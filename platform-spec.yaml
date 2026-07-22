@@ -1321,7 +1321,7 @@ contract_formats:
         direct_delivery_route_plan_consumption:
           status: merge_bearing_runtime_behavior
           implementation_slice: '#1496'
-          canonical_code_owner: internal/runtime/bus.EventBus.PublishDirect and internal/runtime/bus.EventBus.CheckDirectRecipients
+          canonical_code_owner: internal/runtime/bus.EventBus.PublishDirect, internal/runtime/bus.EventBus.PublishDirectRoutes, and internal/runtime/bus.EventBus.CheckDirectRecipients
           rule: |
             Direct delivery is a distinct public delivery semantic, not
             subscribed route authority. PublishDirect and CheckDirectRecipients
@@ -1333,6 +1333,10 @@ contract_formats:
             direct RoutePlan path and MUST NOT reinterpret caller-supplied
             recipients as subscribed RoutePlan authority or rebuild subscribed
             routing from replay/readback evidence.
+            Public operator replay MUST use PublishDirectRoutes: current direct
+            policy proves only live recipient capability, while every persisted
+            and dispatched target, reply-context, and payload-projection fact is
+            copied exactly from the selected original delivery route.
         lowered_connect_route_plan_consumption:
           status: merge_bearing_runtime_behavior
           implementation_slice: '#1473/#1545'
@@ -11049,7 +11053,7 @@ flow_model:
           - Publish, PublishInMutation, CheckPublishRecipientPlan, and engineOutbox preserve the corrected RoutePlan path where relevant
         implementation_slice_1496:
           status: merge_bearing_runtime_behavior
-          canonical_code_owner: internal/runtime/bus.RoutePlan via deliveryPlanner.Plan, deliveryPlanner.PlanDirect, EventBus.PublishDirect, and EventBus.CheckDirectRecipients
+          canonical_code_owner: internal/runtime/bus.RoutePlan via deliveryPlanner.Plan, deliveryPlanner.PlanDirect, EventBus.PublishDirect, EventBus.PublishDirectRoutes, and EventBus.CheckDirectRecipients
           rule: |
             Subscribed publish planning, direct publish planning, recipient-plan
             materialization, authorization guards, engine outbox, operator replay
@@ -11068,8 +11072,8 @@ flow_model:
           - production bus files contain no eventDeliveryPlan compatibility adapter, CanonicalRoutePlan fallback, or routePlanFromLegacyEventDeliveryPlan interpreter
           - deliveryPlanner.Plan and deliveryPlanner.PlanDirect return RoutePlan directly
           - Publish, PublishInMutation, CheckPublishRecipientPlan, and engineOutbox preserve RoutePlan authority after materialization and guard checks
-          - PublishDirect and CheckDirectRecipients preserve direct RoutePlan behavior and CommittedReplayScopeDirect persistence
-          - operator event.replay proves direct-recipient preflight and direct publish through the same RoutePlan-backed path
+          - PublishDirect, PublishDirectRoutes, and CheckDirectRecipients preserve direct RoutePlan behavior and CommittedReplayScopeDirect persistence
+          - operator event.replay proves direct-recipient preflight and exact selected-route direct publish through the same RoutePlan-backed path
         implementation_slice_1479:
           status: merge_bearing_runtime_behavior
           canonical_code_owner: internal/runtime/core/pinrouting.MaterializeConnectRoutePlan with internal/runtime/bus.connectRoutePlanResolver
@@ -22457,7 +22461,7 @@ cli_specification:
       owner: /v1/rpc agent.replay
       behavior: Event-targeted redelivery CLI consumer. The CLI sends agent_id, event_id, and optional idempotency_key to /v1/rpc agent.replay through the shared v1 API client. This command MUST NOT replay backlog state, call agent.replay_backlog, derive recipients locally, synthesize replay events, or call dashboard/Builder REST, runtime/store/EventBus/agentcontrol, directive, restart, list, or view owners.
       output:
-        success_line: agent replay ok with agent_id, event_id, replay_event_id, audit_event_id, original_delivery.delivery_id, and new_delivery.delivery_id
+        success_line: agent replay ok with agent_id, event_id, replay_event_id, audit_event_id, exact delivery count, and one source_delivery_id/new_delivery_id/status line per route sibling
       exit_codes:
         success: 0
         cli_validation: 2
@@ -22478,7 +22482,7 @@ cli_specification:
       - exact /v1/rpc agent.replay call with agent_id and event_id params
       - --event-id is required and no event-targeted replay request is made without it
       - --idempotency-key passes idempotency_key exactly when provided and is never generated or persisted locally
-      - output renders event_id, replay_event_id, audit_event_id, original_delivery.delivery_id, and new_delivery.delivery_id from AgentReplayResult.original_delivery/new_delivery
+      - output validates and renders every one-to-one source_delivery_id/new delivery pair from AgentReplayResult.original_deliveries/new_deliveries without subscriber-level collapse
       - invalid args/flags and missing explicit token for non-loopback API targets make zero API calls
       - EVENT_NOT_FOUND, EVENT_REPLAY_NO_DELIVERY_HISTORY, EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL, EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE, EVENT_REPLAY_NOT_ELIGIBLE, PAYLOAD_VALIDATION_FAILED, IDEMPOTENCY_CONFLICT, HTTP failures, unknown RPC errors, and malformed success responses fail closed with tested exit codes
       - no agent.replay_backlog, direct DB/store/runtime/EventBus/agentcontrol, dashboard/Builder REST, legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, directive, restart, list, or view method usage
@@ -25299,8 +25303,8 @@ api_specification:
         - agent_id
         - replay_event_id
         - audit_event_id
-        - original_delivery
-        - new_delivery
+        - original_deliveries
+        - new_deliveries
         properties:
           event_id:
             $ref: '#/components/schemas/OpaqueId'
@@ -25314,12 +25318,16 @@ api_specification:
           audit_event_id:
             $ref: '#/components/schemas/OpaqueId'
             description: Persisted synthetic event.replayed audit event identity.
-          original_delivery:
-            $ref: '#/components/schemas/EventReplayDelivery'
-            description: Original agent delivery row used as replay target authority.
-          new_delivery:
-            $ref: '#/components/schemas/EventReplayDelivery'
-            description: Fresh delivery row created for replay_event_id with source_delivery_id lineage to original_delivery.
+          original_deliveries:
+            type: array
+            items:
+              $ref: '#/components/schemas/EventReplayDelivery'
+            description: Every exact original route-level delivery row for the selected agent, each used as replay target authority.
+          new_deliveries:
+            type: array
+            items:
+              $ref: '#/components/schemas/EventReplayDelivery'
+            description: Exact fresh route-level delivery rows created for replay_event_id. Each source_delivery_id identifies one original_deliveries row.
       DeadLetterRecord:
         type: object
         additionalProperties: false
@@ -28398,9 +28406,10 @@ api_specification:
         \ must not add recipients. Requested subscribers outside the original agent delivery set fail closed with EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL.\n\
         \nPublic replay creates fresh replay execution evidence. Implementations MUST preserve the original event, delivery,\
         \ receipt, and session inspection surface, and MUST create a distinct replay event identity whose source_event_id/parent\
-        \ lineage points at the original event. The fresh replay event creates fresh event_deliveries rows, and the result\
-        \ reports source_delivery_id lineage back to the original delivery rows.\n\nOnly terminal original delivery rows are\
-        \ replayable in v1: delivered, failed, and dead_letter. Pending or in_progress originals fail closed with EVENT_REPLAY_NOT_ELIGIBLE.\
+        \ lineage points at the original event. The fresh replay event creates one fresh event_deliveries row for every selected\
+        \ exact original route, preserving target, reply-context, and payload-projection facts without subscriber-level collapse.\
+        \ Each result row reports source_delivery_id lineage back to its exact original delivery row.\n\nOnly original delivery\
+        \ rows whose status is delivered, failed, or dead_letter are replayable in v1. Pending or in_progress originals fail closed with EVENT_REPLAY_NOT_ELIGIBLE.\
         \ If the original event has no replayable original agent delivery history, the method fails with EVENT_REPLAY_NO_DELIVERY_HISTORY.\n\
         \nThe server also persists a synthetic event.replayed audit event with original event identity, replay event identity,\
         \ selected subscribers, actor token identity, and original delivery summary. event.list, event.get, run.trace, and\
@@ -29753,8 +29762,9 @@ api_specification:
         \ event_id. If agent_id was not an original agent subscriber for that event, the method fails closed with EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL.\
         \ Current live subscriptions, route tables, bundle declarations, or agent backlog state must not add recipients.\n\
         \nThe replay preserves the original event, delivery, receipt, and session inspection surface, creates a distinct replay\
-        \ event identity with source_event_id/parent lineage to the original event, creates a fresh delivery row for the selected\
-        \ agent, and returns the single original/new delivery projection. The synthetic audit event is the canonical event.replayed\
+        \ event identity with source_event_id/parent lineage to the original event, creates one fresh delivery row for every\
+        \ exact original route owned by the selected agent, and returns exact original_deliveries/new_deliveries arrays. The\
+        \ arrays are one-to-one by source_delivery_id; subscriber-level collapse is forbidden. The synthetic audit event is the canonical event.replayed\
         \ event; this method does not create agent.event_replayed or mutate/abort the original session.\n"
       scope:
         required:

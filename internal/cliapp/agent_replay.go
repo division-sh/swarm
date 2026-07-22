@@ -27,12 +27,12 @@ type agentReplayCommandOptions struct {
 }
 
 type agentReplayResult struct {
-	EventID          string              `json:"event_id"`
-	AgentID          string              `json:"agent_id"`
-	ReplayEventID    string              `json:"replay_event_id"`
-	AuditEventID     string              `json:"audit_event_id"`
-	OriginalDelivery agentReplayDelivery `json:"original_delivery"`
-	NewDelivery      agentReplayDelivery `json:"new_delivery"`
+	EventID            string                `json:"event_id"`
+	AgentID            string                `json:"agent_id"`
+	ReplayEventID      string                `json:"replay_event_id"`
+	AuditEventID       string                `json:"audit_event_id"`
+	OriginalDeliveries []agentReplayDelivery `json:"original_deliveries"`
+	NewDeliveries      []agentReplayDelivery `json:"new_deliveries"`
 }
 
 type agentReplayDelivery struct {
@@ -142,11 +142,46 @@ func validateAgentReplayResult(result agentReplayResult, expectedAgentID, expect
 	if strings.TrimSpace(result.EventID) != expectedEventID {
 		return fmt.Errorf("malformed agent.replay result: event_id=%q, want %q", result.EventID, expectedEventID)
 	}
-	if err := validateAgentReplayDelivery("original_delivery", result.OriginalDelivery); err != nil {
-		return err
+	if len(result.OriginalDeliveries) == 0 {
+		return fmt.Errorf("malformed agent.replay result: original_deliveries must contain at least one delivery")
 	}
-	if err := validateAgentReplayDelivery("new_delivery", result.NewDelivery); err != nil {
-		return err
+	if len(result.NewDeliveries) != len(result.OriginalDeliveries) {
+		return fmt.Errorf("malformed agent.replay result: new_deliveries count=%d, want %d", len(result.NewDeliveries), len(result.OriginalDeliveries))
+	}
+	originalIDs := make(map[string]struct{}, len(result.OriginalDeliveries))
+	for index, delivery := range result.OriginalDeliveries {
+		field := fmt.Sprintf("original_deliveries[%d]", index)
+		if err := validateAgentReplayDelivery(field, delivery); err != nil {
+			return err
+		}
+		if strings.TrimSpace(delivery.SubscriberID) != expectedAgentID {
+			return fmt.Errorf("malformed agent.replay result: %s.subscriber_id=%q, want %q", field, delivery.SubscriberID, expectedAgentID)
+		}
+		if _, duplicate := originalIDs[delivery.DeliveryID]; duplicate {
+			return fmt.Errorf("malformed agent.replay result: duplicate original delivery_id=%q", delivery.DeliveryID)
+		}
+		originalIDs[delivery.DeliveryID] = struct{}{}
+	}
+	matched := make(map[string]struct{}, len(result.NewDeliveries))
+	for index, delivery := range result.NewDeliveries {
+		field := fmt.Sprintf("new_deliveries[%d]", index)
+		if err := validateAgentReplayDelivery(field, delivery); err != nil {
+			return err
+		}
+		if strings.TrimSpace(delivery.SubscriberID) != expectedAgentID {
+			return fmt.Errorf("malformed agent.replay result: %s.subscriber_id=%q, want %q", field, delivery.SubscriberID, expectedAgentID)
+		}
+		sourceID := strings.TrimSpace(delivery.SourceDeliveryID)
+		if sourceID == "" {
+			return fmt.Errorf("malformed agent.replay result: %s.source_delivery_id is required", field)
+		}
+		if _, ok := originalIDs[sourceID]; !ok {
+			return fmt.Errorf("malformed agent.replay result: %s.source_delivery_id=%q is not an original delivery", field, sourceID)
+		}
+		if _, duplicate := matched[sourceID]; duplicate {
+			return fmt.Errorf("malformed agent.replay result: original delivery_id=%q matched multiple new deliveries", sourceID)
+		}
+		matched[sourceID] = struct{}{}
 	}
 	return nil
 }
@@ -177,14 +212,17 @@ func writeAgentReplayResult(out io.Writer, result agentReplayResult) {
 	if out == nil {
 		return
 	}
-	fmt.Fprintf(out, "agent replay ok: agent_id=%s event_id=%s replay_event_id=%s audit_event_id=%s original_delivery.delivery_id=%s new_delivery.delivery_id=%s\n",
+	fmt.Fprintf(out, "agent replay ok: agent_id=%s event_id=%s replay_event_id=%s audit_event_id=%s deliveries=%d\n",
 		result.AgentID,
 		result.EventID,
 		result.ReplayEventID,
 		result.AuditEventID,
-		result.OriginalDelivery.DeliveryID,
-		result.NewDelivery.DeliveryID,
+		len(result.NewDeliveries),
 	)
+	for _, delivery := range result.NewDeliveries {
+		fmt.Fprintf(out, "replayed delivery: source_delivery_id=%s new_delivery_id=%s status=%s\n",
+			delivery.SourceDeliveryID, delivery.DeliveryID, formatCLIHumanCode(cliHumanCodeDeliveryStatus, delivery.Status))
+	}
 }
 
 func agentReplayErrorExitCode(err error) int {

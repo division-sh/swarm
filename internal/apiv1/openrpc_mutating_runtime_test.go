@@ -325,7 +325,7 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 		"agent.replay": {
 			Params:         map[string]any{"event_id": "evt-1", "agent_id": "agent-a"},
 			ConflictParams: map[string]any{"event_id": "evt-1", "agent_id": "agent-b"},
-			ResultKeys:     []string{"event_id", "agent_id", "replay_event_id", "audit_event_id", "original_delivery", "new_delivery"},
+			ResultKeys:     []string{"event_id", "agent_id", "replay_event_id", "audit_event_id", "original_deliveries", "new_deliveries"},
 			SuccessEffects: 2,
 		},
 		"agent.replay_backlog": {
@@ -1285,17 +1285,23 @@ func (p *mutatingProbeEventPublisher) PublishInMutation(ctx context.Context, evt
 	return p.Publish(ctx, evt)
 }
 
-func (p *mutatingProbeEventPublisher) PublishDirect(_ context.Context, evt events.Event, recipients []string) error {
+func (p *mutatingProbeEventPublisher) PublishDirectRoutes(_ context.Context, evt events.Event, routes []events.DeliveryRoute) error {
 	if p.directErr != nil {
 		return p.directErr
 	}
 	p.state.recordEffect()
-	deliveries := make([]store.OperatorEventDelivery, 0, len(recipients))
-	for i, recipient := range recipients {
+	deliveries := make([]store.OperatorEventDelivery, 0, len(routes))
+	for i, route := range routes {
+		recipient := route.SubscriberID
+		identity, err := route.Identity()
+		if err != nil {
+			return err
+		}
 		deliveries = append(deliveries, store.OperatorEventDelivery{
-			DeliveryID:     "delivery-" + recipient,
+			DeliveryID:     "delivery-" + recipient + "-" + identity.String(),
 			SubscriberType: eventReplaySubscriberTypeAgent,
 			SubscriberID:   recipient,
+			Route:          route,
 			SessionID:      "sess-" + recipient,
 			Status:         string(runtimedelivery.StatusDelivered),
 			RetryCount:     i,
@@ -1380,10 +1386,12 @@ func (s *mutatingRuntimeProbeState) storeEvent(evt events.Event, deliveries []st
 func mutatingProbeOriginalEvent(eventID string, subscribers []string, status runtimedelivery.Status) store.OperatorEventFull {
 	deliveries := make([]store.OperatorEventDelivery, 0, len(subscribers))
 	for _, subscriber := range subscribers {
+		route := events.DeliveryRoute{SubscriberType: eventReplaySubscriberTypeAgent, SubscriberID: subscriber}
 		deliveries = append(deliveries, store.OperatorEventDelivery{
 			DeliveryID:     "original-" + subscriber,
 			SubscriberType: eventReplaySubscriberTypeAgent,
 			SubscriberID:   subscriber,
+			Route:          route,
 			SessionID:      "sess-" + subscriber,
 			Status:         string(status),
 			RetryEligible:  status == runtimedelivery.StatusFailed,

@@ -103,6 +103,7 @@ type OperatorEventDelivery struct {
 	DeliveryID     string                     `json:"delivery_id"`
 	SubscriberType string                     `json:"subscriber_type"`
 	SubscriberID   string                     `json:"subscriber_id"`
+	Route          events.DeliveryRoute       `json:"-"`
 	SessionID      string                     `json:"session_id,omitempty"`
 	Status         string                     `json:"status"`
 	ReasonCode     string                     `json:"reason_code,omitempty"`
@@ -522,7 +523,7 @@ func EnrichOperatorDeliveryFailureEvidence(deliveries []OperatorEventDelivery, d
 func operatorEventDeliveryFromSnapshot(snapshot runtimedelivery.Snapshot) OperatorEventDelivery {
 	item := OperatorEventDelivery{
 		DeliveryID: snapshot.DeliveryID, SubscriberType: string(snapshot.SubscriberClass),
-		SubscriberID: snapshot.SubscriberID, SessionID: snapshot.ActiveSessionID,
+		SubscriberID: snapshot.SubscriberID, Route: snapshot.Route.Normalized(), SessionID: snapshot.ActiveSessionID,
 		Status: string(snapshot.Status), ReasonCode: snapshot.ReasonCode,
 		Failure: runtimefailures.CloneEnvelope(snapshot.Failure), RetryCount: snapshot.RetryCount,
 		RetryEligible: snapshot.RetryEligible, Terminal: snapshot.Terminal(),
