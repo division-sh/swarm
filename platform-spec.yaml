@@ -12249,7 +12249,10 @@ platform_tables:
         outcome at the new fence version. The delivery, terminalization attempt/outcome, typed
         `delivery_parent_terminalized` lifecycle-conflict failure, and matching dead_letters row commit atomically; failure
         of any required evidence writer rolls the whole operation back. Existing selected stores are unsupported; there is
-        no migration or compatibility interpretation.
+        no migration or compatibility interpretation. Agent lifecycle and diagnostic operator pages select exact status,
+        cursor, ordering, and limit-plus-one delivery identities in SQL before hydrating canonical snapshots, event metadata,
+        or dead-letter evidence. Their work is bounded by the requested page rather than retained agent history; 24-hour
+        diagnostic totals use a count-only projection over the same canonical status and occurrence-time facts.
       ddl: |
         CREATE TABLE event_deliveries (
             delivery_id       UUID PRIMARY KEY,
@@ -12284,6 +12287,9 @@ platform_tables:
             INDEX idx_deliveries_event (event_id),
             FOREIGN KEY (delivery_id, current_attempt_version, current_attempt_open) REFERENCES event_delivery_attempts(delivery_id, claim_version, open_marker)
         );
+        CREATE INDEX idx_deliveries_agent_lifecycle_page ON event_deliveries (subscriber_type, subscriber_id, created_at DESC, delivery_id DESC);
+        CREATE INDEX idx_deliveries_agent_failure_page ON event_deliveries (subscriber_type, subscriber_id, status, updated_at DESC, delivery_id DESC);
+        CREATE INDEX idx_deliveries_agent_dead_letter_page ON event_deliveries (subscriber_type, subscriber_id, status, settled_at DESC, delivery_id DESC);
     event_delivery_attempts:
       description: >-
         Immutable-fence execution attempt ledger for exact executable deliveries. Each claim version has one random token

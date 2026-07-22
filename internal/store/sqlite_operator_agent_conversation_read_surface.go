@@ -492,11 +492,11 @@ func (r *sqliteOperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryDi
 	}
 
 	opts = defaultOperatorAgentDeliveryDiagnosticsOptions(opts)
-	snapshots, err := r.store.deliverySnapshotsForAgent(ctx, agentID, time.Unix(0, 0).UTC())
+	counts, failures, deadLetters, err := loadAgentDeliveryDiagnosticSnapshotPages(ctx, r.store, agentID, opts)
 	if err != nil {
 		return OperatorAgentDeliveryDiagnostics{}, err
 	}
-	return buildAgentDeliveryDiagnostics(agentID, snapshots, opts,
+	return buildAgentDeliveryDiagnostics(agentID, counts, failures, deadLetters,
 		func(eventID string) (deliveryLifecycleEventMetadata, error) {
 			record, found, err := loadSQLiteEventIdentity(ctx, r.db, eventID)
 			if err != nil {

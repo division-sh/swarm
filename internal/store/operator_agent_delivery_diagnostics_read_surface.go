@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -91,6 +90,11 @@ type agentDeliveryDiagnosticsCursor struct {
 	DeliveryID string `json:"delivery_id"`
 }
 
+type agentDeliveryDiagnosticSnapshotReader interface {
+	deliveryDiagnosticSnapshotPageForAgent(context.Context, runtimedelivery.AgentDiagnosticPageQuery) (runtimedelivery.SnapshotPage, error)
+	deliveryDiagnosticCountsForAgentSince(context.Context, string, time.Time) (runtimedelivery.AgentDiagnosticCounts, error)
+}
+
 func (s *PostgresStore) LoadOperatorAgentDeliveryDiagnostics(ctx context.Context, agentID string, opts OperatorAgentDeliveryDiagnosticsOptions) (OperatorAgentDeliveryDiagnostics, error) {
 	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).LoadOperatorAgentDeliveryDiagnostics(ctx, agentID, opts)
 }
@@ -108,18 +112,16 @@ func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryDiagnost
 	}
 
 	opts = defaultOperatorAgentDeliveryDiagnosticsOptions(opts)
-	reader, ok := r.owner.(interface {
-		deliverySnapshotsForAgent(context.Context, string, time.Time) ([]runtimedelivery.Snapshot, error)
-	})
+	reader, ok := r.owner.(agentDeliveryDiagnosticSnapshotReader)
 	if !ok {
-		return OperatorAgentDeliveryDiagnostics{}, fmt.Errorf("operator agent delivery diagnostics requires canonical delivery snapshots")
+		return OperatorAgentDeliveryDiagnostics{}, fmt.Errorf("operator agent delivery diagnostics requires canonical bounded delivery snapshots")
 	}
-	snapshots, err := reader.deliverySnapshotsForAgent(ctx, agentID, time.Unix(0, 0).UTC())
+	counts, failures, deadLetters, err := loadAgentDeliveryDiagnosticSnapshotPages(ctx, reader, agentID, opts)
 	if err != nil {
 		return OperatorAgentDeliveryDiagnostics{}, err
 	}
 	observability := NewOperatorObservabilityReadSurface(r.db, r.owner)
-	return buildAgentDeliveryDiagnostics(agentID, snapshots, opts,
+	return buildAgentDeliveryDiagnostics(agentID, counts, failures, deadLetters,
 		func(eventID string) (deliveryLifecycleEventMetadata, error) {
 			record, found, err := loadPostgresEventIdentity(ctx, r.db, eventID)
 			if err != nil {
@@ -209,48 +211,22 @@ func decodeAgentDeliveryDiagnosticsCursor(raw, kind, field string) (agentDeliver
 
 func buildAgentDeliveryDiagnostics(
 	agentID string,
-	snapshots []runtimedelivery.Snapshot,
-	opts OperatorAgentDeliveryDiagnosticsOptions,
+	counts runtimedelivery.AgentDiagnosticCounts,
+	failures runtimedelivery.SnapshotPage,
+	deadLetters runtimedelivery.SnapshotPage,
 	loadEvent func(string) (deliveryLifecycleEventMetadata, error),
 	loadDeliveryDeadLetters func(string, int64) ([]OperatorDeadLetterRecord, error),
 ) (OperatorAgentDeliveryDiagnostics, error) {
 	result := OperatorAgentDeliveryDiagnostics{
-		AgentID: agentID, Failures: []OperatorAgentDeliveryFailure{}, DeadLetters: []OperatorAgentDeadLetterDelivery{},
+		AgentID:  agentID,
+		Summary:  OperatorAgentDeliveryDiagnosticsSummary{Failures24h: counts.Failures, DeadLetters24h: counts.DeadLetters},
+		Failures: []OperatorAgentDeliveryFailure{}, DeadLetters: []OperatorAgentDeadLetterDelivery{},
 	}
-	cutoff := time.Now().UTC().Add(-24 * time.Hour)
-	for _, snapshot := range snapshots {
-		occurredAt := deliveryDiagnosticOccurredAt(snapshot)
-		switch snapshot.Status {
-		case runtimedelivery.StatusFailed:
-			if !occurredAt.Before(cutoff) {
-				result.Summary.Failures24h++
-			}
-		case runtimedelivery.StatusDeadLetter:
-			if !occurredAt.Before(cutoff) {
-				result.Summary.DeadLetters24h++
-			}
-		}
-	}
-
-	failureCursorAt, failureCursorID, err := decodeDeliveryDiagnosticsPosition(opts.FailureCursor, "agent.delivery_diagnostics.failures", "failure_cursor")
-	if err != nil {
-		return OperatorAgentDeliveryDiagnostics{}, err
-	}
-	deadCursorAt, deadCursorID, err := decodeDeliveryDiagnosticsPosition(opts.DeadLetterCursor, "agent.delivery_diagnostics.dead_letters", "dead_letter_cursor")
-	if err != nil {
-		return OperatorAgentDeliveryDiagnostics{}, err
-	}
-	for _, snapshot := range snapshots {
-		if snapshot.Status != runtimedelivery.StatusFailed && snapshot.Status != runtimedelivery.StatusDeadLetter {
-			continue
+	for _, snapshot := range failures.Snapshots {
+		if snapshot.Status != runtimedelivery.StatusFailed {
+			return OperatorAgentDeliveryDiagnostics{}, fmt.Errorf("canonical failure page returned delivery status %q", snapshot.Status)
 		}
 		occurredAt := deliveryDiagnosticOccurredAt(snapshot)
-		if snapshot.Status == runtimedelivery.StatusFailed && !deliveryDiagnosticsAfterCursor(occurredAt, snapshot.DeliveryID, failureCursorAt, failureCursorID) {
-			continue
-		}
-		if snapshot.Status == runtimedelivery.StatusDeadLetter && !deliveryDiagnosticsAfterCursor(occurredAt, snapshot.DeliveryID, deadCursorAt, deadCursorID) {
-			continue
-		}
 		metadata, err := loadEvent(snapshot.EventID)
 		if err != nil {
 			return OperatorAgentDeliveryDiagnostics{}, err
@@ -259,14 +235,25 @@ func buildAgentDeliveryDiagnostics(
 		if runID == "" {
 			runID = metadata.RunID
 		}
-		if snapshot.Status == runtimedelivery.StatusFailed {
-			result.Failures = append(result.Failures, OperatorAgentDeliveryFailure{
-				DeliveryID: snapshot.DeliveryID, EventID: snapshot.EventID, EventName: metadata.EventName,
-				RunID: runID, EntityID: metadata.EntityID, Status: string(snapshot.Status),
-				ReasonCode: snapshot.ReasonCode, Failure: runtimefailures.CloneEnvelope(snapshot.Failure),
-				RetryCount: snapshot.RetryCount, OccurredAt: occurredAt,
-			})
-			continue
+		result.Failures = append(result.Failures, OperatorAgentDeliveryFailure{
+			DeliveryID: snapshot.DeliveryID, EventID: snapshot.EventID, EventName: metadata.EventName,
+			RunID: runID, EntityID: metadata.EntityID, Status: string(snapshot.Status),
+			ReasonCode: snapshot.ReasonCode, Failure: runtimefailures.CloneEnvelope(snapshot.Failure),
+			RetryCount: snapshot.RetryCount, OccurredAt: occurredAt,
+		})
+	}
+	for _, snapshot := range deadLetters.Snapshots {
+		if snapshot.Status != runtimedelivery.StatusDeadLetter {
+			return OperatorAgentDeliveryDiagnostics{}, fmt.Errorf("canonical dead-letter page returned delivery status %q", snapshot.Status)
+		}
+		occurredAt := deliveryDiagnosticOccurredAt(snapshot)
+		metadata, err := loadEvent(snapshot.EventID)
+		if err != nil {
+			return OperatorAgentDeliveryDiagnostics{}, err
+		}
+		runID := snapshot.RunID
+		if runID == "" {
+			runID = metadata.RunID
 		}
 		records, err := loadDeliveryDeadLetters(snapshot.DeliveryID, snapshot.ClaimVersion)
 		if err != nil {
@@ -279,29 +266,50 @@ func buildAgentDeliveryDiagnostics(
 			RetryCount: snapshot.RetryCount, OccurredAt: occurredAt, DeadLetterRecords: records,
 		})
 	}
-	sort.Slice(result.Failures, func(i, j int) bool {
-		if !result.Failures[i].OccurredAt.Equal(result.Failures[j].OccurredAt) {
-			return result.Failures[i].OccurredAt.After(result.Failures[j].OccurredAt)
-		}
-		return result.Failures[i].DeliveryID > result.Failures[j].DeliveryID
-	})
-	sort.Slice(result.DeadLetters, func(i, j int) bool {
-		if !result.DeadLetters[i].OccurredAt.Equal(result.DeadLetters[j].OccurredAt) {
-			return result.DeadLetters[i].OccurredAt.After(result.DeadLetters[j].OccurredAt)
-		}
-		return result.DeadLetters[i].DeliveryID > result.DeadLetters[j].DeliveryID
-	})
-	if len(result.Failures) > opts.FailureLimit {
-		last := result.Failures[opts.FailureLimit-1]
+	if failures.HasMore && len(result.Failures) > 0 {
+		last := result.Failures[len(result.Failures)-1]
 		result.FailuresNextCursor = encodeAgentDeliveryDiagnosticsCursor("agent.delivery_diagnostics.failures", last.OccurredAt, last.DeliveryID)
-		result.Failures = result.Failures[:opts.FailureLimit]
 	}
-	if len(result.DeadLetters) > opts.DeadLetterLimit {
-		last := result.DeadLetters[opts.DeadLetterLimit-1]
+	if deadLetters.HasMore && len(result.DeadLetters) > 0 {
+		last := result.DeadLetters[len(result.DeadLetters)-1]
 		result.DeadLettersNextCursor = encodeAgentDeliveryDiagnosticsCursor("agent.delivery_diagnostics.dead_letters", last.OccurredAt, last.DeliveryID)
-		result.DeadLetters = result.DeadLetters[:opts.DeadLetterLimit]
 	}
 	return result, nil
+}
+
+func loadAgentDeliveryDiagnosticSnapshotPages(
+	ctx context.Context,
+	reader agentDeliveryDiagnosticSnapshotReader,
+	agentID string,
+	opts OperatorAgentDeliveryDiagnosticsOptions,
+) (runtimedelivery.AgentDiagnosticCounts, runtimedelivery.SnapshotPage, runtimedelivery.SnapshotPage, error) {
+	failureCursorAt, failureCursorID, err := decodeDeliveryDiagnosticsPosition(opts.FailureCursor, "agent.delivery_diagnostics.failures", "failure_cursor")
+	if err != nil {
+		return runtimedelivery.AgentDiagnosticCounts{}, runtimedelivery.SnapshotPage{}, runtimedelivery.SnapshotPage{}, err
+	}
+	deadCursorAt, deadCursorID, err := decodeDeliveryDiagnosticsPosition(opts.DeadLetterCursor, "agent.delivery_diagnostics.dead_letters", "dead_letter_cursor")
+	if err != nil {
+		return runtimedelivery.AgentDiagnosticCounts{}, runtimedelivery.SnapshotPage{}, runtimedelivery.SnapshotPage{}, err
+	}
+	counts, err := reader.deliveryDiagnosticCountsForAgentSince(ctx, agentID, time.Now().UTC().Add(-24*time.Hour))
+	if err != nil {
+		return runtimedelivery.AgentDiagnosticCounts{}, runtimedelivery.SnapshotPage{}, runtimedelivery.SnapshotPage{}, err
+	}
+	failures, err := reader.deliveryDiagnosticSnapshotPageForAgent(ctx, runtimedelivery.AgentDiagnosticPageQuery{
+		AgentID: agentID, Status: runtimedelivery.StatusFailed,
+		BeforeOccurredAt: failureCursorAt, BeforeDeliveryID: failureCursorID, Limit: opts.FailureLimit,
+	})
+	if err != nil {
+		return runtimedelivery.AgentDiagnosticCounts{}, runtimedelivery.SnapshotPage{}, runtimedelivery.SnapshotPage{}, err
+	}
+	deadLetters, err := reader.deliveryDiagnosticSnapshotPageForAgent(ctx, runtimedelivery.AgentDiagnosticPageQuery{
+		AgentID: agentID, Status: runtimedelivery.StatusDeadLetter,
+		BeforeOccurredAt: deadCursorAt, BeforeDeliveryID: deadCursorID, Limit: opts.DeadLetterLimit,
+	})
+	if err != nil {
+		return runtimedelivery.AgentDiagnosticCounts{}, runtimedelivery.SnapshotPage{}, runtimedelivery.SnapshotPage{}, err
+	}
+	return counts, failures, deadLetters, nil
 }
 
 func deliveryDiagnosticOccurredAt(snapshot runtimedelivery.Snapshot) time.Time {
@@ -327,11 +335,4 @@ func decodeDeliveryDiagnosticsPosition(raw, kind, field string) (time.Time, stri
 		return time.Time{}, "", AgentDeliveryDiagnosticsCursorError{Field: field}
 	}
 	return occurredAt.UTC(), strings.TrimSpace(cursor.DeliveryID), nil
-}
-
-func deliveryDiagnosticsAfterCursor(occurredAt time.Time, deliveryID string, cursorAt time.Time, cursorID string) bool {
-	if cursorAt.IsZero() {
-		return true
-	}
-	return occurredAt.Before(cursorAt) || (occurredAt.Equal(cursorAt) && deliveryID < cursorID)
 }

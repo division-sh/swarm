@@ -753,6 +753,188 @@ func (a *Adapter) SnapshotsForAgent(ctx context.Context, q queryer, agentID stri
 	return a.snapshotsByIDQuery(ctx, q, query, agentID, since.UTC())
 }
 
+func (a *Adapter) LifecycleSnapshotPageForAgent(ctx context.Context, q queryer, page AgentLifecyclePageQuery) (SnapshotPage, error) {
+	agentID := strings.TrimSpace(page.AgentID)
+	if agentID == "" {
+		return SnapshotPage{}, fmt.Errorf("delivery lifecycle page agent id is required")
+	}
+	runID := strings.TrimSpace(page.RunID)
+	if runID != "" {
+		if _, err := uuid.Parse(runID); err != nil {
+			return SnapshotPage{}, fmt.Errorf("delivery lifecycle page run id: %w", err)
+		}
+	}
+	if err := validateSnapshotPagePosition(page.BeforeCreatedAt, page.BeforeDeliveryID, page.Limit); err != nil {
+		return SnapshotPage{}, fmt.Errorf("delivery lifecycle page: %w", err)
+	}
+	statusSelected := map[Status]bool{}
+	for _, status := range page.Statuses {
+		switch status {
+		case StatusPending, StatusInProgress, StatusDelivered, StatusFailed, StatusDeadLetter:
+			statusSelected[status] = true
+		default:
+			return SnapshotPage{}, fmt.Errorf("delivery lifecycle page status %q is invalid", status)
+		}
+	}
+	selectAllStatuses := len(statusSelected) == 0
+	for _, status := range []Status{StatusPending, StatusInProgress, StatusDelivered, StatusFailed, StatusDeadLetter} {
+		if selectAllStatuses {
+			statusSelected[status] = true
+		}
+	}
+	var cursorAt any
+	var cursorID any
+	if !page.BeforeCreatedAt.IsZero() {
+		cursorAt = page.BeforeCreatedAt.UTC()
+		cursorID = strings.TrimSpace(page.BeforeDeliveryID)
+	}
+	query := `
+		SELECT d.delivery_id::text
+		FROM event_deliveries d
+		WHERE d.subscriber_type = 'agent' AND d.subscriber_id = $1
+		  AND ($2::text = '' OR d.run_id = NULLIF($2::text, '')::uuid)
+		  AND (($3 AND d.status = 'pending') OR ($4 AND d.status = 'in_progress') OR
+		       ($5 AND d.status = 'delivered') OR ($6 AND d.status = 'failed') OR
+		       ($7 AND d.status = 'dead_letter'))
+		  AND ($8::timestamptz IS NULL OR d.created_at < $8 OR (d.created_at = $8 AND d.delivery_id < $9::uuid))
+		ORDER BY d.created_at DESC, d.delivery_id DESC
+		LIMIT $10`
+	args := []any{
+		agentID, runID,
+		statusSelected[StatusPending], statusSelected[StatusInProgress], statusSelected[StatusDelivered],
+		statusSelected[StatusFailed], statusSelected[StatusDeadLetter],
+		cursorAt, cursorID, page.Limit + 1,
+	}
+	if a.dialect == DialectSQLite {
+		query = `
+			SELECT d.delivery_id
+			FROM event_deliveries d
+			WHERE d.subscriber_type = 'agent' AND d.subscriber_id = ?
+			  AND (? = '' OR d.run_id = ?)
+			  AND ((? AND d.status = 'pending') OR (? AND d.status = 'in_progress') OR
+			       (? AND d.status = 'delivered') OR (? AND d.status = 'failed') OR
+			       (? AND d.status = 'dead_letter'))
+			  AND (? IS NULL OR d.created_at < ? OR (d.created_at = ? AND d.delivery_id < ?))
+			ORDER BY d.created_at DESC, d.delivery_id DESC
+			LIMIT ?`
+		args = []any{
+			agentID, runID, runID,
+			statusSelected[StatusPending], statusSelected[StatusInProgress], statusSelected[StatusDelivered],
+			statusSelected[StatusFailed], statusSelected[StatusDeadLetter],
+			cursorAt, cursorAt, cursorAt, cursorID, page.Limit + 1,
+		}
+	}
+	return a.snapshotPageByIDQuery(ctx, q, page.Limit, query, args...)
+}
+
+func (a *Adapter) DiagnosticSnapshotPageForAgent(ctx context.Context, q queryer, page AgentDiagnosticPageQuery) (SnapshotPage, error) {
+	agentID := strings.TrimSpace(page.AgentID)
+	if agentID == "" {
+		return SnapshotPage{}, fmt.Errorf("delivery diagnostic page agent id is required")
+	}
+	if page.Status != StatusFailed && page.Status != StatusDeadLetter {
+		return SnapshotPage{}, fmt.Errorf("delivery diagnostic page status %q is invalid", page.Status)
+	}
+	if err := validateSnapshotPagePosition(page.BeforeOccurredAt, page.BeforeDeliveryID, page.Limit); err != nil {
+		return SnapshotPage{}, fmt.Errorf("delivery diagnostic page: %w", err)
+	}
+	var cursorAt any
+	var cursorID any
+	if !page.BeforeOccurredAt.IsZero() {
+		cursorAt = page.BeforeOccurredAt.UTC()
+		cursorID = strings.TrimSpace(page.BeforeDeliveryID)
+	}
+	occurredColumn := "d.updated_at"
+	if page.Status == StatusDeadLetter {
+		occurredColumn = "d.settled_at"
+	}
+	query := fmt.Sprintf(`
+		SELECT d.delivery_id::text
+		FROM event_deliveries d
+		WHERE d.subscriber_type = 'agent' AND d.subscriber_id = $1 AND d.status = $2
+		  AND ($3::timestamptz IS NULL OR %[1]s < $3 OR
+		       (%[1]s = $3 AND d.delivery_id < $4::uuid))
+		ORDER BY %[1]s DESC, d.delivery_id DESC
+		LIMIT $5`, occurredColumn)
+	args := []any{agentID, string(page.Status), cursorAt, cursorID, page.Limit + 1}
+	if a.dialect == DialectSQLite {
+		query = fmt.Sprintf(`
+			SELECT d.delivery_id
+			FROM event_deliveries d
+			WHERE d.subscriber_type = 'agent' AND d.subscriber_id = ? AND d.status = ?
+			  AND (? IS NULL OR %[1]s < ? OR (%[1]s = ? AND d.delivery_id < ?))
+			ORDER BY %[1]s DESC, d.delivery_id DESC
+			LIMIT ?`, occurredColumn)
+		args = []any{agentID, string(page.Status), cursorAt, cursorAt, cursorAt, cursorID, page.Limit + 1}
+	}
+	return a.snapshotPageByIDQuery(ctx, q, page.Limit, query, args...)
+}
+
+func (a *Adapter) DiagnosticCountsForAgentSince(ctx context.Context, q queryer, agentID string, since time.Time) (AgentDiagnosticCounts, error) {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return AgentDiagnosticCounts{}, fmt.Errorf("delivery diagnostic counts agent id is required")
+	}
+	if since.IsZero() {
+		return AgentDiagnosticCounts{}, fmt.Errorf("delivery diagnostic counts cutoff is required")
+	}
+	query := `
+		SELECT COUNT(*) FILTER (WHERE d.status = 'failed'),
+		       COUNT(*) FILTER (WHERE d.status = 'dead_letter')
+		FROM event_deliveries d
+		WHERE d.subscriber_type = 'agent' AND d.subscriber_id = $1
+		  AND d.status IN ('failed', 'dead_letter')
+		  AND ((d.status = 'failed' AND d.updated_at >= $2) OR
+		       (d.status = 'dead_letter' AND d.settled_at >= $2))`
+	if a.dialect == DialectSQLite {
+		query = `
+			SELECT COALESCE(SUM(CASE WHEN d.status = 'failed' THEN 1 ELSE 0 END), 0),
+			       COALESCE(SUM(CASE WHEN d.status = 'dead_letter' THEN 1 ELSE 0 END), 0)
+			FROM event_deliveries d
+			WHERE d.subscriber_type = 'agent' AND d.subscriber_id = ?
+			  AND d.status IN ('failed', 'dead_letter')
+			  AND ((d.status = 'failed' AND d.updated_at >= ?) OR
+			       (d.status = 'dead_letter' AND d.settled_at >= ?))`
+	}
+	var counts AgentDiagnosticCounts
+	args := []any{agentID, since.UTC()}
+	if a.dialect == DialectSQLite {
+		args = []any{agentID, since.UTC(), since.UTC()}
+	}
+	if err := q.QueryRowContext(ctx, query, args...).Scan(&counts.Failures, &counts.DeadLetters); err != nil {
+		return AgentDiagnosticCounts{}, fmt.Errorf("count agent delivery diagnostics: %w", err)
+	}
+	return counts, nil
+}
+
+func validateSnapshotPagePosition(before time.Time, deliveryID string, limit int) error {
+	deliveryID = strings.TrimSpace(deliveryID)
+	if limit <= 0 {
+		return fmt.Errorf("limit must be positive")
+	}
+	if before.IsZero() != (deliveryID == "") {
+		return fmt.Errorf("cursor time and delivery id must be supplied together")
+	}
+	if deliveryID != "" {
+		if _, err := uuid.Parse(deliveryID); err != nil {
+			return fmt.Errorf("cursor delivery id: %w", err)
+		}
+	}
+	return nil
+}
+
+func (a *Adapter) snapshotPageByIDQuery(ctx context.Context, q queryer, limit int, query string, args ...any) (SnapshotPage, error) {
+	snapshots, err := a.snapshotsByIDQuery(ctx, q, query, args...)
+	if err != nil {
+		return SnapshotPage{}, err
+	}
+	page := SnapshotPage{Snapshots: snapshots, HasMore: len(snapshots) > limit}
+	if page.HasMore {
+		page.Snapshots = page.Snapshots[:limit]
+	}
+	return page, nil
+}
+
 func (a *Adapter) snapshotsByIDQuery(ctx context.Context, q queryer, query string, args ...any) ([]Snapshot, error) {
 	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -235,16 +234,20 @@ func (s *SQLiteRuntimeStore) ensureSQLiteAgentDeliveryLifecycleAgentExists(ctx c
 
 func (r *OperatorAgentConversationReadSurface) listAgentDeliveryLifecycleRows(ctx context.Context, agentID string, opts OperatorAgentDeliveryLifecycleOptions) ([]OperatorAgentDeliveryLifecycleRow, string, error) {
 	reader, ok := r.owner.(interface {
-		deliverySnapshotsForAgent(context.Context, string, time.Time) ([]runtimedelivery.Snapshot, error)
+		deliveryLifecycleSnapshotPageForAgent(context.Context, runtimedelivery.AgentLifecyclePageQuery) (runtimedelivery.SnapshotPage, error)
 	})
 	if !ok {
-		return nil, "", fmt.Errorf("operator agent delivery lifecycle requires canonical delivery snapshots")
+		return nil, "", fmt.Errorf("operator agent delivery lifecycle requires canonical bounded delivery snapshots")
 	}
-	snapshots, err := reader.deliverySnapshotsForAgent(ctx, agentID, time.Unix(0, 0).UTC())
+	query, err := agentDeliveryLifecyclePageQuery(agentID, opts)
+	if err != nil {
+		return nil, "", err
+	}
+	page, err := reader.deliveryLifecycleSnapshotPageForAgent(ctx, query)
 	if err != nil {
 		return nil, "", fmt.Errorf("list agent delivery lifecycle rows: %w", err)
 	}
-	return deliveryLifecycleRowsFromSnapshots(snapshots, opts, func(eventID string) (deliveryLifecycleEventMetadata, error) {
+	rows, err := deliveryLifecycleRowsFromSnapshots(page.Snapshots, func(eventID string) (deliveryLifecycleEventMetadata, error) {
 		record, found, err := loadPostgresEventIdentity(ctx, r.db, eventID)
 		if err != nil {
 			return deliveryLifecycleEventMetadata{}, err
@@ -259,14 +262,19 @@ func (r *OperatorAgentConversationReadSurface) listAgentDeliveryLifecycleRows(ct
 		event := admitted.Event()
 		return deliveryLifecycleEventMetadata{EventName: string(event.Type()), RunID: event.RunID(), EntityID: event.EntityID()}, nil
 	})
+	return rows, agentDeliveryLifecyclePageCursor(rows, page.HasMore), err
 }
 
 func (s *SQLiteRuntimeStore) listSQLiteAgentDeliveryLifecycleRows(ctx context.Context, agentID string, opts OperatorAgentDeliveryLifecycleOptions) ([]OperatorAgentDeliveryLifecycleRow, string, error) {
-	snapshots, err := s.deliverySnapshotsForAgent(ctx, agentID, time.Unix(0, 0).UTC())
+	query, err := agentDeliveryLifecyclePageQuery(agentID, opts)
+	if err != nil {
+		return nil, "", err
+	}
+	page, err := s.deliveryLifecycleSnapshotPageForAgent(ctx, query)
 	if err != nil {
 		return nil, "", fmt.Errorf("list sqlite agent delivery lifecycle rows: %w", err)
 	}
-	return deliveryLifecycleRowsFromSnapshots(snapshots, opts, func(eventID string) (deliveryLifecycleEventMetadata, error) {
+	rows, err := deliveryLifecycleRowsFromSnapshots(page.Snapshots, func(eventID string) (deliveryLifecycleEventMetadata, error) {
 		record, found, err := loadSQLiteEventIdentity(ctx, s.DB, eventID)
 		if err != nil {
 			return deliveryLifecycleEventMetadata{}, err
@@ -281,6 +289,7 @@ func (s *SQLiteRuntimeStore) listSQLiteAgentDeliveryLifecycleRows(ctx context.Co
 		event := admitted.Event()
 		return deliveryLifecycleEventMetadata{EventName: string(event.Type()), RunID: event.RunID(), EntityID: event.EntityID()}, nil
 	})
+	return rows, agentDeliveryLifecyclePageCursor(rows, page.HasMore), err
 }
 
 type deliveryLifecycleEventMetadata struct {
@@ -291,38 +300,13 @@ type deliveryLifecycleEventMetadata struct {
 
 func deliveryLifecycleRowsFromSnapshots(
 	snapshots []runtimedelivery.Snapshot,
-	opts OperatorAgentDeliveryLifecycleOptions,
 	loadEvent func(string) (deliveryLifecycleEventMetadata, error),
-) ([]OperatorAgentDeliveryLifecycleRow, string, error) {
-	statuses := make(map[string]struct{}, len(opts.Statuses))
-	for _, status := range opts.Statuses {
-		statuses[status] = struct{}{}
-	}
-	var cursorAt time.Time
-	var cursorID string
-	if opts.Cursor != "" {
-		var err error
-		cursorAt, cursorID, err = decodeAgentDeliveryLifecycleCursorPosition(opts.Cursor)
-		if err != nil {
-			return nil, "", err
-		}
-	}
+) ([]OperatorAgentDeliveryLifecycleRow, error) {
 	rows := make([]OperatorAgentDeliveryLifecycleRow, 0, len(snapshots))
 	for _, snapshot := range snapshots {
-		if opts.RunID != "" && snapshot.RunID != opts.RunID {
-			continue
-		}
-		if len(statuses) > 0 {
-			if _, ok := statuses[string(snapshot.Status)]; !ok {
-				continue
-			}
-		}
-		if !cursorAt.IsZero() && (snapshot.CreatedAt.After(cursorAt) || (snapshot.CreatedAt.Equal(cursorAt) && snapshot.DeliveryID >= cursorID)) {
-			continue
-		}
 		metadata, err := loadEvent(snapshot.EventID)
 		if err != nil {
-			return nil, "", err
+			return nil, err
 		}
 		runID := snapshot.RunID
 		if runID == "" {
@@ -344,30 +328,38 @@ func deliveryLifecycleRowsFromSnapshots(
 		}
 		rows = append(rows, row)
 	}
-	sort.Slice(rows, func(i, j int) bool {
-		if !rows[i].DeliveryCreatedAt.Equal(rows[j].DeliveryCreatedAt) {
-			return rows[i].DeliveryCreatedAt.After(rows[j].DeliveryCreatedAt)
+	return rows, nil
+}
+
+func agentDeliveryLifecyclePageQuery(agentID string, opts OperatorAgentDeliveryLifecycleOptions) (runtimedelivery.AgentLifecyclePageQuery, error) {
+	query := runtimedelivery.AgentLifecyclePageQuery{
+		AgentID: agentID,
+		RunID:   opts.RunID,
+		Limit:   opts.Limit,
+	}
+	for _, raw := range opts.Statuses {
+		status, err := runtimedelivery.ParseStatus(raw)
+		if err != nil {
+			return runtimedelivery.AgentLifecyclePageQuery{}, AgentDeliveryLifecycleStatusError{Status: raw}
 		}
-		return rows[i].DeliveryID > rows[j].DeliveryID
-	})
-	return trimAgentDeliveryLifecyclePage(rows, opts.Limit), agentDeliveryLifecycleNextCursor(rows, opts.Limit), nil
+		query.Statuses = append(query.Statuses, status)
+	}
+	if opts.Cursor != "" {
+		createdAt, deliveryID, err := decodeAgentDeliveryLifecycleCursorPosition(opts.Cursor)
+		if err != nil {
+			return runtimedelivery.AgentLifecyclePageQuery{}, err
+		}
+		query.BeforeCreatedAt = createdAt
+		query.BeforeDeliveryID = deliveryID
+	}
+	return query, nil
 }
 
-func trimAgentDeliveryLifecyclePage(rows []OperatorAgentDeliveryLifecycleRow, limit int) []OperatorAgentDeliveryLifecycleRow {
-	if limit < 0 {
-		limit = 0
-	}
-	if len(rows) > limit {
-		return rows[:limit]
-	}
-	return rows
-}
-
-func agentDeliveryLifecycleNextCursor(rows []OperatorAgentDeliveryLifecycleRow, limit int) string {
-	if limit <= 0 || len(rows) <= limit {
+func agentDeliveryLifecyclePageCursor(rows []OperatorAgentDeliveryLifecycleRow, hasMore bool) string {
+	if !hasMore || len(rows) == 0 {
 		return ""
 	}
-	last := rows[limit-1]
+	last := rows[len(rows)-1]
 	return encodeAgentDeliveryLifecycleCursor(last.DeliveryCreatedAt, last.DeliveryID)
 }
 

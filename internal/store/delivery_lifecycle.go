@@ -545,6 +545,30 @@ func (s *SQLiteRuntimeStore) deliverySnapshotsForAgent(ctx context.Context, agen
 	return sqliteDeliveryAdapter.SnapshotsForAgent(ctx, eventReadQueryerFromContext(ctx, s.DB), agentID, since)
 }
 
+func (s *PostgresStore) deliveryLifecycleSnapshotPageForAgent(ctx context.Context, query runtimedelivery.AgentLifecyclePageQuery) (runtimedelivery.SnapshotPage, error) {
+	return postgresDeliveryAdapter.LifecycleSnapshotPageForAgent(ctx, eventReadQueryerFromContext(ctx, s.DB), query)
+}
+
+func (s *SQLiteRuntimeStore) deliveryLifecycleSnapshotPageForAgent(ctx context.Context, query runtimedelivery.AgentLifecyclePageQuery) (runtimedelivery.SnapshotPage, error) {
+	return sqliteDeliveryAdapter.LifecycleSnapshotPageForAgent(ctx, eventReadQueryerFromContext(ctx, s.DB), query)
+}
+
+func (s *PostgresStore) deliveryDiagnosticSnapshotPageForAgent(ctx context.Context, query runtimedelivery.AgentDiagnosticPageQuery) (runtimedelivery.SnapshotPage, error) {
+	return postgresDeliveryAdapter.DiagnosticSnapshotPageForAgent(ctx, eventReadQueryerFromContext(ctx, s.DB), query)
+}
+
+func (s *SQLiteRuntimeStore) deliveryDiagnosticSnapshotPageForAgent(ctx context.Context, query runtimedelivery.AgentDiagnosticPageQuery) (runtimedelivery.SnapshotPage, error) {
+	return sqliteDeliveryAdapter.DiagnosticSnapshotPageForAgent(ctx, eventReadQueryerFromContext(ctx, s.DB), query)
+}
+
+func (s *PostgresStore) deliveryDiagnosticCountsForAgentSince(ctx context.Context, agentID string, since time.Time) (runtimedelivery.AgentDiagnosticCounts, error) {
+	return postgresDeliveryAdapter.DiagnosticCountsForAgentSince(ctx, eventReadQueryerFromContext(ctx, s.DB), agentID, since)
+}
+
+func (s *SQLiteRuntimeStore) deliveryDiagnosticCountsForAgentSince(ctx context.Context, agentID string, since time.Time) (runtimedelivery.AgentDiagnosticCounts, error) {
+	return sqliteDeliveryAdapter.DiagnosticCountsForAgentSince(ctx, eventReadQueryerFromContext(ctx, s.DB), agentID, since)
+}
+
 func (s *PostgresStore) terminalizeRunDeliveriesTx(ctx context.Context, tx *sql.Tx, runID, reason string) ([]runtimedelivery.Terminalization, error) {
 	terminalizations, err := postgresDeliveryAdapter.TerminalizeRun(ctx, tx, runID, reason)
 	if err != nil {
