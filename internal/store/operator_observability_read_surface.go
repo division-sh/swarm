@@ -114,10 +114,13 @@ type OperatorEventDelivery struct {
 	StartedAt      *time.Time                 `json:"started_at,omitempty"`
 	FinishedAt     *time.Time                 `json:"finished_at,omitempty"`
 	DeadLetters    []OperatorDeadLetterRecord `json:"dead_letters,omitempty"`
+	claimVersion   int64
 }
 
 type OperatorDeadLetterRecord struct {
 	DeadLetterID string                   `json:"dead_letter_id"`
+	DeliveryID   string                   `json:"delivery_id,omitempty"`
+	ClaimVersion int64                    `json:"claim_version,omitempty"`
 	Failure      runtimefailures.Envelope `json:"failure"`
 	RetryCount   int                      `json:"retry_count"`
 	ChainDepth   int                      `json:"chain_depth"`
@@ -500,8 +503,13 @@ func EnrichOperatorDeliveryFailureEvidence(deliveries []OperatorEventDelivery, d
 	for _, delivery := range deliveries {
 		delivery.Status = strings.TrimSpace(delivery.Status)
 		delivery.ReasonCode = strings.TrimSpace(delivery.ReasonCode)
-		if delivery.Status == "dead_letter" && len(deadLetters) > 0 {
-			delivery.DeadLetters = append([]OperatorDeadLetterRecord(nil), deadLetters...)
+		if delivery.Status == "dead_letter" {
+			delivery.DeadLetters = nil
+			for _, record := range deadLetters {
+				if record.DeliveryID == delivery.DeliveryID && record.ClaimVersion == delivery.claimVersion {
+					delivery.DeadLetters = append(delivery.DeadLetters, record)
+				}
+			}
 		}
 		out = append(out, delivery)
 	}
@@ -518,6 +526,7 @@ func operatorEventDeliveryFromSnapshot(snapshot runtimedelivery.Snapshot) Operat
 		Status: string(snapshot.Status), ReasonCode: snapshot.ReasonCode,
 		Failure: runtimefailures.CloneEnvelope(snapshot.Failure), RetryCount: snapshot.RetryCount,
 		RetryEligible: snapshot.RetryEligible, Terminal: snapshot.Terminal(),
+		claimVersion: snapshot.ClaimVersion,
 	}
 	if !snapshot.CreatedAt.IsZero() {
 		created := snapshot.CreatedAt
@@ -546,6 +555,8 @@ func (r *OperatorObservabilityReadSurface) loadOperatorEventDeadLetters(ctx cont
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			dl.dead_letter_id::text,
+			COALESCE(dl.delivery_id::text, ''),
+			COALESCE(dl.claim_version, 0),
 			dl.failure,
 			COALESCE(dl.retry_count, 0),
 			COALESCE(dl.chain_depth, 0),
@@ -563,7 +574,7 @@ func (r *OperatorObservabilityReadSurface) loadOperatorEventDeadLetters(ctx cont
 	for rows.Next() {
 		var item OperatorDeadLetterRecord
 		var rawFailure []byte
-		if err := rows.Scan(&item.DeadLetterID, &rawFailure, &item.RetryCount, &item.ChainDepth, &item.HandlerNode, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.DeadLetterID, &item.DeliveryID, &item.ClaimVersion, &rawFailure, &item.RetryCount, &item.ChainDepth, &item.HandlerNode, &item.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan operator event dead letter: %w", err)
 		}
 		failure, err := decodeStoredFailure(rawFailure)
@@ -575,6 +586,46 @@ func (r *OperatorObservabilityReadSurface) loadOperatorEventDeadLetters(ctx cont
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read operator event dead letters: %w", err)
+	}
+	return out, nil
+}
+
+func (r *OperatorObservabilityReadSurface) loadOperatorDeliveryDeadLetters(ctx context.Context, deliveryID string, claimVersion int64) ([]OperatorDeadLetterRecord, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT
+			dl.dead_letter_id::text,
+			dl.delivery_id::text,
+			dl.claim_version,
+			dl.failure,
+			COALESCE(dl.retry_count, 0),
+			COALESCE(dl.chain_depth, 0),
+			COALESCE(dl.handler_node, ''),
+			dl.created_at
+		FROM dead_letters dl
+		WHERE dl.delivery_id::text = $1
+		  AND dl.claim_version = $2
+		ORDER BY dl.claim_version ASC, dl.created_at ASC, dl.dead_letter_id::text ASC
+	`, strings.TrimSpace(deliveryID), claimVersion)
+	if err != nil {
+		return nil, fmt.Errorf("load operator delivery dead letters: %w", err)
+	}
+	defer rows.Close()
+	out := []OperatorDeadLetterRecord{}
+	for rows.Next() {
+		var item OperatorDeadLetterRecord
+		var rawFailure []byte
+		if err := rows.Scan(&item.DeadLetterID, &item.DeliveryID, &item.ClaimVersion, &rawFailure, &item.RetryCount, &item.ChainDepth, &item.HandlerNode, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan operator delivery dead letter: %w", err)
+		}
+		failure, err := decodeStoredFailure(rawFailure)
+		if err != nil || failure == nil {
+			return nil, fmt.Errorf("decode operator delivery dead letter failure: %w", err)
+		}
+		item.Failure = *failure
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read operator delivery dead letters: %w", err)
 	}
 	return out, nil
 }
