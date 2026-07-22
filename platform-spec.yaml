@@ -21720,7 +21720,7 @@ cli_specification:
           mean unknown bundle and do not block startup. `--no-require-bundle-match` disables this admission gate for operator-approved
           recovery/dev workflows.
       active_run_abandon_quiescence:
-        implemented_by: '#808/#1251'
+        implemented_by: '#808/#1251/#2105'
         flag: --abandon-active-runs
         owner: internal/runtime/runquiescence plus selected runtime store active-run quiescence owner, consumed by internal/serveapp
         ordering: >
@@ -21748,7 +21748,10 @@ cli_specification:
         late_writer_rule: >
           EventBus, AgentManager, node pipeline, and pipeline-receipt writers MUST treat `server_restart_abandon` as a terminal
           active-run quiescence reason. They MUST NOT overwrite the delivery/receipt reason, reclaim the delivery, or requeue
-          missing pipeline work after the owner has applied.
+          missing pipeline work after the owner has applied. Before and after agent handler execution, AgentManager MUST consume
+          the selected store's canonical delivery snapshot readback for this exact event/subscriber on both PostgreSQL and SQLite;
+          a backend that omits that capability is not a supported Manager store. The check MUST fail closed on read error and MUST
+          prevent handler outputs after terminalization.
         destructive_reset_separation: >
           Destructive reset/runtime.nuke consumes the same active-run quiescence owner with `runtime_nuke_cancelled` reasons and
           must retain its existing run-scoped cleanup and managed-container deletion semantics. `--abandon-active-runs` does not

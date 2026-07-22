@@ -959,6 +959,16 @@ seam_families:
     notes: >
       Store writers persist typed delivery authority and delivery targets. They
       are the physical sink, not independent route planners.
+  - id: active_run_delivery_quiescence_readback_proof
+    layer: execution_admission
+    classification: valid_consumer
+    paths:
+      - internal/store/active_run_quiescence_delivery_readback_test.go
+    search_dimensions: [pending_agent_subscription_recovery_authority]
+    notes: >
+      The parity proof claims an existing canonical agent obligation only to
+      establish in-progress state, then proves both selected stores expose the
+      same terminal quiescence fact. It does not derive or produce routes.
   - id: workflow_node_execution_admission
     layer: execution_admission
     classification: valid_consumer
