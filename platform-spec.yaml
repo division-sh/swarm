@@ -12223,7 +12223,11 @@ platform_tables:
         Canonical executable event-delivery obligation for agents and system nodes. One row exists per immutable event
         and complete normalized DeliveryRoute identity, including subscriber, target, reply context, and payload projection.
         route_identity is produced only by events.DeliveryRoute and is unique per event. run_id is structurally coupled
-        to the immutable event rather than trusted as an independent fact. max_retries is structural: agent
+        to the immutable event rather than trusted as an independent fact. Every replay-eligibility, audit, and run-fork
+        revision consumer MUST preserve every route-level
+        row even when siblings share a subscriber, and executable dead-letter evidence MUST match only its exact delivery_id;
+        event/subscriber grouping is not delivery identity.
+        max_retries is structural: agent
         obligations permit one retry and node obligations permit three retries. next_eligible_at is persisted selection
         truth. in_progress always carries one random claim token, monotonic claim version, and lease expiry; every mutation
         after claim requires that exact opaque capability. From claim acquisition through handler execution, deterministic

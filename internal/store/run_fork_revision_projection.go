@@ -16,13 +16,11 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]Ru
 	for _, event := range snapshot.Events {
 		events[strings.TrimSpace(event.EventID)] = event
 	}
-	deadLetters := make(map[string]map[string]struct{})
+	deadLetters := make(map[string]struct{}, len(snapshot.DeadLetters))
 	for _, deadLetter := range snapshot.DeadLetters {
-		eventID := strings.TrimSpace(deadLetter.OriginalEventID)
-		if deadLetters[eventID] == nil {
-			deadLetters[eventID] = map[string]struct{}{}
+		if deliveryID := strings.TrimSpace(deadLetter.DeliveryID); deliveryID != "" {
+			deadLetters[deliveryID] = struct{}{}
 		}
-		deadLetters[eventID][strings.TrimSpace(deadLetter.HandlerNode)] = struct{}{}
 	}
 	deliveryKeys := make(map[string]struct{}, len(snapshot.Deliveries))
 	out := make([]RunForkPendingWork, 0, len(snapshot.Deliveries)+len(snapshot.Receipts))
@@ -50,7 +48,7 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]Ru
 			StartedAt:       traceTimePtr(durable.StartedAt),
 			DeliveredAt:     traceTimePtr(durable.SettledAt),
 		}
-		_, deadLetter := deadLetters[item.EventID][item.SubscriberID]
+		_, deadLetter := deadLetters[item.DeliveryID]
 		item.Classification = classifyRunForkDeliverySnapshot(durable, deadLetter)
 		out = append(out, item)
 	}

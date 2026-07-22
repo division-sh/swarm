@@ -101,6 +101,53 @@ func TestOperatorEventReplayPublishesDistinctReplayEventAuditAndIdempotency(t *t
 	}
 }
 
+func TestEventReplayTargetsPreserveAndValidateEveryExactSubscriberRoute(t *testing.T) {
+	delivered := store.OperatorEventDelivery{
+		DeliveryID: "delivery-delivered", SubscriberType: eventReplaySubscriberTypeAgent,
+		SubscriberID: "agent-a", Status: string(runtimedelivery.StatusDelivered), Terminal: true,
+	}
+	pending := store.OperatorEventDelivery{
+		DeliveryID: "delivery-pending", SubscriberType: eventReplaySubscriberTypeAgent,
+		SubscriberID: "agent-a", Status: string(runtimedelivery.StatusPending), Terminal: false,
+	}
+	for _, deliveries := range [][]store.OperatorEventDelivery{
+		{delivered, pending},
+		{pending, delivered},
+	} {
+		_, subscribers, err := eventReplayTargets(store.OperatorEventFull{
+			EventID: "event-routes", Deliveries: deliveries,
+		}, []string{"agent-a"})
+		var applicationErr *ApplicationError
+		if !errors.As(err, &applicationErr) || applicationErr.Code != EventReplayNotEligibleCode {
+			t.Fatalf("eventReplayTargets error = %v, want %s", err, EventReplayNotEligibleCode)
+		}
+		if len(subscribers) != 0 {
+			t.Fatalf("selected subscribers on failed validation = %#v, want none", subscribers)
+		}
+		details, ok := applicationErr.Details.(map[string]any)
+		if !ok || details["delivery_id"] != pending.DeliveryID {
+			t.Fatalf("not-eligible details = %#v, want exact pending delivery %s", applicationErr.Details, pending.DeliveryID)
+		}
+	}
+
+	failed := pending
+	failed.DeliveryID = "delivery-failed"
+	failed.Status = string(runtimedelivery.StatusFailed)
+	failed.Terminal = true
+	targets, subscribers, err := eventReplayTargets(store.OperatorEventFull{
+		EventID: "event-routes", Deliveries: []store.OperatorEventDelivery{delivered, failed},
+	}, []string{"agent-a"})
+	if err != nil {
+		t.Fatalf("eventReplayTargets terminal siblings: %v", err)
+	}
+	if !reflect.DeepEqual(subscribers, []string{"agent-a"}) {
+		t.Fatalf("selected subscribers = %#v, want [agent-a]", subscribers)
+	}
+	if len(targets) != 2 || targets[0].DeliveryID != delivered.DeliveryID || targets[1].DeliveryID != failed.DeliveryID {
+		t.Fatalf("terminal route targets = %#v, want both exact delivery rows", targets)
+	}
+}
+
 type completeOperatorReplayProofStore interface {
 	runtimebus.EventStore
 	runtimedelivery.Store

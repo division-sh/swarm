@@ -361,7 +361,7 @@ func ensureEventReplayAudit(
 }
 
 func eventReplayTargets(original store.OperatorEventFull, requested []string) ([]eventReplayDelivery, []string, error) {
-	originalBySubscriber := map[string]store.OperatorEventDelivery{}
+	originalBySubscriber := map[string][]store.OperatorEventDelivery{}
 	orderedSubscribers := []string{}
 	for _, delivery := range original.Deliveries {
 		subscriberType := strings.TrimSpace(delivery.SubscriberType)
@@ -369,11 +369,10 @@ func eventReplayTargets(original store.OperatorEventFull, requested []string) ([
 		if subscriberType != eventReplaySubscriberTypeAgent || subscriberID == "" {
 			continue
 		}
-		if _, seen := originalBySubscriber[subscriberID]; seen {
-			continue
+		if _, seen := originalBySubscriber[subscriberID]; !seen {
+			orderedSubscribers = append(orderedSubscribers, subscriberID)
 		}
-		originalBySubscriber[subscriberID] = delivery
-		orderedSubscribers = append(orderedSubscribers, subscriberID)
+		originalBySubscriber[subscriberID] = append(originalBySubscriber[subscriberID], delivery)
 	}
 	if len(orderedSubscribers) == 0 {
 		return nil, nil, NewApplicationError(EventReplayNoDeliveryHistoryCode, false, map[string]any{"event_id": original.EventID})
@@ -381,7 +380,10 @@ func eventReplayTargets(original store.OperatorEventFull, requested []string) ([
 	requested = uniqueTrimmedStrings(requested)
 	if len(requested) == 0 {
 		deliveries, err := deliveriesForSubscribers(original.EventID, originalBySubscriber, orderedSubscribers)
-		return deliveries, orderedSubscribers, err
+		if err != nil {
+			return nil, nil, err
+		}
+		return deliveries, orderedSubscribers, nil
 	}
 	selected := make([]string, 0, len(requested))
 	for _, subscriber := range requested {
@@ -396,7 +398,10 @@ func eventReplayTargets(original store.OperatorEventFull, requested []string) ([
 		selected = append(selected, subscriber)
 	}
 	deliveries, err := deliveriesForSubscribers(original.EventID, originalBySubscriber, selected)
-	return deliveries, selected, err
+	if err != nil {
+		return nil, nil, err
+	}
+	return deliveries, selected, nil
 }
 
 func validateReplayEligibleDelivery(eventID string, delivery store.OperatorEventDelivery) error {
@@ -408,10 +413,10 @@ func validateReplayEligibleDelivery(eventID string, delivery store.OperatorEvent
 	return NewApplicationError(EventReplayNotEligibleCode, false, data)
 }
 
-func deliveriesForSubscribers(eventID string, index map[string]store.OperatorEventDelivery, subscribers []string) ([]eventReplayDelivery, error) {
-	out := make([]eventReplayDelivery, 0, len(subscribers))
+func deliveriesForSubscribers(eventID string, index map[string][]store.OperatorEventDelivery, subscribers []string) ([]eventReplayDelivery, error) {
+	out := []eventReplayDelivery{}
 	for _, subscriber := range subscribers {
-		if delivery, ok := index[subscriber]; ok {
+		for _, delivery := range index[subscriber] {
 			if err := validateReplayEligibleDelivery(eventID, delivery); err != nil {
 				return nil, err
 			}
