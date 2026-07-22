@@ -263,7 +263,7 @@ func (s *SQLiteRuntimeStore) sqliteMarkRunTerminalTx(ctx context.Context, tx *sq
 			return storerunlifecycle.Snapshot{}, fmt.Errorf("run %s still has active deliveries", runID)
 		}
 	} else {
-		if _, err := sqliteDeliveryAdapter.TerminalizeRun(ctx, tx, runID, "run_"+status); err != nil {
+		if _, err := s.terminalizeRunDeliveriesTx(ctx, tx, runID, "run_"+status); err != nil {
 			return storerunlifecycle.Snapshot{}, err
 		}
 	}

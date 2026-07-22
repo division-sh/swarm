@@ -159,6 +159,12 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				removeFault := installDeliveryDeadLetterFault(t, ctx, backend)
+				if _, err := backend.store.TerminalizeRun(ctx, event.RunID(), "run_terminal"); err == nil {
+					t.Fatal("run terminalization succeeded while required diagnostic writer was faulted")
+				}
+				assertDeliverySettlementRolledBack(t, ctx, backend, claimed)
+				removeFault()
 				transitions, err := backend.store.TerminalizeRun(ctx, event.RunID(), "run_terminal")
 				if err != nil {
 					t.Fatalf("terminalize run: %v", err)
@@ -166,13 +172,18 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if len(transitions) != 1 || transitions[0].Current.Status != runtimedelivery.StatusDeadLetter {
 					t.Fatalf("terminalizations = %#v", transitions)
 				}
+				current := transitions[0].Current
+				if current.ClaimVersion != claimed.Claim.Version()+1 || current.Failure == nil || current.Failure.Detail.Code != "delivery_parent_terminalized" {
+					t.Fatalf("terminalized snapshot = %#v, want new exact fence and typed parent failure", current)
+				}
 				if _, err := backend.store.SettleSuccess(ctx, claimed.Claim, nil, 0); !errors.Is(err, runtimedelivery.ErrConflict) {
 					t.Fatalf("late settlement error = %v, want ErrConflict", err)
 				}
 				outcomes, err := backend.store.Outcomes(ctx, transitions[0].Current.DeliveryID)
-				if err != nil || len(outcomes) != 1 || outcomes[0].Outcome != "terminalized" {
+				if err != nil || len(outcomes) != 1 || outcomes[0].Outcome != "terminalized" || outcomes[0].ClaimVersion != current.ClaimVersion || outcomes[0].Failure == nil {
 					t.Fatalf("terminalization outcomes = %#v, err=%v", outcomes, err)
 				}
+				assertExactDeliveryDeadLetter(t, ctx, backend, event, current)
 			})
 
 			t.Run("concurrent_claim_and_restart_reclaim_are_fenced", func(t *testing.T) {
@@ -349,9 +360,9 @@ func assertDeliverySettlementRolledBack(t *testing.T, ctx context.Context, backe
 	if snapshot.Status != runtimedelivery.StatusInProgress || snapshot.ClaimVersion != claimed.Claim.Version() {
 		t.Fatalf("faulted settlement snapshot = %#v, want original in-progress claim", snapshot)
 	}
-	query := `SELECT (SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id=$1::uuid), (SELECT COUNT(*) FROM dead_letters WHERE delivery_id=$1::uuid), (SELECT COUNT(*) FROM author_activity_occurrences WHERE source_identity=$1::text AND transition='dead_letter')`
+	query := `SELECT (SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id=$1::uuid), (SELECT COUNT(*) FROM dead_letters WHERE delivery_id=$1::uuid), (SELECT COUNT(*) FROM author_activity_occurrences WHERE source_identity=$1::text AND transition IN ('dead_letter', 'terminalized'))`
 	if !backend.postgres {
-		query = `SELECT (SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id=?), (SELECT COUNT(*) FROM dead_letters WHERE delivery_id=?), (SELECT COUNT(*) FROM author_activity_occurrences WHERE source_identity=? AND transition='dead_letter')`
+		query = `SELECT (SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id=?), (SELECT COUNT(*) FROM dead_letters WHERE delivery_id=?), (SELECT COUNT(*) FROM author_activity_occurrences WHERE source_identity=? AND transition IN ('dead_letter', 'terminalized'))`
 	}
 	args := []any{claimed.Snapshot.DeliveryID}
 	if !backend.postgres {
@@ -441,6 +452,17 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 		`INSERT INTO event_delivery_outcomes (delivery_id, claim_version, outcome, side_effects, duration_ms, settled_at) VALUES ($1::uuid, 99, 'delivered', '[]'::jsonb, 0, $2)`,
 		`INSERT INTO event_delivery_outcomes (delivery_id, claim_version, outcome, side_effects, duration_ms, settled_at) VALUES (?, 99, 'delivered', '[]', 0, ?)`,
 		[]any{outcomeProof.DeliveryID(), now})
+
+	deadLetterEvent := deliveryLifecycleEvent("schema-dead-letter-failure-" + backend.name)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, deadLetterEvent, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	deadLetterProof, err := backend.store.ProveHandoff(ctx, deadLetterEvent.ID(), route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDeliverySQLRejected(t, backend, "dead-letter without typed failure",
+		`UPDATE event_deliveries SET status='dead_letter', next_eligible_at=NULL, reason_code='raw_terminal', settled_at=created_at, updated_at=created_at WHERE delivery_id=$1::uuid`,
+		`UPDATE event_deliveries SET status='dead_letter', next_eligible_at=NULL, reason_code='raw_terminal', settled_at=created_at, updated_at=created_at WHERE delivery_id=?`,
+		[]any{deadLetterProof.DeliveryID()})
 }
 
 func assertDeliverySQLRejected(t *testing.T, backend deliveryLifecycleConformanceBackend, name, postgresQuery, sqliteQuery string, args []any) {

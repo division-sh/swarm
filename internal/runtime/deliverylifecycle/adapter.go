@@ -948,6 +948,14 @@ func (a *Adapter) TerminalizeRun(ctx context.Context, tx *sql.Tx, runID, reason 
 	if err != nil {
 		return nil, err
 	}
+	failure, err := parentTerminalizationFailure(reason)
+	if err != nil {
+		return nil, err
+	}
+	failureRaw, err := encodeFailure(&failure)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]Terminalization, 0, len(ids))
 	for _, id := range ids {
 		record, err := a.loadByID(ctx, tx, id, true)
@@ -955,11 +963,11 @@ func (a *Adapter) TerminalizeRun(ctx context.Context, tx *sql.Tx, runID, reason 
 			return nil, err
 		}
 		version := record.ClaimVersion + 1
-		query := `UPDATE event_deliveries SET status = 'dead_letter', reason_code = $1, failure = NULL, retry_count = retry_count, next_eligible_at = NULL, claim_version = $2, current_attempt_version = NULL, current_attempt_open = NULL, settled_at = $3, updated_at = $3 WHERE delivery_id = $4::uuid AND claim_version = $5`
-		args := []any{reason, version, now, id, record.ClaimVersion}
+		query := `UPDATE event_deliveries SET status = 'dead_letter', reason_code = $1, failure = $2::jsonb, retry_count = retry_count, next_eligible_at = NULL, claim_version = $3, current_attempt_version = NULL, current_attempt_open = NULL, settled_at = $4, updated_at = $4 WHERE delivery_id = $5::uuid AND claim_version = $6`
+		args := []any{reason, failureRaw, version, now, id, record.ClaimVersion}
 		if a.dialect == DialectSQLite {
-			query = `UPDATE event_deliveries SET status = 'dead_letter', reason_code = ?, failure = NULL, retry_count = retry_count, next_eligible_at = NULL, claim_version = ?, current_attempt_version = NULL, current_attempt_open = NULL, settled_at = ?, updated_at = ? WHERE delivery_id = ? AND claim_version = ?`
-			args = []any{reason, version, now, now, id, record.ClaimVersion}
+			query = `UPDATE event_deliveries SET status = 'dead_letter', reason_code = ?, failure = ?, retry_count = retry_count, next_eligible_at = NULL, claim_version = ?, current_attempt_version = NULL, current_attempt_open = NULL, settled_at = ?, updated_at = ? WHERE delivery_id = ? AND claim_version = ?`
+			args = []any{reason, failureRaw, version, now, now, id, record.ClaimVersion}
 		}
 		if result, err := tx.ExecContext(ctx, query, args...); err != nil {
 			return nil, fmt.Errorf("terminalize run delivery: %w", err)
@@ -968,17 +976,18 @@ func (a *Adapter) TerminalizeRun(ctx context.Context, tx *sql.Tx, runID, reason 
 		}
 		if record.claimToken != "" && record.ClaimVersion > 0 {
 			claim := Claim{deliveryID: id, routeIdentity: record.RouteIdentity.String(), token: record.claimToken, version: record.ClaimVersion, class: record.SubscriberClass, subscriberID: record.SubscriberID}
-			if err := a.completeAttempt(ctx, tx, claim, "terminalized", reason, nil, nil, 0, now); err != nil {
+			if err := a.closeAttemptForTerminalization(ctx, tx, claim, reason, &failure, now); err != nil {
 				return nil, err
 			}
-		} else if err := a.insertTerminalizedAttempt(ctx, tx, id, version, reason, now); err != nil {
+		}
+		if err := a.insertTerminalizedAttempt(ctx, tx, id, version, reason, &failure, now); err != nil {
 			return nil, err
 		}
 		updated, err := a.loadByID(ctx, tx, id, false)
 		if err != nil {
 			return nil, err
 		}
-		if err := a.recordTransition(ctx, updated, "terminalized", nil, now); err != nil {
+		if err := a.recordTransition(ctx, updated, "terminalized", &failure, now); err != nil {
 			return nil, err
 		}
 		out = append(out, Terminalization{Previous: record.Snapshot, Current: updated.Snapshot})
@@ -986,26 +995,73 @@ func (a *Adapter) TerminalizeRun(ctx context.Context, tx *sql.Tx, runID, reason 
 	return out, nil
 }
 
-func (a *Adapter) insertTerminalizedAttempt(ctx context.Context, tx *sql.Tx, deliveryID string, version int64, reason string, now time.Time) error {
+func parentTerminalizationFailure(reason string) (runtimefailures.Envelope, error) {
+	failureErr := runtimefailures.New(
+		runtimefailures.ClassLifecycleConflict,
+		"delivery_parent_terminalized",
+		"delivery_lifecycle",
+		"terminalize_run",
+		map[string]any{"reason_code": reason},
+	)
+	failure, ok := runtimefailures.EnvelopeFromError(failureErr)
+	if !ok {
+		return runtimefailures.Envelope{}, fmt.Errorf("construct delivery parent terminalization failure")
+	}
+	return failure, nil
+}
+
+func (a *Adapter) closeAttemptForTerminalization(ctx context.Context, tx *sql.Tx, claim Claim, reason string, failure *runtimefailures.Envelope, now time.Time) error {
+	failureRaw, err := encodeFailure(failure)
+	if err != nil {
+		return err
+	}
+	query := `
+		UPDATE event_delivery_attempts
+		SET outcome = 'terminalized', reason_code = $1, failure = $2::jsonb,
+			side_effects = '[]'::jsonb, duration_ms = 0, completed_at = $3, open_marker = FALSE
+		WHERE delivery_id = $4::uuid AND claim_version = $5 AND claim_token = $6::uuid AND open_marker = TRUE`
+	args := []any{reason, failureRaw, now, claim.deliveryID, claim.version, claim.token}
+	if a.dialect == DialectSQLite {
+		query = `
+			UPDATE event_delivery_attempts
+			SET outcome = 'terminalized', reason_code = ?, failure = ?,
+				side_effects = '[]', duration_ms = 0, completed_at = ?, open_marker = FALSE
+			WHERE delivery_id = ? AND claim_version = ? AND claim_token = ? AND open_marker = TRUE`
+	}
+	result, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("close delivery attempt for parent terminalization: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return fmt.Errorf("%w: delivery attempt is stale during parent terminalization", ErrConflict)
+	}
+	return nil
+}
+
+func (a *Adapter) insertTerminalizedAttempt(ctx context.Context, tx *sql.Tx, deliveryID string, version int64, reason string, failure *runtimefailures.Envelope, now time.Time) error {
 	token := uuid.NewString()
+	failureRaw, err := encodeFailure(failure)
+	if err != nil {
+		return err
+	}
 	query := `
 		INSERT INTO event_delivery_attempts (
 			delivery_id, claim_version, claim_token, started_at, lease_expires_at,
-			open_marker, outcome, reason_code, side_effects, duration_ms, completed_at
-		) VALUES ($1::uuid, $2, $3::uuid, $4, $5, FALSE, 'terminalized', $6, '[]'::jsonb, 0, $4)`
-	args := []any{deliveryID, version, token, now, now.Add(time.Second), reason}
+			open_marker, outcome, reason_code, failure, side_effects, duration_ms, completed_at
+		) VALUES ($1::uuid, $2, $3::uuid, $4, $5, FALSE, 'terminalized', $6, $7::jsonb, '[]'::jsonb, 0, $4)`
+	args := []any{deliveryID, version, token, now, now.Add(time.Second), reason, failureRaw}
 	if a.dialect == DialectSQLite {
 		query = `
 			INSERT INTO event_delivery_attempts (
 				delivery_id, claim_version, claim_token, started_at, lease_expires_at,
-				open_marker, outcome, reason_code, side_effects, duration_ms, completed_at
-			) VALUES (?, ?, ?, ?, ?, FALSE, 'terminalized', ?, '[]', 0, ?)`
-		args = []any{deliveryID, version, token, now, now.Add(time.Second), reason, now}
+				open_marker, outcome, reason_code, failure, side_effects, duration_ms, completed_at
+			) VALUES (?, ?, ?, ?, ?, FALSE, 'terminalized', ?, ?, '[]', 0, ?)`
+		args = []any{deliveryID, version, token, now, now.Add(time.Second), reason, failureRaw, now}
 	}
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("record terminalized delivery attempt: %w", err)
 	}
-	return a.insertOutcome(ctx, tx, deliveryID, version, "terminalized", reason, nil, nil, 0, now)
+	return a.insertOutcome(ctx, tx, deliveryID, version, "terminalized", reason, failure, nil, 0, now)
 }
 
 func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Claim) (deliveryRecord, time.Time, error) {
@@ -1337,7 +1393,7 @@ func validateRecordShape(record deliveryRecord) error {
 			return conflict("has invalid delivered shape")
 		}
 	case StatusDeadLetter:
-		if !record.NextEligibleAt.IsZero() || !claimClear || record.SettledAt.IsZero() || strings.TrimSpace(record.ReasonCode) == "" {
+		if !record.NextEligibleAt.IsZero() || !claimClear || record.SettledAt.IsZero() || strings.TrimSpace(record.ReasonCode) == "" || record.Failure == nil {
 			return conflict("has invalid dead-letter shape")
 		}
 	default:

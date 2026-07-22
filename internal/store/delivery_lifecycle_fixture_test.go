@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -230,19 +231,24 @@ func loadDeliverySnapshotFixture(t testing.TB, ctx context.Context, store delive
 
 func deletePostgresDeliveryFixturesForRun(t testing.TB, ctx context.Context, db *sql.DB, runID string) {
 	t.Helper()
+	cleanupFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassLifecycleConflict, "fixture_cleanup", nil))
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin delete delivery fixtures for run %s: %v", runID, err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	for _, query := range []string{
-		`UPDATE event_deliveries SET status = 'dead_letter', reason_code = 'fixture_cleanup', failure = NULL, next_eligible_at = NULL, current_attempt_version = NULL, current_attempt_open = NULL, settled_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE run_id = $1::uuid AND status IN ('pending', 'in_progress', 'failed')`,
+		`UPDATE event_deliveries SET status = 'dead_letter', reason_code = 'fixture_cleanup', failure = $2::jsonb, next_eligible_at = NULL, current_attempt_version = NULL, current_attempt_open = NULL, settled_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE run_id = $1::uuid AND status IN ('pending', 'in_progress', 'failed')`,
 		`DELETE FROM dead_letters WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id = $1::uuid)`,
 		`DELETE FROM event_delivery_outcomes WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id = $1::uuid)`,
 		`DELETE FROM event_delivery_attempts WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id = $1::uuid)`,
 		`DELETE FROM event_deliveries WHERE run_id = $1::uuid`,
 	} {
-		if _, err := tx.ExecContext(ctx, query, runID); err != nil {
+		args := []any{runID}
+		if strings.Contains(query, "$2") {
+			args = append(args, cleanupFailure)
+		}
+		if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 			t.Fatalf("delete delivery fixtures for run %s: %v", runID, err)
 		}
 	}

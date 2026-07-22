@@ -882,7 +882,7 @@ func runtimeWriterRules() []runtimeWriterRule {
 		{
 			name:           "canonical executable delivery adapter",
 			path:           rx(`^internal/runtime/deliverylifecycle/adapter\.go$`),
-			function:       rx(`^(insertExactObligation|claimCandidates|ClaimCandidates|claimLocked|BindAgentSession|RenewClaim|settle|TerminalizeRun|insertTerminalizedAttempt|insertAttempt|expireAttempt|completeAttempt|insertOutcome)$`),
+			function:       rx(`^(insertExactObligation|claimCandidates|ClaimCandidates|claimLocked|BindAgentSession|RenewClaim|settle|TerminalizeRun|closeAttemptForTerminalization|insertTerminalizedAttempt|insertAttempt|expireAttempt|completeAttempt|insertOutcome)$`),
 			kinds:          kinds(primitiveRead, primitiveWrite),
 			classification: classActiveTxHelper,
 			reason:         "private executable-delivery lifecycle operations consume the named selected-store event transaction",

@@ -1093,7 +1093,7 @@ func (s *PostgresStore) markRunTerminalTx(ctx context.Context, tx *sql.Tx, runID
 	if err != nil {
 		return storerunlifecycle.Snapshot{}, err
 	}
-	if _, err := postgresDeliveryAdapter.TerminalizeRun(ctx, tx, runID, "run_"+status); err != nil {
+	if _, err := s.terminalizeRunDeliveriesTx(ctx, tx, runID, "run_"+status); err != nil {
 		return storerunlifecycle.Snapshot{}, err
 	}
 	if err := supersedeDecisionCardsForRun(ctx, tx, runID, "run_"+status, endedAt, false, true); err != nil {

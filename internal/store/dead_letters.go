@@ -31,6 +31,20 @@ func (s *PostgresStore) RecordDeadLetterTx(ctx context.Context, tx *sql.Tx, rec 
 	if err := requireActiveRunForEvent(ctx, tx, rec.OriginalEventID, storerunlifecycle.DialectPostgres); err != nil {
 		return err
 	}
+	return s.insertPostgresDeadLetterTx(ctx, tx, rec)
+}
+
+func (s *PostgresStore) recordTerminalizedDeliveryDeadLetterTx(ctx context.Context, tx *sql.Tx, rec runtimedeadletters.Record) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	if err := runtimeauthoractivity.Require(ctx); err != nil {
+		return err
+	}
+	return s.insertPostgresDeadLetterTx(ctx, tx, rec)
+}
+
+func (s *PostgresStore) insertPostgresDeadLetterTx(ctx context.Context, tx *sql.Tx, rec runtimedeadletters.Record) error {
 	source, err := loadDeadLetterAuthorActivitySource(ctx, tx, rec.OriginalEventID, true)
 	if err != nil {
 		return err
@@ -64,6 +78,23 @@ func (s *SQLiteRuntimeStore) RecordDeadLetterTx(ctx context.Context, tx *sql.Tx,
 	if err := requireActiveRunForEvent(ctx, tx, rec.OriginalEventID, storerunlifecycle.DialectSQLite); err != nil {
 		return err
 	}
+	return s.insertSQLiteDeadLetterTx(ctx, tx, rec)
+}
+
+func (s *SQLiteRuntimeStore) recordTerminalizedDeliveryDeadLetterTx(ctx context.Context, tx *sql.Tx, rec runtimedeadletters.Record) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	if tx == nil {
+		return fmt.Errorf("terminalized delivery dead letter transaction is required")
+	}
+	if err := runtimeauthoractivity.Require(ctx); err != nil {
+		return err
+	}
+	return s.insertSQLiteDeadLetterTx(ctx, tx, rec)
+}
+
+func (s *SQLiteRuntimeStore) insertSQLiteDeadLetterTx(ctx context.Context, tx *sql.Tx, rec runtimedeadletters.Record) error {
 	rec, createdAt, err := normalizeSQLiteDeadLetterRecord(s, rec)
 	if err != nil {
 		return err
@@ -138,19 +169,20 @@ func (s *SQLiteRuntimeStore) RecordDeadLetterTx(ctx context.Context, tx *sql.Tx,
 }
 
 type deadLetterAuthorActivitySource struct {
-	RunID     string
-	EntityID  string
-	FlowID    string
-	EventType string
+	RunID      string
+	EntityID   string
+	FlowID     string
+	BundleHash string
+	EventType  string
 }
 
 func loadDeadLetterAuthorActivitySource(ctx context.Context, tx *sql.Tx, eventID string, postgres bool) (deadLetterAuthorActivitySource, error) {
-	query := `SELECT COALESCE(CAST(run_id AS TEXT), ''), COALESCE(CAST(entity_id AS TEXT), ''), COALESCE(flow_instance, ''), event_name FROM events WHERE event_id = ?`
+	query := `SELECT COALESCE(CAST(e.run_id AS TEXT), ''), COALESCE(CAST(e.entity_id AS TEXT), ''), COALESCE(e.flow_instance, ''), COALESCE(r.bundle_hash, ''), e.event_name FROM events e LEFT JOIN runs r ON r.run_id = e.run_id WHERE e.event_id = ?`
 	if postgres {
-		query = `SELECT COALESCE(run_id::text, ''), COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''), event_name FROM events WHERE event_id = $1::uuid`
+		query = `SELECT COALESCE(e.run_id::text, ''), COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(r.bundle_hash, ''), e.event_name FROM events e LEFT JOIN runs r ON r.run_id = e.run_id WHERE e.event_id = $1::uuid`
 	}
 	var source deadLetterAuthorActivitySource
-	if err := tx.QueryRowContext(ctx, query, strings.TrimSpace(eventID)).Scan(&source.RunID, &source.EntityID, &source.FlowID, &source.EventType); err != nil {
+	if err := tx.QueryRowContext(ctx, query, strings.TrimSpace(eventID)).Scan(&source.RunID, &source.EntityID, &source.FlowID, &source.BundleHash, &source.EventType); err != nil {
 		return deadLetterAuthorActivitySource{}, fmt.Errorf("load dead letter source event: %w", err)
 	}
 	return source, nil
@@ -161,6 +193,16 @@ func recordDeadLetterAuthorActivity(ctx context.Context, deadLetterID string, re
 	if deadLetterID == "" {
 		return fmt.Errorf("dead letter author activity requires dead_letter_id")
 	}
+	currentScope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
+	if !ok || strings.TrimSpace(currentScope.RuntimeInstanceID) == "" {
+		return fmt.Errorf("dead letter author activity requires exact runtime instance scope")
+	}
+	occurrenceScope := currentScope
+	if strings.TrimSpace(source.BundleHash) != "" {
+		occurrenceScope = runtimeauthoractivity.BundleScope(currentScope.RuntimeInstanceID, source.BundleHash)
+	} else if currentScope.Kind != runtimeauthoractivity.ScopeBundle || strings.TrimSpace(currentScope.BundleHash) == "" {
+		return fmt.Errorf("dead letter author activity requires persisted run bundle_hash or exact bundle scope")
+	}
 	retry := rec.RetryCount
 	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindDeadLetterRecorded, Transition: "recorded",
@@ -170,7 +212,7 @@ func recordDeadLetterAuthorActivity(ctx context.Context, deadLetterID string, re
 			SubjectType: "event", SubjectID: strings.TrimSpace(rec.OriginalEventID), EventType: source.EventType,
 			RetryCount: &retry, ReasonCode: rec.Failure.Detail.Code, NodeID: strings.TrimSpace(rec.HandlerNode),
 		},
-		Failure: &rec.Failure,
+		Scope: occurrenceScope, Failure: &rec.Failure,
 	})
 }
 
