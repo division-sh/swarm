@@ -1111,6 +1111,202 @@ func TestStandingReplacementAdoptionRestoresWorkflowTimersOnBothStores(t *testin
 	}
 }
 
+func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomicallyOnBothStores(t *testing.T) {
+	type backend struct {
+		name string
+		open func(*testing.T) storeBundle
+	}
+	backends := []backend{
+		{name: "sqlite", open: func(t *testing.T) storeBundle {
+			stores, err := buildStores(context.Background(), storebackend.Selection{
+				Backend: storebackend.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "runtime.sqlite"),
+			}, &config.Config{})
+			if err != nil {
+				t.Fatalf("build SQLite stores: %v", err)
+			}
+			t.Cleanup(func() { _ = stores.SQLDB.Close() })
+			return stores
+		}},
+		{name: "postgres", open: func(t *testing.T) storeBundle {
+			dsn, _, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+			selected, err := store.NewPostgresStore(dsn)
+			if err != nil {
+				t.Fatalf("NewPostgresStore: %v", err)
+			}
+			t.Cleanup(func() { _ = selected.DB.Close() })
+			return selectedPostgresStoreBundle(selected, &config.Config{})
+		}},
+	}
+	for _, backend := range backends {
+		backend := backend
+		t.Run(backend.name, func(t *testing.T) {
+			for _, changedHash := range []bool{false, true} {
+				changedHash := changedHash
+				name := "same_hash"
+				if changedHash {
+					name = "changed_hash"
+				}
+				t.Run(name, func(t *testing.T) {
+					contractsRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
+					schemaPath := filepath.Join(contractsRoot, "flows", "telegram-ingress", "schema.yaml")
+					rawSchema, err := os.ReadFile(schemaPath)
+					if err != nil {
+						t.Fatalf("read standing schema: %v", err)
+					}
+					withTimer := strings.Replace(string(rawSchema), "  active:\n    initial: true\n    gate:", "  active:\n    initial: true\n    timers:\n      - after: 30s\n        advances_to: done\n    gate:", 1)
+					if withTimer == string(rawSchema) {
+						t.Fatal("standing timer insertion point not found")
+					}
+					writeStandingCandidateFile(t, schemaPath, withTimer)
+
+					repoRoot := cliapp.RepoRoot()
+					module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRoot, contractsRoot, cliapp.ResolvePath(repoRoot, defaultPlatformSpecPath))
+					if err != nil {
+						t.Fatalf("load standing workflow module: %v", err)
+					}
+					stores := backend.open(t)
+					if _, err := initializeStateStores(context.Background(), stores, bundle); err != nil {
+						t.Fatalf("initialize state stores: %v", err)
+					}
+					oldHash, err := runtimecontracts.BundleHash(bundle)
+					if err != nil {
+						t.Fatalf("BundleHash: %v", err)
+					}
+					oldSource := semanticview.Wrap(bundle)
+					candidateModule := module
+					candidateBundle := bundle
+					candidateSource := oldSource
+					newHash := oldHash
+					if changedHash {
+						writeStandingCandidateFile(t, filepath.Join(contractsRoot, "flows", "telegram-chat", "prompts", "phrase-bot.md"), "Reply to each Telegram message by emitting telegram.reply_requested with chat_id set to the event conversation_reference. Keep the response concise.\n")
+						candidateModule, candidateBundle, err = cliapp.NewSwarmWorkflowModule(repoRoot, contractsRoot, cliapp.ResolvePath(repoRoot, defaultPlatformSpecPath))
+						if err != nil {
+							t.Fatalf("load changed-hash standing workflow module: %v", err)
+						}
+						candidateSource = semanticview.Wrap(candidateBundle)
+						newHash, err = runtimecontracts.BundleHash(candidateBundle)
+						if err != nil {
+							t.Fatalf("changed BundleHash: %v", err)
+						}
+						if newHash == oldHash {
+							t.Fatal("changed standing bundle retained predecessor hash")
+						}
+					}
+					credentials, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+					if err != nil {
+						t.Fatalf("NewFileStore: %v", err)
+					}
+					for key, value := range map[string]string{
+						"telegram_bot_token": "bot-token", "webhook_signing.telegram": "telegram-secret",
+					} {
+						if err := credentials.Set(context.Background(), key, value); err != nil {
+							t.Fatalf("set credential %s: %v", key, err)
+						}
+					}
+					catalog := testProviderTriggerCatalog(t)
+					installed, err := catalog.InstalledCapabilitySubjects()
+					if err != nil {
+						t.Fatalf("installed capability subjects: %v", err)
+					}
+					admissionState := runtimepkg.ProcessAdmissionState{GenerationID: catalog.GenerationID(), InstalledSubjects: installed}
+					processWorkOwner := newSupervisorTestProcessOwner(t)
+					var manager *runtimepkg.RuntimeContextManager
+					var createdRuntimes []*runtimepkg.Runtime
+					t.Cleanup(func() {
+						if manager != nil {
+							for _, result := range manager.DeactivateAll(runtimepkg.RuntimeContextCauseUnloaded) {
+								if result.ShutdownErr != nil {
+									t.Errorf("deactivate replacement context %s: %v", result.BundleHash, result.ShutdownErr)
+								}
+							}
+						}
+						for i := len(createdRuntimes) - 1; i >= 0; i-- {
+							_ = createdRuntimes[i].ShutdownWithOptions(runtimepkg.ShutdownOptions{Grace: 5 * time.Second})
+						}
+					})
+					newRuntime := func(hash string, workflowModule runtimepipeline.WorkflowModule) *runtimepkg.Runtime {
+						rt, err := runtimepkg.NewRuntime(context.Background(), runtimepkg.RuntimeDeps{
+							Config: &config.Config{}, Stores: stores.runtimeStores(),
+							Options: runtimepkg.RuntimeOptions{
+								WorkflowModule: workflowModule, LLMRuntime: runtimellm.NoopRuntime{},
+								Credentials: credentials, ProviderCredentials: credentials,
+								ProviderTriggerCatalog: catalog, ProcessWorkOwner: processWorkOwner,
+								RuntimeInstanceID: "11111111-1111-1111-1111-111111111111",
+								BundleSourceFact: runtimecorrelation.BundleSourceFact{
+									BundleHash: hash, BundleSource: storerunlifecycle.BundleSourceEphemeral,
+								},
+							},
+						})
+						if err != nil {
+							t.Fatalf("NewRuntime(%s): %v", hash, err)
+						}
+						createdRuntimes = append(createdRuntimes, rt)
+						return rt
+					}
+
+					predecessor := newRuntime(oldHash, module)
+					if err := predecessor.Start(context.Background()); err != nil {
+						t.Fatalf("start predecessor: %v", err)
+					}
+					targets, activations, err := predecessor.EnsureStandingTargets(context.Background())
+					if err != nil {
+						t.Fatalf("ensure predecessor standing targets: %v", err)
+					}
+					if len(targets) != 1 || len(activations) != 1 || !activations[0].Created {
+						t.Fatalf("predecessor standing targets/activations = %#v/%#v", targets, activations)
+					}
+					oldFact := runtimecorrelation.BundleSourceFact{BundleHash: oldHash, BundleSource: storerunlifecycle.BundleSourceEphemeral}
+					manager, err = runtimepkg.NewRuntimeContextManagerWithAdmission(nil, admissionState, runtimepkg.BundleContext{
+						BundleHash: oldHash, BundleSourceFact: oldFact, Source: oldSource,
+						Runtime: predecessor, WorkOwner: predecessor.WorkOccurrence(), StandingTargets: targets,
+					})
+					if err != nil {
+						t.Fatalf("NewRuntimeContextManagerWithAdmission: %v", err)
+					}
+					candidate := newRuntime(newHash, candidateModule)
+					newFact := runtimecorrelation.BundleSourceFact{BundleHash: newHash, BundleSource: storerunlifecycle.BundleSourceEphemeral}
+					supervisor := &runtimeProjectSupervisor{
+						ready: new(atomic.Bool), currentRoot: contractsRoot, currentSource: oldSource, currentBundle: bundle,
+						currentRT: predecessor, currentBundleSourceFact: oldFact, runtimeContexts: manager,
+						providerTriggers: catalog, replacementShutdown: runtimepkg.ShutdownOptions{Grace: 5 * time.Second},
+					}
+					supervisor.ready.Store(true)
+					admission := &processAdmissionCandidate{catalog: catalog, state: admissionState, survivingTargets: map[string][]runtimepkg.StandingTarget{}}
+					if _, err := supervisor.replaceCurrentRuntimeWithSourceAndAdmission(
+						context.Background(), contractsRoot, candidateSource, candidateBundle, newFact,
+						runtimecontracts.BundleIdentity{BundleHash: newHash}, candidate, candidate.WorkOccurrence(), admission,
+					); err != nil {
+						t.Fatalf("replace standing runtime: %v", err)
+					}
+					if supervisor.CurrentRuntime() != candidate || !supervisor.ready.Load() {
+						t.Fatal("standing candidate did not publish after aggregate timer transfer")
+					}
+
+					var timerEvent, timerStatus string
+					if err := stores.SQLDB.QueryRowContext(context.Background(), `SELECT fire_event, status FROM timers`).Scan(&timerEvent, &timerStatus); err != nil {
+						t.Fatalf("load adopted timer: %v", err)
+					}
+					if timerStatus != "active" {
+						t.Fatalf("adopted timer status at publication = %q, want active", timerStatus)
+					}
+					query := `SELECT COUNT(*) FROM events WHERE event_name = ?`
+					if backend.name == "postgres" {
+						query = `SELECT COUNT(*) FROM events WHERE event_name = $1`
+					}
+					var count int
+					if err := stores.SQLDB.QueryRowContext(context.Background(), query, timerEvent).Scan(&count); err != nil {
+						t.Fatalf("count adopted timer events: %v", err)
+					}
+					if count != 0 {
+						t.Fatalf("adopted timer events at publication = %d, want 0", count)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *testing.T) {
 	type backend struct {
 		name string

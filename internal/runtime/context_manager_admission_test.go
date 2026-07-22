@@ -5,6 +5,7 @@ import (
 	goruntime "runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -230,10 +231,11 @@ func TestRuntimeContextManagerReplacementParksAndRehydratesStandingSchedules(t *
 				t.Fatalf("begin Manager-composed replacement work: %v", err)
 			}
 			ownerCtx := managerWork.Context()
-			for _, schedule := range []runtimepipeline.Schedule{
+			replacementSchedules := []runtimepipeline.Schedule{
 				{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "future-once"},
 				{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: "recurring-cron"},
-			} {
+			}
+			for _, schedule := range replacementSchedules {
 				if err := predecessor.Runtime.Scheduler.Register(ownerCtx, schedule); err != nil {
 					t.Fatalf("register %s schedule: %v", schedule.Mode, err)
 				}
@@ -268,7 +270,25 @@ func TestRuntimeContextManagerReplacementParksAndRehydratesStandingSchedules(t *
 				candidateHash = "bundle-v1:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 			}
 			candidate := runtimeAdmissionTestContext(t, candidateHash, "primary", catalog)
-			candidate.Runtime.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(candidate.WorkOwner)
+			candidateIncumbentStarted := make(chan struct{}, 1)
+			releaseCandidateIncumbent := make(chan struct{})
+			var candidatePublished atomic.Bool
+			var candidateActive atomic.Int32
+			var candidateOverlap atomic.Bool
+			candidate.Runtime.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(candidate.WorkOwner, func(context.Context, runtimepipeline.Schedule) {
+				if candidateActive.Add(1) > 1 {
+					candidateOverlap.Store(true)
+				}
+				defer candidateActive.Add(-1)
+				if candidatePublished.Load() {
+					return
+				}
+				select {
+				case candidateIncumbentStarted <- struct{}{}:
+				default:
+				}
+				<-releaseCandidateIncumbent
+			})
 			replacementDone := make(chan error, 1)
 			go func() {
 				_, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashA, candidate)
@@ -314,8 +334,33 @@ func TestRuntimeContextManagerReplacementParksAndRehydratesStandingSchedules(t *
 			if err != nil {
 				t.Fatalf("prepare replacement publication: %v", err)
 			}
-			if err := prepared.Publish(); err != nil {
+			preparedStanding := prepared.publication.standing[serviceID]
+			adoptedCandidateTimer := replacementSchedules[1]
+			adoptedCandidateTimer.Cron = "@every 1ms"
+			if err := candidate.Runtime.Scheduler.Register(
+				worklifetime.WithOccurrence(context.Background(), preparedStanding), adoptedCandidateTimer,
+			); err != nil {
+				t.Fatalf("register adopted candidate timer: %v", err)
+			}
+			select {
+			case <-candidateIncumbentStarted:
+			case <-time.After(time.Second):
+				t.Fatal("adopted candidate timer did not start before publication")
+			}
+			publishDone := make(chan error, 1)
+			go func() { publishDone <- prepared.Publish() }()
+			select {
+			case err := <-publishDone:
+				t.Fatalf("replacement published before exact target incumbent settled: %v", err)
+			default:
+			}
+			candidatePublished.Store(true)
+			close(releaseCandidateIncumbent)
+			if err := <-publishDone; err != nil {
 				t.Fatalf("publish replacement: %v", err)
+			}
+			if candidateOverlap.Load() {
+				t.Fatal("replacement timer overlapped adopted candidate incumbent")
 			}
 			freshStanding := manager.contexts[candidateHash].standing[serviceID]
 			if err := managerOwner.RetireAndWait(context.Background()); err != nil {
@@ -331,6 +376,99 @@ func TestRuntimeContextManagerReplacementParksAndRehydratesStandingSchedules(t *
 			}
 		})
 	}
+}
+
+func TestRuntimeContextReplacementAggregateFailureLeavesNoPartialCandidateAndRetries(t *testing.T) {
+	catalog := runtimeAdmissionTestCatalog(t, "a")
+	state := runtimeAdmissionTestState(t, catalog)
+	predecessor := testBundleContext(t, runtimeContextTestHashA, "standing.aggregate")
+	predecessor.Runtime.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(predecessor.WorkOwner)
+	predecessor.StandingTargets = aggregateReplacementStandingTargets(t, runtimeContextTestHashA, catalog)
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, state, predecessor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range predecessor.StandingTargets {
+		owner := manager.contexts[runtimeContextTestHashA].standing[target.ServiceID]
+		if err := predecessor.Runtime.Scheduler.Register(
+			worklifetime.WithOccurrence(context.Background(), owner),
+			runtimepipeline.Schedule{
+				RunID: target.RunID, AgentID: "timer-agent", EventType: "timer.once", Mode: "once",
+				At: time.Now().Add(time.Hour), TaskID: target.ServiceID,
+			},
+		); err != nil {
+			t.Fatalf("register predecessor schedule for %s: %v", target.ServiceID, err)
+		}
+	}
+
+	failedCandidate := testBundleContext(t, runtimeContextTestHashA, "standing.aggregate")
+	failedCandidate.Runtime.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(failedCandidate.WorkOwner)
+	failedCandidate.StandingTargets = aggregateReplacementStandingTargets(t, runtimeContextTestHashA, catalog)
+	if _, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashA, failedCandidate); err != nil {
+		t.Fatalf("begin aggregate replacement: %v", err)
+	}
+	failedPublication, err := manager.PrepareBundleHashReplacementPublicationWithAdmission(runtimeContextTestHashA, failedCandidate, nil, state)
+	if err != nil {
+		t.Fatalf("prepare failed candidate publication: %v", err)
+	}
+	if err := failedPublication.publication.standing["service-b"].RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire middle successor owner: %v", err)
+	}
+	if err := failedPublication.Publish(); err == nil {
+		t.Fatal("aggregate publication succeeded with a retired middle successor owner")
+	}
+	lookup := manager.LookupBundleHashStatus(runtimeContextTestHashA)
+	if lookup.Loaded() || lookup.Cause != RuntimeContextCauseReplacing {
+		t.Fatalf("failed aggregate publication lookup = %#v, want unavailable replacement", lookup)
+	}
+	failedCandidate.Runtime.Scheduler.Stop()
+	if err := failedCandidate.Runtime.Scheduler.Wait(context.Background()); err != nil {
+		t.Fatalf("wait failed candidate scheduler: %v", err)
+	}
+	if err := failedPublication.Discard(); err != nil {
+		t.Fatalf("discard failed candidate publication: %v", err)
+	}
+
+	retryCandidate := testBundleContext(t, runtimeContextTestHashA, "standing.aggregate")
+	retryCandidate.Runtime.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(retryCandidate.WorkOwner)
+	retryCandidate.StandingTargets = aggregateReplacementStandingTargets(t, runtimeContextTestHashA, catalog)
+	retryPublication, err := manager.PrepareBundleHashReplacementPublicationWithAdmission(runtimeContextTestHashA, retryCandidate, nil, state)
+	if err != nil {
+		t.Fatalf("prepare fresh-candidate retry: %v", err)
+	}
+	if err := retryPublication.Publish(); err != nil {
+		t.Fatalf("publish fresh-candidate retry: %v", err)
+	}
+	for _, target := range retryCandidate.StandingTargets {
+		owner := retryPublication.publication.standing[target.ServiceID]
+		parked, err := retryCandidate.Runtime.Scheduler.ParkOccurrence(context.Background(), owner)
+		if err != nil {
+			t.Fatalf("inspect retry schedules for %s: %v", target.ServiceID, err)
+		}
+		if parked.Count() != 1 {
+			t.Fatalf("retry schedules for %s = %d, want 1", target.ServiceID, parked.Count())
+		}
+	}
+}
+
+func aggregateReplacementStandingTargets(t *testing.T, bundleHash string, catalog *providertriggers.CatalogSnapshot) []StandingTarget {
+	t.Helper()
+	targets := make([]StandingTarget, 0, 3)
+	for _, suffix := range []string{"a", "b", "c"} {
+		plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
+			Alias: "aggregate-" + suffix, Provider: "acme", SigningSecret: "webhook_signing.acme",
+		})
+		if err != nil {
+			t.Fatalf("compile aggregate admission %s: %v", suffix, err)
+		}
+		targets = append(targets, StandingTarget{
+			BundleHash: bundleHash, ServiceID: "service-" + suffix, FlowID: "flow-" + suffix,
+			Alias: "aggregate-" + suffix, Provider: "acme", RunID: "run-" + suffix, Generation: 1,
+			FlowInstance: "flow-" + suffix + "/instance", EntityID: "entity-" + suffix,
+			SigningSecret: "webhook_signing.acme", AdmissionPlan: plan,
+		})
+	}
+	return targets
 }
 
 func TestStandingServiceTransitionRollbackRestoresExactOwnerSchedulesBeforeAdmission(t *testing.T) {

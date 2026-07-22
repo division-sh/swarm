@@ -89,12 +89,14 @@ func (s Schedule) CanonicalWorkflowTimer() bool {
 }
 
 type Scheduler struct {
-	mu       sync.Mutex
-	onFire   func(context.Context, Schedule)
-	tasks    map[string]*scheduledTask
-	draining map[*scheduledTask]struct{}
-	stopped  bool
-	owner    worklifetime.Occurrence
+	mu           sync.Mutex
+	onFire       func(context.Context, Schedule)
+	tasks        map[string]*scheduledTask
+	draining     map[*scheduledTask]struct{}
+	reservations map[string]*PreparedParkedSetRebind
+	transitions  map[*PreparedParkedSetRebind]struct{}
+	stopped      bool
+	owner        worklifetime.Occurrence
 }
 
 type scheduledTask struct {
@@ -128,6 +130,7 @@ type parkedOccurrenceState uint8
 
 const (
 	parkedOccurrencePending parkedOccurrenceState = iota
+	parkedOccurrencePrepared
 	parkedOccurrenceRestored
 	parkedOccurrenceRebound
 )
@@ -143,6 +146,46 @@ type ParkedOccurrence struct {
 	state         parkedOccurrenceState
 }
 
+// ParkedRebind binds one exact parked source authority to one fresh standing
+// occurrence. The target scheduler consumes the complete set atomically.
+type ParkedRebind struct {
+	Parked *ParkedOccurrence
+	Owner  *worklifetime.StandingOccurrence
+}
+
+type preparedParkedTask struct {
+	key  string
+	task *scheduledTask
+	spec cronSpec
+}
+
+type preparedParkedSource struct {
+	parked *ParkedOccurrence
+	state  parkedOccurrenceState
+}
+
+type preparedParkedSetState uint8
+
+const (
+	preparedParkedSetPending preparedParkedSetState = iota
+	preparedParkedSetCommitted
+	preparedParkedSetActive
+	preparedParkedSetAborted
+)
+
+// PreparedParkedSetRebind is the scheduler-owned replacement transaction for
+// a complete parked service set. Target keys remain reserved until activation,
+// so runtime publication can commit dormant tasks before making them runnable.
+type PreparedParkedSetRebind struct {
+	mu        sync.Mutex
+	scheduler *Scheduler
+	sources   []preparedParkedSource
+	tasks     []preparedParkedTask
+	keys      []string
+	done      chan struct{}
+	state     preparedParkedSetState
+}
+
 type cronSpec struct {
 	every    time.Duration
 	schedule cron.Schedule
@@ -154,10 +197,12 @@ func NewSchedulerWithWorkOwner(owner worklifetime.Occurrence, callbacks ...func(
 		cb = callbacks[0]
 	}
 	return &Scheduler{
-		onFire:   cb,
-		tasks:    make(map[string]*scheduledTask),
-		draining: make(map[*scheduledTask]struct{}),
-		owner:    owner,
+		onFire:       cb,
+		tasks:        make(map[string]*scheduledTask),
+		draining:     make(map[*scheduledTask]struct{}),
+		reservations: make(map[string]*PreparedParkedSetRebind),
+		transitions:  make(map[*PreparedParkedSetRebind]struct{}),
+		owner:        owner,
 	}
 }
 
@@ -165,31 +210,10 @@ func (s *Scheduler) Register(ctx context.Context, sc Schedule) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if sc.AgentID == "" || sc.EventType == "" {
-		return errors.New("agent_id and event_type are required")
-	}
-	sc.NormalizeRunID()
-	sc.NormalizeDeliveryContext()
-	sc.NormalizeEntityID()
-	sc.NormalizeFlowInstance()
-	sc.NormalizeTimerID()
-	if sc.Mode == "" {
-		sc.Mode = "once"
-	}
-	var spec cronSpec
-	switch sc.Mode {
-	case "once":
-		if sc.At.IsZero() {
-			return errors.New("schedule.at is required for mode=once")
-		}
-	case "cron":
-		var err error
-		spec, err = parseCronSpec(sc.Cron)
-		if err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("unsupported schedule mode: %s", sc.Mode)
+	var err error
+	sc, spec, err := validateSchedule(sc)
+	if err != nil {
+		return err
 	}
 
 	s.mu.Lock()
@@ -201,6 +225,11 @@ func (s *Scheduler) Register(ctx context.Context, sc Schedule) error {
 		s.mu.Unlock()
 		return errors.New("scheduler requires a runtime work occurrence")
 	}
+	key := scheduleKey(sc)
+	if _, reserved := s.reservations[key]; reserved {
+		s.mu.Unlock()
+		return errors.New("schedule key is reserved by a standing replacement transition")
+	}
 	owner := s.owner
 	if contextual, ok := worklifetime.OccurrenceFromContext(ctx); ok {
 		owner = contextual
@@ -210,7 +239,6 @@ func (s *Scheduler) Register(ctx context.Context, sc Schedule) error {
 		s.mu.Unlock()
 		return fmt.Errorf("admit scheduled task: %w", err)
 	}
-	key := scheduleKey(sc)
 	if existing, ok := s.tasks[key]; ok {
 		s.retireTaskLocked(key, existing)
 	}
@@ -221,22 +249,8 @@ func (s *Scheduler) Register(ctx context.Context, sc Schedule) error {
 	}
 	s.tasks[key] = task
 	s.mu.Unlock()
-
-	switch sc.Mode {
-	case "once":
-		go func() {
-			defer s.finishTask(key, task)
-			s.runOnce(task, key, sc)
-		}()
-		return nil
-	case "cron":
-		go func() {
-			defer s.finishTask(key, task)
-			s.runCron(task, key, sc, spec)
-		}()
-		return nil
-	}
-	panic("validated schedule mode became unreachable")
+	s.startTask(key, task, spec)
+	return nil
 }
 
 func (s *Scheduler) Wait(ctx context.Context) error {
@@ -244,12 +258,15 @@ func (s *Scheduler) Wait(ctx context.Context) error {
 		return nil
 	}
 	s.mu.Lock()
-	done := make([]<-chan struct{}, 0, len(s.draining)+len(s.tasks))
+	done := make([]<-chan struct{}, 0, len(s.draining)+len(s.tasks)+len(s.transitions))
 	for task := range s.draining {
 		done = append(done, task.done)
 	}
 	for _, task := range s.tasks {
 		done = append(done, task.done)
+	}
+	for transition := range s.transitions {
+		done = append(done, transition.done)
 	}
 	s.mu.Unlock()
 	for _, taskDone := range done {
@@ -268,6 +285,11 @@ func (s *Scheduler) Cancel(agentID string, eventType string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for key := range s.reservations {
+		if scheduleKeyMatchesAgentEvent(key, agentID, eventType) {
+			return errors.New("matching schedule key is reserved by a standing replacement transition")
+		}
+	}
 	for key, task := range s.tasks {
 		if !scheduleKeyMatchesAgentEvent(key, agentID, eventType) {
 			continue
@@ -284,6 +306,9 @@ func (s *Scheduler) CancelExact(sc Schedule) error {
 	key := scheduleKey(sc)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, reserved := s.reservations[key]; reserved {
+		return errors.New("schedule key is reserved by a standing replacement transition")
+	}
 	task, ok := s.tasks[key]
 	if !ok {
 		return nil
@@ -305,6 +330,12 @@ func (s *Scheduler) ParkOccurrence(ctx context.Context, owner *worklifetime.Stan
 	}
 	parked := &ParkedOccurrence{scheduler: s, standingOwner: owner}
 	s.mu.Lock()
+	for transition := range s.transitions {
+		if transition.targetsStandingOwner(owner) {
+			s.mu.Unlock()
+			return nil, errors.New("standing occurrence is reserved by a scheduler replacement transition")
+		}
+	}
 	for key, task := range s.tasks {
 		if task == nil || task.standingOwner != owner {
 			continue
@@ -351,31 +382,11 @@ func (p *ParkedOccurrence) RestoreOriginal(ctx context.Context) error {
 	if p == nil {
 		return nil
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.state != parkedOccurrencePending {
-		return errors.New("parked occurrence projection is already settled")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := p.wait(ctx); err != nil {
-		return fmt.Errorf("join parked predecessor schedules: %w", err)
-	}
-	for _, projection := range p.projections {
-		if !projection.restorable {
-			continue
-		}
-		standing, ok := worklifetime.StandingProjection(projection.originalOwner)
-		if !ok || standing != p.standingOwner {
-			return errors.New("parked schedule original owner no longer projects the exact standing occurrence")
-		}
-	}
-	if err := p.restore(ctx, p.scheduler, nil); err != nil {
+	prepared, err := prepareParkedSet(ctx, p.scheduler, []parkedSetBinding{{parked: p, restoreOriginal: true}})
+	if err != nil {
 		return err
 	}
-	p.state = parkedOccurrenceRestored
-	return nil
+	return prepared.Publish()
 }
 
 // Rebind projects eligible schedule facts under one distinct fresh standing
@@ -384,28 +395,11 @@ func (p *ParkedOccurrence) Rebind(ctx context.Context, scheduler *Scheduler, own
 	if p == nil {
 		return nil
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.state != parkedOccurrencePending {
-		return errors.New("parked occurrence projection is already settled")
-	}
-	if scheduler == nil || owner == nil {
-		return errors.New("rebind parked schedules requires scheduler and fresh standing owner")
-	}
-	if owner == p.standingOwner {
-		return errors.New("rebind parked schedules requires a distinct fresh standing owner")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := p.wait(ctx); err != nil {
-		return fmt.Errorf("join parked predecessor schedules: %w", err)
-	}
-	if err := p.restore(ctx, scheduler, owner); err != nil {
+	prepared, err := PrepareParkedSetRebind(ctx, scheduler, []ParkedRebind{{Parked: p, Owner: owner}})
+	if err != nil {
 		return err
 	}
-	p.state = parkedOccurrenceRebound
-	return nil
+	return prepared.Publish()
 }
 
 func (p *ParkedOccurrence) wait(ctx context.Context) error {
@@ -428,72 +422,340 @@ func (p *ParkedOccurrence) wait(ctx context.Context) error {
 	return nil
 }
 
-func (p *ParkedOccurrence) restore(ctx context.Context, scheduler *Scheduler, freshOwner *worklifetime.StandingOccurrence) error {
-	if scheduler == nil {
-		return errors.New("restore parked schedules requires scheduler")
-	}
-	restored := make([]Schedule, 0, len(p.projections))
-	for _, projection := range p.projections {
-		if !projection.restorable {
-			continue
-		}
-		if err := ctx.Err(); err != nil {
-			return errors.Join(err, scheduler.cancelAndWait(context.Background(), restored))
-		}
-		executionOwner := projection.originalOwner
-		if freshOwner != nil {
-			executionOwner = freshOwner
-		}
-		if executionOwner == nil {
-			return errors.Join(errors.New("restore parked schedule requires exact execution owner"), scheduler.cancelAndWait(context.Background(), restored))
-		}
-		registerCtx := worklifetime.WithOccurrence(ctx, executionOwner)
-		if err := scheduler.Register(registerCtx, cloneSchedule(projection.schedule)); err != nil {
-			return errors.Join(fmt.Errorf("restore parked schedule: %w", err), scheduler.cancelAndWait(context.Background(), restored))
-		}
-		restored = append(restored, projection.schedule)
-	}
-	return nil
+type parkedSetBinding struct {
+	parked          *ParkedOccurrence
+	owner           *worklifetime.StandingOccurrence
+	restoreOriginal bool
 }
 
-func (s *Scheduler) cancelAndWait(ctx context.Context, schedules []Schedule) error {
-	if s == nil || len(schedules) == 0 {
-		return nil
+// PrepareParkedSetRebind validates and pre-admits the complete successor set,
+// reserves every exact target key, and retires and joins every exact target
+// incumbent. Source authorities remain pending until CommitDormant succeeds.
+func PrepareParkedSetRebind(ctx context.Context, scheduler *Scheduler, bindings []ParkedRebind) (*PreparedParkedSetRebind, error) {
+	internal := make([]parkedSetBinding, 0, len(bindings))
+	for _, binding := range bindings {
+		internal = append(internal, parkedSetBinding{parked: binding.Parked, owner: binding.Owner})
+	}
+	return prepareParkedSet(ctx, scheduler, internal)
+}
+
+func prepareParkedSet(ctx context.Context, scheduler *Scheduler, bindings []parkedSetBinding) (*PreparedParkedSetRebind, error) {
+	if scheduler == nil {
+		return nil, errors.New("parked schedule set requires a target scheduler")
+	}
+	if len(bindings) == 0 {
+		return nil, errors.New("parked schedule set requires at least one source authority")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	s.mu.Lock()
-	tasks := make([]*scheduledTask, 0, len(schedules))
-	for _, schedule := range schedules {
-		key := scheduleKey(schedule)
-		task := s.tasks[key]
-		if task == nil {
-			continue
+	transition := &PreparedParkedSetRebind{scheduler: scheduler, done: make(chan struct{})}
+	seenSources := make(map[*ParkedOccurrence]struct{}, len(bindings))
+	resetSources := func() {
+		for _, source := range transition.sources {
+			source.parked.mu.Lock()
+			if source.parked.state == parkedOccurrencePrepared {
+				source.parked.state = parkedOccurrencePending
+			}
+			source.parked.mu.Unlock()
 		}
-		tasks = append(tasks, task)
-		s.retireTaskLocked(key, task)
 	}
-	s.mu.Unlock()
-	for _, task := range tasks {
-		select {
-		case <-task.done:
-		case <-ctx.Done():
-			return ctx.Err()
+	releaseTasks := func() {
+		for _, prepared := range transition.tasks {
+			_ = prepared.task.lease.Done()
 		}
+	}
+	fail := func(err error) (*PreparedParkedSetRebind, error) {
+		releaseTasks()
+		resetSources()
+		return nil, err
+	}
+
+	for _, binding := range bindings {
+		parked := binding.parked
+		if parked == nil {
+			return fail(errors.New("parked schedule set contains a nil source authority"))
+		}
+		if _, duplicate := seenSources[parked]; duplicate {
+			return fail(errors.New("parked schedule set contains a duplicate source authority"))
+		}
+		seenSources[parked] = struct{}{}
+		parked.mu.Lock()
+		if parked.state != parkedOccurrencePending {
+			parked.mu.Unlock()
+			return fail(errors.New("parked occurrence projection is already settled or reserved"))
+		}
+		if !binding.restoreOriginal && (binding.owner == nil || binding.owner == parked.standingOwner) {
+			parked.mu.Unlock()
+			return fail(errors.New("rebind parked schedules requires a distinct fresh standing owner"))
+		}
+		parked.state = parkedOccurrencePrepared
+		resultState := parkedOccurrenceRebound
+		if binding.restoreOriginal {
+			resultState = parkedOccurrenceRestored
+		}
+		transition.sources = append(transition.sources, preparedParkedSource{parked: parked, state: resultState})
+		parked.mu.Unlock()
+		if err := parked.wait(ctx); err != nil {
+			return fail(fmt.Errorf("join parked predecessor schedules: %w", err))
+		}
+
+		parked.mu.Lock()
+		projections := append([]parkedProjection(nil), parked.projections...)
+		parked.mu.Unlock()
+		for _, projection := range projections {
+			if !projection.restorable {
+				continue
+			}
+			executionOwner := worklifetime.Occurrence(binding.owner)
+			if binding.restoreOriginal {
+				executionOwner = projection.originalOwner
+				standing, ok := worklifetime.StandingProjection(executionOwner)
+				if !ok || standing != parked.standingOwner {
+					return fail(errors.New("parked schedule original owner no longer projects the exact standing occurrence"))
+				}
+			}
+			if executionOwner == nil {
+				return fail(errors.New("parked schedule set requires an exact execution owner"))
+			}
+			schedule, spec, err := validateSchedule(cloneSchedule(projection.schedule))
+			if err != nil {
+				return fail(fmt.Errorf("validate parked schedule: %w", err))
+			}
+			lease, err := executionOwner.Begin(ownerActionAdmissionContext(ctx))
+			if err != nil {
+				return fail(fmt.Errorf("admit parked schedule successor: %w", err))
+			}
+			standingOwner, _ := worklifetime.StandingProjection(executionOwner)
+			task := &scheduledTask{
+				stop: make(chan struct{}), done: make(chan struct{}), lease: lease,
+				owner: executionOwner, standingOwner: standingOwner, schedule: schedule,
+			}
+			transition.tasks = append(transition.tasks, preparedParkedTask{key: scheduleKey(schedule), task: task, spec: spec})
+		}
+	}
+
+	seenKeys := make(map[string]struct{}, len(transition.tasks))
+	for _, prepared := range transition.tasks {
+		if _, duplicate := seenKeys[prepared.key]; duplicate {
+			return fail(fmt.Errorf("parked schedule set contains duplicate target key %q", prepared.key))
+		}
+		seenKeys[prepared.key] = struct{}{}
+		transition.keys = append(transition.keys, prepared.key)
+	}
+
+	scheduler.mu.Lock()
+	if scheduler.stopped {
+		scheduler.mu.Unlock()
+		return fail(errors.New("target scheduler stopped"))
+	}
+	for _, key := range transition.keys {
+		if _, reserved := scheduler.reservations[key]; reserved {
+			scheduler.mu.Unlock()
+			return fail(fmt.Errorf("target schedule key %q is already reserved", key))
+		}
+	}
+	incumbents := make([]*scheduledTask, 0, len(transition.keys))
+	scheduler.transitions[transition] = struct{}{}
+	for _, key := range transition.keys {
+		scheduler.reservations[key] = transition
+		if incumbent := scheduler.tasks[key]; incumbent != nil {
+			incumbents = append(incumbents, incumbent)
+			scheduler.retireTaskLocked(key, incumbent)
+		}
+	}
+	scheduler.mu.Unlock()
+
+	for _, incumbent := range incumbents {
+		select {
+		case <-incumbent.done:
+		case <-ctx.Done():
+			_ = transition.Abort()
+			return nil, fmt.Errorf("join target schedule incumbent: %w", ctx.Err())
+		}
+	}
+	return transition, nil
+}
+
+// CommitDormant installs the complete rebound set while reservations still
+// reject target-key mutation. No callback is started by this operation.
+func (t *PreparedParkedSetRebind) CommitDormant() error {
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.state != preparedParkedSetPending {
+		return errors.New("parked schedule set is not pending")
+	}
+	s := t.scheduler
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped {
+		return errors.New("target scheduler stopped before parked schedule commit")
+	}
+	for _, prepared := range t.tasks {
+		if s.reservations[prepared.key] != t {
+			return fmt.Errorf("target schedule key %q lost its exact reservation", prepared.key)
+		}
+		if s.tasks[prepared.key] != nil {
+			return fmt.Errorf("target schedule key %q gained an unreserved incumbent", prepared.key)
+		}
+	}
+	for _, prepared := range t.tasks {
+		s.tasks[prepared.key] = prepared.task
+	}
+	t.state = preparedParkedSetCommitted
+	return nil
+}
+
+// Activate settles every source authority, releases every target reservation,
+// and starts the complete committed task set at one scheduler linearization.
+func (t *PreparedParkedSetRebind) Activate() error {
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	if t.state != preparedParkedSetCommitted {
+		t.mu.Unlock()
+		return errors.New("parked schedule set is not committed")
+	}
+	s := t.scheduler
+	s.mu.Lock()
+	for _, prepared := range t.tasks {
+		if s.reservations[prepared.key] != t || s.tasks[prepared.key] != prepared.task {
+			s.mu.Unlock()
+			t.mu.Unlock()
+			return fmt.Errorf("target schedule key %q changed before activation", prepared.key)
+		}
+	}
+	for _, source := range t.sources {
+		source.parked.mu.Lock()
+		if source.parked.state != parkedOccurrencePrepared {
+			source.parked.mu.Unlock()
+			s.mu.Unlock()
+			t.mu.Unlock()
+			return errors.New("parked source authority changed before activation")
+		}
+		source.parked.state = source.state
+		source.parked.mu.Unlock()
+	}
+	for _, key := range t.keys {
+		delete(s.reservations, key)
+	}
+	delete(s.transitions, t)
+	t.state = preparedParkedSetActive
+	close(t.done)
+	s.mu.Unlock()
+	t.mu.Unlock()
+	for _, prepared := range t.tasks {
+		s.startTask(prepared.key, prepared.task, prepared.spec)
 	}
 	return nil
 }
 
-func (s *Scheduler) Stop() {
+// Abort releases successor leases and reservations without settling any
+// source authority. Retired target incumbents remain retired; callers must
+// discard that unavailable candidate and retry with a fresh candidate.
+func (t *PreparedParkedSetRebind) Abort() error {
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.state == preparedParkedSetAborted {
+		return nil
+	}
+	if t.state != preparedParkedSetPending {
+		return errors.New("committed parked schedule set cannot be aborted")
+	}
+	s := t.scheduler
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.stopped {
+	for _, key := range t.keys {
+		if s.reservations[key] == t {
+			delete(s.reservations, key)
+		}
+	}
+	delete(s.transitions, t)
+	t.state = preparedParkedSetAborted
+	close(t.done)
+	s.mu.Unlock()
+	for _, prepared := range t.tasks {
+		_ = prepared.task.lease.Done()
+	}
+	for _, source := range t.sources {
+		source.parked.mu.Lock()
+		if source.parked.state == parkedOccurrencePrepared {
+			source.parked.state = parkedOccurrencePending
+		}
+		source.parked.mu.Unlock()
+	}
+	return nil
+}
+
+// Publish is the one-step form used when no surrounding runtime publication
+// needs the dormant commit boundary.
+func (t *PreparedParkedSetRebind) Publish() error {
+	if err := t.CommitDormant(); err != nil {
+		_ = t.Abort()
+		return err
+	}
+	return t.Activate()
+}
+
+func (t *PreparedParkedSetRebind) targetsStandingOwner(owner *worklifetime.StandingOccurrence) bool {
+	if t == nil || owner == nil {
+		return false
+	}
+	for _, prepared := range t.tasks {
+		if prepared.task.standingOwner == owner {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Scheduler) Stop() {
+	for {
+		s.mu.Lock()
+		if s.stopped {
+			s.mu.Unlock()
+			return
+		}
+		if len(s.transitions) > 0 {
+			pending := make([]<-chan struct{}, 0, len(s.transitions))
+			for transition := range s.transitions {
+				pending = append(pending, transition.done)
+			}
+			s.mu.Unlock()
+			for _, done := range pending {
+				<-done
+			}
+			continue
+		}
+		s.stopped = true
+		for key, task := range s.tasks {
+			s.retireTaskLocked(key, task)
+		}
+		s.mu.Unlock()
 		return
 	}
-	s.stopped = true
-	for key, task := range s.tasks {
-		s.retireTaskLocked(key, task)
+}
+
+func (s *Scheduler) startTask(key string, task *scheduledTask, spec cronSpec) {
+	switch task.schedule.Mode {
+	case "once":
+		go func() {
+			defer s.finishTask(key, task)
+			s.runOnce(task, key, task.schedule)
+		}()
+	case "cron":
+		go func() {
+			defer s.finishTask(key, task)
+			s.runCron(task, key, task.schedule, spec)
+		}()
+	default:
+		panic("validated schedule mode became unreachable")
 	}
 }
 
@@ -642,6 +904,36 @@ func scheduleKey(sc Schedule) string {
 func cloneSchedule(sc Schedule) Schedule {
 	sc.Payload = append([]byte(nil), sc.Payload...)
 	return sc
+}
+
+func validateSchedule(sc Schedule) (Schedule, cronSpec, error) {
+	if sc.AgentID == "" || sc.EventType == "" {
+		return Schedule{}, cronSpec{}, errors.New("agent_id and event_type are required")
+	}
+	sc.NormalizeRunID()
+	sc.NormalizeDeliveryContext()
+	sc.NormalizeEntityID()
+	sc.NormalizeFlowInstance()
+	sc.NormalizeTimerID()
+	if sc.Mode == "" {
+		sc.Mode = "once"
+	}
+	var spec cronSpec
+	switch sc.Mode {
+	case "once":
+		if sc.At.IsZero() {
+			return Schedule{}, cronSpec{}, errors.New("schedule.at is required for mode=once")
+		}
+	case "cron":
+		var err error
+		spec, err = parseCronSpec(sc.Cron)
+		if err != nil {
+			return Schedule{}, cronSpec{}, err
+		}
+	default:
+		return Schedule{}, cronSpec{}, fmt.Errorf("unsupported schedule mode: %s", sc.Mode)
+	}
+	return sc, spec, nil
 }
 
 func scheduleKeyMatchesAgentEvent(key, agentID, eventType string) bool {
