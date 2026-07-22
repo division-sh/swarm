@@ -75,12 +75,14 @@ func (s *SQLiteRuntimeStore) RecordDeadLetterTx(ctx context.Context, tx *sql.Tx,
 	deadLetterID := uuid.NewString()
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO dead_letters (
-			dead_letter_id, original_event_id, original_event, original_payload, entity_id, flow_instance,
+			dead_letter_id, original_event_id, delivery_id, claim_version, original_event, original_payload, entity_id, flow_instance,
 			failure, retry_count, chain_depth, handler_node, created_at
 		)
 		SELECT
 			?,
 			?,
+			NULLIF(?, ''),
+			NULLIF(?, 0),
 			COALESCE(NULLIF(?, ''), COALESCE((SELECT e.event_name FROM events e WHERE e.event_id = ?), '')),
 			COALESCE(NULLIF(?, 'null'), COALESCE((SELECT e.payload FROM events e WHERE e.event_id = ?), '{}')),
 			?,
@@ -93,13 +95,15 @@ func (s *SQLiteRuntimeStore) RecordDeadLetterTx(ctx context.Context, tx *sql.Tx,
 		WHERE NOT EXISTS (
 			SELECT 1
 			FROM dead_letters dl
-			WHERE dl.original_event_id = ?
-			  AND dl.failure = ?
-			  AND COALESCE(dl.handler_node, '') = COALESCE(NULLIF(?, ''), '')
+			WHERE (NULLIF(?, '') IS NOT NULL AND dl.delivery_id = NULLIF(?, '') AND dl.claim_version = NULLIF(?, 0))
+			   OR (NULLIF(?, '') IS NULL AND dl.delivery_id IS NULL AND dl.original_event_id = ?
+			       AND dl.failure = ? AND COALESCE(dl.handler_node, '') = COALESCE(NULLIF(?, ''), ''))
 		)
 	`,
 		deadLetterID,
 		rec.OriginalEventID,
+		rec.DeliveryID,
+		rec.ClaimVersion,
 		rec.OriginalEvent,
 		rec.OriginalEventID,
 		string(rec.OriginalPayload),
@@ -112,6 +116,10 @@ func (s *SQLiteRuntimeStore) RecordDeadLetterTx(ctx context.Context, tx *sql.Tx,
 		rec.ChainDepth,
 		rec.HandlerNode,
 		createdAt,
+		rec.DeliveryID,
+		rec.DeliveryID,
+		rec.ClaimVersion,
+		rec.DeliveryID,
 		rec.OriginalEventID,
 		mustFailureJSON(rec.Failure),
 		rec.HandlerNode,
@@ -175,6 +183,7 @@ func deadLetterOccurredAt(raw string) time.Time {
 
 func normalizeSQLiteDeadLetterRecord(s *SQLiteRuntimeStore, rec runtimedeadletters.Record) (runtimedeadletters.Record, time.Time, error) {
 	rec.OriginalEventID = strings.TrimSpace(rec.OriginalEventID)
+	rec.DeliveryID = strings.TrimSpace(rec.DeliveryID)
 	rec.OriginalEvent = strings.TrimSpace(rec.OriginalEvent)
 	rec.EntityID = strings.TrimSpace(rec.EntityID)
 	rec.FlowInstance = strings.TrimSpace(rec.FlowInstance)
@@ -185,6 +194,17 @@ func normalizeSQLiteDeadLetterRecord(s *SQLiteRuntimeStore, rec runtimedeadlette
 	}
 	if _, err := uuid.Parse(rec.OriginalEventID); err != nil {
 		return rec, time.Time{}, fmt.Errorf("dead letter original event id must be a uuid: %w", err)
+	}
+	if (rec.DeliveryID == "") != (rec.ClaimVersion == 0) {
+		return rec, time.Time{}, fmt.Errorf("dead letter delivery id and claim version must be supplied together")
+	}
+	if rec.DeliveryID != "" {
+		if _, err := uuid.Parse(rec.DeliveryID); err != nil {
+			return rec, time.Time{}, fmt.Errorf("dead letter delivery id must be a uuid: %w", err)
+		}
+		if rec.ClaimVersion <= 0 {
+			return rec, time.Time{}, fmt.Errorf("dead letter claim version must be positive")
+		}
 	}
 	if rec.EntityID != "" {
 		if _, err := uuid.Parse(rec.EntityID); err != nil {

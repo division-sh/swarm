@@ -553,6 +553,9 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 	if _, err := postgresDeliveryAdapter.TerminalizeRun(storyctx, tx, forkRunID, "fork_discarded"); err != nil {
 		return fmt.Errorf("terminalize selected-contract fork deliveries before discard: %w", err)
 	}
+	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
+		return fmt.Errorf("finalize selected-contract fork terminalization activity: %w", err)
+	}
 	var preserveCompletionEvidence bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1::uuid)`, forkRunID).Scan(&preserveCompletionEvidence); err != nil {
 		return fmt.Errorf("check selected-contract completion evidence preservation: %w", err)
@@ -567,6 +570,42 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 		if _, err := tx.ExecContext(ctx, `DELETE FROM agent_conversation_audits WHERE run_id = $1::uuid`, forkRunID); err != nil {
 			return fmt.Errorf("delete selected-contract fork conversation audits: %w", err)
 		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM dead_letters
+		WHERE original_event_id IN (SELECT event_id FROM events WHERE run_id = $1::uuid)
+	`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-contract fork dead letters: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM run_fork_delivery_event_replays WHERE fork_run_id = $1::uuid`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-contract fork replay lineage: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM event_delivery_outcomes
+		WHERE delivery_id IN (
+			SELECT delivery_id FROM event_deliveries
+			WHERE run_id = $1::uuid
+			   OR event_id IN (SELECT event_id FROM events WHERE run_id = $1::uuid)
+		)
+	`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-contract fork delivery outcomes: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM event_delivery_attempts
+		WHERE delivery_id IN (
+			SELECT delivery_id FROM event_deliveries
+			WHERE run_id = $1::uuid
+			   OR event_id IN (SELECT event_id FROM events WHERE run_id = $1::uuid)
+		)
+	`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-contract fork delivery attempts: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM event_deliveries
+		WHERE run_id = $1::uuid
+		   OR event_id IN (SELECT event_id FROM events WHERE run_id = $1::uuid)
+	`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-contract fork deliveries: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM agent_sessions WHERE run_id = $1::uuid`, forkRunID); err != nil {
 		return fmt.Errorf("delete selected-contract fork sessions: %w", err)
@@ -592,9 +631,6 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 	`, forkRunID); err != nil {
 		return fmt.Errorf("delete selected-contract execution lineage: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM run_fork_delivery_event_replays WHERE fork_run_id = $1::uuid`, forkRunID); err != nil {
-		return fmt.Errorf("delete selected-contract fork replay lineage: %w", err)
-	}
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM event_receipts
 		WHERE event_id IN (SELECT event_id FROM events WHERE run_id = $1::uuid)
@@ -602,17 +638,10 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 		return fmt.Errorf("delete selected-contract fork receipts: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM dead_letters
-		WHERE original_event_id IN (SELECT event_id FROM events WHERE run_id = $1::uuid)
+		DELETE FROM committed_replay_scopes
+		WHERE event_id IN (SELECT event_id FROM events WHERE run_id = $1::uuid)
 	`, forkRunID); err != nil {
-		return fmt.Errorf("delete selected-contract fork dead letters: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM event_deliveries
-		WHERE run_id = $1::uuid
-		   OR event_id IN (SELECT event_id FROM events WHERE run_id = $1::uuid)
-	`, forkRunID); err != nil {
-		return fmt.Errorf("delete selected-contract fork deliveries: %w", err)
+		return fmt.Errorf("delete selected-contract fork committed replay scopes: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM timers WHERE run_id = $1::uuid`, forkRunID); err != nil {
 		return fmt.Errorf("delete selected-contract fork timers: %w", err)
@@ -649,9 +678,6 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 		if _, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE run_id = $1::uuid AND status = $2`, forkRunID, RunForkMaterializedStatus); err != nil {
 			return fmt.Errorf("delete selected-contract fork run: %w", err)
 		}
-	}
-	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
-		return fmt.Errorf("finalize selected-contract fork discard activity: %w", err)
 	}
 	if err := commitPostgresRunForkRevisionTx(storyctx, tx); err != nil {
 		return fmt.Errorf("commit selected-contract fork discard: %w", err)

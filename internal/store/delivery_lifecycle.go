@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
@@ -312,7 +313,25 @@ func (s *PostgresStore) SettleFailure(ctx context.Context, claim runtimedelivery
 		if err := storerunlifecycle.RequireActive(txctx, tx, claim.RunID(), storerunlifecycle.DialectPostgres); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
-		return postgresDeliveryAdapter.SettleFailure(txctx, tx, claim, settlement)
+		snapshot, err := postgresDeliveryAdapter.SettleFailure(txctx, tx, claim, settlement)
+		if err != nil || snapshot.Status != runtimedelivery.StatusDeadLetter {
+			return snapshot, err
+		}
+		record, found, err := eventrecordpostgres.Load(txctx, tx, snapshot.EventID)
+		if err != nil || !found {
+			if err == nil {
+				err = eventrecord.Missing(snapshot.EventID)
+			}
+			return runtimedelivery.Snapshot{}, err
+		}
+		diagnostic, err := deliveryDeadLetterRecord(record, snapshot)
+		if err != nil {
+			return runtimedelivery.Snapshot{}, err
+		}
+		if err := s.RecordDeadLetterTx(txctx, tx, diagnostic); err != nil {
+			return runtimedelivery.Snapshot{}, fmt.Errorf("commit terminal delivery diagnostic: %w", err)
+		}
+		return snapshot, nil
 	})
 }
 
@@ -321,8 +340,50 @@ func (s *SQLiteRuntimeStore) SettleFailure(ctx context.Context, claim runtimedel
 		if err := storerunlifecycle.RequireActive(txctx, tx, claim.RunID(), storerunlifecycle.DialectSQLite); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
-		return sqliteDeliveryAdapter.SettleFailure(txctx, tx, claim, settlement)
+		snapshot, err := sqliteDeliveryAdapter.SettleFailure(txctx, tx, claim, settlement)
+		if err != nil || snapshot.Status != runtimedelivery.StatusDeadLetter {
+			return snapshot, err
+		}
+		record, found, err := eventrecordsqlite.Load(txctx, tx, snapshot.EventID)
+		if err != nil || !found {
+			if err == nil {
+				err = eventrecord.Missing(snapshot.EventID)
+			}
+			return runtimedelivery.Snapshot{}, err
+		}
+		diagnostic, err := deliveryDeadLetterRecord(record, snapshot)
+		if err != nil {
+			return runtimedelivery.Snapshot{}, err
+		}
+		if err := s.RecordDeadLetterTx(txctx, tx, diagnostic); err != nil {
+			return runtimedelivery.Snapshot{}, fmt.Errorf("commit terminal delivery diagnostic: %w", err)
+		}
+		return snapshot, nil
 	})
+}
+
+func deliveryDeadLetterRecord(record eventrecord.Record, snapshot runtimedelivery.Snapshot) (runtimedeadletters.Record, error) {
+	failure := snapshot.Failure
+	if failure == nil {
+		return runtimedeadletters.Record{}, fmt.Errorf("terminal delivery %s has no failure envelope", snapshot.DeliveryID)
+	}
+	if snapshot.SettledAt.IsZero() {
+		return runtimedeadletters.Record{}, fmt.Errorf("terminal delivery %s has no settlement timestamp", snapshot.DeliveryID)
+	}
+	return runtimedeadletters.Record{
+		OriginalEventID: record.EventID,
+		DeliveryID:      snapshot.DeliveryID,
+		ClaimVersion:    snapshot.ClaimVersion,
+		OriginalEvent:   record.EventName,
+		OriginalPayload: append([]byte(nil), record.Payload...),
+		EntityID:        record.EntityID,
+		FlowInstance:    record.FlowInstance,
+		Failure:         *failure,
+		RetryCount:      snapshot.RetryCount,
+		ChainDepth:      record.ChainDepth,
+		HandlerNode:     snapshot.SubscriberID,
+		Timestamp:       snapshot.SettledAt.UTC().Format(time.RFC3339Nano),
+	}, nil
 }
 
 func postgresDeliveryMutation(s *PostgresStore, ctx context.Context, operation func(context.Context, *sql.Tx) (runtimedelivery.Snapshot, error)) (runtimedelivery.Snapshot, error) {

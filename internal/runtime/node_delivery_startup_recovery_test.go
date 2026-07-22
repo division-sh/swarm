@@ -270,15 +270,15 @@ func expireNodeDeliveryClaim(t *testing.T, ctx context.Context, db *sql.DB, post
 	defer func() { _ = transaction.Rollback() }()
 	startedAt := time.Now().Add(-2 * time.Hour).UTC()
 	expiresAt := time.Now().Add(-time.Hour).UTC()
-	deliveryQuery := `UPDATE event_deliveries SET created_at = $1, started_at = $1, updated_at = $2, claim_expires_at = $2 WHERE delivery_id = $3::uuid AND status = 'in_progress'`
-	attemptQuery := `UPDATE event_delivery_attempts SET started_at = $1, lease_expires_at = $2 WHERE delivery_id = $3::uuid AND outcome IS NULL`
+	deliveryQuery := `UPDATE event_deliveries SET created_at = $1, started_at = $1, updated_at = $2 WHERE delivery_id = $3::uuid AND status = 'in_progress'`
+	attemptQuery := `UPDATE event_delivery_attempts SET started_at = $1, lease_expires_at = $2 WHERE delivery_id = $3::uuid AND open_marker = TRUE`
 	if !postgres {
-		deliveryQuery = `UPDATE event_deliveries SET created_at = ?, started_at = ?, updated_at = ?, claim_expires_at = ? WHERE delivery_id = ? AND status = 'in_progress'`
-		attemptQuery = `UPDATE event_delivery_attempts SET started_at = ?, lease_expires_at = ? WHERE delivery_id = ? AND outcome IS NULL`
+		deliveryQuery = `UPDATE event_deliveries SET created_at = ?, started_at = ?, updated_at = ? WHERE delivery_id = ? AND status = 'in_progress'`
+		attemptQuery = `UPDATE event_delivery_attempts SET started_at = ?, lease_expires_at = ? WHERE delivery_id = ? AND open_marker = TRUE`
 	}
 	deliveryArgs := []any{startedAt, expiresAt, deliveryID}
 	if !postgres {
-		deliveryArgs = []any{startedAt, startedAt, expiresAt, expiresAt, deliveryID}
+		deliveryArgs = []any{startedAt, startedAt, expiresAt, deliveryID}
 	}
 	if result, execErr := transaction.ExecContext(ctx, deliveryQuery, deliveryArgs...); execErr != nil {
 		t.Fatalf("expire node delivery claim: %v", execErr)

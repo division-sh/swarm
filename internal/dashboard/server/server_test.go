@@ -1475,17 +1475,40 @@ func TestSQLAgentReader_ListGenericAgents_AlignsBacklogWithCanonicalPendingSelec
 		INSERT INTO event_deliveries (
 			delivery_id, run_id, event_id, route_identity, subscriber_type, subscriber_id,
 			delivery_target_route, delivery_context, delivery_payload_projection,
-			status, retry_count, max_retries, next_eligible_at, claim_token, claim_version,
-			claim_expires_at, reason_code, failure, started_at, settled_at, created_at, updated_at
+			status, retry_count, max_retries, next_eligible_at, claim_version,
+			current_attempt_version, current_attempt_open, reason_code, failure, started_at, settled_at, created_at, updated_at
 		) VALUES
-			($6::uuid, $1::uuid, $2::uuid, $10, 'agent', 'agent-1', $11::jsonb, $12::jsonb, $13::jsonb, 'pending', 0, 1, now(), NULL, 0, NULL, NULL, NULL, NULL, NULL, now() - interval '7 minutes', now() - interval '7 minutes'),
-			($7::uuid, $1::uuid, $3::uuid, $10, 'agent', 'agent-1', $11::jsonb, $12::jsonb, $13::jsonb, 'failed', 1, 1, now() - interval '1 minute', NULL, 1, NULL, 'handler_failure', $14::jsonb, now() - interval '4 minutes', NULL, now() - interval '5 minutes', now() - interval '2 minutes'),
-			($8::uuid, $1::uuid, $4::uuid, $10, 'agent', 'agent-1', $11::jsonb, $12::jsonb, $13::jsonb, 'in_progress', 0, 1, NULL, $15::uuid, 1, now() + interval '5 minutes', NULL, NULL, now() - interval '6 minutes', NULL, now() - interval '6 minutes', now() - interval '6 minutes'),
-			($9::uuid, $1::uuid, $5::uuid, $10, 'agent', 'agent-1', $11::jsonb, $12::jsonb, $13::jsonb, 'dead_letter', 1, 1, NULL, NULL, 1, NULL, 'terminal_failure', $16::jsonb, now() - interval '8 minutes', now() - interval '1 minute', now() - interval '8 minutes', now() - interval '1 minute')
+			($6::uuid, $1::uuid, $2::uuid, $10, 'agent', 'agent-1', $11::jsonb, $12::jsonb, $13::jsonb, 'pending', 0, 1, now(), 0, NULL, NULL, NULL, NULL, NULL, NULL, now() - interval '7 minutes', now() - interval '7 minutes'),
+			($7::uuid, $1::uuid, $3::uuid, $10, 'agent', 'agent-1', $11::jsonb, $12::jsonb, $13::jsonb, 'failed', 1, 1, now() - interval '1 minute', 1, NULL, NULL, 'handler_failure', $14::jsonb, now() - interval '4 minutes', NULL, now() - interval '5 minutes', now() - interval '2 minutes'),
+			($8::uuid, $1::uuid, $4::uuid, $10, 'agent', 'agent-1', $11::jsonb, $12::jsonb, $13::jsonb, 'pending', 0, 1, now(), 0, NULL, NULL, NULL, NULL, NULL, NULL, now() - interval '6 minutes', now() - interval '6 minutes'),
+			($9::uuid, $1::uuid, $5::uuid, $10, 'agent', 'agent-1', $11::jsonb, $12::jsonb, $13::jsonb, 'dead_letter', 1, 1, NULL, 1, NULL, NULL, 'terminal_failure', $15::jsonb, now() - interval '8 minutes', now() - interval '1 minute', now() - interval '8 minutes', now() - interval '1 minute')
 	`, runID, pendingEventID, failedEventID, inProgressNoReceiptEventID, deadEventID,
 		uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), routeIdentity.String(), string(targetRaw), string(contextRaw), string(projectionRaw),
-		mustMarshalFailure(t, testFailure("retryable_failure")), uuid.NewString(), mustMarshalFailure(t, testFailure("terminal_dead_letter"))); err != nil {
+		mustMarshalFailure(t, testFailure("retryable_failure")), mustMarshalFailure(t, testFailure("terminal_dead_letter"))); err != nil {
 		t.Fatalf("seed deliveries: %v", err)
+	}
+	var inProgressDeliveryID string
+	if err := db.QueryRowContext(ctx, `
+		SELECT delivery_id::text FROM event_deliveries WHERE event_id = $1::uuid
+	`, inProgressNoReceiptEventID).Scan(&inProgressDeliveryID); err != nil {
+		t.Fatalf("load in-progress delivery id: %v", err)
+	}
+	claimToken := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_delivery_attempts (
+			delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker
+		) VALUES ($1::uuid, 1, $2::uuid, now() - interval '6 minutes', now() + interval '5 minutes', TRUE)
+	`, inProgressDeliveryID, claimToken); err != nil {
+		t.Fatalf("seed in-progress attempt: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE event_deliveries
+		SET status = 'in_progress', next_eligible_at = NULL, claim_version = 1,
+		    current_attempt_version = 1, current_attempt_open = TRUE,
+		    started_at = now() - interval '6 minutes'
+		WHERE delivery_id = $1::uuid
+	`, inProgressDeliveryID); err != nil {
+		t.Fatalf("activate in-progress delivery: %v", err)
 	}
 
 	pendingPage, err := pg.ListPendingAgentDeliveryDetails(ctx, store.PendingAgentDeliveryListOptions{AgentID: "agent-1", Since: time.Now().Add(-time.Hour), Limit: 20})

@@ -276,7 +276,7 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 	var deliveryStatus, reasonCode, activeSession string
 	var stoppedFailure []byte
 	if err := store.DB.QueryRowContext(ctx, `
-		SELECT status, COALESCE(reason_code, ''), failure, COALESCE(active_session_id, '')
+		SELECT status, COALESCE(reason_code, ''), failure, COALESCE(CAST(current_attempt_version AS TEXT), '')
 		FROM event_deliveries
 		WHERE event_id = ?
 		  AND subscriber_id = 'agent-pending'
@@ -287,7 +287,7 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 		t.Fatalf("stopped sqlite delivery = %s/%s failure=%s active=%q, want dead_letter/run_stopped/no failure/no active session", deliveryStatus, reasonCode, stoppedFailure, activeSession)
 	}
 	if err := store.DB.QueryRowContext(ctx, `
-		SELECT status, COALESCE(reason_code, ''), failure, COALESCE(active_session_id, '')
+		SELECT status, COALESCE(reason_code, ''), failure, COALESCE(CAST(current_attempt_version AS TEXT), '')
 		FROM event_deliveries
 		WHERE event_id = ?
 		  AND subscriber_type = 'node'

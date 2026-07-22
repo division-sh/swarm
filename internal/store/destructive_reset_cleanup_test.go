@@ -1229,9 +1229,8 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO dead_letters (original_event_id, original_event, original_payload, flow_instance, failure) VALUES
-			($1::uuid, 'source.event', '{}'::jsonb, 'flow/a', $2::jsonb),
-			(NULL, 'global.failure', '{}'::jsonb, 'flow/a', $2::jsonb)
-	`, sourceEvent, mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "handler_failed", nil))); err != nil {
+			(NULL, 'global.failure', '{}'::jsonb, 'flow/a', $1::jsonb)
+	`, mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "handler_failed", nil))); err != nil {
 		t.Fatalf("seed dead letters: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `

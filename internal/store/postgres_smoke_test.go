@@ -132,14 +132,24 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 		t.Fatalf("claim delivery: %v", err)
 	}
 	activeSessionID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status)
+		VALUES ($1::uuid, $2::uuid, 'control-plane', 'global', TRUE, 'authored', 'active')
+	`, activeSessionID, evt.RunID()); err != nil {
+		t.Fatalf("seed delivery session: %v", err)
+	}
 	if _, err := pg.BindAgentSession(ctx, claimed.Claim, activeSessionID); err != nil {
 		t.Fatalf("bind delivery session: %v", err)
 	}
 	var inProgressStatus, inProgressReason, gotActiveSession string
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(active_session_id::text, '')
-		FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_id = 'control-plane'
+		SELECT COALESCE(d.status, ''), COALESCE(d.reason_code, ''), COALESCE(a.active_session_id::text, '')
+		FROM event_deliveries d
+		JOIN event_delivery_attempts a
+		  ON a.delivery_id = d.delivery_id
+		 AND a.claim_version = d.current_attempt_version
+		 AND a.open_marker = TRUE
+		WHERE d.event_id = $1::uuid AND d.subscriber_id = 'control-plane'
 	`, evt.ID()).Scan(&inProgressStatus, &inProgressReason, &gotActiveSession); err != nil {
 		t.Fatalf("load in-progress delivery: %v", err)
 	}
@@ -157,7 +167,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	}
 	var deliveryStatus, deliveryReason, receiptReason, clearedActiveSession string
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(active_session_id::text, '')
+		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(current_attempt_version::text, '')
 		FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_id = 'control-plane'
 	`, evt.ID()).Scan(&deliveryStatus, &deliveryReason, &clearedActiveSession); err != nil {

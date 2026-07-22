@@ -69,6 +69,7 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 								if got.ID() != event.ID() {
 									t.Fatalf("delivered event = %s, want %s", got.ID(), event.ID())
 								}
+								event = got
 							case <-time.After(5 * time.Second):
 								t.Fatal("timed out waiting for routed standalone event")
 							}

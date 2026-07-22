@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -204,17 +203,6 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 	}, runtimedelivery.StateDelivered, nil)
 	setPostgresDeliveryFixtureTimes(t, ctx, db, successfulDelivery, now.Add(15*time.Second), now.Add(20*time.Second))
 	successDeliveryID := successfulDelivery.DeliveryID
-	if err := runtimedeadletters.Insert(ctx, db, runtimedeadletters.Record{
-		OriginalEventID: targetEventID,
-		OriginalEvent:   "scan.requested",
-		EntityID:        targetEntityID,
-		Failure:         testFailureEnvelope(runtimefailures.ClassInternalFailure, "test_handler_failure", nil),
-		HandlerNode:     "node-a",
-		Timestamp:       now.Add(4 * time.Minute).Format(time.RFC3339Nano),
-	}); err != nil {
-		t.Fatalf("seed dead letter: %v", err)
-	}
-
 	report, err := pg.LoadRunDebugReport(ctx, targetRunID, RunDebugQueryOptions{
 		LogsAllLevels:   false,
 		Component:       "scheduler",

@@ -37,18 +37,6 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 	nodeFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "node_failed", nil)
 	seedDeliveryStateFixture(t, ctx, pg, olderEvent, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}, runtimedelivery.StateExhausted, &agentFailure)
 	seedDeliveryStateFixture(t, ctx, pg, olderEvent, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-a"}, runtimedelivery.StateRetrying, &nodeFailure)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO dead_letters (
-			original_event_id, original_event, original_payload, entity_id, flow_instance,
-			failure, retry_count, chain_depth, handler_node, created_at
-		) VALUES (
-			$1::uuid, 'task.failed', '{}'::jsonb, $2::uuid, 'flow-1',
-			$3::jsonb, 3, 1, 'handler-a', $4
-		)
-	`, olderEventID, entityID, mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassRetryExhausted, "retry_exhausted", nil)), base.Add(2*time.Second)); err != nil {
-		t.Fatalf("seed dead letter: %v", err)
-	}
-
 	hasDead := true
 	filtered, err := pg.ListOperatorEvents(ctx, OperatorEventListOptions{
 		Filter: OperatorEventListFilter{

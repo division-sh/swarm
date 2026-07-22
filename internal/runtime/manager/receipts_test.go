@@ -2,10 +2,12 @@ package manager
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -584,6 +586,101 @@ type renewalTrackingManagerDeliveryStore struct {
 	renewals atomic.Int64
 }
 
+type shortLeaseManagerDeliveryStore struct {
+	*managerDeliveryTestStore
+	leaseTTL time.Duration
+}
+
+func (s *shortLeaseManagerDeliveryStore) ClaimAgentDelivery(ctx context.Context, evt events.Event, route events.DeliveryRoute) (claimed runtimedelivery.ClaimedObligation, err error) {
+	if err := s.ensureDelivery(evt, route); err != nil {
+		return runtimedelivery.ClaimedObligation{}, err
+	}
+	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
+		claimed, err = s.adapter.ClaimExact(story, tx, evt, route, s.leaseTTL)
+		return err
+	})
+	return claimed, err
+}
+
+func (s *shortLeaseManagerDeliveryStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (snapshot runtimedelivery.Snapshot, err error) {
+	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
+		snapshot, err = s.adapter.RenewClaim(story, tx, claim, s.leaseTTL)
+		return err
+	})
+	return snapshot, err
+}
+
+type blockingOutputBus struct {
+	recordingReceiptBus
+	started sync.Once
+	blocked chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingOutputBus) Publish(ctx context.Context, evt events.Event) error {
+	b.started.Do(func() { close(b.blocked) })
+	select {
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	case <-b.release:
+		b.published = append(b.published, evt)
+		return nil
+	}
+}
+
+type singleOutputAgent struct{ id string }
+
+func (a singleOutputAgent) ID() string                      { return a.id }
+func (singleOutputAgent) Type() string                      { return "test" }
+func (singleOutputAgent) Subscriptions() []events.EventType { return nil }
+func (a singleOutputAgent) OnEvent(_ context.Context, inbound events.Event) ([]events.Event, error) {
+	return []events.Event{eventtest.ChildWithLineage("", "output.completed", a.id, "", nil, 0, events.LineageFromEvent(inbound), events.EventEnvelope{}, time.Time{})}, nil
+}
+
+type failingSettlementManagerDeliveryStore struct {
+	runtimedelivery.Store
+}
+
+func (*failingSettlementManagerDeliveryStore) SettleSuccess(context.Context, runtimedelivery.Claim, []string, time.Duration) (runtimedelivery.Snapshot, error) {
+	return runtimedelivery.Snapshot{}, errors.New("injected settlement failure")
+}
+
+type serializingAgent struct {
+	id      string
+	started chan struct{}
+	release chan struct{}
+	mu      sync.Mutex
+	active  int
+	max     int
+	order   []string
+}
+
+func (a *serializingAgent) ID() string                      { return a.id }
+func (*serializingAgent) Type() string                      { return "test" }
+func (*serializingAgent) Subscriptions() []events.EventType { return nil }
+func (a *serializingAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Event, error) {
+	a.mu.Lock()
+	a.active++
+	if a.active > a.max {
+		a.max = a.active
+	}
+	a.order = append(a.order, evt.ID())
+	first := len(a.order) == 1
+	a.mu.Unlock()
+	if first {
+		close(a.started)
+		select {
+		case <-ctx.Done():
+			return nil, context.Cause(ctx)
+		case <-a.release:
+		}
+	}
+	a.mu.Lock()
+	a.active--
+	a.mu.Unlock()
+	return nil, nil
+}
+
 func (s *renewalTrackingManagerDeliveryStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.Snapshot, error) {
 	s.renewals.Add(1)
 	return s.Store.RenewClaim(ctx, claim)
@@ -638,6 +735,111 @@ func TestProcessEventRenewsExactClaimAroundAgentHandler(t *testing.T) {
 	}
 	if snapshot.Status != runtimedelivery.StatusDelivered {
 		t.Fatalf("renewed agent delivery status = %q, want delivered", snapshot.Status)
+	}
+}
+
+func TestProcessEventHeartbeatCoversBlockedOutputAndPreventsReclaim(t *testing.T) {
+	baseStore := newManagerDeliveryTestStore(t)
+	// SQLite CURRENT_TIMESTAMP advances in whole seconds, so the proof lease
+	// must span more than one tick while remaining short enough to exercise
+	// several renewals in one test.
+	shortStore := &shortLeaseManagerDeliveryStore{managerDeliveryTestStore: baseStore, leaseTTL: 1500 * time.Millisecond}
+	bus := &blockingOutputBus{blocked: make(chan struct{}), release: make(chan struct{})}
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: shortStore})
+	agent := singleOutputAgent{id: "agent-a"}
+	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "input.received", "gateway", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+	resultCh := make(chan eventProcessResult, 1)
+	go func() {
+		resultCh <- am.processEventDetailed(managerAgentDeliveryContext(testAuthorActivityContext(context.Background()), agent.ID()), agent, evt)
+	}()
+	select {
+	case <-bus.blocked:
+	case <-time.After(time.Second):
+		t.Fatal("output publication did not block")
+	}
+	time.Sleep(3 * shortStore.leaseTTL)
+	if _, err := baseStore.ClaimAgentDelivery(testAuthorActivityContext(context.Background()), evt, managerAgentDeliveryRoute(agent.ID())); !errors.Is(err, runtimedelivery.ErrIneligible) {
+		t.Fatalf("second reclaimer error = %v, want current renewed claim", err)
+	}
+	close(bus.release)
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			t.Fatalf("process blocked output: %v", result.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("blocked output did not settle after release")
+	}
+	obligation, err := runtimedelivery.NewObligation(evt.ID(), evt.RunID(), managerAgentDeliveryRoute(agent.ID()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := baseStore.Snapshot(context.Background(), obligation.DeliveryID())
+	if err != nil || snapshot.Status != runtimedelivery.StatusDelivered {
+		t.Fatalf("settled delivery = %#v err=%v, want delivered", snapshot, err)
+	}
+}
+
+func TestProcessEventSettlementFailureIsNotReportedAsReplayed(t *testing.T) {
+	baseStore := newManagerDeliveryTestStore(t)
+	deliveryStore := &failingSettlementManagerDeliveryStore{Store: baseStore}
+	am := newTestAgentManagerWithOptions(t, &recordingReceiptBus{}, nil, AgentManagerOptions{DeliveryStore: deliveryStore})
+	agent := &traceRecordingAgent{}
+	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "input.received", "gateway", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+	result := am.processEventDetailed(managerAgentDeliveryContext(testAuthorActivityContext(context.Background()), agent.ID()), agent, evt)
+	if result.err == nil || result.record.Outcome == startupManagerReplayOutcomeReplayed {
+		t.Fatalf("settlement result = outcome:%q err:%v, want failed non-replayed result", result.record.Outcome, result.err)
+	}
+	obligation, err := runtimedelivery.NewObligation(evt.ID(), evt.RunID(), managerAgentDeliveryRoute(agent.ID()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := baseStore.Snapshot(context.Background(), obligation.DeliveryID())
+	if err != nil || snapshot.Status != runtimedelivery.StatusInProgress || snapshot.ClaimExpiresAt.IsZero() {
+		t.Fatalf("failed settlement snapshot = %#v err=%v, want recoverable in-progress claim", snapshot, err)
+	}
+}
+
+func TestClaimedAttemptExecutorSerializesLiveAndRecoveryForOneAgent(t *testing.T) {
+	store := newManagerDeliveryTestStore(t)
+	am := newTestAgentManagerWithOptions(t, &recordingReceiptBus{}, nil, AgentManagerOptions{DeliveryStore: store})
+	agent := &serializingAgent{id: "agent-a", started: make(chan struct{}), release: make(chan struct{})}
+	first := eventtest.RunCreatingRootIngress(uuid.NewString(), "input.first", "gateway", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+	second := eventtest.RunCreatingRootIngress(uuid.NewString(), "input.second", "gateway", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+	results := make(chan eventProcessResult, 2)
+	go func() {
+		results <- am.processEventDetailed(managerAgentDeliveryContext(testAuthorActivityContext(context.Background()), agent.ID()), agent, first)
+	}()
+	select {
+	case <-agent.started:
+	case <-time.After(time.Second):
+		t.Fatal("first claimed attempt did not start")
+	}
+	go func() {
+		results <- am.processEventDetailed(managerAgentDeliveryContext(testAuthorActivityContext(context.Background()), agent.ID()), agent, second)
+	}()
+	time.Sleep(50 * time.Millisecond)
+	agent.mu.Lock()
+	active, maxConcurrent, order := agent.active, agent.max, append([]string(nil), agent.order...)
+	agent.mu.Unlock()
+	if active != 1 || maxConcurrent != 1 || !reflect.DeepEqual(order, []string{first.ID()}) {
+		t.Fatalf("blocked executor = active:%d max:%d order:%v", active, maxConcurrent, order)
+	}
+	close(agent.release)
+	for range 2 {
+		select {
+		case result := <-results:
+			if result.err != nil {
+				t.Fatalf("claimed attempt execution: %v", result.err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("claimed attempt execution did not complete")
+		}
+	}
+	agent.mu.Lock()
+	defer agent.mu.Unlock()
+	if agent.max != 1 || !reflect.DeepEqual(agent.order, []string{first.ID(), second.ID()}) {
+		t.Fatalf("executor result = max:%d order:%v", agent.max, agent.order)
 	}
 }
 
@@ -745,7 +947,7 @@ func TestWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransitions(t *te
 	}
 }
 
-func TestWriteReceipt_ContextCancellationLeavesClaimForLeaseRecoveryAndLogsFailure(t *testing.T) {
+func TestWriteReceipt_ContextCancellationReturnsFailureAndLeavesClaimForLeaseRecovery(t *testing.T) {
 	bus := &recordingReceiptBus{}
 	deliveryStore := newManagerDeliveryTestStore(t)
 	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore})
@@ -756,13 +958,8 @@ func TestWriteReceipt_ContextCancellationLeavesClaimForLeaseRecoveryAndLogsFailu
 	}
 	ctx, cancel := context.WithCancel(testAuthorActivityContext(context.Background()))
 	cancel()
-	am.writeReceipt(runtimedelivery.WithClaim(ctx, claimed.Claim), evt, "agent-a", ReceiptStatusError, testFailure("handler_failed"))
-
-	if len(bus.runtimeLogs) != 1 {
-		t.Fatalf("runtime logs = %d, want 1", len(bus.runtimeLogs))
-	}
-	if bus.runtimeLogs[0].Action != "delivery_settlement_failed" {
-		t.Fatalf("runtime log action = %q, want delivery_settlement_failed", bus.runtimeLogs[0].Action)
+	if _, err := am.writeReceipt(runtimedelivery.WithClaim(ctx, claimed.Claim), evt, "agent-a", ReceiptStatusError, testFailure("handler_failed")); err == nil {
+		t.Fatal("writeReceipt error = nil, want canceled settlement failure")
 	}
 	snapshot, err := deliveryStore.Snapshot(context.Background(), claimed.Claim.DeliveryID())
 	if err != nil {

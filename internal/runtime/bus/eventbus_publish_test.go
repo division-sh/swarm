@@ -141,6 +141,27 @@ func TestCommittedPublishDispatchDropsTransactionConnectionCapability(t *testing
 	}
 }
 
+func TestCommittedPublishDispatchDoesNotExposePublicationClaimConnection(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := eventBusTestRunContext(t, db)
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	observer := &dispatchContextObserver{t: t}
+	bus, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{TestLifecycleProbe: observer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := eventtest.RunCreatingRootIngress(
+		uuid.NewString(), events.EventType("task.requested"), "provider", "", []byte(`{}`), 0,
+		eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC(),
+	)
+	if err := bus.Publish(ctx, event); err != nil {
+		t.Fatal(err)
+	}
+	if !observer.called {
+		t.Fatal("post-commit dispatch lifecycle was not observed")
+	}
+}
+
 func eventBusTestRunContext(t *testing.T, db *sql.DB) context.Context {
 	t.Helper()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), eventBusTestRunID)

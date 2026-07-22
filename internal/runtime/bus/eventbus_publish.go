@@ -553,6 +553,9 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 	if err != nil {
 		return PreparedPublish{}, err
 	}
+	if err := inboundPlan.ValidatePersistentDeliveries(); err != nil {
+		return PreparedPublish{}, fmt.Errorf("validate durable route plan: %w", err)
+	}
 	prepared.plan = inboundPlan
 	var initialReceipt *InitialPipelineReceipt
 	var initialDeadLetter *runtimedeadletters.Record
@@ -787,21 +790,23 @@ func (eb *EventBus) reportLocalDispatchFailure(action string, evt events.Event, 
 
 func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt events.Event, inboundPlan RoutePlan) error {
 	ctx = WithoutCommitPublishTransaction(ctx)
-	eb.notifyTestPostCommitDispatchStarted(ctx, evt)
-	defer eb.notifyTestPostCommitDispatchCompleted(ctx, evt)
+	workCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(ctx))
+	eb.notifyTestPostCommitDispatchStarted(workCtx, evt)
+	defer eb.notifyTestPostCommitDispatchCompleted(workCtx, evt)
 
 	inboundPlan = inboundPlan.Normalized()
 	deferredTransitions := make([]runtimepipeline.DeferredPipelineTransition, 0, 8)
 	postCommitActions := make([]runtimepipeline.OwnerAction, 0, 8)
 	afterPublishActions := make([]runtimepipeline.OwnerAction, 0, 4)
 	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
-	ctx = runtimepipeline.WithPipelineTransitionCollector(ctx, &deferredTransitions)
-	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommitActions)
-	ctx = runtimepipeline.WithPipelineAfterPublishActions(ctx, &afterPublishActions)
+	workCtx = runtimepipeline.WithPipelineTransitionCollector(workCtx, &deferredTransitions)
+	workCtx = runtimepipeline.WithPipelinePostCommitActions(workCtx, &postCommitActions)
+	workCtx = runtimepipeline.WithPipelineAfterPublishActions(workCtx, &afterPublishActions)
+	workCtx = runtimepipeline.WithPipelineReceiptOverride(workCtx, receiptOverride)
 	ctx = runtimepipeline.WithPipelineReceiptOverride(ctx, receiptOverride)
 	defer runtimepipeline.FlushPipelineAfterPublishActions(afterPublishActions)
 
-	passthrough, deferred, err := eb.runInterceptorsForDeliveryRoutes(ctx, evt, inboundPlan.DeliveryRoutes())
+	passthrough, deferred, err := eb.runInterceptorsForDeliveryRoutes(workCtx, evt, inboundPlan.DeliveryRoutes())
 	if err != nil {
 		eb.recordCommittedPublishReceipt(ctx, evt, err)
 		return err
@@ -811,28 +816,28 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 		recipients := inboundPlan.RecipientIDs()
 		if len(recipients) > 0 {
 			eb.logQueuedDeliveries(ctx, evt, inboundPlan.PersistedRecipientIDs(), "matched_agent_subscription", inboundPlan.ExtraDetail)
-			if err := eb.deliverRoutePlanWithRoutes(ctx, evt, inboundPlan); err != nil {
+			if err := eb.deliverRoutePlanWithRoutes(workCtx, evt, inboundPlan); err != nil {
 				eb.recordCommittedPublishReceipt(ctx, evt, err)
 				return err
 			}
 			eb.logDelivery(ctx, evt, recipients, inboundPlan.ExtraDetail)
 		}
 		if inboundPlan.BlockedByCycle && inboundPlan.CycleEscalation != nil {
-			if err := eb.publishDeferred(ctx, *inboundPlan.CycleEscalation); err != nil {
+			if err := eb.publishDeferred(workCtx, *inboundPlan.CycleEscalation); err != nil {
 				eb.recordCommittedPublishReceipt(ctx, evt, err)
 				return err
 			}
 		}
 		if strings.TrimSpace(inboundPlan.ContradictionReason) != "" {
-			_ = eb.emitContradiction(ctx, evt, inboundPlan.ContradictionReason)
+			_ = eb.emitContradiction(workCtx, evt, inboundPlan.ContradictionReason)
 		}
 	}
 	eb.logPublished(ctx, evt, 0)
 	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
-	runtimepipeline.FlushDeferredPipelineTransitions(ctx, deferredTransitions)
+	runtimepipeline.FlushDeferredPipelineTransitions(workCtx, deferredTransitions)
 
 	for _, d := range deferred {
-		if err := eb.publishDeferred(ctx, d); err != nil {
+		if err := eb.publishDeferred(workCtx, d); err != nil {
 			eb.recordCommittedPublishReceipt(ctx, evt, err)
 			return err
 		}

@@ -119,6 +119,9 @@ func markInboundDeliveryActiveForSession(ctx context.Context, publisher EventPub
 	if publisher == nil || session == nil {
 		return false, nil
 	}
+	if !session.Memory.Enabled {
+		return false, nil
+	}
 	agentID := strings.TrimSpace(session.AgentID)
 	sessionID := strings.TrimSpace(session.ID)
 	if agentID == "" || sessionID == "" {

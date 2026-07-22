@@ -1212,8 +1212,13 @@ func (am *AgentManager) replayAgentBacklogDetailed(ctx context.Context, agentID 
 	defer lease.Release()
 	agent := lease.Agent
 	for {
-		pending, err := am.pendingDeliveriesForAgent(lease.Context, agentID, 1)
+		laneCtx, releaseLane, laneErr := am.acquireClaimedAttemptLane(lease.Context, agentID)
+		if laneErr != nil {
+			return summary, laneErr
+		}
+		pending, err := am.pendingDeliveriesForAgent(laneCtx, agentID, 1)
 		if err != nil {
+			releaseLane()
 			if startupManagerReplayDiagnosticsEnabled(ctx) {
 				failure := failureEnvelope(err, "agent-manager", "load_pending_backlog")
 				record := startupManagerReplayRecord{
@@ -1229,20 +1234,25 @@ func (am *AgentManager) replayAgentBacklogDetailed(ctx context.Context, agentID 
 			return summary, err
 		}
 		if len(pending) == 0 {
+			releaseLane()
 			break
 		}
 		execution := pending[0]
 		evt := execution.Event
 		if am.isAuthBreakerTripped() {
+			releaseLane()
 			return summary, nil
 		}
-		eventCtx := lease.Context
+		eventCtx := laneCtx
 		if _, ok := worklifetime.OccurrenceFromContext(eventCtx); !ok {
 			eventCtx = worklifetime.WithOccurrence(eventCtx, am.workOwner)
 		}
 		eventCtx = runtimedelivery.WithRoute(eventCtx, execution.Snapshot.Route)
 		eventCtx = runtimedelivery.WithClaim(eventCtx, execution.Claim)
-		result := am.processEventDetailed(eventCtx, agent, evt)
+		result := func() eventProcessResult {
+			defer releaseLane()
+			return am.processEventDetailed(eventCtx, agent, evt)
+		}()
 		summary.observe(result.record)
 		if startupManagerReplayDiagnosticsEnabled(ctx) {
 			logStartupManagerReplayAftermath(ctx, am.bus, result.record)
@@ -1749,6 +1759,19 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 								}
 								return true
 							}
+							laneCtx, releaseLane, laneErr := am.acquireClaimedAttemptLane(evtCtx, agent.ID())
+							if laneErr != nil {
+								if am.bus != nil {
+									am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
+										Level: "error", Component: "agent-manager", Action: "delivery_executor_admission_failed",
+										EventID: strings.TrimSpace(evt.ID()), EventType: strings.TrimSpace(string(evt.Type())), AgentID: agent.ID(),
+										Failure: failureEnvelope(laneErr, "agent-manager", "acquire_claimed_attempt_lane"),
+									})
+								}
+								return true
+							}
+							defer releaseLane()
+							evtCtx = laneCtx
 							claimed, claimErr := am.deliveryStore.ClaimAgentDelivery(evtCtx, evt, route)
 							if claimErr != nil {
 								if am.bus != nil {
@@ -1767,8 +1790,12 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 								panicFailure := runtimefailures.FromError(runtimefailures.New(runtimefailures.ClassInternalFailure, "agent_event_panic", "agent-manager", "process_event", map[string]any{
 									"agent_id": agent.ID(), "event_id": evt.ID(), "event_type": evt.Type(),
 								}), "agent-manager", "process_event")
-								am.writeReceipt(evtCtx, evt, agent.ID(), ReceiptStatusError, &panicFailure.Failure)
+								_, settlementErr := am.writeReceipt(evtCtx, evt, agent.ID(), ReceiptStatusError, &panicFailure.Failure)
 								if am.bus != nil {
+									detail := map[string]any{"stack_trace": evtStackTrace}
+									if settlementErr != nil {
+										detail["settlement_error"] = settlementErr.Error()
+									}
 									am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
 										Level:     "error",
 										Component: "agent-manager",
@@ -1777,10 +1804,8 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 										EventType: strings.TrimSpace(string(evt.Type())),
 										AgentID:   agent.ID(),
 										EntityID:  strings.TrimSpace(evt.EntityID()),
-										Detail: map[string]any{
-											"stack_trace": evtStackTrace,
-										},
-										Failure: &panicFailure.Failure,
+										Detail:    detail,
+										Failure:   &panicFailure.Failure,
 									})
 								}
 								if panicCount >= poisonPanicQuarantineAt {

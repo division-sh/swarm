@@ -19,17 +19,47 @@ func BootstrapFreshPostgres(ctx context.Context, tx *sql.Tx, plans []TableDDL, s
 	if _, err := tx.ExecContext(ctx, `CREATE EXTENSION IF NOT EXISTS pgcrypto`); err != nil {
 		return fmt.Errorf("create pgcrypto for fresh postgres store: %w", err)
 	}
+	var deferred []string
 	for _, plan := range plans {
 		for _, statement := range plan.Statements {
+			statement, deferred = deferPostgresForwardReferences(statement, deferred)
 			if _, err := tx.ExecContext(ctx, strings.TrimSpace(statement)); err != nil {
 				return fmt.Errorf("create postgres %s table %s: %w", plan.SchemaKind, plan.TableName, err)
 			}
+		}
+	}
+	for _, statement := range deferred {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("install postgres forward-reference constraint: %w", err)
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO runtime_store_metadata (id, swarm_version, platform_version, created_at) VALUES (1, $1, $2, $3)`, swarmVersion, platformVersion, createdAt.UTC()); err != nil {
 		return fmt.Errorf("stamp fresh postgres store origin: %w", err)
 	}
 	return nil
+}
+
+const deliveryCurrentAttemptForeignKey = "FOREIGN KEY (delivery_id, current_attempt_version, current_attempt_open) REFERENCES event_delivery_attempts(delivery_id, claim_version, open_marker)"
+const deadLetterDeliveryOutcomeForeignKey = "FOREIGN KEY (delivery_id, claim_version) REFERENCES event_delivery_outcomes(delivery_id, claim_version)"
+
+// PostgreSQL requires the referenced table to exist when a foreign key is
+// declared. SQLite permits the same authoritative inline DDL to reference the
+// table created immediately afterward, so only PostgreSQL defers this one
+// lifecycle-cycle constraint until both tables exist.
+func deferPostgresForwardReferences(statement string, deferred []string) (string, []string) {
+	switch ExtractTableName(statement) {
+	case "event_deliveries":
+		if strings.Contains(statement, deliveryCurrentAttemptForeignKey) {
+			statement = strings.Replace(statement, ",\n    "+deliveryCurrentAttemptForeignKey, "", 1)
+			deferred = append(deferred, "ALTER TABLE event_deliveries ADD CONSTRAINT event_deliveries_current_attempt_fk "+deliveryCurrentAttemptForeignKey)
+		}
+	case "dead_letters":
+		if strings.Contains(statement, deadLetterDeliveryOutcomeForeignKey) {
+			statement = strings.Replace(statement, ",\n    "+deadLetterDeliveryOutcomeForeignKey, "", 1)
+			deferred = append(deferred, "ALTER TABLE dead_letters ADD CONSTRAINT dead_letters_delivery_outcome_fk "+deadLetterDeliveryOutcomeForeignKey)
+		}
+	}
+	return statement, deferred
 }
 
 type TableDDL struct {

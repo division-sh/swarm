@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
@@ -269,7 +270,7 @@ type observabilitySurfaceFixture struct {
 func newSQLiteObservabilitySurfaceFixture(t *testing.T, ctx context.Context) observabilitySurfaceFixture {
 	t.Helper()
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-	return newObservabilitySurfaceFixture(t, ctx, sqliteStore)
+	return newObservabilitySurfaceFixture(t, ctx, sqliteStore, sqliteStore.DB, true)
 }
 
 func newPostgresObservabilitySurfaceFixture(t *testing.T, ctx context.Context) observabilitySurfaceFixture {
@@ -278,7 +279,7 @@ func newPostgresObservabilitySurfaceFixture(t *testing.T, ctx context.Context) o
 	t.Cleanup(cleanup)
 	pg := &storepkg.PostgresStore{DB: db}
 	storetest.BootstrapPostgresRuntimeStore(t, pg)
-	return newObservabilitySurfaceFixture(t, ctx, pg)
+	return newObservabilitySurfaceFixture(t, ctx, pg, db, false)
 }
 
 type observabilityFixtureStore interface {
@@ -287,7 +288,7 @@ type observabilityFixtureStore interface {
 	runtimepkg.RuntimeLogPersistence
 }
 
-func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store observabilityFixtureStore) observabilitySurfaceFixture {
+func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store observabilityFixtureStore, db *sql.DB, sqlite bool) observabilitySurfaceFixture {
 	t.Helper()
 	registrar, ok := store.(authorActivityTestCatalogRegistrar)
 	if !ok {
@@ -309,7 +310,7 @@ func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store obs
 	if err != nil {
 		t.Fatalf("ClaimAgentDelivery: %v", err)
 	}
-	sessionID := uuid.NewString()
+	sessionID := seedOperatorReplayDeliverySession(t, ctx, db, sqlite, runID, "agent-1")
 	if _, err := store.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 		t.Fatalf("BindAgentSession: %v", err)
 	}

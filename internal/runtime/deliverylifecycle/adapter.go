@@ -58,7 +58,7 @@ func (a *Adapter) CommitInitial(ctx context.Context, tx *sql.Tx, eventID, runID 
 	if tx == nil {
 		return nil, fmt.Errorf("delivery initial commit transaction is required")
 	}
-	if err := events.ValidateDeliveryRouteProjections(routes); err != nil {
+	if err := events.ValidateDeliveryRoutes(routes); err != nil {
 		return nil, err
 	}
 	routes = events.NormalizeDeliveryRoutes(routes)
@@ -177,29 +177,43 @@ func (a *Adapter) claimPending(ctx context.Context, tx *sql.Tx, class Subscriber
 		return nil, err
 	}
 	query := `
-		SELECT delivery_id::text
-		FROM event_deliveries
-		WHERE subscriber_type = $1 AND subscriber_id = $2
+		SELECT d.delivery_id::text
+		FROM event_deliveries d
+		LEFT JOIN event_delivery_attempts current_attempt
+		  ON current_attempt.delivery_id = d.delivery_id
+		 AND current_attempt.claim_version = d.current_attempt_version
+		 AND current_attempt.open_marker = TRUE
+		WHERE d.subscriber_type = $1 AND d.subscriber_id = $2
 		  AND (
-			status = 'pending'
-			OR (status = 'failed' AND retry_count <= max_retries AND next_eligible_at <= $3)
-			OR (status = 'in_progress' AND claim_expires_at <= $3)
+			d.status = 'pending'
+			OR (d.status = 'failed' AND d.retry_count <= d.max_retries AND d.next_eligible_at <= $3)
+			OR (d.status = 'in_progress' AND current_attempt.lease_expires_at <= $3)
 		  )
-		ORDER BY next_eligible_at, created_at, delivery_id
-		FOR UPDATE SKIP LOCKED
+		ORDER BY CASE
+			WHEN d.status = 'in_progress' THEN current_attempt.lease_expires_at
+			ELSE d.next_eligible_at
+		END ASC, d.created_at ASC, d.delivery_id ASC
+		FOR UPDATE OF d SKIP LOCKED
 		LIMIT $4`
 	args := []any{string(class), subscriberID, now, limit}
 	if a.dialect == DialectSQLite {
 		query = `
-			SELECT delivery_id
-			FROM event_deliveries
-			WHERE subscriber_type = ? AND subscriber_id = ?
+			SELECT d.delivery_id
+			FROM event_deliveries d
+			LEFT JOIN event_delivery_attempts current_attempt
+			  ON current_attempt.delivery_id = d.delivery_id
+			 AND current_attempt.claim_version = d.current_attempt_version
+			 AND current_attempt.open_marker = TRUE
+			WHERE d.subscriber_type = ? AND d.subscriber_id = ?
 			  AND (
-				status = 'pending'
-				OR (status = 'failed' AND retry_count <= max_retries AND next_eligible_at <= ?)
-				OR (status = 'in_progress' AND claim_expires_at <= ?)
+				d.status = 'pending'
+				OR (d.status = 'failed' AND d.retry_count <= d.max_retries AND d.next_eligible_at <= ?)
+				OR (d.status = 'in_progress' AND current_attempt.lease_expires_at <= ?)
 			  )
-			ORDER BY next_eligible_at, created_at, delivery_id
+			ORDER BY CASE
+				WHEN d.status = 'in_progress' THEN current_attempt.lease_expires_at
+				ELSE d.next_eligible_at
+			END ASC, d.created_at ASC, d.delivery_id ASC
 			LIMIT ?`
 		args = []any{string(class), subscriberID, now, now, limit}
 	}
@@ -264,30 +278,32 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, record deliveryRe
 		if record.ClaimExpiresAt.IsZero() || record.ClaimExpiresAt.After(now) {
 			return ClaimedObligation{}, ErrIneligible
 		}
-		if err := a.expireAttempt(ctx, tx, record, now); err != nil {
-			return ClaimedObligation{}, err
-		}
 	default:
 		return ClaimedObligation{}, ErrIneligible
 	}
 	token := uuid.NewString()
 	version := record.ClaimVersion + 1
 	expiresAt := now.Add(leaseTTL)
+	if err := a.insertAttempt(ctx, tx, record.DeliveryID, version, token, now, expiresAt); err != nil {
+		return ClaimedObligation{}, err
+	}
 	query := `
 		UPDATE event_deliveries
-		SET status = 'in_progress', claim_token = $1::uuid, claim_version = $2,
-			claim_expires_at = $3, started_at = COALESCE(started_at, $4),
-			next_eligible_at = NULL, reason_code = NULL, failure = NULL, updated_at = $4
-		WHERE delivery_id = $5::uuid AND claim_version = $6`
-	args := []any{token, version, expiresAt, now, record.DeliveryID, record.ClaimVersion}
+		SET status = 'in_progress', claim_version = $1,
+			current_attempt_version = $1, current_attempt_open = TRUE,
+			started_at = COALESCE(started_at, $2), next_eligible_at = NULL,
+			reason_code = NULL, failure = NULL, updated_at = $2
+		WHERE delivery_id = $3::uuid AND claim_version = $4`
+	args := []any{version, now, record.DeliveryID, record.ClaimVersion}
 	if a.dialect == DialectSQLite {
 		query = `
 			UPDATE event_deliveries
-			SET status = 'in_progress', claim_token = ?, claim_version = ?,
-				claim_expires_at = ?, started_at = COALESCE(started_at, ?),
-				next_eligible_at = NULL, reason_code = NULL, failure = NULL, updated_at = ?
+			SET status = 'in_progress', claim_version = ?,
+				current_attempt_version = ?, current_attempt_open = TRUE,
+				started_at = COALESCE(started_at, ?), next_eligible_at = NULL,
+				reason_code = NULL, failure = NULL, updated_at = ?
 			WHERE delivery_id = ? AND claim_version = ?`
-		args = []any{token, version, expiresAt, now, now, record.DeliveryID, record.ClaimVersion}
+		args = []any{version, version, now, now, record.DeliveryID, record.ClaimVersion}
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -297,8 +313,10 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, record deliveryRe
 	if err != nil || rows != 1 {
 		return ClaimedObligation{}, fmt.Errorf("%w: delivery claim lost compare-and-set", ErrConflict)
 	}
-	if err := a.insertAttempt(ctx, tx, record.DeliveryID, version, token, now, expiresAt); err != nil {
-		return ClaimedObligation{}, err
+	if record.Status == StatusInProgress {
+		if err := a.expireAttempt(ctx, tx, record, now); err != nil {
+			return ClaimedObligation{}, err
+		}
 	}
 	claim := Claim{deliveryID: record.DeliveryID, runID: record.RunID, routeIdentity: record.RouteIdentity.String(), token: token, version: version, class: record.SubscriberClass, subscriberID: record.SubscriberID}
 	claimed, err := a.loadByID(ctx, tx, record.DeliveryID, false)
@@ -318,17 +336,23 @@ func (a *Adapter) BindAgentSession(ctx context.Context, tx *sql.Tx, claim Claim,
 	if _, err := uuid.Parse(strings.TrimSpace(sessionID)); err != nil {
 		return Snapshot{}, fmt.Errorf("delivery session id: %w", err)
 	}
-	record, now, err := a.requireCurrentClaim(ctx, tx, claim)
+	record, _, err := a.requireCurrentClaim(ctx, tx, claim)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	if record.SubscriberClass != SubscriberAgent {
 		return Snapshot{}, fmt.Errorf("%w: node delivery cannot bind an agent session", ErrConflict)
 	}
-	query := `UPDATE event_deliveries SET active_session_id = $1::uuid, updated_at = $2 WHERE delivery_id = $3::uuid AND claim_token = $4::uuid AND claim_version = $5`
-	args := []any{sessionID, now, claim.deliveryID, claim.token, claim.version}
+	query := `
+		UPDATE event_delivery_attempts
+		SET active_session_id = $1::uuid, session_run_id = $2::uuid, session_agent_id = $3
+		WHERE delivery_id = $4::uuid AND claim_version = $5 AND claim_token = $6::uuid AND open_marker = TRUE`
+	args := []any{sessionID, record.RunID, record.SubscriberID, claim.deliveryID, claim.version, claim.token}
 	if a.dialect == DialectSQLite {
-		query = `UPDATE event_deliveries SET active_session_id = ?, updated_at = ? WHERE delivery_id = ? AND claim_token = ? AND claim_version = ?`
+		query = `
+			UPDATE event_delivery_attempts
+			SET active_session_id = ?, session_run_id = ?, session_agent_id = ?
+			WHERE delivery_id = ? AND claim_version = ? AND claim_token = ? AND open_marker = TRUE`
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -353,11 +377,18 @@ func (a *Adapter) RenewClaim(ctx context.Context, tx *sql.Tx, claim Claim, lease
 		return Snapshot{}, err
 	}
 	expiresAt := now.Add(leaseTTL)
-	query := `UPDATE event_deliveries SET claim_expires_at = $1, updated_at = $2 WHERE delivery_id = $3::uuid AND status = 'in_progress' AND claim_token = $4::uuid AND claim_version = $5 AND claim_expires_at > $2`
-	args := []any{expiresAt, now, claim.deliveryID, claim.token, claim.version}
+	query := `
+		UPDATE event_delivery_attempts
+		SET lease_expires_at = $1
+		WHERE delivery_id = $2::uuid AND claim_version = $3 AND claim_token = $4::uuid
+		  AND open_marker = TRUE AND lease_expires_at > $5`
+	args := []any{expiresAt, claim.deliveryID, claim.version, claim.token, now}
 	if a.dialect == DialectSQLite {
-		query = `UPDATE event_deliveries SET claim_expires_at = ?, updated_at = ? WHERE delivery_id = ? AND status = 'in_progress' AND claim_token = ? AND claim_version = ? AND claim_expires_at > ?`
-		args = []any{expiresAt, now, claim.deliveryID, claim.token, claim.version, now}
+		query = `
+			UPDATE event_delivery_attempts
+			SET lease_expires_at = ?
+			WHERE delivery_id = ? AND claim_version = ? AND claim_token = ?
+			  AND open_marker = TRUE AND lease_expires_at > ?`
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -365,18 +396,6 @@ func (a *Adapter) RenewClaim(ctx context.Context, tx *sql.Tx, claim Claim, lease
 	}
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return Snapshot{}, fmt.Errorf("%w: delivery claim renewal lost claim", ErrConflict)
-	}
-	attemptQuery := `UPDATE event_delivery_attempts SET lease_expires_at = $1 WHERE delivery_id = $2::uuid AND claim_version = $3 AND claim_token = $4::uuid AND outcome IS NULL`
-	attemptArgs := []any{expiresAt, claim.deliveryID, claim.version, claim.token}
-	if a.dialect == DialectSQLite {
-		attemptQuery = `UPDATE event_delivery_attempts SET lease_expires_at = ? WHERE delivery_id = ? AND claim_version = ? AND claim_token = ? AND outcome IS NULL`
-	}
-	result, err = tx.ExecContext(ctx, attemptQuery, attemptArgs...)
-	if err != nil {
-		return Snapshot{}, fmt.Errorf("renew delivery claim attempt: %w", err)
-	}
-	if rows, _ := result.RowsAffected(); rows != 1 {
-		return Snapshot{}, fmt.Errorf("%w: delivery claim renewal lost attempt", ErrConflict)
 	}
 	updated, err := a.loadByID(ctx, tx, claim.deliveryID, false)
 	return updated.Snapshot, err
@@ -450,21 +469,23 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, claim Claim, settlemen
 		UPDATE event_deliveries
 		SET status = $1::text, retry_count = $2, next_eligible_at = $3,
 			reason_code = NULLIF($4, ''), failure = NULLIF($5, '')::jsonb,
-			claim_token = NULL, claim_expires_at = NULL, active_session_id = NULL,
+			current_attempt_version = NULL, current_attempt_open = NULL,
 			settled_at = CASE WHEN $1::text IN ('delivered', 'dead_letter') THEN $6::timestamptz ELSE NULL END,
 			updated_at = $6::timestamptz
-		WHERE delivery_id = $7::uuid AND claim_token = $8::uuid AND claim_version = $9 AND status = 'in_progress'`
-	args := []any{string(status), retryCount, nextEligible, reason, failureRaw, now, claim.deliveryID, claim.token, claim.version}
+		WHERE delivery_id = $7::uuid AND claim_version = $8 AND current_attempt_version = $8
+		  AND current_attempt_open = TRUE AND status = 'in_progress'`
+	args := []any{string(status), retryCount, nextEligible, reason, failureRaw, now, claim.deliveryID, claim.version}
 	if a.dialect == DialectSQLite {
 		query = `
 			UPDATE event_deliveries
 			SET status = ?, retry_count = ?, next_eligible_at = ?,
 				reason_code = NULLIF(?, ''), failure = NULLIF(?, ''),
-				claim_token = NULL, claim_expires_at = NULL, active_session_id = NULL,
+				current_attempt_version = NULL, current_attempt_open = NULL,
 				settled_at = CASE WHEN ? IN ('delivered', 'dead_letter') THEN ? ELSE NULL END,
 				updated_at = ?
-			WHERE delivery_id = ? AND claim_token = ? AND claim_version = ? AND status = 'in_progress'`
-		args = []any{string(status), retryCount, nextEligible, reason, failureRaw, string(status), now, now, claim.deliveryID, claim.token, claim.version}
+			WHERE delivery_id = ? AND claim_version = ? AND current_attempt_version = ?
+			  AND current_attempt_open = TRUE AND status = 'in_progress'`
+		args = []any{string(status), retryCount, nextEligible, reason, failureRaw, string(status), now, now, claim.deliveryID, claim.version, claim.version}
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -902,10 +923,10 @@ func (a *Adapter) TerminalizeRun(ctx context.Context, tx *sql.Tx, runID, reason 
 			return nil, err
 		}
 		version := record.ClaimVersion + 1
-		query := `UPDATE event_deliveries SET status = 'dead_letter', reason_code = $1, failure = NULL, retry_count = retry_count, next_eligible_at = NULL, claim_token = NULL, claim_version = $2, claim_expires_at = NULL, active_session_id = NULL, settled_at = $3, updated_at = $3 WHERE delivery_id = $4::uuid AND claim_version = $5`
+		query := `UPDATE event_deliveries SET status = 'dead_letter', reason_code = $1, failure = NULL, retry_count = retry_count, next_eligible_at = NULL, claim_version = $2, current_attempt_version = NULL, current_attempt_open = NULL, settled_at = $3, updated_at = $3 WHERE delivery_id = $4::uuid AND claim_version = $5`
 		args := []any{reason, version, now, id, record.ClaimVersion}
 		if a.dialect == DialectSQLite {
-			query = `UPDATE event_deliveries SET status = 'dead_letter', reason_code = ?, failure = NULL, retry_count = retry_count, next_eligible_at = NULL, claim_token = NULL, claim_version = ?, claim_expires_at = NULL, active_session_id = NULL, settled_at = ?, updated_at = ? WHERE delivery_id = ? AND claim_version = ?`
+			query = `UPDATE event_deliveries SET status = 'dead_letter', reason_code = ?, failure = NULL, retry_count = retry_count, next_eligible_at = NULL, claim_version = ?, current_attempt_version = NULL, current_attempt_open = NULL, settled_at = ?, updated_at = ? WHERE delivery_id = ? AND claim_version = ?`
 			args = []any{reason, version, now, now, id, record.ClaimVersion}
 		}
 		if result, err := tx.ExecContext(ctx, query, args...); err != nil {
@@ -918,7 +939,7 @@ func (a *Adapter) TerminalizeRun(ctx context.Context, tx *sql.Tx, runID, reason 
 			if err := a.completeAttempt(ctx, tx, claim, "terminalized", reason, nil, nil, 0, now); err != nil {
 				return nil, err
 			}
-		} else if err := a.insertOutcome(ctx, tx, id, version, "terminalized", reason, nil, nil, 0, now); err != nil {
+		} else if err := a.insertTerminalizedAttempt(ctx, tx, id, version, reason, now); err != nil {
 			return nil, err
 		}
 		updated, err := a.loadByID(ctx, tx, id, false)
@@ -931,6 +952,28 @@ func (a *Adapter) TerminalizeRun(ctx context.Context, tx *sql.Tx, runID, reason 
 		out = append(out, Terminalization{Previous: record.Snapshot, Current: updated.Snapshot})
 	}
 	return out, nil
+}
+
+func (a *Adapter) insertTerminalizedAttempt(ctx context.Context, tx *sql.Tx, deliveryID string, version int64, reason string, now time.Time) error {
+	token := uuid.NewString()
+	query := `
+		INSERT INTO event_delivery_attempts (
+			delivery_id, claim_version, claim_token, started_at, lease_expires_at,
+			open_marker, outcome, reason_code, side_effects, duration_ms, completed_at
+		) VALUES ($1::uuid, $2, $3::uuid, $4, $5, FALSE, 'terminalized', $6, '[]'::jsonb, 0, $4)`
+	args := []any{deliveryID, version, token, now, now.Add(time.Second), reason}
+	if a.dialect == DialectSQLite {
+		query = `
+			INSERT INTO event_delivery_attempts (
+				delivery_id, claim_version, claim_token, started_at, lease_expires_at,
+				open_marker, outcome, reason_code, side_effects, duration_ms, completed_at
+			) VALUES (?, ?, ?, ?, ?, FALSE, 'terminalized', ?, '[]', 0, ?)`
+		args = []any{deliveryID, version, token, now, now.Add(time.Second), reason, now}
+	}
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("record terminalized delivery attempt: %w", err)
+	}
+	return a.insertOutcome(ctx, tx, deliveryID, version, "terminalized", reason, nil, nil, 0, now)
 }
 
 func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Claim) (deliveryRecord, time.Time, error) {
@@ -950,10 +993,10 @@ func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Cla
 }
 
 func (a *Adapter) insertAttempt(ctx context.Context, tx *sql.Tx, deliveryID string, version int64, token string, startedAt, expiresAt time.Time) error {
-	query := `INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at) VALUES ($1::uuid, $2, $3::uuid, $4, $5)`
+	query := `INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker) VALUES ($1::uuid, $2, $3::uuid, $4, $5, TRUE)`
 	args := []any{deliveryID, version, token, startedAt, expiresAt}
 	if a.dialect == DialectSQLite {
-		query = `INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at) VALUES (?, ?, ?, ?, ?)`
+		query = `INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker) VALUES (?, ?, ?, ?, ?, TRUE)`
 	}
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("record delivery claim attempt: %w", err)
@@ -965,10 +1008,10 @@ func (a *Adapter) expireAttempt(ctx context.Context, tx *sql.Tx, record delivery
 	if record.claimToken == "" || record.ClaimVersion <= 0 {
 		return fmt.Errorf("%w: expired in-progress delivery has no current claim", ErrConflict)
 	}
-	query := `UPDATE event_delivery_attempts SET outcome = 'lease_expired', completed_at = $1 WHERE delivery_id = $2::uuid AND claim_version = $3 AND claim_token = $4::uuid AND outcome IS NULL`
+	query := `UPDATE event_delivery_attempts SET outcome = 'lease_expired', completed_at = $1, open_marker = FALSE WHERE delivery_id = $2::uuid AND claim_version = $3 AND claim_token = $4::uuid AND open_marker = TRUE`
 	args := []any{now, record.DeliveryID, record.ClaimVersion, record.claimToken}
 	if a.dialect == DialectSQLite {
-		query = `UPDATE event_delivery_attempts SET outcome = 'lease_expired', completed_at = ? WHERE delivery_id = ? AND claim_version = ? AND claim_token = ? AND outcome IS NULL`
+		query = `UPDATE event_delivery_attempts SET outcome = 'lease_expired', completed_at = ?, open_marker = FALSE WHERE delivery_id = ? AND claim_version = ? AND claim_token = ? AND open_marker = TRUE`
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -993,15 +1036,15 @@ func (a *Adapter) completeAttempt(ctx context.Context, tx *sql.Tx, claim Claim, 
 	query := `
 		UPDATE event_delivery_attempts
 		SET outcome = $1, reason_code = NULLIF($2, ''), failure = NULLIF($3, '')::jsonb,
-			side_effects = $4::jsonb, duration_ms = $5, completed_at = $6
-		WHERE delivery_id = $7::uuid AND claim_version = $8 AND claim_token = $9::uuid AND outcome IS NULL`
+			side_effects = $4::jsonb, duration_ms = $5, completed_at = $6, open_marker = FALSE
+		WHERE delivery_id = $7::uuid AND claim_version = $8 AND claim_token = $9::uuid AND open_marker = TRUE`
 	args := []any{outcome, reason, failureRaw, string(sideEffectsRaw), durationMS, now, claim.deliveryID, claim.version, claim.token}
 	if a.dialect == DialectSQLite {
 		query = `
 			UPDATE event_delivery_attempts
 			SET outcome = ?, reason_code = NULLIF(?, ''), failure = NULLIF(?, ''),
-				side_effects = ?, duration_ms = ?, completed_at = ?
-			WHERE delivery_id = ? AND claim_version = ? AND claim_token = ? AND outcome IS NULL`
+				side_effects = ?, duration_ms = ?, completed_at = ?, open_marker = FALSE
+			WHERE delivery_id = ? AND claim_version = ? AND claim_token = ? AND open_marker = TRUE`
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -1112,25 +1155,33 @@ func (a *Adapter) loadByEventAndRoute(ctx context.Context, q interface {
 func (a *Adapter) selectRecord() string {
 	if a.dialect == DialectSQLite {
 		return `
-			SELECT d.delivery_id, d.event_id, COALESCE(d.run_id, ''), d.route_identity,
+			SELECT d.delivery_id, d.event_id, d.run_id, d.route_identity,
 				d.subscriber_type, d.subscriber_id, d.delivery_target_route, d.delivery_context,
 				d.delivery_payload_projection, d.status, d.retry_count, d.max_retries,
-				d.next_eligible_at, d.claim_version, COALESCE(d.claim_token, ''), d.claim_expires_at,
-				COALESCE(d.active_session_id, ''), COALESCE(d.reason_code, ''), d.failure,
+				d.next_eligible_at, d.claim_version, COALESCE(current_attempt.claim_token, ''), current_attempt.lease_expires_at,
+				COALESCE(current_attempt.active_session_id, ''), COALESCE(d.reason_code, ''), d.failure,
 				d.started_at, d.settled_at, d.created_at, d.updated_at,
 				e.event_name, COALESCE(e.entity_id, ''), COALESCE(e.flow_instance, ''), COALESCE(r.bundle_hash, '')
-			FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
+			FROM event_deliveries d JOIN events e ON e.event_id = d.event_id AND e.run_id = d.run_id
+			LEFT JOIN event_delivery_attempts current_attempt
+			  ON current_attempt.delivery_id = d.delivery_id
+			 AND current_attempt.claim_version = d.current_attempt_version
+			 AND current_attempt.open_marker = TRUE
 			LEFT JOIN runs r ON r.run_id = d.run_id`
 	}
 	return `
-		SELECT d.delivery_id::text, d.event_id::text, COALESCE(d.run_id::text, ''), d.route_identity,
+		SELECT d.delivery_id::text, d.event_id::text, d.run_id::text, d.route_identity,
 			d.subscriber_type, d.subscriber_id, d.delivery_target_route, d.delivery_context,
 			d.delivery_payload_projection, d.status, d.retry_count, d.max_retries,
-			d.next_eligible_at, d.claim_version, COALESCE(d.claim_token::text, ''), d.claim_expires_at,
-			COALESCE(d.active_session_id::text, ''), COALESCE(d.reason_code, ''), d.failure,
+			d.next_eligible_at, d.claim_version, COALESCE(current_attempt.claim_token::text, ''), current_attempt.lease_expires_at,
+			COALESCE(current_attempt.active_session_id::text, ''), COALESCE(d.reason_code, ''), d.failure,
 			d.started_at, d.settled_at, d.created_at, d.updated_at,
 			e.event_name, COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(r.bundle_hash, '')
-		FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
+		FROM event_deliveries d JOIN events e ON e.event_id = d.event_id AND e.run_id = d.run_id
+		LEFT JOIN event_delivery_attempts current_attempt
+		  ON current_attempt.delivery_id = d.delivery_id
+		 AND current_attempt.claim_version = d.current_attempt_version
+		 AND current_attempt.open_marker = TRUE
 		LEFT JOIN runs r ON r.run_id = d.run_id`
 }
 
@@ -1214,10 +1265,8 @@ func validateRecordShape(record deliveryRecord) error {
 	if _, err := uuid.Parse(record.EventID); err != nil {
 		return conflict("has invalid event identity")
 	}
-	if record.RunID != "" {
-		if _, err := uuid.Parse(record.RunID); err != nil {
-			return conflict("has invalid run identity")
-		}
+	if _, err := uuid.Parse(record.RunID); err != nil {
+		return conflict("has invalid run identity")
 	}
 	if record.CreatedAt.IsZero() || record.UpdatedAt.IsZero() || record.UpdatedAt.Before(record.CreatedAt) {
 		return conflict("has invalid durable timestamps")

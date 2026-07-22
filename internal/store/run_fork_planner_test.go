@@ -476,8 +476,8 @@ func TestRunForkPlanner_SystemDeliveryRowsAreNotCanonicalEventDeliveries(t *test
 	if err == nil {
 		t.Fatal("seed system delivery succeeded, want canonical event_deliveries subscriber_type check to reject system rows")
 	}
-	if !strings.Contains(err.Error(), "subscriber class") {
-		t.Fatalf("system delivery error = %v, want typed subscriber-class refusal", err)
+	if !strings.Contains(err.Error(), "unsupported subscriber type") {
+		t.Fatalf("system delivery error = %v, want typed subscriber refusal", err)
 	}
 }
 

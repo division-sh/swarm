@@ -1337,10 +1337,12 @@ func NormalizeDeliveryRoutes(in []DeliveryRoute) []DeliveryRoute {
 	for _, route := range in {
 		route = route.Normalized()
 		if route.SubscriberType == "" || route.SubscriberID == "" {
+			out = append(out, route)
 			continue
 		}
 		identity, err := route.Identity()
 		if err != nil {
+			out = append(out, route)
 			continue
 		}
 		key := identity.String()
@@ -1351,6 +1353,25 @@ func NormalizeDeliveryRoutes(in []DeliveryRoute) []DeliveryRoute {
 		out = append(out, route)
 	}
 	return out
+}
+
+// ValidateDeliveryRoutes rejects malformed durable executable-delivery facts
+// before they can be normalized into a smaller set. DeliveryRoute is the
+// complete persisted identity for exactly the supported agent and node
+// execution classes.
+func ValidateDeliveryRoutes(in []DeliveryRoute) error {
+	for index, route := range in {
+		route = route.Normalized()
+		switch route.SubscriberType {
+		case "agent", "node":
+		default:
+			return fmt.Errorf("delivery route %d has unsupported subscriber type %q", index, route.SubscriberType)
+		}
+		if _, err := route.Identity(); err != nil {
+			return fmt.Errorf("delivery route %d: %w", index, err)
+		}
+	}
+	return ValidateDeliveryRouteProjections(in)
 }
 
 // SameDeliveryRouteIdentity reports whether two routes identify one exact

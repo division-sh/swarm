@@ -192,8 +192,8 @@ func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	if len(publisher.events) != 1 {
 		t.Fatalf("expected 1 platform.agent_started event, got %d", len(publisher.events))
 	}
-	if len(publisher.marks) != 1 {
-		t.Fatalf("expected 1 delivery mark, got %d", len(publisher.marks))
+	if len(publisher.marks) != 0 {
+		t.Fatalf("stateless session delivery marks = %d, want 0", len(publisher.marks))
 	}
 	if len(publisher.runtimeLogs) != 0 {
 		t.Fatalf("expected no delivery lifecycle log without a real delivery mark, got %d", len(publisher.runtimeLogs))
@@ -242,8 +242,8 @@ func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	if len(publisher.events) != 1 {
 		t.Fatalf("expected 1 platform.agent_started event, got %d", len(publisher.events))
 	}
-	if len(publisher.marks) != 1 {
-		t.Fatalf("expected 1 delivery mark, got %d", len(publisher.marks))
+	if len(publisher.marks) != 0 {
+		t.Fatalf("stateless session delivery marks = %d, want 0", len(publisher.marks))
 	}
 	if len(publisher.runtimeLogs) != 0 {
 		t.Fatalf("expected no delivery lifecycle log without a real delivery mark, got %d", len(publisher.runtimeLogs))
@@ -331,7 +331,7 @@ func TestPublishAgentStarted_LogsActiveTransitionOnlyAfterRealDeliveryMark(t *te
 	publishAgentStarted(ctx, publisher, &Session{
 		ID:      "session-1",
 		AgentID: "agent-1",
-		Memory:  agentmemory.Authored(false),
+		Memory:  agentmemory.Authored(true),
 	}, events.EventType("platform.agent_started"))
 
 	if len(publisher.runtimeLogs) != 1 {
@@ -480,7 +480,7 @@ func TestPublishAgentStarted_LogsRuntimeFailures(t *testing.T) {
 	publishAgentStarted(ctx, publisher, &Session{
 		ID:                "session-1",
 		AgentID:           "agent-1",
-		Memory:            agentmemory.Authored(false),
+		Memory:            agentmemory.Authored(true),
 		ProviderSessionID: "provider-1",
 	}, events.EventType("platform.agent_started"))
 
