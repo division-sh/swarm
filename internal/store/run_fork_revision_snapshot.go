@@ -87,6 +87,7 @@ type runForkRevisionDeadLetter struct {
 	runForkRevisionedFact
 	DeadLetterID    string    `json:"dead_letter_id"`
 	OriginalEventID string    `json:"original_event_id"`
+	DeliveryID      string    `json:"delivery_id"`
 	HandlerNode     string    `json:"handler_node"`
 	CreatedAt       time.Time `json:"created_at"`
 }

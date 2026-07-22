@@ -671,20 +671,21 @@ func TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery(t *testing.T) {
 	}
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
 	retryFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "retryable_error", nil)
-	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-dead"}, runtimedelivery.StateRetrying, &retryFailure)
+	nodeDead := seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-dead"}, runtimedelivery.StateRetrying, &retryFailure)
 	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-ok"}, runtimedelivery.StateDelivered, nil)
 	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-ok"}, runtimedelivery.StateDelivered, nil)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO dead_letters (
-			original_event_id, original_event, original_payload, flow_instance,
+			original_event_id, delivery_id, claim_version, original_event, original_payload, flow_instance,
 			failure, retry_count, handler_node, created_at
 		)
 		VALUES
-			($1::uuid, 'fork.work', '{}'::jsonb, 'runtime', $2::jsonb, 1, 'node-dead', $4),
-			($1::uuid, 'fork.work', '{}'::jsonb, 'runtime', $3::jsonb, 3, 'node-other', $4)
+			($1::uuid, $5::uuid, $6, 'fork.work', '{}'::jsonb, 'runtime', $2::jsonb, 1, 'node-dead', $4),
+			($1::uuid, NULL, NULL, 'fork.work', '{}'::jsonb, 'runtime', $3::jsonb, 3, 'node-other', $4)
 	`, eventID,
 		mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "node_failed", nil)),
-		mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassRetryExhausted, "different_node_failed", nil)), at); err != nil {
+		mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassRetryExhausted, "different_node_failed", nil)), at,
+		nodeDead.DeliveryID, nodeDead.ClaimVersion); err != nil {
 		t.Fatalf("seed dead letters: %v", err)
 	}
 
@@ -712,6 +713,52 @@ func TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery(t *testing.T) {
 	}
 	if _, ok := got["node-other"]; ok {
 		t.Fatalf("dead-letter-only handler became pending work row; all=%#v", got)
+	}
+}
+
+func TestRunForkPlanner_DeadLetterClassificationUsesExactSiblingDeliveryID(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := admitTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000255, 0).UTC()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
+	deadRoute := events.DeliveryRoute{
+		SubscriberType: "agent", SubscriberID: "agent-shared",
+		Target: events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/dead", EntityID: uuid.NewString()},
+	}
+	deliveredRoute := events.DeliveryRoute{
+		SubscriberType: "agent", SubscriberID: "agent-shared",
+		Target: events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/delivered", EntityID: uuid.NewString()},
+	}
+	failure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "route_failed", nil)
+	dead := seedDeliveryStateFixture(t, ctx, pg, event, deadRoute, runtimedelivery.StateExhausted, &failure)
+	delivered := seedDeliveryStateFixture(t, ctx, pg, event, deliveredRoute, runtimedelivery.StateDelivered, nil)
+
+	captureRunForkTestRevision(t, db, runID)
+	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	classifications := map[string]string{}
+	for _, item := range plan.PendingWork {
+		if item.SubscriberID == "agent-shared" {
+			classifications[item.DeliveryID] = item.Classification
+		}
+	}
+	if got := classifications[dead.DeliveryID]; got != RunForkPendingClassificationDeadLetter {
+		t.Fatalf("dead sibling classification = %q, want %q; all=%#v", got, RunForkPendingClassificationDeadLetter, classifications)
+	}
+	if got := classifications[delivered.DeliveryID]; got != RunForkPendingClassificationDeliveredCompleted {
+		t.Fatalf("delivered sibling classification = %q, want %q; all=%#v", got, RunForkPendingClassificationDeliveredCompleted, classifications)
 	}
 }
 

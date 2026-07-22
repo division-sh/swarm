@@ -576,6 +576,7 @@ const canonicalDeadLettersProjectionSQL = `
 	SELECT d.dead_letter_id::text AS fact_key,
 	       jsonb_build_object(
 	           'dead_letter_id', d.dead_letter_id, 'original_event_id', d.original_event_id,
+	           'delivery_id', COALESCE(d.delivery_id::text, ''),
 	           'handler_node', d.handler_node, 'created_at', d.created_at) AS fact, d.xmin::text::bigint AS source_transaction_id
 	FROM dead_letters d
 	JOIN events e ON e.event_id = d.original_event_id
