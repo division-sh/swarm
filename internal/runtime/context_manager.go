@@ -99,12 +99,11 @@ type replacementPublication struct {
 // replacement publication. Preparation owns the candidate standing
 // occurrences; Publish is the only operation that makes them selectable.
 type PreparedRuntimeContextReplacement struct {
-	mu                sync.Mutex
-	manager           *RuntimeContextManager
-	publication       *replacementPublication
-	published         bool
-	discarded         bool
-	schedulesRestored bool
+	mu          sync.Mutex
+	manager     *RuntimeContextManager
+	publication *replacementPublication
+	published   bool
+	discarded   bool
 }
 
 // PreparedStandingServicePublication owns one fresh, unselectable standing
@@ -178,41 +177,67 @@ func (p *PreparedRuntimeContextReplacement) Publish() error {
 	if p.discarded || p.manager == nil || p.publication == nil {
 		return errors.New("prepared runtime context replacement is no longer active")
 	}
-	if !p.schedulesRestored {
-		if err := restoreReplacementStandingSchedules(p.publication); err != nil {
-			return err
-		}
-		p.schedulesRestored = true
+	scheduleTransition, err := prepareReplacementStandingSchedules(p.publication)
+	if err != nil {
+		return err
 	}
 	m := p.manager
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	entry := m.contexts[p.publication.existingHash]
 	if entry != p.publication.entry || entry == nil || entry.state != RuntimeContextStateUnloaded || entry.cause != RuntimeContextCauseReplacing {
+		m.mu.Unlock()
+		if scheduleTransition != nil {
+			_ = scheduleTransition.Abort()
+		}
 		return fmt.Errorf("runtime context %s is not unavailable for prepared replacement", p.publication.existingHash)
 	}
+	if scheduleTransition != nil {
+		if err := scheduleTransition.CommitDormant(); err != nil {
+			m.mu.Unlock()
+			_ = scheduleTransition.Abort()
+			return fmt.Errorf("commit replacement standing schedule set: %w", err)
+		}
+	}
 	m.applyReplacementPublicationLocked(p.publication)
+	if scheduleTransition != nil {
+		if err := scheduleTransition.Activate(); err != nil {
+			entry.state = RuntimeContextStateUnloaded
+			entry.cause = RuntimeContextCauseUnavailable
+			m.mu.Unlock()
+			return fmt.Errorf("activate replacement standing schedule set: %w", err)
+		}
+	}
 	p.published = true
+	m.mu.Unlock()
 	return nil
 }
 
-func restoreReplacementStandingSchedules(publication *replacementPublication) error {
+func prepareReplacementStandingSchedules(publication *replacementPublication) (*runtimepipeline.PreparedParkedSetRebind, error) {
 	if publication == nil || len(publication.parkedStanding) == 0 {
-		return nil
+		return nil, nil
 	}
 	if publication.runtime == nil || publication.runtime.Scheduler == nil {
-		return errors.New("replacement standing schedules require a candidate scheduler")
+		return nil, errors.New("replacement standing schedules require a candidate scheduler")
 	}
-	for serviceID, parked := range publication.parkedStanding {
+	serviceIDs := make([]string, 0, len(publication.parkedStanding))
+	for serviceID := range publication.parkedStanding {
+		serviceIDs = append(serviceIDs, serviceID)
+	}
+	sort.Strings(serviceIDs)
+	bindings := make([]runtimepipeline.ParkedRebind, 0, len(serviceIDs))
+	for _, serviceID := range serviceIDs {
+		parked := publication.parkedStanding[serviceID]
 		owner := publication.standing[serviceID]
 		if owner == nil {
-			continue
+			return nil, fmt.Errorf("replacement standing schedules for %s require a fresh standing owner", serviceID)
 		}
-		if err := parked.Rebind(context.Background(), publication.runtime.Scheduler, owner); err != nil {
-			return fmt.Errorf("restore replacement standing schedules for %s: %w", serviceID, err)
-		}
+		bindings = append(bindings, runtimepipeline.ParkedRebind{Parked: parked, Owner: owner})
 	}
-	return nil
+	prepared, err := runtimepipeline.PrepareParkedSetRebind(context.Background(), publication.runtime.Scheduler, bindings)
+	if err != nil {
+		return nil, fmt.Errorf("prepare complete replacement standing schedule set: %w", err)
+	}
+	return prepared, nil
 }
 
 func (p *PreparedRuntimeContextReplacement) Discard() error {
