@@ -60,15 +60,15 @@ func startClaimHeartbeat(ctx context.Context, owner worklifetime.Occurrence, sto
 		_ = workLease.Done()
 		return nil, fmt.Errorf("renew delivery claim before execution: %w", err)
 	}
+	leaseTTL := snapshot.ClaimExpiresAt.Sub(snapshot.UpdatedAt)
+	if leaseTTL <= 0 {
+		_ = workLease.Done()
+		return nil, fmt.Errorf("renewed delivery claim did not report a positive lease")
+	}
 	if interval == 0 {
-		leaseTTL := snapshot.ClaimExpiresAt.Sub(snapshot.UpdatedAt)
-		if leaseTTL <= 0 {
-			_ = workLease.Done()
-			return nil, fmt.Errorf("renewed delivery claim did not report a positive lease")
-		}
 		interval = leaseTTL / 3
 	}
-	if interval <= 0 || interval >= DefaultLeaseTTL {
+	if interval <= 0 || interval >= leaseTTL {
 		_ = workLease.Done()
 		return nil, fmt.Errorf("delivery claim heartbeat interval must be positive and shorter than the claim lease")
 	}
