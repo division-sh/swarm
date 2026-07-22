@@ -3747,12 +3747,12 @@ type servedEventReplayProofResult struct {
 }
 
 type servedAgentReplayProofResult struct {
-	EventID          string                    `json:"event_id"`
-	AgentID          string                    `json:"agent_id"`
-	ReplayEventID    string                    `json:"replay_event_id"`
-	AuditEventID     string                    `json:"audit_event_id"`
-	OriginalDelivery servedReplayProofDelivery `json:"original_delivery"`
-	NewDelivery      servedReplayProofDelivery `json:"new_delivery"`
+	EventID            string                      `json:"event_id"`
+	AgentID            string                      `json:"agent_id"`
+	ReplayEventID      string                      `json:"replay_event_id"`
+	AuditEventID       string                      `json:"audit_event_id"`
+	OriginalDeliveries []servedReplayProofDelivery `json:"original_deliveries"`
+	NewDeliveries      []servedReplayProofDelivery `json:"new_deliveries"`
 }
 
 type servedAgentReplayBacklogProofResult struct {
@@ -4377,7 +4377,10 @@ func requireServedLiveAgentAgentReplayResult(t *testing.T, rt servedControlProof
 	if result.EventID != originalEventID || result.AgentID != "load-agent" || result.ReplayEventID == "" || result.AuditEventID == "" || result.ReplayEventID == originalEventID || result.AuditEventID == originalEventID || result.AuditEventID == result.ReplayEventID {
 		t.Fatalf("%s agent.replay result IDs = %#v, want distinct original/replay/audit IDs for load-agent", rt.Backend, result)
 	}
-	requireServedLiveAgentReplayDeliveryPair(t, rt.Backend, result.OriginalDelivery, result.NewDelivery)
+	if len(result.OriginalDeliveries) != 1 || len(result.NewDeliveries) != 1 {
+		t.Fatalf("%s agent.replay deliveries = original %#v new %#v, want one exact pair", rt.Backend, result.OriginalDeliveries, result.NewDeliveries)
+	}
+	requireServedLiveAgentReplayDeliveryPair(t, rt.Backend, result.OriginalDeliveries[0], result.NewDeliveries[0])
 }
 
 func requireServedLiveAgentReplayDeliveryPair(t *testing.T, backend string, original, replayed servedReplayProofDelivery) {

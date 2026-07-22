@@ -133,7 +133,7 @@ func TestEventReplayTargetsPreserveAndValidateEveryExactSubscriberRoute(t *testi
 	failed := pending
 	failed.DeliveryID = "delivery-failed"
 	failed.Status = string(runtimedelivery.StatusFailed)
-	failed.Terminal = true
+	failed.Terminal = false
 	targets, subscribers, err := eventReplayTargets(store.OperatorEventFull{
 		EventID: "event-routes", Deliveries: []store.OperatorEventDelivery{delivered, failed},
 	}, []string{"agent-a"})
@@ -250,11 +250,12 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					originalID, events.EventType("scan.requested"), eventtest.Producer(events.EventProducerAgent, "origin-agent"), "event-owned-task",
 					json.RawMessage(`{"task_id":"payload-owned-task","topic":"medicine"}`), 4, runID, parentID, envelope, createdAt,
 				), "mock")
+				originalRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: agentID, Target: deliveryTarget}
 				storetest.CommitSemanticEvent(t, ctx, f.store, parent)
 				storetest.CommitSemanticEventWithRoutes(t, ctx, f.store, original,
-					[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: agentID}},
+					[]events.DeliveryRoute{originalRoute},
 					runtimereplayclaim.CommittedReplayScopeSubscribed)
-				markOperatorReplayDeliveryTerminal(t, ctx, f.store, f.db, f.sqlite, original, agentID)
+				markOperatorReplayDeliveryTerminal(t, ctx, f.store, f.db, f.sqlite, original, originalRoute)
 				persistedOriginal, err := f.store.LoadOperatorEvent(ctx, originalID)
 				if err != nil {
 					t.Fatalf("LoadOperatorEvent original: %v", err)
@@ -325,6 +326,212 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				assertOperatorReplaySnapshot(t, persistedSnapshot, persistedWant)
 			})
 		}
+	}
+}
+
+func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity(t *testing.T) {
+	type fixture struct {
+		store completeOperatorReplayProofStore
+		db    *sql.DB
+	}
+	for _, tc := range []struct {
+		name string
+		open func(*testing.T, context.Context) fixture
+	}{
+		{
+			name: "sqlite",
+			open: func(t *testing.T, ctx context.Context) fixture {
+				s := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+				return fixture{store: s, db: s.DB}
+			},
+		},
+		{
+			name: "postgres",
+			open: func(t *testing.T, _ context.Context) fixture {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				return fixture{store: storetest.AdmitPostgresRuntimeStore(t, db), db: db}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := testAuthorActivityContext(context.Background())
+			f := tc.open(t, ctx)
+			bus, err := newScopedAPITestEventBus(t, f.store, runtimebus.EventBusOptions{
+				ContractBundle: semanticview.Wrap(runStartTestBundle("scan.requested")),
+			})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			const agentID = "route-sibling-replay-agent"
+			ch := runtimebustest.Subscribe(t, bus, agentID)
+			defer runtimebustest.Unsubscribe(bus, agentID)
+
+			runID := uuid.NewString()
+			parentID := uuid.NewString()
+			originalID := uuid.NewString()
+			createdAt := time.Unix(1700001400, 0).UTC()
+			seedCompleteReplayRun(t, ctx, f.db, tc.name == "sqlite", runID, createdAt.Add(-time.Minute))
+			if err := f.store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+				Config: runtimeactors.AgentConfig{
+					ID: agentID, Role: "observer", Type: "stub", Model: "regular", ExecutionMode: "live",
+					Config: []byte(`{}`), Subscriptions: []string{"scan.requested"},
+				},
+				Status: "active", HiredBy: "test", StartedAt: createdAt,
+			}); err != nil {
+				t.Fatalf("UpsertAgent: %v", err)
+			}
+			firstProjection, err := events.NewDeliveryPayloadProjection(map[string]string{"route_marker": "first"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			secondProjection, err := events.NewDeliveryPayloadProjection(map[string]string{"route_marker": "second"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			routes := []events.DeliveryRoute{
+				{
+					SubscriberType: "agent", SubscriberID: agentID,
+					Target:  events.RouteIdentity{FlowID: "target-flow", FlowInstance: "target-flow/first", EntityID: uuid.NewString()},
+					Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-first"}}, PayloadProjection: firstProjection,
+				},
+				{
+					SubscriberType: "agent", SubscriberID: agentID,
+					Target:  events.RouteIdentity{FlowID: "target-flow", FlowInstance: "target-flow/second", EntityID: uuid.NewString()},
+					Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-second"}}, PayloadProjection: secondProjection,
+				},
+			}
+			parent := eventtest.InExecutionMode(eventtest.PersistedRuntimeControlForProducer(
+				parentID, events.EventType("replay.parent"), eventtest.Producer(events.EventProducerPlatform, "replay-proof"), "",
+				json.RawMessage(`{"parent":true}`), 0, runID, "", events.EventEnvelope{}, createdAt.Add(-time.Second),
+			), "mock")
+			original := eventtest.InExecutionMode(eventtest.PersistedChildForProducer(
+				originalID, events.EventType("scan.requested"), eventtest.Producer(events.EventProducerAgent, "origin-agent"), "",
+				json.RawMessage(`{"topic":"medicine"}`), 0, runID, parentID, events.EventEnvelope{Scope: events.EventScopeGlobal}, createdAt,
+			), "mock")
+			storetest.CommitSemanticEvent(t, ctx, f.store, parent)
+			storetest.CommitSemanticEventWithRoutes(t, ctx, f.store, original, routes, runtimereplayclaim.CommittedReplayScopeSubscribed)
+
+			firstClaim, err := f.store.ClaimAgentDelivery(ctx, original, routes[0])
+			if err != nil {
+				t.Fatalf("claim delivered route: %v", err)
+			}
+			if _, err := f.store.SettleSuccess(ctx, firstClaim.Claim, nil, time.Millisecond); err != nil {
+				t.Fatalf("settle delivered route: %v", err)
+			}
+			secondClaim, err := f.store.ClaimAgentDelivery(ctx, original, routes[1])
+			if err != nil {
+				t.Fatalf("claim failed route: %v", err)
+			}
+			if snapshot, err := f.store.SettleFailure(ctx, secondClaim.Claim, runtimedelivery.Settlement{
+				Disposition: runtimedelivery.FailureRetry, Failure: testFailure("handler_failed"), RetryBase: time.Hour,
+			}); err != nil || snapshot.Status != runtimedelivery.StatusFailed || snapshot.Terminal() {
+				t.Fatalf("settle retryable failed route snapshot=%#v err=%v", snapshot, err)
+			}
+
+			handler := completeOperatorReplayTestHandler(t, f.store, bus, createdAt.Add(time.Minute))
+			response := rpcCall(t, handler, eventReplayBody(originalID, []string{agentID}, "exact-routes-"+tc.name))
+			if response.Error != nil {
+				t.Fatalf("event.replay error = %#v", response.Error)
+			}
+			result := asMap(t, response.Result)
+			replayID := stringValue(t, result["replay_event_id"], "replay_event_id")
+			originalRows := asSlice(t, result["original_deliveries"])
+			newRows := asSlice(t, result["new_deliveries"])
+			if len(originalRows) != 2 || len(newRows) != 2 {
+				t.Fatalf("replay route rows original=%#v new=%#v, want two exact siblings", originalRows, newRows)
+			}
+			sourceByNew := map[string]string{}
+			for _, raw := range newRows {
+				row := asMap(t, raw)
+				sourceByNew[fmt.Sprint(row["delivery_id"])] = fmt.Sprint(row["source_delivery_id"])
+			}
+			for _, route := range routes {
+				originalObligation, err := runtimedelivery.NewObligation(originalID, runID, route)
+				if err != nil {
+					t.Fatal(err)
+				}
+				newObligation, err := runtimedelivery.NewObligation(replayID, runID, route)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := sourceByNew[newObligation.DeliveryID()]; got != originalObligation.DeliveryID() {
+					t.Fatalf("new delivery %s source = %q, want exact sibling %s", newObligation.DeliveryID(), got, originalObligation.DeliveryID())
+				}
+			}
+
+			persistedReplay, err := f.store.LoadOperatorEvent(ctx, replayID)
+			if err != nil {
+				t.Fatalf("LoadOperatorEvent replay: %v", err)
+			}
+			if len(persistedReplay.Deliveries) != 2 {
+				t.Fatalf("persisted replay deliveries = %#v, want two", persistedReplay.Deliveries)
+			}
+			for _, route := range routes {
+				matched := false
+				for _, delivery := range persistedReplay.Deliveries {
+					if events.SameDeliveryRouteIdentity(route, delivery.Route) {
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					t.Fatalf("persisted replay omitted exact route %#v", route)
+				}
+			}
+
+			received := map[string]events.Event{}
+			for range routes {
+				delivery := requireAPIV1RuntimeBusEvent(t, ch, "exact route sibling replay")
+				var payload map[string]any
+				if err := json.Unmarshal(delivery.Payload(), &payload); err != nil {
+					t.Fatalf("decode projected payload: %v", err)
+				}
+				received[fmt.Sprint(payload["route_marker"])] = delivery
+			}
+			for index, marker := range []string{"first", "second"} {
+				delivery, ok := received[marker]
+				if !ok {
+					t.Fatalf("received route markers = %#v, missing %s", received, marker)
+				}
+				if delivery.TargetRoute() != routes[index].Target.Normalized() || delivery.DeliveryContext().ReplyContextID() != routes[index].Context.ReplyContextID() {
+					t.Fatalf("received %s route target/context = %#v/%q, want %#v/%q", marker, delivery.TargetRoute(), delivery.DeliveryContext().ReplyContextID(), routes[index].Target, routes[index].Context.ReplyContextID())
+				}
+			}
+
+			agentResponse := rpcCall(t, handler, agentReplayBody(originalID, agentID, "exact-agent-routes-"+tc.name))
+			if agentResponse.Error != nil {
+				t.Fatalf("agent.replay error = %#v", agentResponse.Error)
+			}
+			agentResult := asMap(t, agentResponse.Result)
+			agentReplayID := stringValue(t, agentResult["replay_event_id"], "replay_event_id")
+			agentOriginals := asSlice(t, agentResult["original_deliveries"])
+			agentNew := asSlice(t, agentResult["new_deliveries"])
+			if len(agentOriginals) != 2 || len(agentNew) != 2 {
+				t.Fatalf("agent.replay route rows original=%#v new=%#v, want two exact siblings", agentOriginals, agentNew)
+			}
+			agentSourceByNew := map[string]string{}
+			for _, raw := range agentNew {
+				row := asMap(t, raw)
+				agentSourceByNew[fmt.Sprint(row["delivery_id"])] = fmt.Sprint(row["source_delivery_id"])
+			}
+			for _, route := range routes {
+				originalObligation, err := runtimedelivery.NewObligation(originalID, runID, route)
+				if err != nil {
+					t.Fatal(err)
+				}
+				newObligation, err := runtimedelivery.NewObligation(agentReplayID, runID, route)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := agentSourceByNew[newObligation.DeliveryID()]; got != originalObligation.DeliveryID() {
+					t.Fatalf("agent replay delivery %s source = %q, want %s", newObligation.DeliveryID(), got, originalObligation.DeliveryID())
+				}
+			}
+			for range routes {
+				requireAPIV1RuntimeBusEvent(t, ch, "agent exact route sibling replay")
+			}
+		})
 	}
 }
 
@@ -410,13 +617,13 @@ func completeOperatorReplayTestHandler(t *testing.T, owner completeOperatorRepla
 	})
 }
 
-func markOperatorReplayDeliveryTerminal(t *testing.T, ctx context.Context, owner runtimedelivery.Store, db *sql.DB, sqlite bool, evt events.Event, agentID string) {
+func markOperatorReplayDeliveryTerminal(t *testing.T, ctx context.Context, owner runtimedelivery.Store, db *sql.DB, sqlite bool, evt events.Event, route events.DeliveryRoute) {
 	t.Helper()
-	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: agentID}
 	claimed, err := owner.ClaimAgentDelivery(ctx, evt, route)
 	if err != nil {
 		t.Fatalf("claim original delivery: %v", err)
 	}
+	agentID := route.SubscriberID
 	sessionID := seedOperatorReplayDeliverySession(t, ctx, db, sqlite, evt.RunID(), agentID)
 	if _, err := owner.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 		t.Fatalf("bind original delivery session: %v", err)
@@ -889,13 +1096,21 @@ func TestOperatorAgentReplayProjectsSingletonEventReplayOwner(t *testing.T) {
 	if replayEventID == original.EventID || auditEventID == original.EventID || auditEventID == replayEventID {
 		t.Fatalf("event IDs not distinct: original=%s replay=%s audit=%s", original.EventID, replayEventID, auditEventID)
 	}
-	originalDelivery := asMap(t, result["original_delivery"])
-	if originalDelivery["subscriber_id"] != "agent-a" || strings.TrimSpace(fmt.Sprint(originalDelivery["delivery_id"])) == "" {
-		t.Fatalf("original_delivery = %#v, want agent-a delivery", originalDelivery)
+	originalDeliveries := asSlice(t, result["original_deliveries"])
+	if len(originalDeliveries) != 1 {
+		t.Fatalf("original_deliveries = %#v, want one", originalDeliveries)
 	}
-	newDelivery := asMap(t, result["new_delivery"])
+	originalDelivery := asMap(t, originalDeliveries[0])
+	if originalDelivery["subscriber_id"] != "agent-a" || strings.TrimSpace(fmt.Sprint(originalDelivery["delivery_id"])) == "" {
+		t.Fatalf("original_deliveries = %#v, want agent-a delivery", originalDeliveries)
+	}
+	newDeliveries := asSlice(t, result["new_deliveries"])
+	if len(newDeliveries) != 1 {
+		t.Fatalf("new_deliveries = %#v, want one", newDeliveries)
+	}
+	newDelivery := asMap(t, newDeliveries[0])
 	if newDelivery["subscriber_id"] != "agent-a" || newDelivery["source_delivery_id"] != originalDelivery["delivery_id"] {
-		t.Fatalf("new_delivery = %#v, want agent-a source delivery %s", newDelivery, originalDelivery["delivery_id"])
+		t.Fatalf("new_deliveries = %#v, want agent-a source delivery %s", newDeliveries, originalDelivery["delivery_id"])
 	}
 	assertReplayEventDelivered(t, chA, replayEventID, original.EventID)
 	assertNoReplayEvent(t, chB)
@@ -1067,8 +1282,8 @@ func (p *failOnceAuditEventPublisher) Publish(ctx context.Context, evt events.Ev
 	return p.inner.Publish(ctx, evt)
 }
 
-func (p *failOnceAuditEventPublisher) PublishDirect(ctx context.Context, evt events.Event, recipients []string) error {
-	return p.inner.PublishDirect(ctx, evt, recipients)
+func (p *failOnceAuditEventPublisher) PublishDirectRoutes(ctx context.Context, evt events.Event, routes []events.DeliveryRoute) error {
+	return p.inner.PublishDirectRoutes(ctx, evt, routes)
 }
 
 func (p *failOnceAuditEventPublisher) CheckDirectRecipients(ctx context.Context, evt events.Event, recipients []string) (runtimebus.DirectRecipientStatus, error) {

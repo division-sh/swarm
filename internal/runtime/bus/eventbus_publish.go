@@ -250,6 +250,7 @@ type eventBusCommitPublishPlan struct {
 	event            events.Event
 	direct           bool
 	directRecipients []string
+	directRoutes     []events.DeliveryRoute
 	admitted         events.AdmittedEvent
 	publicationClaim *pipelinePublicationClaim
 }
@@ -291,6 +292,12 @@ func (p eventBusCommitPublishPlan) PrepareCommitPublish(ctx context.Context) (Pr
 	if !p.direct {
 		return p.bus.prepareAdmittedPublishInMutation(ctx, p.admitted, p.publicationClaim, runtimereplayclaim.CommittedReplayScopeSubscribed, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
 			return p.bus.planSubscribedRoutePlan(ctx, evt, true)
+		})
+	}
+	if len(p.directRoutes) > 0 {
+		routes := events.NormalizeDeliveryRoutes(p.directRoutes)
+		return p.bus.prepareAdmittedPublishInMutation(ctx, p.admitted, p.publicationClaim, runtimereplayclaim.CommittedReplayScopeDirect, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
+			return p.bus.planExactDirectRoutePlan(ctx, evt, routes)
 		})
 	}
 	requested := uniqueStrings(p.directRecipients)
@@ -1408,6 +1415,40 @@ func (eb *EventBus) planDirectRoutePlan(ctx context.Context, evt events.Event, r
 	return plan.WithDefaultDeliveryContext(events.DeliveryContextFromContext(ctx)), nil
 }
 
+// planExactDirectRoutePlan uses current policy only to resolve live recipient
+// capabilities. The supplied routes remain the sole persistence and delivery
+// authority for target, context, and payload projection facts.
+func (eb *EventBus) planExactDirectRoutePlan(ctx context.Context, evt events.Event, routes []events.DeliveryRoute) (RoutePlan, error) {
+	routes = events.NormalizeDeliveryRoutes(routes)
+	if err := events.ValidateDeliveryRoutes(routes); err != nil {
+		return RoutePlan{}, err
+	}
+	recipients := make([]string, 0, len(routes))
+	for _, route := range routes {
+		if strings.TrimSpace(route.SubscriberType) != routePlanSubscriberAgent {
+			return RoutePlan{}, fmt.Errorf("exact direct delivery route must identify an agent subscriber")
+		}
+		recipients = append(recipients, route.SubscriberID)
+	}
+	recipients = uniqueStrings(recipients)
+	if len(recipients) == 0 {
+		return RoutePlan{}, errors.New("exact direct delivery routes are required")
+	}
+	plan, err := eb.planDirectRoutePlan(ctx, evt, recipients)
+	if err != nil {
+		return RoutePlan{}, err
+	}
+	if filtered := filteredRecipients(recipients, plan.RecipientIDs()); len(filtered) > 0 {
+		return RoutePlan{}, fmt.Errorf("exact direct delivery rejected recipients: %s", strings.Join(filtered, ", "))
+	}
+	plan.DeliveryIntents = routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerDirectPolicy)
+	plan = plan.Normalized()
+	if err := plan.ValidatePersistentDeliveries(); err != nil {
+		return RoutePlan{}, fmt.Errorf("validate exact direct delivery routes: %w", err)
+	}
+	return plan, nil
+}
+
 // PublishDirect persists an event and delivers it to an explicit caller-supplied
 // recipient set. The recipient manifest still routes through the canonical
 // delivery policy so explicit delivery cannot bypass scoped-recipient rules.
@@ -1426,6 +1467,32 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	}
 	ctx = eb.withBundleFingerprint(ctx)
 	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt, direct: true, directRecipients: uniqueStrings(recipients)})
+	if err != nil {
+		return err
+	}
+	return eb.dispatchPreparedPublish(ctx, prepared)
+}
+
+// PublishDirectRoutes persists and dispatches exactly the caller-supplied
+// agent routes. It is the closed public-replay boundary: current policy may
+// prove recipient availability but cannot replace route-owned facts.
+func (eb *EventBus) PublishDirectRoutes(ctx context.Context, evt events.Event, routes []events.DeliveryRoute) error {
+	lease, err := eb.beginRuntimeWork(ctx)
+	if err != nil {
+		return err
+	}
+	if lease != nil {
+		defer func() { _ = lease.Done() }()
+		ctx = bindWorkContext(ctx, lease, eb.workOwner)
+	}
+	ctx = WithCurrentRuntimeEpoch(ctx)
+	if err := ensurePublishEpoch(ctx); err != nil {
+		return err
+	}
+	ctx = eb.withBundleFingerprint(ctx)
+	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{
+		bus: eb, event: evt, direct: true, directRoutes: events.NormalizeDeliveryRoutes(routes),
+	})
 	if err != nil {
 		return err
 	}

@@ -55,8 +55,11 @@ func TestAgentReplayUsesV1RPCWithEventIDAndIdempotencyKey(t *testing.T) {
 		"event_id=event-1",
 		"replay_event_id=event-replay-1",
 		"audit_event_id=event-audit-1",
-		"original_delivery.delivery_id=delivery-original-1",
-		"new_delivery.delivery_id=delivery-new-1",
+		"deliveries=2",
+		"source_delivery_id=delivery-original-1",
+		"new_delivery_id=delivery-new-1",
+		"source_delivery_id=delivery-original-2",
+		"new_delivery_id=delivery-new-2",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
@@ -250,12 +253,12 @@ func TestAgentReplayMapsFailureExitCodes(t *testing.T) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
 				result := agentReplayTestResult()
-				original := result["original_delivery"].(map[string]any)
+				original := result["original_deliveries"].([]any)[0].(map[string]any)
 				delete(original, "delivery_id")
 				writeJSONRPCResult(t, w, req.ID, result)
 			},
 			wantCode:   3,
-			wantStderr: "original_delivery.delivery_id is required",
+			wantStderr: "original_deliveries[0].delivery_id is required",
 		},
 		{
 			name: "invalid delivery status exits three",
@@ -263,12 +266,12 @@ func TestAgentReplayMapsFailureExitCodes(t *testing.T) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
 				result := agentReplayTestResult()
-				newDelivery := result["new_delivery"].(map[string]any)
+				newDelivery := result["new_deliveries"].([]any)[0].(map[string]any)
 				newDelivery["status"] = "locally_replayed"
 				writeJSONRPCResult(t, w, req.ID, result)
 			},
 			wantCode:   3,
-			wantStderr: "new_delivery.status",
+			wantStderr: "new_deliveries[0].status",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -294,21 +297,34 @@ func agentReplayTestResult() map[string]any {
 		"agent_id":        "agent-1",
 		"replay_event_id": "event-replay-1",
 		"audit_event_id":  "event-audit-1",
-		"original_delivery": map[string]any{
+		"original_deliveries": []any{map[string]any{
 			"delivery_id":   "delivery-original-1",
 			"subscriber_id": "agent-1",
 			"session_id":    "session-original-1",
 			"status":        "delivered",
 			"attempt":       1,
-		},
-		"new_delivery": map[string]any{
+		}, map[string]any{
+			"delivery_id":   "delivery-original-2",
+			"subscriber_id": "agent-1",
+			"session_id":    "session-original-2",
+			"status":        "failed",
+			"attempt":       2,
+		}},
+		"new_deliveries": []any{map[string]any{
 			"delivery_id":        "delivery-new-1",
 			"subscriber_id":      "agent-1",
 			"session_id":         "session-new-1",
 			"status":             "pending",
 			"attempt":            1,
 			"source_delivery_id": "delivery-original-1",
-		},
+		}, map[string]any{
+			"delivery_id":        "delivery-new-2",
+			"subscriber_id":      "agent-1",
+			"session_id":         "session-new-2",
+			"status":             "pending",
+			"attempt":            1,
+			"source_delivery_id": "delivery-original-2",
+		}},
 	}
 }
 

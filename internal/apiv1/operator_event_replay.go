@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/runbundle"
@@ -25,7 +26,7 @@ const (
 
 type eventReplayPublisher interface {
 	EventPublisher
-	PublishDirect(context.Context, events.Event, []string) error
+	PublishDirectRoutes(context.Context, events.Event, []events.DeliveryRoute) error
 	CheckDirectRecipients(context.Context, events.Event, []string) (runtimebus.DirectRecipientStatus, error)
 }
 
@@ -54,15 +55,16 @@ type eventReplayDelivery struct {
 	FinishedAt       *time.Time                       `json:"finished_at,omitempty"`
 	DeadLetters      []store.OperatorDeadLetterRecord `json:"dead_letters,omitempty"`
 	SourceDeliveryID string                           `json:"source_delivery_id,omitempty"`
+	route            events.DeliveryRoute
 }
 
 type agentReplayResult struct {
-	EventID          string              `json:"event_id"`
-	AgentID          string              `json:"agent_id"`
-	ReplayEventID    string              `json:"replay_event_id"`
-	AuditEventID     string              `json:"audit_event_id"`
-	OriginalDelivery eventReplayDelivery `json:"original_delivery"`
-	NewDelivery      eventReplayDelivery `json:"new_delivery"`
+	EventID            string                `json:"event_id"`
+	AgentID            string                `json:"agent_id"`
+	ReplayEventID      string                `json:"replay_event_id"`
+	AuditEventID       string                `json:"audit_event_id"`
+	OriginalDeliveries []eventReplayDelivery `json:"original_deliveries"`
+	NewDeliveries      []eventReplayDelivery `json:"new_deliveries"`
 }
 
 type eventReplayStoredResult struct {
@@ -243,7 +245,11 @@ func performEventReplay(
 		}
 		publisher = selectedPublisher
 	}
-	_, selectedSubscribers, err := eventReplayTargets(original, requestedSubscribers)
+	originalDeliveries, selectedSubscribers, err := eventReplayTargets(original, requestedSubscribers)
+	if err != nil {
+		return eventReplayPerformed{}, err
+	}
+	selectedRoutes, err := eventReplayRoutes(originalDeliveries)
 	if err != nil {
 		return eventReplayPerformed{}, err
 	}
@@ -266,7 +272,7 @@ func performEventReplay(
 		})
 	}
 	var replayPublishErr error
-	if err := publisher.PublishDirect(ctx, replayEvent, selectedSubscribers); err != nil {
+	if err := publisher.PublishDirectRoutes(ctx, replayEvent, selectedRoutes); err != nil {
 		persisted, loadErr := eventReplayEvidencePersisted(ctx, opts, replayEventID)
 		if loadErr != nil {
 			return eventReplayPerformed{}, loadErr
@@ -405,11 +411,12 @@ func eventReplayTargets(original store.OperatorEventFull, requested []string) ([
 }
 
 func validateReplayEligibleDelivery(eventID string, delivery store.OperatorEventDelivery) error {
-	if delivery.Terminal {
+	status, err := runtimedelivery.ParseStatus(delivery.Status)
+	if err == nil && (status == runtimedelivery.StatusDelivered || status == runtimedelivery.StatusFailed || status == runtimedelivery.StatusDeadLetter) {
 		return nil
 	}
 	data := eventReplayDeliveryFailureEvidence(eventID, delivery)
-	data["reason"] = "original delivery is not terminal"
+	data["reason"] = "original delivery status is not replayable"
 	return NewApplicationError(EventReplayNotEligibleCode, false, data)
 }
 
@@ -424,6 +431,25 @@ func deliveriesForSubscribers(eventID string, index map[string][]store.OperatorE
 		}
 	}
 	return out, nil
+}
+
+func eventReplayRoutes(deliveries []eventReplayDelivery) ([]events.DeliveryRoute, error) {
+	routes := make([]events.DeliveryRoute, 0, len(deliveries))
+	for _, delivery := range deliveries {
+		route := delivery.route.Normalized()
+		if route.SubscriberType != eventReplaySubscriberTypeAgent || route.SubscriberID != strings.TrimSpace(delivery.SubscriberID) {
+			return nil, fmt.Errorf("replay source delivery %s is missing its exact agent route", strings.TrimSpace(delivery.DeliveryID))
+		}
+		routes = append(routes, route)
+	}
+	routes = events.NormalizeDeliveryRoutes(routes)
+	if err := events.ValidateDeliveryRoutes(routes); err != nil {
+		return nil, fmt.Errorf("validate replay source routes: %w", err)
+	}
+	if len(routes) != len(deliveries) {
+		return nil, fmt.Errorf("replay source routes are not one-to-one with original deliveries")
+	}
+	return routes, nil
 }
 
 func replayEventFromOriginal(original store.OperatorEventFull, replayEventID string, now time.Time) (events.Event, error) {
@@ -487,7 +513,10 @@ func eventReplayResultFromStore(ctx context.Context, opts OperatorReadOptions, s
 	if err != nil {
 		return eventReplayResult{}, err
 	}
-	newDeliveries := eventReplayNewDeliveries(replay.Deliveries, originalDeliveries)
+	newDeliveries, err := eventReplayNewDeliveries(replay.Deliveries, originalDeliveries)
+	if err != nil {
+		return eventReplayResult{}, err
+	}
 	return eventReplayResult{
 		EventID:             strings.TrimSpace(stored.EventID),
 		ReplayEventID:       strings.TrimSpace(stored.ReplayEventID),
@@ -498,20 +527,43 @@ func eventReplayResultFromStore(ctx context.Context, opts OperatorReadOptions, s
 	}, nil
 }
 
-func eventReplayNewDeliveries(deliveries []store.OperatorEventDelivery, originals []eventReplayDelivery) []eventReplayDelivery {
-	sourceBySubscriber := map[string]string{}
+func eventReplayNewDeliveries(deliveries []store.OperatorEventDelivery, originals []eventReplayDelivery) ([]eventReplayDelivery, error) {
+	sourceByRoute := map[string]string{}
 	for _, original := range originals {
-		sourceBySubscriber[original.SubscriberID] = original.DeliveryID
+		identity, err := original.route.Identity()
+		if err != nil {
+			return nil, fmt.Errorf("original replay delivery %s route: %w", original.DeliveryID, err)
+		}
+		if _, duplicate := sourceByRoute[identity.String()]; duplicate {
+			return nil, fmt.Errorf("duplicate original replay route identity %s", identity.String())
+		}
+		sourceByRoute[identity.String()] = original.DeliveryID
 	}
 	out := make([]eventReplayDelivery, 0, len(deliveries))
+	matched := map[string]struct{}{}
 	for _, delivery := range deliveries {
 		subscriberID := strings.TrimSpace(delivery.SubscriberID)
 		if strings.TrimSpace(delivery.SubscriberType) != eventReplaySubscriberTypeAgent || subscriberID == "" {
 			continue
 		}
-		out = append(out, eventReplayDeliveryFromStore(delivery, sourceBySubscriber[subscriberID]))
+		identity, err := delivery.Route.Identity()
+		if err != nil {
+			return nil, fmt.Errorf("new replay delivery %s route: %w", delivery.DeliveryID, err)
+		}
+		sourceDeliveryID := sourceByRoute[identity.String()]
+		if sourceDeliveryID == "" {
+			return nil, fmt.Errorf("new replay delivery %s has no exact original route", delivery.DeliveryID)
+		}
+		if _, duplicate := matched[sourceDeliveryID]; duplicate {
+			return nil, fmt.Errorf("original replay delivery %s matched multiple new deliveries", sourceDeliveryID)
+		}
+		matched[sourceDeliveryID] = struct{}{}
+		out = append(out, eventReplayDeliveryFromStore(delivery, sourceDeliveryID))
 	}
-	return out
+	if len(out) != len(originals) {
+		return nil, fmt.Errorf("replay persisted %d exact agent deliveries, want %d", len(out), len(originals))
+	}
+	return out, nil
 }
 
 func eventReplayDeliveryFromStore(delivery store.OperatorEventDelivery, sourceDeliveryID string) eventReplayDelivery {
@@ -532,6 +584,7 @@ func eventReplayDeliveryFromStore(delivery store.OperatorEventDelivery, sourceDe
 		FinishedAt:       published.FinishedAt,
 		DeadLetters:      append([]store.OperatorDeadLetterRecord(nil), published.DeadLetters...),
 		SourceDeliveryID: strings.TrimSpace(sourceDeliveryID),
+		route:            delivery.Route.Normalized(),
 	}
 }
 
@@ -557,32 +610,30 @@ func eventReplayDeliveryFailureEvidence(eventID string, delivery store.OperatorE
 
 func agentReplayResultFromEventReplay(agentID string, replay eventReplayResult) (agentReplayResult, error) {
 	agentID = strings.TrimSpace(agentID)
-	original, ok := deliveryForSubscriber(replay.OriginalDeliveries, agentID)
-	if !ok {
+	originals := deliveriesForSubscriber(replay.OriginalDeliveries, agentID)
+	if len(originals) == 0 {
 		return agentReplayResult{}, fmt.Errorf("agent.replay canonical replay result missing original delivery for agent %s", agentID)
 	}
-	newDelivery, ok := deliveryForSubscriber(replay.NewDeliveries, agentID)
-	if !ok {
+	newDeliveries := deliveriesForSubscriber(replay.NewDeliveries, agentID)
+	if len(newDeliveries) != len(originals) {
 		return agentReplayResult{}, fmt.Errorf("agent.replay canonical replay result missing new delivery for agent %s", agentID)
 	}
 	return agentReplayResult{
-		EventID:          strings.TrimSpace(replay.EventID),
-		AgentID:          agentID,
-		ReplayEventID:    strings.TrimSpace(replay.ReplayEventID),
-		AuditEventID:     strings.TrimSpace(replay.AuditEventID),
-		OriginalDelivery: original,
-		NewDelivery:      newDelivery,
+		EventID: strings.TrimSpace(replay.EventID), AgentID: agentID,
+		ReplayEventID: strings.TrimSpace(replay.ReplayEventID), AuditEventID: strings.TrimSpace(replay.AuditEventID),
+		OriginalDeliveries: originals, NewDeliveries: newDeliveries,
 	}, nil
 }
 
-func deliveryForSubscriber(deliveries []eventReplayDelivery, subscriberID string) (eventReplayDelivery, bool) {
+func deliveriesForSubscriber(deliveries []eventReplayDelivery, subscriberID string) []eventReplayDelivery {
 	subscriberID = strings.TrimSpace(subscriberID)
+	out := make([]eventReplayDelivery, 0, len(deliveries))
 	for _, delivery := range deliveries {
 		if strings.TrimSpace(delivery.SubscriberID) == subscriberID {
-			return delivery, true
+			out = append(out, delivery)
 		}
 	}
-	return eventReplayDelivery{}, false
+	return out
 }
 
 func eventReplayActorSource(req Request) string {

@@ -273,6 +273,7 @@ func TestCLIHumanCodeUnknownValuesRemainVerbatim(t *testing.T) {
 
 func TestCLIHumanCodePublicConsumersUseSharedProjector(t *testing.T) {
 	required := map[string][]string{
+		"agent_replay.go\x00writeAgentReplayResult":                    {string(userfacing.HumanCodeDeliveryStatus)},
 		"agents.go\x00writeAgentListResult":                            {string(userfacing.HumanCodeAgentStatus), string(userfacing.HumanCodeMemorySource)},
 		"agents.go\x00writeAgentDeliveryLifecycleListResult":           {string(userfacing.HumanCodeDeliveryStatus)},
 		"agents.go\x00writeAgentDiagnosisResult":                       {string(userfacing.HumanCodeAgentLifecycleBlockingLayer), string(userfacing.HumanCodeAgentLifecycleState), string(userfacing.HumanCodeAgentStatus), string(userfacing.HumanCodeWatchdogAction), string(userfacing.HumanCodeWatchdogBlockingLayer), string(userfacing.HumanCodeWatchdogOutcome), string(userfacing.HumanCodeWatchdogState)},
