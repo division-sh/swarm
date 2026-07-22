@@ -1016,7 +1016,7 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	var activeSessionNull, startedNull, settledNull bool
 	if err := db.QueryRowContext(ctx, `
 		SELECT delivery_id::text, run_id::text, event_id::text, subscriber_type, subscriber_id, status, retry_count,
-		       COALESCE(reason_code, ''), active_session_id IS NULL, started_at IS NULL, settled_at IS NULL
+		       COALESCE(reason_code, ''), current_attempt_version IS NULL, started_at IS NULL, settled_at IS NULL
 		FROM event_deliveries
 		WHERE run_id = $1::uuid
 		  AND subscriber_type = 'agent'

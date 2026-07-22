@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -67,6 +68,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					t.Fatalf("second live claim error = %v, want ErrIneligible", err)
 				}
 				sessionID := uuid.NewString()
+				seedDeliveryAgentSession(t, ctx, backend, sessionID, event.RunID(), agent.SubscriberID)
 				bound, err := backend.store.BindAgentSession(ctx, claimed.Claim, sessionID)
 				if err != nil {
 					t.Fatalf("bind agent session: %v", err)
@@ -238,7 +240,220 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				}
 				assertDeliveryAttemptHistory(t, ctx, backend, settled.DeliveryID)
 			})
+
+			t.Run("fresh_schema_rejects_disconnected_lifecycle_facts", func(t *testing.T) {
+				assertDeliverySchemaRejectsDisconnectedFacts(t, ctx, backend)
+			})
+
+			t.Run("expired_claim_precedes_continuous_pending_backlog", func(t *testing.T) {
+				agentID := "selector-agent-" + backend.name
+				expiredEvent := deliveryLifecycleEvent("selector-expired-" + backend.name)
+				route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: agentID}
+				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, expiredEvent, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+				claimed, err := backend.store.ClaimAgentDelivery(ctx, expiredEvent, route)
+				if err != nil {
+					t.Fatalf("claim selector expiry candidate: %v", err)
+				}
+				expireDeliveryClaimForConformance(t, ctx, backend, claimed.Snapshot.DeliveryID)
+				for index := 0; index < 12; index++ {
+					pending := deliveryLifecycleEvent(fmt.Sprintf("selector-pending-%s-%02d", backend.name, index))
+					storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, pending, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+				}
+				backlog, err := backend.restart.ClaimAgentBacklog(ctx, agentID, 1)
+				if err != nil {
+					t.Fatalf("claim saturated backlog: %v", err)
+				}
+				if len(backlog) != 1 || backlog[0].Snapshot.DeliveryID != claimed.Snapshot.DeliveryID || backlog[0].Claim.Version() != claimed.Claim.Version()+1 {
+					t.Fatalf("first saturated claim = %#v, want expired delivery %s version %d", backlog, claimed.Snapshot.DeliveryID, claimed.Claim.Version()+1)
+				}
+			})
+
+			t.Run("terminal_settlement_commits_exact_diagnostic_atomically", func(t *testing.T) {
+				for _, class := range []runtimedelivery.SubscriberClass{runtimedelivery.SubscriberAgent, runtimedelivery.SubscriberNode} {
+					class := class
+					t.Run(string(class), func(t *testing.T) {
+						event := deliveryLifecycleEvent(fmt.Sprintf("atomic-diagnostic-%s-%s", backend.name, class))
+						route := events.DeliveryRoute{SubscriberType: string(class), SubscriberID: "diagnostic-" + string(class)}
+						storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+						var claimed runtimedelivery.ClaimedObligation
+						var err error
+						if class == runtimedelivery.SubscriberAgent {
+							claimed, err = backend.store.ClaimAgentDelivery(ctx, event, route)
+						} else {
+							claimed, err = backend.store.ClaimNodeDelivery(ctx, event, route)
+						}
+						if err != nil {
+							t.Fatalf("claim %s diagnostic delivery: %v", class, err)
+						}
+						removeFault := installDeliveryDeadLetterFault(t, ctx, backend)
+						settlement := runtimedelivery.Settlement{
+							Disposition: runtimedelivery.FailureDeadLetter,
+							ReasonCode:  "terminal_test_failure",
+							Failure:     testFailure("terminal_test_failure"),
+						}
+						if _, err := backend.store.SettleFailure(ctx, claimed.Claim, settlement); err == nil {
+							t.Fatal("terminal settlement succeeded while required diagnostic writer was faulted")
+						}
+						assertDeliverySettlementRolledBack(t, ctx, backend, claimed)
+						removeFault()
+						settled, err := backend.store.SettleFailure(ctx, claimed.Claim, settlement)
+						if err != nil {
+							t.Fatalf("settle %s diagnostic delivery: %v", class, err)
+						}
+						assertExactDeliveryDeadLetter(t, ctx, backend, event, settled)
+					})
+				}
+			})
 		})
+	}
+}
+
+func installDeliveryDeadLetterFault(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend) func() {
+	t.Helper()
+	if backend.postgres {
+		if _, err := backend.db.ExecContext(ctx, `CREATE OR REPLACE FUNCTION fail_delivery_dead_letter_insert() RETURNS trigger AS $$ BEGIN IF NEW.delivery_id IS NOT NULL THEN RAISE EXCEPTION 'forced delivery diagnostic failure'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql`); err != nil {
+			t.Fatalf("create delivery diagnostic fault function: %v", err)
+		}
+		if _, err := backend.db.ExecContext(ctx, `CREATE TRIGGER fail_delivery_dead_letter_insert BEFORE INSERT ON dead_letters FOR EACH ROW EXECUTE FUNCTION fail_delivery_dead_letter_insert()`); err != nil {
+			t.Fatalf("create delivery diagnostic fault trigger: %v", err)
+		}
+		cleanup := func() {
+			if _, err := backend.db.ExecContext(ctx, `DROP TRIGGER IF EXISTS fail_delivery_dead_letter_insert ON dead_letters`); err != nil {
+				t.Fatalf("drop delivery diagnostic fault trigger: %v", err)
+			}
+			if _, err := backend.db.ExecContext(ctx, `DROP FUNCTION IF EXISTS fail_delivery_dead_letter_insert()`); err != nil {
+				t.Fatalf("drop delivery diagnostic fault function: %v", err)
+			}
+		}
+		t.Cleanup(cleanup)
+		return cleanup
+	}
+	if _, err := backend.db.ExecContext(ctx, `CREATE TRIGGER fail_delivery_dead_letter_insert BEFORE INSERT ON dead_letters WHEN NEW.delivery_id IS NOT NULL BEGIN SELECT RAISE(ABORT, 'forced delivery diagnostic failure'); END`); err != nil {
+		t.Fatalf("create sqlite delivery diagnostic fault trigger: %v", err)
+	}
+	cleanup := func() {
+		if _, err := backend.db.ExecContext(ctx, `DROP TRIGGER IF EXISTS fail_delivery_dead_letter_insert`); err != nil {
+			t.Fatalf("drop sqlite delivery diagnostic fault trigger: %v", err)
+		}
+	}
+	t.Cleanup(cleanup)
+	return cleanup
+}
+
+func assertDeliverySettlementRolledBack(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, claimed runtimedelivery.ClaimedObligation) {
+	t.Helper()
+	snapshot, err := backend.store.Snapshot(ctx, claimed.Snapshot.DeliveryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Status != runtimedelivery.StatusInProgress || snapshot.ClaimVersion != claimed.Claim.Version() {
+		t.Fatalf("faulted settlement snapshot = %#v, want original in-progress claim", snapshot)
+	}
+	query := `SELECT (SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id=$1::uuid), (SELECT COUNT(*) FROM dead_letters WHERE delivery_id=$1::uuid), (SELECT COUNT(*) FROM author_activity_occurrences WHERE source_identity=$1::text AND transition='dead_letter')`
+	if !backend.postgres {
+		query = `SELECT (SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id=?), (SELECT COUNT(*) FROM dead_letters WHERE delivery_id=?), (SELECT COUNT(*) FROM author_activity_occurrences WHERE source_identity=? AND transition='dead_letter')`
+	}
+	args := []any{claimed.Snapshot.DeliveryID}
+	if !backend.postgres {
+		args = []any{claimed.Snapshot.DeliveryID, claimed.Snapshot.DeliveryID, claimed.Snapshot.DeliveryID}
+	}
+	var outcomes, diagnostics, transitions int
+	if err := backend.db.QueryRowContext(ctx, query, args...).Scan(&outcomes, &diagnostics, &transitions); err != nil {
+		t.Fatalf("read faulted settlement evidence: %v", err)
+	}
+	if outcomes != 0 || diagnostics != 0 || transitions != 0 {
+		t.Fatalf("faulted settlement evidence outcomes=%d diagnostics=%d transitions=%d, want all zero", outcomes, diagnostics, transitions)
+	}
+}
+
+func assertExactDeliveryDeadLetter(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, event events.Event, settled runtimedelivery.Snapshot) {
+	t.Helper()
+	query := `SELECT delivery_id::text, claim_version, original_event, original_payload, retry_count, chain_depth, handler_node FROM dead_letters WHERE delivery_id=$1::uuid AND claim_version=$2`
+	if !backend.postgres {
+		query = `SELECT delivery_id, claim_version, original_event, original_payload, retry_count, chain_depth, handler_node FROM dead_letters WHERE delivery_id=? AND claim_version=?`
+	}
+	var deliveryID, eventType, handler string
+	var claimVersion int64
+	var payload []byte
+	var retryCount, chainDepth int
+	if err := backend.db.QueryRowContext(ctx, query, settled.DeliveryID, settled.ClaimVersion).Scan(&deliveryID, &claimVersion, &eventType, &payload, &retryCount, &chainDepth, &handler); err != nil {
+		t.Fatalf("read exact terminal delivery diagnostic: %v", err)
+	}
+	var gotPayload, wantPayload any
+	if err := json.Unmarshal(payload, &gotPayload); err != nil {
+		t.Fatalf("decode terminal diagnostic payload: %v", err)
+	}
+	if err := json.Unmarshal(event.Payload(), &wantPayload); err != nil {
+		t.Fatal(err)
+	}
+	if deliveryID != settled.DeliveryID || claimVersion != settled.ClaimVersion || eventType != string(event.Type()) ||
+		!reflect.DeepEqual(gotPayload, wantPayload) || retryCount != settled.RetryCount || chainDepth != event.ChainDepth() || handler != settled.SubscriberID {
+		t.Fatalf("terminal diagnostic = delivery:%s version:%d type:%s payload:%v retry:%d depth:%d handler:%s; want exact settled/event facts", deliveryID, claimVersion, eventType, gotPayload, retryCount, chainDepth, handler)
+	}
+}
+
+func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend) {
+	t.Helper()
+	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "schema-agent-" + backend.name}
+	event := deliveryLifecycleEvent("schema-event-" + backend.name)
+	other := deliveryLifecycleEvent("schema-other-run-" + backend.name)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, other, nil, runtimereplayclaim.CommittedReplayScopeDirect)
+	proof, err := backend.store.ProveHandoff(ctx, event.ID(), route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDeliverySQLRejected(t, backend, "event/run mismatch",
+		`UPDATE event_deliveries SET run_id = $1::uuid WHERE delivery_id = $2::uuid`,
+		`UPDATE event_deliveries SET run_id = ? WHERE delivery_id = ?`,
+		[]any{other.RunID(), proof.DeliveryID()})
+
+	missingAttemptEvent := deliveryLifecycleEvent("schema-missing-attempt-" + backend.name)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, missingAttemptEvent, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	missingAttempt, err := backend.store.ProveHandoff(ctx, missingAttemptEvent.ID(), route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	assertDeliverySQLRejected(t, backend, "in-progress without open attempt",
+		`UPDATE event_deliveries SET status='in_progress', next_eligible_at=NULL, claim_version=1, current_attempt_version=1, current_attempt_open=TRUE, started_at=$1, updated_at=$1 WHERE delivery_id=$2::uuid`,
+		`UPDATE event_deliveries SET status='in_progress', next_eligible_at=NULL, claim_version=1, current_attempt_version=1, current_attempt_open=TRUE, started_at=?, updated_at=? WHERE delivery_id=?`,
+		[]any{now, missingAttempt.DeliveryID()})
+
+	sessionEvent := deliveryLifecycleEvent("schema-session-" + backend.name)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, sessionEvent, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	claimed, err := backend.store.ClaimAgentDelivery(ctx, sessionEvent, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDeliverySQLRejected(t, backend, "nonexistent exact agent session",
+		`UPDATE event_delivery_attempts SET active_session_id=$1::uuid, session_run_id=$2::uuid, session_agent_id=$3 WHERE delivery_id=$4::uuid AND claim_version=$5`,
+		`UPDATE event_delivery_attempts SET active_session_id=?, session_run_id=?, session_agent_id=? WHERE delivery_id=? AND claim_version=?`,
+		[]any{uuid.NewString(), sessionEvent.RunID(), route.SubscriberID, claimed.Snapshot.DeliveryID, claimed.Claim.Version()})
+
+	outcomeEvent := deliveryLifecycleEvent("schema-outcome-" + backend.name)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, outcomeEvent, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	outcomeProof, err := backend.store.ProveHandoff(ctx, outcomeEvent.ID(), route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDeliverySQLRejected(t, backend, "outcome without exact attempt",
+		`INSERT INTO event_delivery_outcomes (delivery_id, claim_version, outcome, side_effects, duration_ms, settled_at) VALUES ($1::uuid, 99, 'delivered', '[]'::jsonb, 0, $2)`,
+		`INSERT INTO event_delivery_outcomes (delivery_id, claim_version, outcome, side_effects, duration_ms, settled_at) VALUES (?, 99, 'delivered', '[]', 0, ?)`,
+		[]any{outcomeProof.DeliveryID(), now})
+}
+
+func assertDeliverySQLRejected(t *testing.T, backend deliveryLifecycleConformanceBackend, name, postgresQuery, sqliteQuery string, args []any) {
+	t.Helper()
+	query := postgresQuery
+	if !backend.postgres {
+		query = sqliteQuery
+		if name == "in-progress without open attempt" {
+			args = []any{args[0], args[0], args[1]}
+		}
+	}
+	if _, err := backend.db.Exec(query, args...); err == nil {
+		t.Fatalf("%s mutation succeeded; fresh schema must reject it", name)
 	}
 }
 
@@ -321,17 +536,17 @@ func expireDeliveryClaimForConformance(t *testing.T, ctx context.Context, backen
 		t.Fatalf("begin claim-expiry proof: %v", err)
 	}
 	defer func() { _ = transaction.Rollback() }()
-	deliveryQuery := `UPDATE event_deliveries SET created_at = $1, started_at = $1, updated_at = $2, claim_expires_at = $2 WHERE delivery_id = $3::uuid AND status = 'in_progress'`
-	attemptQuery := `UPDATE event_delivery_attempts SET started_at = $1, lease_expires_at = $2 WHERE delivery_id = $3::uuid AND outcome IS NULL`
+	deliveryQuery := `UPDATE event_deliveries SET created_at = $1, started_at = $1, updated_at = $2 WHERE delivery_id = $3::uuid AND status = 'in_progress'`
+	attemptQuery := `UPDATE event_delivery_attempts SET started_at = $1, lease_expires_at = $2 WHERE delivery_id = $3::uuid AND open_marker = TRUE`
 	if !backend.postgres {
-		deliveryQuery = `UPDATE event_deliveries SET created_at = ?, started_at = ?, updated_at = ?, claim_expires_at = ? WHERE delivery_id = ? AND status = 'in_progress'`
-		attemptQuery = `UPDATE event_delivery_attempts SET started_at = ?, lease_expires_at = ? WHERE delivery_id = ? AND outcome IS NULL`
+		deliveryQuery = `UPDATE event_deliveries SET created_at = ?, started_at = ?, updated_at = ? WHERE delivery_id = ? AND status = 'in_progress'`
+		attemptQuery = `UPDATE event_delivery_attempts SET started_at = ?, lease_expires_at = ? WHERE delivery_id = ? AND open_marker = TRUE`
 	}
 	var deliveryResult sql.Result
 	if backend.postgres {
 		deliveryResult, err = transaction.ExecContext(ctx, deliveryQuery, startedAt, expiresAt, deliveryID)
 	} else {
-		deliveryResult, err = transaction.ExecContext(ctx, deliveryQuery, startedAt, startedAt, expiresAt, expiresAt, deliveryID)
+		deliveryResult, err = transaction.ExecContext(ctx, deliveryQuery, startedAt, startedAt, expiresAt, deliveryID)
 	}
 	if err != nil {
 		t.Fatalf("expire delivery claim: %v", err)
@@ -382,9 +597,9 @@ func assertDeliveryAttemptHistory(t *testing.T, ctx context.Context, backend del
 
 func assertDeliveryAttemptLeaseMatchesObligation(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, deliveryID string, version int64) {
 	t.Helper()
-	query := `SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id = a.delivery_id WHERE a.delivery_id = $1::uuid AND a.claim_version = $2 AND a.outcome IS NULL AND a.lease_expires_at = d.claim_expires_at`
+	query := `SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id = a.delivery_id AND d.current_attempt_version = a.claim_version AND d.current_attempt_open = TRUE WHERE a.delivery_id = $1::uuid AND a.claim_version = $2 AND a.open_marker = TRUE`
 	if !backend.postgres {
-		query = `SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id = a.delivery_id WHERE a.delivery_id = ? AND a.claim_version = ? AND a.outcome IS NULL AND a.lease_expires_at = d.claim_expires_at`
+		query = `SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id = a.delivery_id AND d.current_attempt_version = a.claim_version AND d.current_attempt_open = TRUE WHERE a.delivery_id = ? AND a.claim_version = ? AND a.open_marker = TRUE`
 	}
 	var matches int
 	if err := backend.db.QueryRowContext(ctx, query, deliveryID, version).Scan(&matches); err != nil {
@@ -410,6 +625,22 @@ func deliveryLifecycleEvent(label string) events.Event {
 	)
 }
 
+func seedDeliveryAgentSession(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, sessionID, runID, agentID string) {
+	t.Helper()
+	agentQuery := `INSERT INTO agents (agent_id, role, model) VALUES ($1, 'delivery-test', 'test') ON CONFLICT (agent_id) DO NOTHING`
+	sessionQuery := `INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance) VALUES ($1::uuid, $2::uuid, $3, $4)`
+	if !backend.postgres {
+		agentQuery = `INSERT OR IGNORE INTO agents (agent_id, role, model) VALUES (?, 'delivery-test', 'test')`
+		sessionQuery = `INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance) VALUES (?, ?, ?, ?)`
+	}
+	if _, err := backend.db.ExecContext(ctx, agentQuery, agentID); err != nil {
+		t.Fatalf("seed delivery agent: %v", err)
+	}
+	if _, err := backend.db.ExecContext(ctx, sessionQuery, sessionID, runID, agentID, "delivery-conformance"); err != nil {
+		t.Fatalf("seed delivery agent session: %v", err)
+	}
+}
+
 func deliveryLifecycleConformanceBackends(t *testing.T) []deliveryLifecycleConformanceBackend {
 	t.Helper()
 	sqlite, sqliteRestart := storetest.StartSQLiteRuntimeStorePair(t)
@@ -428,10 +659,10 @@ func requireCanonicalDeliveryLifecycleSurface(t *testing.T, ctx context.Context,
 	storetest.BootstrapPostgresRuntimeStore(t, pg)
 	requireTableColumns(t, ctx, pg.DB, "event_deliveries",
 		"delivery_id", "event_id", "route_identity", "subscriber_type", "subscriber_id",
-		"status", "retry_count", "max_retries", "claim_token", "claim_version",
-		"claim_expires_at", "settled_at")
+		"status", "retry_count", "max_retries", "claim_version", "current_attempt_version",
+		"current_attempt_open", "settled_at")
 	requireTableColumns(t, ctx, pg.DB, "event_delivery_attempts",
-		"delivery_id", "claim_version", "claim_token", "started_at", "lease_expires_at", "outcome")
+		"delivery_id", "claim_version", "claim_token", "started_at", "lease_expires_at", "active_session_id", "open_marker", "outcome")
 	requireTableColumns(t, ctx, pg.DB, "event_delivery_outcomes",
 		"delivery_id", "claim_version", "outcome", "side_effects", "duration_ms", "settled_at")
 }

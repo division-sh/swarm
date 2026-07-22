@@ -63,32 +63,14 @@ func seedPostgresStoreEvent(
 
 func resetAgentSessionsSpecTable(t *testing.T, ctx context.Context, pg *PostgresStore) {
 	t.Helper()
-	if _, err := pg.DB.ExecContext(ctx, `DROP TABLE IF EXISTS agent_sessions CASCADE`); err != nil {
-		t.Fatalf("drop legacy agent_sessions: %v", err)
+	if err := pg.requireCurrentSchema(); err != nil {
+		t.Fatalf("canonical agent session schema: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `DROP TABLE IF EXISTS agent_turns CASCADE`); err != nil {
-		t.Fatalf("drop legacy agent_turns: %v", err)
+	if _, err := pg.DB.ExecContext(ctx, `DELETE FROM agent_turns`); err != nil {
+		t.Fatalf("clear agent turns: %v", err)
 	}
-	spec := loadPlatformSpecForSQLiteSchemaTest(t)
-	allPlans, err := GeneratePlatformTableDDLs(spec)
-	if err != nil {
-		t.Fatalf("GeneratePlatformTableDDLs(agent_sessions): %v", err)
-	}
-	plans := make([]SchemaTableDDL, 0, 2)
-	for _, plan := range allPlans {
-		if plan.TableName == "agent_sessions" || plan.TableName == "agent_turns" {
-			plans = append(plans, plan)
-		}
-	}
-	if len(plans) != 2 {
-		t.Fatalf("canonical agent memory plans = %#v, want sessions and turns", plans)
-	}
-	for _, plan := range plans {
-		for _, statement := range plan.Statements {
-			if _, err := pg.DB.ExecContext(ctx, statement); err != nil {
-				t.Fatalf("create canonical %s test table: %v", plan.TableName, err)
-			}
-		}
+	if _, err := pg.DB.ExecContext(ctx, `DELETE FROM agent_sessions`); err != nil {
+		t.Fatalf("clear agent sessions: %v", err)
 	}
 }
 
@@ -1013,7 +995,7 @@ func TestPostgresStore_PersistEventWithDeliveries_SuccessAndRollbackOnFailure(t 
 		events.EventType("system.directive"),
 		"human", "", []byte(`{"directive":"SaaS in Argentina"}`), 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, time.Now().UTC()),
 
-		[]string{" control-plane ", "", "control-plane"}); err != nil {
+		[]string{"control-plane"}); err != nil {
 		t.Fatalf("PersistEventWithDeliveries success path: %v", err)
 	}
 

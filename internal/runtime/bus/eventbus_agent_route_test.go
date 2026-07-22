@@ -91,9 +91,8 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 			max_retries INTEGER NOT NULL,
 			next_eligible_at TIMESTAMP,
 			claim_version INTEGER NOT NULL,
-			claim_token TEXT,
-			claim_expires_at TIMESTAMP,
-			active_session_id TEXT,
+			current_attempt_version INTEGER,
+			current_attempt_open BOOLEAN,
 			reason_code TEXT,
 			failure BLOB,
 			started_at TIMESTAMP,
@@ -101,6 +100,24 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL,
 			UNIQUE (event_id, route_identity)
+		)`,
+		`CREATE TABLE event_delivery_attempts (
+			delivery_id TEXT NOT NULL,
+			claim_version INTEGER NOT NULL,
+			claim_token TEXT NOT NULL UNIQUE,
+			started_at TIMESTAMP NOT NULL,
+			lease_expires_at TIMESTAMP NOT NULL,
+			active_session_id TEXT,
+			session_run_id TEXT,
+			session_agent_id TEXT,
+			open_marker BOOLEAN NOT NULL,
+			outcome TEXT,
+			reason_code TEXT,
+			failure BLOB,
+			side_effects BLOB NOT NULL DEFAULT '[]',
+			duration_ms INTEGER,
+			completed_at TIMESTAMP,
+			PRIMARY KEY(delivery_id, claim_version)
 		)`,
 	} {
 		if _, err := db.Exec(ddl); err != nil {

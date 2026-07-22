@@ -163,7 +163,7 @@ func assertUnavailableBundlePreservationDelivery(t *testing.T, ctx context.Conte
 	var status, reason string
 	var activeSession sql.NullString
 	if err := pg.DB.QueryRowContext(ctx, `
-		SELECT status, COALESCE(reason_code, ''), active_session_id::text
+		SELECT status, COALESCE(reason_code, ''), current_attempt_version::text
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'agent'

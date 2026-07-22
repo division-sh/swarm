@@ -207,7 +207,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				storetest.CommitSemanticEventWithRoutes(t, ctx, f.store, original,
 					[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: agentID}},
 					runtimereplayclaim.CommittedReplayScopeSubscribed)
-				markOperatorReplayDeliveryTerminal(t, ctx, f.store, original, agentID)
+				markOperatorReplayDeliveryTerminal(t, ctx, f.store, f.db, f.sqlite, original, agentID)
 				persistedOriginal, err := f.store.LoadOperatorEvent(ctx, originalID)
 				if err != nil {
 					t.Fatalf("LoadOperatorEvent original: %v", err)
@@ -363,19 +363,46 @@ func completeOperatorReplayTestHandler(t *testing.T, owner completeOperatorRepla
 	})
 }
 
-func markOperatorReplayDeliveryTerminal(t *testing.T, ctx context.Context, owner runtimedelivery.Store, evt events.Event, agentID string) {
+func markOperatorReplayDeliveryTerminal(t *testing.T, ctx context.Context, owner runtimedelivery.Store, db *sql.DB, sqlite bool, evt events.Event, agentID string) {
 	t.Helper()
 	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: agentID}
 	claimed, err := owner.ClaimAgentDelivery(ctx, evt, route)
 	if err != nil {
 		t.Fatalf("claim original delivery: %v", err)
 	}
-	if _, err := owner.BindAgentSession(ctx, claimed.Claim, uuid.NewString()); err != nil {
+	sessionID := seedOperatorReplayDeliverySession(t, ctx, db, sqlite, evt.RunID(), agentID)
+	if _, err := owner.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 		t.Fatalf("bind original delivery session: %v", err)
 	}
 	if _, err := owner.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
 		t.Fatalf("settle original delivery: %v", err)
 	}
+}
+
+func seedOperatorReplayDeliverySession(t testing.TB, ctx context.Context, db *sql.DB, sqlite bool, runID, agentID string) string {
+	t.Helper()
+	sessionID := uuid.NewString()
+	agentQuery := `
+		INSERT INTO agents (agent_id, role, model, memory_enabled, memory_source)
+		VALUES ($1, 'operator-replay-test', 'operator-replay-test', TRUE, 'authored')
+		ON CONFLICT (agent_id) DO NOTHING
+	`
+	query := `INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance) VALUES ($1::uuid, $2::uuid, $3, $4)`
+	if sqlite {
+		agentQuery = `
+			INSERT INTO agents (agent_id, role, model, memory_enabled, memory_source)
+			VALUES (?, 'operator-replay-test', 'operator-replay-test', 1, 'authored')
+			ON CONFLICT (agent_id) DO NOTHING
+		`
+		query = `INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance) VALUES (?, ?, ?, ?)`
+	}
+	if _, err := db.ExecContext(ctx, agentQuery, agentID); err != nil {
+		t.Fatalf("seed operator replay delivery agent: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, query, sessionID, runID, agentID, "operator-replay/"+sessionID); err != nil {
+		t.Fatalf("seed operator replay delivery session: %v", err)
+	}
+	return sessionID
 }
 
 func updateCompleteReplayChainDepth(ctx context.Context, db *sql.DB, sqlite bool, eventID string, depth int) (sql.Result, error) {
@@ -1058,7 +1085,8 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 			if err != nil {
 				t.Fatalf("claim original delivery %s %s: %v", eventID, subscriber, err)
 			}
-			if _, err := pg.BindAgentSession(ctx, claimed.Claim, uuid.NewString()); err != nil {
+			sessionID := seedOperatorReplayDeliverySession(t, ctx, pg.DB, false, runID, subscriber)
+			if _, err := pg.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 				t.Fatalf("bind original delivery %s %s: %v", eventID, subscriber, err)
 			}
 			if status == runtimedelivery.StatusDelivered {

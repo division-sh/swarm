@@ -148,6 +148,9 @@ func NewObligation(eventID, runID string, route events.DeliveryRoute) (Obligatio
 	if _, err := uuid.Parse(eventID); err != nil {
 		return Obligation{}, fmt.Errorf("delivery obligation event id: %w", err)
 	}
+	if _, err := uuid.Parse(runID); err != nil {
+		return Obligation{}, fmt.Errorf("delivery obligation run id: %w", err)
+	}
 	route = route.Normalized()
 	class, err := ParseSubscriberClass(route.SubscriberType)
 	if err != nil {

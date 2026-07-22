@@ -1583,7 +1583,12 @@ contract_formats:
             rule: Executable RoutePlan recipients are committed as typed
               event_deliveries rows. The durable row is the delivery-authority
               sink consumed by workflow-node admission, dispatch, retry,
-              recovery, replay, and readback surfaces.
+              recovery, replay, and readback surfaces. Every persistent live
+              agent recipient must have one exact durable route and every
+              durable agent route must have one matching live recipient;
+              malformed or unmatched intent rejects the complete event
+              admission transaction before any route is persisted or
+              dispatched.
         authority_boundaries:
           admission: Event admission decides whether an event may enter or
             start work. It is a prerequisite to RoutePlan construction, not a
@@ -4697,9 +4702,12 @@ engine:
         Y. The platform can process thousands of entities simultaneously.
       entity_lock: 'The platform acquires an entity-level lock before handler execution. Lock scope: one entity, one handler.
         Released after commit or rollback. Lock mechanism is implementation-specific (DB row lock, in-memory mutex, etc.).'
-      agent_concurrency: Agent deliveries are asynchronous. Events placed in agent inbox in order. Agent processes inbox events
-        sequentially. Multiple agents run concurrently. No entity lock needed for agent processing — agents interact with
-        entities through platform tools which acquire their own locks.
+      agent_concurrency: Agent deliveries are asynchronous. Live dispatch and standing recovery enter one per-agent
+        claimed-attempt executor before claiming work. That executor processes admitted obligations sequentially from exact
+        claim through handler execution, deterministic emitted-output publication, required diagnostics, and settlement;
+        neither carrier may invoke the same agent concurrently or bypass the queue. Multiple agents run concurrently. No
+        entity lock is needed for agent processing — agents interact with entities through platform tools which acquire their
+        own locks.
     atomicity:
       description: All side effects of one handler execution are atomic. Either everything commits or nothing does.
       within_atomic_boundary:
@@ -11741,6 +11749,7 @@ platform_tables:
             CHECK (event_name NOT IN ('platform.inbound_recorded', 'platform.agent_directive') OR run_id IS NOT NULL),
             CHECK ((event_name = 'platform.runtime_log' AND scope = 'global') OR (event_name = 'platform.inbound_recorded' AND scope IN ('entity', 'global')) OR (event_name = 'platform.agent_directive' AND scope = 'global') OR event_name NOT IN ('platform.runtime_log', 'platform.inbound_recorded', 'platform.agent_directive')),
             CHECK ((routing_source_kind = '' AND source_route = '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL) OR (routing_source_kind = 'declared_ingress' AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NOT NULL) OR (routing_source_kind = 'runtime_instance' AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL)),
+            UNIQUE (event_id, run_id),
             INDEX idx_events_run (run_id, created_at) WHERE run_id IS NOT NULL,
             INDEX idx_events_entity (entity_id, created_at) WHERE entity_id IS NOT NULL,
             INDEX idx_events_flow (flow_instance, event_name) WHERE flow_instance IS NOT NULL,
@@ -12206,18 +12215,23 @@ platform_tables:
       description: >-
         Canonical executable event-delivery obligation for agents and system nodes. One row exists per immutable event
         and complete normalized DeliveryRoute identity, including subscriber, target, reply context, and payload projection.
-        route_identity is produced only by events.DeliveryRoute and is unique per event. max_retries is structural: agent
+        route_identity is produced only by events.DeliveryRoute and is unique per event. run_id is structurally coupled
+        to the immutable event rather than trusted as an independent fact. max_retries is structural: agent
         obligations permit one retry and node obligations permit three retries. next_eligible_at is persisted selection
         truth. in_progress always carries one random claim token, monotonic claim version, and lease expiry; every mutation
-        after claim requires that exact opaque capability. While an agent or node handler executes, the owner renews that
-        exact token/version and atomically extends both claim_expires_at and its open attempt lease using database time.
-        Parent terminalization increments the fence and clears claim
-        facts so late writers cannot resurrect work. Existing selected stores are unsupported; there is no migration or
-        compatibility interpretation.
+        after claim requires that exact opaque capability. From claim acquisition through handler execution, deterministic
+        emitted-output publication, required diagnostics/activity, and settlement, the owner renews that exact token/version
+        and extends the one open attempt lease using database time. Heartbeat cadence derives from the lease returned by the
+        selected-store owner. Renewal and settlement are mutually excluded for the exact claim. The delivery row points to
+        that exact open attempt; claim token, lease, and session facts exist only on the attempt and cannot diverge.
+        Parent terminalization increments the fence and clears claim facts so late writers cannot resurrect work. It closes
+        the current attempt when one exists; otherwise it records a closed terminalization attempt at the new fence version.
+        In both cases it commits one exact terminalized outcome in the same transaction. Existing selected stores are
+        unsupported; there is no migration or compatibility interpretation.
       ddl: |
         CREATE TABLE event_deliveries (
             delivery_id       UUID PRIMARY KEY,
-            run_id            UUID REFERENCES runs(run_id),
+            run_id            UUID NOT NULL REFERENCES runs(run_id),
             event_id          UUID NOT NULL REFERENCES events(event_id),
             route_identity    TEXT NOT NULL CHECK (route_identity ~ '^delivery-route-v1:sha256:[0-9a-f]{64}$'),
             subscriber_type   TEXT NOT NULL CHECK (subscriber_type IN ('node', 'agent')),
@@ -12229,10 +12243,9 @@ platform_tables:
             retry_count       INTEGER NOT NULL CHECK (retry_count >= 0),
             max_retries       INTEGER NOT NULL CHECK ((subscriber_type = 'agent' AND max_retries = 1) OR (subscriber_type = 'node' AND max_retries = 3)),
             next_eligible_at  TIMESTAMPTZ,
-            claim_token       UUID,
             claim_version     BIGINT NOT NULL CHECK (claim_version >= 0),
-            claim_expires_at  TIMESTAMPTZ,
-            active_session_id UUID,
+            current_attempt_version BIGINT,
+            current_attempt_open BOOLEAN,
             reason_code       TEXT,
             failure           JSONB,
             started_at        TIMESTAMPTZ,
@@ -12240,22 +12253,23 @@ platform_tables:
             created_at        TIMESTAMPTZ NOT NULL,
             updated_at        TIMESTAMPTZ NOT NULL,
             UNIQUE (event_id, route_identity),
+            FOREIGN KEY (event_id, run_id) REFERENCES events(event_id, run_id),
             CHECK (retry_count <= max_retries),
-            CHECK ((status = 'pending' AND next_eligible_at IS NOT NULL AND claim_token IS NULL AND claim_expires_at IS NULL AND active_session_id IS NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'in_progress' AND next_eligible_at IS NULL AND claim_token IS NOT NULL AND claim_version > 0 AND claim_expires_at IS NOT NULL AND started_at IS NOT NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'failed' AND retry_count > 0 AND next_eligible_at IS NOT NULL AND claim_token IS NULL AND claim_expires_at IS NULL AND active_session_id IS NULL AND settled_at IS NULL AND failure IS NOT NULL) OR (status = 'delivered' AND next_eligible_at IS NULL AND claim_token IS NULL AND claim_expires_at IS NULL AND active_session_id IS NULL AND settled_at IS NOT NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'dead_letter' AND next_eligible_at IS NULL AND claim_token IS NULL AND claim_expires_at IS NULL AND active_session_id IS NULL AND settled_at IS NOT NULL AND NULLIF(TRIM(COALESCE(reason_code, '')), '') IS NOT NULL)),
-            CHECK (active_session_id IS NULL OR (status = 'in_progress' AND subscriber_type = 'agent')),
-            CHECK (claim_expires_at IS NULL OR claim_expires_at > started_at),
+            CHECK ((status = 'pending' AND next_eligible_at IS NOT NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'in_progress' AND next_eligible_at IS NULL AND claim_version > 0 AND current_attempt_version = claim_version AND current_attempt_open = TRUE AND started_at IS NOT NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'failed' AND retry_count > 0 AND next_eligible_at IS NOT NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NULL AND failure IS NOT NULL) OR (status = 'delivered' AND next_eligible_at IS NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NOT NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'dead_letter' AND next_eligible_at IS NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NOT NULL AND NULLIF(TRIM(COALESCE(reason_code, '')), '') IS NOT NULL)),
             CHECK (updated_at >= created_at),
             INDEX idx_deliveries_run (run_id, status) WHERE run_id IS NOT NULL,
             INDEX idx_deliveries_eligibility (subscriber_type, subscriber_id, status, next_eligible_at),
-            INDEX idx_deliveries_claim_expiry (claim_expires_at) WHERE status = 'in_progress',
-            INDEX idx_deliveries_event (event_id)
+            INDEX idx_deliveries_event (event_id),
+            FOREIGN KEY (delivery_id, current_attempt_version, current_attempt_open) REFERENCES event_delivery_attempts(delivery_id, claim_version, open_marker)
         );
     event_delivery_attempts:
       description: >-
         Immutable-fence execution attempt ledger for exact executable deliveries. Each claim version has one random token
-        and bounded lease. outcome remains null only while the claim is current; exact claim renewal extends this row and its
-        obligation atomically, and reclaim records lease_expired before a new version is minted. Attempt rows are evidence and
-        never independently select or mutate delivery work.
+        and bounded lease. outcome remains null only while the delivery row points to this exact open attempt; exact claim
+        renewal extends this sole lease fact, and reclaim repoints the delivery before recording lease_expired. Agent session
+        identity is bound to the exact run and agent through a composite foreign key. Only memory-enabled agents bind this
+        persisted session fact; stateless provider sessions are process-local and must leave all three session columns null.
+        Attempt rows are evidence and never independently select or mutate delivery work.
       ddl: |
         CREATE TABLE event_delivery_attempts (
             delivery_id      UUID NOT NULL REFERENCES event_deliveries(delivery_id),
@@ -12263,6 +12277,10 @@ platform_tables:
             claim_token      UUID NOT NULL UNIQUE,
             started_at       TIMESTAMPTZ NOT NULL,
             lease_expires_at TIMESTAMPTZ NOT NULL,
+            active_session_id UUID,
+            session_run_id    UUID,
+            session_agent_id  TEXT,
+            open_marker       BOOLEAN NOT NULL,
             outcome          TEXT CHECK (outcome IS NULL OR outcome IN ('delivered', 'retry_scheduled', 'dead_letter', 'lease_expired', 'terminalized')),
             reason_code      TEXT,
             failure          JSONB,
@@ -12270,8 +12288,11 @@ platform_tables:
             duration_ms      BIGINT CHECK (duration_ms IS NULL OR duration_ms >= 0),
             completed_at     TIMESTAMPTZ,
             PRIMARY KEY (delivery_id, claim_version),
+            UNIQUE (delivery_id, claim_version, open_marker),
+            FOREIGN KEY (active_session_id, session_run_id, session_agent_id) REFERENCES agent_sessions(session_id, run_id, agent_id),
             CHECK (lease_expires_at > started_at),
-            CHECK ((outcome IS NULL AND completed_at IS NULL) OR (outcome IS NOT NULL AND completed_at IS NOT NULL)),
+            CHECK ((active_session_id IS NULL AND session_run_id IS NULL AND session_agent_id IS NULL) OR (active_session_id IS NOT NULL AND session_run_id IS NOT NULL AND NULLIF(TRIM(COALESCE(session_agent_id, '')), '') IS NOT NULL)),
+            CHECK ((open_marker = TRUE AND outcome IS NULL AND completed_at IS NULL) OR (open_marker = FALSE AND outcome IS NOT NULL AND completed_at IS NOT NULL)),
             CHECK (completed_at IS NULL OR completed_at >= started_at),
             INDEX idx_delivery_attempts_open (lease_expires_at) WHERE outcome IS NULL
         );
@@ -12291,7 +12312,7 @@ platform_tables:
             duration_ms   BIGINT NOT NULL CHECK (duration_ms >= 0),
             settled_at    TIMESTAMPTZ NOT NULL,
             PRIMARY KEY (delivery_id, claim_version),
-            FOREIGN KEY (delivery_id) REFERENCES event_deliveries(delivery_id),
+            FOREIGN KEY (delivery_id, claim_version) REFERENCES event_delivery_attempts(delivery_id, claim_version),
             INDEX idx_delivery_outcomes_delivery (delivery_id, settled_at)
         );
     committed_replay_scopes:
@@ -12402,7 +12423,7 @@ platform_tables:
         \ CHECK (termination_reason IS NULL OR termination_reason IN ('normal', 'cancelled', 'failed', 'orphaned', 'contaminated')),\n\
         \    termination_detail TEXT,\n    successor_session_id UUID REFERENCES agent_sessions(session_id),\n    terminated_at TIMESTAMPTZ,\n    created_at        TIMESTAMPTZ\
         \ NOT NULL DEFAULT NOW(),\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    CHECK ((status IN ('active', 'suspended') AND termination_reason IS NULL AND termination_detail IS NULL AND successor_session_id IS NULL AND terminated_at IS NULL) OR (status = 'terminated' AND termination_reason IS NOT NULL AND terminated_at IS NOT NULL)),\n    CHECK (termination_detail IS NULL OR termination_reason IS NOT NULL),\n    CHECK (successor_session_id IS NULL OR status = 'terminated'),\n    CHECK (successor_session_id IS NULL OR successor_session_id <> session_id),\n\
-        \    UNIQUE INDEX agent_sessions_nonterminated_unique (run_id, agent_id, flow_instance) WHERE status <> 'terminated',\n    INDEX idx_sessions_run (run_id),\n    INDEX idx_sessions_agent (agent_id, status),\n\
+        \    UNIQUE (session_id, run_id, agent_id),\n    UNIQUE INDEX agent_sessions_nonterminated_unique (run_id, agent_id, flow_instance) WHERE status <> 'terminated',\n    INDEX idx_sessions_run (run_id),\n    INDEX idx_sessions_agent (agent_id, status),\n\
         \    INDEX idx_sessions_lease (lease_expires_at) WHERE lease_holder IS NOT NULL,\n    INDEX idx_sessions_terminated_reason (termination_reason, terminated_at) WHERE status = 'terminated'\n);"
       lookup_pattern: Runtime acquires memory via exact `(run_id, agent_id, flow_instance)` equality with explicit status filtering.
       lifecycle_authority: 'The agents lifecycle cell/token is the sole admission and mutable-projection authority for live sessions. Lifecycle replace/destroy transitions own the complete active+suspended exact-agent set in the same selected-store transaction as the lifecycle cell and durable outcome. Standalone registry termination is non-authoritative.'
@@ -13009,12 +13030,12 @@ platform_tables:
         flow_scoped: entity_id NULL, flow_instance NOT NULL, run_id set for runtime-owned flow timers. Tied to flow instance
           inside run_id. Cancelled when flow instance terminates.
     dead_letters:
-      description: Failed events after a terminal delivery disposition. The canonical failure envelope is preserved verbatim from the triggering runtime failure; lifecycle and retry counters remain dead-letter-owned facts.
+      description: Failed events after a terminal delivery disposition. The canonical failure envelope is preserved verbatim from the triggering runtime failure; lifecycle and retry counters remain dead-letter-owned facts. Claimed executable-delivery failures carry the exact delivery_id and claim_version pair and are structurally coupled to the committed delivery outcome. Pre-delivery diagnostics leave both fields null.
       ddl: "CREATE TABLE dead_letters (\n    dead_letter_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    original_event_id\
-        \ UUID REFERENCES events(event_id),\n    original_event    TEXT NOT NULL,\n    original_payload  JSONB NOT NULL DEFAULT\
+        \ UUID REFERENCES events(event_id),\n    delivery_id       UUID,\n    claim_version     BIGINT,\n    original_event    TEXT NOT NULL,\n    original_payload  JSONB NOT NULL DEFAULT\
         \ '{}',\n    entity_id         UUID,\n    flow_instance     TEXT NOT NULL,\n    failure           JSONB NOT NULL,\n   \
         \ retry_count       INTEGER NOT NULL DEFAULT 0,\n    chain_depth       INTEGER NOT NULL DEFAULT 0,\n    handler_node\
-        \      TEXT,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_dead_letters_flow (flow_instance,\
+        \      TEXT,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (delivery_id, claim_version),\n    FOREIGN KEY (delivery_id, claim_version) REFERENCES event_delivery_outcomes(delivery_id, claim_version),\n    CHECK ((delivery_id IS NULL AND claim_version IS NULL) OR (delivery_id IS NOT NULL AND claim_version > 0)),\n    INDEX idx_dead_letters_flow (flow_instance,\
         \ created_at),\n    INDEX idx_dead_letters_class ((failure->>'class'))\n);"
     runs:
       description: 'Platform run registry. A run is a top-level execution context — everything that happens from a

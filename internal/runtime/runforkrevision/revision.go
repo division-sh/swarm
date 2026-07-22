@@ -226,10 +226,16 @@ func CaptureCurrentTransaction(ctx context.Context, tx *sql.Tx) (map[string]int6
 }
 
 var currentTransactionFamilyQueries = map[Family]string{
-	FamilyEvents:                  `SELECT run_id::text AS run_id, 'events'::text AS family FROM events WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
-	FamilyEntityMutations:         `SELECT run_id::text AS run_id, 'entity_mutations'::text AS family FROM entity_mutations WHERE xmin::text::bigint = txid_current()`,
-	FamilyEntityMetadata:          `SELECT run_id::text AS run_id, 'entity_metadata'::text AS family FROM entity_state WHERE xmin::text::bigint = txid_current()`,
-	FamilyEventDeliveries:         `SELECT run_id::text AS run_id, 'event_deliveries'::text AS family FROM event_deliveries WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
+	FamilyEvents:          `SELECT run_id::text AS run_id, 'events'::text AS family FROM events WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
+	FamilyEntityMutations: `SELECT run_id::text AS run_id, 'entity_mutations'::text AS family FROM entity_mutations WHERE xmin::text::bigint = txid_current()`,
+	FamilyEntityMetadata:  `SELECT run_id::text AS run_id, 'entity_metadata'::text AS family FROM entity_state WHERE xmin::text::bigint = txid_current()`,
+	FamilyEventDeliveries: `SELECT d.run_id::text AS run_id, 'event_deliveries'::text AS family
+		FROM event_deliveries d
+		WHERE d.run_id IS NOT NULL AND (
+			d.xmin::text::bigint = txid_current()
+			OR EXISTS (SELECT 1 FROM event_delivery_attempts a WHERE a.delivery_id = d.delivery_id AND a.xmin::text::bigint = txid_current())
+			OR EXISTS (SELECT 1 FROM event_delivery_outcomes o WHERE o.delivery_id = d.delivery_id AND o.xmin::text::bigint = txid_current())
+		)`,
 	FamilyCommittedReplayScopes:   `SELECT run_id::text AS run_id, 'committed_replay_scopes'::text AS family FROM committed_replay_scopes WHERE run_id IS NOT NULL AND xmin::text::bigint = txid_current()`,
 	FamilyEventReceipts:           `SELECT e.run_id::text AS run_id, 'event_receipts'::text AS family FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id IS NOT NULL AND r.xmin::text::bigint = txid_current()`,
 	FamilyDeadLetters:             `SELECT e.run_id::text AS run_id, 'dead_letters'::text AS family FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id IS NOT NULL AND d.xmin::text::bigint = txid_current()`,
@@ -530,12 +536,17 @@ const canonicalEventDeliveriesProjectionSQL = `
 	           'delivery_payload_projection', d.delivery_payload_projection, 'status', d.status,
 	           'retry_count', d.retry_count, 'max_retries', d.max_retries,
 	           'next_eligible_at', d.next_eligible_at,
-	           'claim_version', d.claim_version, 'claim_expires_at', d.claim_expires_at,
+	           'claim_version', d.claim_version, 'claim_expires_at', current_attempt.lease_expires_at,
 	           'reason_code', d.reason_code, 'failure', d.failure,
-	           'active_session_id', d.active_session_id, 'started_at', d.started_at,
+	           'active_session_id', current_attempt.active_session_id, 'started_at', d.started_at,
 	           'settled_at', d.settled_at, 'created_at', d.created_at,
-	           'updated_at', d.updated_at) AS fact, d.xmin::text::bigint AS source_transaction_id
+	           'updated_at', d.updated_at) AS fact,
+	       GREATEST(d.xmin::text::bigint, COALESCE(current_attempt.xmin::text::bigint, 0)) AS source_transaction_id
 	FROM event_deliveries d
+	LEFT JOIN event_delivery_attempts current_attempt
+	  ON current_attempt.delivery_id = d.delivery_id
+	 AND current_attempt.claim_version = d.current_attempt_version
+	 AND current_attempt.open_marker = TRUE
 	WHERE d.run_id = $1::uuid
 `
 

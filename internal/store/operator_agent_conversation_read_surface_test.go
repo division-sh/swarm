@@ -530,18 +530,12 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 	failedNewDeliveryID := newSnapshot.DeliveryID
 	failedOldDeliveryID := oldSnapshot.DeliveryID
 	deadDeliveryID := deadSnapshot.DeliveryID
-	terminalFailure := mustMarshalTestFailure(t, terminalFailureEnvelope)
-	deadLetterID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO dead_letters (
-			dead_letter_id, original_event_id, original_event, original_payload, flow_instance,
-			failure, retry_count, chain_depth, handler_node, created_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'task.dead', '{}'::jsonb, 'flow/test',
-			$3::jsonb, 3, 0, 'agent-1', $4
-		)
-	`, deadLetterID, deadEventID, terminalFailure, now.Add(-2*time.Minute)); err != nil {
-		t.Fatalf("seed dead letter: %v", err)
+	var deadLetterID string
+	if err := db.QueryRowContext(ctx, `
+		SELECT dead_letter_id::text FROM dead_letters
+		WHERE delivery_id = $1::uuid AND claim_version = $2
+	`, deadDeliveryID, deadSnapshot.ClaimVersion).Scan(&deadLetterID); err != nil {
+		t.Fatalf("load canonical dead letter: %v", err)
 	}
 
 	first, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, "agent-1", OperatorAgentDeliveryDiagnosticsOptions{
@@ -1245,7 +1239,7 @@ func assertAgentDeliveryLifecycleRows(t *testing.T, got []OperatorAgentDeliveryL
 	}
 }
 
-func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsUsesLifecycleOutcomeWithoutDeadLetterRecord(t *testing.T) {
+func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsUsesCanonicalLifecycleDiagnostic(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := newTestPostgresStore(t, db)
@@ -1279,8 +1273,8 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsUsesLifecycleOutcom
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDeliveryDiagnostics: %v", err)
 	}
-	if got.Summary.DeadLetters24h != 1 || len(got.DeadLetters) != 1 || len(got.DeadLetters[0].DeadLetterRecords) != 0 {
-		t.Fatalf("delivery diagnostics = %#v, want one canonical lifecycle outcome and no legacy dead-letter record", got)
+	if got.Summary.DeadLetters24h != 1 || len(got.DeadLetters) != 1 || len(got.DeadLetters[0].DeadLetterRecords) != 1 {
+		t.Fatalf("delivery diagnostics = %#v, want one canonical lifecycle outcome and diagnostic", got)
 	}
 }
 

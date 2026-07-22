@@ -73,14 +73,16 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 			subscriber_type TEXT NOT NULL, subscriber_id TEXT NOT NULL, delivery_target_route BLOB NOT NULL,
 			delivery_context BLOB NOT NULL, delivery_payload_projection BLOB NOT NULL, status TEXT NOT NULL,
 			retry_count INTEGER NOT NULL, max_retries INTEGER NOT NULL, next_eligible_at TIMESTAMP,
-			claim_token TEXT, claim_version INTEGER NOT NULL, claim_expires_at TIMESTAMP,
-			active_session_id TEXT, reason_code TEXT, failure BLOB, started_at TIMESTAMP,
+			claim_version INTEGER NOT NULL, current_attempt_version INTEGER, current_attempt_open BOOLEAN,
+			reason_code TEXT, failure BLOB, started_at TIMESTAMP,
 			settled_at TIMESTAMP, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
 			UNIQUE(event_id, route_identity)
 		)`,
 		`CREATE TABLE event_delivery_attempts (
 			delivery_id TEXT NOT NULL, claim_version INTEGER NOT NULL, claim_token TEXT NOT NULL UNIQUE,
-			started_at TIMESTAMP NOT NULL, lease_expires_at TIMESTAMP NOT NULL, outcome TEXT,
+			started_at TIMESTAMP NOT NULL, lease_expires_at TIMESTAMP NOT NULL,
+			active_session_id TEXT, session_run_id TEXT, session_agent_id TEXT, open_marker BOOLEAN NOT NULL,
+			outcome TEXT,
 			reason_code TEXT, failure BLOB, side_effects BLOB NOT NULL DEFAULT '[]', duration_ms INTEGER,
 			completed_at TIMESTAMP, PRIMARY KEY(delivery_id, claim_version)
 		)`,

@@ -236,6 +236,8 @@ func deletePostgresDeliveryFixturesForRun(t testing.TB, ctx context.Context, db 
 	}
 	defer func() { _ = tx.Rollback() }()
 	for _, query := range []string{
+		`UPDATE event_deliveries SET status = 'dead_letter', reason_code = 'fixture_cleanup', failure = NULL, next_eligible_at = NULL, current_attempt_version = NULL, current_attempt_open = NULL, settled_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE run_id = $1::uuid AND status IN ('pending', 'in_progress', 'failed')`,
+		`DELETE FROM dead_letters WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id = $1::uuid)`,
 		`DELETE FROM event_delivery_outcomes WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id = $1::uuid)`,
 		`DELETE FROM event_delivery_attempts WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id = $1::uuid)`,
 		`DELETE FROM event_deliveries WHERE run_id = $1::uuid`,
@@ -261,7 +263,10 @@ func setPostgresDeliveryFixtureTimes(t testing.TB, ctx context.Context, db *sql.
 	case runtimedelivery.StatusPending:
 		query = `UPDATE event_deliveries SET created_at=$2::timestamptz, updated_at=$3::timestamptz, next_eligible_at=$3::timestamptz WHERE delivery_id=$1::uuid`
 	case runtimedelivery.StatusInProgress:
-		query = `UPDATE event_deliveries SET created_at=$2::timestamptz, updated_at=$3::timestamptz, started_at=$3::timestamptz, claim_expires_at=$3::timestamptz + interval '5 minutes' WHERE delivery_id=$1::uuid`
+		if _, err := db.ExecContext(ctx, `UPDATE event_delivery_attempts SET started_at=$2::timestamptz, lease_expires_at=$3::timestamptz + interval '5 minutes' WHERE delivery_id=$1::uuid AND open_marker=TRUE`, snapshot.DeliveryID, createdAt, transitionAt); err != nil {
+			t.Fatalf("set delivery fixture %s attempt times: %v", snapshot.DeliveryID, err)
+		}
+		query = `UPDATE event_deliveries SET created_at=$2::timestamptz, updated_at=$3::timestamptz, started_at=$3::timestamptz WHERE delivery_id=$1::uuid`
 	case runtimedelivery.StatusFailed:
 		query = `UPDATE event_deliveries SET created_at=$2::timestamptz, updated_at=$3::timestamptz, started_at=$2::timestamptz, next_eligible_at=$3::timestamptz + interval '1 hour' WHERE delivery_id=$1::uuid`
 	case runtimedelivery.StatusDelivered, runtimedelivery.StatusDeadLetter:
@@ -290,8 +295,11 @@ func setSQLiteDeliveryFixtureTimes(t testing.TB, ctx context.Context, db *sql.DB
 		query = `UPDATE event_deliveries SET created_at=?, updated_at=?, next_eligible_at=? WHERE delivery_id=?`
 		args = []any{createdAt, transitionAt, transitionAt, snapshot.DeliveryID}
 	case runtimedelivery.StatusInProgress:
-		query = `UPDATE event_deliveries SET created_at=?, updated_at=?, started_at=?, claim_expires_at=? WHERE delivery_id=?`
-		args = []any{createdAt, transitionAt, transitionAt, transitionAt.Add(5 * time.Minute), snapshot.DeliveryID}
+		if _, err := db.ExecContext(ctx, `UPDATE event_delivery_attempts SET started_at=?, lease_expires_at=? WHERE delivery_id=? AND open_marker=TRUE`, createdAt, transitionAt.Add(5*time.Minute), snapshot.DeliveryID); err != nil {
+			t.Fatalf("set delivery fixture %s attempt times: %v", snapshot.DeliveryID, err)
+		}
+		query = `UPDATE event_deliveries SET created_at=?, updated_at=?, started_at=? WHERE delivery_id=?`
+		args = []any{createdAt, transitionAt, transitionAt, snapshot.DeliveryID}
 	case runtimedelivery.StatusFailed:
 		query = `UPDATE event_deliveries SET created_at=?, updated_at=?, started_at=?, next_eligible_at=? WHERE delivery_id=?`
 		args = []any{createdAt, transitionAt, createdAt, transitionAt.Add(time.Hour), snapshot.DeliveryID}

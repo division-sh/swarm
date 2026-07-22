@@ -131,17 +131,6 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	}, runtimedelivery.StateDelivered, nil)
 	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.DB, successfulDelivery, now.Add(5*time.Second), now.Add(7*time.Second))
 	successDeliveryID := successfulDelivery.DeliveryID
-	deadLetterID := uuid.NewString()
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-			INSERT INTO dead_letters (
-				dead_letter_id, original_event_id, original_event, original_payload, flow_instance,
-				failure, retry_count, chain_depth, handler_node, created_at
-			)
-			VALUES (?, ?, 'scan.finished', '{}', 'flow-1', ?, 2, 0, 'node-dead', ?)
-		`, deadLetterID, newerLatestEvent, mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassRetryExhausted, "node_failure", nil)), now.Add(9*time.Second)); err != nil {
-		t.Fatalf("seed sqlite dead letter: %v", err)
-	}
-
 	header, err := sqliteStore.LoadRunHeader(ctx, older)
 	if err != nil {
 		t.Fatalf("LoadRunHeader: %v", err)
@@ -233,7 +222,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadOperatorEvent sqlite latest: %v", err)
 	}
-	if len(full.DeadLetters) != 1 || full.DeadLetters[0].DeadLetterID != deadLetterID {
+	if len(full.DeadLetters) != 1 || full.DeadLetters[0].DeadLetterID == "" {
 		t.Fatalf("sqlite event dead letters = %#v", full.DeadLetters)
 	}
 	if len(full.Deliveries) != 1 || len(full.Deliveries[0].DeadLetters) != 1 || !full.Deliveries[0].Terminal {

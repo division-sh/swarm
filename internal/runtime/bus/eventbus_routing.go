@@ -586,11 +586,14 @@ func (eb *EventBus) deliverToRecipientsWithRoutes(ctx context.Context, evt event
 
 func (eb *EventBus) deliverRoutePlanWithRoutes(ctx context.Context, evt events.Event, routePlan RoutePlan) error {
 	routePlan = routePlan.Normalized()
+	if err := routePlan.ValidatePersistentDeliveries(); err != nil {
+		return err
+	}
 	return eb.deliverLiveRecipientsWithRoutes(ctx, evt, routePlan.LiveRecipients, routePlan.DeliveryRoutes())
 }
 
 func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt events.Event, liveRecipients []RoutePlanLiveRecipient, deliveryRoutes []events.DeliveryRoute) error {
-	if err := events.ValidateDeliveryRouteProjections(deliveryRoutes); err != nil {
+	if err := events.ValidateDeliveryRoutes(deliveryRoutes); err != nil {
 		return err
 	}
 	liveRecipients = normalizeRoutePlanLiveRecipients(liveRecipients)

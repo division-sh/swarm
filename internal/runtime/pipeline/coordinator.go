@@ -485,26 +485,35 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 		}
 		pc.notifyTestLifecycleHandlerStarted(attemptCtx, nodeID, evt)
 		started := time.Now()
-		result, err, heartbeatErr := pc.executeClaimedNodeHandler(attemptCtx, claim, deliveryStore, nodeID, handler, workflowTriggerContext{
-			Event:           evt,
-			HandlerEventKey: handlerEventKey,
-			State:           pc.currentWorkflowState(attemptCtx, workflowEventEntityID(evt)),
-		})
+		heartbeat, heartbeatErr := runtimedelivery.StartClaimHeartbeat(attemptCtx, pc.workOwner, deliveryStore, claim)
 		if heartbeatErr != nil {
 			return false, fmt.Errorf("renew workflow node delivery claim: %w", heartbeatErr)
 		}
+		executionCtx := heartbeat.Context()
+		result, err := pc.executeNodeContractHandler(executionCtx, nodeID, handler, workflowTriggerContext{
+			Event:           evt,
+			HandlerEventKey: handlerEventKey,
+			State:           pc.currentWorkflowState(executionCtx, workflowEventEntityID(evt)),
+		}, false)
 		if err == nil {
-			pc.notifyTestLifecycleHandlerCompleted(attemptCtx, nodeID, evt, "completed")
-			pc.recordInterceptedEmitDeadLetters(attemptCtx, evt, nodeID, result.Outcome)
+			pc.notifyTestLifecycleHandlerCompleted(executionCtx, nodeID, evt, "completed")
+			pc.recordInterceptedEmitDeadLetters(executionCtx, evt, nodeID, result.Outcome)
 			sideEffects := []string{"handler_completed"}
-			if _, settleErr := deliveryStore.SettleSuccess(attemptCtx, claim, sideEffects, time.Since(started)); settleErr != nil {
-				return false, fmt.Errorf("settle workflow node delivery: %w", settleErr)
+			settlementGuard, settleErr := heartbeat.BeginSettlement()
+			if settleErr != nil {
+				_ = heartbeat.Stop()
+				return false, fmt.Errorf("prepare workflow node delivery settlement: %w", settleErr)
+			}
+			_, settleErr = deliveryStore.SettleSuccess(executionCtx, claim, sideEffects, time.Since(started))
+			finishErr := settlementGuard.Finish(settleErr == nil)
+			if err := errors.Join(settleErr, finishErr); err != nil {
+				return false, fmt.Errorf("settle workflow node delivery: %w", err)
 			}
 			pc.convergeWorkflowNodeNormalRunCompletion(attemptCtx, nodeID, evt)
 			pc.notifyTestLifecycleDeliveryStatus(attemptCtx, nodeID, evt, "delivered")
 			return result.Handled, nil
 		}
-		pc.notifyTestLifecycleHandlerCompleted(attemptCtx, nodeID, evt, "failed")
+		pc.notifyTestLifecycleHandlerCompleted(executionCtx, nodeID, evt, "failed")
 		failure := runtimefailures.FromError(err, runtimeWorkflowID, "execute_handler")
 		disposition := runtimedelivery.FailureRetry
 		reason := "handler_failure"
@@ -515,22 +524,24 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 				reason = "chain_depth_exceeded"
 			}
 		}
-		snapshot, settleErr := deliveryStore.SettleFailure(attemptCtx, claim, runtimedelivery.Settlement{
+		settlementGuard, settleErr := heartbeat.BeginSettlement()
+		if settleErr != nil {
+			_ = heartbeat.Stop()
+			return false, fmt.Errorf("prepare failed workflow node delivery settlement: %w", settleErr)
+		}
+		snapshot, settleErr := deliveryStore.SettleFailure(executionCtx, claim, runtimedelivery.Settlement{
 			Disposition: disposition, ReasonCode: reason, Failure: &failure.Failure,
 			Duration: time.Since(started), RetryBase: workflowHandlerRetryBase(source),
 		})
-		if settleErr != nil {
-			return false, fmt.Errorf("settle failed workflow node delivery: %w", settleErr)
+		finishErr := settlementGuard.Finish(settleErr == nil)
+		if err := errors.Join(settleErr, finishErr); err != nil {
+			return false, fmt.Errorf("settle failed workflow node delivery: %w", err)
 		}
 		pc.notifyTestLifecycleDeliveryStatus(attemptCtx, nodeID, evt, string(snapshot.Status))
 		if snapshot.Status == runtimedelivery.StatusDeadLetter {
-			deadLetterErr := recordPipelineDeadLetter(attemptCtx, pc.db, runtimedeadletters.Record{
-				OriginalEventID: strings.TrimSpace(evt.ID()), Failure: failure.Failure,
-				RetryCount: snapshot.RetryCount, ChainDepth: evt.ChainDepth(), HandlerNode: nodeID,
-			})
 			pc.recordWorkflowHandlerFailure(attemptCtx, evt, nodeID, err)
 			pc.convergeWorkflowNodeNormalRunCompletion(attemptCtx, nodeID, evt)
-			return true, errors.Join(err, deadLetterErr)
+			return true, err
 		}
 		wait := time.Until(snapshot.NextEligibleAt)
 		if wait < 0 {
@@ -545,27 +556,6 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 		}
 		claimed = false
 	}
-}
-
-func (pc *PipelineCoordinator) executeClaimedNodeHandler(
-	ctx context.Context,
-	claim runtimedelivery.Claim,
-	deliveryStore runtimedelivery.Store,
-	nodeID string,
-	handler runtimecontracts.SystemNodeEventHandler,
-	triggerCtx workflowTriggerContext,
-) (
-	result contractHandlerExecutionResult,
-	handlerErr error,
-	heartbeatErr error,
-) {
-	heartbeat, err := runtimedelivery.StartClaimHeartbeat(ctx, pc.workOwner, deliveryStore, claim)
-	if err != nil {
-		return contractHandlerExecutionResult{}, nil, err
-	}
-	defer func() { heartbeatErr = heartbeat.Stop() }()
-	result, handlerErr = pc.executeNodeContractHandler(heartbeat.Context(), nodeID, handler, triggerCtx, false)
-	return result, handlerErr, nil
 }
 
 func (pc *PipelineCoordinator) recordWorkflowHandlerFailure(ctx context.Context, evt events.Event, nodeID string, err error) {
@@ -588,19 +578,6 @@ func (pc *PipelineCoordinator) recordWorkflowHandlerFailure(ctx context.Context,
 				"error":   err.Error(),
 			},
 			Failure: &failure.Failure,
-		})
-	}
-	if pc.db != nil {
-		_ = recordPipelineDeadLetter(ctx, pc.db, runtimedeadletters.Record{
-			OriginalEventID: strings.TrimSpace(evt.ID()),
-			OriginalEvent:   strings.TrimSpace(string(evt.Type())),
-			OriginalPayload: evt.Payload(),
-			EntityID:        workflowEventEntityID(evt),
-			FlowInstance:    "runtime",
-			Failure:         failure.Failure,
-			RetryCount:      0,
-			ChainDepth:      evt.ChainDepth(),
-			HandlerNode:     strings.TrimSpace(nodeID),
 		})
 	}
 }

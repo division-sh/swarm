@@ -160,10 +160,6 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileDeliveryActiv
 	if err != nil {
 		t.Fatalf("claim active delivery: %v", err)
 	}
-	sessionID := uuid.NewString()
-	if _, err := pg.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
-		t.Fatalf("bind active delivery: %v", err)
-	}
 	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}

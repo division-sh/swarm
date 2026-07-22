@@ -7031,7 +7031,7 @@ func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testin
 	var deliveryStatus, deliveryReason string
 	var activeSession sql.NullString
 	if err := sqliteStore.DB.QueryRowContext(ctx, `
-		SELECT status, COALESCE(reason_code, ''), active_session_id
+		SELECT status, COALESCE(reason_code, ''), current_attempt_version
 		FROM event_deliveries
 		WHERE event_id = ?
 		  AND subscriber_type = 'agent'
@@ -7512,6 +7512,20 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 		_ = sqliteStore.Close()
 		t.Fatalf("claim sqlite active delivery: %v", err)
 	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source, runtime_descriptor)
+		VALUES ('agent-a', 'serve-abandon', 'operator', 'default', TRUE, 'authored', '{"type":"default","execution_mode":"live"}')
+	`); err != nil {
+		_ = sqliteStore.Close()
+		t.Fatalf("seed sqlite delivery agent: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status)
+		VALUES (?, ?, 'agent-a', 'serve-abandon', TRUE, 'authored', 'active')
+	`, activeSessionID, runID); err != nil {
+		_ = sqliteStore.Close()
+		t.Fatalf("seed sqlite delivery session: %v", err)
+	}
 	if _, err := sqliteStore.BindAgentSession(claimCtx, claimed.Claim, activeSessionID); err != nil {
 		_ = sqliteStore.Close()
 		t.Fatalf("bind sqlite active delivery session: %v", err)
@@ -7611,14 +7625,14 @@ func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context
 	if err != nil {
 		t.Fatalf("claim delivery %s: %v", source, err)
 	}
-	if _, err := runtimePG.BindAgentSession(claimCtx, claimed.Claim, sessionID); err != nil {
-		t.Fatalf("bind delivery session %s: %v", source, err)
-	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status)
 		VALUES ($1::uuid, $2::uuid, 'agent-a', 'startup-recovery', TRUE, 'authored', 'active')
 	`, sessionID, runID); err != nil {
 		t.Fatalf("seed session %s: %v", source, err)
+	}
+	if _, err := runtimePG.BindAgentSession(claimCtx, claimed.Claim, sessionID); err != nil {
+		t.Fatalf("bind delivery session %s: %v", source, err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, status)
@@ -7668,7 +7682,7 @@ func assertServeRuntimeUnavailableBundleRunOrphaned(t *testing.T, ctx context.Co
 		WHERE run_id = $1::uuid
 		  AND status = 'dead_letter'
 		  AND reason_code = $2
-		  AND active_session_id IS NULL
+		  AND current_attempt_version IS NULL
 	`, runID, reason).Scan(&deadLetters); err != nil {
 		t.Fatalf("count orphaned deliveries %s: %v", runID, err)
 	}
@@ -8838,6 +8852,18 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	if err != nil {
 		t.Fatalf("claim active delivery: %v", err)
 	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source, runtime_descriptor)
+		VALUES ('agent-a', 'serve-abandon', 'operator', 'default', TRUE, 'authored', '{"type":"default","execution_mode":"live"}'::jsonb)
+	`); err != nil {
+		t.Fatalf("seed active delivery agent: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status)
+		VALUES ($1::uuid, $2::uuid, 'agent-a', 'serve-abandon', TRUE, 'authored', 'active')
+	`, activeSessionID, runID); err != nil {
+		t.Fatalf("seed active delivery session: %v", err)
+	}
 	if _, err := runtimePG.BindAgentSession(claimCtx, claimed.Claim, activeSessionID); err != nil {
 		t.Fatalf("bind active delivery session: %v", err)
 	}
@@ -8876,7 +8902,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	var deliveryStatus, deliveryReason string
 	var deliveryActiveSession sql.NullString
 	if err := db.QueryRowContext(context.Background(), `
-		SELECT status, COALESCE(reason_code, ''), active_session_id::text
+		SELECT status, COALESCE(reason_code, ''), current_attempt_version::text
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'agent'

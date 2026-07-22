@@ -1055,7 +1055,29 @@ func TestExecuteSelectedContractRunForkAPIProvidersPersistExactManagedCapability
 				t.Fatalf("ExecuteSelectedContractRunFork: %v\nlatest receipt failure: %s\nlatest dead letter failure: %s", err, receiptFailure, deadLetterFailure)
 			}
 			if providerCalls.Load() != 1 {
-				t.Fatalf("provider calls = %d, want 1", providerCalls.Load())
+				var deliveryDiagnostic string
+				var runtimeDiagnostic string
+				_ = db.QueryRowContext(ctx, `
+					SELECT COALESCE(jsonb_agg(jsonb_build_object(
+						'subscriber', d.subscriber_id,
+						'status', d.status,
+						'reason', d.reason_code,
+						'failure', d.failure,
+						'attempt_outcome', a.outcome,
+						'attempt_failure', a.failure
+					) ORDER BY d.created_at)::text, '[]')
+					FROM event_deliveries d
+					LEFT JOIN event_delivery_attempts a
+					  ON a.delivery_id = d.delivery_id
+					WHERE d.run_id = $1::uuid
+				`, result.Materialization.ForkRunID).Scan(&deliveryDiagnostic)
+				_ = db.QueryRowContext(ctx, `
+					SELECT COALESCE(jsonb_agg(payload ORDER BY created_at)::text, '[]')
+					FROM events
+					WHERE run_id = $1::uuid
+					  AND event_name = 'platform.runtime_log'
+				`, result.Materialization.ForkRunID).Scan(&runtimeDiagnostic)
+				t.Fatalf("provider calls = %d, want 1; deliveries=%s; runtime=%s", providerCalls.Load(), deliveryDiagnostic, runtimeDiagnostic)
 			}
 			assertSelectedForkProviderCapabilityEvidence(t, ctx, db, result, tc.adapter)
 		})

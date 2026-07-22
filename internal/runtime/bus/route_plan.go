@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -362,6 +363,45 @@ func (p RoutePlan) DeliveryRoutes() []events.DeliveryRoute {
 	return events.NormalizeDeliveryRoutes(out)
 }
 
+// ValidatePersistentDeliveries proves that every admitted persistent live
+// agent recipient has one durable route and that every durable agent route has
+// a live recipient. Node routes are durable pipeline authority and therefore
+// do not require a LiveRecipients entry.
+func (p RoutePlan) ValidatePersistentDeliveries() error {
+	p = p.Normalized()
+	routes := p.DeliveryRoutes()
+	if err := events.ValidateDeliveryRoutes(routes); err != nil {
+		return err
+	}
+	liveAgents := make(map[string]struct{})
+	for index, recipient := range p.LiveRecipients {
+		if !recipient.PersistAsDelivery {
+			continue
+		}
+		if recipient.SubscriberType != routePlanSubscriberAgent || strings.TrimSpace(recipient.RecipientID) == "" {
+			return fmt.Errorf("persistent live recipient %d must identify one agent", index)
+		}
+		liveAgents[recipient.RecipientID] = struct{}{}
+	}
+	routeAgents := make(map[string]struct{})
+	for _, route := range routes {
+		if route.SubscriberType == routePlanSubscriberAgent {
+			routeAgents[route.SubscriberID] = struct{}{}
+		}
+	}
+	for agentID := range liveAgents {
+		if _, ok := routeAgents[agentID]; !ok {
+			return fmt.Errorf("persistent live agent %q has no exact durable delivery route", agentID)
+		}
+	}
+	for agentID := range routeAgents {
+		if _, ok := liveAgents[agentID]; !ok {
+			return fmt.Errorf("durable agent delivery route %q has no persistent live recipient", agentID)
+		}
+	}
+	return nil
+}
+
 func (p RoutePlan) HasPersistentDeliveries() bool {
 	return len(p.PersistedRecipientIDs()) > 0 || len(p.DeliveryRoutes()) > 0
 }
@@ -554,6 +594,7 @@ func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlan
 		intent.PayloadProjection = intent.PayloadProjection.Normalized()
 		intent.Producer = intent.Producer.Normalized()
 		if intent.SubscriberType == "" || intent.SubscriberID == "" {
+			out = append(out, intent)
 			continue
 		}
 		key := strings.Join([]string{intent.SubscriberType, intent.SubscriberID, intent.Target.FlowID, intent.Target.FlowInstance, intent.Target.EntityID, intent.Context.ReplyContextID(), intent.PayloadProjection.Fingerprint()}, "\x00")

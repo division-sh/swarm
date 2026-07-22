@@ -369,11 +369,15 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		liveSessionCount int
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), COALESCE(active_session_id::text, '')
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'agent'
-		  AND subscriber_id = 'agent-1'
+		SELECT COALESCE(d.status, ''), COALESCE(a.active_session_id::text, '')
+		FROM event_deliveries d
+		JOIN event_delivery_attempts a
+		  ON a.delivery_id = d.delivery_id
+		 AND a.claim_version = d.current_attempt_version
+		 AND a.open_marker = TRUE
+		WHERE d.event_id = $1::uuid
+		  AND d.subscriber_type = 'agent'
+		  AND d.subscriber_id = 'agent-1'
 	`, event2.ID()).Scan(&deliveryStatus, &activeSessionID); err != nil {
 		t.Fatalf("load second delivery: %v", err)
 	}
@@ -562,11 +566,15 @@ printf '{"result":"ok"}'
 		activeSessionID string
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), COALESCE(active_session_id::text, '')
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'agent'
-		  AND subscriber_id = 'agent-1'
+		SELECT COALESCE(d.status, ''), COALESCE(a.active_session_id::text, '')
+		FROM event_deliveries d
+		JOIN event_delivery_attempts a
+		  ON a.delivery_id = d.delivery_id
+		 AND a.claim_version = d.current_attempt_version
+		 AND a.open_marker = TRUE
+		WHERE d.event_id = $1::uuid
+		  AND d.subscriber_type = 'agent'
+		  AND d.subscriber_id = 'agent-1'
 	`, evt.ID()).Scan(&deliveryStatus, &activeSessionID); err != nil {
 		t.Fatalf("load delivery: %v", err)
 	}
