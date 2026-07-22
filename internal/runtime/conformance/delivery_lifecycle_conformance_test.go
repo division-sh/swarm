@@ -118,12 +118,16 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if err != nil {
 					t.Fatalf("claim delivery: %v", err)
 				}
+				agedAt := ageDeliveryClaimForConformance(t, ctx, backend, claimed.Snapshot.DeliveryID)
 				renewed, err := backend.store.RenewClaim(ctx, claimed.Claim)
 				if err != nil {
 					t.Fatalf("renew claim: %v", err)
 				}
-				if renewed.ClaimVersion != claimed.Claim.Version() || renewed.Status != runtimedelivery.StatusInProgress || renewed.ClaimExpiresAt.Before(claimed.Snapshot.ClaimExpiresAt) {
+				if renewed.ClaimVersion != claimed.Claim.Version() || renewed.Status != runtimedelivery.StatusInProgress || renewed.ClaimExpiresAt.Before(claimed.Snapshot.ClaimExpiresAt) || !renewed.UpdatedAt.After(agedAt) {
 					t.Fatalf("renewed claim = %#v, original = %#v", renewed, claimed.Snapshot)
+				}
+				if lease := renewed.ClaimExpiresAt.Sub(renewed.UpdatedAt); lease != runtimedelivery.DefaultLeaseTTL {
+					t.Fatalf("renewed lease window = %s, want %s from exact database renewal time", lease, runtimedelivery.DefaultLeaseTTL)
 				}
 				assertDeliveryAttemptLeaseMatchesObligation(t, ctx, backend, renewed.DeliveryID, renewed.ClaimVersion)
 				if _, err := backend.restart.ClaimAgentDelivery(ctx, event, route); !errors.Is(err, runtimedelivery.ErrIneligible) {
@@ -547,6 +551,43 @@ func makeDeliveryImmediatelyEligible(t *testing.T, ctx context.Context, backend 
 	if rows, err := result.RowsAffected(); err != nil || rows != 1 {
 		t.Fatalf("make retry eligible affected %d rows, err=%v", rows, err)
 	}
+}
+
+func ageDeliveryClaimForConformance(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, deliveryID string) time.Time {
+	t.Helper()
+	agedAt := time.Now().Add(-15 * time.Minute).UTC()
+	transaction, err := backend.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin aged-claim proof: %v", err)
+	}
+	defer func() { _ = transaction.Rollback() }()
+	deliveryQuery := `UPDATE event_deliveries SET created_at = $1, started_at = $1, updated_at = $1 WHERE delivery_id = $2::uuid AND status = 'in_progress'`
+	attemptQuery := `UPDATE event_delivery_attempts SET started_at = $1 WHERE delivery_id = $2::uuid AND open_marker = TRUE`
+	if !backend.postgres {
+		deliveryQuery = `UPDATE event_deliveries SET created_at = ?, started_at = ?, updated_at = ? WHERE delivery_id = ? AND status = 'in_progress'`
+		attemptQuery = `UPDATE event_delivery_attempts SET started_at = ? WHERE delivery_id = ? AND open_marker = TRUE`
+	}
+	var deliveryResult sql.Result
+	if backend.postgres {
+		deliveryResult, err = transaction.ExecContext(ctx, deliveryQuery, agedAt, deliveryID)
+	} else {
+		deliveryResult, err = transaction.ExecContext(ctx, deliveryQuery, agedAt, agedAt, agedAt, deliveryID)
+	}
+	if err != nil {
+		t.Fatalf("age delivery lifecycle timestamp: %v", err)
+	}
+	if rows, rowsErr := deliveryResult.RowsAffected(); rowsErr != nil || rows != 1 {
+		t.Fatalf("age delivery lifecycle affected %d rows, err=%v", rows, rowsErr)
+	}
+	if result, execErr := transaction.ExecContext(ctx, attemptQuery, agedAt, deliveryID); execErr != nil {
+		t.Fatalf("age delivery attempt: %v", execErr)
+	} else if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
+		t.Fatalf("age delivery attempt affected %d rows, err=%v", rows, rowsErr)
+	}
+	if err := transaction.Commit(); err != nil {
+		t.Fatalf("commit aged-claim proof: %v", err)
+	}
+	return agedAt
 }
 
 func expireDeliveryClaimForConformance(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, deliveryID string) {

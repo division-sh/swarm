@@ -34,7 +34,8 @@ func (s *heartbeatTestStore) RenewClaim(context.Context, Claim) (Snapshot, error
 	if s.failAt > 0 && s.renewals >= s.failAt {
 		return Snapshot{}, errors.New("renewal rejected")
 	}
-	return Snapshot{ClaimExpiresAt: time.Now().Add(DefaultLeaseTTL)}, nil
+	now := time.Now().UTC()
+	return Snapshot{UpdatedAt: now, ClaimExpiresAt: now.Add(DefaultLeaseTTL)}, nil
 }
 
 func (s *heartbeatTestStore) renewalCount() int {
@@ -65,6 +66,21 @@ func TestClaimHeartbeatRenewsBeforeDuringAndAfterExecution(t *testing.T) {
 	}
 	if err := owner.WaitForQuiescence(context.Background()); err != nil {
 		t.Fatalf("wait for heartbeat ownership: %v", err)
+	}
+}
+
+func TestClaimHeartbeatDerivesDefaultCadenceFromRenewedLease(t *testing.T) {
+	owner := newHeartbeatTestOwner(t)
+	store := &heartbeatTestStore{}
+	heartbeat, err := StartClaimHeartbeat(context.Background(), owner, store, heartbeatTestClaim())
+	if err != nil {
+		t.Fatalf("start default heartbeat: %v", err)
+	}
+	if err := heartbeat.Stop(); err != nil {
+		t.Fatalf("stop default heartbeat: %v", err)
+	}
+	if got := store.renewalCount(); got != 2 {
+		t.Fatalf("renewals = %d, want immediate and final renewal", got)
 	}
 }
 

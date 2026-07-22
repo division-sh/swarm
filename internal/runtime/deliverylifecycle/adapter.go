@@ -429,6 +429,27 @@ func (a *Adapter) RenewClaim(ctx context.Context, tx *sql.Tx, claim Claim, lease
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return Snapshot{}, fmt.Errorf("%w: delivery claim renewal lost claim", ErrConflict)
 	}
+	deliveryQuery := `
+		UPDATE event_deliveries
+		SET updated_at = $1
+		WHERE delivery_id = $2::uuid AND status = 'in_progress' AND claim_version = $3
+		  AND current_attempt_version = $3 AND current_attempt_open = TRUE`
+	deliveryArgs := []any{now, claim.deliveryID, claim.version}
+	if a.dialect == DialectSQLite {
+		deliveryQuery = `
+			UPDATE event_deliveries
+			SET updated_at = ?
+			WHERE delivery_id = ? AND status = 'in_progress' AND claim_version = ?
+			  AND current_attempt_version = ? AND current_attempt_open = TRUE`
+		deliveryArgs = []any{now, claim.deliveryID, claim.version, claim.version}
+	}
+	deliveryResult, err := tx.ExecContext(ctx, deliveryQuery, deliveryArgs...)
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("record delivery claim renewal time: %w", err)
+	}
+	if rows, _ := deliveryResult.RowsAffected(); rows != 1 {
+		return Snapshot{}, fmt.Errorf("%w: delivery claim renewal lost lifecycle owner", ErrConflict)
+	}
 	updated, err := a.loadByID(ctx, tx, claim.deliveryID, false)
 	return updated.Snapshot, err
 }

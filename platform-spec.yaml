@@ -12236,8 +12236,10 @@ platform_tables:
         truth. in_progress always carries one random claim token, monotonic claim version, and lease expiry; every mutation
         after claim requires that exact opaque capability. From claim acquisition through handler execution, deterministic
         emitted-output publication, required diagnostics/activity, and settlement, the owner renews that exact token/version
-        and extends the one open attempt lease using database time. Heartbeat cadence derives from the lease returned by the
-        selected-store owner. Renewal and settlement are mutually excluded for the exact claim. The delivery row points to
+        and extends the one open attempt lease using database time. The same renewal transaction stamps delivery.updated_at
+        with that exact database time, so ClaimExpiresAt - UpdatedAt is the authoritative renewed lease window returned to
+        heartbeat consumers; the original claim/start time MUST NOT influence cadence. Heartbeat cadence derives from that
+        returned lease window. Renewal and settlement are mutually excluded for the exact claim. The delivery row points to
         that exact open attempt; claim token, lease, and session facts exist only on the attempt and cannot diverge.
         A transaction that composes run terminalization with delivery terminalization MUST lock and mutate the run row
         before locking any delivery row. Claim, settlement, and parent terminalization therefore share one run-then-delivery

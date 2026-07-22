@@ -969,3 +969,33 @@ func TestWriteReceipt_ContextCancellationReturnsFailureAndLeavesClaimForLeaseRec
 		t.Fatalf("cancelled delivery = status:%q claim_expires_at:%v, want leased in_progress work", snapshot.Status, snapshot.ClaimExpiresAt)
 	}
 }
+
+func TestWriteReceiptLongRunningClaimUsesExactRenewalTime(t *testing.T) {
+	bus := &recordingReceiptBus{}
+	deliveryStore := newManagerDeliveryTestStore(t)
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore})
+	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("long-running-settlement"), events.EventType("work.requested"), "source", "", nil, 0, eventtest.UUID("long-running-settlement-run"), "", events.EventEnvelope{}, time.Time{})
+	claimed, err := deliveryStore.ClaimAgentDelivery(testAuthorActivityContext(context.Background()), evt, managerAgentDeliveryRoute("agent-a"))
+	if err != nil {
+		t.Fatalf("claim delivery: %v", err)
+	}
+	agedAt := time.Now().Add(-15 * time.Minute).UTC()
+	if result, execErr := deliveryStore.db.ExecContext(context.Background(), `UPDATE event_deliveries SET created_at = ?, started_at = ?, updated_at = ? WHERE delivery_id = ? AND status = 'in_progress'`, agedAt, agedAt, agedAt, claimed.Snapshot.DeliveryID); execErr != nil {
+		t.Fatalf("age long-running delivery: %v", execErr)
+	} else if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
+		t.Fatalf("age long-running delivery affected %d rows, err=%v", rows, rowsErr)
+	}
+	if result, execErr := deliveryStore.db.ExecContext(context.Background(), `UPDATE event_delivery_attempts SET started_at = ? WHERE delivery_id = ? AND claim_version = ? AND open_marker = TRUE`, agedAt, claimed.Snapshot.DeliveryID, claimed.Claim.Version()); execErr != nil {
+		t.Fatalf("age long-running attempt: %v", execErr)
+	} else if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
+		t.Fatalf("age long-running attempt affected %d rows, err=%v", rows, rowsErr)
+	}
+
+	settled, err := am.writeReceipt(runtimedelivery.WithClaim(testAuthorActivityContext(context.Background()), claimed.Claim), evt, "agent-a", ReceiptStatusError, testFailure("handler_failed"))
+	if err != nil {
+		t.Fatalf("settle long-running claim: %v", err)
+	}
+	if settled.Status != runtimedelivery.StatusFailed || settled.RetryCount != 1 {
+		t.Fatalf("settled long-running delivery = %#v, want first retry scheduled", settled)
+	}
+}
