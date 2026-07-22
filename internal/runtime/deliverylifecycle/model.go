@@ -207,6 +207,33 @@ type Snapshot struct {
 func (s Snapshot) Terminal() bool { return s.Status.Terminal() }
 func (s Snapshot) State() State   { return StateFromStatus(s.Status, s.ActiveSessionID) }
 
+type SnapshotPage struct {
+	Snapshots []Snapshot
+	HasMore   bool
+}
+
+type AgentLifecyclePageQuery struct {
+	AgentID          string
+	RunID            string
+	Statuses         []Status
+	BeforeCreatedAt  time.Time
+	BeforeDeliveryID string
+	Limit            int
+}
+
+type AgentDiagnosticPageQuery struct {
+	AgentID          string
+	Status           Status
+	BeforeOccurredAt time.Time
+	BeforeDeliveryID string
+	Limit            int
+}
+
+type AgentDiagnosticCounts struct {
+	Failures    int
+	DeadLetters int
+}
+
 // Claim is a fenced durable capability. It has no public constructor and its
 // identity cannot be recovered from a Snapshot.
 type Claim struct {

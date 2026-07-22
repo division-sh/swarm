@@ -106,6 +106,18 @@ func (s fakeAgentConversationReadSource) deliverySnapshotsForAgent(context.Conte
 	return []runtimedelivery.Snapshot{}, nil
 }
 
+func (s fakeAgentConversationReadSource) deliveryLifecycleSnapshotPageForAgent(context.Context, runtimedelivery.AgentLifecyclePageQuery) (runtimedelivery.SnapshotPage, error) {
+	return runtimedelivery.SnapshotPage{Snapshots: []runtimedelivery.Snapshot{}}, nil
+}
+
+func (s fakeAgentConversationReadSource) deliveryDiagnosticSnapshotPageForAgent(context.Context, runtimedelivery.AgentDiagnosticPageQuery) (runtimedelivery.SnapshotPage, error) {
+	return runtimedelivery.SnapshotPage{Snapshots: []runtimedelivery.Snapshot{}}, nil
+}
+
+func (s fakeAgentConversationReadSource) deliveryDiagnosticCountsForAgentSince(context.Context, string, time.Time) (runtimedelivery.AgentDiagnosticCounts, error) {
+	return runtimedelivery.AgentDiagnosticCounts{}, nil
+}
+
 func (s fakeAgentConversationReadSource) ListOperatorConversationTurns(_ context.Context, opts OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error) {
 	if s.turnErr != nil {
 		return OperatorConversationTurnListResult{}, s.turnErr
