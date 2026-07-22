@@ -644,6 +644,10 @@ func validateDetail(class Class, detail Detail) error {
 		}
 	}
 	switch class {
+	case ClassRetryExhausted:
+		if detail.Code == "delivery_retry_exhausted" {
+			return validateDeliveryRetryExhaustedDetail(detail.Attributes)
+		}
 	case ClassOutcomeUncertain:
 		switch detail.Code {
 		case "run_terminal_persistence_unconfirmed":
@@ -693,6 +697,56 @@ func validateDetail(class Class, detail Detail) error {
 				return fmt.Errorf("%s detail forbids attributes", detail.Code)
 			}
 		}
+	}
+	return nil
+}
+
+func validateDeliveryRetryExhaustedDetail(attributes map[string]any) error {
+	if len(attributes) != 2 {
+		return fmt.Errorf("delivery_retry_exhausted detail requires only max_retries and retry_history")
+	}
+	maxRetries, ok := intAttribute(attributes["max_retries"])
+	if !ok || maxRetries <= 0 {
+		return fmt.Errorf("delivery_retry_exhausted max_retries must be a positive integer")
+	}
+	var history []any
+	switch typed := attributes["retry_history"].(type) {
+	case []any:
+		history = typed
+	case []map[string]any:
+		history = make([]any, len(typed))
+		for index := range typed {
+			history[index] = typed[index]
+		}
+	default:
+		return fmt.Errorf("delivery_retry_exhausted retry_history must be an array")
+	}
+	if len(history) != maxRetries+1 {
+		return fmt.Errorf("delivery_retry_exhausted retry_history must contain max_retries plus the exhausting attempt")
+	}
+	var previousVersion int
+	for index, raw := range history {
+		item, ok := raw.(map[string]any)
+		if !ok || len(item) != 2 {
+			return fmt.Errorf("delivery_retry_exhausted retry_history[%d] requires only claim_version and failure", index)
+		}
+		version, ok := intAttribute(item["claim_version"])
+		if !ok || version <= previousVersion {
+			return fmt.Errorf("delivery_retry_exhausted retry_history claim versions must be positive and strictly increasing")
+		}
+		failureValue, ok := item["failure"].(map[string]any)
+		if !ok {
+			return fmt.Errorf("delivery_retry_exhausted retry_history[%d] failure must be an envelope", index)
+		}
+		failureRaw, err := json.Marshal(failureValue)
+		if err != nil {
+			return fmt.Errorf("delivery_retry_exhausted retry_history[%d] failure: %w", index, err)
+		}
+		failure, err := UnmarshalEnvelope(failureRaw)
+		if err != nil || failure.Class == ClassRetryExhausted {
+			return fmt.Errorf("delivery_retry_exhausted retry_history[%d] must contain a valid non-exhaustion failure", index)
+		}
+		previousVersion = version
 	}
 	return nil
 }

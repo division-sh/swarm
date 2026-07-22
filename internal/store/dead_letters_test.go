@@ -38,7 +38,7 @@ func TestRecordDeadLetter_PersistsAndDedupes(t *testing.T) {
 	}
 	rec := runtimedeadletters.Record{
 		OriginalEventID: evt.ID(),
-		Failure:         testFailureEnvelope(runtimefailures.ClassRetryExhausted, "delivery_retry_exhausted", nil),
+		Failure:         testFailureEnvelope(runtimefailures.ClassConnectorFailure, "terminal_delivery_failure", nil),
 		RetryCount:      4,
 		HandlerNode:     "agent-1",
 	}

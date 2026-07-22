@@ -15,6 +15,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -447,7 +448,7 @@ func (am *AgentManager) writeReceipt(ctx context.Context, evt events.Event, agen
 	case ReceiptStatusError:
 		snapshot, err = am.deliveryStore.SettleFailure(writeCtx, claim, runtimedelivery.Settlement{
 			Disposition: runtimedelivery.FailureRetry, ReasonCode: "handler_failure",
-			Failure: failure, RetryBase: time.Minute,
+			Failure: failure, RetryBase: semanticview.HandlerRetryBase(am.semanticSource),
 		})
 	case ReceiptStatusDeadLetter:
 		snapshot, err = am.deliveryStore.SettleFailure(writeCtx, claim, runtimedelivery.Settlement{

@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 )
@@ -942,6 +943,40 @@ func TestWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransitions(t *te
 			}
 			if got := detail["delivery_terminal_outcome"]; got != tc.wantTerminal && !(got == nil && tc.wantTerminal == "") {
 				t.Fatalf("delivery_terminal_outcome = %#v, want %q", got, tc.wantTerminal)
+			}
+		})
+	}
+}
+
+func TestWriteReceiptUsesCanonicalHandlerRetryBase(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		source semanticview.Source
+		want   time.Duration
+	}{
+		{name: "default", want: time.Second},
+		{
+			name: "configured",
+			source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+				"handler_retry_base_seconds": {Value: 37},
+			}}}),
+			want: 37 * time.Second,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			deliveryStore := newManagerDeliveryTestStore(t)
+			am := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{DeliveryStore: deliveryStore, SemanticSource: test.source})
+			evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("work.requested"), "source", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Time{})
+			claimed, err := deliveryStore.ClaimAgentDelivery(testAuthorActivityContext(context.Background()), evt, managerAgentDeliveryRoute("agent-a"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			settled, err := am.writeReceipt(runtimedelivery.WithClaim(testAuthorActivityContext(context.Background()), claimed.Claim), evt, "agent-a", ReceiptStatusError, testFailure("handler_failed"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if delay := settled.NextEligibleAt.Sub(settled.UpdatedAt); delay != test.want {
+				t.Fatalf("agent retry delay = %s, want %s", delay, test.want)
 			}
 		})
 	}

@@ -98,7 +98,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	if err := commitDeliveryObligationFixture(ctx, sqliteStore, latestEvent, deadRoute); err != nil {
 		t.Fatalf("commit sqlite exhausted delivery: %v", err)
 	}
-	nodeFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "node_failure", nil)
+	nodeFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "node_failure", nil)
 	claimed, err := sqliteStore.ClaimNodeDelivery(ctx, latestEvent, deadRoute)
 	if err != nil {
 		t.Fatalf("claim sqlite exhausted delivery: %v", err)

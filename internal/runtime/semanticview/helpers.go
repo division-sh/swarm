@@ -1,10 +1,42 @@
 package semanticview
 
 import (
+	"strconv"
 	"strings"
+	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
+
+const handlerRetryBasePolicyKey = "handler_retry_base_seconds"
+
+// HandlerRetryBase is the canonical projection of the retry cadence shared by
+// system handlers and agent sessions.
+func HandlerRetryBase(source Source) time.Duration {
+	value, ok := PolicyValueForFlow(source, "", handlerRetryBasePolicyKey)
+	if !ok {
+		return time.Second
+	}
+	var seconds float64
+	switch typed := value.Value.(type) {
+	case int:
+		seconds = float64(typed)
+	case int64:
+		seconds = float64(typed)
+	case float64:
+		seconds = typed
+	case string:
+		seconds, _ = strconv.ParseFloat(strings.TrimSpace(typed), 64)
+	}
+	if !(seconds > 0) {
+		return time.Second
+	}
+	duration := time.Duration(seconds * float64(time.Second))
+	if duration <= 0 {
+		return time.Second
+	}
+	return duration
+}
 
 type PolicyValueResolution struct {
 	Value    runtimecontracts.PolicyValue

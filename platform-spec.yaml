@@ -6780,6 +6780,19 @@ engine:
           deterministic: true
           message_template: Retry policy was exhausted (%s).
           remediation_template: Resolve the underlying failure before starting a new execution (%s).
+          detail_contracts:
+            delivery_retry_exhausted:
+              owner: internal/runtime/deliverylifecycle settlement owner
+              attributes:
+                max_retries:
+                  required: true
+                  type: integer
+                  minimum: 1
+                retry_history:
+                  required: true
+                  type: array
+                  item_contract: Each item contains exactly one positive, strictly increasing claim_version and one canonical non-exhaustion platform.failure/v1 envelope. The ordered array contains every retry-scheduled failure followed by the exhausting attempt, so its length is max_retries plus one.
+              additional_attributes: false
         platform.budget_exhausted:
           family: task_execution
           task_failure: true
@@ -6942,6 +6955,7 @@ engine:
         max_retries: 3
         backoff: exponential with configurable base. Default base 1s (delays 1s, 2s, 4s). Configurable via policy.yaml
           handler_retry_base_seconds. Production deployments may use longer bases (e.g., 60s for 1min, 5min, 30min delays).
+        backoff_projection_owner: internal/runtime/semanticview.HandlerRetryBase is the single interpreter consumed by system handlers and agent sessions.
         decision_owner: engine.FailureDisposition consumes the canonical envelope's registry-stamped retryable value; error prose is never classified
       dead_letter: After max_retries exhausted, emit platform.dead_letter with the canonical failure envelope and retry history.
         Dead letter events are root-scoped.
@@ -6955,7 +6969,7 @@ engine:
         decision_owner: internal/runtime/engine.FailureDispositionFor consumes the canonical returned Agent.OnEvent failure envelope.
         terminal_rule: A terminal or dead-letter disposition terminalizes the delivery immediately, preserves the original envelope,
           does not advance retry_count, and must not be labeled retry_exhausted.
-        exhaustion_rule: platform.retry_exhausted is synthesized only after retry dispositions consume the configured retry budget.
+        exhaustion_rule: platform.retry_exhausted/delivery_retry_exhausted is synthesized by the delivery lifecycle owner only after retry dispositions consume the configured retry budget. Its retry_history contains each persisted retry-scheduled failure and the exhausting attempt in claim-version order; the synthesized envelope is committed identically to the delivery, exact attempt, outcome, dead-letter, and author-activity transition.
     timer_failure:
       behavior: Timer event treated as regular event. Same retry policy as handler failures.
     chain_depth_limit:

@@ -24,6 +24,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -532,7 +533,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 		}
 		snapshot, settleErr := deliveryStore.SettleFailure(executionCtx, claim, runtimedelivery.Settlement{
 			Disposition: disposition, ReasonCode: reason, Failure: &failure.Failure,
-			Duration: time.Since(started), RetryBase: workflowHandlerRetryBase(source),
+			Duration: time.Since(started), RetryBase: semanticview.HandlerRetryBase(source),
 		})
 		finishErr := settlementGuard.Finish(settleErr == nil)
 		if err := errors.Join(settleErr, finishErr); err != nil {
