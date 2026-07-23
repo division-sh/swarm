@@ -5,16 +5,24 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -31,6 +39,164 @@ type nodeDeliveryRecoveryStore interface {
 type renewalTrackingDeliveryStore struct {
 	runtimedelivery.Store
 	renewals atomic.Int64
+}
+
+type startupRecoveryOrderStore interface {
+	nodeDeliveryRecoveryStore
+	runtimemanager.ManagerPersistence
+	runtimemanager.AgentLifecyclePersistence
+}
+
+type startupRecoveryOrderLLM struct{}
+
+func (startupRecoveryOrderLLM) StartSession(context.Context, string, string, []llm.ToolDefinition) (*llm.Session, error) {
+	return &llm.Session{}, nil
+}
+
+func (startupRecoveryOrderLLM) ContinueSession(context.Context, *llm.Session, llm.Message) (*llm.Response, error) {
+	return &llm.Response{}, nil
+}
+
+type startupRecoveryOrderAgent struct {
+	id            string
+	subscriptions []events.EventType
+}
+
+func (a startupRecoveryOrderAgent) ID() string { return a.id }
+func (startupRecoveryOrderAgent) Type() string { return "test" }
+func (a startupRecoveryOrderAgent) Subscriptions() []events.EventType {
+	return append([]events.EventType(nil), a.subscriptions...)
+}
+func (a startupRecoveryOrderAgent) OnEvent(_ context.Context, event events.Event) ([]events.Event, error) {
+	return nil, nil
+}
+
+func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity(t *testing.T) {
+	for _, backend := range []struct {
+		name  string
+		setup func(*testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore, *runtimepipeline.WorkflowInstanceStore)
+	}{
+		{
+			name: "postgres",
+			setup: func(t *testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore, *runtimepipeline.WorkflowInstanceStore) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				ctx := seedRuntimeTestRun(t, db)
+				return ctx, db, db, storetest.AdmitPostgresRuntimeStore(t, db), runtimepipeline.NewWorkflowInstanceStore(db)
+			},
+		},
+		{
+			name: "sqlite",
+			setup: func(t *testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore, *runtimepipeline.WorkflowInstanceStore) {
+				selected := storetest.StartSQLiteRuntimeStore(t)
+				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
+				if _, err := selected.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, templateInstanceDeliveryRunID); err != nil {
+					t.Fatalf("seed SQLite startup-order run: %v", err)
+				}
+				workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(selected.DB, selected)
+				return ctx, nil, selected.DB, selected, workflowStore
+			},
+		},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
+			ctx, runtimeSQLDB, queryDB, selected, workflowStore := backend.setup(t)
+			repoRoot := filepath.Clean(filepath.Join("..", ".."))
+			fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", "test-boot-success")
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+				repoRoot,
+				fixtureRoot,
+				runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+			)
+			if err != nil {
+				t.Fatalf("load startup-order workflow contract: %v", err)
+			}
+			source := semanticview.Wrap(bundle)
+			module := newRuntimeTestWorkflowModule(t, source)
+
+			const agentID = "startup-order-agent"
+			agentConfig := runtimeactors.AgentConfig{
+				ID: agentID, Type: "test", Role: "observer", FlowID: "global", Model: "regular",
+				ExecutionMode: "live", Subscriptions: []string{"task.completed"}, Config: []byte(`{"system_prompt":"observe completed tasks"}`),
+			}
+
+			eventID := eventtest.UUID("startup-order-node-event-" + backend.name)
+			event := eventtest.RunCreatingRootIngress(
+				eventID, "task.requested", "test", "", []byte(`{}`), 0,
+				templateInstanceDeliveryRunID, "", events.EventEnvelope{}, time.Now().UTC(),
+			)
+			nodeRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "complete-task"}
+			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{nodeRoute}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+
+			processOwner := worklifetime.NewProcess()
+			t.Cleanup(func() {
+				joinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if _, err := processOwner.Join(joinCtx); err != nil {
+					t.Errorf("join startup-order process owner: %v", err)
+				}
+			})
+			hydrated := atomic.Bool{}
+			runtime, err := swarmruntime.NewRuntime(ctx, swarmruntime.RuntimeDeps{
+				Config: &config.Config{Runtime: config.RuntimeConfig{RecoveryOnStartup: true}, LLM: config.LLMConfig{Backend: "anthropic"}},
+				Stores: swarmruntime.Stores{
+					SQLDB: runtimeSQLDB, EventStore: selected, PipelineStore: workflowStore,
+					ManagerStore: selected, DeliveryStore: selected,
+				},
+				Options: swarmruntime.RuntimeOptions{
+					SelfCheck: false, WorkflowModule: module, LLMRuntime: startupRecoveryOrderLLM{},
+					RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleSourceFact: authorActivityTestBundleSourceFact,
+					BundleFingerprint: authorActivityTestBundleSourceFact.BundleFingerprint, ProcessWorkOwner: processOwner,
+					TestWorkflowNodeHandlerStartHook: func(context.Context, string, events.Event) error {
+						if !hydrated.Load() {
+							return errors.New("workflow-node recovery started before persisted agent hydration")
+						}
+						return nil
+					},
+				},
+			})
+			if err != nil {
+				t.Fatalf("NewRuntime: %v", err)
+			}
+			t.Cleanup(func() {
+				if err := runtime.Shutdown(); err != nil {
+					t.Errorf("shutdown startup-order runtime: %v", err)
+				}
+			})
+			if err := runtime.Manager.SpawnAgent(agentConfig); err != nil {
+				t.Fatalf("persist startup-order agent: %v", err)
+			}
+			if err := runtime.Manager.Shutdown(); err != nil {
+				t.Fatalf("retire constructed manager before startup-order replacement: %v", err)
+			}
+			runtime.Manager = runtimemanager.NewAgentManagerWithOptions(runtime.Bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+				hydrated.Store(true)
+				subscriptions := make([]events.EventType, 0, len(cfg.Subscriptions))
+				for _, subscription := range cfg.Subscriptions {
+					subscriptions = append(subscriptions, events.EventType(subscription))
+				}
+				return startupRecoveryOrderAgent{id: cfg.ID, subscriptions: subscriptions}, nil
+			}, runtimemanager.AgentManagerOptions{
+				BaseContext: ctx, LifecycleStore: selected, DeliveryStore: selected, SemanticSource: source,
+				WorkflowInstances: workflowStore, WorkOwner: runtime.WorkOccurrence(),
+			}, selected)
+
+			if err := runtime.Start(ctx); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			assertRecoveredNodeDelivery(t, ctx, selected, eventID, nodeRoute, 1)
+			eventIDQuery := `SELECT event_id::text FROM events WHERE event_name = 'task.completed' ORDER BY created_at DESC LIMIT 1`
+			if backend.name == "sqlite" {
+				eventIDQuery = `SELECT event_id FROM events WHERE event_name = 'task.completed' ORDER BY created_at DESC LIMIT 1`
+			}
+			var completedEventID string
+			if err := queryDB.QueryRowContext(ctx, eventIDQuery).Scan(&completedEventID); err != nil {
+				t.Fatalf("load event emitted by recovered workflow node: %v", err)
+			}
+			if completedEventID == "" || !hydrated.Load() {
+				t.Fatalf("startup order proof = completed event %q hydrated %t, want emitted event after agent hydration", completedEventID, hydrated.Load())
+			}
+		})
+	}
 }
 
 func (s *renewalTrackingDeliveryStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.Snapshot, error) {
