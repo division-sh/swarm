@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -43,6 +44,24 @@ type failureReturningAgent struct {
 type countingFailureAgent struct {
 	failureReturningAgent
 	calls int
+}
+
+type failOnceSettlementManagerDeliveryStore struct {
+	runtimedelivery.Store
+	failNext          atomic.Bool
+	attempts          atomic.Int32
+	canceledAtAttempt atomic.Bool
+}
+
+func (s *failOnceSettlementManagerDeliveryStore) SettleFailure(ctx context.Context, claim runtimedelivery.Claim, settlement runtimedelivery.Settlement) (runtimedelivery.Snapshot, error) {
+	s.attempts.Add(1)
+	if ctx.Err() != nil {
+		s.canceledAtAttempt.Store(true)
+	}
+	if s.failNext.CompareAndSwap(true, false) {
+		return runtimedelivery.Snapshot{}, errors.New("injected intervention settlement failure")
+	}
+	return s.Store.SettleFailure(ctx, claim, settlement)
 }
 
 func (a *countingFailureAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
@@ -255,6 +274,236 @@ func TestRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRecovery(
 				t.Fatalf("agent calls after recovery = %d, want settled delivery not to execute again", got)
 			}
 		})
+	}
+}
+
+func TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim(t *testing.T) {
+	tests := []struct {
+		name       string
+		newFailure func() error
+	}{
+		{name: "authentication_needed", newFailure: func() error {
+			return runtimefailures.New(runtimefailures.ClassAuthenticationNeeded, "provider_credential_missing", "test-agent", "call_provider", map[string]any{"auth_kind": "provider_credential"})
+		}},
+		{name: "provider_credit_exhausted", newFailure: func() error {
+			return runtimefailures.New(runtimefailures.ClassConnectorFailure, "provider_credit_exhausted", "test-agent", "call_provider", map[string]any{"status": 402})
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runtimebus.ResumeRuntimeIngress()
+			t.Cleanup(runtimebus.ResumeRuntimeIngress)
+
+			baseStore := newManagerDeliveryTestStore(t)
+			shortStore := &shortLeaseManagerDeliveryStore{managerDeliveryTestStore: baseStore, leaseTTL: 1500 * time.Millisecond}
+			deliveryStore := &failOnceSettlementManagerDeliveryStore{Store: shortStore}
+			deliveryStore.failNext.Store(true)
+			persistence := &startupReplayTestStore{
+				recoveryTestStore:        recoveryTestStore{},
+				managerDeliveryTestStore: baseStore,
+			}
+			probe := lifecycletest.New(t, lifecycletest.WithTimeout(5*time.Second))
+			eventBus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+			if err != nil {
+				t.Fatalf("NewEventBus: %v", err)
+			}
+			var calls atomic.Int32
+			agent := shutdownTestAgent{
+				id:            "intervention-settlement-agent",
+				subscriptions: []events.EventType{"test.intervention.settlement"},
+				onEvent: func(context.Context, events.Event) ([]events.Event, error) {
+					if calls.Add(1) == 1 {
+						return nil, tt.newFailure()
+					}
+					return nil, nil
+				},
+			}
+			newFactory := func(runtimeactors.AgentConfig) (Agent, error) { return agent, nil }
+			manager := newTestAgentManagerWithOptions(t, eventBus, newFactory, AgentManagerOptions{
+				DeliveryStore:      deliveryStore,
+				TestLifecycleProbe: probe.Raw(),
+			}, persistence)
+			if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: runtimeactors.AgentConfig{
+				ExecutionMode: "live",
+				ID:            agent.ID(),
+				Subscriptions: []string{"test.intervention.settlement"},
+			}}, false); err != nil {
+				t.Fatalf("spawn intervention settlement agent: %v", err)
+			}
+			if err := manager.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+				t.Fatalf("run intervention settlement manager: %v", err)
+			}
+			managerRunCtx, _, running := manager.lifecycle.runSnapshot()
+			if !running || managerRunCtx == nil {
+				t.Fatal("intervention settlement manager is not running")
+			}
+
+			inbound := eventtest.RunCreatingRootIngress(
+				eventtest.UUID("intervention-settlement-"+tt.name),
+				events.EventType("test.intervention.settlement"),
+				"test", "", nil, 0,
+				eventtest.UUID("intervention-settlement-run-"+tt.name),
+				"", events.EventEnvelope{}, time.Now().UTC(),
+			)
+			if err := eventBus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
+				t.Fatalf("publish intervention settlement event: %v", err)
+			}
+			probe.RequireAgentInProgress(inbound.ID(), agent.ID())
+			select {
+			case <-managerRunCtx.Done():
+			case <-time.After(time.Second):
+				t.Fatal("failed intervention settlement did not request fail-closed shutdown")
+			}
+			if err := manager.Shutdown(); err != nil {
+				t.Fatalf("join intervention settlement shutdown: %v", err)
+			}
+			if deliveryStore.attempts.Load() != 1 || deliveryStore.canceledAtAttempt.Load() {
+				t.Fatalf("settlement attempts = %d canceled_at_attempt=%t, want one attempt before shutdown cancellation", deliveryStore.attempts.Load(), deliveryStore.canceledAtAttempt.Load())
+			}
+
+			obligation, err := runtimedelivery.NewObligation(inbound.ID(), inbound.RunID(), managerAgentDeliveryRoute(agent.ID()))
+			if err != nil {
+				t.Fatalf("derive intervention settlement obligation: %v", err)
+			}
+			snapshot, err := baseStore.Snapshot(context.Background(), obligation.DeliveryID())
+			if err != nil {
+				t.Fatalf("load failed intervention settlement delivery: %v", err)
+			}
+			if snapshot.Status != runtimedelivery.StatusInProgress || snapshot.ClaimExpiresAt.IsZero() || snapshot.Failure != nil {
+				t.Fatalf("failed intervention settlement delivery = %#v, want leased in_progress claim without terminal failure", snapshot)
+			}
+			outcomes, err := baseStore.Outcomes(context.Background(), obligation.DeliveryID())
+			if err != nil {
+				t.Fatalf("load failed intervention settlement outcomes: %v", err)
+			}
+			if len(outcomes) != 0 {
+				t.Fatalf("failed intervention settlement outcomes = %#v, want no fabricated terminal evidence", outcomes)
+			}
+
+			recoveryProbe := lifecycletest.New(t, lifecycletest.WithTimeout(5*time.Second))
+			recoveryBus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+			if err != nil {
+				t.Fatalf("NewEventBus(recovery): %v", err)
+			}
+			recoveryManager := newTestAgentManagerWithOptions(t, recoveryBus, newFactory, AgentManagerOptions{
+				DeliveryStore:      deliveryStore,
+				TestLifecycleProbe: recoveryProbe.Raw(),
+			}, persistence)
+			recoveryManager.retrySweepInterval = 10 * time.Millisecond
+			if err := recoveryManager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: runtimeactors.AgentConfig{
+				ExecutionMode: "live",
+				ID:            agent.ID(),
+				Subscriptions: []string{"test.intervention.settlement"},
+			}}, false); err != nil {
+				t.Fatalf("spawn intervention recovery agent: %v", err)
+			}
+			if err := recoveryManager.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+				t.Fatalf("run intervention recovery manager: %v", err)
+			}
+			recoveryProbe.RequireAgentDelivered(inbound.ID(), agent.ID())
+			if err := recoveryManager.Shutdown(); err != nil {
+				t.Fatalf("shutdown intervention recovery manager: %v", err)
+			}
+			if got := calls.Load(); got != 2 {
+				t.Fatalf("agent calls after lease recovery = %d, want one failed attempt and one fresh-runtime recovery", got)
+			}
+			recovered, err := baseStore.Snapshot(context.Background(), obligation.DeliveryID())
+			if err != nil {
+				t.Fatalf("load recovered intervention delivery: %v", err)
+			}
+			if recovered.Status != runtimedelivery.StatusDelivered || recovered.ClaimVersion != 2 {
+				t.Fatalf("recovered intervention delivery = status:%q claim_version:%d, want delivered at claim version 2", recovered.Status, recovered.ClaimVersion)
+			}
+		})
+	}
+}
+
+func TestRunningManagerStandingRetryReclaimsFailedDeliveryAutomatically(t *testing.T) {
+	runtimebus.ResumeRuntimeIngress()
+	t.Cleanup(runtimebus.ResumeRuntimeIngress)
+
+	deliveryStore := newManagerDeliveryTestStore(t)
+	persistence := &startupReplayTestStore{
+		recoveryTestStore:        recoveryTestStore{},
+		managerDeliveryTestStore: deliveryStore,
+	}
+	probe := lifecycletest.New(t, lifecycletest.WithTimeout(5*time.Second))
+	eventBus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	var calls atomic.Int32
+	agent := shutdownTestAgent{
+		id:            "standing-retry-agent",
+		subscriptions: []events.EventType{"test.standing.retry"},
+		onEvent: func(context.Context, events.Event) ([]events.Event, error) {
+			if calls.Add(1) == 1 {
+				return nil, runtimefailures.New(runtimefailures.ClassTimeout, "provider_request_timeout", "test-agent", "call_provider", nil)
+			}
+			return nil, nil
+		},
+	}
+	manager := newTestAgentManagerWithOptions(t, eventBus, func(runtimeactors.AgentConfig) (Agent, error) {
+		return agent, nil
+	}, AgentManagerOptions{
+		DeliveryStore:      deliveryStore,
+		TestLifecycleProbe: probe.Raw(),
+	}, persistence)
+	manager.retrySweepInterval = 10 * time.Millisecond
+	if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: runtimeactors.AgentConfig{
+		ExecutionMode: "live",
+		ID:            agent.ID(),
+		Subscriptions: []string{"test.standing.retry"},
+	}}, false); err != nil {
+		t.Fatalf("spawn standing retry agent: %v", err)
+	}
+	if err := manager.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+		t.Fatalf("run standing retry manager: %v", err)
+	}
+
+	inbound := eventtest.RunCreatingRootIngress(
+		eventtest.UUID("standing-retry"),
+		events.EventType("test.standing.retry"),
+		"test", "", nil, 0,
+		eventtest.UUID("standing-retry-run"),
+		"", events.EventEnvelope{}, time.Now().UTC(),
+	)
+	if err := eventBus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
+		t.Fatalf("publish standing retry event: %v", err)
+	}
+	probe.RequireAgentFailed(inbound.ID(), agent.ID())
+	obligation, err := runtimedelivery.NewObligation(inbound.ID(), inbound.RunID(), managerAgentDeliveryRoute(agent.ID()))
+	if err != nil {
+		t.Fatalf("derive standing retry obligation: %v", err)
+	}
+	failed, err := deliveryStore.Snapshot(context.Background(), obligation.DeliveryID())
+	if err != nil {
+		t.Fatalf("load failed standing retry delivery: %v", err)
+	}
+	if failed.Status != runtimedelivery.StatusFailed || failed.RetryCount != 1 || !failed.NextEligibleAt.After(failed.UpdatedAt) {
+		t.Fatalf("standing retry first settlement = %#v, want persisted failed retry delay", failed)
+	}
+
+	probe.RequireAgentDelivered(inbound.ID(), agent.ID())
+	if err := manager.Shutdown(); err != nil {
+		t.Fatalf("shutdown standing retry manager: %v", err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("standing retry agent calls = %d, want automatic retry without manual replay or restart", got)
+	}
+	delivered, err := deliveryStore.Snapshot(context.Background(), obligation.DeliveryID())
+	if err != nil {
+		t.Fatalf("load delivered standing retry delivery: %v", err)
+	}
+	if delivered.Status != runtimedelivery.StatusDelivered || delivered.ClaimVersion != 2 {
+		t.Fatalf("standing retry final delivery = status:%q claim_version:%d, want delivered at claim version 2", delivered.Status, delivered.ClaimVersion)
+	}
+	outcomes, err := deliveryStore.Outcomes(context.Background(), obligation.DeliveryID())
+	if err != nil {
+		t.Fatalf("load standing retry outcomes: %v", err)
+	}
+	if len(outcomes) != 2 || outcomes[0].Outcome != "retry_scheduled" || outcomes[1].Outcome != "delivered" {
+		t.Fatalf("standing retry outcomes = %#v, want retry_scheduled then delivered", outcomes)
 	}
 }
 
