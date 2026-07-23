@@ -359,22 +359,22 @@ func (s *SQLiteRuntimeStore) sqliteRunDebugEventCounts(ctx context.Context, runI
 }
 
 func (s *SQLiteRuntimeStore) sqliteRunDebugDeliveryCounts(ctx context.Context, runID string) ([]RunDebugDeliveryCount, error) {
-	snapshots, err := s.deliverySnapshotsForRun(ctx, runID)
+	counts, err := s.deliveryRunDiagnosticCounts(ctx, runID)
 	if err != nil {
 		return nil, fmt.Errorf("query sqlite run debug delivery counts: %w", err)
 	}
-	return runDebugDeliveryCountsFromSnapshots(snapshots), nil
+	return runDebugDeliveryCounts(counts), nil
 }
 
 func (s *SQLiteRuntimeStore) sqliteRunDebugFailureDeliveries(ctx context.Context, runID string, limit int) ([]RunDebugFailureDelivery, error) {
 	if limit <= 0 {
 		limit = 10
 	}
-	snapshots, err := s.deliverySnapshotsForRun(ctx, runID)
+	snapshots, err := s.deliveryRunDiagnosticFailures(ctx, runID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query sqlite run failed deliveries: %w", err)
 	}
-	return runDebugFailuresFromSnapshots(snapshots, limit,
+	return runDebugFailuresFromSnapshots(snapshots,
 		func(eventID string) (deliveryLifecycleEventMetadata, error) {
 			record, found, err := loadSQLiteEventIdentity(ctx, s.DB, eventID)
 			if err != nil {

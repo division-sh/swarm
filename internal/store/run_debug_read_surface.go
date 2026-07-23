@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -494,11 +493,11 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 		return RunDebugReport{}, fmt.Errorf("read event counts: %w", err)
 	}
 
-	deliverySnapshots, err := s.deliverySnapshotsForRun(ctx, report.RunID)
+	deliveryCounts, err := s.deliveryRunDiagnosticCounts(ctx, report.RunID)
 	if err != nil {
 		return RunDebugReport{}, fmt.Errorf("load deliveries: %w", err)
 	}
-	report.Deliveries = runDebugDeliveryCountsFromSnapshots(deliverySnapshots)
+	report.Deliveries = runDebugDeliveryCounts(deliveryCounts)
 	failedDeliveries, err := s.loadRunDebugFailureDeliveries(ctx, report.RunID, opts.DeadLetterLimit)
 	if err != nil {
 		return RunDebugReport{}, err
@@ -709,11 +708,11 @@ func (s *PostgresStore) loadRunDebugFailureDeliveries(ctx context.Context, runID
 	if limit <= 0 {
 		limit = 10
 	}
-	snapshots, err := s.deliverySnapshotsForRun(ctx, runID)
+	snapshots, err := s.deliveryRunDiagnosticFailures(ctx, runID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("load run failed deliveries: %w", err)
 	}
-	return runDebugFailuresFromSnapshots(snapshots, limit,
+	return runDebugFailuresFromSnapshots(snapshots,
 		func(eventID string) (deliveryLifecycleEventMetadata, error) {
 			record, found, err := loadPostgresEventIdentity(ctx, s.DB, eventID)
 			if err != nil {
@@ -741,49 +740,30 @@ func normalizeRunDebugFailureDelivery(item *RunDebugFailureDelivery) {
 	item.ReasonCode = strings.TrimSpace(item.ReasonCode)
 }
 
-func runDebugDeliveryCountsFromSnapshots(snapshots []runtimedelivery.Snapshot) []RunDebugDeliveryCount {
-	counts := map[string]int{}
-	for _, snapshot := range snapshots {
-		counts[snapshot.SubscriberID+"\x00"+string(snapshot.Status)]++
-	}
+func runDebugDeliveryCounts(counts []runtimedelivery.RunDiagnosticCount) []RunDebugDeliveryCount {
 	out := make([]RunDebugDeliveryCount, 0, len(counts))
-	for key, count := range counts {
-		parts := strings.SplitN(key, "\x00", 2)
-		out = append(out, RunDebugDeliveryCount{SubscriberID: parts[0], Status: parts[1], Count: count})
+	for _, count := range counts {
+		out = append(out, RunDebugDeliveryCount{
+			SubscriberID: count.SubscriberID,
+			Status:       string(count.Status),
+			Count:        count.Count,
+		})
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].SubscriberID != out[j].SubscriberID {
-			return out[i].SubscriberID < out[j].SubscriberID
-		}
-		return out[i].Status < out[j].Status
-	})
 	return out
 }
 
 func runDebugFailuresFromSnapshots(
 	snapshots []runtimedelivery.Snapshot,
-	limit int,
 	loadEvent func(string) (deliveryLifecycleEventMetadata, error),
 	loadDeliveryDeadLetters func(string, int64) ([]OperatorDeadLetterRecord, error),
 ) ([]RunDebugFailureDelivery, error) {
-	failed := make([]runtimedelivery.Snapshot, 0)
 	for _, snapshot := range snapshots {
-		if snapshot.Status == runtimedelivery.StatusFailed || snapshot.Status == runtimedelivery.StatusDeadLetter {
-			failed = append(failed, snapshot)
+		if snapshot.Status != runtimedelivery.StatusFailed && snapshot.Status != runtimedelivery.StatusDeadLetter {
+			return nil, fmt.Errorf("canonical run diagnostic failure page returned delivery status %q", snapshot.Status)
 		}
 	}
-	sort.Slice(failed, func(i, j int) bool {
-		left, right := deliveryDiagnosticOccurredAt(failed[i]), deliveryDiagnosticOccurredAt(failed[j])
-		if !left.Equal(right) {
-			return left.After(right)
-		}
-		return failed[i].DeliveryID > failed[j].DeliveryID
-	})
-	if len(failed) > limit {
-		failed = failed[:limit]
-	}
-	out := make([]RunDebugFailureDelivery, 0, len(failed))
-	for _, snapshot := range failed {
+	out := make([]RunDebugFailureDelivery, 0, len(snapshots))
+	for _, snapshot := range snapshots {
 		metadata, err := loadEvent(snapshot.EventID)
 		if err != nil {
 			return nil, err

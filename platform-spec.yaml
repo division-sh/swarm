@@ -12276,7 +12276,10 @@ platform_tables:
         no migration or compatibility interpretation. Agent lifecycle and diagnostic operator pages select exact status,
         cursor, ordering, and limit-plus-one delivery identities in SQL before hydrating canonical snapshots, event metadata,
         or dead-letter evidence. Their work is bounded by the requested page rather than retained agent history; 24-hour
-        diagnostic totals use a count-only projection over the same canonical status and occurrence-time facts.
+        diagnostic totals use a count-only projection over the same canonical status and occurrence-time facts. Run-debug
+        delivery summaries likewise aggregate subscriber/status counts in SQL and select only the requested failed/dead-letter
+        identities in diagnostic occurrence order before canonical snapshot, event, and dead-letter hydration; the report must
+        not hydrate complete run delivery history.
       ddl: |
         CREATE TABLE event_deliveries (
             delivery_id       UUID PRIMARY KEY,

@@ -270,6 +270,14 @@ type AgentDiagnosticCounts struct {
 	DeadLetters int
 }
 
+// RunDiagnosticCount is an exact count of persisted delivery obligations for
+// one subscriber and lifecycle status within a run.
+type RunDiagnosticCount struct {
+	SubscriberID string
+	Status       Status
+	Count        int
+}
+
 // Claim is a fenced durable capability. It has no public constructor and its
 // identity cannot be recovered from a Snapshot.
 type Claim struct {
