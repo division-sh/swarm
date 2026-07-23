@@ -21684,6 +21684,17 @@ cli_specification:
           - step: 11
             name: manager_recovery_if_enabled
             owner: internal/runtime
+            ordering: >
+              When persistent startup recovery is enabled, the runtime MUST hydrate persisted agent state and register
+              every admitted live agent receiver before it recovers any executable workflow-node delivery. The successful
+              agent-hydration boundary authorizes the initial node-delivery recovery pass, which in turn opens standing
+              node recovery. A recovered node handler therefore observes the same receiver registry as post-readiness
+              dispatch rather than treating an unhydrated persisted agent as an absent recipient.
+            failure_rule: >
+              If persisted agent hydration fails, startup records the canonical degraded manager-recovery decision and
+              MUST keep the executable node-delivery recovery gate closed. It MUST NOT claim, retry, settle, or dead-letter
+              a node delivery against a partially hydrated receiver registry. No timer, polling loop, or later maintenance
+              pass may bypass that gate.
           - step: 12
             name: outbox_sweeper
             owner: internal/runtime

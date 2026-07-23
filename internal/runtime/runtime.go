@@ -1489,27 +1489,34 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		rt.emitBootProgress(11, "manager_recovery_if_enabled", "skipped", "recovery_on_startup disabled")
 	} else {
 		recovered := make([]string, 0, 2)
-		if rt.Pipeline != nil {
+		agentHydrationSucceeded := true
+		if rt.Manager != nil {
+			startupRecoveryDecision.ManagerRecoveryAttempted = true
+			_, err := rt.Manager.HydrateForStartup(ctx)
+			if err != nil {
+				agentHydrationSucceeded = false
+				rt.recordStartupManagerRecoveryFailure(ctx, &startupRecoveryDecision, err)
+			} else {
+				recovered = append(recovered, "agent state")
+			}
+		}
+		if rt.Pipeline != nil && agentHydrationSucceeded {
 			if err := rt.Pipeline.RecoverNodeDeliveries(ctx); err != nil {
 				rt.emitBootProgress(11, "manager_recovery_if_enabled", "FAILED", err.Error())
 				return fmt.Errorf("recover executable workflow-node deliveries: %w", err)
 			}
 			recovered = append(recovered, "workflow-node deliveries")
 		}
-		if rt.Manager != nil {
-			startupRecoveryDecision.ManagerRecoveryAttempted = true
-			_, err := rt.Manager.HydrateForStartup(ctx)
-			if err != nil {
-				rt.recordStartupManagerRecoveryFailure(ctx, &startupRecoveryDecision, err)
-			}
-			recovered = append(recovered, "agent state")
-		}
 		status := "ok"
 		if startupRecoveryDecision.Outcome == startupRecoveryOutcomeDegraded {
 			status = string(startupRecoveryDecision.Outcome)
 		}
 		detail := "no executable delivery consumers available"
-		if len(recovered) > 0 {
+		if !agentHydrationSucceeded && rt.Pipeline != nil {
+			detail = "agent state hydration failed; workflow-node delivery recovery withheld"
+		} else if !agentHydrationSucceeded {
+			detail = "agent state hydration failed"
+		} else if len(recovered) > 0 {
 			detail = strings.Join(recovered, " and ") + " hydrated; managed replay awaits execution admission"
 		}
 		rt.emitBootProgress(11, "manager_recovery_if_enabled", status, detail)
