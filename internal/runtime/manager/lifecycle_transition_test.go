@@ -229,7 +229,10 @@ func TestManagerAuthBreakerAndExplicitShutdownJoinOneTransition(t *testing.T) {
 	eventBus := newLifecycleTransitionEventBus(t)
 	fixture := newBlockedManagerLifecycleFixture(t, eventBus, eventBus)
 
-	fixture.manager.maybeTripAuthCircuitBreaker(testAuthorActivityContext(context.Background()), "agent-transition", fixture.inbound, testAuthFailure())
+	if !fixture.manager.maybeTripAuthCircuitBreaker(testAuthorActivityContext(context.Background()), "agent-transition", fixture.inbound, testAuthFailure()) {
+		t.Fatal("auth breaker did not require shared shutdown")
+	}
+	fixture.manager.lifecycle.requestShutdownTransition()
 	waitForManagerShuttingDown(t, fixture.manager)
 	shutdown := make(chan error, 1)
 	go func() { shutdown <- fixture.manager.Shutdown() }()

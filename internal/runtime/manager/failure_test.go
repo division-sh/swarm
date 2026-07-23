@@ -3,15 +3,19 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 )
 
 func testFailure(detailCode string) *runtimefailures.Envelope {
@@ -117,6 +121,139 @@ func TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t
 				t.Fatalf("returned error = %v, want canonical failure", result.err)
 			}
 			assertManagerFailureEqual(t, returned, expected)
+		})
+	}
+}
+
+func TestRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRecovery(t *testing.T) {
+	tests := []struct {
+		name       string
+		newFailure func() error
+	}{
+		{name: "authentication_needed", newFailure: func() error {
+			return runtimefailures.New(runtimefailures.ClassAuthenticationNeeded, "provider_credential_missing", "test-agent", "call_provider", map[string]any{"auth_kind": "provider_credential"})
+		}},
+		{name: "provider_credit_exhausted", newFailure: func() error {
+			return runtimefailures.New(runtimefailures.ClassConnectorFailure, "provider_credit_exhausted", "test-agent", "call_provider", map[string]any{"status": 402})
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runtimebus.ResumeRuntimeIngress()
+			t.Cleanup(runtimebus.ResumeRuntimeIngress)
+
+			deliveryStore := newManagerDeliveryTestStore(t)
+			persistence := &startupReplayTestStore{
+				recoveryTestStore:        recoveryTestStore{},
+				managerDeliveryTestStore: deliveryStore,
+			}
+			probe := lifecycletest.New(t)
+			eventBus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+			if err != nil {
+				t.Fatalf("NewEventBus: %v", err)
+			}
+			var calls atomic.Int32
+			agent := shutdownTestAgent{
+				id:            "intervention-agent",
+				subscriptions: []events.EventType{"test.intervention"},
+				onEvent: func(context.Context, events.Event) ([]events.Event, error) {
+					calls.Add(1)
+					return nil, tt.newFailure()
+				},
+			}
+			newFactory := func(runtimeactors.AgentConfig) (Agent, error) { return agent, nil }
+			manager := newTestAgentManagerWithOptions(t, eventBus, newFactory, AgentManagerOptions{
+				DeliveryStore:      deliveryStore,
+				TestLifecycleProbe: probe.Raw(),
+			}, persistence)
+			if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: runtimeactors.AgentConfig{
+				ExecutionMode: "live",
+				ID:            agent.ID(),
+				Subscriptions: []string{"test.intervention"},
+			}}, false); err != nil {
+				t.Fatalf("spawn intervention agent: %v", err)
+			}
+			if err := manager.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+				t.Fatalf("run intervention manager: %v", err)
+			}
+			managerRunCtx, _, running := manager.lifecycle.runSnapshot()
+			if !running || managerRunCtx == nil {
+				t.Fatal("intervention manager is not running")
+			}
+
+			inbound := eventtest.RunCreatingRootIngress(
+				eventtest.UUID("intervention-"+tt.name),
+				events.EventType("test.intervention"),
+				"test", "", nil, 0,
+				eventtest.UUID("intervention-run-"+tt.name),
+				"", events.EventEnvelope{}, time.Now().UTC(),
+			)
+			if err := eventBus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
+				t.Fatalf("publish intervention event: %v", err)
+			}
+			probe.RequireAgentInProgress(inbound.ID(), agent.ID())
+			probe.RequireAgentDeadLetter(inbound.ID(), agent.ID())
+			select {
+			case <-managerRunCtx.Done():
+			case <-time.After(time.Second):
+				t.Fatal("intervention failure did not request shared shutdown after settlement")
+			}
+			if err := manager.Shutdown(); err != nil {
+				t.Fatalf("join intervention shutdown: %v", err)
+			}
+			if got := calls.Load(); got != 1 {
+				t.Fatalf("agent calls = %d, want 1", got)
+			}
+
+			obligation, err := runtimedelivery.NewObligation(inbound.ID(), inbound.RunID(), managerAgentDeliveryRoute(agent.ID()))
+			if err != nil {
+				t.Fatalf("derive intervention obligation: %v", err)
+			}
+			snapshot, err := deliveryStore.Snapshot(context.Background(), obligation.DeliveryID())
+			if err != nil {
+				t.Fatalf("load settled intervention delivery: %v", err)
+			}
+			if snapshot.Status != runtimedelivery.StatusDeadLetter || !snapshot.Terminal() || snapshot.Failure == nil {
+				t.Fatalf("settled intervention delivery = status:%q terminal:%t failure:%#v, want terminal dead letter with failure", snapshot.Status, snapshot.Terminal(), snapshot.Failure)
+			}
+			outcomes, err := deliveryStore.Outcomes(context.Background(), obligation.DeliveryID())
+			if err != nil {
+				t.Fatalf("load intervention outcomes: %v", err)
+			}
+			if len(outcomes) != 1 || outcomes[0].Outcome != "dead_letter" || outcomes[0].ClaimVersion != snapshot.ClaimVersion || outcomes[0].Failure == nil {
+				t.Fatalf("intervention outcomes = %#v, want one exact dead-letter outcome at claim version %d", outcomes, snapshot.ClaimVersion)
+			}
+			summary, err := deliveryStore.SummarizeRun(context.Background(), inbound.RunID())
+			if err != nil {
+				t.Fatalf("summarize intervention run: %v", err)
+			}
+			if !summary.Settled() || summary.InProgress != 0 || summary.DeadLetter != 1 {
+				t.Fatalf("intervention run summary = %#v, want settled with one dead letter", summary)
+			}
+
+			recoveryBus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+			if err != nil {
+				t.Fatalf("NewEventBus(recovery): %v", err)
+			}
+			recoveryManager := newTestAgentManagerWithOptions(t, recoveryBus, newFactory, AgentManagerOptions{
+				DeliveryStore: deliveryStore,
+			}, persistence)
+			if err := recoveryManager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: runtimeactors.AgentConfig{
+				ExecutionMode: "live",
+				ID:            agent.ID(),
+				Subscriptions: []string{"test.intervention"},
+			}}, false); err != nil {
+				t.Fatalf("spawn recovery agent: %v", err)
+			}
+			if err := recoveryManager.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+				t.Fatalf("run recovery manager: %v", err)
+			}
+			if err := recoveryManager.ReplayAgentBacklog(testAuthorActivityContext(context.Background()), agent.ID()); err != nil {
+				t.Fatalf("replay intervention backlog: %v", err)
+			}
+			if got := calls.Load(); got != 1 {
+				t.Fatalf("agent calls after recovery = %d, want settled delivery not to execute again", got)
+			}
 		})
 	}
 }

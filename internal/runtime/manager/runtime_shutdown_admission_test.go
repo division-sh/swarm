@@ -323,7 +323,9 @@ func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdo
 
 	breakerDone := make(chan struct{})
 	go func() {
-		am.maybeTripAuthCircuitBreaker(testAuthorActivityContext(context.Background()), agent.id, inbound, testAuthFailure())
+		if am.maybeTripAuthCircuitBreaker(testAuthorActivityContext(context.Background()), agent.id, inbound, testAuthFailure()) {
+			am.lifecycle.requestShutdownTransition()
+		}
 		close(breakerDone)
 	}()
 

@@ -170,8 +170,11 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 	if err != nil {
 		status := receiptStatusForAgentFailure(err)
 		agentFailure := runtimeengine.NormalizeFailure(err, "agent-manager", "process_event.on_event")
-		am.maybeTripAuthCircuitBreaker(ctx, agent.ID(), evt, agentFailure.Failure)
+		shutdownAfterSettlement := am.maybeTripAuthCircuitBreaker(ctx, agent.ID(), evt, agentFailure.Failure)
 		_, settleErr := am.writeReceipt(attemptCtx, evt, agent.ID(), status, &agentFailure.Failure, heartbeat)
+		if settleErr == nil && shutdownAfterSettlement {
+			am.lifecycle.requestShutdownTransition()
+		}
 		record.Outcome = startupManagerReplayOutcomeDropped
 		record.ReasonCode = startupManagerReplayReasonProcessFailed
 		record.Failure = runtimefailures.CloneEnvelope(&agentFailure.Failure)
@@ -291,7 +294,7 @@ func (am *AgentManager) shouldSuppressForBudget(agentID string, evt events.Event
 	return false, ""
 }
 
-func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, agentID string, evt events.Event, failure runtimefailures.Envelope) {
+func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, agentID string, evt events.Event, failure runtimefailures.Envelope) (shutdownAfterSettlement bool) {
 	eventID := strings.TrimSpace(evt.ID())
 	reason := ""
 	authRequired := false
@@ -302,12 +305,12 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, agentID
 	case failure.Class == runtimefailures.ClassConnectorFailure && failure.Detail.Code == "provider_credit_exhausted":
 		reason = "provider_credit_intervention_required"
 	default:
-		return
+		return false
 	}
 	am.runMu.Lock()
 	if am.authBreakerTripped {
 		am.runMu.Unlock()
-		return
+		return false
 	}
 	am.authBreakerTripped = true
 	am.runMu.Unlock()
@@ -374,7 +377,7 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, agentID
 			"timestamp":     now.Format(time.RFC3339Nano),
 		}), events.EventEnvelope{EntityID: entityID, FlowInstance: flowInstance}, now)
 		if constructErr != nil {
-			return
+			return running
 		}
 		if err := am.bus.Publish(eventCtx, authEvt); err != nil {
 			if am.bus != nil {
@@ -390,11 +393,7 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, agentID
 			}
 		}
 	}
-	if running {
-		// The current delivery is part of the work this transition must join.
-		// Request the shared shutdown and let its watcher execute the join.
-		am.lifecycle.requestShutdownTransition()
-	}
+	return running
 }
 
 func (am *AgentManager) isAuthBreakerTripped() bool {
