@@ -365,7 +365,8 @@ func (a *Adapter) BindAgentSession(ctx context.Context, tx *sql.Tx, claim Claim,
 	if tx == nil || !claim.valid() {
 		return Snapshot{}, fmt.Errorf("delivery session binding requires a current claim")
 	}
-	if _, err := uuid.Parse(strings.TrimSpace(sessionID)); err != nil {
+	sessionID = strings.TrimSpace(sessionID)
+	if _, err := uuid.Parse(sessionID); err != nil {
 		return Snapshot{}, fmt.Errorf("delivery session id: %w", err)
 	}
 	record, _, err := a.requireCurrentClaim(ctx, tx, claim)
@@ -377,14 +378,26 @@ func (a *Adapter) BindAgentSession(ctx context.Context, tx *sql.Tx, claim Claim,
 	}
 	query := `
 		UPDATE event_delivery_attempts
-		SET active_session_id = $1::uuid, session_run_id = $2::uuid, session_agent_id = $3
-		WHERE delivery_id = $4::uuid AND claim_version = $5 AND claim_token = $6::uuid AND open_marker = TRUE`
+		SET active_session_id = $1::uuid, session_delivery_id = $4::uuid,
+			session_run_id = $2::uuid, session_subscriber_type = 'agent', session_agent_id = $3
+		WHERE delivery_id = $4::uuid AND claim_version = $5 AND claim_token = $6::uuid AND open_marker = TRUE
+		  AND EXISTS (
+			SELECT 1 FROM agent_sessions session
+			WHERE session.session_id = $1::uuid AND session.run_id = $2::uuid
+			  AND session.agent_id = $3 AND session.status = 'active'
+		  )`
 	args := []any{sessionID, record.RunID, record.SubscriberID, claim.deliveryID, claim.version, claim.token}
 	if a.dialect == DialectSQLite {
 		query = `
 			UPDATE event_delivery_attempts
-			SET active_session_id = ?, session_run_id = ?, session_agent_id = ?
-			WHERE delivery_id = ? AND claim_version = ? AND claim_token = ? AND open_marker = TRUE`
+			SET active_session_id = ?1, session_delivery_id = ?4,
+				session_run_id = ?2, session_subscriber_type = 'agent', session_agent_id = ?3
+			WHERE delivery_id = ?4 AND claim_version = ?5 AND claim_token = ?6 AND open_marker = TRUE
+			  AND EXISTS (
+				SELECT 1 FROM agent_sessions session
+				WHERE session.session_id = ?1 AND session.run_id = ?2
+				  AND session.agent_id = ?3 AND session.status = 'active'
+			  )`
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -1270,14 +1283,16 @@ func (a *Adapter) closeAttemptForTerminalization(ctx context.Context, tx *sql.Tx
 	query := `
 		UPDATE event_delivery_attempts
 		SET outcome = 'terminalized', reason_code = $1, failure = $2::jsonb,
-			side_effects = '[]'::jsonb, duration_ms = 0, completed_at = $3, open_marker = FALSE
+			side_effects = '[]'::jsonb, duration_ms = 0, completed_at = $3,
+			current_delivery_id = NULL, open_marker = FALSE
 		WHERE delivery_id = $4::uuid AND claim_version = $5 AND claim_token = $6::uuid AND open_marker = TRUE`
 	args := []any{reason, failureRaw, now, claim.deliveryID, claim.version, claim.token}
 	if a.dialect == DialectSQLite {
 		query = `
 			UPDATE event_delivery_attempts
 			SET outcome = 'terminalized', reason_code = ?, failure = ?,
-				side_effects = '[]', duration_ms = 0, completed_at = ?, open_marker = FALSE
+				side_effects = '[]', duration_ms = 0, completed_at = ?,
+				current_delivery_id = NULL, open_marker = FALSE
 			WHERE delivery_id = ? AND claim_version = ? AND claim_token = ? AND open_marker = TRUE`
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
@@ -1333,10 +1348,10 @@ func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Cla
 }
 
 func (a *Adapter) insertAttempt(ctx context.Context, tx *sql.Tx, deliveryID string, version int64, token string, startedAt, expiresAt time.Time) error {
-	query := `INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker) VALUES ($1::uuid, $2, $3::uuid, $4, $5, TRUE)`
+	query := `INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker) VALUES ($1::uuid, $2, $3::uuid, $4, $5, $1::uuid, TRUE)`
 	args := []any{deliveryID, version, token, startedAt, expiresAt}
 	if a.dialect == DialectSQLite {
-		query = `INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker) VALUES (?, ?, ?, ?, ?, TRUE)`
+		query = `INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker) VALUES (?1, ?2, ?3, ?4, ?5, ?1, TRUE)`
 	}
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("record delivery claim attempt: %w", err)
@@ -1348,10 +1363,10 @@ func (a *Adapter) expireAttempt(ctx context.Context, tx *sql.Tx, record delivery
 	if record.claimToken == "" || record.ClaimVersion <= 0 {
 		return fmt.Errorf("%w: expired in-progress delivery has no current claim", ErrConflict)
 	}
-	query := `UPDATE event_delivery_attempts SET outcome = 'lease_expired', completed_at = $1, open_marker = FALSE WHERE delivery_id = $2::uuid AND claim_version = $3 AND claim_token = $4::uuid AND open_marker = TRUE`
+	query := `UPDATE event_delivery_attempts SET outcome = 'lease_expired', completed_at = $1, current_delivery_id = NULL, open_marker = FALSE WHERE delivery_id = $2::uuid AND claim_version = $3 AND claim_token = $4::uuid AND open_marker = TRUE`
 	args := []any{now, record.DeliveryID, record.ClaimVersion, record.claimToken}
 	if a.dialect == DialectSQLite {
-		query = `UPDATE event_delivery_attempts SET outcome = 'lease_expired', completed_at = ?, open_marker = FALSE WHERE delivery_id = ? AND claim_version = ? AND claim_token = ? AND open_marker = TRUE`
+		query = `UPDATE event_delivery_attempts SET outcome = 'lease_expired', completed_at = ?, current_delivery_id = NULL, open_marker = FALSE WHERE delivery_id = ? AND claim_version = ? AND claim_token = ? AND open_marker = TRUE`
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -1376,14 +1391,16 @@ func (a *Adapter) completeAttempt(ctx context.Context, tx *sql.Tx, claim Claim, 
 	query := `
 		UPDATE event_delivery_attempts
 		SET outcome = $1, reason_code = NULLIF($2, ''), failure = NULLIF($3, '')::jsonb,
-			side_effects = $4::jsonb, duration_ms = $5, completed_at = $6, open_marker = FALSE
+			side_effects = $4::jsonb, duration_ms = $5, completed_at = $6,
+			current_delivery_id = NULL, open_marker = FALSE
 		WHERE delivery_id = $7::uuid AND claim_version = $8 AND claim_token = $9::uuid AND open_marker = TRUE`
 	args := []any{outcome, reason, failureRaw, string(sideEffectsRaw), durationMS, now, claim.deliveryID, claim.version, claim.token}
 	if a.dialect == DialectSQLite {
 		query = `
 			UPDATE event_delivery_attempts
 			SET outcome = ?, reason_code = NULLIF(?, ''), failure = NULLIF(?, ''),
-				side_effects = ?, duration_ms = ?, completed_at = ?, open_marker = FALSE
+				side_effects = ?, duration_ms = ?, completed_at = ?,
+				current_delivery_id = NULL, open_marker = FALSE
 			WHERE delivery_id = ? AND claim_version = ? AND claim_token = ? AND open_marker = TRUE`
 	}
 	result, err := tx.ExecContext(ctx, query, args...)

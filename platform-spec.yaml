@@ -4709,9 +4709,12 @@ engine:
       agent_concurrency: Agent deliveries are asynchronous. Live dispatch and standing recovery enter one per-agent
         claimed-attempt executor before claiming work. That executor processes admitted obligations sequentially from exact
         claim through handler execution, deterministic emitted-output publication, required diagnostics, and settlement;
-        neither carrier may invoke the same agent concurrently or bypass the queue. Multiple agents run concurrently. No
-        entity lock is needed for agent processing — agents interact with entities through platform tools which acquire their
-        own locks.
+        neither carrier may invoke the same agent concurrently or bypass the queue. Executor ownership is lexical,
+        non-transferable, and acquired only by the outer live-dispatch, standing-recovery, or direct-processing entry before
+        work is enqueued or started. Context values and descendant callbacks cannot assert or inherit executor ownership;
+        queued descendants re-enter through an outer entry and acquire the executor independently. Multiple agents run
+        concurrently. No entity lock is needed for agent processing — agents interact with entities through platform tools
+        which acquire their own locks.
     atomicity:
       description: All side effects of one handler execution are atomic. Either everything commits or nothing does.
       within_atomic_boundary:
@@ -12296,6 +12299,8 @@ platform_tables:
             created_at        TIMESTAMPTZ NOT NULL,
             updated_at        TIMESTAMPTZ NOT NULL,
             UNIQUE (event_id, route_identity),
+            UNIQUE (delivery_id, current_attempt_version, current_attempt_open),
+            UNIQUE (delivery_id, run_id, subscriber_type, subscriber_id),
             FOREIGN KEY (event_id, run_id) REFERENCES events(event_id, run_id),
             CHECK (retry_count <= max_retries),
             CHECK ((status = 'pending' AND next_eligible_at IS NOT NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'in_progress' AND next_eligible_at IS NULL AND claim_version > 0 AND current_attempt_version = claim_version AND current_attempt_open = TRUE AND started_at IS NOT NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'failed' AND retry_count > 0 AND next_eligible_at IS NOT NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NULL AND failure IS NOT NULL) OR (status = 'delivered' AND next_eligible_at IS NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NOT NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'dead_letter' AND next_eligible_at IS NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NOT NULL AND failure IS NOT NULL AND NULLIF(TRIM(COALESCE(reason_code, '')), '') IS NOT NULL)),
@@ -12303,7 +12308,7 @@ platform_tables:
             INDEX idx_deliveries_run (run_id, status) WHERE run_id IS NOT NULL,
             INDEX idx_deliveries_eligibility (subscriber_type, subscriber_id, status, next_eligible_at),
             INDEX idx_deliveries_event (event_id),
-            FOREIGN KEY (delivery_id, current_attempt_version, current_attempt_open) REFERENCES event_delivery_attempts(delivery_id, claim_version, open_marker)
+            FOREIGN KEY (delivery_id, current_attempt_version, current_attempt_open) REFERENCES event_delivery_attempts(delivery_id, claim_version, open_marker) DEFERRABLE INITIALLY DEFERRED
         );
         CREATE INDEX idx_deliveries_agent_lifecycle_page ON event_deliveries (subscriber_type, subscriber_id, created_at DESC, delivery_id DESC);
         CREATE INDEX idx_deliveries_agent_failure_page ON event_deliveries (subscriber_type, subscriber_id, status, updated_at DESC, delivery_id DESC);
@@ -12312,10 +12317,13 @@ platform_tables:
       description: >-
         Immutable-fence execution attempt ledger for exact executable deliveries. Each claim version has one random token
         and bounded lease. outcome remains null only while the delivery row points to this exact open attempt; exact claim
-        renewal extends this sole lease fact, and reclaim repoints the delivery before recording lease_expired. Agent session
-        identity is bound to the exact run and agent through a composite foreign key. Only memory-enabled agents bind this
-        persisted session fact; stateless provider sessions are process-local and must leave all three session columns null.
-        Attempt rows are evidence and never independently select or mutate delivery work.
+        renewal extends this sole lease fact, and reclaim repoints the delivery before recording lease_expired. Every open
+        attempt carries a deferred exact back-reference to the parent delivery's current claim projection, so an unreferenced
+        second open attempt is structurally impossible. Agent session identity is bound to the exact delivery, run, subscriber
+        class, and agent through composite foreign keys; the named binding operation additionally requires that exact session
+        to be active. Only memory-enabled agents bind this persisted session fact; stateless provider sessions are process-local
+        and must leave the complete session projection null. Attempt rows are evidence and never independently select or mutate
+        delivery work.
       ddl: |
         CREATE TABLE event_delivery_attempts (
             delivery_id      UUID NOT NULL REFERENCES event_deliveries(delivery_id),
@@ -12323,8 +12331,11 @@ platform_tables:
             claim_token      UUID NOT NULL UNIQUE,
             started_at       TIMESTAMPTZ NOT NULL,
             lease_expires_at TIMESTAMPTZ NOT NULL,
+            current_delivery_id UUID,
             active_session_id UUID,
+            session_delivery_id UUID,
             session_run_id    UUID,
+            session_subscriber_type TEXT,
             session_agent_id  TEXT,
             open_marker       BOOLEAN NOT NULL,
             outcome          TEXT CHECK (outcome IS NULL OR outcome IN ('delivered', 'retry_scheduled', 'dead_letter', 'lease_expired', 'terminalized')),
@@ -12336,8 +12347,11 @@ platform_tables:
             PRIMARY KEY (delivery_id, claim_version),
             UNIQUE (delivery_id, claim_version, open_marker),
             FOREIGN KEY (active_session_id, session_run_id, session_agent_id) REFERENCES agent_sessions(session_id, run_id, agent_id),
+            FOREIGN KEY (session_delivery_id, session_run_id, session_subscriber_type, session_agent_id) REFERENCES event_deliveries(delivery_id, run_id, subscriber_type, subscriber_id),
+            FOREIGN KEY (current_delivery_id, claim_version, open_marker) REFERENCES event_deliveries(delivery_id, current_attempt_version, current_attempt_open) DEFERRABLE INITIALLY DEFERRED,
             CHECK (lease_expires_at > started_at),
-            CHECK ((active_session_id IS NULL AND session_run_id IS NULL AND session_agent_id IS NULL) OR (active_session_id IS NOT NULL AND session_run_id IS NOT NULL AND NULLIF(TRIM(COALESCE(session_agent_id, '')), '') IS NOT NULL)),
+            CHECK ((open_marker = TRUE AND current_delivery_id = delivery_id) OR (open_marker = FALSE AND current_delivery_id IS NULL)),
+            CHECK ((active_session_id IS NULL AND session_delivery_id IS NULL AND session_run_id IS NULL AND session_subscriber_type IS NULL AND session_agent_id IS NULL) OR (active_session_id IS NOT NULL AND session_delivery_id = delivery_id AND session_run_id IS NOT NULL AND session_subscriber_type = 'agent' AND NULLIF(TRIM(COALESCE(session_agent_id, '')), '') IS NOT NULL)),
             CHECK ((open_marker = TRUE AND outcome IS NULL AND completed_at IS NULL) OR (open_marker = FALSE AND outcome IS NOT NULL AND completed_at IS NOT NULL)),
             CHECK (completed_at IS NULL OR completed_at >= started_at),
             INDEX idx_delivery_attempts_open (lease_expires_at) WHERE outcome IS NULL

@@ -81,7 +81,8 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 		`CREATE TABLE event_delivery_attempts (
 			delivery_id TEXT NOT NULL, claim_version INTEGER NOT NULL, claim_token TEXT NOT NULL UNIQUE,
 			started_at TIMESTAMP NOT NULL, lease_expires_at TIMESTAMP NOT NULL,
-			active_session_id TEXT, session_run_id TEXT, session_agent_id TEXT, open_marker BOOLEAN NOT NULL,
+			current_delivery_id TEXT, active_session_id TEXT, session_delivery_id TEXT, session_run_id TEXT,
+			session_subscriber_type TEXT, session_agent_id TEXT, open_marker BOOLEAN NOT NULL,
 			outcome TEXT,
 			reason_code TEXT, failure BLOB, side_effects BLOB NOT NULL DEFAULT '[]', duration_ms INTEGER,
 			completed_at TIMESTAMP, PRIMARY KEY(delivery_id, claim_version)

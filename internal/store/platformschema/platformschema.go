@@ -39,7 +39,7 @@ func BootstrapFreshPostgres(ctx context.Context, tx *sql.Tx, plans []TableDDL, s
 	return nil
 }
 
-const deliveryCurrentAttemptForeignKey = "FOREIGN KEY (delivery_id, current_attempt_version, current_attempt_open) REFERENCES event_delivery_attempts(delivery_id, claim_version, open_marker)"
+const deliveryCurrentAttemptForeignKey = "FOREIGN KEY (delivery_id, current_attempt_version, current_attempt_open) REFERENCES event_delivery_attempts(delivery_id, claim_version, open_marker) DEFERRABLE INITIALLY DEFERRED"
 const deadLetterDeliveryOutcomeForeignKey = "FOREIGN KEY (delivery_id, claim_version) REFERENCES event_delivery_outcomes(delivery_id, claim_version)"
 
 // PostgreSQL requires the referenced table to exist when a foreign key is
