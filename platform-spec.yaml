@@ -12262,6 +12262,9 @@ platform_tables:
         heartbeat consumers; the original claim/start time MUST NOT influence cadence. Heartbeat cadence derives from that
         returned lease window. Renewal and settlement are mutually excluded for the exact claim. The delivery row points to
         that exact open attempt; claim token, lease, and session facts exist only on the attempt and cannot diverge.
+        After a retry settlement commits and its heartbeat joins, any process-local wait for next_eligible_at is owned by the
+        still-live runtime-generation execution context. A completed attempt or heartbeat context MUST NOT own or cancel that
+        wait; runtime retirement and caller cancellation remain authoritative.
         A transaction that composes run terminalization with delivery terminalization MUST lock and mutate the run row
         before locking any delivery row. Claim, settlement, and parent terminalization therefore share one run-then-delivery
         lock order; inverse delivery-then-run acquisition is forbidden.

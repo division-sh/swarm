@@ -5,18 +5,50 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+type failOnceRetryOutbox struct {
+	inner runtimeengine.OutboxWriter
+	calls atomic.Int32
+}
+
+func (o *failOnceRetryOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.EmitIntent) error {
+	if o.calls.Add(1) == 1 {
+		return runtimefailures.Wrap(
+			runtimefailures.ClassDependencyUnavailable,
+			"write_failed",
+			"workflow-node-retry-test",
+			"write_outbox",
+			nil,
+			errors.New("transient outbox failure"),
+		)
+	}
+	return o.inner.WriteOutbox(ctx, intents)
+}
+
+type failOnceRetryPipelineBus struct {
+	*recordingPipelineBus
+	outbox *failOnceRetryOutbox
+}
+
+func (b *failOnceRetryPipelineBus) EngineOutbox() runtimeengine.OutboxWriter {
+	return b.outbox
+}
 
 func TestPipelineCoordinatorInterceptSkipsNodeWithoutPersistedDeliveryAuthority(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
@@ -202,6 +234,108 @@ func TestPipelineCoordinatorInterceptSettlesAuthorizedNodeDelivery(t *testing.T)
 	}
 	if status != "delivered" {
 		t.Fatalf("authorized node delivery status = %q, want delivered", status)
+	}
+}
+
+func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			workflowStore, ctx := tc.open(t)
+			owner := newPipelineTestDeliveryOwnerForDB(t, workflowStore.db)
+			baseBus := &recordingPipelineBus{}
+			bus := &failOnceRetryPipelineBus{recordingPipelineBus: baseBus}
+			bus.outbox = &failOnceRetryOutbox{inner: baseBus.EngineOutbox()}
+			bundle := &runtimecontracts.WorkflowContractBundle{
+				Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+					"handler_retry_base_seconds": {Value: 1},
+				}},
+				Events: map[string]runtimecontracts.EventCatalogEntry{
+					"source.evt":     {},
+					"node.completed": {},
+				},
+				Semantics: runtimecontracts.WorkflowSemanticView{
+					Name:    "delivery-retry",
+					Version: "v-test",
+					NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+						"node-a": {
+							"source.evt": {
+								Emit: runtimecontracts.EmitSpec{Event: "node.completed"},
+							},
+						},
+					},
+				},
+			}
+			pc := NewPipelineCoordinatorWithOptions(bus, workflowStore.db, PipelineCoordinatorOptions{
+				Module: &previewWorkflowModule{
+					bundle: bundle,
+					workflow: NewWorkflowDefinition("delivery-retry", []WorkflowStage{
+						{Name: "queued"},
+						{Name: "done", Terminal: true},
+					}, []WorkflowTransition{{
+						Name: "complete", From: []WorkflowStateID{"queued"}, To: "done", Node: "node-a",
+					}}),
+					workflowNodes: []WorkflowNode{{
+						ID: "node-a", Subscriptions: []events.EventType{"source.evt"},
+						Policies: map[string]WorkflowEventPolicy{"source.evt": {Consume: true}},
+					}},
+				},
+				WorkflowStore: workflowStore,
+				DeliveryStore: owner,
+				WorkOwner:     pipelineTestWorkOwner(t),
+			})
+
+			entityID := uuid.NewString()
+			runID := runtimecorrelation.RunIDFromContext(ctx)
+			evt := eventtest.RunCreatingRootIngress(
+				uuid.NewString(), events.EventType("source.evt"), "src", "", []byte(`{}`), 0,
+				runID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC(),
+			)
+			dialect := runtimeauthoractivity.DialectPostgres
+			if workflowStore.isSQLite() {
+				dialect = runtimeauthoractivity.DialectSQLite
+			}
+			seedPipelineEventRecordForDialect(t, ctx, workflowStore.db, dialect, evt)
+			if err := workflowStore.Upsert(ctx, WorkflowInstance{
+				InstanceID: entityID, StorageRef: entityID, WorkflowName: "delivery-retry", WorkflowVersion: "v-test", CurrentState: "queued",
+			}); err != nil {
+				t.Fatalf("seed workflow instance: %v", err)
+			}
+			route := events.DeliveryRoute{
+				SubscriberType: "node", SubscriberID: "node-a", Target: events.RouteIdentity{EntityID: entityID},
+			}
+			if err := owner.commitInitial(ctx, evt, route); err != nil {
+				t.Fatalf("commit node delivery: %v", err)
+			}
+
+			handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), evt)
+			if err != nil {
+				t.Fatalf("dispatch retrying node delivery: %v", err)
+			}
+			if !handled {
+				t.Fatal("dispatch retrying node delivery handled = false, want true")
+			}
+			if got := bus.outbox.calls.Load(); got == 0 {
+				t.Fatal("outbox failure injector was not reached")
+			}
+			proof, err := owner.ProveHandoff(ctx, evt.ID(), route)
+			if err != nil {
+				t.Fatalf("prove node delivery handoff: %v", err)
+			}
+			snapshot, err := owner.Snapshot(ctx, proof.DeliveryID())
+			if err != nil {
+				t.Fatalf("load node delivery snapshot: %v", err)
+			}
+			if snapshot.Status != runtimedelivery.StatusDelivered || snapshot.RetryCount != 1 {
+				t.Fatalf("node delivery snapshot = status:%s retries:%d, want delivered/1", snapshot.Status, snapshot.RetryCount)
+			}
+			outcomes, err := owner.Outcomes(ctx, proof.DeliveryID())
+			if err != nil {
+				t.Fatalf("load node delivery outcomes: %v", err)
+			}
+			if len(outcomes) != 2 || outcomes[0].Outcome != "retry_scheduled" || outcomes[1].Outcome != string(runtimedelivery.StatusDelivered) {
+				t.Fatalf("node delivery outcomes = %#v, want retry_scheduled then delivered", outcomes)
+			}
+		})
 	}
 }
 
