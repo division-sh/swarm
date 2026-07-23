@@ -48,6 +48,7 @@ const (
 	directiveOperationTTL             = 24 * time.Hour
 	directiveHeartbeatRenewalTimeout  = 5 * time.Second
 	directiveHeartbeatShutdownTimeout = 5 * time.Second
+	defaultAgentRetrySweepInterval    = 30 * time.Second
 )
 
 type directiveHeartbeatConfig struct {
@@ -1105,7 +1106,11 @@ func (am *AgentManager) retryLoop(ctx context.Context) {
 	if am.store == nil {
 		return
 	}
-	ticker := time.NewTicker(30 * time.Second)
+	interval := am.retrySweepInterval
+	if interval <= 0 {
+		interval = defaultAgentRetrySweepInterval
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {

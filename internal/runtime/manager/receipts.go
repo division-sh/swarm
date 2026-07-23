@@ -172,7 +172,7 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 		agentFailure := runtimeengine.NormalizeFailure(err, "agent-manager", "process_event.on_event")
 		shutdownAfterSettlement := am.maybeTripAuthCircuitBreaker(ctx, agent.ID(), evt, agentFailure.Failure)
 		_, settleErr := am.writeReceipt(attemptCtx, evt, agent.ID(), status, &agentFailure.Failure, heartbeat)
-		if settleErr == nil && shutdownAfterSettlement {
+		if shutdownAfterSettlement {
 			am.lifecycle.requestShutdownTransition()
 		}
 		record.Outcome = startupManagerReplayOutcomeDropped

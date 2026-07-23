@@ -52,6 +52,7 @@ type AgentManager struct {
 	workOwner                       worklifetime.Occurrence
 	selectedContractRouteRecoveries map[string]SelectedContractRouteRecoveryTruth
 	directiveHeartbeat              directiveHeartbeatConfig
+	retrySweepInterval              time.Duration
 	lifecycle                       *agentLifecycleCoordinator
 	baseContext                     context.Context
 
@@ -137,6 +138,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		workOwner:                       opts.WorkOwner,
 		selectedContractRouteRecoveries: map[string]SelectedContractRouteRecoveryTruth{},
 		directiveHeartbeat:              defaultDirectiveHeartbeatConfig(),
+		retrySweepInterval:              defaultAgentRetrySweepInterval,
 		runtimeMode:                     strings.TrimSpace(opts.RuntimeMode),
 		budget:                          opts.Budget,
 		resetRuntimeOwnedState:          opts.ResetRuntimeOwnedState,
