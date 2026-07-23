@@ -790,6 +790,83 @@ func (a *Adapter) SnapshotsForRun(ctx context.Context, q queryer, runID string) 
 	return a.snapshotsByIDQuery(ctx, q, query, runID)
 }
 
+// RunDiagnosticCounts aggregates run-debug delivery counts in storage without
+// hydrating each canonical snapshot.
+func (a *Adapter) RunDiagnosticCounts(ctx context.Context, q queryer, runID string) ([]RunDiagnosticCount, error) {
+	runID = strings.TrimSpace(runID)
+	if _, err := uuid.Parse(runID); err != nil {
+		return nil, fmt.Errorf("delivery run diagnostic counts run id: %w", err)
+	}
+	query := `
+		SELECT subscriber_id, status, COUNT(*)
+		FROM event_deliveries
+		WHERE run_id = $1::uuid
+		GROUP BY subscriber_id, status
+		ORDER BY subscriber_id, status`
+	if a.dialect == DialectSQLite {
+		query = `
+			SELECT subscriber_id, status, COUNT(*)
+			FROM event_deliveries
+			WHERE run_id = ?
+			GROUP BY subscriber_id, status
+			ORDER BY subscriber_id, status`
+	}
+	rows, err := q.QueryContext(ctx, query, runID)
+	if err != nil {
+		return nil, fmt.Errorf("select delivery run diagnostic counts: %w", err)
+	}
+	defer rows.Close()
+	counts := []RunDiagnosticCount{}
+	for rows.Next() {
+		var item RunDiagnosticCount
+		var rawStatus string
+		if err := rows.Scan(&item.SubscriberID, &rawStatus, &item.Count); err != nil {
+			return nil, fmt.Errorf("scan delivery run diagnostic count: %w", err)
+		}
+		item.SubscriberID = strings.TrimSpace(item.SubscriberID)
+		if item.SubscriberID == "" || item.Count <= 0 {
+			return nil, fmt.Errorf("%w: delivery run diagnostic count violates structural policy", ErrConflict)
+		}
+		item.Status, err = ParseStatus(rawStatus)
+		if err != nil {
+			return nil, err
+		}
+		counts = append(counts, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read delivery run diagnostic counts: %w", err)
+	}
+	return counts, nil
+}
+
+// RunDiagnosticFailures applies failure classification, ordering, and limit
+// before canonical snapshot hydration. Diagnostic occurrence time is the
+// lifecycle owner's settled -> updated -> created fallback.
+func (a *Adapter) RunDiagnosticFailures(ctx context.Context, q queryer, runID string, limit int) ([]Snapshot, error) {
+	runID = strings.TrimSpace(runID)
+	if _, err := uuid.Parse(runID); err != nil {
+		return nil, fmt.Errorf("delivery run diagnostic failures run id: %w", err)
+	}
+	if limit <= 0 {
+		return nil, fmt.Errorf("delivery run diagnostic failures limit must be positive")
+	}
+	query := `
+		SELECT delivery_id::text
+		FROM event_deliveries
+		WHERE run_id = $1::uuid AND status IN ('failed', 'dead_letter')
+		ORDER BY COALESCE(settled_at, updated_at, created_at) DESC, delivery_id DESC
+		LIMIT $2`
+	if a.dialect == DialectSQLite {
+		query = `
+			SELECT delivery_id
+			FROM event_deliveries
+			WHERE run_id = ? AND status IN ('failed', 'dead_letter')
+			ORDER BY COALESCE(settled_at, updated_at, created_at) DESC, delivery_id DESC
+			LIMIT ?`
+	}
+	return a.snapshotsByIDQuery(ctx, q, query, runID, limit)
+}
+
 func (a *Adapter) SnapshotsForAgent(ctx context.Context, q queryer, agentID string, since time.Time) ([]Snapshot, error) {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {

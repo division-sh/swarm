@@ -537,6 +537,22 @@ func (s *SQLiteRuntimeStore) deliverySnapshotsForRun(ctx context.Context, runID 
 	return sqliteDeliveryAdapter.SnapshotsForRun(ctx, eventReadQueryerFromContext(ctx, s.DB), runID)
 }
 
+func (s *PostgresStore) deliveryRunDiagnosticCounts(ctx context.Context, runID string) ([]runtimedelivery.RunDiagnosticCount, error) {
+	return postgresDeliveryAdapter.RunDiagnosticCounts(ctx, eventReadQueryerFromContext(ctx, s.DB), runID)
+}
+
+func (s *SQLiteRuntimeStore) deliveryRunDiagnosticCounts(ctx context.Context, runID string) ([]runtimedelivery.RunDiagnosticCount, error) {
+	return sqliteDeliveryAdapter.RunDiagnosticCounts(ctx, eventReadQueryerFromContext(ctx, s.DB), runID)
+}
+
+func (s *PostgresStore) deliveryRunDiagnosticFailures(ctx context.Context, runID string, limit int) ([]runtimedelivery.Snapshot, error) {
+	return postgresDeliveryAdapter.RunDiagnosticFailures(ctx, eventReadQueryerFromContext(ctx, s.DB), runID, limit)
+}
+
+func (s *SQLiteRuntimeStore) deliveryRunDiagnosticFailures(ctx context.Context, runID string, limit int) ([]runtimedelivery.Snapshot, error) {
+	return sqliteDeliveryAdapter.RunDiagnosticFailures(ctx, eventReadQueryerFromContext(ctx, s.DB), runID, limit)
+}
+
 func (s *PostgresStore) deliveryRunTraceReferencePage(ctx context.Context, query runtimedelivery.RunTracePageQuery) (runtimedelivery.RunTraceReferencePage, error) {
 	return postgresDeliveryAdapter.RunTraceReferencePage(ctx, eventReadQueryerFromContext(ctx, s.DB), query)
 }
