@@ -14338,6 +14338,10 @@ run_model:
       not invent a second observability island. The joined trace projection links event identity, delivery lifecycle,
       session ownership, and turn activity for a single run by consuming canonical rows from events, event_deliveries,
       agent_sessions or agent_conversation_audits, and agent_turns.'
+    joined_trace_page_ownership: 'The canonical run trace owner MUST apply typed filters, materialization-window predicates,
+      keyset cursor ordering, and limit+1 while selecting exact joined row identities in the selected store. It then hydrates
+      canonical delivery snapshots and referenced event, turn, and session facts only for the returned bounded page. Loading
+      complete run history and applying pagination after hydration is forbidden.'
     entity_timeline: 'To see one entity''s full history across runs:
       SELECT * FROM entity_mutations WHERE entity_id = :entity_id ORDER BY created_at.
       This shows every field change, who made it, and which event caused it.'

@@ -815,6 +815,332 @@ func (a *Adapter) SnapshotsForAgent(ctx context.Context, q queryer, agentID stri
 	return a.snapshotsByIDQuery(ctx, q, query, agentID, since.UTC())
 }
 
+// RunTraceReferencePage applies trace filtering, keyset ordering, and the
+// limit before canonical snapshot hydration. This keeps executable-delivery
+// SQL private while bounding every run-debug page by its requested size.
+func (a *Adapter) RunTraceReferencePage(ctx context.Context, q queryer, page RunTracePageQuery) (RunTraceReferencePage, error) {
+	page.RunID = strings.TrimSpace(page.RunID)
+	if _, err := uuid.Parse(page.RunID); err != nil {
+		return RunTraceReferencePage{}, fmt.Errorf("delivery run trace page run id: %w", err)
+	}
+	if page.Limit <= 0 {
+		return RunTraceReferencePage{}, fmt.Errorf("delivery run trace page limit must be positive")
+	}
+	if page.After != nil && (page.After.EventCreatedAt.IsZero() || strings.TrimSpace(page.After.EventID) == "") {
+		return RunTraceReferencePage{}, fmt.Errorf("delivery run trace page cursor requires event time and id")
+	}
+	for _, status := range page.DeliveryStatuses {
+		if _, err := ParseStatus(string(status)); err != nil {
+			return RunTraceReferencePage{}, err
+		}
+	}
+	for _, class := range page.SubscriberClasses {
+		if _, err := ParseSubscriberClass(string(class)); err != nil {
+			return RunTraceReferencePage{}, err
+		}
+	}
+
+	type rawReference struct {
+		eventID    string
+		deliveryID string
+		turnID     string
+	}
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if a.dialect == DialectPostgres {
+		rows, err = a.queryPostgresRunTraceReferences(ctx, q, page)
+	} else {
+		rows, err = a.querySQLiteRunTraceReferences(ctx, q, page)
+	}
+	if err != nil {
+		return RunTraceReferencePage{}, err
+	}
+	raw := make([]rawReference, 0, page.Limit+1)
+	for rows.Next() {
+		var reference rawReference
+		if err := rows.Scan(&reference.eventID, &reference.deliveryID, &reference.turnID); err != nil {
+			_ = rows.Close()
+			return RunTraceReferencePage{}, fmt.Errorf("scan delivery run trace reference: %w", err)
+		}
+		reference.eventID = strings.TrimSpace(reference.eventID)
+		reference.deliveryID = strings.TrimSpace(reference.deliveryID)
+		reference.turnID = strings.TrimSpace(reference.turnID)
+		raw = append(raw, reference)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return RunTraceReferencePage{}, fmt.Errorf("read delivery run trace references: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return RunTraceReferencePage{}, fmt.Errorf("close delivery run trace references: %w", err)
+	}
+
+	result := RunTraceReferencePage{HasMore: len(raw) > page.Limit}
+	if result.HasMore {
+		raw = raw[:page.Limit]
+	}
+	result.References = make([]RunTraceReference, len(raw))
+	needsSnapshots := false
+	for index, reference := range raw {
+		result.References[index] = RunTraceReference{EventID: reference.eventID, TurnID: reference.turnID}
+		needsSnapshots = needsSnapshots || reference.deliveryID != ""
+	}
+	if !needsSnapshots {
+		return result, nil
+	}
+
+	now, err := a.databaseNow(ctx, q)
+	if err != nil {
+		return RunTraceReferencePage{}, err
+	}
+	cache := map[string]Snapshot{}
+	for index, reference := range raw {
+		if reference.deliveryID == "" {
+			continue
+		}
+		snapshot, ok := cache[reference.deliveryID]
+		if !ok {
+			record, err := a.loadByID(ctx, q, reference.deliveryID, false)
+			if err != nil {
+				return RunTraceReferencePage{}, err
+			}
+			snapshot = snapshotAt(record, now)
+			if snapshot.EventID != reference.eventID || snapshot.RunID != page.RunID {
+				return RunTraceReferencePage{}, fmt.Errorf("delivery run trace reference %s does not belong to event %s in run %s", reference.deliveryID, reference.eventID, page.RunID)
+			}
+			cache[reference.deliveryID] = snapshot
+		}
+		snapshotCopy := snapshot
+		result.References[index].Delivery = &snapshotCopy
+	}
+	return result, nil
+}
+
+func (a *Adapter) queryPostgresRunTraceReferences(ctx context.Context, q queryer, page RunTracePageQuery) (*sql.Rows, error) {
+	where := []string{"e.run_id = $1::uuid"}
+	args := []any{page.RunID}
+	addArg := func(value any) int {
+		args = append(args, value)
+		return len(args)
+	}
+	if page.After != nil {
+		eventAt := addArg(page.After.EventCreatedAt.UTC())
+		eventID := addArg(strings.TrimSpace(page.After.EventID))
+		deliveryAt := addArg(traceNullableTimestamp(page.After.DeliveryCreatedAt))
+		deliveryID := addArg(strings.TrimSpace(page.After.DeliveryID))
+		turnAt := addArg(traceNullableTimestamp(page.After.TurnCreatedAt))
+		turnID := addArg(strings.TrimSpace(page.After.TurnID))
+		where = append(where, fmt.Sprintf(`(
+			e.created_at,
+			e.event_id::text,
+			COALESCE(d.created_at, '-infinity'::timestamptz),
+			COALESCE(d.delivery_id::text, ''),
+			COALESCE(t.created_at, '-infinity'::timestamptz),
+			COALESCE(t.turn_id::text, '')
+		) > ($%d::timestamptz, $%d, $%d::timestamptz, $%d, $%d::timestamptz, $%d)`, eventAt, eventID, deliveryAt, deliveryID, turnAt, turnID))
+	}
+	watermark := `GREATEST(
+		e.created_at,
+		COALESCE(d.created_at, '-infinity'::timestamptz),
+		COALESCE(d.started_at, '-infinity'::timestamptz),
+		COALESCE(d.settled_at, '-infinity'::timestamptz),
+		COALESCE(sess.updated_at, '-infinity'::timestamptz),
+		COALESCE(t.created_at, '-infinity'::timestamptz)
+	)`
+	if page.Since != nil {
+		where = append(where, fmt.Sprintf("%s > $%d::timestamptz", watermark, addArg(page.Since.UTC())))
+	}
+	if page.Until != nil {
+		where = append(where, fmt.Sprintf("%s <= $%d::timestamptz", watermark, addArg(page.Until.UTC())))
+	}
+	addTextFilter := func(expression string, values []string) {
+		if len(values) == 0 {
+			return
+		}
+		placeholders := make([]string, 0, len(values))
+		for _, value := range values {
+			placeholders = append(placeholders, fmt.Sprintf("$%d", addArg(value)))
+		}
+		where = append(where, expression+" IN ("+strings.Join(placeholders, ",")+")")
+	}
+	addTextFilter("e.event_name", page.EventNames)
+	addTextFilter("e.entity_id::text", page.EntityIDs)
+	statuses := make([]string, 0, len(page.DeliveryStatuses))
+	for _, status := range page.DeliveryStatuses {
+		statuses = append(statuses, string(status))
+	}
+	addTextFilter("d.status", statuses)
+	addTextFilter("d.subscriber_id", page.SubscriberIDs)
+	classes := make([]string, 0, len(page.SubscriberClasses))
+	for _, class := range page.SubscriberClasses {
+		classes = append(classes, string(class))
+	}
+	addTextFilter("d.subscriber_type", classes)
+	if page.ExcludeRuntimeLogs {
+		where = append(where, "e.event_name <> 'platform.runtime_log'")
+	}
+	limit := addArg(page.Limit + 1)
+	rows, err := q.QueryContext(ctx, fmt.Sprintf(`
+		WITH trace_sessions AS (
+			SELECT session_id, run_id, updated_at FROM agent_sessions
+			UNION ALL
+			SELECT session_id, run_id, updated_at FROM agent_conversation_audits
+		)
+		SELECT e.event_id::text, COALESCE(d.delivery_id::text, ''), COALESCE(t.turn_id::text, '')
+		FROM events e
+		LEFT JOIN event_deliveries d ON d.event_id = e.event_id
+		LEFT JOIN event_delivery_attempts current_attempt
+			ON current_attempt.delivery_id = d.delivery_id
+		   AND current_attempt.claim_version = d.current_attempt_version
+		   AND current_attempt.open_marker = TRUE
+		LEFT JOIN agent_turns t
+			ON t.run_id = e.run_id
+		   AND t.trigger_event_id = e.event_id
+		   AND (d.delivery_id IS NULL OR (d.subscriber_type = 'agent' AND d.subscriber_id <> '' AND t.agent_id = d.subscriber_id))
+		LEFT JOIN trace_sessions sess
+			ON sess.session_id = COALESCE(t.session_id, current_attempt.active_session_id)
+		   AND (sess.run_id = e.run_id OR sess.run_id IS NULL)
+		WHERE %s
+		ORDER BY e.created_at, e.event_id, d.created_at NULLS FIRST, d.delivery_id NULLS FIRST, t.created_at NULLS FIRST, t.turn_id NULLS FIRST
+		LIMIT $%d`, strings.Join(where, " AND "), limit), args...)
+	if err != nil {
+		return nil, fmt.Errorf("select postgres delivery run trace references: %w", err)
+	}
+	return rows, nil
+}
+
+func (a *Adapter) querySQLiteRunTraceReferences(ctx context.Context, q queryer, page RunTracePageQuery) (*sql.Rows, error) {
+	where := []string{"e.run_id = ?"}
+	args := []any{page.RunID}
+	if page.After != nil {
+		eventAt := sqliteTraceSQLTime(page.After.EventCreatedAt)
+		deliveryAt := sqliteTraceSQLTimeOrFloor(page.After.DeliveryCreatedAt)
+		turnAt := sqliteTraceSQLTimeOrFloor(page.After.TurnCreatedAt)
+		floor := sqliteTraceCursorFloor
+		where = append(where, `(
+			`+sqliteTraceTimeExpression("e.created_at")+` > julianday(?)
+			OR (`+sqliteTraceTimeExpression("e.created_at")+` = julianday(?) AND e.event_id > ?)
+			OR (`+sqliteTraceTimeExpression("e.created_at")+` = julianday(?) AND e.event_id = ? AND `+sqliteTraceCoalescedTimeExpression("d.created_at")+` > julianday(?))
+			OR (`+sqliteTraceTimeExpression("e.created_at")+` = julianday(?) AND e.event_id = ? AND `+sqliteTraceCoalescedTimeExpression("d.created_at")+` = julianday(?) AND COALESCE(d.delivery_id, '') > ?)
+			OR (`+sqliteTraceTimeExpression("e.created_at")+` = julianday(?) AND e.event_id = ? AND `+sqliteTraceCoalescedTimeExpression("d.created_at")+` = julianday(?) AND COALESCE(d.delivery_id, '') = ? AND `+sqliteTraceCoalescedTimeExpression("t.created_at")+` > julianday(?))
+			OR (`+sqliteTraceTimeExpression("e.created_at")+` = julianday(?) AND e.event_id = ? AND `+sqliteTraceCoalescedTimeExpression("d.created_at")+` = julianday(?) AND COALESCE(d.delivery_id, '') = ? AND `+sqliteTraceCoalescedTimeExpression("t.created_at")+` = julianday(?) AND COALESCE(t.turn_id, '') > ?)
+		)`)
+		args = append(args,
+			eventAt,
+			eventAt, page.After.EventID,
+			eventAt, page.After.EventID, floor, floor, floor, deliveryAt,
+			eventAt, page.After.EventID, floor, floor, floor, deliveryAt, page.After.DeliveryID,
+			eventAt, page.After.EventID, floor, floor, floor, deliveryAt, page.After.DeliveryID, floor, floor, floor, turnAt,
+			eventAt, page.After.EventID, floor, floor, floor, deliveryAt, page.After.DeliveryID, floor, floor, floor, turnAt, page.After.TurnID,
+		)
+	}
+	if page.Since != nil {
+		where = append(where, sqliteTraceWatermarkExpression()+" > julianday(?)")
+		args = append(args, sqliteTraceSQLTime(page.Since.UTC()))
+	}
+	if page.Until != nil {
+		where = append(where, sqliteTraceWatermarkExpression()+" <= julianday(?)")
+		args = append(args, sqliteTraceSQLTime(page.Until.UTC()))
+	}
+	addTextFilter := func(expression string, values []string) {
+		if len(values) == 0 {
+			return
+		}
+		placeholders := make([]string, 0, len(values))
+		for _, value := range values {
+			placeholders = append(placeholders, "?")
+			args = append(args, value)
+		}
+		where = append(where, expression+" IN ("+strings.Join(placeholders, ",")+")")
+	}
+	addTextFilter("e.event_name", page.EventNames)
+	addTextFilter("COALESCE(e.entity_id, '')", page.EntityIDs)
+	statuses := make([]string, 0, len(page.DeliveryStatuses))
+	for _, status := range page.DeliveryStatuses {
+		statuses = append(statuses, string(status))
+	}
+	addTextFilter("COALESCE(d.status, '')", statuses)
+	addTextFilter("COALESCE(d.subscriber_id, '')", page.SubscriberIDs)
+	classes := make([]string, 0, len(page.SubscriberClasses))
+	for _, class := range page.SubscriberClasses {
+		classes = append(classes, string(class))
+	}
+	addTextFilter("COALESCE(d.subscriber_type, '')", classes)
+	if page.ExcludeRuntimeLogs {
+		where = append(where, "e.event_name <> 'platform.runtime_log'")
+	}
+	args = append(args, page.Limit+1)
+	rows, err := q.QueryContext(ctx, `
+		WITH trace_sessions AS (
+			SELECT session_id, run_id, updated_at FROM agent_sessions
+			UNION ALL
+			SELECT session_id, run_id, updated_at FROM agent_conversation_audits
+		)
+		SELECT e.event_id, COALESCE(d.delivery_id, ''), COALESCE(t.turn_id, '')
+		FROM events e
+		LEFT JOIN event_deliveries d ON d.event_id = e.event_id
+		LEFT JOIN event_delivery_attempts current_attempt
+			ON current_attempt.delivery_id = d.delivery_id
+		   AND current_attempt.claim_version = d.current_attempt_version
+		   AND current_attempt.open_marker = 1
+		LEFT JOIN agent_turns t
+			ON t.run_id = e.run_id
+		   AND t.trigger_event_id = e.event_id
+		   AND (d.delivery_id IS NULL OR (d.subscriber_type = 'agent' AND d.subscriber_id <> '' AND t.agent_id = d.subscriber_id))
+		LEFT JOIN trace_sessions sess
+			ON sess.session_id = COALESCE(t.session_id, current_attempt.active_session_id)
+		   AND (sess.run_id = e.run_id OR sess.run_id IS NULL)
+		WHERE `+strings.Join(where, " AND ")+`
+		ORDER BY `+sqliteTraceTimeExpression("e.created_at")+`, e.event_id, `+sqliteTraceTimeExpression("d.created_at")+`, d.delivery_id, `+sqliteTraceTimeExpression("t.created_at")+`, t.turn_id
+		LIMIT ?`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("select sqlite delivery run trace references: %w", err)
+	}
+	return rows, nil
+}
+
+const sqliteTraceCursorFloor = "0001-01-01T00:00:00Z"
+
+func traceNullableTimestamp(value time.Time) string {
+	if value.IsZero() {
+		return "-infinity"
+	}
+	return value.UTC().Format(time.RFC3339Nano)
+}
+
+func sqliteTraceSQLTime(value time.Time) string {
+	return value.UTC().Format(time.RFC3339Nano)
+}
+
+func sqliteTraceSQLTimeOrFloor(value time.Time) string {
+	if value.IsZero() {
+		return sqliteTraceCursorFloor
+	}
+	return sqliteTraceSQLTime(value)
+}
+
+func sqliteTraceTimeExpression(expression string) string {
+	return `COALESCE(julianday(` + expression + `), julianday(substr(CAST(` + expression + ` AS TEXT), 1, instr(CAST(` + expression + ` AS TEXT), ' +') - 1)))`
+}
+
+func sqliteTraceCoalescedTimeExpression(expression string) string {
+	coalesced := `COALESCE(` + expression + `, ?)`
+	return sqliteTraceTimeExpression(coalesced)
+}
+
+func sqliteTraceWatermarkExpression() string {
+	return `max(
+		` + sqliteTraceTimeExpression("e.created_at") + `,
+		` + sqliteTraceTimeExpression("COALESCE(d.created_at, '"+sqliteTraceCursorFloor+"')") + `,
+		` + sqliteTraceTimeExpression("COALESCE(d.started_at, '"+sqliteTraceCursorFloor+"')") + `,
+		` + sqliteTraceTimeExpression("COALESCE(d.settled_at, '"+sqliteTraceCursorFloor+"')") + `,
+		` + sqliteTraceTimeExpression("COALESCE(sess.updated_at, '"+sqliteTraceCursorFloor+"')") + `,
+		` + sqliteTraceTimeExpression("COALESCE(t.created_at, '"+sqliteTraceCursorFloor+"')") + `
+	)`
+}
+
 func (a *Adapter) LifecycleSnapshotPageForAgent(ctx context.Context, q queryer, page AgentLifecyclePageQuery) (SnapshotPage, error) {
 	agentID := strings.TrimSpace(page.AgentID)
 	if agentID == "" {
