@@ -118,6 +118,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 				PendingCount:            2,
 				OldestPendingAgeSeconds: 45,
 				PendingDeliveries: []store.OperatorAgentPendingDelivery{{
+					DeliveryID: "delivery-1",
 					EventID:    "event-1",
 					EventName:  "task.ready",
 					EnqueuedAt: time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC),
@@ -747,6 +748,7 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedOwnerData(t *testing.T) {
 			Status:  "running",
 			Queue: store.OperatorAgentDiagnosisQueue{
 				PendingDeliveries: []store.OperatorAgentPendingDelivery{{
+					DeliveryID: "delivery-1",
 					EventName:  "task.ready",
 					EnqueuedAt: time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC),
 				}},

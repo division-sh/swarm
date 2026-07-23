@@ -1150,6 +1150,10 @@ func publicSurfaceSelectedOperatorReadAPIProofs() map[string]publicSurfaceSelect
 			Backends: []string{"explicit_postgres"},
 			Methods:  []string{"agent.diagnose"},
 		},
+		"TestAgentDiagnoseExactDeliveryPaginationParity": {
+			Backends: []string{"default_sqlite", "explicit_postgres"},
+			Methods:  []string{"agent.diagnose"},
+		},
 		"TestOperatorAgentReadSurfaceLoadAgentProjectsSessionAndTurnRefs": {
 			Backends: []string{"explicit_postgres"},
 			Methods:  []string{"agent.get"},

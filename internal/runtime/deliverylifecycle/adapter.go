@@ -778,18 +778,6 @@ func (a *Adapter) SnapshotsForEvent(ctx context.Context, q queryer, eventID stri
 	return a.snapshotsByIDQuery(ctx, q, query, eventID)
 }
 
-func (a *Adapter) SnapshotsForRun(ctx context.Context, q queryer, runID string) ([]Snapshot, error) {
-	runID = strings.TrimSpace(runID)
-	if _, err := uuid.Parse(runID); err != nil {
-		return nil, fmt.Errorf("delivery run snapshots run id: %w", err)
-	}
-	query := `SELECT delivery_id::text FROM event_deliveries WHERE run_id = $1::uuid ORDER BY created_at, delivery_id`
-	if a.dialect == DialectSQLite {
-		query = `SELECT delivery_id FROM event_deliveries WHERE run_id = ? ORDER BY created_at, delivery_id`
-	}
-	return a.snapshotsByIDQuery(ctx, q, query, runID)
-}
-
 // RunDiagnosticCounts aggregates run-debug delivery counts in storage without
 // hydrating each canonical snapshot.
 func (a *Adapter) RunDiagnosticCounts(ctx context.Context, q queryer, runID string) ([]RunDiagnosticCount, error) {
@@ -865,31 +853,6 @@ func (a *Adapter) RunDiagnosticFailures(ctx context.Context, q queryer, runID st
 			LIMIT ?`
 	}
 	return a.snapshotsByIDQuery(ctx, q, query, runID, limit)
-}
-
-func (a *Adapter) SnapshotsForAgent(ctx context.Context, q queryer, agentID string, since time.Time) ([]Snapshot, error) {
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
-		return nil, fmt.Errorf("delivery agent snapshots agent id is required")
-	}
-	if since.IsZero() {
-		since = time.Unix(0, 0).UTC()
-	}
-	query := `
-		SELECT d.delivery_id::text
-		FROM event_deliveries d
-		JOIN events e ON e.event_id = d.event_id
-		WHERE d.subscriber_type = 'agent' AND d.subscriber_id = $1 AND e.created_at >= $2
-		ORDER BY e.created_at, e.event_id, d.delivery_id`
-	if a.dialect == DialectSQLite {
-		query = `
-			SELECT d.delivery_id
-			FROM event_deliveries d
-			JOIN events e ON e.event_id = d.event_id
-			WHERE d.subscriber_type = 'agent' AND d.subscriber_id = ? AND e.created_at >= ?
-			ORDER BY e.created_at, e.event_id, d.delivery_id`
-	}
-	return a.snapshotsByIDQuery(ctx, q, query, agentID, since.UTC())
 }
 
 // RunTraceReferencePage applies trace filtering, keyset ordering, and the
@@ -1509,72 +1472,6 @@ func (a *Adapter) ActiveSnapshots(ctx context.Context, q queryer) ([]Snapshot, e
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, record.Snapshot)
-	}
-	return out, nil
-}
-
-func (a *Adapter) EligibleAgentSnapshots(ctx context.Context, q queryer, agentID string, since time.Time) ([]Snapshot, error) {
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
-		return nil, fmt.Errorf("delivery agent id is required")
-	}
-	if since.IsZero() {
-		since = time.Unix(0, 0).UTC()
-	}
-	query := `
-		SELECT d.delivery_id::text
-		FROM event_deliveries d
-		JOIN events e ON e.event_id = d.event_id
-		LEFT JOIN runs r ON r.run_id = e.run_id
-		WHERE d.subscriber_type = 'agent' AND d.subscriber_id = $1
-		  AND e.created_at >= $2
-		  AND (e.run_id IS NULL OR r.status IN ('running', 'paused'))
-		  AND (
-			d.status = 'pending'
-			OR (d.status = 'failed' AND d.retry_count <= d.max_retries AND d.next_eligible_at <= CURRENT_TIMESTAMP)
-			OR d.status = 'in_progress'
-		  )
-		ORDER BY e.created_at, e.event_id, d.delivery_id`
-	if a.dialect == DialectSQLite {
-		query = `
-			SELECT d.delivery_id
-			FROM event_deliveries d
-			JOIN events e ON e.event_id = d.event_id
-			LEFT JOIN runs r ON r.run_id = e.run_id
-			WHERE d.subscriber_type = 'agent' AND d.subscriber_id = ?
-			  AND e.created_at >= ?
-			  AND (e.run_id IS NULL OR r.status IN ('running', 'paused'))
-			  AND (
-				d.status = 'pending'
-				OR (d.status = 'failed' AND d.retry_count <= d.max_retries AND d.next_eligible_at <= CURRENT_TIMESTAMP)
-				OR d.status = 'in_progress'
-			  )
-			ORDER BY e.created_at, e.event_id, d.delivery_id`
-	}
-	rows, err := q.QueryContext(ctx, query, agentID, since)
-	if err != nil {
-		return nil, fmt.Errorf("select eligible agent delivery snapshots: %w", err)
-	}
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	out := make([]Snapshot, 0, len(ids))
-	for _, id := range ids {
-		record, err := a.loadByID(ctx, q, id, false)
-		if err != nil {
-			return nil, err
-		}
-		record.RetryEligible = record.Status == StatusPending || record.Status == StatusFailed
 		out = append(out, record.Snapshot)
 	}
 	return out, nil

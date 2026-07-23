@@ -1057,15 +1057,11 @@ func runForkSelectedContractConversationAdvancedFacts(facts []string) []string {
 }
 
 func ensureRunForkNoPostForkActiveConversationDeliverySessionCoupling(ctx context.Context, q timerReconstructionQueryer, lineage runForkActivationLineage) error {
-	snapshots, err := postgresDeliveryAdapter.SnapshotsForRun(ctx, q, lineage.SourceRunID)
+	snapshots, err := postgresDeliveryAdapter.ActiveCouplingSnapshotsForRun(ctx, q, lineage.SourceRunID)
 	if err != nil {
 		return fmt.Errorf("check selected-contract source delivery snapshots: %w", err)
 	}
 	for _, snapshot := range snapshots {
-		activeCoupling := snapshot.Status == runtimedelivery.StatusInProgress || snapshot.ActiveSessionID != "" || (!snapshot.StartedAt.IsZero() && !snapshot.Terminal())
-		if !activeCoupling {
-			continue
-		}
 		var revision sql.NullInt64
 		if err := q.QueryRowContext(ctx, `
 			SELECT MAX(revision)
@@ -1140,12 +1136,12 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 	if missingLineage > 0 {
 		return runForkReplayResumeError("fork_selected_contract_execution_lineage_missing", RunForkReplayResumeFactForkReplayState, "fork activation blocked: fork_selected_contract_execution_lineage_missing")
 	}
-	deliverySnapshots, err := postgresDeliveryAdapter.SnapshotsForRun(ctx, tx, forkRunID)
+	deliverySnapshots, err := postgresDeliveryAdapter.AgentSnapshotsForRun(ctx, tx, forkRunID)
 	if err != nil {
 		return fmt.Errorf("check selected-contract fork delivery snapshots: %w", err)
 	}
 	for _, snapshot := range deliverySnapshots {
-		if snapshot.SubscriberClass != runtimedelivery.SubscriberAgent || snapshot.Status == runtimedelivery.StatusDelivered {
+		if snapshot.Status == runtimedelivery.StatusDelivered {
 			continue
 		}
 		return runForkReplayResumeError(
@@ -1156,9 +1152,6 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 	}
 	selectedAgents := []string{}
 	for _, snapshot := range deliverySnapshots {
-		if snapshot.SubscriberClass != runtimedelivery.SubscriberAgent {
-			continue
-		}
 		var selected bool
 		if err := tx.QueryRowContext(ctx, `
 			SELECT EXISTS (

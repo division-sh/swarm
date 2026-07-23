@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
+	"github.com/google/uuid"
 )
 
 const pendingAgentDeliveryCursorKind = "agent.diagnose.queue"
@@ -39,6 +41,7 @@ type PendingAgentDeliveryPage struct {
 }
 
 type PendingAgentDeliveryDetail struct {
+	DeliveryID string
 	EventID    string
 	EventName  string
 	EnqueuedAt time.Time
@@ -46,72 +49,11 @@ type PendingAgentDeliveryDetail struct {
 	Event      events.Event `json:"-"`
 }
 
-type pendingAgentDeliveryRecord struct {
-	AgentID            string
-	Event              events.Event
-	DeliveryFound      bool
-	DeliveryStatus     string
-	DeliveryRetryCount int
-	DeliveryCreatedAt  time.Time
-}
-
 type pendingAgentDeliveryCursor struct {
 	Kind       string `json:"kind"`
 	EnqueuedAt string `json:"enqueued_at"`
 	EventID    string `json:"event_id"`
-}
-
-type pendingAgentDeliveryCursorPosition struct {
-	EnqueuedAt time.Time
-	EventID    string
-}
-
-func (r pendingAgentDeliveryRecord) isPending(now time.Time) bool {
-	_ = now
-	return r.DeliveryFound
-}
-
-func (r pendingAgentDeliveryRecord) pendingAgeSec(now time.Time) int {
-	if r.Event.CreatedAt().IsZero() {
-		return 0
-	}
-	age := int(now.Sub(r.Event.CreatedAt()).Seconds())
-	if age < 0 {
-		return 0
-	}
-	return age
-}
-
-func pendingAgentDeliveryFactsFromRecords(records []pendingAgentDeliveryRecord, now time.Time) PendingAgentDeliveryFacts {
-	var facts PendingAgentDeliveryFacts
-	for _, record := range records {
-		if !record.isPending(now) {
-			continue
-		}
-		facts.PendingCount++
-		age := record.pendingAgeSec(now)
-		if age > facts.OldestPendingAgeSec {
-			facts.OldestPendingAgeSec = age
-		}
-	}
-	return facts
-}
-
-func pendingEventsFromRecords(records []pendingAgentDeliveryRecord, now time.Time, limit int) []events.Event {
-	if limit <= 0 {
-		limit = len(records)
-	}
-	out := make([]events.Event, 0, min(limit, len(records)))
-	for _, record := range records {
-		if !record.isPending(now) {
-			continue
-		}
-		out = append(out, record.Event)
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out
+	DeliveryID string `json:"delivery_id"`
 }
 
 func (s *PostgresStore) ListPendingAgentDeliveryFacts(ctx context.Context, agentIDs []string, since time.Time) (map[string]PendingAgentDeliveryFacts, error) {
@@ -119,56 +61,37 @@ func (s *PostgresStore) ListPendingAgentDeliveryFacts(ctx context.Context, agent
 		return nil, err
 	}
 	normalized := normalizePendingAgentIDs(agentIDs)
-	if len(normalized) == 0 {
-		return map[string]PendingAgentDeliveryFacts{}, nil
-	}
-	records, err := s.listPendingAgentDeliveryRecordsSpec(ctx, normalized, since)
+	aggregates, err := postgresDeliveryAdapter.AgentPendingAggregates(ctx, s.DB, normalized, since)
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now()
-	out := make(map[string]PendingAgentDeliveryFacts, len(normalized))
-	for _, agentID := range normalized {
-		out[agentID] = PendingAgentDeliveryFacts{}
-	}
-	grouped := make(map[string][]pendingAgentDeliveryRecord, len(normalized))
-	for _, record := range records {
-		grouped[record.AgentID] = append(grouped[record.AgentID], record)
-	}
-	for _, agentID := range normalized {
-		out[agentID] = pendingAgentDeliveryFactsFromRecords(grouped[agentID], now)
-	}
-	return out, nil
+	return pendingAgentDeliveryFactsFromAggregates(normalized, aggregates, time.Now()), nil
 }
 
 func (s *PostgresStore) ListPendingAgentDeliveryDetails(ctx context.Context, opts PendingAgentDeliveryListOptions) (PendingAgentDeliveryPage, error) {
-	opts.AgentID = strings.TrimSpace(opts.AgentID)
-	opts.Cursor = strings.TrimSpace(opts.Cursor)
-	if opts.AgentID == "" {
-		return PendingAgentDeliveryPage{PendingDeliveries: []PendingAgentDeliveryDetail{}}, nil
-	}
-	if opts.Limit == 0 {
-		opts.Limit = DefaultPendingAgentDeliveryDetailLimit
-	}
-	if opts.Limit < 0 || opts.Limit > MaxPendingAgentDeliveryDetailLimit {
-		return PendingAgentDeliveryPage{}, fmt.Errorf("pending agent delivery detail limit must be from 1 to %d", MaxPendingAgentDeliveryDetailLimit)
-	}
-	var cursor *pendingAgentDeliveryCursorPosition
-	if opts.Cursor != "" {
-		decoded, err := decodePendingAgentDeliveryCursor(opts.Cursor)
-		if err != nil {
-			return PendingAgentDeliveryPage{}, err
-		}
-		cursor = &decoded
+	opts, cursor, empty, err := normalizePendingAgentDeliveryOptions(opts)
+	if err != nil || empty {
+		return PendingAgentDeliveryPage{PendingDeliveries: []PendingAgentDeliveryDetail{}}, err
 	}
 	if err := s.requireCurrentSchema(); err != nil {
 		return PendingAgentDeliveryPage{}, err
 	}
-	records, err := s.listPendingAgentDeliveryRecordsSpec(ctx, []string{opts.AgentID}, opts.Since)
+	aggregates, err := postgresDeliveryAdapter.AgentPendingAggregates(ctx, s.DB, []string{opts.AgentID}, opts.Since)
 	if err != nil {
 		return PendingAgentDeliveryPage{}, err
 	}
-	return pendingAgentDeliveryPageFromRecords(records, time.Now(), opts.Limit, cursor)
+	page, err := postgresDeliveryAdapter.AgentPendingReferencePage(ctx, s.DB, runtimedelivery.AgentPendingPageQuery{
+		AgentID: opts.AgentID,
+		Since:   opts.Since,
+		Limit:   opts.Limit,
+		After:   cursor,
+	})
+	if err != nil {
+		return PendingAgentDeliveryPage{}, err
+	}
+	return pendingAgentDeliveryPageFromProjection(ctx, opts.AgentID, aggregates, page, time.Now(), func(ctx context.Context, eventID string) (eventrecord.Record, bool, error) {
+		return eventrecordpostgres.Load(ctx, s.DB, eventID)
+	})
 }
 
 func normalizePendingAgentIDs(agentIDs []string) []string {
@@ -188,80 +111,103 @@ func normalizePendingAgentIDs(agentIDs []string) []string {
 	return out
 }
 
-func (s *PostgresStore) listPendingAgentDeliveryRecordsSpec(ctx context.Context, agentIDs []string, since time.Time) ([]pendingAgentDeliveryRecord, error) {
-	out := []pendingAgentDeliveryRecord{}
-	for _, agentID := range agentIDs {
-		snapshots, err := postgresDeliveryAdapter.EligibleAgentSnapshots(ctx, s.DB, agentID, since)
-		if err != nil {
-			return nil, err
-		}
-		for _, snapshot := range snapshots {
-			durable, found, err := eventrecordpostgres.Load(ctx, s.DB, snapshot.EventID)
-			if err != nil || !found {
-				if err == nil {
-					err = eventrecord.Missing(snapshot.EventID)
-				}
-				return nil, err
-			}
-			admitted, err := durable.Decode()
-			if err != nil {
-				return nil, err
-			}
-			delivery, err := events.NewDeliveryEvent(admitted.Event(), snapshot.Route)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, pendingAgentDeliveryRecord{
-				AgentID: snapshot.SubscriberID, Event: delivery.Event(), DeliveryFound: true,
-				DeliveryStatus: string(snapshot.Status), DeliveryRetryCount: snapshot.RetryCount,
-				DeliveryCreatedAt: snapshot.CreatedAt,
-			})
-		}
+func normalizePendingAgentDeliveryOptions(opts PendingAgentDeliveryListOptions) (PendingAgentDeliveryListOptions, *runtimedelivery.AgentPendingPosition, bool, error) {
+	opts.AgentID = strings.TrimSpace(opts.AgentID)
+	opts.Cursor = strings.TrimSpace(opts.Cursor)
+	if opts.AgentID == "" {
+		return opts, nil, true, nil
 	}
-	return out, nil
+	if opts.Limit == 0 {
+		opts.Limit = DefaultPendingAgentDeliveryDetailLimit
+	}
+	if opts.Limit < 0 || opts.Limit > MaxPendingAgentDeliveryDetailLimit {
+		return opts, nil, false, fmt.Errorf("pending agent delivery detail limit must be from 1 to %d", MaxPendingAgentDeliveryDetailLimit)
+	}
+	if opts.Cursor == "" {
+		return opts, nil, false, nil
+	}
+	cursor, err := decodePendingAgentDeliveryCursor(opts.Cursor)
+	if err != nil {
+		return opts, nil, false, err
+	}
+	return opts, &cursor, false, nil
 }
 
-func pendingAgentDeliveryPageFromRecords(records []pendingAgentDeliveryRecord, now time.Time, limit int, cursor *pendingAgentDeliveryCursorPosition) (PendingAgentDeliveryPage, error) {
-	if limit <= 0 {
-		limit = DefaultPendingAgentDeliveryDetailLimit
+func pendingAgentDeliveryFactsFromAggregates(agentIDs []string, aggregates []runtimedelivery.AgentPendingAggregate, now time.Time) map[string]PendingAgentDeliveryFacts {
+	out := make(map[string]PendingAgentDeliveryFacts, len(agentIDs))
+	for _, agentID := range agentIDs {
+		out[agentID] = PendingAgentDeliveryFacts{}
 	}
-	facts := pendingAgentDeliveryFactsFromRecords(records, now)
+	for _, aggregate := range aggregates {
+		age := int(now.Sub(aggregate.OldestEventAt).Seconds())
+		if age < 0 {
+			age = 0
+		}
+		out[strings.TrimSpace(aggregate.AgentID)] = PendingAgentDeliveryFacts{
+			PendingCount:        aggregate.Count,
+			OldestPendingAgeSec: age,
+		}
+	}
+	return out
+}
+
+func pendingAgentDeliveryPageFromProjection(
+	ctx context.Context,
+	agentID string,
+	aggregates []runtimedelivery.AgentPendingAggregate,
+	page runtimedelivery.AgentPendingReferencePage,
+	now time.Time,
+	load func(context.Context, string) (eventrecord.Record, bool, error),
+) (PendingAgentDeliveryPage, error) {
+	facts := pendingAgentDeliveryFactsFromAggregates([]string{agentID}, aggregates, now)[agentID]
 	out := PendingAgentDeliveryPage{
 		PendingCount:        facts.PendingCount,
 		OldestPendingAgeSec: facts.OldestPendingAgeSec,
-		PendingDeliveries:   []PendingAgentDeliveryDetail{},
+		PendingDeliveries:   make([]PendingAgentDeliveryDetail, 0, len(page.References)),
 	}
-	for _, record := range records {
-		if !record.isPending(now) {
-			continue
+	for _, reference := range page.References {
+		durable, found, err := load(ctx, reference.Snapshot.EventID)
+		if err != nil || !found {
+			if err == nil {
+				err = eventrecord.Missing(reference.Snapshot.EventID)
+			}
+			return PendingAgentDeliveryPage{}, err
 		}
-		if cursor != nil && !pendingAgentDeliveryRecordAfterCursor(record, *cursor) {
-			continue
+		admitted, err := durable.Decode()
+		if err != nil {
+			return PendingAgentDeliveryPage{}, err
 		}
-		detail, err := pendingAgentDeliveryDetailFromRecord(record)
+		event := admitted.Event()
+		if event.ID() != reference.Snapshot.EventID || !event.CreatedAt().UTC().Equal(reference.EventCreatedAt.UTC()) {
+			return PendingAgentDeliveryPage{}, fmt.Errorf("pending agent delivery event %s changed during hydration", reference.Snapshot.EventID)
+		}
+		delivery, err := events.NewDeliveryEvent(event, reference.Snapshot.Route)
+		if err != nil {
+			return PendingAgentDeliveryPage{}, err
+		}
+		detail, err := pendingAgentDeliveryDetailFromReference(reference, delivery.Event())
 		if err != nil {
 			return PendingAgentDeliveryPage{}, err
 		}
 		out.PendingDeliveries = append(out.PendingDeliveries, detail)
-		if len(out.PendingDeliveries) > limit {
-			break
-		}
 	}
-	if len(out.PendingDeliveries) > limit {
-		lastVisible := out.PendingDeliveries[limit-1]
-		out.NextCursor = encodePendingAgentDeliveryCursor(lastVisible)
-		out.PendingDeliveries = out.PendingDeliveries[:limit]
+	if page.HasMore && len(out.PendingDeliveries) > 0 {
+		out.NextCursor = encodePendingAgentDeliveryCursor(out.PendingDeliveries[len(out.PendingDeliveries)-1])
 	}
 	return out, nil
 }
 
-func pendingAgentDeliveryDetailFromRecord(record pendingAgentDeliveryRecord) (PendingAgentDeliveryDetail, error) {
+func pendingAgentDeliveryDetailFromReference(reference runtimedelivery.AgentPendingReference, event events.Event) (PendingAgentDeliveryDetail, error) {
 	detail := PendingAgentDeliveryDetail{
-		EventID:    strings.TrimSpace(record.Event.ID()),
-		EventName:  strings.TrimSpace(string(record.Event.Type())),
-		EnqueuedAt: record.Event.CreatedAt().UTC(),
-		Attempts:   record.DeliveryRetryCount,
-		Event:      record.Event,
+		DeliveryID: strings.TrimSpace(reference.Snapshot.DeliveryID),
+		EventID:    strings.TrimSpace(event.ID()),
+		EventName:  strings.TrimSpace(string(event.Type())),
+		EnqueuedAt: reference.EventCreatedAt.UTC(),
+		Attempts:   reference.Snapshot.RetryCount,
+		Event:      event,
+	}
+	if detail.DeliveryID == "" {
+		return PendingAgentDeliveryDetail{}, fmt.Errorf("pending agent delivery detail delivery_id is required")
 	}
 	if detail.EventID == "" {
 		return PendingAgentDeliveryDetail{}, fmt.Errorf("pending agent delivery detail event_id is required")
@@ -278,51 +224,44 @@ func pendingAgentDeliveryDetailFromRecord(record pendingAgentDeliveryRecord) (Pe
 	return detail, nil
 }
 
-func pendingAgentDeliveryRecordAfterCursor(record pendingAgentDeliveryRecord, cursor pendingAgentDeliveryCursorPosition) bool {
-	enqueuedAt := record.Event.CreatedAt().UTC()
-	if enqueuedAt.After(cursor.EnqueuedAt) {
-		return true
-	}
-	if enqueuedAt.Before(cursor.EnqueuedAt) {
-		return false
-	}
-	return strings.TrimSpace(record.Event.ID()) > cursor.EventID
-}
-
 func encodePendingAgentDeliveryCursor(detail PendingAgentDeliveryDetail) string {
 	raw, _ := json.Marshal(pendingAgentDeliveryCursor{
 		Kind:       pendingAgentDeliveryCursorKind,
 		EnqueuedAt: detail.EnqueuedAt.UTC().Format(time.RFC3339Nano),
 		EventID:    strings.TrimSpace(detail.EventID),
+		DeliveryID: strings.TrimSpace(detail.DeliveryID),
 	})
 	return base64.RawURLEncoding.EncodeToString(raw)
 }
 
-func decodePendingAgentDeliveryCursor(raw string) (pendingAgentDeliveryCursorPosition, error) {
+func decodePendingAgentDeliveryCursor(raw string) (runtimedelivery.AgentPendingPosition, error) {
 	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(raw))
 	if err != nil {
-		return pendingAgentDeliveryCursorPosition{}, ErrInvalidPendingAgentDeliveryCursor
+		return runtimedelivery.AgentPendingPosition{}, ErrInvalidPendingAgentDeliveryCursor
 	}
 	var cursor pendingAgentDeliveryCursor
 	if err := json.Unmarshal(decoded, &cursor); err != nil {
-		return pendingAgentDeliveryCursorPosition{}, ErrInvalidPendingAgentDeliveryCursor
+		return runtimedelivery.AgentPendingPosition{}, ErrInvalidPendingAgentDeliveryCursor
 	}
-	if strings.TrimSpace(cursor.Kind) != pendingAgentDeliveryCursorKind || strings.TrimSpace(cursor.EventID) == "" || strings.TrimSpace(cursor.EnqueuedAt) == "" {
-		return pendingAgentDeliveryCursorPosition{}, ErrInvalidPendingAgentDeliveryCursor
+	if strings.TrimSpace(cursor.Kind) != pendingAgentDeliveryCursorKind ||
+		strings.TrimSpace(cursor.EventID) == "" ||
+		strings.TrimSpace(cursor.DeliveryID) == "" ||
+		strings.TrimSpace(cursor.EnqueuedAt) == "" {
+		return runtimedelivery.AgentPendingPosition{}, ErrInvalidPendingAgentDeliveryCursor
 	}
 	enqueuedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(cursor.EnqueuedAt))
 	if err != nil {
-		return pendingAgentDeliveryCursorPosition{}, ErrInvalidPendingAgentDeliveryCursor
+		return runtimedelivery.AgentPendingPosition{}, ErrInvalidPendingAgentDeliveryCursor
 	}
-	return pendingAgentDeliveryCursorPosition{
-		EnqueuedAt: enqueuedAt.UTC(),
-		EventID:    strings.TrimSpace(cursor.EventID),
+	if _, err := uuid.Parse(strings.TrimSpace(cursor.EventID)); err != nil {
+		return runtimedelivery.AgentPendingPosition{}, ErrInvalidPendingAgentDeliveryCursor
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(cursor.DeliveryID)); err != nil {
+		return runtimedelivery.AgentPendingPosition{}, ErrInvalidPendingAgentDeliveryCursor
+	}
+	return runtimedelivery.AgentPendingPosition{
+		EventCreatedAt: enqueuedAt.UTC(),
+		EventID:        strings.TrimSpace(cursor.EventID),
+		DeliveryID:     strings.TrimSpace(cursor.DeliveryID),
 	}, nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

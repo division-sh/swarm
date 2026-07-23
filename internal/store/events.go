@@ -909,65 +909,16 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.C
 }
 
 func (s *PostgresStore) listEventsWithPendingDeliveriesForRunSpec(ctx context.Context, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
-	var active bool
-	if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = $1::uuid AND status IN ('running', 'paused'))`, runID).Scan(&active); err != nil {
-		return nil, fmt.Errorf("inspect pending-delivery run: %w", err)
-	}
-	if !active {
-		return []events.PersistedReplayEvent{}, nil
-	}
-	snapshots, err := postgresDeliveryAdapter.SnapshotsForRun(ctx, s.DB, runID)
-	if err != nil {
-		return nil, fmt.Errorf("list run pending delivery snapshots: %w", err)
-	}
-	records, err := hydratePostgresPersistedReplayEvents(ctx, s.DB, pendingDeliveryEventIDs(snapshots, since))
-	if err != nil {
-		return nil, err
-	}
-	return filterExecutableReplayEvents(records, limit), nil
-}
-
-func pendingDeliveryEventIDs(snapshots []runtimedelivery.Snapshot, since time.Time) []string {
-	filtered := make([]runtimedelivery.Snapshot, 0, len(snapshots))
-	for _, snapshot := range snapshots {
-		if snapshot.Status == runtimedelivery.StatusPending && !snapshot.CreatedAt.Before(since) {
-			filtered = append(filtered, snapshot)
-		}
-	}
-	sort.Slice(filtered, func(i, j int) bool {
-		if !filtered[i].CreatedAt.Equal(filtered[j].CreatedAt) {
-			return filtered[i].CreatedAt.Before(filtered[j].CreatedAt)
-		}
-		return filtered[i].EventID < filtered[j].EventID
+	eventIDs, err := postgresDeliveryAdapter.PendingRunEventIDs(ctx, s.DB, runtimedelivery.PendingRunEventQuery{
+		RunID:              runID,
+		Since:              since,
+		Limit:              limit,
+		ExcludedEventNames: diagnosticDirectReplayEventNames(),
 	})
-	seen := map[string]struct{}{}
-	ids := make([]string, 0, len(filtered))
-	for _, snapshot := range filtered {
-		if _, ok := seen[snapshot.EventID]; ok {
-			continue
-		}
-		seen[snapshot.EventID] = struct{}{}
-		ids = append(ids, snapshot.EventID)
+	if err != nil {
+		return nil, fmt.Errorf("list run pending delivery event ids: %w", err)
 	}
-	return ids
-}
-
-func filterExecutableReplayEvents(records []events.PersistedReplayEvent, limit int) []events.PersistedReplayEvent {
-	excluded := map[events.EventType]struct{}{}
-	for _, eventType := range events.DiagnosticDirectEventTypes() {
-		excluded[eventType] = struct{}{}
-	}
-	out := make([]events.PersistedReplayEvent, 0, min(limit, len(records)))
-	for _, record := range records {
-		if _, skip := excluded[record.Event.Type()]; skip {
-			continue
-		}
-		out = append(out, record)
-		if len(out) == limit {
-			break
-		}
-	}
-	return out
+	return hydratePostgresPersistedReplayEvents(ctx, s.DB, eventIDs)
 }
 
 func chooseRowQueryer(db *sql.DB, tx *sql.Tx) rowQueryer {

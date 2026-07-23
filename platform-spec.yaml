@@ -12287,7 +12287,15 @@ platform_tables:
         diagnostic totals use a count-only projection over the same canonical status and occurrence-time facts. Run-debug
         delivery summaries likewise aggregate subscriber/status counts in SQL and select only the requested failed/dead-letter
         identities in diagnostic occurrence order before canonical snapshot, event, and dead-letter hydration; the report must
-        not hydrate complete run delivery history.
+        not hydrate complete run delivery history. Pending-run recovery selects active-run pending event identities, applies
+        its watermark, diagnostic-event exclusions, event de-duplication, order, and limit before event hydration. Agent-list
+        lifecycle selects one row-ranked current lifecycle identity per requested agent in one batched projection before
+        canonical hydration. Agent diagnosis computes grouped pending aggregates without event hydration and pages exact
+        `(events.created_at, events.event_id, event_deliveries.delivery_id)` identities with limit-plus-one before hydrating
+        only visible snapshots and events; `delivery_id` is therefore mandatory in the public row and opaque cursor. Bundle
+        deletion, fork replay-state existence, source active-session coupling, and selected-fork agent completion consume
+        separate purpose-named lifecycle projections. Generic full-history run, agent, or eligible-agent snapshot readers are
+        forbidden production interfaces.
       ddl: |
         CREATE TABLE event_deliveries (
             delivery_id       UUID PRIMARY KEY,
@@ -25930,11 +25938,15 @@ api_specification:
         type: object
         additionalProperties: false
         required:
+        - delivery_id
         - event_id
         - event_name
         - enqueued_at
         - attempts
         properties:
+          delivery_id:
+            $ref: '#/components/schemas/OpaqueId'
+            description: Exact executable delivery obligation identity. It is part of the pending-detail page order and cursor so same-event route siblings are never collapsed.
           event_id:
             $ref: '#/components/schemas/OpaqueId'
           event_name:
@@ -29451,7 +29463,8 @@ api_specification:
         runtime_state.watchdog is omitted when no active live session or no
         active-session watchdog evidence exists, and malformed watchdog data
         fails closed. Queue details are paged with queue_limit and
-        queue_cursor, ordered by events.created_at ASC then events.event_id ASC.
+        queue_cursor, ordered by events.created_at ASC, events.event_id ASC,
+        then event_deliveries.delivery_id ASC.
         AgentPendingDelivery.enqueued_at uses the same timestamp owner as
         oldest_pending_age_seconds. AgentPendingDelivery.attempts is the
         canonical recorded retry counter from event_deliveries.retry_count, with

@@ -363,7 +363,7 @@ func validAgentDiagnosisResult() map[string]any {
 			"pending_count":              2,
 			"oldest_pending_age_seconds": 30,
 			"pending_deliveries": []map[string]any{
-				{"event_id": "event-1", "event_name": "platform.agent_directive", "enqueued_at": "2026-05-18T03:01:00Z", "attempts": 1},
+				{"delivery_id": "delivery-1", "event_id": "event-1", "event_name": "platform.agent_directive", "enqueued_at": "2026-05-18T03:01:00Z", "attempts": 1},
 			},
 			"next_cursor": "cursor-2",
 		},
