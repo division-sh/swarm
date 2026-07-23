@@ -766,6 +766,9 @@ func validateAgentDiagnosisResult(item store.OperatorAgentDiagnosis) error {
 		return fmt.Errorf("agent.diagnose owner returned malformed result: queue.pending_deliveries must be an array")
 	}
 	for i, detail := range item.Queue.PendingDeliveries {
+		if strings.TrimSpace(detail.DeliveryID) == "" {
+			return fmt.Errorf("agent.diagnose owner returned malformed result: queue.pending_deliveries[%d].delivery_id is required", i)
+		}
 		if strings.TrimSpace(detail.EventID) == "" {
 			return fmt.Errorf("agent.diagnose owner returned malformed result: queue.pending_deliveries[%d].event_id is required", i)
 		}

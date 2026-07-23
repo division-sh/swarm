@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
@@ -287,22 +288,16 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsMissingPipelineReceipt(ctx context.
 }
 
 func (s *SQLiteRuntimeStore) listSQLiteEventsWithPendingDeliveriesForRun(ctx context.Context, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
-	var active bool
-	if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = ? AND status IN ('running', 'paused'))`, runID).Scan(&active); err != nil {
-		return nil, fmt.Errorf("inspect sqlite pending-delivery run: %w", err)
-	}
-	if !active {
-		return []events.PersistedReplayEvent{}, nil
-	}
-	snapshots, err := sqliteDeliveryAdapter.SnapshotsForRun(ctx, s.DB, runID)
+	eventIDs, err := sqliteDeliveryAdapter.PendingRunEventIDs(ctx, s.DB, runtimedelivery.PendingRunEventQuery{
+		RunID:              runID,
+		Since:              since,
+		Limit:              limit,
+		ExcludedEventNames: diagnosticDirectReplayEventNames(),
+	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list sqlite run pending delivery event ids: %w", err)
 	}
-	records, err := hydrateSQLitePersistedReplayEvents(ctx, s.DB, pendingDeliveryEventIDs(snapshots, since))
-	if err != nil {
-		return nil, err
-	}
-	return filterExecutableReplayEvents(records, limit), nil
+	return hydrateSQLitePersistedReplayEvents(ctx, s.DB, eventIDs)
 }
 
 func (s *SQLiteRuntimeStore) ClaimPipelineReplay(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
@@ -382,89 +377,34 @@ func (l *sqliteReplayLease) Release(context.Context) error {
 
 func (s *SQLiteRuntimeStore) ListPendingAgentDeliveryFacts(ctx context.Context, agentIDs []string, since time.Time) (map[string]PendingAgentDeliveryFacts, error) {
 	normalized := normalizePendingAgentIDs(agentIDs)
-	out := make(map[string]PendingAgentDeliveryFacts, len(normalized))
-	for _, agentID := range normalized {
-		out[agentID] = PendingAgentDeliveryFacts{}
-	}
-	if len(normalized) == 0 {
-		return out, nil
-	}
-	records, err := s.listSQLitePendingAgentDeliveryRecords(ctx, normalized, since)
+	aggregates, err := sqliteDeliveryAdapter.AgentPendingAggregates(ctx, s.DB, normalized, since)
 	if err != nil {
 		return nil, err
 	}
-	grouped := make(map[string][]pendingAgentDeliveryRecord, len(normalized))
-	for _, record := range records {
-		grouped[record.AgentID] = append(grouped[record.AgentID], record)
-	}
-	now := s.now()
-	for _, agentID := range normalized {
-		out[agentID] = pendingAgentDeliveryFactsFromRecords(grouped[agentID], now)
-	}
-	return out, nil
+	return pendingAgentDeliveryFactsFromAggregates(normalized, aggregates, s.now()), nil
 }
 
 func (s *SQLiteRuntimeStore) ListPendingAgentDeliveryDetails(ctx context.Context, opts PendingAgentDeliveryListOptions) (PendingAgentDeliveryPage, error) {
-	opts.AgentID = strings.TrimSpace(opts.AgentID)
-	opts.Cursor = strings.TrimSpace(opts.Cursor)
-	if opts.AgentID == "" {
-		return PendingAgentDeliveryPage{PendingDeliveries: []PendingAgentDeliveryDetail{}}, nil
+	opts, cursor, empty, err := normalizePendingAgentDeliveryOptions(opts)
+	if err != nil || empty {
+		return PendingAgentDeliveryPage{PendingDeliveries: []PendingAgentDeliveryDetail{}}, err
 	}
-	if opts.Limit == 0 {
-		opts.Limit = DefaultPendingAgentDeliveryDetailLimit
-	}
-	if opts.Limit < 0 || opts.Limit > MaxPendingAgentDeliveryDetailLimit {
-		return PendingAgentDeliveryPage{}, fmt.Errorf("pending agent delivery detail limit must be from 1 to %d", MaxPendingAgentDeliveryDetailLimit)
-	}
-	var cursor *pendingAgentDeliveryCursorPosition
-	if opts.Cursor != "" {
-		decoded, err := decodePendingAgentDeliveryCursor(opts.Cursor)
-		if err != nil {
-			return PendingAgentDeliveryPage{}, err
-		}
-		cursor = &decoded
-	}
-	records, err := s.listSQLitePendingAgentDeliveryRecords(ctx, []string{opts.AgentID}, opts.Since)
+	aggregates, err := sqliteDeliveryAdapter.AgentPendingAggregates(ctx, s.DB, []string{opts.AgentID}, opts.Since)
 	if err != nil {
 		return PendingAgentDeliveryPage{}, err
 	}
-	return pendingAgentDeliveryPageFromRecords(records, s.now(), opts.Limit, cursor)
-}
-
-func (s *SQLiteRuntimeStore) listSQLitePendingAgentDeliveryRecords(ctx context.Context, agentIDs []string, since time.Time) ([]pendingAgentDeliveryRecord, error) {
-	out := []pendingAgentDeliveryRecord{}
-	for _, agentID := range agentIDs {
-		snapshots, err := sqliteDeliveryAdapter.EligibleAgentSnapshots(ctx, s.DB, agentID, since)
-		if err != nil {
-			return nil, err
-		}
-		for _, snapshot := range snapshots {
-			durable, found, err := eventrecordsqlite.Load(ctx, s.DB, snapshot.EventID)
-			if err != nil || !found {
-				if err == nil {
-					err = eventrecord.Missing(snapshot.EventID)
-				}
-				return nil, err
-			}
-			admitted, err := durable.Decode()
-			if err != nil {
-				return nil, err
-			}
-			delivery, err := events.NewDeliveryEvent(admitted.Event(), snapshot.Route)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, pendingAgentDeliveryRecord{
-				AgentID:            snapshot.SubscriberID,
-				Event:              delivery.Event(),
-				DeliveryFound:      true,
-				DeliveryStatus:     string(snapshot.Status),
-				DeliveryRetryCount: snapshot.RetryCount,
-				DeliveryCreatedAt:  snapshot.CreatedAt,
-			})
-		}
+	page, err := sqliteDeliveryAdapter.AgentPendingReferencePage(ctx, s.DB, runtimedelivery.AgentPendingPageQuery{
+		AgentID: opts.AgentID,
+		Since:   opts.Since,
+		Limit:   opts.Limit,
+		After:   cursor,
+	})
+	if err != nil {
+		return PendingAgentDeliveryPage{}, err
 	}
-	return out, nil
+	return pendingAgentDeliveryPageFromProjection(ctx, opts.AgentID, aggregates, page, s.now(), func(ctx context.Context, eventID string) (eventrecord.Record, bool, error) {
+		return eventrecordsqlite.Load(ctx, s.DB, eventID)
+	})
 }
 
 func sqliteJSONRawMessage(raw any) json.RawMessage {

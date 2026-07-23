@@ -206,6 +206,12 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.selected_runtime_mutation_unit_of_work",
 			Reason:         "the private backend-neutral delivery adapter is the sole executable-delivery SQL owner below the typed lifecycle port",
 		},
+		"internal/runtime/deliverylifecycle/read_projections.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2105,
+			SpecRef:        "platform-spec.yaml#platform_tables.event_deliveries",
+			Reason:         "the private backend-neutral delivery adapter owns bounded purpose-specific lifecycle read projections before canonical hydration",
+		},
 		"internal/runtime/pipeline/engine_adapter.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,

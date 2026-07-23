@@ -102,10 +102,6 @@ func (s fakeAgentConversationReadSource) ListAgentDeliveryLifecycleFacts(_ conte
 	return out, s.err
 }
 
-func (s fakeAgentConversationReadSource) deliverySnapshotsForAgent(context.Context, string, time.Time) ([]runtimedelivery.Snapshot, error) {
-	return []runtimedelivery.Snapshot{}, nil
-}
-
 func (s fakeAgentConversationReadSource) deliveryLifecycleSnapshotPageForAgent(context.Context, runtimedelivery.AgentLifecyclePageQuery) (runtimedelivery.SnapshotPage, error) {
 	return runtimedelivery.SnapshotPage{Snapshots: []runtimedelivery.Snapshot{}}, nil
 }
@@ -406,6 +402,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 				PendingCount:        3,
 				OldestPendingAgeSec: 90,
 				PendingDeliveries: []PendingAgentDeliveryDetail{{
+					DeliveryID: "delivery-1",
 					EventID:    "event-1",
 					EventName:  "task.ready",
 					EnqueuedAt: eventTime,

@@ -471,11 +471,11 @@ func runForkSourceAdvancedCode(family string) (string, bool) {
 }
 
 func ensureRunForkActivationNoForkReplayState(ctx context.Context, tx *sql.Tx, forkRunID string) error {
-	deliveries, err := postgresDeliveryAdapter.SnapshotsForRun(ctx, tx, forkRunID)
+	hasDeliveries, err := postgresDeliveryAdapter.RunHasDeliveryObligations(ctx, tx, forkRunID)
 	if err != nil {
 		return fmt.Errorf("check fork_deliveries_already_exist: %w", err)
 	}
-	if len(deliveries) > 0 {
+	if hasDeliveries {
 		return runForkReplayResumeError("fork_deliveries_already_exist", RunForkReplayResumeFactForkReplayState, "fork activation blocked: fork_deliveries_already_exist")
 	}
 	checks := []struct {

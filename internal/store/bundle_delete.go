@@ -194,14 +194,11 @@ func (s *PostgresStore) ApplyBundleDeleteFinalMutation(ctx context.Context, req 
 func (s *PostgresStore) planBundleDeleteDeliveries(ctx context.Context, runIDs []string) ([]bundledelete.DeliveryRef, error) {
 	out := []bundledelete.DeliveryRef{}
 	for _, runID := range runIDs {
-		snapshots, err := s.deliverySnapshotsForRun(ctx, runID)
+		snapshots, err := postgresDeliveryAdapter.NonterminalSnapshotsForRun(ctx, s.DB, runID)
 		if err != nil {
 			return nil, fmt.Errorf("plan bundle delete deliveries: %w", err)
 		}
 		for _, snapshot := range snapshots {
-			if snapshot.Terminal() {
-				continue
-			}
 			item := bundledelete.DeliveryRef{
 				DeliveryID: snapshot.DeliveryID, RunID: snapshot.RunID, EventID: snapshot.EventID,
 				SubscriberType: string(snapshot.SubscriberClass), SubscriberID: snapshot.SubscriberID,

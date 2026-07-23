@@ -48,27 +48,26 @@ func (s *PostgresStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, age
 }
 
 func (s *PostgresStore) listAgentLifecycleRecordsSpec(ctx context.Context, agentIDs []string) ([]agentLifecycleDeliveryRecord, error) {
-	out := make([]agentLifecycleDeliveryRecord, 0)
-	for _, agentID := range agentIDs {
-		snapshots, err := s.deliverySnapshotsForAgent(ctx, agentID, time.Unix(0, 0).UTC())
-		if err != nil {
-			return nil, err
-		}
-		for _, snapshot := range snapshots {
-			if snapshot.Status == runtimedelivery.StatusDelivered {
-				continue
-			}
-			record := agentLifecycleDeliveryRecord{
-				AgentID: snapshot.SubscriberID, Status: string(snapshot.Status),
-				ActiveSessionID: snapshot.ActiveSessionID, CreatedAt: snapshot.CreatedAt,
-			}
-			if !snapshot.SettledAt.IsZero() {
-				record.DeliveredAt = sql.NullTime{Time: snapshot.SettledAt, Valid: true}
-			}
-			out = append(out, record)
-		}
+	snapshots, err := postgresDeliveryAdapter.CurrentAgentSnapshots(ctx, s.DB, agentIDs)
+	if err != nil {
+		return nil, err
 	}
-	return out, nil
+	return agentLifecycleRecordsFromSnapshots(snapshots), nil
+}
+
+func agentLifecycleRecordsFromSnapshots(snapshots []runtimedelivery.Snapshot) []agentLifecycleDeliveryRecord {
+	out := make([]agentLifecycleDeliveryRecord, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		record := agentLifecycleDeliveryRecord{
+			AgentID: snapshot.SubscriberID, Status: string(snapshot.Status),
+			ActiveSessionID: snapshot.ActiveSessionID, CreatedAt: snapshot.CreatedAt,
+		}
+		if !snapshot.SettledAt.IsZero() {
+			record.DeliveredAt = sql.NullTime{Time: snapshot.SettledAt, Valid: true}
+		}
+		out = append(out, record)
+	}
+	return out
 }
 
 type agentLifecycleCandidate struct {

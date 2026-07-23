@@ -229,6 +229,42 @@ type AgentDiagnosticPageQuery struct {
 	Limit            int
 }
 
+type PendingRunEventQuery struct {
+	RunID              string
+	Since              time.Time
+	Limit              int
+	ExcludedEventNames []string
+}
+
+type AgentPendingAggregate struct {
+	AgentID       string
+	Count         int
+	OldestEventAt time.Time
+}
+
+type AgentPendingPageQuery struct {
+	AgentID string
+	Since   time.Time
+	Limit   int
+	After   *AgentPendingPosition
+}
+
+type AgentPendingPosition struct {
+	EventCreatedAt time.Time
+	EventID        string
+	DeliveryID     string
+}
+
+type AgentPendingReference struct {
+	Snapshot       Snapshot
+	EventCreatedAt time.Time
+}
+
+type AgentPendingReferencePage struct {
+	References []AgentPendingReference
+	HasMore    bool
+}
+
 // RunTracePageQuery selects the exact row identities needed by one bounded
 // run-debug page. Snapshot hydration remains owned by Adapter.
 type RunTracePageQuery struct {

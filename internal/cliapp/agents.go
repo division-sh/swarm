@@ -99,6 +99,7 @@ type agentDiagnosisQueue struct {
 }
 
 type agentDiagnosisPendingDelivery struct {
+	DeliveryID string `json:"delivery_id"`
 	EventID    string `json:"event_id"`
 	EventName  string `json:"event_name"`
 	EnqueuedAt string `json:"enqueued_at"`
@@ -575,6 +576,9 @@ func validateAgentDiagnosisResult(result agentDiagnosisResult) error {
 		return fmt.Errorf("malformed agent.diagnose result: queue.next_cursor is empty")
 	}
 	for i, delivery := range result.Queue.PendingDeliveries {
+		if strings.TrimSpace(delivery.DeliveryID) == "" {
+			return fmt.Errorf("malformed agent.diagnose result: queue.pending_deliveries[%d].delivery_id is required", i)
+		}
 		if strings.TrimSpace(delivery.EventID) == "" {
 			return fmt.Errorf("malformed agent.diagnose result: queue.pending_deliveries[%d].event_id is required", i)
 		}

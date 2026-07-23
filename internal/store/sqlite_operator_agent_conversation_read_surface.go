@@ -68,27 +68,11 @@ func (s *SQLiteRuntimeStore) ListAgentDeliveryLifecycleFacts(ctx context.Context
 }
 
 func (s *SQLiteRuntimeStore) listSQLiteAgentLifecycleRecords(ctx context.Context, agentIDs []string) ([]agentLifecycleDeliveryRecord, error) {
-	out := make([]agentLifecycleDeliveryRecord, 0)
-	for _, agentID := range agentIDs {
-		snapshots, err := s.deliverySnapshotsForAgent(ctx, agentID, time.Unix(0, 0).UTC())
-		if err != nil {
-			return nil, err
-		}
-		for _, snapshot := range snapshots {
-			if snapshot.Status == "delivered" {
-				continue
-			}
-			record := agentLifecycleDeliveryRecord{
-				AgentID: snapshot.SubscriberID, Status: string(snapshot.Status),
-				ActiveSessionID: snapshot.ActiveSessionID, CreatedAt: snapshot.CreatedAt,
-			}
-			if !snapshot.SettledAt.IsZero() {
-				record.DeliveredAt = sql.NullTime{Time: snapshot.SettledAt, Valid: true}
-			}
-			out = append(out, record)
-		}
+	snapshots, err := sqliteDeliveryAdapter.CurrentAgentSnapshots(ctx, s.DB, agentIDs)
+	if err != nil {
+		return nil, err
 	}
-	return out, nil
+	return agentLifecycleRecordsFromSnapshots(snapshots), nil
 }
 
 func (r *sqliteOperatorAgentConversationReadSurface) ListOperatorAgents(ctx context.Context, opts OperatorAgentListOptions) (OperatorAgentListResult, error) {

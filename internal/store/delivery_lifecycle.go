@@ -529,14 +529,6 @@ func (s *SQLiteRuntimeStore) deliverySnapshotsForEvent(ctx context.Context, even
 	return sqliteDeliveryAdapter.SnapshotsForEvent(ctx, eventReadQueryerFromContext(ctx, s.DB), eventID)
 }
 
-func (s *PostgresStore) deliverySnapshotsForRun(ctx context.Context, runID string) ([]runtimedelivery.Snapshot, error) {
-	return postgresDeliveryAdapter.SnapshotsForRun(ctx, eventReadQueryerFromContext(ctx, s.DB), runID)
-}
-
-func (s *SQLiteRuntimeStore) deliverySnapshotsForRun(ctx context.Context, runID string) ([]runtimedelivery.Snapshot, error) {
-	return sqliteDeliveryAdapter.SnapshotsForRun(ctx, eventReadQueryerFromContext(ctx, s.DB), runID)
-}
-
 func (s *PostgresStore) deliveryRunDiagnosticCounts(ctx context.Context, runID string) ([]runtimedelivery.RunDiagnosticCount, error) {
 	return postgresDeliveryAdapter.RunDiagnosticCounts(ctx, eventReadQueryerFromContext(ctx, s.DB), runID)
 }
@@ -559,14 +551,6 @@ func (s *PostgresStore) deliveryRunTraceReferencePage(ctx context.Context, query
 
 func (s *SQLiteRuntimeStore) deliveryRunTraceReferencePage(ctx context.Context, query runtimedelivery.RunTracePageQuery) (runtimedelivery.RunTraceReferencePage, error) {
 	return sqliteDeliveryAdapter.RunTraceReferencePage(ctx, eventReadQueryerFromContext(ctx, s.DB), query)
-}
-
-func (s *PostgresStore) deliverySnapshotsForAgent(ctx context.Context, agentID string, since time.Time) ([]runtimedelivery.Snapshot, error) {
-	return postgresDeliveryAdapter.SnapshotsForAgent(ctx, eventReadQueryerFromContext(ctx, s.DB), agentID, since)
-}
-
-func (s *SQLiteRuntimeStore) deliverySnapshotsForAgent(ctx context.Context, agentID string, since time.Time) ([]runtimedelivery.Snapshot, error) {
-	return sqliteDeliveryAdapter.SnapshotsForAgent(ctx, eventReadQueryerFromContext(ctx, s.DB), agentID, since)
 }
 
 func (s *PostgresStore) deliveryLifecycleSnapshotPageForAgent(ctx context.Context, query runtimedelivery.AgentLifecyclePageQuery) (runtimedelivery.SnapshotPage, error) {

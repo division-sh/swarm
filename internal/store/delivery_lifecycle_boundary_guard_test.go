@@ -16,10 +16,43 @@ var executableDeliverySQL = regexp.MustCompile(`(?is)\b(?:from|join|into|update|
 
 var executableDeliverySQLOwners = map[string]string{
 	"internal/runtime/deliverylifecycle/adapter.go":                   "canonical executable-delivery lifecycle adapter",
+	"internal/runtime/deliverylifecycle/read_projections.go":          "canonical bounded executable-delivery read projections",
 	"internal/runtime/runforkrevision/revision.go":                    "immutable fork-revision fact capture",
 	"internal/store/destructive_reset_cleanup.go":                     "named destructive-reset physical cleanup",
 	"internal/store/run_fork_selected_contract_execution_mutation.go": "selected-fork physical cleanup after typed terminalization",
 	"internal/store/testsql/event.go":                                 "named hostile rollback injection used only by tests",
+}
+
+func TestRetiredGenericDeliveryReadersHaveNoProductionConsumers(t *testing.T) {
+	repoRoot := eventBoundaryRepositoryRoot(t)
+	retired := []string{"SnapshotsForRun", "SnapshotsForAgent", "EligibleAgentSnapshots"}
+	for _, rootName := range []string{"internal", "cmd"} {
+		root := filepath.Join(repoRoot, rootName)
+		if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			contents, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			for _, name := range retired {
+				if regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`).Match(contents) {
+					relative, relErr := filepath.Rel(repoRoot, path)
+					if relErr != nil {
+						return relErr
+					}
+					t.Errorf("%s consumes retired generic delivery reader %s", filepath.ToSlash(relative), name)
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("walk %s: %v", rootName, err)
+		}
+	}
 }
 
 func TestExecutableDeliverySQLHasClosedOwners(t *testing.T) {

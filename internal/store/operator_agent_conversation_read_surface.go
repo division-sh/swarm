@@ -168,6 +168,7 @@ type OperatorAgentDiagnosisQueue struct {
 }
 
 type OperatorAgentPendingDelivery struct {
+	DeliveryID string    `json:"delivery_id"`
 	EventID    string    `json:"event_id"`
 	EventName  string    `json:"event_name"`
 	EnqueuedAt time.Time `json:"enqueued_at"`
@@ -805,6 +806,7 @@ func operatorAgentDiagnosisQueueFromPendingPage(page PendingAgentDeliveryPage) O
 	}
 	for _, detail := range page.PendingDeliveries {
 		queue.PendingDeliveries = append(queue.PendingDeliveries, OperatorAgentPendingDelivery{
+			DeliveryID: strings.TrimSpace(detail.DeliveryID),
 			EventID:    strings.TrimSpace(detail.EventID),
 			EventName:  strings.TrimSpace(detail.EventName),
 			EnqueuedAt: detail.EnqueuedAt.UTC(),
@@ -831,6 +833,9 @@ func validateOperatorAgentDiagnosis(item OperatorAgentDiagnosis) error {
 		return fmt.Errorf("agent diagnosis queue.pending_deliveries must be an array")
 	}
 	for i, detail := range item.Queue.PendingDeliveries {
+		if strings.TrimSpace(detail.DeliveryID) == "" {
+			return fmt.Errorf("agent diagnosis queue.pending_deliveries[%d].delivery_id is required", i)
+		}
 		if strings.TrimSpace(detail.EventID) == "" {
 			return fmt.Errorf("agent diagnosis queue.pending_deliveries[%d].event_id is required", i)
 		}

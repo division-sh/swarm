@@ -670,6 +670,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					PendingCount:            2,
 					OldestPendingAgeSeconds: 30,
 					PendingDeliveries: []store.OperatorAgentPendingDelivery{{
+						DeliveryID: "delivery-1",
 						EventID:    "event-1",
 						EventName:  "task.ready",
 						EnqueuedAt: time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC),
