@@ -550,18 +550,28 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 			}
 			return true, err
 		}
-		wait := time.Until(snapshot.NextEligibleAt)
-		if wait < 0 {
-			wait = 0
-		}
-		timer := time.NewTimer(wait)
-		select {
-		case <-attemptCtx.Done():
-			timer.Stop()
-			return true, attemptCtx.Err()
-		case <-timer.C:
+		if err := waitForWorkflowNodeRetry(ctx, snapshot.NextEligibleAt); err != nil {
+			return true, err
 		}
 		claimed = false
+	}
+}
+
+func waitForWorkflowNodeRetry(ctx context.Context, nextEligibleAt time.Time) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	wait := time.Until(nextEligibleAt)
+	if wait < 0 {
+		wait = 0
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 
