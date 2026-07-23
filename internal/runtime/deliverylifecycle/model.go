@@ -229,6 +229,42 @@ type AgentDiagnosticPageQuery struct {
 	Limit            int
 }
 
+// RunTracePageQuery selects the exact row identities needed by one bounded
+// run-debug page. Snapshot hydration remains owned by Adapter.
+type RunTracePageQuery struct {
+	RunID              string
+	Limit              int
+	After              *RunTracePosition
+	Since              *time.Time
+	Until              *time.Time
+	EventNames         []string
+	EntityIDs          []string
+	DeliveryStatuses   []Status
+	SubscriberIDs      []string
+	SubscriberClasses  []SubscriberClass
+	ExcludeRuntimeLogs bool
+}
+
+type RunTracePosition struct {
+	EventCreatedAt    time.Time
+	EventID           string
+	DeliveryCreatedAt time.Time
+	DeliveryID        string
+	TurnCreatedAt     time.Time
+	TurnID            string
+}
+
+type RunTraceReference struct {
+	EventID  string
+	Delivery *Snapshot
+	TurnID   string
+}
+
+type RunTraceReferencePage struct {
+	References []RunTraceReference
+	HasMore    bool
+}
+
 type AgentDiagnosticCounts struct {
 	Failures    int
 	DeadLetters int

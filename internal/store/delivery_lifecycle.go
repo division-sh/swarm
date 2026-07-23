@@ -537,6 +537,14 @@ func (s *SQLiteRuntimeStore) deliverySnapshotsForRun(ctx context.Context, runID 
 	return sqliteDeliveryAdapter.SnapshotsForRun(ctx, eventReadQueryerFromContext(ctx, s.DB), runID)
 }
 
+func (s *PostgresStore) deliveryRunTraceReferencePage(ctx context.Context, query runtimedelivery.RunTracePageQuery) (runtimedelivery.RunTraceReferencePage, error) {
+	return postgresDeliveryAdapter.RunTraceReferencePage(ctx, eventReadQueryerFromContext(ctx, s.DB), query)
+}
+
+func (s *SQLiteRuntimeStore) deliveryRunTraceReferencePage(ctx context.Context, query runtimedelivery.RunTracePageQuery) (runtimedelivery.RunTraceReferencePage, error) {
+	return sqliteDeliveryAdapter.RunTraceReferencePage(ctx, eventReadQueryerFromContext(ctx, s.DB), query)
+}
+
 func (s *PostgresStore) deliverySnapshotsForAgent(ctx context.Context, agentID string, since time.Time) ([]runtimedelivery.Snapshot, error) {
 	return postgresDeliveryAdapter.SnapshotsForAgent(ctx, eventReadQueryerFromContext(ctx, s.DB), agentID, since)
 }
