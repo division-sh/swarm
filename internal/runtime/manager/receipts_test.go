@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -943,15 +944,10 @@ func TestClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBusDescend
 
 	later := eventtest.RunCreatingRootIngress(uuid.NewString(), "test.lane.later", "test", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 	laterResult := make(chan eventProcessResult, 1)
-	laterQueued := make(chan struct{})
 	go func() {
-		close(laterQueued)
 		laterResult <- am.processEventDetailed(managerAgentDeliveryContext(testAuthorActivityContext(context.Background()), agent.ID()), agent, later)
 	}()
-	<-laterQueued
-	// Give the lexical contender a chance to register on the held lane before
-	// the root returns its same-agent descendant to the real EventBus queue.
-	time.Sleep(10 * time.Millisecond)
+	requireClaimedAttemptLaneWaiters(t, am, agent.ID(), 1)
 	close(agent.releaseRoot)
 	select {
 	case <-agent.laterStarted:
@@ -982,6 +978,23 @@ func TestClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBusDescend
 	defer agent.mu.Unlock()
 	if agent.max != 1 || agent.active != 0 {
 		t.Fatalf("lane concurrency = active:%d max:%d, want active:0 max:1", agent.active, agent.max)
+	}
+}
+
+func requireClaimedAttemptLaneWaiters(t *testing.T, am *AgentManager, agentID string, want int64) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		am.deliveryLaneMu.Lock()
+		lane := am.deliveryLanes[agentID]
+		am.deliveryLaneMu.Unlock()
+		if lane != nil && lane.waiters.Load() == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("claimed-attempt lane waiters for %q did not reach %d", agentID, want)
+		}
+		runtime.Gosched()
 	}
 }
 

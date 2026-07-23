@@ -68,7 +68,7 @@ type AgentManager struct {
 	deadLetterLastRaised map[string]time.Time
 
 	deliveryLaneMu sync.Mutex
-	deliveryLanes  map[string]chan struct{}
+	deliveryLanes  map[string]*claimedAttemptLane
 }
 
 var (
@@ -154,7 +154,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		poisonEventEmitted:              make(map[string]bool),
 		deadLetterWindows:               make(map[string][]deadLetterEscalationSample),
 		deadLetterLastRaised:            make(map[string]time.Time),
-		deliveryLanes:                   make(map[string]chan struct{}),
+		deliveryLanes:                   make(map[string]*claimedAttemptLane),
 	}
 }
 
