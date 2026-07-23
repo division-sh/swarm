@@ -476,6 +476,50 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 		`UPDATE event_delivery_attempts SET active_session_id=?, session_run_id=?, session_agent_id=? WHERE delivery_id=? AND claim_version=?`,
 		[]any{uuid.NewString(), sessionEvent.RunID(), route.SubscriberID, claimed.Snapshot.DeliveryID, claimed.Claim.Version()})
 
+	otherSessionEvent := deliveryLifecycleEvent("schema-session-other-owner-" + backend.name)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, otherSessionEvent, nil, runtimereplayclaim.CommittedReplayScopeDirect)
+	otherSessionID := uuid.NewString()
+	otherAgentID := "schema-other-agent-" + backend.name
+	seedDeliveryAgentSession(t, ctx, backend, otherSessionID, otherSessionEvent.RunID(), otherAgentID)
+	assertDeliverySQLRejected(t, backend, "session owned by another delivery run and agent",
+		`UPDATE event_delivery_attempts SET active_session_id=$1::uuid, session_delivery_id=$2::uuid, session_run_id=$3::uuid, session_subscriber_type='agent', session_agent_id=$4 WHERE delivery_id=$2::uuid AND claim_version=$5`,
+		`UPDATE event_delivery_attempts SET active_session_id=?1, session_delivery_id=?2, session_run_id=?3, session_subscriber_type='agent', session_agent_id=?4 WHERE delivery_id=?2 AND claim_version=?5`,
+		[]any{otherSessionID, claimed.Snapshot.DeliveryID, otherSessionEvent.RunID(), otherAgentID, claimed.Claim.Version()})
+	if _, err := backend.store.BindAgentSession(ctx, claimed.Claim, otherSessionID); !errors.Is(err, runtimedelivery.ErrConflict) {
+		t.Fatalf("bind session owned by another delivery error = %v, want ErrConflict", err)
+	}
+
+	assertDeliverySQLRejected(t, backend, "unreferenced second open attempt",
+		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker) VALUES ($1::uuid, $2, $3::uuid, $4, $5, $1::uuid, TRUE)`,
+		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker) VALUES (?1, ?2, ?3, ?4, ?5, ?1, TRUE)`,
+		[]any{claimed.Snapshot.DeliveryID, claimed.Claim.Version() + 1, uuid.NewString(), now, now.Add(time.Minute)})
+
+	terminatedRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "terminated-session-agent-" + backend.name}
+	terminatedEvent := deliveryLifecycleEvent("schema-terminated-session-" + backend.name)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, terminatedEvent, []events.DeliveryRoute{terminatedRoute}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	terminatedClaim, err := backend.store.ClaimAgentDelivery(ctx, terminatedEvent, terminatedRoute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminatedSessionID := uuid.NewString()
+	seedDeliveryAgentSession(t, ctx, backend, terminatedSessionID, terminatedEvent.RunID(), terminatedRoute.SubscriberID)
+	terminateSessionQuery := `UPDATE agent_sessions SET status='terminated', termination_reason='normal', terminated_at=$2, updated_at=$2 WHERE session_id=$1::uuid`
+	if !backend.postgres {
+		terminateSessionQuery = `UPDATE agent_sessions SET status='terminated', termination_reason='normal', terminated_at=?, updated_at=? WHERE session_id=?`
+	}
+	var terminateErr error
+	if backend.postgres {
+		_, terminateErr = backend.db.ExecContext(ctx, terminateSessionQuery, terminatedSessionID, now)
+	} else {
+		_, terminateErr = backend.db.ExecContext(ctx, terminateSessionQuery, now, now, terminatedSessionID)
+	}
+	if terminateErr != nil {
+		t.Fatalf("terminate exact delivery session: %v", terminateErr)
+	}
+	if _, err := backend.store.BindAgentSession(ctx, terminatedClaim.Claim, terminatedSessionID); !errors.Is(err, runtimedelivery.ErrConflict) {
+		t.Fatalf("bind terminated exact session error = %v, want ErrConflict", err)
+	}
+
 	outcomeEvent := deliveryLifecycleEvent("schema-outcome-" + backend.name)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, outcomeEvent, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
 	outcomeProof, err := backend.store.ProveHandoff(ctx, outcomeEvent.ID(), route)
@@ -797,7 +841,8 @@ func requireCanonicalDeliveryLifecycleSurface(t *testing.T, ctx context.Context,
 		"status", "retry_count", "max_retries", "claim_version", "current_attempt_version",
 		"current_attempt_open", "settled_at")
 	requireTableColumns(t, ctx, pg.DB, "event_delivery_attempts",
-		"delivery_id", "claim_version", "claim_token", "started_at", "lease_expires_at", "active_session_id", "open_marker", "outcome")
+		"delivery_id", "claim_version", "claim_token", "started_at", "lease_expires_at", "current_delivery_id",
+		"active_session_id", "session_delivery_id", "session_run_id", "session_subscriber_type", "session_agent_id", "open_marker", "outcome")
 	requireTableColumns(t, ctx, pg.DB, "event_delivery_outcomes",
 		"delivery_id", "claim_version", "outcome", "side_effects", "duration_ms", "settled_at")
 }

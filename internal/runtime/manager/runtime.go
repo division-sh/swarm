@@ -353,7 +353,7 @@ func (am *AgentManager) shouldSkipAlreadyPublishedOutput(ctx context.Context, ev
 	return exists
 }
 
-func (am *AgentManager) safeProcessEvent(ctx context.Context, agent Agent, evt events.Event) (err error, panicked bool, panicText string, stackTrace string) {
+func (am *AgentManager) safeProcessEventOwned(ctx context.Context, agent Agent, evt events.Event) (err error, panicked bool, panicText string, stackTrace string) {
 	defer func() {
 		if r := recover(); r != nil {
 			panicked = true
@@ -361,7 +361,7 @@ func (am *AgentManager) safeProcessEvent(ctx context.Context, agent Agent, evt e
 			stackTrace = strings.TrimSpace(string(debug.Stack()))
 		}
 	}()
-	err = am.processEvent(ctx, agent, evt)
+	err = am.processEventDetailedOwned(ctx, agent, evt).err
 	return
 }
 
@@ -1212,11 +1212,11 @@ func (am *AgentManager) replayAgentBacklogDetailed(ctx context.Context, agentID 
 	defer lease.Release()
 	agent := lease.Agent
 	for {
-		laneCtx, releaseLane, laneErr := am.acquireClaimedAttemptLane(lease.Context, agentID)
+		releaseLane, laneErr := am.acquireClaimedAttemptLane(lease.Context, agentID)
 		if laneErr != nil {
 			return summary, laneErr
 		}
-		pending, err := am.pendingDeliveriesForAgent(laneCtx, agentID, 1)
+		pending, err := am.pendingDeliveriesForAgent(lease.Context, agentID, 1)
 		if err != nil {
 			releaseLane()
 			if startupManagerReplayDiagnosticsEnabled(ctx) {
@@ -1243,7 +1243,7 @@ func (am *AgentManager) replayAgentBacklogDetailed(ctx context.Context, agentID 
 			releaseLane()
 			return summary, nil
 		}
-		eventCtx := laneCtx
+		eventCtx := lease.Context
 		if _, ok := worklifetime.OccurrenceFromContext(eventCtx); !ok {
 			eventCtx = worklifetime.WithOccurrence(eventCtx, am.workOwner)
 		}
@@ -1251,7 +1251,7 @@ func (am *AgentManager) replayAgentBacklogDetailed(ctx context.Context, agentID 
 		eventCtx = runtimedelivery.WithClaim(eventCtx, execution.Claim)
 		result := func() eventProcessResult {
 			defer releaseLane()
-			return am.processEventDetailed(eventCtx, agent, evt)
+			return am.processEventDetailedOwned(eventCtx, agent, evt)
 		}()
 		summary.observe(result.record)
 		if startupManagerReplayDiagnosticsEnabled(ctx) {
@@ -1759,7 +1759,7 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 								}
 								return true
 							}
-							laneCtx, releaseLane, laneErr := am.acquireClaimedAttemptLane(evtCtx, agent.ID())
+							releaseLane, laneErr := am.acquireClaimedAttemptLane(evtCtx, agent.ID())
 							if laneErr != nil {
 								if am.bus != nil {
 									am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
@@ -1771,7 +1771,6 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 								return true
 							}
 							defer releaseLane()
-							evtCtx = laneCtx
 							claimed, claimErr := am.deliveryStore.ClaimAgentDelivery(evtCtx, evt, route)
 							if claimErr != nil {
 								if am.bus != nil {
@@ -1784,7 +1783,7 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 								return false
 							}
 							evtCtx = runtimedelivery.WithClaim(evtCtx, claimed.Claim)
-							err, evtPanicked, evtPanicText, evtStackTrace := am.safeProcessEvent(evtCtx, agent, evt)
+							err, evtPanicked, evtPanicText, evtStackTrace := am.safeProcessEventOwned(evtCtx, agent, evt)
 							if evtPanicked {
 								panicCount := am.incrementPoisonPanicCount(agent.ID(), evt.ID())
 								panicFailure := runtimefailures.FromError(runtimefailures.New(runtimefailures.ClassInternalFailure, "agent_event_panic", "agent-manager", "process_event", map[string]any{

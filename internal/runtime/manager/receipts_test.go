@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -656,6 +657,66 @@ type serializingAgent struct {
 	order   []string
 }
 
+type descendantLaneAgent struct {
+	id             string
+	rootStarted    chan struct{}
+	releaseRoot    chan struct{}
+	laterStarted   chan struct{}
+	releaseLater   chan struct{}
+	childStarted   chan struct{}
+	childCompleted chan struct{}
+	mu             sync.Mutex
+	active         int
+	max            int
+}
+
+func (a *descendantLaneAgent) ID() string { return a.id }
+func (*descendantLaneAgent) Type() string { return "test" }
+func (*descendantLaneAgent) Subscriptions() []events.EventType {
+	return []events.EventType{"test.lane.root", "test.lane.child"}
+}
+func (a *descendantLaneAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Event, error) {
+	a.mu.Lock()
+	a.active++
+	if a.active > a.max {
+		a.max = a.active
+	}
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		a.active--
+		a.mu.Unlock()
+	}()
+
+	switch evt.Type() {
+	case "test.lane.root":
+		close(a.rootStarted)
+		select {
+		case <-ctx.Done():
+			return nil, context.Cause(ctx)
+		case <-a.releaseRoot:
+		}
+		return []events.Event{eventtest.ChildWithLineage(
+			"", "test.lane.child", a.id, "", nil, 0,
+			events.LineageFromEvent(evt), events.EventEnvelope{}, time.Time{},
+		)}, nil
+	case "test.lane.later":
+		close(a.laterStarted)
+		select {
+		case <-ctx.Done():
+			return nil, context.Cause(ctx)
+		case <-a.releaseLater:
+			return nil, nil
+		}
+	case "test.lane.child":
+		close(a.childStarted)
+		close(a.childCompleted)
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("unexpected lane test event type %q", evt.Type())
+	}
+}
+
 func (a *serializingAgent) ID() string                      { return a.id }
 func (*serializingAgent) Type() string                      { return "test" }
 func (*serializingAgent) Subscriptions() []events.EventType { return nil }
@@ -841,6 +902,86 @@ func TestClaimedAttemptExecutorSerializesLiveAndRecoveryForOneAgent(t *testing.T
 	defer agent.mu.Unlock()
 	if agent.max != 1 || !reflect.DeepEqual(agent.order, []string{first.ID(), second.ID()}) {
 		t.Fatalf("executor result = max:%d order:%v", agent.max, agent.order)
+	}
+}
+
+func TestClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBusDescendant(t *testing.T) {
+	eventBus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	agent := &descendantLaneAgent{
+		id:             "agent-lane-descendant",
+		rootStarted:    make(chan struct{}),
+		releaseRoot:    make(chan struct{}),
+		laterStarted:   make(chan struct{}),
+		releaseLater:   make(chan struct{}),
+		childStarted:   make(chan struct{}),
+		childCompleted: make(chan struct{}),
+	}
+	am := newTestAgentManager(t, eventBus, func(runtimeactors.AgentConfig) (Agent, error) { return agent, nil })
+	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: runtimeactors.AgentConfig{
+		ExecutionMode: "live",
+		ID:            agent.ID(),
+		Subscriptions: []string{"test.lane.root", "test.lane.child"},
+	}}, false); err != nil {
+		t.Fatalf("spawn lane test agent: %v", err)
+	}
+	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+		t.Fatalf("run lane test manager: %v", err)
+	}
+
+	root := eventtest.RunCreatingRootIngress(uuid.NewString(), "test.lane.root", "test", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+	if err := eventBus.Publish(testAuthorActivityContext(context.Background()), root); err != nil {
+		t.Fatalf("publish lane root: %v", err)
+	}
+	select {
+	case <-agent.rootStarted:
+	case <-time.After(time.Second):
+		t.Fatal("root delivery did not enter the agent lane")
+	}
+
+	later := eventtest.RunCreatingRootIngress(uuid.NewString(), "test.lane.later", "test", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+	laterResult := make(chan eventProcessResult, 1)
+	laterQueued := make(chan struct{})
+	go func() {
+		close(laterQueued)
+		laterResult <- am.processEventDetailed(managerAgentDeliveryContext(testAuthorActivityContext(context.Background()), agent.ID()), agent, later)
+	}()
+	<-laterQueued
+	// Give the lexical contender a chance to register on the held lane before
+	// the root returns its same-agent descendant to the real EventBus queue.
+	time.Sleep(10 * time.Millisecond)
+	close(agent.releaseRoot)
+	select {
+	case <-agent.laterStarted:
+	case <-time.After(time.Second):
+		t.Fatal("later lexical owner did not acquire the released lane")
+	}
+
+	select {
+	case <-agent.childStarted:
+		t.Fatal("same-agent EventBus descendant overlapped the later lexical owner")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(agent.releaseLater)
+	select {
+	case result := <-laterResult:
+		if result.err != nil {
+			t.Fatalf("later lexical owner: %v", result.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("later lexical owner did not settle")
+	}
+	select {
+	case <-agent.childCompleted:
+	case <-time.After(time.Second):
+		t.Fatal("same-agent EventBus descendant did not execute after lane release")
+	}
+	agent.mu.Lock()
+	defer agent.mu.Unlock()
+	if agent.max != 1 || agent.active != 0 {
+		t.Fatalf("lane concurrency = active:%d max:%d, want active:0 max:1", agent.active, agent.max)
 	}
 }
 

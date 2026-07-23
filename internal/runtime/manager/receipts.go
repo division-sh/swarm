@@ -46,7 +46,7 @@ func failureEnvelope(err error, component, operation string) *runtimefailures.En
 }
 
 func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, evt events.Event) eventProcessResult {
-	ownedCtx, release, err := am.acquireClaimedAttemptLane(ctx, agent.ID())
+	release, err := am.acquireClaimedAttemptLane(ctx, agent.ID())
 	if err != nil {
 		return eventProcessResult{record: startupManagerReplayRecord{
 			Event: evt, AgentID: agent.ID(), Outcome: startupManagerReplayOutcomeDropped,
@@ -55,7 +55,7 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 		}, err: err}
 	}
 	defer release()
-	return am.processEventDetailedOwned(ownedCtx, agent, evt)
+	return am.processEventDetailedOwned(ctx, agent, evt)
 }
 
 func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Agent, evt events.Event) eventProcessResult {

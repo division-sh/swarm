@@ -125,6 +125,25 @@ func TestSQLiteStatementsForPlanAcceptsCompositeForeignKeyDeleteCascade(t *testi
 	}
 }
 
+func TestSQLiteStatementsForPlanAcceptsDeferredCompositeForeignKey(t *testing.T) {
+	statements, err := SQLiteStatementsForPlan(SchemaTableDDL{
+		TableName:  "child",
+		SchemaKind: "platform_spec",
+		Statements: []string{`CREATE TABLE IF NOT EXISTS child (
+    delivery_id UUID NOT NULL,
+    claim_version BIGINT NOT NULL,
+    open_marker BOOLEAN NOT NULL,
+    FOREIGN KEY (delivery_id, claim_version, open_marker) REFERENCES parent(delivery_id, current_attempt_version, current_attempt_open) DEFERRABLE INITIALLY DEFERRED
+)`},
+	})
+	if err != nil {
+		t.Fatalf("SQLiteStatementsForPlan: %v", err)
+	}
+	if len(statements) != 1 || !strings.Contains(statements[0], `FOREIGN KEY ("delivery_id", "claim_version", "open_marker") REFERENCES "parent"("delivery_id", "current_attempt_version", "current_attempt_open") DEFERRABLE INITIALLY DEFERRED`) {
+		t.Fatalf("deferred foreign key translation = %#v", statements)
+	}
+}
+
 func TestSQLiteSchemaStoreRendersExplicitUUIDDefaults(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	sqliteStore, err := NewSQLiteSchemaStore(filepath.Join(t.TempDir(), "uuid-defaults.db"))
