@@ -12262,6 +12262,11 @@ platform_tables:
         heartbeat consumers; the original claim/start time MUST NOT influence cadence. Heartbeat cadence derives from that
         returned lease window. Renewal and settlement are mutually excluded for the exact claim. The delivery row points to
         that exact open attempt; claim token, lease, and session facts exist only on the attempt and cannot diverge.
+        When an accepted agent delivery returns authentication-needed or provider-credit-exhausted, the exact claim heartbeat
+        and settlement guard remain authoritative until the terminal delivery, closed attempt, outcome, failure evidence, and
+        author activity commit. Runtime ingress pause, typed failure normalization, and platform.auth_required publication may
+        precede that commit, but the shared runtime shutdown transition MUST NOT be requested until settlement succeeds.
+        Detached contexts, replacement claims, and shutdown-before-settlement recovery are forbidden.
         After a retry settlement commits and its heartbeat joins, any process-local wait for next_eligible_at is owned by the
         still-live runtime-generation execution context. A completed attempt or heartbeat context MUST NOT own or cancel that
         wait; runtime retirement and caller cancellation remain authoritative.
