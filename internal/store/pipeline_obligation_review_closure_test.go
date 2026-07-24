@@ -389,6 +389,86 @@ func TestPostgresPipelineScanSnapshotExcludesEarlierSequenceCommittedAfterBounda
 	}
 }
 
+func TestPostgresPipelineScanSnapshotRetainsRouteAfterPostBoundaryDeferral(t *testing.T) {
+	fixture := openPostgresAuthorActivityReceiptFixture(t)
+	selected := fixture.store.(pipelineObligationParityStore)
+	owner := selected.PipelineObligations()
+	ctx := testAuthorActivityContext()
+	runID := uuid.NewString()
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
+	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+
+	firstID := commitPipelineParityEvent(t, ctx, selected, runID, base)
+	targetID := commitPipelineParityEvent(t, ctx, selected, runID, base.Add(time.Microsecond))
+	insertProducerIdentityDecisionObligation(t, fixture, ctx, firstID, runID, base)
+	insertProducerIdentityDecisionObligation(t, fixture, ctx, targetID, runID, base.Add(time.Microsecond))
+
+	var insertionTransactionBefore, tupleTransactionBefore string
+	if err := fixture.db.QueryRowContext(ctx, `
+		SELECT insertion_transaction_id::text, xmin::text
+		FROM decision_card_route_obligations
+		WHERE event_id = $1::uuid`, targetID,
+	).Scan(&insertionTransactionBefore, &tupleTransactionBefore); err != nil {
+		t.Fatalf("read target insertion identity: %v", err)
+	}
+
+	scan, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID))
+	if err != nil {
+		t.Fatalf("OpenScan: %v", err)
+	}
+	defer func() {
+		if err := owner.CloseScan(context.WithoutCancel(ctx), scan); err != nil &&
+			!errors.Is(err, runtimepipelineobligation.ErrStaleScan) {
+			t.Errorf("CloseScan: %v", err)
+		}
+	}()
+
+	first, err := owner.ClaimBatch(ctx, scan, 1)
+	if err != nil || len(first.Work) != 1 || first.Work[0].Event.ID() != firstID {
+		t.Fatalf("first ClaimBatch: %#v err=%v", first, err)
+	}
+	target, err := owner.ClaimEvent(ctx, targetID, runtimepipelineobligation.PurposeDecisionRoute)
+	if err != nil {
+		t.Fatalf("claim target route after boundary: %v", err)
+	}
+	if err := owner.Settle(ctx, target.Claim, runtimepipelineobligation.Deferred(
+		"retry_after_boundary",
+		time.Now().UTC().Add(-time.Second),
+		nil,
+	)); err != nil {
+		t.Fatalf("defer target route after boundary: %v", err)
+	}
+	if err := owner.Settle(ctx, first.Work[0].Claim, runtimepipelineobligation.Acknowledged("first_processed")); err != nil {
+		t.Fatalf("settle first route: %v", err)
+	}
+
+	var insertionTransactionAfter, tupleTransactionAfter string
+	if err := fixture.db.QueryRowContext(ctx, `
+		SELECT insertion_transaction_id::text, xmin::text
+		FROM decision_card_route_obligations
+		WHERE event_id = $1::uuid`, targetID,
+	).Scan(&insertionTransactionAfter, &tupleTransactionAfter); err != nil {
+		t.Fatalf("read deferred target insertion identity: %v", err)
+	}
+	if insertionTransactionAfter != insertionTransactionBefore {
+		t.Fatalf("insertion transaction changed across deferral: before=%s after=%s", insertionTransactionBefore, insertionTransactionAfter)
+	}
+	if tupleTransactionAfter == tupleTransactionBefore {
+		t.Fatalf("tuple transaction did not change across deferral: %s", tupleTransactionAfter)
+	}
+
+	second, err := owner.ClaimBatch(ctx, scan, 1)
+	if err != nil {
+		t.Fatalf("second ClaimBatch: %v", err)
+	}
+	if len(second.Work) != 1 || second.Work[0].Event.ID() != targetID {
+		t.Fatalf("retained scan lost deferred pre-boundary route: %#v", second)
+	}
+	if err := owner.Settle(ctx, second.Work[0].Claim, runtimepipelineobligation.Acknowledged("target_processed")); err != nil {
+		t.Fatalf("settle target route: %v", err)
+	}
+}
+
 func insertPostgresPipelineSnapshotFixtureTx(ctx context.Context, tx *sql.Tx, event events.Event) error {
 	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
