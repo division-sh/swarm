@@ -35,6 +35,7 @@ type OutboxSweeperConfig struct {
 type pipelineSweepScan struct {
 	cursor         runtimepipelineobligation.Scan
 	locallyBlocked bool
+	closePending   bool
 }
 
 func DefaultOutboxSweeperConfig() OutboxSweeperConfig {
@@ -169,6 +170,12 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 		eb.pipelineScans = map[runtimepipelineobligation.ScanRequest]*pipelineSweepScan{}
 	}
 	state := eb.pipelineScans[request]
+	if state != nil && state.closePending {
+		if closeErr := eb.closePipelineScanLocked(context.WithoutCancel(ctx), request); closeErr != nil {
+			return result, closeErr
+		}
+		state = nil
+	}
 	if state == nil {
 		cursor, openErr := eb.pipelineObligations.OpenScan(ctx, request)
 		if openErr != nil {
@@ -252,10 +259,14 @@ func (eb *EventBus) closePipelineScanLocked(ctx context.Context, request runtime
 	if state == nil {
 		return nil
 	}
-	delete(eb.pipelineScans, request)
+	state.closePending = true
 	err := eb.pipelineObligations.CloseScan(ctx, state.cursor)
 	if errors.Is(err, runtimepipelineobligation.ErrStaleScan) {
+		delete(eb.pipelineScans, request)
 		return nil
+	}
+	if err == nil {
+		delete(eb.pipelineScans, request)
 	}
 	return err
 }
