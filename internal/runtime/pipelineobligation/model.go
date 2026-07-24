@@ -347,8 +347,8 @@ func (r ScanRequest) QueryAt(phase int) (ClaimQuery, bool) {
 }
 
 // Scan is an opaque, process-local continuation capability issued by one
-// selected store. Its keyset position and outstanding claims remain private to
-// that store.
+// selected store. Its phase boundaries, keyset position, and outstanding
+// claims remain private to that store.
 type Scan struct {
 	token  string
 	issuer string

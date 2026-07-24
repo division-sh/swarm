@@ -31,6 +31,8 @@ type pipelineScanState struct {
 	request    runtimepipelineobligation.ScanRequest
 	phase      int
 	after      *pipelineCandidate
+	through    *pipelineCandidate
+	bound      bool
 	openClaims map[string]runtimepipelineobligation.Claim
 	closed     bool
 }
@@ -243,7 +245,8 @@ func (s *sqlitePipelineObligationStore) OpenScan(ctx context.Context, request ru
 }
 
 type pipelineBatchBackend struct {
-	candidates func(context.Context, runtimepipelineobligation.ClaimQuery, *pipelineCandidate, int) ([]pipelineCandidate, error)
+	boundary   func(context.Context, runtimepipelineobligation.ClaimQuery) (*pipelineCandidate, error)
+	candidates func(context.Context, runtimepipelineobligation.ClaimQuery, *pipelineCandidate, *pipelineCandidate, int) ([]pipelineCandidate, error)
 	claim      func(context.Context, string, runtimepipelineobligation.Purpose) (runtimepipelineobligation.Claim, error)
 	associate  func(runtimepipelineobligation.Scan, runtimepipelineobligation.Claim) error
 	load       func(context.Context, runtimepipelineobligation.Claim) (runtimepipelineobligation.ClaimedWork, error)
@@ -261,6 +264,7 @@ func (s *postgresPipelineObligationStore) ClaimBatch(ctx context.Context, scan r
 		return runtimepipelineobligation.ScanBatch{}, runtimepipelineobligation.ErrStaleScan
 	}
 	batch, err := claimPipelineBatch(ctx, state, limit, pipelineBatchBackend{
+		boundary:   s.postgresPipelineBoundary,
 		candidates: s.postgresPipelineCandidates,
 		claim:      s.claimPostgresPipelineEvent,
 		associate:  s.associatePostgresPipelineClaim,
@@ -285,6 +289,7 @@ func (s *sqlitePipelineObligationStore) ClaimBatch(ctx context.Context, scan run
 		return runtimepipelineobligation.ScanBatch{}, runtimepipelineobligation.ErrStaleScan
 	}
 	batch, err := claimPipelineBatch(ctx, state, limit, pipelineBatchBackend{
+		boundary:   s.sqlitePipelineBoundary,
 		candidates: s.sqlitePipelineCandidates,
 		claim:      s.claimSQLitePipelineEvent,
 		associate:  s.associateSQLitePipelineClaim,
@@ -333,15 +338,25 @@ func claimPipelineBatch(
 			batch.Exhausted = true
 			return batch, nil
 		}
+		if !state.bound {
+			state.through, err = backend.boundary(ctx, query)
+			if err != nil {
+				return batch, err
+			}
+			state.bound = true
+			if state.through == nil {
+				advancePipelineScanPhase(state)
+				continue
+			}
+		}
 		remaining := limit - batch.Examined
 		pageLimit := min(remaining, pipelineCandidatePageSize)
-		candidates, err := backend.candidates(ctx, query, state.after, pageLimit)
+		candidates, err := backend.candidates(ctx, query, state.after, state.through, pageLimit)
 		if err != nil {
 			return batch, err
 		}
 		if len(candidates) == 0 {
-			state.phase++
-			state.after = nil
+			advancePipelineScanPhase(state)
 			continue
 		}
 		for i := range candidates {
@@ -379,8 +394,7 @@ func claimPipelineBatch(
 			}
 			batch.Work = append(batch.Work, work)
 			if i == len(candidates)-1 && len(candidates) < pageLimit {
-				state.phase++
-				state.after = nil
+				advancePipelineScanPhase(state)
 				if _, more := state.request.QueryAt(state.phase); !more {
 					batch.Exhausted = true
 				}
@@ -391,11 +405,17 @@ func claimPipelineBatch(
 			return batch, nil
 		}
 		if len(candidates) < pageLimit {
-			state.phase++
-			state.after = nil
+			advancePipelineScanPhase(state)
 		}
 	}
 	return batch, nil
+}
+
+func advancePipelineScanPhase(state *pipelineScanState) {
+	state.phase++
+	state.after = nil
+	state.through = nil
+	state.bound = false
 }
 
 func (s *postgresPipelineObligationStore) CloseScan(ctx context.Context, scan runtimepipelineobligation.Scan) error {
@@ -1092,7 +1112,33 @@ func sqlitePipelineEligible(ctx context.Context, q pipelineQueryer, eventID stri
 	}
 }
 
-func (s *PostgresStore) postgresPipelineCandidates(ctx context.Context, query runtimepipelineobligation.ClaimQuery, after *pipelineCandidate, limit int) ([]pipelineCandidate, error) {
+func (s *PostgresStore) postgresPipelineBoundary(ctx context.Context, query runtimepipelineobligation.ClaimQuery) (*pipelineCandidate, error) {
+	candidates, err := s.postgresPipelineCandidatePage(ctx, query, nil, nil, 1, true)
+	return pipelineBoundaryCandidate(candidates, err)
+}
+
+func (s *PostgresStore) postgresPipelineCandidates(
+	ctx context.Context,
+	query runtimepipelineobligation.ClaimQuery,
+	after *pipelineCandidate,
+	through *pipelineCandidate,
+	limit int,
+) ([]pipelineCandidate, error) {
+	return s.postgresPipelineCandidatePage(ctx, query, after, through, limit, false)
+}
+
+func (s *PostgresStore) postgresPipelineCandidatePage(
+	ctx context.Context,
+	query runtimepipelineobligation.ClaimQuery,
+	after *pipelineCandidate,
+	through *pipelineCandidate,
+	limit int,
+	descending bool,
+) ([]pipelineCandidate, error) {
+	order := "ASC"
+	if descending {
+		order = "DESC"
+	}
 	if query.Purpose == runtimepipelineobligation.PurposeDecisionRoute {
 		whereAfter := ""
 		args := []any{}
@@ -1108,6 +1154,14 @@ func (s *PostgresStore) postgresPipelineCandidates(ctx context.Context, query ru
 				len(args)+1, len(args)+2, len(args)+3, len(args)+4)
 			args = append(args, after.attemptCount, after.nextAttemptAt, after.createdAt, after.eventID)
 		}
+		whereThrough := ""
+		if through != nil {
+			whereThrough = fmt.Sprintf(`
+				AND (route.attempt_count, route.next_attempt_at, route.created_at, route.event_id) <=
+				    ($%d, $%d, $%d, $%d::uuid)`,
+				len(args)+1, len(args)+2, len(args)+3, len(args)+4)
+			args = append(args, through.attemptCount, through.nextAttemptAt, through.createdAt, through.eventID)
+		}
 		args = append(args, limit)
 		rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
 				SELECT route.event_id::text
@@ -1121,8 +1175,9 @@ func (s *PostgresStore) postgresPipelineCandidates(ctx context.Context, query ru
 				  AND run.status IN ('running', 'paused')
 				  %s
 				  %s
-				ORDER BY route.attempt_count, route.next_attempt_at, route.created_at, route.event_id
-				LIMIT $%d`, whereRun, whereAfter, len(args)), args...)
+				  %s
+				ORDER BY route.attempt_count %s, route.next_attempt_at %s, route.created_at %s, route.event_id %s
+				LIMIT $%d`, whereRun, whereAfter, whereThrough, order, order, order, order, len(args)), args...)
 		if err != nil {
 			return nil, err
 		}
@@ -1139,6 +1194,11 @@ func (s *PostgresStore) postgresPipelineCandidates(ctx context.Context, query ru
 		whereAfter = fmt.Sprintf("AND (e.created_at, e.event_id) > ($%d, $%d::uuid)", len(args)+1, len(args)+2)
 		args = append(args, after.createdAt, after.eventID)
 	}
+	whereThrough := ""
+	if through != nil {
+		whereThrough = fmt.Sprintf("AND (e.created_at, e.event_id) <= ($%d, $%d::uuid)", len(args)+1, len(args)+2)
+		args = append(args, through.createdAt, through.eventID)
+	}
 	args = append(args, limit)
 	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
 			SELECT e.event_id::text, 0, e.created_at, e.created_at
@@ -1152,20 +1212,47 @@ func (s *PostgresStore) postgresPipelineCandidates(ctx context.Context, query ru
 			  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
 			  %s
 			  %s
+			  %s
 			  AND NOT EXISTS (
 				SELECT 1 FROM decision_card_route_obligations route
 				WHERE route.event_id = e.event_id AND route.status <> 'completed'
 			  )
 			  AND %s
-			ORDER BY e.created_at, e.event_id
-			LIMIT $%d`, whereRun, whereAfter, postgresDiagnosticDirectReplayExclusionSQL("e", 1), len(args)), args...)
+			ORDER BY e.created_at %s, e.event_id %s
+			LIMIT $%d`, whereRun, whereAfter, whereThrough, postgresDiagnosticDirectReplayExclusionSQL("e", 1), order, order, len(args)), args...)
 	if err != nil {
 		return nil, err
 	}
 	return scanPipelineCandidates(rows, false, "postgres pipeline candidates")
 }
 
-func (s *SQLiteRuntimeStore) sqlitePipelineCandidates(ctx context.Context, query runtimepipelineobligation.ClaimQuery, after *pipelineCandidate, limit int) ([]pipelineCandidate, error) {
+func (s *SQLiteRuntimeStore) sqlitePipelineBoundary(ctx context.Context, query runtimepipelineobligation.ClaimQuery) (*pipelineCandidate, error) {
+	candidates, err := s.sqlitePipelineCandidatePage(ctx, query, nil, nil, 1, true)
+	return pipelineBoundaryCandidate(candidates, err)
+}
+
+func (s *SQLiteRuntimeStore) sqlitePipelineCandidates(
+	ctx context.Context,
+	query runtimepipelineobligation.ClaimQuery,
+	after *pipelineCandidate,
+	through *pipelineCandidate,
+	limit int,
+) ([]pipelineCandidate, error) {
+	return s.sqlitePipelineCandidatePage(ctx, query, after, through, limit, false)
+}
+
+func (s *SQLiteRuntimeStore) sqlitePipelineCandidatePage(
+	ctx context.Context,
+	query runtimepipelineobligation.ClaimQuery,
+	after *pipelineCandidate,
+	through *pipelineCandidate,
+	limit int,
+	descending bool,
+) ([]pipelineCandidate, error) {
+	order := "ASC"
+	if descending {
+		order = "DESC"
+	}
 	if query.Purpose == runtimepipelineobligation.PurposeDecisionRoute {
 		whereAfter := ""
 		args := []any{time.Now().UTC()}
@@ -1180,6 +1267,13 @@ func (s *SQLiteRuntimeStore) sqlitePipelineCandidates(ctx context.Context, query
 				    (?, ?, ?, ?)`
 			args = append(args, after.attemptCount, after.nextAttemptAt, after.createdAt, after.eventID)
 		}
+		whereThrough := ""
+		if through != nil {
+			whereThrough = `
+				AND (route.attempt_count, route.next_attempt_at, route.created_at, route.event_id) <=
+				    (?, ?, ?, ?)`
+			args = append(args, through.attemptCount, through.nextAttemptAt, through.createdAt, through.eventID)
+		}
 		args = append(args, limit)
 		rows, err := s.DB.QueryContext(ctx, `
 				SELECT route.event_id
@@ -1193,7 +1287,8 @@ func (s *SQLiteRuntimeStore) sqlitePipelineCandidates(ctx context.Context, query
 				  AND run.status IN ('running', 'paused')
 				  `+whereRun+`
 				  `+whereAfter+`
-				ORDER BY route.attempt_count, route.next_attempt_at, route.created_at, route.event_id
+				  `+whereThrough+`
+				ORDER BY route.attempt_count `+order+`, route.next_attempt_at `+order+`, route.created_at `+order+`, route.event_id `+order+`
 				LIMIT ?`, args...)
 		if err != nil {
 			return nil, err
@@ -1211,6 +1306,11 @@ func (s *SQLiteRuntimeStore) sqlitePipelineCandidates(ctx context.Context, query
 		whereAfter = "AND (e.created_at, e.event_id) > (?, ?)"
 		args = append(args, after.createdAt, after.eventID)
 	}
+	whereThrough := ""
+	if through != nil {
+		whereThrough = "AND (e.created_at, e.event_id) <= (?, ?)"
+		args = append(args, through.createdAt, through.eventID)
+	}
 	args = append(args, diagnosticDirectReplayEventArgs()...)
 	args = append(args, limit)
 	rows, err := s.DB.QueryContext(ctx, `
@@ -1225,17 +1325,29 @@ func (s *SQLiteRuntimeStore) sqlitePipelineCandidates(ctx context.Context, query
 			  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
 			  `+whereRun+`
 			  `+whereAfter+`
+			  `+whereThrough+`
 			  AND NOT EXISTS (
 				SELECT 1 FROM decision_card_route_obligations route
 				WHERE route.event_id = e.event_id AND route.status <> 'completed'
 		  )
 		  AND `+sqliteDiagnosticDirectReplayExclusionSQL("e")+`
-		ORDER BY e.created_at, e.event_id
+		ORDER BY e.created_at `+order+`, e.event_id `+order+`
 		LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
 	return scanPipelineCandidates(rows, false, "sqlite pipeline candidates")
+}
+
+func pipelineBoundaryCandidate(candidates []pipelineCandidate, err error) (*pipelineCandidate, error) {
+	if err != nil {
+		return nil, err
+	}
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	boundary := candidates[0]
+	return &boundary, nil
 }
 
 func scanPipelineCandidates(rows *sql.Rows, decisionRoute bool, operation string) (out []pipelineCandidate, err error) {
