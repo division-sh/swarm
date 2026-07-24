@@ -30761,8 +30761,10 @@ durable_pipeline_processing_obligation_authority:
       reset a phase, assemble query families, or durably persist a cursor. Every batch limit bounds candidate rows examined,
       including busy and newly ineligible rows, rather than settlements or returned work. Position advances before a claim
       may be retained or released. On first entry to each fixed phase, the selected store captures that phase's exact
-      store-generated insertion-sequence high-water mark; the cursor never examines beyond it. Work persisted after
-      that boundary belongs to the next fresh scan, so sustained ingress cannot indefinitely extend ordinary recovery or
+      store-generated insertion-sequence high-water mark; PostgreSQL also captures an exact visibility snapshot for that
+      phase, while SQLite write serialization makes its non-reusable sequence ceiling the visibility boundary. The cursor
+      never examines a row outside that captured membership. Work committed or persisted after that boundary belongs to
+      the next fresh scan, so sustained ingress cannot indefinitely extend ordinary recovery or
       prevent a later scan from re-entering decision routing. A full batch therefore continues monotonically on the next call. Startup,
       ingress-resume, and run-continue consumers drain bounded batches until explicit exhaustion or blockage. The periodic
       consumer performs one bounded batch per tick and retains the same cursor for the next tick until explicit exhaustion.
@@ -30891,7 +30893,7 @@ durable_pipeline_processing_obligation_authority:
     PPO-SET-001: Acknowledgement and decision-route disposition require the current claim and commit atomically.
     PPO-REL-001: Cancellation, cursor abandonment, non-durable retry release, failed settlement, explicit release, and restart preserve reclaimability without stranded ownership or blocking later sweep candidates; PostgreSQL owner and capacity retirement require a true exact-session unlock, and failed teardown remains retryable; startup, ingress resume, and run continue stop normally only on explicit exhaustion or blockage.
     PPO-SCP-001: Committed scope is exact persisted truth; missing or invalid scope returns typed claim-bound quarantine work to the consumer, and no store-side settlement, delivery marker, current-route inference, fallback, or repair exists.
-    PPO-CUR-001: Cursor continuation is monotonic across fixed global/run phases, captures one selected-store-generated immutable insertion-sequence high-water boundary per phase, advances before release, remembers local blockage until bounded-pass exhaustion, reaches every consumer as one typed SweepResult, survives periodic tick boundaries, and cannot be reset, extended, or positioned by a caller.
+    PPO-CUR-001: Cursor continuation is monotonic across fixed global/run phases, captures one selected-store-generated immutable insertion-sequence high-water boundary per phase plus an exact PostgreSQL visibility snapshot, advances before release, remembers local blockage until bounded-pass exhaustion, reaches every consumer as one typed SweepResult, survives periodic tick boundaries, excludes transactions committed after phase entry regardless of sequence allocation order, and cannot be reset, extended, or positioned by a caller.
     PPO-DSP-001: Dispatch consumes the process-local owner and cannot outlive runtime retirement or selected-store release.
     PPO-DCR-001: Decision-route defer, quarantine, processed acknowledgement, convergence retry, completion, and inactive-parent supersession are age-independent and ordered.
     PPO-GLO-001: Global durable-work presence is one typed age-independent projection.

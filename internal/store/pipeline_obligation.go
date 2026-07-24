@@ -62,11 +62,12 @@ type sqlitePipelineObligationStore struct{ *SQLiteRuntimeStore }
 const pipelineCandidatePageSize = 32
 
 type pipelineCandidate struct {
-	eventID           string
-	insertionSequence int64
-	attemptCount      int
-	nextAttemptAt     time.Time
-	createdAt         time.Time
+	eventID            string
+	insertionSequence  int64
+	visibilitySnapshot string
+	attemptCount       int
+	nextAttemptAt      time.Time
+	createdAt          time.Time
 }
 
 func (s *PostgresStore) PipelineObligations() runtimepipelineobligation.Store {
@@ -1114,8 +1115,20 @@ func sqlitePipelineEligible(ctx context.Context, q pipelineQueryer, eventID stri
 }
 
 func (s *PostgresStore) postgresPipelineBoundary(ctx context.Context, query runtimepipelineobligation.ClaimQuery) (*pipelineCandidate, error) {
-	candidates, err := s.postgresPipelineCandidatePage(ctx, query, nil, nil, 1, true)
-	return pipelineBoundaryCandidate(candidates, err)
+	var visibilitySnapshot string
+	if err := s.DB.QueryRowContext(ctx, `SELECT pg_current_snapshot()::text`).Scan(&visibilitySnapshot); err != nil {
+		return nil, fmt.Errorf("capture postgres pipeline visibility snapshot: %w", err)
+	}
+	visibilitySnapshot = strings.TrimSpace(visibilitySnapshot)
+	if visibilitySnapshot == "" {
+		return nil, errors.New("postgres pipeline visibility snapshot is empty")
+	}
+	candidates, err := s.postgresPipelineCandidatePage(ctx, query, nil, nil, visibilitySnapshot, 1, true)
+	boundary, err := pipelineBoundaryCandidate(candidates, err)
+	if boundary != nil {
+		boundary.visibilitySnapshot = visibilitySnapshot
+	}
+	return boundary, err
 }
 
 func (s *PostgresStore) postgresPipelineCandidates(
@@ -1125,7 +1138,10 @@ func (s *PostgresStore) postgresPipelineCandidates(
 	through *pipelineCandidate,
 	limit int,
 ) ([]pipelineCandidate, error) {
-	return s.postgresPipelineCandidatePage(ctx, query, after, through, limit, false)
+	if through == nil || strings.TrimSpace(through.visibilitySnapshot) == "" {
+		return nil, errors.New("postgres pipeline visibility snapshot is missing")
+	}
+	return s.postgresPipelineCandidatePage(ctx, query, after, through, through.visibilitySnapshot, limit, false)
 }
 
 func (s *PostgresStore) postgresPipelineCandidatePage(
@@ -1133,6 +1149,7 @@ func (s *PostgresStore) postgresPipelineCandidatePage(
 	query runtimepipelineobligation.ClaimQuery,
 	after *pipelineCandidate,
 	through *pipelineCandidate,
+	visibilitySnapshot string,
 	limit int,
 	boundary bool,
 ) ([]pipelineCandidate, error) {
@@ -1151,6 +1168,11 @@ func (s *PostgresStore) postgresPipelineCandidatePage(
 				len(args)+1, len(args)+2, len(args)+3, len(args)+4)
 			args = append(args, after.attemptCount, after.nextAttemptAt, after.createdAt, after.eventID)
 		}
+		whereVisibility := fmt.Sprintf(
+			"AND pg_visible_in_snapshot(route.xmin::text::xid8, $%d::pg_snapshot)",
+			len(args)+1,
+		)
+		args = append(args, visibilitySnapshot)
 		whereThrough := ""
 		if through != nil {
 			whereThrough = fmt.Sprintf("AND route.insertion_sequence <= $%d", len(args)+1)
@@ -1175,8 +1197,9 @@ func (s *PostgresStore) postgresPipelineCandidatePage(
 				  %s
 				  %s
 				  %s
+				  %s
 				ORDER BY %s
-				LIMIT $%d`, whereRun, whereAfter, whereThrough, orderBy, len(args)), args...)
+				LIMIT $%d`, whereRun, whereAfter, whereVisibility, whereThrough, orderBy, len(args)), args...)
 		if err != nil {
 			return nil, err
 		}
@@ -1193,6 +1216,11 @@ func (s *PostgresStore) postgresPipelineCandidatePage(
 		whereAfter = fmt.Sprintf("AND (e.created_at, e.event_id) > ($%d, $%d::uuid)", len(args)+1, len(args)+2)
 		args = append(args, after.createdAt, after.eventID)
 	}
+	whereVisibility := fmt.Sprintf(
+		"AND pg_visible_in_snapshot(e.xmin::text::xid8, $%d::pg_snapshot)",
+		len(args)+1,
+	)
+	args = append(args, visibilitySnapshot)
 	whereThrough := ""
 	if through != nil {
 		whereThrough = fmt.Sprintf("AND e.insertion_sequence <= $%d", len(args)+1)
@@ -1216,13 +1244,14 @@ func (s *PostgresStore) postgresPipelineCandidatePage(
 			  %s
 			  %s
 			  %s
+			  %s
 			  AND NOT EXISTS (
 				SELECT 1 FROM decision_card_route_obligations route
 				WHERE route.event_id = e.event_id AND route.status <> 'completed'
-			  )
+			)
 			  AND %s
 			ORDER BY %s
-			LIMIT $%d`, whereRun, whereAfter, whereThrough, postgresDiagnosticDirectReplayExclusionSQL("e", 1), orderBy, len(args)), args...)
+			LIMIT $%d`, whereRun, whereAfter, whereVisibility, whereThrough, postgresDiagnosticDirectReplayExclusionSQL("e", 1), orderBy, len(args)), args...)
 	if err != nil {
 		return nil, err
 	}
