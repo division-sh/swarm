@@ -2,6 +2,7 @@ package bus_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -103,5 +104,106 @@ func TestPeriodicSweeperRetainsCursorAcrossTicksUntilExplicitExhaustion(t *testi
 	}
 	if len(owner.claimScan) != 2 || owner.claimScan[0] != owner.claimScan[1] {
 		t.Fatalf("periodic claim scans = %#v, want the same cursor through explicit exhaustion", owner.claimScan)
+	}
+}
+
+type retryingScanCloseStore struct {
+	runtimepipelineobligation.Store
+
+	issuer                    *runtimepipelineobligation.ScanIssuer
+	firstScan                 runtimepipelineobligation.Scan
+	openCount                 int
+	firstCloseAttempts        int
+	firstCloseFailed          bool
+	firstCloseSucceeded       bool
+	claimedAfterCloseFailure  bool
+	openedBeforeCloseRecovery bool
+}
+
+func newRetryingScanCloseStore() *retryingScanCloseStore {
+	return &retryingScanCloseStore{
+		issuer: runtimepipelineobligation.NewScanIssuer(),
+	}
+}
+
+func (s *retryingScanCloseStore) OpenScan(context.Context, runtimepipelineobligation.ScanRequest) (runtimepipelineobligation.Scan, error) {
+	if s.firstCloseFailed && !s.firstCloseSucceeded {
+		s.openedBeforeCloseRecovery = true
+	}
+	scan, err := s.issuer.Issue()
+	if err != nil {
+		return runtimepipelineobligation.Scan{}, err
+	}
+	s.openCount++
+	if s.openCount == 1 {
+		s.firstScan = scan
+	}
+	return scan, nil
+}
+
+func (s *retryingScanCloseStore) ClaimBatch(_ context.Context, scan runtimepipelineobligation.Scan, _ int) (runtimepipelineobligation.ScanBatch, error) {
+	if _, err := s.issuer.Token(scan); err != nil {
+		return runtimepipelineobligation.ScanBatch{}, err
+	}
+	if scan == s.firstScan && s.firstCloseFailed {
+		s.claimedAfterCloseFailure = true
+		return runtimepipelineobligation.ScanBatch{}, runtimepipelineobligation.ErrStaleScan
+	}
+	return runtimepipelineobligation.ScanBatch{Exhausted: true}, nil
+}
+
+func (s *retryingScanCloseStore) CloseScan(_ context.Context, scan runtimepipelineobligation.Scan) error {
+	if _, err := s.issuer.Token(scan); err != nil {
+		return err
+	}
+	if scan != s.firstScan {
+		return nil
+	}
+	s.firstCloseAttempts++
+	if s.firstCloseAttempts == 1 {
+		s.firstCloseFailed = true
+		return errRetryPipelineScanClose
+	}
+	s.firstCloseSucceeded = true
+	return nil
+}
+
+var errRetryPipelineScanClose = errors.New("retry pipeline scan close")
+
+func TestSweepRetriesFailedScanCloseBeforeClaimingOrOpeningReplacement(t *testing.T) {
+	owner := newRetryingScanCloseStore()
+	bus, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
+		PipelineObligations: owner,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+
+	first, err := bus.SweepPipelineObligations(context.Background(), 1)
+	if !errors.Is(err, errRetryPipelineScanClose) {
+		t.Fatalf("first sweep error = %v, want retryable close failure", err)
+	}
+	if !first.Exhausted {
+		t.Fatalf("first sweep result = %#v, want exhausted result before close failure", first)
+	}
+
+	second, err := bus.SweepPipelineObligations(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("second sweep: %v", err)
+	}
+	if !second.Exhausted {
+		t.Fatalf("second sweep result = %#v, want replacement scan exhaustion", second)
+	}
+	if owner.firstCloseAttempts != 2 {
+		t.Fatalf("first cursor close attempts = %d, want retry through retained cursor", owner.firstCloseAttempts)
+	}
+	if owner.claimedAfterCloseFailure {
+		t.Fatal("failed-close cursor was claimed again before teardown")
+	}
+	if owner.openedBeforeCloseRecovery {
+		t.Fatal("replacement cursor opened before failed close recovered")
+	}
+	if owner.openCount != 2 {
+		t.Fatalf("scan opens = %d, want replacement only after close recovery", owner.openCount)
 	}
 }
