@@ -247,16 +247,10 @@ func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublis
 	if err != nil {
 		return PreparedPublish{}, err
 	}
-	claim, err := eb.claimPipelinePublication(preparedCtx, admitted.ID())
-	if err != nil {
-		return PreparedPublish{}, err
-	}
 	plan.event = admitted.Event()
 	plan.admitted = admitted
-	plan.publicationClaim = claim
 	prepared, err := owner.CommitPublish(preparedCtx, plan)
 	if err != nil {
-		claim.Release(preparedCtx)
 		return PreparedPublish{}, err
 	}
 	return prepared, nil
@@ -271,22 +265,40 @@ func (p eventBusCommitPublishPlan) PrepareCommitPublish(ctx context.Context) (Pr
 	if p.admitted.ID() == "" || p.admitted.ID() != p.event.ID() {
 		return PreparedPublish{}, errors.New("event publish plan requires pre-admitted event identity")
 	}
+	if transaction, ok := CommitPublishTransactionFromContext(ctx); !ok || transaction == nil {
+		return PreparedPublish{}, errors.New("typed CommitPublish transaction context is required")
+	}
+	if p.direct && len(p.directRoutes) == 0 && len(uniqueStrings(p.directRecipients)) == 0 {
+		return PreparedPublish{}, errors.New("direct event publication requires at least one recipient")
+	}
+	claim := p.publicationClaim
+	if claim == nil {
+		var err error
+		claim, err = p.bus.claimPipelinePublication(ctx, p.admitted.ID())
+		if err != nil {
+			return PreparedPublish{}, err
+		}
+	}
+	prepare := func(scope runtimepipelineobligation.CommittedScope, planRoutes func(context.Context, events.Event) (RoutePlan, error)) (PreparedPublish, error) {
+		prepared, err := p.bus.prepareAdmittedPublishInMutation(ctx, p.admitted, claim, scope, planRoutes)
+		if err != nil {
+			claim.Release(ctx)
+		}
+		return prepared, err
+	}
 	if !p.direct {
-		return p.bus.prepareAdmittedPublishInMutation(ctx, p.admitted, p.publicationClaim, runtimepipelineobligation.ScopeSubscribed, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
+		return prepare(runtimepipelineobligation.ScopeSubscribed, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
 			return p.bus.planSubscribedRoutePlan(ctx, evt, true)
 		})
 	}
 	if len(p.directRoutes) > 0 {
 		routes := events.NormalizeDeliveryRoutes(p.directRoutes)
-		return p.bus.prepareAdmittedPublishInMutation(ctx, p.admitted, p.publicationClaim, runtimepipelineobligation.ScopeDirect, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
+		return prepare(runtimepipelineobligation.ScopeDirect, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
 			return p.bus.planExactDirectRoutePlan(ctx, evt, routes)
 		})
 	}
 	requested := uniqueStrings(p.directRecipients)
-	if len(requested) == 0 {
-		return PreparedPublish{}, errors.New("direct event publication requires at least one recipient")
-	}
-	return p.bus.prepareAdmittedPublishInMutation(ctx, p.admitted, p.publicationClaim, runtimepipelineobligation.ScopeDirect, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
+	return prepare(runtimepipelineobligation.ScopeDirect, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
 		plan, err := p.bus.planDirectRoutePlan(ctx, evt, requested)
 		if err != nil {
 			return RoutePlan{}, err

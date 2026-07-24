@@ -30771,11 +30771,22 @@ durable_pipeline_processing_obligation_authority:
       current cursor through the selected-store owner before the consumer returns. No consumer infers exhaustion from
       settled count, retry-only batches, corrupt work, an under-filled settlement count, or a run-local blocked prefix.
     current_claim: >
-      One event has at most one process-local current claim in the exclusively owned selected-store runtime. PostgreSQL
-      advisory locks and SQLite mutation serialization fence each database mutation edge; opaque capability identity
-      rejects foreign, stale, released, duplicate, and wrong-purpose mutation. Settlement does not accept a caller-selected
-      event ID, so redirecting a capability to another obligation is structurally unrepresentable. PostgreSQL claim
-      registration and parent terminalization share one registry/advisory-lock order: a parent either observes the
+      One event has at most one current claim across every process sharing the selected PostgreSQL store and one
+      process-local current claim in the exclusively owned SQLite runtime. PostgreSQL retains one private session advisory
+      lock lease in the opaque claim state from registration until exact settlement, release, cursor abandonment, or
+      cancellation consumes the claim; the connection and lock never escape the private adapter. Each retained lease adds
+      one private claim-capacity slot after successful acquisition, preserving the configured persistence-pool capacity for
+      claimed-work readback and execution; consuming the claim removes that exact slot. Connection acquisition is
+      cancellable and occurs before the process registry lock and before capacity is added. A publication started outside an
+      existing mutation acquires its claim inside the selected-store event transaction, while a selected-fork named commit
+      reuses its already-retained claim connection. Every operation on one PostgreSQL claim is serialized by its opaque
+      selected-store claim state, including selected-fork commit, settlement, release, and cursor abandonment, so the retained
+      session cannot run overlapping transactions or unlock while an accepted operation is active. Current claims therefore
+      cannot exhaust the persistence pool before or after their transaction begins. SQLite
+      mutation serialization fences each database mutation edge. Opaque capability identity rejects foreign, stale,
+      released, duplicate, and wrong-purpose mutation. Settlement does not accept a caller-selected event ID, so redirecting
+      a capability to another obligation is structurally unrepresentable. PostgreSQL claim registration and parent
+      terminalization share one registry/advisory-lock order after connection reservation: a parent either observes the
       registered claim and fails busy or acquires the transaction fence before a later claim can register. There is no
       scan-to-lock interval in which both can proceed.
     release: >
@@ -30852,7 +30863,7 @@ durable_pipeline_processing_obligation_authority:
     PPO-OWN-001: One mandatory selected-store owner; no optional, nil, no-op, alias, legacy, reader, writer, settler, or fake-store assembler survives on durable runtime, EventBus, coordinator, or recovery paths.
     PPO-DIS-001: One closed typed disposition vocabulary owns every foreground, recovery, directive, decision-route, and initial outcome.
     PPO-SEL-001: Eligibility and canonical hydration are exact, age-independent, and exhaustive through one opaque selected-store cursor whose batch limit bounds examined candidates; diagnostic and non-running/non-paused exclusions are explicit.
-    PPO-CLM-001: Exclusion precedes final eligibility recheck and only one current claim exists per event.
+    PPO-CLM-001: Exclusion precedes final eligibility recheck and only one current claim exists per event across every process sharing a selected PostgreSQL store or within the selected SQLite runtime; PostgreSQL retains the exact advisory-lock lease until the claim is consumed.
     PPO-PUB-001: Foreground publication, executable event commit, and every recovery surface share the exact current event-identity exclusion; only closed diagnostic-direct named commits are claim-free.
     PPO-SET-001: Acknowledgement and decision-route disposition require the current claim and commit atomically.
     PPO-REL-001: Cancellation, cursor abandonment, non-durable retry release, failed settlement, explicit release, and restart preserve reclaimability without stranded ownership or blocking later sweep candidates; startup, ingress resume, and run continue stop normally only on explicit exhaustion or blockage.

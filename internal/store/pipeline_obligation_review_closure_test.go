@@ -15,6 +15,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -465,6 +466,120 @@ func TestPostgresParentTerminalizationLinearizesClaimRegistration(t *testing.T) 
 	_, outcome, reason := readExactPipelineReceipt(t, ctx, fixture, eventID)
 	if outcome != "dead_letter" || reason != "run_stopped" {
 		t.Fatalf("parent terminal receipt outcome=%q reason=%q", outcome, reason)
+	}
+}
+
+func TestPostgresPipelineClaimLeaseExcludesIndependentStoreUntilRelease(t *testing.T) {
+	dsn, db, _ := testutil.StartPostgres(t)
+	primary := newTestPostgresStore(t, db)
+	fixture := authorActivityReceiptFixture{
+		store:   primary,
+		db:      db,
+		dialect: runtimeauthoractivity.DialectPostgres,
+	}
+	ctx := testAuthorActivityContext()
+	runID := uuid.NewString()
+	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	eventID := commitPipelineParityEvent(t, ctx, primary, runID, time.Now().UTC().Add(-time.Minute))
+	db.SetMaxOpenConns(2)
+	db.SetMaxIdleConns(2)
+
+	secondaryDB, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatalf("open independent PostgreSQL pool: %v", err)
+	}
+	t.Cleanup(func() { _ = secondaryDB.Close() })
+	if err := secondaryDB.PingContext(ctx); err != nil {
+		t.Fatalf("ping independent PostgreSQL pool: %v", err)
+	}
+	secondary := &PostgresStore{DB: secondaryDB}
+	secondary.schemaAdmission.markCurrent()
+
+	primaryWork, err := primary.PipelineObligations().ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
+	if err != nil {
+		t.Fatalf("primary claim: %v", err)
+	}
+	if got := db.Stats().MaxOpenConnections; got != 3 {
+		t.Fatalf("primary pool capacity while claim lease is current = %d, want 3", got)
+	}
+	if _, err := secondary.PipelineObligations().ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery); !errors.Is(err, runtimepipelineobligation.ErrBusy) {
+		t.Fatalf("independent store claim while primary lease is current = %v, want ErrBusy", err)
+	}
+	if err := primary.PipelineObligations().Release(ctx, primaryWork.Claim); err != nil {
+		t.Fatalf("release primary claim: %v", err)
+	}
+	if got := db.Stats().MaxOpenConnections; got != 2 {
+		t.Fatalf("primary pool capacity after claim release = %d, want 2", got)
+	}
+	secondaryWork, err := secondary.PipelineObligations().ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
+	if err != nil {
+		t.Fatalf("independent store claim after release: %v", err)
+	}
+	if err := secondary.PipelineObligations().Release(ctx, secondaryWork.Claim); err != nil {
+		t.Fatalf("release independent claim: %v", err)
+	}
+}
+
+func TestPostgresPipelineClaimConnectionWaitIsCancellableOutsideRegistryLock(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	selected := newTestPostgresStore(t, db)
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	ctx := testAuthorActivityContext()
+	held, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatalf("hold only PostgreSQL connection: %v", err)
+	}
+	t.Cleanup(func() { _ = held.Close() })
+
+	registry := selected.postgresPipelineClaims()
+	baselineWait := db.Stats().WaitCount
+	claimCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	claimErr := make(chan error, 1)
+	go func() {
+		_, err := selected.PipelineObligations().ClaimPublication(claimCtx, uuid.NewString())
+		claimErr <- err
+	}()
+
+	waitDeadline := time.NewTimer(5 * time.Second)
+	defer waitDeadline.Stop()
+	waitTick := time.NewTicker(time.Millisecond)
+	defer waitTick.Stop()
+	for db.Stats().WaitCount == baselineWait {
+		select {
+		case <-waitDeadline.C:
+			t.Fatal("claim did not wait for the exhausted PostgreSQL pool")
+		case <-waitTick.C:
+		}
+	}
+
+	registryAvailable := make(chan struct{})
+	go func() {
+		registry.mu.Lock()
+		registry.mu.Unlock()
+		close(registryAvailable)
+	}()
+	select {
+	case <-registryAvailable:
+	case <-time.After(time.Second):
+		t.Fatal("claim held the process registry while waiting for a PostgreSQL connection")
+	}
+
+	cancel()
+	select {
+	case err := <-claimErr:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled claim error = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled claim did not return")
+	}
+	registry.mu.Lock()
+	claimCount := len(registry.claims)
+	registry.mu.Unlock()
+	if claimCount != 0 {
+		t.Fatalf("cancelled pre-claim connection wait registered %d claims, want 0", claimCount)
 	}
 }
 

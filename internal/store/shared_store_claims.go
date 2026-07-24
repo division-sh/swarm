@@ -20,10 +20,11 @@ type advisoryLockLease interface {
 }
 
 type sqlAdvisoryLockLease struct {
-	conn        *sql.Conn
-	lockKey     string
-	lifetime    *sharedSQLConnLifetime
-	releaseConn func() error
+	conn            *sql.Conn
+	lockKey         string
+	lifetime        *sharedSQLConnLifetime
+	releaseConn     func() error
+	releaseCapacity func()
 }
 
 type sharedSQLConnLifetimeContextKey struct{}
@@ -103,13 +104,25 @@ func (l *sqlAdvisoryLockLease) BindContext(ctx context.Context) context.Context 
 }
 
 func (l *sqlAdvisoryLockLease) Release(ctx context.Context) error {
-	if l == nil || l.conn == nil {
+	if l == nil {
+		return nil
+	}
+	releaseCapacity := l.releaseCapacity
+	l.releaseCapacity = nil
+	if releaseCapacity != nil {
+		defer releaseCapacity()
+	}
+	if l.conn == nil {
 		return nil
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	_, unlockErr := l.conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, l.lockKey)
+	exec := l.conn.ExecContext
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		exec = tx.ExecContext
+	}
+	_, unlockErr := exec(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, l.lockKey)
 	releaseErr := error(nil)
 	if l.releaseConn != nil {
 		releaseErr = l.releaseConn()

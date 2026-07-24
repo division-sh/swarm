@@ -2104,18 +2104,9 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 	}
 }
 
-type publicationClaimBarrierStore struct {
-	*store.PostgresStore
-	obligations runtimepipelineobligation.Store
-}
-
 type replayClaimBarrierStore struct {
 	*store.PostgresStore
 	obligations runtimepipelineobligation.Store
-}
-
-func (s *publicationClaimBarrierStore) PipelineObligations() runtimepipelineobligation.Store {
-	return s.obligations
 }
 
 func (s *replayClaimBarrierStore) PipelineObligations() runtimepipelineobligation.Store {
@@ -2148,11 +2139,6 @@ func (s *blockingPipelineObligationStore) awaitClaim(ctx context.Context, claim 
 	}
 }
 
-func (s *blockingPipelineObligationStore) ClaimPublication(ctx context.Context, eventID string) (runtimepipelineobligation.Claim, error) {
-	claim, err := s.Store.ClaimPublication(ctx, eventID)
-	return s.awaitClaim(ctx, claim, err)
-}
-
 func (s *blockingPipelineObligationStore) ClaimBatch(ctx context.Context, scan runtimepipelineobligation.Scan, limit int) (runtimepipelineobligation.ScanBatch, error) {
 	batch, err := s.Store.ClaimBatch(ctx, scan, 1)
 	if err != nil {
@@ -2178,15 +2164,7 @@ func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing
 			db.SetMaxOpenConns(poolSize)
 			db.SetMaxIdleConns(poolSize)
 
-			claimed := make(chan struct{}, poolSize)
-			release := make(chan struct{})
-			selected := &publicationClaimBarrierStore{
-				PostgresStore: pg,
-				obligations: &blockingPipelineObligationStore{
-					Store: pg.PipelineObligations(), claimed: claimed, release: release,
-				},
-			}
-			bus, err := newScopedTestEventBus(selected)
+			bus, err := newScopedTestEventBus(pg)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2220,10 +2198,6 @@ func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing
 				}()
 			}
 			close(start)
-			for i := 0; i < poolSize; i++ {
-				requireSignalBefore(t, claimed, 5*time.Second, "aligned PostgreSQL publication claim")
-			}
-			close(release)
 			for i := 0; i < poolSize; i++ {
 				if err := requireErrorBefore(t, errs, 10*time.Second, "pool-saturated publication"); err != nil {
 					t.Fatal(err)
