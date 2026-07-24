@@ -926,8 +926,8 @@ func (s conformanceRecoveryFailureObligations) GlobalWorkPresence(context.Contex
 	return runtimepipelineobligation.GlobalWorkPresence{ProcessingEligible: true}, nil
 }
 
-func (s conformanceRecoveryFailureObligations) ClaimNext(context.Context, runtimepipelineobligation.ClaimQuery) (runtimepipelineobligation.ClaimedWork, bool, error) {
-	return runtimepipelineobligation.ClaimedWork{}, false, s.err
+func (s conformanceRecoveryFailureObligations) ClaimBatch(context.Context, runtimepipelineobligation.Scan, int) (runtimepipelineobligation.ScanBatch, error) {
+	return runtimepipelineobligation.ScanBatch{}, s.err
 }
 
 func acknowledgeConformancePipelineEvent(t testing.TB, ctx context.Context, owner runtimepipelineobligation.Store, eventID string) {

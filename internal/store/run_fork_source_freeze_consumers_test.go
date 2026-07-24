@@ -187,7 +187,7 @@ type forkedEventSelectorSurface interface {
 func assertForkedEventSelectors(t *testing.T, store forkedEventSelectorSurface, runID, eventID string) {
 	t.Helper()
 	ctx := testAuthorActivityBundleSourceContext()
-	work, ok, err := store.PipelineObligations().ClaimNext(ctx, runtimepipelineobligation.RunRecoveryQuery(runID))
+	work, ok, err := claimNextPipelineWorkForTest(t, ctx, store.PipelineObligations(), runtimepipelineobligation.RunRecoveryQuery(runID))
 	if err != nil || ok {
 		t.Fatalf("pipeline selector returned frozen event: work=%#v ok=%t err=%v", work, ok, err)
 	}

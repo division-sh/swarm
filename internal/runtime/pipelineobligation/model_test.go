@@ -100,6 +100,49 @@ func TestPipelineClaimQueryIsClosed(t *testing.T) {
 	}
 }
 
+func TestPipelineScanRequestOwnsFixedPhaseOrderAndOpaqueIdentity(t *testing.T) {
+	global := GlobalScanRequest()
+	if err := global.Validate(); err != nil {
+		t.Fatalf("global scan request: %v", err)
+	}
+	first, ok := global.QueryAt(0)
+	if !ok || first.Purpose != PurposeDecisionRoute {
+		t.Fatalf("global phase 0 = %#v, %v", first, ok)
+	}
+	second, ok := global.QueryAt(1)
+	if !ok || second.Purpose != PurposeRecovery || second.RunID != "" {
+		t.Fatalf("global phase 1 = %#v, %v", second, ok)
+	}
+	if _, ok := global.QueryAt(2); ok {
+		t.Fatal("global scan exposed an undeclared third phase")
+	}
+
+	runID := uuid.NewString()
+	run := RunScanRequest(runID)
+	if err := run.Validate(); err != nil {
+		t.Fatalf("run scan request: %v", err)
+	}
+	query, ok := run.QueryAt(0)
+	if !ok || query.Purpose != PurposeRecovery || query.RunID != runID {
+		t.Fatalf("run phase = %#v, %v", query, ok)
+	}
+	if err := RunScanRequest("not-a-uuid").Validate(); err == nil {
+		t.Fatal("run scan accepted invalid run identity")
+	}
+
+	issuer := NewScanIssuer()
+	scan, err := issuer.Issue()
+	if err != nil {
+		t.Fatalf("Issue scan: %v", err)
+	}
+	if _, err := issuer.Token(scan); err != nil {
+		t.Fatalf("verify scan: %v", err)
+	}
+	if _, err := NewScanIssuer().Token(scan); !errors.Is(err, ErrStaleScan) {
+		t.Fatalf("foreign scan error = %v, want ErrStaleScan", err)
+	}
+}
+
 func TestPreclassifiedWorkAcceptsOnlyClaimBoundTerminalNonSuccess(t *testing.T) {
 	eventID := uuid.NewString()
 	runID := uuid.NewString()

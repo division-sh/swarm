@@ -80,6 +80,8 @@ type EventBus struct {
 	providerOutputVerifier      ProviderOutputAuthorizationVerifier
 	outboxSweeperActive         bool
 	outboxSweeperDone           chan struct{}
+	pipelineSweepMu             sync.Mutex
+	pipelineScans               map[runtimepipelineobligation.ScanRequest]*pipelineSweepScan
 	workOwner                   worklifetime.Occurrence
 }
 

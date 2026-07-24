@@ -46,6 +46,8 @@ type SQLiteRuntimeStore struct {
 	startupOwner            string
 	pipelineClaimIssuer     *runtimepipelineobligation.ClaimIssuer
 	pipelineClaims          map[string]*pipelineClaimState
+	pipelineScanIssuer      *runtimepipelineobligation.ScanIssuer
+	pipelineScans           map[string]*pipelineScanState
 	sessionLockTTL          time.Duration
 	nowFn                   func() time.Time
 }
@@ -76,6 +78,8 @@ func NewSQLiteRuntimeStore(path string) (*SQLiteRuntimeStore, error) {
 		SQLiteSchemaStore:   schemaStore,
 		pipelineClaimIssuer: runtimepipelineobligation.NewClaimIssuer(),
 		pipelineClaims:      map[string]*pipelineClaimState{},
+		pipelineScanIssuer:  runtimepipelineobligation.NewScanIssuer(),
+		pipelineScans:       map[string]*pipelineScanState{},
 		sessionLockTTL:      120 * time.Second,
 		nowFn:               time.Now,
 	}, nil

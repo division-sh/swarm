@@ -68,7 +68,7 @@ func TestEventProducerIdentityPersistenceToReadbackParity(t *testing.T) {
 				t.Fatalf("PersistEventWithDeliveries: %v", err)
 			}
 
-			readbacks := eventProducerIdentityReadbacks(surface, fixture, ctx, eventID, runID, agentID, createdAt)
+			readbacks := eventProducerIdentityReadbacks(t, surface, fixture, ctx, eventID, runID, agentID, createdAt)
 			for _, readback := range readbacks {
 				t.Run(readback.name, func(t *testing.T) {
 					loaded, err := readback.load()
@@ -110,7 +110,7 @@ func TestEventProducerIdentityPersistenceToReadbackParity(t *testing.T) {
 			}
 
 			insertProducerIdentityDecisionObligation(t, fixture, ctx, eventID, runID, createdAt)
-			due, ok, err := surface.PipelineObligations().ClaimNext(ctx, runtimepipelineobligation.DecisionRouteQuery())
+			due, ok, err := claimNextPipelineWorkForTest(t, ctx, surface.PipelineObligations(), runtimepipelineobligation.DecisionRouteQuery())
 			if err != nil {
 				t.Fatalf("claim decision-route obligation: %v", err)
 			}
@@ -132,10 +132,10 @@ type eventProducerIdentityReadback struct {
 	load         func() (events.Event, error)
 }
 
-func eventProducerIdentityReadbacks(surface eventProducerIdentityLifecycleStore, fixture authorActivityReceiptFixture, ctx context.Context, eventID, runID, agentID string, createdAt time.Time) []eventProducerIdentityReadback {
+func eventProducerIdentityReadbacks(t testing.TB, surface eventProducerIdentityLifecycleStore, fixture authorActivityReceiptFixture, ctx context.Context, eventID, runID, agentID string, createdAt time.Time) []eventProducerIdentityReadback {
 	fromPipelineClaim := func(query runtimepipelineobligation.ClaimQuery) func() (events.Event, error) {
 		return func() (events.Event, error) {
-			work, ok, err := surface.PipelineObligations().ClaimNext(ctx, query)
+			work, ok, err := claimNextPipelineWorkForTest(t, ctx, surface.PipelineObligations(), query)
 			if err != nil {
 				return events.Event{}, err
 			}

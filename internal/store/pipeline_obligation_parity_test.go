@@ -96,9 +96,9 @@ func provePipelineAgeIndependentSelection(
 		t.Fatalf("oldest eligible event = %s, want %s", presence.OldestEligibleEvent, createdAt)
 	}
 
-	work, ok, err := owner.ClaimNext(ctx, runtimepipelineobligation.RunRecoveryQuery(runID))
+	work, ok, err := claimNextPipelineWorkForTest(t, ctx, owner, runtimepipelineobligation.RunRecoveryQuery(runID))
 	if err != nil || !ok {
-		t.Fatalf("ClaimNext old event: ok=%v err=%v", ok, err)
+		t.Fatalf("scan old event: ok=%v err=%v", ok, err)
 	}
 	if work.Event.ID() != eventID || work.Scope != runtimepipelineobligation.ScopeDirect || work.Acknowledged {
 		t.Fatalf("claimed work = %#v, want exact old direct unacknowledged event %s", work, eventID)
@@ -158,11 +158,11 @@ func provePipelineClaimLifecycle(
 	if err := owner.Settle(ctx, reclaimed.Claim, runtimepipelineobligation.Terminal("test_terminal", nil)); err != nil {
 		t.Fatalf("settle reclaimed event: %v", err)
 	}
-	if _, ok, err := owner.ClaimNext(ctx, runtimepipelineobligation.RunRecoveryQuery(runID)); err != nil || ok {
+	if _, ok, err := claimNextPipelineWorkForTest(t, ctx, owner, runtimepipelineobligation.RunRecoveryQuery(runID)); err != nil || ok {
 		t.Fatalf("terminal event reclaimed: ok=%v err=%v", ok, err)
 	}
-	if _, _, err := owner.ClaimNext(ctx, runtimepipelineobligation.ClaimQuery{Purpose: runtimepipelineobligation.PurposePublication}); err == nil {
-		t.Fatal("ClaimNext accepted publication query")
+	if _, _, err := claimNextPipelineWorkForTest(t, ctx, owner, runtimepipelineobligation.ClaimQuery{Purpose: runtimepipelineobligation.PurposePublication}); err == nil {
+		t.Fatal("scan accepted publication query")
 	}
 }
 
@@ -184,11 +184,20 @@ func provePipelineScopeFailure(
 	}
 
 	owner := selected.PipelineObligations()
-	if _, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery); !errors.Is(err, runtimepipelineobligation.ErrMissingScope) {
-		t.Fatalf("ClaimEvent missing scope error = %v, want ErrMissingScope", err)
+	work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
+	if err != nil {
+		t.Fatalf("ClaimEvent missing scope: %v", err)
 	}
-	if _, ok, err := owner.ClaimNext(ctx, runtimepipelineobligation.RunRecoveryQuery(runID)); err != nil || ok {
-		t.Fatalf("ClaimNext corrupt scope: ok=%v err=%v, want quarantined and skipped", ok, err)
+	disposition, preclassified := work.PreDispatchDisposition()
+	if !preclassified || disposition.Kind() != runtimepipelineobligation.DispositionQuarantined ||
+		disposition.ReasonCode() != "committed_pipeline_scope_missing" {
+		t.Fatalf("missing scope classification = %#v classified=%v", disposition, preclassified)
+	}
+	if err := owner.Settle(ctx, work.Claim, disposition); err != nil {
+		t.Fatalf("settle missing scope classification: %v", err)
+	}
+	if _, ok, err := claimNextPipelineWorkForTest(t, ctx, owner, runtimepipelineobligation.RunRecoveryQuery(runID)); err != nil || ok {
+		t.Fatalf("settled corrupt scope reclaimed: ok=%v err=%v", ok, err)
 	}
 	count, outcome, reason := readExactPipelineReceipt(t, ctx, fixture, eventID)
 	if count != 1 || outcome != "dead_letter" || reason != "committed_pipeline_scope_missing" {
@@ -230,7 +239,7 @@ func provePipelineMalformedRecoveryPreclassification(
 	}
 
 	owner := selected.PipelineObligations()
-	work, ok, err := owner.ClaimNext(ctx, runtimepipelineobligation.GlobalRecoveryQuery())
+	work, ok, err := claimNextPipelineWorkForTest(t, ctx, owner, runtimepipelineobligation.GlobalRecoveryQuery())
 	if err != nil || !ok || work.Event.ID() != eventID {
 		t.Fatalf("claim malformed recovery: work=%s ok=%v err=%v", work.Event.ID(), ok, err)
 	}
@@ -269,7 +278,7 @@ func provePipelineRunSummary(
 	settlePipelineParityEvent(t, ctx, owner, deadLetterID, runtimepipelineobligation.DeadLetter("dead_letter", nil))
 	deferredID := commitPipelineParityEvent(t, ctx, selected, runID, base.Add(4*time.Second))
 	insertProducerIdentityDecisionObligation(t, fixture, ctx, deferredID, runID, base.Add(4*time.Second))
-	deferred, ok, err := owner.ClaimNext(ctx, runtimepipelineobligation.DecisionRouteQuery())
+	deferred, ok, err := claimNextPipelineWorkForTest(t, ctx, owner, runtimepipelineobligation.DecisionRouteQuery())
 	if err != nil || !ok || deferred.Event.ID() != deferredID {
 		t.Fatalf("claim deferred decision route: work=%s ok=%v err=%v", deferred.Event.ID(), ok, err)
 	}
@@ -342,7 +351,7 @@ func provePipelineDecisionRouteDispositions(
 
 	processedID := commitPipelineParityEvent(t, ctx, selected, runID, at)
 	insertProducerIdentityDecisionObligation(t, fixture, ctx, processedID, runID, at)
-	processed, ok, err := owner.ClaimNext(ctx, runtimepipelineobligation.DecisionRouteQuery())
+	processed, ok, err := claimNextPipelineWorkForTest(t, ctx, owner, runtimepipelineobligation.DecisionRouteQuery())
 	if err != nil || !ok || processed.Event.ID() != processedID {
 		t.Fatalf("claim processed decision route: work=%s ok=%v err=%v", processed.Event.ID(), ok, err)
 	}
@@ -363,7 +372,7 @@ func provePipelineDecisionRouteDispositions(
 
 	quarantineID := commitPipelineParityEvent(t, ctx, selected, runID, at.Add(time.Second))
 	insertProducerIdentityDecisionObligation(t, fixture, ctx, quarantineID, runID, at.Add(time.Second))
-	quarantined, ok, err := owner.ClaimNext(ctx, runtimepipelineobligation.DecisionRouteQuery())
+	quarantined, ok, err := claimNextPipelineWorkForTest(t, ctx, owner, runtimepipelineobligation.DecisionRouteQuery())
 	if err != nil || !ok || quarantined.Event.ID() != quarantineID {
 		t.Fatalf("claim quarantine decision route: work=%s ok=%v err=%v", quarantined.Event.ID(), ok, err)
 	}
@@ -492,7 +501,7 @@ func TestPipelineObligationHasNoLegacyCapabilityAssemblers(t *testing.T) {
 		"ClaimPipelineReplay", "ClaimPipelinePublication", "ClaimPipelineSettlement",
 		"SupportsPersistedReplay", "PipelineReceiptOverride", "InitialPipelineReceipt",
 		"PipelineReceiptDeferred", "BindLeaseContext", "RequireStore",
-		"runtime/replayclaim", "NewEventBus(", "NewRecoveryManager()",
+		"runtime/replayclaim", "NewEventBus(", "NewRecoveryManager()", "ClaimNext",
 	}
 	allowedScopeFiles := map[string]bool{
 		"internal/store/pipeline_obligation.go":                           true,

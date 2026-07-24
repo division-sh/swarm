@@ -28,17 +28,21 @@ import (
 type startupRecoveryPipelineOwner struct {
 	mu       sync.Mutex
 	issuer   *runtimepipelineobligation.ClaimIssuer
+	scanner  *runtimepipelineobligation.ScanIssuer
 	work     []events.PersistedReplayEvent
 	claimErr error
 	claims   map[string]runtimepipelineobligation.Claim
+	scans    map[string]runtimepipelineobligation.ScanRequest
 }
 
 func newStartupRecoveryPipelineOwner(work []events.PersistedReplayEvent, claimErr error) *startupRecoveryPipelineOwner {
 	return &startupRecoveryPipelineOwner{
 		issuer:   runtimepipelineobligation.NewClaimIssuer(),
+		scanner:  runtimepipelineobligation.NewScanIssuer(),
 		work:     append([]events.PersistedReplayEvent(nil), work...),
 		claimErr: claimErr,
 		claims:   map[string]runtimepipelineobligation.Claim{},
+		scans:    map[string]runtimepipelineobligation.ScanRequest{},
 	}
 }
 
@@ -77,35 +81,87 @@ func (s *startupRecoveryPipelineOwner) ClaimEvent(_ context.Context, eventID str
 	return runtimepipelineobligation.ClaimedWork{}, runtimepipelineobligation.ErrIneligible
 }
 
-func (s *startupRecoveryPipelineOwner) ClaimNext(_ context.Context, query runtimepipelineobligation.ClaimQuery) (runtimepipelineobligation.ClaimedWork, bool, error) {
-	if err := query.Validate(); err != nil {
-		return runtimepipelineobligation.ClaimedWork{}, false, err
+func (s *startupRecoveryPipelineOwner) OpenScan(_ context.Context, request runtimepipelineobligation.ScanRequest) (runtimepipelineobligation.Scan, error) {
+	if err := request.Validate(); err != nil {
+		return runtimepipelineobligation.Scan{}, err
 	}
-	if s.claimErr != nil {
-		return runtimepipelineobligation.ClaimedWork{}, false, s.claimErr
+	scan, err := s.scanner.Issue()
+	if err != nil {
+		return runtimepipelineobligation.Scan{}, err
+	}
+	token, err := s.scanner.Token(scan)
+	if err != nil {
+		return runtimepipelineobligation.Scan{}, err
 	}
 	s.mu.Lock()
-	var event events.Event
-	for _, item := range s.work {
-		if query.RunID != "" && item.Event.RunID() != query.RunID {
+	s.scans[token] = request
+	s.mu.Unlock()
+	return scan, nil
+}
+
+func (s *startupRecoveryPipelineOwner) ClaimBatch(_ context.Context, scan runtimepipelineobligation.Scan, limit int) (runtimepipelineobligation.ScanBatch, error) {
+	if s.claimErr != nil {
+		return runtimepipelineobligation.ScanBatch{}, s.claimErr
+	}
+	token, err := s.scanner.Token(scan)
+	if err != nil {
+		return runtimepipelineobligation.ScanBatch{}, err
+	}
+	s.mu.Lock()
+	request, ok := s.scans[token]
+	s.mu.Unlock()
+	if !ok {
+		return runtimepipelineobligation.ScanBatch{}, runtimepipelineobligation.ErrStaleScan
+	}
+	batch := runtimepipelineobligation.ScanBatch{}
+	for phase := 0; batch.Examined < limit; phase++ {
+		query, ok := request.QueryAt(phase)
+		if !ok {
+			batch.Exhausted = true
+			return batch, nil
+		}
+		if query.Purpose == runtimepipelineobligation.PurposeDecisionRoute {
 			continue
 		}
-		if _, busy := s.claims[item.Event.ID()]; !busy {
-			event = item.Event
-			break
+		s.mu.Lock()
+		candidates := append([]events.PersistedReplayEvent(nil), s.work...)
+		s.mu.Unlock()
+		for _, item := range candidates {
+			if query.RunID != "" && item.Event.RunID() != query.RunID {
+				continue
+			}
+			batch.Examined++
+			claim, err := s.issue(item.Event.ID(), query.Purpose)
+			if errors.Is(err, runtimepipelineobligation.ErrBusy) {
+				batch.LocallyBlocked = true
+				continue
+			}
+			if err != nil {
+				return batch, err
+			}
+			batch.Work = append(batch.Work, runtimepipelineobligation.ClaimedWork{
+				Event: item.Event, Scope: runtimepipelineobligation.ScopeSubscribed, Claim: claim,
+			})
+			if batch.Examined == limit {
+				return batch, nil
+			}
 		}
 	}
-	s.mu.Unlock()
-	if event.ID() == "" {
-		return runtimepipelineobligation.ClaimedWork{}, false, nil
-	}
-	claim, err := s.issue(event.ID(), query.Purpose)
+	return batch, nil
+}
+
+func (s *startupRecoveryPipelineOwner) CloseScan(_ context.Context, scan runtimepipelineobligation.Scan) error {
+	token, err := s.scanner.Token(scan)
 	if err != nil {
-		return runtimepipelineobligation.ClaimedWork{}, false, err
+		return err
 	}
-	return runtimepipelineobligation.ClaimedWork{
-		Event: event, Scope: runtimepipelineobligation.ScopeSubscribed, Claim: claim,
-	}, true, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.scans[token]; !ok {
+		return runtimepipelineobligation.ErrStaleScan
+	}
+	delete(s.scans, token)
+	return nil
 }
 
 func (s *startupRecoveryPipelineOwner) verify(claim runtimepipelineobligation.Claim) error {

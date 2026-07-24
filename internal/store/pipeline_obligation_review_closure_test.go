@@ -92,7 +92,7 @@ func TestExecutableEventCommitRequiresCurrentPublicationClaimOnSQLiteAndPostgres
 	}
 }
 
-func TestPipelineClaimNextTraversesPastBusyCandidatePageOnSQLiteAndPostgres(t *testing.T) {
+func TestPipelineScanBoundsExaminationAndContinuesPastBusyCandidatesOnSQLiteAndPostgres(t *testing.T) {
 	for _, backend := range []struct {
 		name string
 		open func(*testing.T) authorActivityReceiptFixture
@@ -109,8 +109,9 @@ func TestPipelineClaimNextTraversesPastBusyCandidatePageOnSQLiteAndPostgres(t *t
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			base := time.Now().UTC().Add(-time.Hour)
 
-			held := make([]runtimepipelineobligation.Claim, 0, pipelineCandidatePageSize)
-			for i := 0; i < pipelineCandidatePageSize; i++ {
+			const heldCount = 5
+			held := make([]runtimepipelineobligation.Claim, 0, heldCount)
+			for i := 0; i < heldCount; i++ {
 				eventID := commitPipelineParityEvent(t, ctx, selected, runID, base.Add(time.Duration(i)*time.Microsecond))
 				work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
 				if err != nil {
@@ -118,19 +119,163 @@ func TestPipelineClaimNextTraversesPastBusyCandidatePageOnSQLiteAndPostgres(t *t
 				}
 				held = append(held, work.Claim)
 			}
-			laterID := commitPipelineParityEvent(t, ctx, selected, runID, base.Add(pipelineCandidatePageSize*time.Microsecond))
+			laterID := commitPipelineParityEvent(t, ctx, selected, runID, base.Add(heldCount*time.Microsecond))
 
-			work, ok, err := owner.ClaimNext(ctx, runtimepipelineobligation.RunRecoveryQuery(runID))
-			if err != nil || !ok || work.Event.ID() != laterID {
-				t.Fatalf("ClaimNext after busy page: event=%s ok=%v err=%v, want %s", work.Event.ID(), ok, err, laterID)
+			scan, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID))
+			if err != nil {
+				t.Fatalf("OpenScan: %v", err)
 			}
-			if err := owner.Release(ctx, work.Claim); err != nil {
-				t.Fatalf("release later claim: %v", err)
+			totalExamined := 0
+			var later runtimepipelineobligation.ClaimedWork
+			exhausted := false
+			for pass := 0; pass < 10 && !exhausted; pass++ {
+				batch, err := owner.ClaimBatch(ctx, scan, 2)
+				if err != nil {
+					t.Fatalf("ClaimBatch pass %d: %v", pass, err)
+				}
+				if batch.Examined > 2 {
+					t.Fatalf("ClaimBatch pass %d examined %d candidates, want <= 2", pass, batch.Examined)
+				}
+				totalExamined += batch.Examined
+				for _, work := range batch.Work {
+					if work.Event.ID() != laterID {
+						t.Fatalf("claimed busy-prefix event %s, want only %s", work.Event.ID(), laterID)
+					}
+					later = work
+				}
+				exhausted = batch.Exhausted
+			}
+			if !exhausted || later.Event.ID() != laterID || totalExamined != heldCount+1 {
+				t.Fatalf("scan result: exhausted=%v later=%s examined=%d, want true %s %d", exhausted, later.Event.ID(), totalExamined, laterID, heldCount+1)
+			}
+			if err := owner.CloseScan(ctx, scan); err != nil {
+				t.Fatalf("CloseScan: %v", err)
+			}
+			if err := owner.Release(ctx, later.Claim); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
+				t.Fatalf("claim survived cursor close: %v", err)
 			}
 			for _, claim := range held {
 				if err := owner.Release(ctx, claim); err != nil {
 					t.Fatalf("release blocker: %v", err)
 				}
+			}
+		})
+	}
+}
+
+func TestPipelineScanCancellationAndAbandonmentReleaseClaimsOnSQLiteAndPostgres(t *testing.T) {
+	for _, backend := range []struct {
+		name string
+		open func(*testing.T) authorActivityReceiptFixture
+	}{
+		{name: "sqlite", open: openSQLiteAuthorActivityReceiptFixture},
+		{name: "postgres", open: openPostgresAuthorActivityReceiptFixture},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			selected := fixture.store.(pipelineObligationParityStore)
+			owner := selected.PipelineObligations()
+			ctx := testAuthorActivityContext()
+			runID := uuid.NewString()
+			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
+
+			for _, mode := range []string{"cancel", "abandon"} {
+				t.Run(mode, func(t *testing.T) {
+					scan, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID))
+					if err != nil {
+						t.Fatalf("OpenScan: %v", err)
+					}
+					batch, err := owner.ClaimBatch(ctx, scan, 1)
+					if err != nil || len(batch.Work) != 1 || batch.Work[0].Event.ID() != eventID {
+						t.Fatalf("ClaimBatch: work=%d err=%v", len(batch.Work), err)
+					}
+					switch mode {
+					case "cancel":
+						cancelled, cancel := context.WithCancel(ctx)
+						cancel()
+						if _, err := owner.ClaimBatch(cancelled, scan, 1); !errors.Is(err, context.Canceled) {
+							t.Fatalf("cancelled ClaimBatch error = %v, want context canceled", err)
+						}
+						if err := owner.CloseScan(ctx, scan); !errors.Is(err, runtimepipelineobligation.ErrStaleScan) {
+							t.Fatalf("cancelled scan remained open: %v", err)
+						}
+					case "abandon":
+						if err := owner.CloseScan(ctx, scan); err != nil {
+							t.Fatalf("CloseScan: %v", err)
+						}
+					}
+					reclaimed, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
+					if err != nil {
+						t.Fatalf("reclaim after %s: %v", mode, err)
+					}
+					if err := owner.Release(ctx, reclaimed.Claim); err != nil {
+						t.Fatalf("release reclaimed work: %v", err)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestCorruptPipelineScopeClassificationIsTypedForMissingAndInvalidFacts(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+		code string
+	}{
+		{name: "missing", err: runtimepipelineobligation.ErrMissingScope, code: "committed_pipeline_scope_missing"},
+		{name: "invalid", err: runtimepipelineobligation.ErrInvalidScope, code: "committed_pipeline_scope_invalid"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			disposition, ok := corruptPipelineScopeDisposition(uuid.NewString(), test.err)
+			if !ok || disposition.Kind() != runtimepipelineobligation.DispositionQuarantined ||
+				disposition.ReasonCode() != test.code {
+				t.Fatalf("classification = %#v, %v", disposition, ok)
+			}
+		})
+	}
+}
+
+func TestPipelineScanRechecksDecisionEligibilityAfterEachMutationOnSQLiteAndPostgres(t *testing.T) {
+	for _, backend := range []struct {
+		name string
+		open func(*testing.T) authorActivityReceiptFixture
+	}{
+		{name: "sqlite", open: openSQLiteAuthorActivityReceiptFixture},
+		{name: "postgres", open: openPostgresAuthorActivityReceiptFixture},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			selected := fixture.store.(pipelineObligationParityStore)
+			owner := selected.PipelineObligations()
+			ctx := testAuthorActivityContext()
+			runID := uuid.NewString()
+			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			at := time.Now().UTC().Add(-time.Minute)
+			firstID := commitPipelineParityEvent(t, ctx, selected, runID, at)
+			secondID := commitPipelineParityEvent(t, ctx, selected, runID, at.Add(time.Microsecond))
+			insertProducerIdentityDecisionObligation(t, fixture, ctx, firstID, runID, at)
+			insertProducerIdentityDecisionObligation(t, fixture, ctx, secondID, runID, at.Add(time.Microsecond))
+
+			scan, err := owner.OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest())
+			if err != nil {
+				t.Fatalf("OpenScan: %v", err)
+			}
+			defer func() { _ = owner.CloseScan(context.WithoutCancel(ctx), scan) }()
+			first, err := owner.ClaimBatch(ctx, scan, 10)
+			if err != nil || len(first.Work) != 1 || first.Work[0].Event.ID() != firstID {
+				t.Fatalf("first ClaimBatch: %#v err=%v", first, err)
+			}
+			if err := owner.Settle(ctx, first.Work[0].Claim, runtimepipelineobligation.Quarantined("first_poison", nil)); err != nil {
+				t.Fatalf("settle first: %v", err)
+			}
+			second, err := owner.ClaimBatch(ctx, scan, 10-first.Examined)
+			if err != nil || len(second.Work) != 1 || second.Work[0].Event.ID() != secondID {
+				t.Fatalf("second ClaimBatch: %#v err=%v", second, err)
+			}
+			if err := owner.Settle(ctx, second.Work[0].Claim, runtimepipelineobligation.Acknowledged("second_processed")); err != nil {
+				t.Fatalf("settle second: %v", err)
 			}
 		})
 	}
