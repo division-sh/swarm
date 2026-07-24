@@ -707,7 +707,7 @@ func (pc *PipelineCoordinator) handleActivityRequestEvent(ctx context.Context, e
 	dispatcher := pipelineActivityDispatcher{coordinator: pc}
 	if failure := dispatcher.activityContractPinFailure(ctx, intent, pc.SemanticSource()); failure != nil {
 		if failure.Class == runtimefailures.ClassDependencyUnavailable {
-			return true, runtimepipelineobligation.DeferExecution(failure.Detail.Code, time.Now().UTC().Add(runtimepipelineobligation.DecisionRouteRetryDelay), failure), nil
+			return true, runtimepipelineobligation.ReleaseForRetry(failure.Detail.Code, failure), nil
 		}
 		return true, runtimepipelineobligation.DeadLetterExecution(failure.Detail.Code, failure), nil
 	}

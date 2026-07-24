@@ -799,6 +799,9 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 	if err != nil {
 		return errors.Join(err, eb.settleCommittedPublish(ctx, publicationClaim, committedPublishFailureDisposition(evt, "pipeline_dispatch_failed", eventBusFailure(err, "dispatch_committed_publish"))))
 	}
+	if _, retry := outcome.RetryRelease(); retry {
+		return nil
+	}
 	if disposition, ok := outcome.Disposition(); ok {
 		return eb.settleCommittedPublish(ctx, publicationClaim, disposition)
 	}

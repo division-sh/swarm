@@ -92,6 +92,42 @@ func TestPipelineActivityIntentWriterPersistsDurableActivityRequestEvent(t *test
 	}
 }
 
+func TestPipelineActivityContractPinUnavailableRequestsClaimRelease(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+	pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, nil, PipelineCoordinatorOptions{
+		Module: staticSemanticWorkflowModule{source: source},
+	})
+	intent := testActivityIntent("https://example.com/source")
+	intent.BundleHash = "sha256:" + strings.Repeat("a", 64)
+	intent.WorkflowVersion = "required-workflow-version"
+	request, err := activityRequestEmitIntent(intent)
+	if err != nil {
+		t.Fatalf("activityRequestEmitIntent: %v", err)
+	}
+
+	handled, outcome, err := pc.handleActivityRequestEvent(testAuthorActivityContext(t, context.Background()), request.Event)
+	if err != nil {
+		t.Fatalf("handleActivityRequestEvent: %v", err)
+	}
+	if !handled {
+		t.Fatal("activity request was not handled")
+	}
+	if disposition, ok := outcome.Disposition(); ok {
+		t.Fatalf("contract pin mismatch returned durable disposition %#v", disposition)
+	}
+	retry, ok := outcome.RetryRelease()
+	if !ok {
+		t.Fatal("contract pin mismatch did not request claim release")
+	}
+	if got := retry.ReasonCode(); got != "activity_contract_pin_unavailable" {
+		t.Fatalf("retry reason = %q", got)
+	}
+	failure := retry.Failure()
+	if failure == nil || failure.Class != runtimefailures.ClassDependencyUnavailable {
+		t.Fatalf("retry failure = %#v, want dependency unavailable", failure)
+	}
+}
+
 func TestActivityRequestAndResultPreserveMockExecutionMode(t *testing.T) {
 	intent := testActivityIntent("https://example.com/source")
 	intent.ExecutionMode = executionmode.Mock
