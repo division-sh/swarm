@@ -13,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -50,10 +51,19 @@ type authorActivityTestCatalogRegistrar interface {
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 }
 
+type pipelineObligationTestProvider interface {
+	PipelineObligations() runtimepipelineobligation.Store
+}
+
 func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
 	opts := runtimebus.EventBusOptions{}
 	if len(options) > 0 {
 		opts = options[0]
+	}
+	if opts.PipelineObligations == nil {
+		if provider, ok := store.(pipelineObligationTestProvider); ok {
+			opts.PipelineObligations = provider.PipelineObligations()
+		}
 	}
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
@@ -94,6 +104,18 @@ func testAuthorActivityContext(ctx context.Context) context.Context {
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash,
 	))
+}
+
+func acknowledgePipelineTestEvent(t testing.TB, ctx context.Context, provider pipelineObligationTestProvider, eventID string) {
+	t.Helper()
+	owner := provider.PipelineObligations()
+	work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
+	if err != nil {
+		t.Fatalf("claim pipeline obligation for %s: %v", eventID, err)
+	}
+	if err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
+		t.Fatalf("acknowledge pipeline obligation for %s: %v", eventID, err)
+	}
 }
 
 func authorActivityTestEventDescriptors(source semanticview.Source) []runtimeauthoractivity.EventDescriptor {

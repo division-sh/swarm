@@ -14,6 +14,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -140,6 +141,13 @@ func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts 
 	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = conformanceTestRuntimeOccurrence(t, opts.BundleSourceFact.BundleHash)
+	}
+	if opts.PipelineObligations == nil {
+		if provider, ok := eventStore.(interface {
+			PipelineObligations() runtimepipelineobligation.Store
+		}); ok {
+			opts.PipelineObligations = provider.PipelineObligations()
+		}
 	}
 	if registrar, ok := eventStore.(testAuthorActivityCatalogRegistrar); ok {
 		descriptors := testAuthorActivityEventDescriptors(t, opts)

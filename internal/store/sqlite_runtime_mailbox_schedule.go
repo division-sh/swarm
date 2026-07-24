@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -622,14 +623,8 @@ func (s *SQLiteRuntimeStore) sqliteQuiesceStoppedRunWorkTx(ctx context.Context, 
 	if err != nil {
 		return 0, err
 	}
-	eventIDs := map[string]struct{}{}
-	for _, delivery := range deliveries {
-		eventIDs[delivery.Current.EventID] = struct{}{}
-	}
-	for eventID := range eventIDs {
-		if err := sqliteUpsertActiveRunQuiescencePipelineReceiptTx(ctx, tx, eventID, "run_stopped", reason, now); err != nil {
-			return 0, err
-		}
+	if _, err := s.terminalizeSQLitePipelineRunTx(ctx, tx, runID, runtimepipelineobligation.DeadLetter("run_stopped", nil), now); err != nil {
+		return 0, err
 	}
 	if _, err := sqliteTerminateActiveRunSessionsTx(ctx, tx, []string{runID}, "run_stopped", now); err != nil {
 		return 0, err

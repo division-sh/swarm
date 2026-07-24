@@ -13,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -74,6 +75,13 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = newAPITestRuntimeWorkOccurrence(t, opts.RuntimeInstanceID, opts.BundleSourceFact.BundleHash)
+	}
+	if opts.PipelineObligations == nil {
+		if provider, ok := eventStore.(interface {
+			PipelineObligations() runtimepipelineobligation.Store
+		}); ok {
+			opts.PipelineObligations = provider.PipelineObligations()
+		}
 	}
 	if registrar, ok := eventStore.(authorActivityTestCatalogRegistrar); ok {
 		descriptors, err := authorActivityTestDescriptors(opts.ContractBundle)

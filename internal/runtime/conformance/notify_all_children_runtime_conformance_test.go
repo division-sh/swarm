@@ -19,7 +19,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	"github.com/division-sh/swarm/internal/store"
@@ -33,13 +33,14 @@ type notifyAllChildrenStore interface {
 	runtimedelivery.Store
 	ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error)
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
-	ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error)
+	PipelineObligations() runtimepipelineobligation.Store
 }
 
 type notifyAllChildrenRuntime struct {
 	bus         *runtimebus.EventBus
 	diagnostics *fanInBarrierDiagnosticBus
 	manager     *runtimemanager.AgentManager
+	pipeline    *runtimepipeline.PipelineCoordinator
 }
 
 func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndReplayOnBothBackends(t *testing.T) {
@@ -191,19 +192,13 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 
 			originalA := items["acct-a"]
 			deleteNotifyAllChildrenPipelineReceipt(t, ctx, backend, db, originalA)
-			missing, err := backend.ListEventsMissingPipelineReceipt(ctx, fixedEngineNow.Add(-24*time.Hour), 20)
+			claimed, err := backend.PipelineObligations().ClaimEvent(ctx, originalA, runtimepipelineobligation.PurposeRecovery)
 			if err != nil {
-				t.Fatalf("ListEventsMissingPipelineReceipt: %v", err)
+				t.Fatalf("claim original pipeline obligation: %v", err)
 			}
-			var replay events.Event
-			for _, record := range missing {
-				if record.Event.ID() == originalA {
-					replay = record.Event
-					break
-				}
-			}
-			if replay.ID() == "" {
-				t.Fatalf("original A item %s missing from persisted replay rows %#v", originalA, missing)
+			replay := claimed.Event
+			if err := backend.PipelineObligations().Release(ctx, claimed.Claim); err != nil {
+				t.Fatalf("release original pipeline obligation: %v", err)
 			}
 			routes, err := backend.ListEventDeliveryRoutes(ctx, originalA)
 			if err != nil || len(routes) != 1 {
@@ -213,11 +208,11 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				uuid.NewString(), replay.Type(), "workflow-runtime", "", replay.Payload(), replay.ChainDepth()+1,
 				runID, replay.ID(), replay.Envelope(), fixedEngineNow.Add(time.Second),
 			)
-			storetest.CommitSemanticEventWithRoutes(t, ctx, backend, recoveryEvent, routes, runtimereplayclaim.CommittedReplayScopeSubscribed)
+			storetest.CommitSemanticEventWithRoutes(t, ctx, backend, recoveryEvent, routes, runtimepipelineobligation.ScopeSubscribed)
 			eventCountBefore := countNotifyAllChildrenItemEvents(t, ctx, backend, db, runID)
 			restarted := newNotifyAllChildrenRuntime(t, backend, db, source, func() time.Time { return fixedEngineNow })
-			if err := restarted.bus.ReleasePendingPersistedDeliveriesForEvent(ctx, recoveryEvent); err != nil {
-				t.Fatalf("ReleasePendingPersistedDeliveriesForEvent: %v", err)
+			if err := restarted.pipeline.RecoverNodeDeliveries(ctx); err != nil {
+				t.Fatalf("RecoverNodeDeliveries: %v", err)
 			}
 			waitNotifyAllChildrenBus(t, restarted.bus)
 			assertNotifyAllChildrenMetadata(t, ctx, backend, db, descriptors["acct-a"].FlowInstance, "last_command", "refresh")
@@ -300,7 +295,7 @@ func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, d
 		TestEngineEmitNow: engineNow,
 		WorkOwner:         workOwner,
 	})
-	return notifyAllChildrenRuntime{bus: eventBus, diagnostics: diagnosticBus, manager: manager}
+	return notifyAllChildrenRuntime{bus: eventBus, diagnostics: diagnosticBus, manager: manager, pipeline: coordinator}
 }
 
 func publishNotifyAllChildrenEvent(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, source semanticview.Source, runID, localEvent string, payload map[string]any) string {

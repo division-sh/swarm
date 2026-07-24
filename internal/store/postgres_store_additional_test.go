@@ -25,6 +25,7 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -160,7 +161,7 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 	seedPostgresStoreEvent(t, ctx, pg, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", time.Now().UTC())
 	seedPostgresEntityStateRows(t, db, ctx, runID, entityID)
 	event := commitPostgresDeliveryFixture(t, ctx, db, eventID, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"})
-	if err := pg.UpsertPipelineReceipt(ctx, eventID, "processed", nil); err != nil {
+	if err := acknowledgePipelineEventFixture(ctx, pg, eventID); err != nil {
 		t.Fatalf("seed pipeline receipt: %v", err)
 	}
 
@@ -854,7 +855,7 @@ func TestPostgresStore_RunTerminalOwnersPersistCanonicalLifecycle(t *testing.T) 
 
 	completedFixture := seedNormalRunCompletionFixture(t, db, "done", "review/inst-1", "review")
 	completedRunID := completedFixture.RunID
-	if err := pg.UpsertPipelineReceipt(ctx, completedFixture.EventID, "processed", nil); err != nil {
+	if err := acknowledgePipelineEventFixture(ctx, pg, completedFixture.EventID); err != nil {
 		t.Fatalf("seed completed run receipt: %v", err)
 	}
 	if err := pg.ConvergeNormalRunCompletion(ctx, completedFixture.EventID, []string{"done"}, map[string][]string{"review": {"done"}}); err != nil {
@@ -957,31 +958,31 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 	if err := commitSemanticEventFixture(ctx, pg, eventMissing); err != nil {
 		t.Fatalf("append missing event: %v", err)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", nil); err != nil {
+	if err := acknowledgePipelineEventFixture(ctx, pg, parentID); err != nil {
 		t.Fatalf("upsert parent receipt: %v", err)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, eventProcessed.ID(), "processed", nil); err != nil {
+	if err := acknowledgePipelineEventFixture(ctx, pg, eventProcessed.ID()); err != nil {
 		t.Fatalf("upsert processed receipt: %v", err)
 	}
 
-	missing, err := pg.ListEventsMissingPipelineReceipt(ctx, time.Now().Add(-1*time.Hour), 20)
+	missing, ok, err := pg.PipelineObligations().ClaimNext(ctx, runtimepipelineobligation.GlobalRecoveryQuery())
 	if err != nil {
-		t.Fatalf("list missing pipeline receipts: %v", err)
+		t.Fatalf("claim missing pipeline obligation: %v", err)
 	}
-	if len(missing) != 1 {
-		t.Fatalf("expected 1 missing event, got %d", len(missing))
+	if !ok {
+		t.Fatal("expected one missing pipeline obligation")
 	}
-	if missing[0].Event.ID() != eventMissing.ID() {
-		t.Fatalf("expected missing event id=%s got=%s", eventMissing.ID(), missing[0].Event.ID())
+	if missing.Event.ID() != eventMissing.ID() {
+		t.Fatalf("expected missing event id=%s got=%s", eventMissing.ID(), missing.Event.ID())
 	}
-	if missing[0].Event.RunID() != runID {
-		t.Fatalf("missing event run_id = %q, want %q", missing[0].Event.RunID(), runID)
+	if missing.Event.RunID() != runID {
+		t.Fatalf("missing event run_id = %q, want %q", missing.Event.RunID(), runID)
 	}
-	if missing[0].Event.ParentEventID() != parentID {
-		t.Fatalf("missing event parent_event_id = %q, want %q", missing[0].Event.ParentEventID(), parentID)
+	if missing.Event.ParentEventID() != parentID {
+		t.Fatalf("missing event parent_event_id = %q, want %q", missing.Event.ParentEventID(), parentID)
 	}
-	if missing[0].ReplayFailure != nil {
-		t.Fatalf("missing event replay_failure = %#v, want nil", missing[0].ReplayFailure)
+	if err := pg.PipelineObligations().Release(ctx, missing.Claim); err != nil {
+		t.Fatalf("release missing pipeline obligation: %v", err)
 	}
 }
 

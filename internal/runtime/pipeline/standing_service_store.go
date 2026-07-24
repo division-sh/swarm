@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/google/uuid"
 )
 
@@ -948,6 +948,16 @@ func (s *WorkflowInstanceStore) standingRunHasLiveWorkTx(ctx context.Context, tx
 	if !deliverySummary.Settled() {
 		return true, nil
 	}
+	if s.pipelineStore == nil {
+		return false, fmt.Errorf("inspect standing run pipeline work: pipeline obligation store is required")
+	}
+	pipelineSummary, err := s.pipelineStore.SummarizeRun(ctx, runID)
+	if err != nil {
+		return false, fmt.Errorf("inspect standing run pipeline work: %w", err)
+	}
+	if pipelineSummary.HasOpenWork() {
+		return true, nil
+	}
 	query := `
 		SELECT EXISTS (
 			SELECT 1 FROM agent_sessions WHERE run_id = ? AND status IN ('active', 'suspended')
@@ -975,6 +985,9 @@ func (s *WorkflowInstanceStore) quiesceStandingRunTx(ctx context.Context, tx *sq
 	if s.deliveryStore == nil {
 		return fmt.Errorf("quiesce standing run: delivery lifecycle store is required")
 	}
+	if s.pipelineStore == nil {
+		return fmt.Errorf("quiesce standing run: pipeline obligation store is required")
+	}
 	scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, bundleHash)
 	if err != nil {
 		return fmt.Errorf("quiesce standing run scope: %w", err)
@@ -983,29 +996,10 @@ func (s *WorkflowInstanceStore) quiesceStandingRunTx(ctx context.Context, tx *sq
 	if _, err := s.deliveryStore.TerminalizeRun(ctx, runID, reason); err != nil {
 		return fmt.Errorf("terminalize standing deliveries: %w", err)
 	}
-	diagnosticTypes := events.DiagnosticDirectEventTypes()
+	if _, err := s.pipelineStore.TerminalizeRun(ctx, runID, runtimepipelineobligation.DeadLetter(reason, nil), now); err != nil {
+		return fmt.Errorf("terminalize standing pipeline obligations: %w", err)
+	}
 	if s.isSQLite() {
-		diagnosticPlaceholders := strings.TrimRight(strings.Repeat("?,", len(diagnosticTypes)), ",")
-		pipelineArgs := []any{reason, now, runID}
-		for _, eventType := range diagnosticTypes {
-			pipelineArgs = append(pipelineArgs, string(eventType))
-		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, reason_code, processed_at)
-			SELECT e.event_id, 'platform', 'pipeline', 'dead_letter', ?, ?
-			FROM events e
-			LEFT JOIN event_receipts r
-			  ON r.event_id = e.event_id
-			 AND r.subscriber_type = 'platform'
-			 AND r.subscriber_id = 'pipeline'
-			WHERE e.run_id = ?
-			  AND e.event_name NOT IN (`+diagnosticPlaceholders+`)
-			  AND (r.event_id IS NULL OR COALESCE(r.outcome, '') <> 'success')
-			ON CONFLICT(event_id, subscriber_type, subscriber_id) DO UPDATE SET
-				outcome = 'dead_letter', reason_code = excluded.reason_code, failure = NULL, processed_at = excluded.processed_at
-		`, pipelineArgs...); err != nil {
-			return fmt.Errorf("settle sqlite standing pipeline receipts: %w", err)
-		}
 		if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET status = 'terminated', termination_reason = ?, termination_detail = ?, terminated_at = COALESCE(terminated_at, ?), lease_holder = NULL, lease_expires_at = NULL, updated_at = ? WHERE run_id = ? AND status IN ('active', 'suspended')`, sessionReason, reason, now, now, runID); err != nil {
 			return fmt.Errorf("terminate sqlite standing sessions: %w", err)
 		}
@@ -1013,28 +1007,6 @@ func (s *WorkflowInstanceStore) quiesceStandingRunTx(ctx context.Context, tx *sq
 			return fmt.Errorf("cancel sqlite standing timers: %w", err)
 		}
 		return nil
-	}
-	diagnosticPlaceholders := make([]string, 0, len(diagnosticTypes))
-	pipelineArgs := []any{runID, reason, now}
-	for i, eventType := range diagnosticTypes {
-		diagnosticPlaceholders = append(diagnosticPlaceholders, fmt.Sprintf("$%d", i+4))
-		pipelineArgs = append(pipelineArgs, string(eventType))
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, reason_code, processed_at)
-		SELECT e.event_id, 'platform', 'pipeline', 'dead_letter', $2, $3::timestamptz
-		FROM events e
-		LEFT JOIN event_receipts r
-		  ON r.event_id = e.event_id
-		 AND r.subscriber_type = 'platform'
-		 AND r.subscriber_id = 'pipeline'
-		WHERE e.run_id = $1::uuid
-		  AND e.event_name NOT IN (`+strings.Join(diagnosticPlaceholders, ", ")+`)
-		  AND (r.event_id IS NULL OR COALESCE(r.outcome, '') <> 'success')
-		ON CONFLICT(event_id, subscriber_type, subscriber_id) DO UPDATE SET
-			outcome = 'dead_letter', reason_code = EXCLUDED.reason_code, failure = NULL, processed_at = EXCLUDED.processed_at
-	`, pipelineArgs...); err != nil {
-		return fmt.Errorf("settle standing pipeline receipts: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET status = 'terminated', termination_reason = $2, termination_detail = $3, terminated_at = COALESCE(terminated_at, $4), lease_holder = NULL, lease_expires_at = NULL, updated_at = $4 WHERE run_id = $1::uuid AND status IN ('active', 'suspended')`, runID, sessionReason, reason, now); err != nil {
 		return fmt.Errorf("terminate standing sessions: %w", err)

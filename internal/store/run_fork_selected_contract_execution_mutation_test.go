@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -1497,31 +1496,6 @@ func TestPostTSourceConversationHistoryActivationKeepsActiveCouplingFailClosed(t
 	}
 	if !runForkTestHasActivationBlocker(activation, "source_active_conversation_session_coupling_after_fork_point") {
 		t.Fatalf("activation blockers = %#v, want active post-T coupling blocker", activation.UnsupportedBlockers)
-	}
-}
-
-func TestCommittedReplayScopeRejectsPostCommitChange(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-	sourceRunID := uuid.NewString()
-	entityID := uuid.NewString()
-	eventID := uuid.NewString()
-	at := time.Unix(1700003625, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
-	direct, ok := committedReplayScopeFromReasonCode(replayScopeReasonDirect)
-	if !ok {
-		t.Fatal("direct replay scope contract is unavailable")
-	}
-	if err := pg.UpsertCommittedReplayScope(ctx, eventID, direct); err == nil {
-		t.Fatal("post-commit replay scope change succeeded")
-	}
-	var got string
-	if err := db.QueryRowContext(ctx, `SELECT scope FROM committed_replay_scopes WHERE event_id = $1::uuid`, eventID).Scan(&got); err != nil {
-		t.Fatalf("load immutable replay scope: %v", err)
-	}
-	if got != string(runtimereplayclaim.CommittedReplayScopeSubscribed) {
-		t.Fatalf("replay scope = %q, want subscribed", got)
 	}
 }
 

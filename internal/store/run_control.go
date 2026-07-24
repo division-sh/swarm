@@ -8,6 +8,7 @@ import (
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
@@ -286,14 +287,8 @@ func (s *PostgresStore) quiesceStoppedRunWorkTx(ctx context.Context, tx *sql.Tx,
 	if err != nil {
 		return 0, err
 	}
-	eventIDs := map[string]struct{}{}
-	for _, delivery := range deliveries {
-		eventIDs[delivery.Current.EventID] = struct{}{}
-	}
-	for eventID := range eventIDs {
-		if err := upsertActiveRunQuiescencePipelineReceiptTx(ctx, tx, eventID, "run_stopped", reason, now); err != nil {
-			return 0, err
-		}
+	if _, err := s.terminalizePostgresPipelineRunTx(ctx, tx, runID, runtimepipelineobligation.DeadLetter("run_stopped", nil), now); err != nil {
+		return 0, err
 	}
 	if _, err := terminateActiveRunSessionsTx(ctx, tx, []string{runID}, "run_stopped", now); err != nil {
 		return 0, err

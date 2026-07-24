@@ -4,27 +4,20 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"time"
 )
 
 type normalRunCompletionTestStore struct {
 	InMemoryEventStore
-	pipelineReceipts []string
 	standaloneEvents []string
 	normalEvents     []string
 	workflowTerms    []string
 	flowTerms        map[string][]string
-}
-
-func (s *normalRunCompletionTestStore) UpsertPipelineReceipt(_ context.Context, eventID, _ string, _ *runtimefailures.Envelope) error {
-	s.pipelineReceipts = append(s.pipelineReceipts, eventID)
-	return nil
 }
 
 func (s *normalRunCompletionTestStore) ConvergeStandaloneRuntimePlatformRun(_ context.Context, evt events.Event) error {
@@ -42,23 +35,6 @@ func (s *normalRunCompletionTestStore) ConvergeNormalRunCompletion(_ context.Con
 		}
 	}
 	return nil
-}
-
-func TestEventBusMarkPipelineReceiptConvergesNormalRunCompletion(t *testing.T) {
-	store := &normalRunCompletionTestStore{}
-	eb, err := newScopedTestEventBus(store)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	if err := eb.markPipelineReceipt(context.Background(), "event-1", "processed", nil); err != nil {
-		t.Fatalf("markPipelineReceipt: %v", err)
-	}
-	if len(store.pipelineReceipts) != 1 || store.pipelineReceipts[0] != "event-1" {
-		t.Fatalf("pipeline receipts = %#v, want event-1", store.pipelineReceipts)
-	}
-	if len(store.normalEvents) != 1 || store.normalEvents[0] != "event-1" {
-		t.Fatalf("normal completion events = %#v, want event-1", store.normalEvents)
-	}
 }
 
 func TestEventBusStandalonePlatformConvergenceAlsoProbesNormalRunCompletion(t *testing.T) {

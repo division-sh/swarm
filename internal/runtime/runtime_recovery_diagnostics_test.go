@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,17 +18,204 @@ import (
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
-type startupRecoveryTestLease struct{}
+type startupRecoveryPipelineOwner struct {
+	mu       sync.Mutex
+	issuer   *runtimepipelineobligation.ClaimIssuer
+	work     []events.PersistedReplayEvent
+	claimErr error
+	claims   map[string]runtimepipelineobligation.Claim
+}
 
-func (startupRecoveryTestLease) Release(context.Context) error { return nil }
+func newStartupRecoveryPipelineOwner(work []events.PersistedReplayEvent, claimErr error) *startupRecoveryPipelineOwner {
+	return &startupRecoveryPipelineOwner{
+		issuer:   runtimepipelineobligation.NewClaimIssuer(),
+		work:     append([]events.PersistedReplayEvent(nil), work...),
+		claimErr: claimErr,
+		claims:   map[string]runtimepipelineobligation.Claim{},
+	}
+}
+
+func (s *startupRecoveryPipelineOwner) issue(eventID string, purpose runtimepipelineobligation.Purpose) (runtimepipelineobligation.Claim, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, busy := s.claims[eventID]; busy {
+		return runtimepipelineobligation.Claim{}, runtimepipelineobligation.ErrBusy
+	}
+	claim, err := s.issuer.Issue(eventID, purpose)
+	if err == nil {
+		s.claims[eventID] = claim
+	}
+	return claim, err
+}
+
+func (s *startupRecoveryPipelineOwner) ClaimPublication(_ context.Context, eventID string) (runtimepipelineobligation.Claim, error) {
+	return s.issue(eventID, runtimepipelineobligation.PurposePublication)
+}
+
+func (s *startupRecoveryPipelineOwner) ClaimEvent(_ context.Context, eventID string, purpose runtimepipelineobligation.Purpose) (runtimepipelineobligation.ClaimedWork, error) {
+	claim, err := s.issue(eventID, purpose)
+	if err != nil {
+		return runtimepipelineobligation.ClaimedWork{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, item := range s.work {
+		if item.Event.ID() == eventID {
+			return runtimepipelineobligation.ClaimedWork{
+				Event: item.Event, Scope: runtimepipelineobligation.ScopeSubscribed, Claim: claim,
+			}, nil
+		}
+	}
+	delete(s.claims, eventID)
+	return runtimepipelineobligation.ClaimedWork{}, runtimepipelineobligation.ErrIneligible
+}
+
+func (s *startupRecoveryPipelineOwner) ClaimNext(_ context.Context, query runtimepipelineobligation.ClaimQuery) (runtimepipelineobligation.ClaimedWork, bool, error) {
+	if err := query.Validate(); err != nil {
+		return runtimepipelineobligation.ClaimedWork{}, false, err
+	}
+	if s.claimErr != nil {
+		return runtimepipelineobligation.ClaimedWork{}, false, s.claimErr
+	}
+	s.mu.Lock()
+	var event events.Event
+	for _, item := range s.work {
+		if query.RunID != "" && item.Event.RunID() != query.RunID {
+			continue
+		}
+		if _, busy := s.claims[item.Event.ID()]; !busy {
+			event = item.Event
+			break
+		}
+	}
+	s.mu.Unlock()
+	if event.ID() == "" {
+		return runtimepipelineobligation.ClaimedWork{}, false, nil
+	}
+	claim, err := s.issue(event.ID(), query.Purpose)
+	if err != nil {
+		return runtimepipelineobligation.ClaimedWork{}, false, err
+	}
+	return runtimepipelineobligation.ClaimedWork{
+		Event: event, Scope: runtimepipelineobligation.ScopeSubscribed, Claim: claim,
+	}, true, nil
+}
+
+func (s *startupRecoveryPipelineOwner) verify(claim runtimepipelineobligation.Claim) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.claims[claim.EventID()]
+	if !ok {
+		return runtimepipelineobligation.ErrStaleClaim
+	}
+	currentToken, err := s.issuer.Token(current)
+	if err != nil {
+		return err
+	}
+	claimToken, err := s.issuer.Token(claim)
+	if err != nil {
+		return err
+	}
+	if currentToken != claimToken {
+		return runtimepipelineobligation.ErrStaleClaim
+	}
+	return nil
+}
+
+func (s *startupRecoveryPipelineOwner) MarkDecisionProcessed(_ context.Context, claim runtimepipelineobligation.Claim) error {
+	return s.verify(claim)
+}
+
+func (s *startupRecoveryPipelineOwner) Settle(_ context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) error {
+	if err := disposition.ValidateFor(claim.Purpose()); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.claims[claim.EventID()]
+	if !ok {
+		return runtimepipelineobligation.ErrStaleClaim
+	}
+	currentToken, err := s.issuer.Token(current)
+	if err != nil {
+		return err
+	}
+	claimToken, err := s.issuer.Token(claim)
+	if err != nil {
+		return err
+	}
+	if currentToken != claimToken {
+		return runtimepipelineobligation.ErrStaleClaim
+	}
+	if err := s.issuer.Verify(claim, claim.EventID(), claim.Purpose()); err != nil {
+		return err
+	}
+	delete(s.claims, claim.EventID())
+	if disposition.Kind() != runtimepipelineobligation.DispositionDeferred {
+		remaining := s.work[:0]
+		for _, item := range s.work {
+			if item.Event.ID() != claim.EventID() {
+				remaining = append(remaining, item)
+			}
+		}
+		s.work = remaining
+	}
+	return nil
+}
+
+func (s *startupRecoveryPipelineOwner) Release(_ context.Context, claim runtimepipelineobligation.Claim) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.claims[claim.EventID()]
+	if !ok {
+		return runtimepipelineobligation.ErrStaleClaim
+	}
+	currentToken, err := s.issuer.Token(current)
+	if err != nil {
+		return err
+	}
+	claimToken, err := s.issuer.Token(claim)
+	if err != nil {
+		return err
+	}
+	if currentToken != claimToken {
+		return runtimepipelineobligation.ErrStaleClaim
+	}
+	if err := s.issuer.Verify(claim, claim.EventID(), claim.Purpose()); err != nil {
+		return err
+	}
+	delete(s.claims, claim.EventID())
+	return nil
+}
+
+func (s *startupRecoveryPipelineOwner) GlobalWorkPresence(context.Context) (runtimepipelineobligation.GlobalWorkPresence, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return runtimepipelineobligation.GlobalWorkPresence{ProcessingEligible: len(s.work) > 0}, nil
+}
+
+func (s *startupRecoveryPipelineOwner) SummarizeRun(_ context.Context, runID string) (runtimepipelineobligation.RunSummary, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	summary := runtimepipelineobligation.RunSummary{RunID: strings.TrimSpace(runID)}
+	for _, item := range s.work {
+		if item.Event.RunID() == summary.RunID {
+			summary.Replayable++
+		}
+	}
+	return summary, nil
+}
+
+func (*startupRecoveryPipelineOwner) TerminalizeRun(context.Context, string, runtimepipelineobligation.Disposition, time.Time) (int, error) {
+	return 0, nil
+}
 
 type startupRecoveryManagerStore struct {
 	loadErr error
@@ -126,6 +314,10 @@ func (startupManagerReplayRuntimeAgent) OnEvent(_ context.Context, evt events.Ev
 
 type startupRecoveryMinimalEventStore struct{}
 
+func (startupRecoveryMinimalEventStore) PipelineObligations() runtimepipelineobligation.Store {
+	return newStartupRecoveryPipelineOwner(nil, nil)
+}
+
 func (startupRecoveryMinimalEventStore) RegisterAuthorActivityEventCatalog(scope runtimeauthoractivity.Scope, descriptors []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error) {
 	return runtimeauthoractivity.NewEventCatalogRegistry().Register(scope, descriptors)
 }
@@ -141,9 +333,17 @@ func (startupRecoveryMinimalEventStore) ListEventDeliveryRecipients(context.Cont
 func (startupRecoveryMinimalEventStore) SupportsPersistedReplay() bool { return false }
 
 type startupRecoveryEventStore struct {
-	missing  []events.PersistedReplayEvent
-	routes   []runtimeflowidentity.Route
-	claimErr error
+	missing     []events.PersistedReplayEvent
+	routes      []runtimeflowidentity.Route
+	claimErr    error
+	obligations *startupRecoveryPipelineOwner
+}
+
+func (s *startupRecoveryEventStore) PipelineObligations() runtimepipelineobligation.Store {
+	if s.obligations == nil {
+		s.obligations = newStartupRecoveryPipelineOwner(s.missing, s.claimErr)
+	}
+	return s.obligations
 }
 
 func (startupRecoveryEventStore) RegisterAuthorActivityEventCatalog(scope runtimeauthoractivity.Scope, descriptors []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error) {
@@ -152,10 +352,6 @@ func (startupRecoveryEventStore) RegisterAuthorActivityEventCatalog(scope runtim
 
 func (startupRecoveryEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
 	return runtimebustest.CommitPublishNoop(ctx, plan)
-}
-
-func (startupRecoveryEventStore) UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error {
-	return nil
 }
 
 func (startupRecoveryEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
@@ -173,23 +369,6 @@ func (startupRecoveryEventStore) DeleteFlowInstanceRoute(context.Context, runtim
 func (s startupRecoveryEventStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.Route, error) {
 	return append([]runtimeflowidentity.Route(nil), s.routes...), nil
 }
-
-func (s startupRecoveryEventStore) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
-	return append([]events.PersistedReplayEvent(nil), s.missing...), nil
-}
-
-func (s startupRecoveryEventStore) ClaimPipelineReplay(context.Context, string) (runtimeownership.Lease, bool, error) {
-	if s.claimErr != nil {
-		return nil, false, s.claimErr
-	}
-	return startupRecoveryTestLease{}, true, nil
-}
-
-func (startupRecoveryEventStore) ClaimPipelinePublication(context.Context, string) (runtimeownership.Lease, bool, error) {
-	return startupRecoveryTestLease{}, true, nil
-}
-
-func (startupRecoveryEventStore) SupportsPersistedReplay() bool { return true }
 
 func testRecoveryDiagnosticsConfig(recoveryOnStartup bool) *config.Config {
 	return &config.Config{
@@ -408,7 +587,7 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	eventStore := &startupRecoveryEventStore{
 		missing: []events.PersistedReplayEvent{{
-			Event: eventtest.RunCreatingRootIngress("evt-1", "support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+			Event: eventtest.RunCreatingRootIngress(eventtest.UUID("startup-recovery-manager-work"), "support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		}},
 		routes: []runtimeflowidentity.Route{
 			runtimeflowidentity.DeriveRoute("child", "inst-1"),
@@ -811,7 +990,7 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	eventStore := &startupRecoveryEventStore{
 		missing: []events.PersistedReplayEvent{{
-			Event: eventtest.RunCreatingRootIngress("evt-1", "support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+			Event: eventtest.RunCreatingRootIngress(eventtest.UUID("startup-recovery-claim-failure"), "support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		}},
 		claimErr: errors.New("claim failed"),
 	}

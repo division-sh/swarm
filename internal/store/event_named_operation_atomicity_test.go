@@ -14,6 +14,7 @@ import (
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/google/uuid"
 )
@@ -51,7 +52,8 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 				{
 					name: "pipeline_receipt",
 					mutate: func(req *CommitSelectedForkEventRequest) {
-						req.Commit.PipelineReceipt = &runtimebus.InitialPipelineReceipt{Status: "error", Failure: &runtimefailures.Envelope{}}
+						disposition := runtimepipelineobligation.Terminal("fixture_error", &runtimefailures.Envelope{})
+						req.Commit.Disposition = &disposition
 					},
 				},
 				{
@@ -89,7 +91,8 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 
 				duplicate := req
 				duplicate.Commit.DeliveryRoutes = []events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "must-not-appear"}}
-				duplicate.Commit.PipelineReceipt = &runtimebus.InitialPipelineReceipt{Status: "error", Failure: &runtimefailures.Envelope{}}
+				disposition := runtimepipelineobligation.Terminal("fixture_error", &runtimefailures.Envelope{})
+				duplicate.Commit.Disposition = &disposition
 				duplicate.Commit.DeadLetter = &runtimedeadletters.Record{OriginalEventID: uuid.NewString()}
 				outcome, err = store.CommitSelectedForkEvent(ctx, duplicate)
 				if err != nil || outcome != runtimebus.EventAppendExactDuplicate {

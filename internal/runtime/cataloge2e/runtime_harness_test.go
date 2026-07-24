@@ -191,6 +191,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 	rt, err := runtime.NewRuntime(ctx, runtime.RuntimeDeps{Config: cfg, Stores: runtime.Stores{
 		SQLDB:               db,
 		PipelineStore:       runtimepipeline.NewWorkflowInstanceStore(db),
+		PipelineObligations: pg.PipelineObligations(),
 		EventStore:          pg,
 		DeliveryStore:       pg,
 		RuntimeLogStore:     pg,

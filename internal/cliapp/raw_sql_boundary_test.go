@@ -136,6 +136,12 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1783,
 			Reason:         "event bus observes pipeline SQL transaction context as part of the existing runtime unit-of-work boundary",
 		},
+		"internal/runtime/bus/eventbus_publish.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2106,
+			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.durable_pipeline_processing_obligation_authority",
+			Reason:         "event publication observes the canonical pipeline mutation context to commit and settle the typed processing obligation in the selected unit of work",
+		},
 		"internal/runtime/bus/outbox.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,

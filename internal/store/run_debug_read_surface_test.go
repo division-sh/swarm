@@ -304,10 +304,10 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 	}
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, inboundEvidenceEventID, readyRunID, events.EventTypePlatformInboundRecord, events.EventProducerPlatform, "test", "", "", now.Add(-20*time.Second))
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, directiveEvidenceEventID, readyRunID, events.EventTypePlatformAgentDirective, events.EventProducerPlatform, "test", "", "", now.Add(-20*time.Second))
-	if err := pg.UpsertPipelineReceipt(ctx, activeEventID, "processed", nil); err != nil {
+	if err := acknowledgePipelineEventFixture(ctx, pg, activeEventID); err != nil {
 		t.Fatalf("UpsertPipelineReceipt active event: %v", err)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, readyEventID, "processed", nil); err != nil {
+	if err := acknowledgePipelineEventFixture(ctx, pg, readyEventID); err != nil {
 		t.Fatalf("UpsertPipelineReceipt ready event: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `

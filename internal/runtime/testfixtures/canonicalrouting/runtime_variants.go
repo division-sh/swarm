@@ -51,7 +51,7 @@ func CopyGeneratedActivity(t testing.TB, nested, subscribeResults bool) string {
 	}
 	nodes := "activity-node:\n  id: activity-node\n  execution_type: system_node\n  subscribes_to: [request" + resultSubscriptions + "]\n  event_handlers:\n    request:\n      activity:\n        id: send\n        tool: send\n        input:\n          message:\n            ref: payload.message\n" + resultHandlers
 	if nested {
-		nodes += "observer-node:\n  id: observer-node\n  execution_type: system_node\n  subscribes_to: [child.send.succeeded, child.send.failed]\n  event_handlers:\n    child.send.succeeded:\n      rules:\n        - id: observe_success\n          condition: payload.result.delivered == true\n    child.send.failed:\n      rules:\n        - id: observe_failure\n          condition: payload.failure != null\n"
+		nodes += "observer-node:\n  id: observer-node\n  execution_type: system_node\n  subscribes_to: [send.succeeded, send.failed]\n  event_handlers:\n    send.succeeded:\n      rules:\n        - id: observe_success\n          condition: payload.result.delivered == true\n    send.failed:\n      rules:\n        - id: observe_failure\n          condition: payload.failure != null\n"
 	}
 	writeClosedVariantFile(t, root, flowRoot+"nodes.yaml", nodes)
 	return root

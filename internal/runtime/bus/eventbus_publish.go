@@ -19,38 +19,12 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type targetFailureDeadLetterRecorder interface {
 	RecordDeadLetter(context.Context, runtimedeadletters.Record) error
-}
-
-func shouldPersistPipelineReceipt(persisted bool, publishErr error) bool {
-	if !persisted {
-		return false
-	}
-	return !errors.Is(publishErr, errAuthoritativeDeliveryIncomplete) && !runtimepipeline.IsPipelineReceiptDeferred(publishErr)
-}
-
-func pipelineReceiptStatus(ctx context.Context, publishErr error) (string, *runtimefailures.Envelope) {
-	if publishErr != nil {
-		failure := runtimefailures.Normalize(publishErr, "eventbus", "publish")
-		return "error", &failure
-	}
-	if overrideStatus, overrideFailure, ok := runtimepipeline.PipelineReceiptOverrideFromContext(ctx); ok {
-		return overrideStatus, overrideFailure
-	}
-	return "processed", nil
-}
-
-func applyTargetDeliveryFailureReceipt(override *runtimepipeline.PipelineReceiptOverride, failure runtimepinrouting.TargetFailure) {
-	if override == nil || failure == "" {
-		return
-	}
-	override.Status = "dead_letter"
-	override.Failure = targetDeliveryFailureEnvelope(failure)
 }
 
 func targetDeliveryFailureEnvelope(failure runtimepinrouting.TargetFailure) *runtimefailures.Envelope {
@@ -181,6 +155,9 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) error {
 	if err != nil {
 		return err
 	}
+	if queued, err := eb.queuePreparedPublishForActiveMutation(ctx, prepared); queued || err != nil {
+		return err
+	}
 	return eb.dispatchPreparedPublish(ctx, prepared)
 }
 
@@ -204,6 +181,9 @@ func (eb *EventBus) PublishAndWait(ctx context.Context, evt events.Event) error 
 	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt})
 	if err != nil {
 		return err
+	}
+	if _, active := runtimepipeline.PipelineSQLTxFromContext(ctx); active {
+		return errors.New("PublishAndWait cannot dispatch before its active mutation commits")
 	}
 	group := newLocalDeliveryCompletionGroup()
 	waitCtx := ctx
@@ -239,6 +219,9 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 	if err != nil {
 		return err
 	}
+	if queued, err := eb.queuePreparedPublishForActiveMutation(ctx, prepared); queued || err != nil {
+		return err
+	}
 	if prepared.exactDuplicate {
 		return eb.DispatchPreparedPublish(ctx, prepared)
 	}
@@ -268,7 +251,6 @@ func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublis
 	if err != nil {
 		return PreparedPublish{}, err
 	}
-	preparedCtx = claim.BindContext(preparedCtx)
 	plan.event = admitted.Event()
 	plan.admitted = admitted
 	plan.publicationClaim = claim
@@ -290,13 +272,13 @@ func (p eventBusCommitPublishPlan) PrepareCommitPublish(ctx context.Context) (Pr
 		return PreparedPublish{}, errors.New("event publish plan requires pre-admitted event identity")
 	}
 	if !p.direct {
-		return p.bus.prepareAdmittedPublishInMutation(ctx, p.admitted, p.publicationClaim, runtimereplayclaim.CommittedReplayScopeSubscribed, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
+		return p.bus.prepareAdmittedPublishInMutation(ctx, p.admitted, p.publicationClaim, runtimepipelineobligation.ScopeSubscribed, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
 			return p.bus.planSubscribedRoutePlan(ctx, evt, true)
 		})
 	}
 	if len(p.directRoutes) > 0 {
 		routes := events.NormalizeDeliveryRoutes(p.directRoutes)
-		return p.bus.prepareAdmittedPublishInMutation(ctx, p.admitted, p.publicationClaim, runtimereplayclaim.CommittedReplayScopeDirect, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
+		return p.bus.prepareAdmittedPublishInMutation(ctx, p.admitted, p.publicationClaim, runtimepipelineobligation.ScopeDirect, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
 			return p.bus.planExactDirectRoutePlan(ctx, evt, routes)
 		})
 	}
@@ -304,7 +286,7 @@ func (p eventBusCommitPublishPlan) PrepareCommitPublish(ctx context.Context) (Pr
 	if len(requested) == 0 {
 		return PreparedPublish{}, errors.New("direct event publication requires at least one recipient")
 	}
-	return p.bus.prepareAdmittedPublishInMutation(ctx, p.admitted, p.publicationClaim, runtimereplayclaim.CommittedReplayScopeDirect, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
+	return p.bus.prepareAdmittedPublishInMutation(ctx, p.admitted, p.publicationClaim, runtimepipelineobligation.ScopeDirect, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
 		plan, err := p.bus.planDirectRoutePlan(ctx, evt, requested)
 		if err != nil {
 			return RoutePlan{}, err
@@ -369,10 +351,12 @@ func (p PreparedPublish) CommitRequest() CommitPublishRequest {
 	request := CommitPublishRequest{
 		Event:          p.admitted,
 		DeliveryRoutes: p.plan.DeliveryRoutes(),
-		ReplayScope:    runtimereplayclaim.CommittedReplayScopeSubscribed,
+		ReplayScope:    runtimepipelineobligation.ScopeSubscribed,
+		PipelineClaim:  p.publicationClaim.Claim(),
 	}
 	if failure := runtimepinrouting.TargetFailure(strings.TrimSpace(string(p.plan.TargetFailure))); failure != "" {
-		request.PipelineReceipt = &InitialPipelineReceipt{Status: "dead_letter", Failure: targetDeliveryFailureEnvelope(failure)}
+		disposition := runtimepipelineobligation.DeadLetter(string(failure), targetDeliveryFailureEnvelope(failure))
+		request.Disposition = &disposition
 		_, _, record := targetDeliveryFailureRecord(p.Event, p.plan, failure)
 		request.DeadLetter = &record
 	}
@@ -434,7 +418,6 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 	if err != nil {
 		return PreparedPublish{}, err
 	}
-	preparedCtx = publicationClaim.BindContext(preparedCtx)
 	plan, err := eb.planSubscribedPublish(preparedCtx, evt)
 	if err != nil {
 		publicationClaim.Release(preparedCtx)
@@ -471,12 +454,12 @@ func (eb *EventBus) PreparePublishInMutation(ctx context.Context, evt events.Eve
 		defer func() { _ = lease.Done() }()
 		ctx = bindWorkContext(ctx, lease, eb.workOwner)
 	}
-	return eb.preparePublishInMutation(ctx, evt, runtimereplayclaim.CommittedReplayScopeSubscribed, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
+	return eb.preparePublishInMutation(ctx, evt, runtimepipelineobligation.ScopeSubscribed, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
 		return eb.planSubscribedRoutePlan(ctx, evt, true)
 	})
 }
 
-func (eb *EventBus) preparePublishInMutation(ctx context.Context, evt events.Event, replayScope runtimereplayclaim.CommittedReplayScope, planRoutes func(context.Context, events.Event) (RoutePlan, error)) (PreparedPublish, error) {
+func (eb *EventBus) preparePublishInMutation(ctx context.Context, evt events.Event, replayScope runtimepipelineobligation.CommittedScope, planRoutes func(context.Context, events.Event) (RoutePlan, error)) (PreparedPublish, error) {
 	ictx, admitted, err := eb.admitPublishEvent(ctx, evt)
 	if err != nil {
 		return PreparedPublish{}, err
@@ -521,7 +504,7 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 	ctx context.Context,
 	admitted events.AdmittedEvent,
 	publicationClaim *pipelinePublicationClaim,
-	replayScope runtimereplayclaim.CommittedReplayScope,
+	replayScope runtimepipelineobligation.CommittedScope,
 	planRoutes func(context.Context, events.Event) (RoutePlan, error),
 ) (PreparedPublish, error) {
 	evt := admitted.Event()
@@ -530,7 +513,6 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 		return PreparedPublish{}, errors.New("typed CommitPublish transaction context is required")
 	}
 	txctx := WithCommitPublishTransaction(ctx, transaction)
-	txctx = publicationClaim.BindContext(txctx)
 	if publicationClaim != nil && !runtimepipeline.QueuePipelineRollbackAction(txctx, func(actionCtx context.Context) { publicationClaim.Release(actionCtx) }) {
 		publicationClaim.Release(txctx)
 		return PreparedPublish{}, errors.New("event mutation rollback actions are required for pipeline publication claim")
@@ -539,12 +521,10 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 	if err != nil {
 		return PreparedPublish{}, err
 	}
-	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
-	txctx = runtimepipeline.WithPipelineReceiptOverride(txctx, receiptOverride)
 	prepared := PreparedPublish{
 		Event:            evt,
 		admitted:         admitted,
-		direct:           replayScope == runtimereplayclaim.CommittedReplayScopeDirect,
+		direct:           replayScope == runtimepipelineobligation.ScopeDirect,
 		publicationClaim: publicationClaim,
 		dispatchContext:  txctx,
 	}
@@ -564,18 +544,17 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 		return PreparedPublish{}, fmt.Errorf("validate durable route plan: %w", err)
 	}
 	prepared.plan = inboundPlan
-	var initialReceipt *InitialPipelineReceipt
+	var initialDisposition *runtimepipelineobligation.Disposition
 	var initialDeadLetter *runtimedeadletters.Record
 	if inboundPlan.TargetFailure != "" {
-		applyTargetDeliveryFailureReceipt(receiptOverride, inboundPlan.TargetFailure)
-		status, failure := pipelineReceiptStatus(txctx, nil)
-		initialReceipt = &InitialPipelineReceipt{Status: status, Failure: failure}
+		disposition := runtimepipelineobligation.DeadLetter(string(inboundPlan.TargetFailure), targetDeliveryFailureEnvelope(inboundPlan.TargetFailure))
+		initialDisposition = &disposition
 		_, _, deadLetter := targetDeliveryFailureRecord(evt, inboundPlan, inboundPlan.TargetFailure)
 		initialDeadLetter = &deadLetter
 	}
 	if err := finalizePreparedPublish(txctx, transaction, CommitPublishRequest{
 		Event: admitted, DeliveryRoutes: inboundPlan.DeliveryRoutes(), ReplayScope: replayScope,
-		PipelineReceipt: initialReceipt, DeadLetter: initialDeadLetter,
+		PipelineClaim: publicationClaim.Claim(), Disposition: initialDisposition, DeadLetter: initialDeadLetter,
 	}); err != nil {
 		return PreparedPublish{}, fmt.Errorf("finalize event publish: %w", err)
 	}
@@ -626,7 +605,7 @@ func (eb *EventBus) PublishDirectInMutation(ctx context.Context, evt events.Even
 	if len(requested) == 0 {
 		return errors.New("direct event publication requires at least one recipient")
 	}
-	prepared, err := eb.preparePublishInMutation(ctx, evt, runtimereplayclaim.CommittedReplayScopeDirect, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
+	prepared, err := eb.preparePublishInMutation(ctx, evt, runtimepipelineobligation.ScopeDirect, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
 		plan, err := eb.planDirectRoutePlan(ctx, evt, requested)
 		if err != nil {
 			return RoutePlan{}, err
@@ -657,6 +636,13 @@ func (eb *EventBus) queuePreparedPublishInMutation(ctx context.Context, prepared
 		return errors.New("event mutation post-commit actions are required")
 	}
 	return nil
+}
+
+func (eb *EventBus) queuePreparedPublishForActiveMutation(ctx context.Context, prepared PreparedPublish) (bool, error) {
+	if _, active := runtimepipeline.PipelineSQLTxFromContext(ctx); !active {
+		return false, nil
+	}
+	return true, eb.queuePreparedPublishInMutation(ctx, prepared)
 }
 
 // DispatchPreparedPublish consumes only the plan finalized by
@@ -708,7 +694,6 @@ func (eb *EventBus) dispatchPreparedPublishWithCompletion(ctx context.Context, p
 	if prepared.dispatchContext != nil {
 		ctx = WithoutCommitPublishTransaction(runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(prepared.dispatchContext))))
 	}
-	ctx = prepared.publicationClaim.BindContext(ctx)
 	defer prepared.publicationClaim.Release(ctx)
 	dispatchErr := eb.dispatchPreparedPublishBody(ctx, prepared)
 	if completion == nil {
@@ -732,7 +717,7 @@ func (eb *EventBus) dispatchPreparedPublishBody(ctx context.Context, prepared Pr
 		eb.recordCommittedPublishConvergence(ctx, prepared.Event)
 		return nil
 	}
-	return eb.completeCommittedPublishDispatch(ctx, prepared.Event, prepared.plan)
+	return eb.completeCommittedPublishDispatch(ctx, prepared.Event, prepared.plan, prepared.publicationClaim)
 }
 
 func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared PreparedPublish) error {
@@ -776,7 +761,7 @@ func (eb *EventBus) dispatchCommittedPublishAsync(ctx context.Context, evt event
 		defer func() { _ = lease.Done() }()
 		dispatchCtx = bindWorkContext(dispatchCtx, lease, owner)
 		defer publicationClaim.Release(dispatchCtx)
-		if err := eb.completeCommittedPublishDispatch(dispatchCtx, evt, inboundPlan); err != nil {
+		if err := eb.completeCommittedPublishDispatch(dispatchCtx, evt, inboundPlan, publicationClaim); err != nil {
 			eb.reportLocalDispatchFailure("async_committed_dispatch_failed", evt, err)
 		}
 	}()
@@ -795,7 +780,7 @@ func (eb *EventBus) reportLocalDispatchFailure(action string, evt events.Event, 
 	)
 }
 
-func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt events.Event, inboundPlan RoutePlan) error {
+func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt events.Event, inboundPlan RoutePlan, publicationClaim *pipelinePublicationClaim) error {
 	ctx = WithoutCommitPublishTransaction(ctx)
 	workCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(ctx))
 	eb.notifyTestPostCommitDispatchStarted(workCtx, evt)
@@ -805,18 +790,17 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 	deferredTransitions := make([]runtimepipeline.DeferredPipelineTransition, 0, 8)
 	postCommitActions := make([]runtimepipeline.OwnerAction, 0, 8)
 	afterPublishActions := make([]runtimepipeline.OwnerAction, 0, 4)
-	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
 	workCtx = runtimepipeline.WithPipelineTransitionCollector(workCtx, &deferredTransitions)
 	workCtx = runtimepipeline.WithPipelinePostCommitActions(workCtx, &postCommitActions)
 	workCtx = runtimepipeline.WithPipelineAfterPublishActions(workCtx, &afterPublishActions)
-	workCtx = runtimepipeline.WithPipelineReceiptOverride(workCtx, receiptOverride)
-	ctx = runtimepipeline.WithPipelineReceiptOverride(ctx, receiptOverride)
 	defer runtimepipeline.FlushPipelineAfterPublishActions(afterPublishActions)
 
-	passthrough, deferred, err := eb.runInterceptorsForDeliveryRoutes(workCtx, evt, inboundPlan.DeliveryRoutes())
+	passthrough, deferred, outcome, err := eb.runInterceptorsForDeliveryRoutes(workCtx, evt, inboundPlan.DeliveryRoutes())
 	if err != nil {
-		eb.recordCommittedPublishReceipt(ctx, evt, err)
-		return err
+		return errors.Join(err, eb.settleCommittedPublish(ctx, publicationClaim, committedPublishFailureDisposition(evt, "pipeline_dispatch_failed", eventBusFailure(err, "dispatch_committed_publish"))))
+	}
+	if disposition, ok := outcome.Disposition(); ok {
+		return eb.settleCommittedPublish(ctx, publicationClaim, disposition)
 	}
 
 	if passthrough {
@@ -824,15 +808,16 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 		if len(recipients) > 0 {
 			eb.logQueuedDeliveries(ctx, evt, inboundPlan.PersistedRecipientIDs(), "matched_agent_subscription", inboundPlan.ExtraDetail)
 			if err := eb.deliverRoutePlanWithRoutes(workCtx, evt, inboundPlan); err != nil {
-				eb.recordCommittedPublishReceipt(ctx, evt, err)
-				return err
+				if errors.Is(err, errAuthoritativeDeliveryIncomplete) {
+					return err
+				}
+				return errors.Join(err, eb.settleCommittedPublish(ctx, publicationClaim, committedPublishFailureDisposition(evt, "pipeline_delivery_failed", eventBusFailure(err, "deliver_route_plan"))))
 			}
 			eb.logDelivery(ctx, evt, recipients, inboundPlan.ExtraDetail)
 		}
 		if inboundPlan.BlockedByCycle && inboundPlan.CycleEscalation != nil {
 			if err := eb.publishDeferred(workCtx, *inboundPlan.CycleEscalation); err != nil {
-				eb.recordCommittedPublishReceipt(ctx, evt, err)
-				return err
+				return errors.Join(err, eb.settleCommittedPublish(ctx, publicationClaim, committedPublishFailureDisposition(evt, "pipeline_deferred_publish_failed", eventBusFailure(err, "publish_deferred"))))
 			}
 		}
 		if strings.TrimSpace(inboundPlan.ContradictionReason) != "" {
@@ -845,34 +830,78 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 
 	for _, d := range deferred {
 		if err := eb.publishDeferred(workCtx, d); err != nil {
-			eb.recordCommittedPublishReceipt(ctx, evt, err)
-			return err
+			return errors.Join(err, eb.settleCommittedPublish(ctx, publicationClaim, committedPublishFailureDisposition(evt, "pipeline_deferred_publish_failed", eventBusFailure(err, "publish_deferred"))))
 		}
 	}
-	eb.recordCommittedPublishReceipt(ctx, evt, nil)
+	if evt.Type() == events.EventType("mailbox.card_decided") {
+		if err := publicationClaim.MarkDecisionProcessed(ctx); err != nil {
+			return err
+		}
+		if err := eb.ConvergeNormalRunCompletionForEvent(ctx, evt.ID()); err != nil {
+			failure := eventBusDependencyFailure(err, "decision_route_convergence_failed", "converge_decision_route")
+			if settleErr := eb.settleCommittedPublish(ctx, publicationClaim, runtimepipelineobligation.Deferred("decision_route_convergence_failed", time.Now().UTC().Add(runtimepipelineobligation.DecisionRouteRetryDelay), failure)); settleErr != nil {
+				return errors.Join(err, settleErr)
+			}
+			return nil
+		}
+		return eb.settleCommittedPublish(ctx, publicationClaim, runtimepipelineobligation.Acknowledged("decision_route_converged"))
+	}
+	if err := eb.settleCommittedPublish(ctx, publicationClaim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
+		return err
+	}
 	eb.recordCommittedPublishConvergence(ctx, evt)
 	return nil
 }
 
-func (eb *EventBus) runInterceptorsForDeliveryRoutes(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute) (bool, []events.Event, error) {
+func (eb *EventBus) settleCommittedPublish(ctx context.Context, claim *pipelinePublicationClaim, disposition runtimepipelineobligation.Disposition) error {
+	if claim == nil {
+		if eb != nil && eb.pipelineObligations != nil {
+			return errors.New("committed pipeline dispatch requires its publication claim")
+		}
+		return nil
+	}
+	return claim.Settle(ctx, disposition)
+}
+
+func committedPublishFailureDisposition(evt events.Event, reason string, failure *runtimefailures.Envelope) runtimepipelineobligation.Disposition {
+	reason = pipelineDispositionFailureReason(reason, failure)
+	if evt.Type() == events.EventType("mailbox.card_decided") {
+		return runtimepipelineobligation.Quarantined(reason, failure)
+	}
+	return runtimepipelineobligation.Terminal(reason, failure)
+}
+
+func pipelineDispositionFailureReason(fallback string, failure *runtimefailures.Envelope) string {
+	if failure != nil {
+		if code := strings.TrimSpace(failure.Detail.Code); code != "" {
+			return code
+		}
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func (eb *EventBus) runInterceptorsForDeliveryRoutes(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	interceptors := eb.interceptorsSnapshot()
 	nodeRoutes := nodeDeliveryRoutes(deliveryRoutes)
 	if len(nodeRoutes) == 0 {
 		return eb.runInterceptorSet(ctx, evt, interceptors)
 	}
 	eventInterceptors, routeInterceptors := splitDeliveryRouteInterceptors(interceptors)
-	passthrough, deferred, err := eb.runInterceptorSet(ctx, evt, eventInterceptors)
+	passthrough, deferred, outcome, err := eb.runInterceptorSet(ctx, evt, eventInterceptors)
 	if err != nil {
-		return passthrough, nil, err
+		return passthrough, nil, runtimepipelineobligation.Continue(), err
 	}
-	routePassthrough, routeDeferred, err := eb.runNodeDeliveryRouteInterceptors(ctx, evt, nodeRoutes, routeInterceptors)
+	if !outcome.ContinueDispatch() {
+		return passthrough, deferred, outcome, nil
+	}
+	routePassthrough, routeDeferred, routeOutcome, err := eb.runNodeDeliveryRouteInterceptors(ctx, evt, nodeRoutes, routeInterceptors)
 	if err != nil {
-		return passthrough, nil, err
+		return passthrough, nil, runtimepipelineobligation.Continue(), err
 	}
 	if len(routeDeferred) > 0 {
 		deferred = append(deferred, routeDeferred...)
 	}
-	return passthrough && routePassthrough, deferred, nil
+	return passthrough && routePassthrough, deferred, routeOutcome, nil
 }
 
 func nodeDeliveryRoutes(deliveryRoutes []events.DeliveryRoute) []events.DeliveryRoute {
@@ -902,13 +931,13 @@ func splitDeliveryRouteInterceptors(interceptors []EventInterceptor) ([]EventInt
 	return eventInterceptors, routeInterceptors
 }
 
-func (eb *EventBus) runNodeDeliveryRouteInterceptors(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute, interceptors []DeliveryRouteInterceptor) (bool, []events.Event, error) {
+func (eb *EventBus) runNodeDeliveryRouteInterceptors(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute, interceptors []DeliveryRouteInterceptor) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	if err := events.ValidateDeliveryRouteProjections(deliveryRoutes); err != nil {
-		return true, nil, err
+		return true, nil, runtimepipelineobligation.Continue(), err
 	}
 	deliveryRoutes = nodeDeliveryRoutes(deliveryRoutes)
 	if len(deliveryRoutes) == 0 || len(interceptors) == 0 {
-		return true, nil, nil
+		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
 	passthrough := true
 	deferred := make([]events.Event, 0)
@@ -929,24 +958,27 @@ func (eb *EventBus) runNodeDeliveryRouteInterceptors(ctx context.Context, evt ev
 		seen[key] = struct{}{}
 		projected, err := projectEventForDeliveryRoute(evt, route)
 		if err != nil {
-			return passthrough, nil, err
+			return passthrough, nil, runtimepipelineobligation.Continue(), err
 		}
 		for _, it := range interceptors {
-			pass, out, err := it.InterceptDeliveryRoute(ctx, projected, route)
+			pass, out, outcome, err := it.InterceptDeliveryRoute(ctx, projected, route)
 			if err != nil {
-				return passthrough, nil, err
+				return passthrough, nil, runtimepipelineobligation.Continue(), err
+			}
+			if !outcome.ContinueDispatch() {
+				return passthrough, deferred, outcome, nil
 			}
 			if !pass {
 				passthrough = false
 			}
 			admitted, err := admitDeferredEvents(ctx, out)
 			if err != nil {
-				return passthrough, nil, err
+				return passthrough, nil, runtimepipelineobligation.Continue(), err
 			}
 			deferred = append(deferred, admitted...)
 		}
 	}
-	return passthrough, deferred, nil
+	return passthrough, deferred, runtimepipelineobligation.Continue(), nil
 }
 
 func projectEventForDeliveryRoute(evt events.Event, route events.DeliveryRoute) (events.DeliveryEvent, error) {
@@ -1026,33 +1058,6 @@ func (eb *EventBus) convergeStandaloneRuntimePlatformRun(ctx context.Context, ev
 	return eb.ConvergeNormalRunCompletionForEvent(ctx, evt.ID())
 }
 
-func (eb *EventBus) recordCommittedPublishReceipt(ctx context.Context, evt events.Event, publishErr error) {
-	if runtimepipeline.IsPipelineReceiptDeferred(publishErr) {
-		_ = eb.deferDecisionRouteObligation(ctx, evt.ID(), publishErr)
-		return
-	}
-	if publishErr != nil && evt.Type() == events.EventType("mailbox.card_decided") {
-		if err := eb.QuarantineRecoveredPipelineEvent(ctx, evt, publishErr); err != nil {
-			failure := eventBusDependencyFailure(err, "decision_route_obligation_quarantine_failed", "quarantine_decision_route")
-			eb.logRuntime(ctx, "error", "Quarantining the failed foreground decision route failed", "eventbus", "decision_route_obligation_quarantine_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, nil, failure, 0)
-		}
-		return
-	}
-	if publishErr == nil && evt.Type() == events.EventType("mailbox.card_decided") {
-		if err := eb.SettleRecoveredPipelineEvent(ctx, evt); err != nil {
-			_ = eb.deferDecisionRouteObligation(ctx, evt.ID(), err)
-		}
-		return
-	}
-	if !shouldPersistPipelineReceipt(true, publishErr) {
-		return
-	}
-	status, failure := pipelineReceiptStatus(ctx, publishErr)
-	if err := eb.markPipelineReceipt(ctx, evt.ID(), status, failure); err == nil && evt.Type() == events.EventType("mailbox.card_decided") {
-		_ = eb.completeDecisionRouteObligation(ctx, evt.ID())
-	}
-}
-
 func (eb *EventBus) recordCommittedPublishConvergence(ctx context.Context, evt events.Event) {
 	// Decision-route convergence is part of its durable settlement state machine.
 	// Sending a post-route failure through this generic path can overwrite a
@@ -1064,7 +1069,6 @@ func (eb *EventBus) recordCommittedPublishConvergence(ctx context.Context, evt e
 		failureErr := runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "normal_run_completion_failed", "eventbus", "post_commit_convergence", map[string]any{
 			"event_id": evt.ID(), "event_type": string(evt.Type()),
 		}, err)
-		eb.recordCommittedPublishReceipt(ctx, evt, failureErr)
 		failure := runtimefailures.Normalize(failureErr, "eventbus", "post_commit_convergence")
 		eb.logRuntime(ctx, "error", "Post-commit publish convergence failed", "eventbus", "publish_post_commit_convergence_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, map[string]any{
 			"failure": failure,
@@ -1072,7 +1076,7 @@ func (eb *EventBus) recordCommittedPublishConvergence(ctx context.Context, evt e
 	}
 }
 
-func (eb *EventBus) runInterceptors(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
+func (eb *EventBus) runInterceptors(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	return eb.runInterceptorSet(ctx, evt, eb.interceptorsSnapshot())
 }
 
@@ -1091,32 +1095,32 @@ func (eb *EventBus) interceptorsSnapshot() []EventInterceptor {
 	return interceptors
 }
 
-func (eb *EventBus) runInterceptorSet(ctx context.Context, evt events.Event, interceptors []EventInterceptor) (bool, []events.Event, error) {
+func (eb *EventBus) runInterceptorSet(ctx context.Context, evt events.Event, interceptors []EventInterceptor) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	if len(interceptors) == 0 {
-		return true, nil, nil
+		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
 	passthrough := true
 	deferred := make([]events.Event, 0, 4)
 	for _, it := range interceptors {
-		pass, out, err := it.Intercept(ctx, evt)
+		pass, out, outcome, err := it.Intercept(ctx, evt)
 		if err != nil {
-			if runtimepipeline.IsPipelineReceiptDeferred(err) {
-				return true, nil, err
-			}
-			return true, nil, runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "event_interceptor_failed", "eventbus", "run_interceptor", map[string]any{
+			return true, nil, runtimepipelineobligation.Continue(), runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "event_interceptor_failed", "eventbus", "run_interceptor", map[string]any{
 				"event_id": evt.ID(), "event_type": string(evt.Type()),
 			}, err)
+		}
+		if !outcome.ContinueDispatch() {
+			return pass, deferred, outcome, nil
 		}
 		if !pass {
 			passthrough = false
 		}
 		admitted, err := admitDeferredEvents(ctx, out)
 		if err != nil {
-			return true, nil, err
+			return true, nil, runtimepipelineobligation.Continue(), err
 		}
 		deferred = append(deferred, admitted...)
 	}
-	return passthrough, deferred, nil
+	return passthrough, deferred, runtimepipelineobligation.Continue(), nil
 }
 
 func admitDeferredEvents(ctx context.Context, out []events.Event) ([]events.Event, error) {
@@ -1470,6 +1474,9 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	if err != nil {
 		return err
 	}
+	if queued, err := eb.queuePreparedPublishForActiveMutation(ctx, prepared); queued || err != nil {
+		return err
+	}
 	return eb.dispatchPreparedPublish(ctx, prepared)
 }
 
@@ -1494,6 +1501,9 @@ func (eb *EventBus) PublishDirectRoutes(ctx context.Context, evt events.Event, r
 		bus: eb, event: evt, direct: true, directRoutes: events.NormalizeDeliveryRoutes(routes),
 	})
 	if err != nil {
+		return err
+	}
+	if queued, err := eb.queuePreparedPublishForActiveMutation(ctx, prepared); queued || err != nil {
 		return err
 	}
 	return eb.dispatchPreparedPublish(ctx, prepared)
@@ -1614,41 +1624,28 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 	return eb.publishRecipientPlan(evt, plan), nil
 }
 
-// PublishPersistedRecipients delivers an already-committed event using the
-// persisted agent manifest plus the authoritative committed replay scope.
-func (eb *EventBus) PublishPersistedRecipients(ctx context.Context, evt events.Event, recipients []string) error {
-	return eb.publishPersistedRecipients(ctx, evt, recipients, false)
-}
-
 // RecoverPersistedPipeline replays the complete pipeline for an event whose
 // terminal pipeline receipt was never written.
-func (eb *EventBus) RecoverPersistedPipeline(ctx context.Context, evt events.Event, recipients []string) error {
-	return eb.publishPersistedRecipients(ctx, evt, recipients, true)
+func (eb *EventBus) RecoverPersistedPipeline(ctx context.Context, work runtimepipelineobligation.ClaimedWork, recipients []string) (runtimepipelineobligation.ExecutionOutcome, error) {
+	return eb.publishClaimedPipeline(ctx, work.Event, work.Scope, recipients)
 }
 
-func (eb *EventBus) ReleasePendingPersistedDeliveriesForEvent(ctx context.Context, evt events.Event) error {
-	if eb == nil {
-		return nil
-	}
-	return eb.publishPersistedRecipients(ctx, evt, nil, true)
-}
-
-func (eb *EventBus) publishPersistedRecipients(ctx context.Context, evt events.Event, recipients []string, replayInterceptors bool) error {
+func (eb *EventBus) publishClaimedPipeline(ctx context.Context, evt events.Event, scope runtimepipelineobligation.CommittedScope, recipients []string) (runtimepipelineobligation.ExecutionOutcome, error) {
 	eb.clearPendingOutboxOperation(evt.ID())
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
-		return err
+		return runtimepipelineobligation.Continue(), err
 	}
 	recipients = uniqueStrings(recipients)
 	if evt.Type() == "" {
-		return errors.New("event type is required")
+		return runtimepipelineobligation.Continue(), errors.New("event type is required")
 	}
 	if !isValidEventTypeName(string(evt.Type())) {
-		return fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
+		return runtimepipelineobligation.Continue(), fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
 	}
 	admitted, err := events.RevalidatePersistedEvent(evt)
 	if err != nil {
-		return err
+		return runtimepipelineobligation.Continue(), err
 	}
 	evt = admitted.Event()
 	ctx = events.WithDeliveryContext(ctx, evt.DeliveryContext())
@@ -1656,57 +1653,61 @@ func (eb *EventBus) publishPersistedRecipients(ctx context.Context, evt events.E
 		ctx = runtimecorrelation.WithRunID(ctx, runID)
 	}
 	if reason, err := eb.dispatchQueueReason(ctx, evt); err != nil {
-		return err
+		return runtimepipelineobligation.Continue(), err
 	} else if reason != "" {
 		if reason == dispatchQueueRuntimeIngress {
-			return ErrRuntimeIngressPaused
+			return runtimepipelineobligation.Continue(), ErrRuntimeIngressPaused
 		}
-		return ErrRunDispatchBlocked
+		return runtimepipelineobligation.Continue(), ErrRunDispatchBlocked
 	}
-	scope, err := eb.authoritativeReplayScopeForEvent(ctx, evt.ID())
-	if err != nil {
-		return err
+	return eb.publishPersistedRecipientsWithScope(ctx, evt, scope, recipients, true)
+}
+
+func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt events.Event, scope runtimepipelineobligation.CommittedScope, recipients []string, replayInterceptors bool) (runtimepipelineobligation.ExecutionOutcome, error) {
+	if _, err := runtimepipelineobligation.ParseCommittedScope(string(scope)); err != nil {
+		return runtimepipelineobligation.Continue(), err
 	}
 	liveRecipients, internalRecipients, deliveryRoutes, err := eb.replayRecipientsForCommittedEvent(ctx, evt, recipients, scope)
 	if err != nil {
-		return err
+		return runtimepipelineobligation.Continue(), err
 	}
 	passthrough := true
 	deferred := []events.Event(nil)
-	if replayInterceptors && scope == runtimereplayclaim.CommittedReplayScopeSubscribed {
+	if replayInterceptors && scope == runtimepipelineobligation.ScopeSubscribed {
 		postCommitActions := make([]runtimepipeline.OwnerAction, 0, 8)
 		deferredTransitions := make([]runtimepipeline.DeferredPipelineTransition, 0, 8)
-		receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
 		ctx = runtimepipeline.WithPipelineTransitionCollector(ctx, &deferredTransitions)
 		ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommitActions)
-		ctx = runtimepipeline.WithPipelineReceiptOverride(ctx, receiptOverride)
-		var err error
-		passthrough, deferred, err = eb.runInterceptorsForDeliveryRoutes(ctx, evt, deliveryRoutes)
+		var outcome runtimepipelineobligation.ExecutionOutcome
+		passthrough, deferred, outcome, err = eb.runInterceptorsForDeliveryRoutes(ctx, evt, deliveryRoutes)
 		if err != nil {
-			return err
+			return runtimepipelineobligation.Continue(), err
+		}
+		if !outcome.ContinueDispatch() {
+			return outcome, nil
 		}
 		runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
 		runtimepipeline.FlushDeferredPipelineTransitions(ctx, deferredTransitions)
 	}
 	if passthrough && len(liveRecipients) > 0 {
 		if err := eb.deliverToRecipientsWithRoutes(ctx, evt, liveRecipients, deliveryRoutes); err != nil {
-			return err
+			return runtimepipelineobligation.Continue(), err
 		}
 	}
 	for _, d := range deferred {
 		if err := eb.publishDeferred(ctx, d); err != nil {
-			return err
+			return runtimepipelineobligation.Continue(), err
 		}
 	}
 	if !passthrough || len(liveRecipients) == 0 {
-		return nil
+		return runtimepipelineobligation.Continue(), nil
 	}
 	owner := "event_deliveries"
-	if scope == runtimereplayclaim.CommittedReplayScopeSubscribed {
+	if scope == runtimepipelineobligation.ScopeSubscribed {
 		owner = "event_deliveries+committed_replay_scope"
 	}
 	eb.logRuntime(ctx, "debug", "Persisted event was delivered to authoritative recipients", "eventbus", "delivered", evt.ID(), string(evt.Type()), "", evt.EntityID(), "", nil, map[string]any{
-		"direct":                     scope == runtimereplayclaim.CommittedReplayScopeDirect,
+		"direct":                     scope == runtimepipelineobligation.ScopeDirect,
 		"delivery_manifest_owner":    owner,
 		"recipients_count":           len(liveRecipients),
 		"parent_event_id":            strings.TrimSpace(evt.ParentEventID()),
@@ -1716,7 +1717,7 @@ func (eb *EventBus) publishPersistedRecipients(ctx context.Context, evt events.E
 		"internal_recipients":        append([]string(nil), internalRecipients...),
 		"replay_scope":               string(scope),
 	}, nil, 0)
-	return nil
+	return runtimepipelineobligation.Continue(), nil
 }
 
 func (eb *EventBus) deliveryTargetsForEvent(ctx context.Context, eventID string) map[string]events.RouteIdentity {

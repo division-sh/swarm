@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 )
 
 func TestControllerContinueDoesNotFailAfterCommittedTransitionWhenReleaseFails(t *testing.T) {
@@ -76,7 +75,7 @@ type fakeRunControlQueue struct {
 	releases []int
 }
 
-func (q *fakeRunControlQueue) ReleaseRunQueue(context.Context, string, time.Duration, int) (int, error) {
+func (q *fakeRunControlQueue) ReleaseRunQueue(context.Context, string, int) (int, error) {
 	q.called = true
 	q.calls++
 	if len(q.releases) > 0 {

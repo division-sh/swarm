@@ -9,16 +9,15 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
 type eventCommitTxStore interface {
 	appendAdmittedEventTxOutcome(context.Context, *sql.Tx, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
 	commitInitialDeliveryObligationsTx(context.Context, *sql.Tx, string, string, []events.DeliveryRoute) error
-	UpsertCommittedReplayScopeTx(context.Context, *sql.Tx, string, runtimereplayclaim.CommittedReplayScope) error
-	UpsertPipelineReceiptTx(context.Context, *sql.Tx, string, string, *runtimefailures.Envelope) error
+	commitInitialPipelineScopeTx(context.Context, *sql.Tx, string, runtimepipelineobligation.CommittedScope) error
+	commitInitialPipelineDispositionTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) error
 	RecordDeadLetterTx(context.Context, *sql.Tx, runtimedeadletters.Record) error
 }
 
@@ -89,11 +88,11 @@ func (c sqlPublishCommitter) commitInitialSideEffects(ctx context.Context, req r
 	if err := c.store.commitInitialDeliveryObligationsTx(ctx, c.tx, req.Event.ID(), req.Event.Event().RunID(), req.DeliveryRoutes); err != nil {
 		return err
 	}
-	if err := c.store.UpsertCommittedReplayScopeTx(ctx, c.tx, req.Event.ID(), req.ReplayScope); err != nil {
+	if err := c.store.commitInitialPipelineScopeTx(ctx, c.tx, req.Event.ID(), req.ReplayScope); err != nil {
 		return err
 	}
-	if req.PipelineReceipt != nil {
-		if err := c.store.UpsertPipelineReceiptTx(ctx, c.tx, req.Event.ID(), req.PipelineReceipt.Status, req.PipelineReceipt.Failure); err != nil {
+	if req.Disposition != nil {
+		if err := c.store.commitInitialPipelineDispositionTx(ctx, c.tx, req.Event.ID(), req.PipelineClaim, *req.Disposition); err != nil {
 			return err
 		}
 	}

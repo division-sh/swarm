@@ -28,6 +28,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -193,7 +194,7 @@ type gateRecoveryCountingInterceptor struct {
 	calls    atomic.Int32
 }
 
-func (i *gateRecoveryCountingInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
+func (i *gateRecoveryCountingInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	if evt.Type() == events.EventType("mailbox.card_decided") {
 		i.calls.Add(1)
 	}
@@ -252,18 +253,32 @@ func (s *selectiveSQLiteNormalRunConvergenceFailure) ConvergeNormalRunCompletion
 	return s.SQLiteRuntimeStore.ConvergeNormalRunCompletion(ctx, eventID, workflowTerminalStates, flowTerminalStates)
 }
 
-func (i gateRecoveryPoisonInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, error) {
+func (i gateRecoveryPoisonInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	if evt.ID() != i.poisonEventID {
-		return true, nil, nil
+		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
-	return false, nil, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "decision_route_fixture_invalid", "test", "poison_route", nil)
+	return false, nil, runtimepipelineobligation.Continue(), runtimefailures.New(runtimefailures.ClassSchemaInvalid, "decision_route_fixture_invalid", "test", "poison_route", nil)
 }
 
-func (i gateRecoveryFairnessInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, error) {
+func (i gateRecoveryFairnessInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	if _, ok := i.deferred[evt.ID()]; !ok {
-		return true, nil, nil
+		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
-	return true, nil, runtimepipeline.DeferPipelineReceipt(runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "decision_card_bundle_unavailable", "test", "fairness", nil))
+	failure := runtimefailures.Normalize(
+		runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "decision_card_bundle_unavailable", "test", "fairness", nil),
+		"test",
+		"fairness",
+	)
+	return true, nil, runtimepipelineobligation.DeferExecution(
+		"decision_card_bundle_unavailable",
+		time.Now().UTC().Add(runtimepipelineobligation.DecisionRouteRetryDelay),
+		&failure,
+	), nil
+}
+
+func gateRecoveryDeferred(outcome runtimepipelineobligation.ExecutionOutcome) bool {
+	disposition, ok := outcome.Disposition()
+	return ok && disposition.Kind() == runtimepipelineobligation.DispositionDeferred
 }
 
 func TestWorkflowGateUnavailablePinRecoversThroughPersistedEventBusOnBothStores(t *testing.T) {
@@ -352,7 +367,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			sourceRoute := seedProposedEffectProofDelivery(t, selected, sourceEvent, "support")
 			sourceCtx := events.WithDeliveryContext(ctx, sourceEvent.DeliveryContext())
 			sourceCtx = runtimedelivery.WithRoute(sourceCtx, sourceRoute)
-			forward, _, err := coordinator.Intercept(sourceCtx, sourceEvent)
+			forward, _, _, err := coordinator.Intercept(sourceCtx, sourceEvent)
 			if err != nil {
 				t.Fatalf("execute proposal source: %v", err)
 			}
@@ -412,9 +427,9 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			decisionEvent := eventtest.RuntimeControl(decisionEventID, events.EventType("mailbox.card_decided"), "platform", "", decisionPayload, 0, runID, "",
 				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "root"), time.Now().UTC())
 			storetest.CommitSemanticEvent(t, ctx, selected.events, decisionEvent)
-			forward, emitted, err := newCoordinator(otherGateBundle).Intercept(ctx, decisionEvent)
-			if err == nil || !runtimepipeline.IsPipelineReceiptDeferred(err) {
-				t.Fatalf("route approval under changed bundle = forward:%v emitted:%d error:%v, want recoverable deferral", forward, len(emitted), err)
+			forward, emitted, outcome, err := newCoordinator(otherGateBundle).Intercept(ctx, decisionEvent)
+			if err != nil || !gateRecoveryDeferred(outcome) {
+				t.Fatalf("route approval under changed bundle = forward:%v emitted:%d outcome:%#v error:%v, want recoverable deferral", forward, len(emitted), outcome, err)
 			}
 			assertProposedEffectProofCounts(t, selected, runID, 0, 0)
 			if got := calls.Load(); got != 0 {
@@ -428,7 +443,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				t.Fatalf("bundle-deferred proposed effect = %#v, %v", deferred, err)
 			}
 			bus.SetInterceptors()
-			forward, emitted, err = coordinator.Intercept(ctx, decisionEvent)
+			forward, emitted, _, err = coordinator.Intercept(ctx, decisionEvent)
 			if err != nil {
 				t.Fatalf("route approval decision: %v; continuation route=%s/%s/%s", err, deferred.FlowID, deferred.FlowInstance, deferred.EntityID)
 			}
@@ -437,14 +452,14 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			}
 			releasedRequest := loadProposedEffectProofRequest(t, selected, runID)
 			changedCoordinator := newCoordinator(otherGateBundle)
-			if changedForward, changedEmitted, changedErr := changedCoordinator.Intercept(ctx, releasedRequest); changedErr == nil || !runtimepipeline.IsPipelineReceiptDeferred(changedErr) {
-				t.Fatalf("consume released request under changed bundle = forward:%v emitted:%d error:%v, want recoverable deferral", changedForward, len(changedEmitted), changedErr)
+			if changedForward, changedEmitted, changedOutcome, changedErr := changedCoordinator.Intercept(ctx, releasedRequest); changedErr != nil || !gateRecoveryDeferred(changedOutcome) {
+				t.Fatalf("consume released request under changed bundle = forward:%v emitted:%d outcome:%#v error:%v, want recoverable deferral", changedForward, len(changedEmitted), changedOutcome, changedErr)
 			}
 			if got := calls.Load(); got != 0 {
 				t.Fatalf("provider calls while released request pin unavailable = %d, want 0", got)
 			}
 			bus.SetInterceptors(coordinator)
-			if consumed, _, consumeErr := coordinator.Intercept(ctx, releasedRequest); consumeErr != nil || consumed {
+			if consumed, _, _, consumeErr := coordinator.Intercept(ctx, releasedRequest); consumeErr != nil || consumed {
 				t.Fatalf("consume released activity request under pinned bundle = forward:%v error:%v", consumed, consumeErr)
 			}
 			waitForGateRecoveryQuiescence(t, bus, ctx)
@@ -470,7 +485,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			coordinator = newCoordinator(gateRecoveryBundle)
 			bus.SetInterceptors(coordinator)
 			released := loadProposedEffectProofRequest(t, selected, runID)
-			forward, _, err = coordinator.Intercept(ctx, released)
+			forward, _, _, err = coordinator.Intercept(ctx, released)
 			if err != nil {
 				t.Fatalf("replay persisted approved request: %v", err)
 			}
@@ -482,7 +497,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			if got := calls.Load(); got != 1 {
 				t.Fatalf("provider calls after persisted replay = %d, want 1", got)
 			}
-			if _, _, err := changedCoordinator.Intercept(ctx, decisionEvent); err != nil {
+			if _, _, _, err := changedCoordinator.Intercept(ctx, decisionEvent); err != nil {
 				t.Fatalf("approval route replay after commit acknowledgment loss under changed bundle: %v", err)
 			}
 			waitForGateRecoveryQuiescence(t, bus, ctx)
@@ -500,7 +515,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				proposalRoute := seedProposedEffectProofDelivery(t, selected, proposal, "support")
 				proposalCtx := events.WithDeliveryContext(ctx, proposal.DeliveryContext())
 				proposalCtx = runtimedelivery.WithRoute(proposalCtx, proposalRoute)
-				consumed, _, routeErr := coordinator.Intercept(proposalCtx, proposal)
+				consumed, _, _, routeErr := coordinator.Intercept(proposalCtx, proposal)
 				if routeErr != nil || consumed {
 					t.Fatalf("create %s proposal = forward:%v error:%v", verdict, consumed, routeErr)
 				}
@@ -534,14 +549,14 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				decision := eventtest.RuntimeControl(decisionID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
 					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "root"), time.Now().UTC())
 				storetest.CommitSemanticEvent(t, ctx, selected.events, decision)
-				consumed, _, routeErr = coordinator.Intercept(ctx, decision)
+				consumed, _, _, routeErr = coordinator.Intercept(ctx, decision)
 				if routeErr != nil || consumed {
 					t.Fatalf("route %s = forward:%v error:%v", verdict, consumed, routeErr)
 				}
 				waitForGateRecoveryQuiescence(t, bus, ctx)
 				assertProposedEffectProofCounts(t, selected, runID, 1, 1)
 				assertProposedEffectOutcomeCount(t, selected, runID, wantEvent, 1)
-				if _, _, routeErr = newCoordinator(otherGateBundle).Intercept(ctx, decision); routeErr != nil {
+				if _, _, _, routeErr = newCoordinator(otherGateBundle).Intercept(ctx, decision); routeErr != nil {
 					t.Fatalf("%s route replay after commit acknowledgment loss under changed bundle: %v", verdict, routeErr)
 				}
 				if got := calls.Load(); got != 1 {
@@ -660,7 +675,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					Module: gateRecoveryModule{source: source}, WorkflowStore: selected.workflowStore,
 					DecisionCards: selected.cards, BundleHash: gateRecoveryBundle,
 				})
-				forward, emitted, err := coordinator.Intercept(ctx, decisionEvent)
+				forward, emitted, _, err := coordinator.Intercept(ctx, decisionEvent)
 				if err != nil || forward || len(emitted) != 0 {
 					t.Fatalf("route %s = forward:%v emitted:%d error:%v", verdict, forward, len(emitted), err)
 				}
@@ -693,7 +708,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					Module: gateRecoveryModule{source: source}, WorkflowStore: selected.workflowStore,
 					DecisionCards: selected.cards, BundleHash: otherGateBundle,
 				})
-				if _, _, err := changed.Intercept(ctx, decisionEvent); err != nil {
+				if _, _, _, err := changed.Intercept(ctx, decisionEvent); err != nil {
 					t.Fatalf("%s terminal route replay under changed bundle: %v", verdict, err)
 				}
 				if len(bus.outbox) != beforeOutbox || len(bus.published) != beforePublished {
@@ -754,7 +769,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 				[]byte(`{"chat_id":"support-room","text":"must roll back"}`), 0, runID, "",
 				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
 			route := seedProposedEffectProofDelivery(t, selected, event, "support")
-			forward, _, err := coordinator.Intercept(runtimedelivery.WithRoute(ctx, route), event)
+			forward, _, _, err := coordinator.Intercept(runtimedelivery.WithRoute(ctx, route), event)
 			if err != nil || forward {
 				t.Fatalf("proposal failure interception = forward:%v error:%v", forward, err)
 			}
@@ -840,7 +855,7 @@ func TestDecisionRouteObligationFairnessAdmitsNewWorkBehindFullDeferredPageOnBot
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := bus.SweepUndispatched(ctx, 24*time.Hour, 200); err != nil {
+			if _, err := bus.SweepUndispatched(ctx, 200); err != nil {
 				t.Fatal(err)
 			}
 			assertGateRecoveryProcessedReceipt(t, selected, newEventID)
@@ -868,13 +883,13 @@ func TestDecisionRouteObligationQuarantinesPoisonAndContinuesOnBothStores(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got, err := bus.SweepUndispatched(testAuthorActivityContext(t, context.Background()), time.Hour, 10); err != nil || got != 1 {
-				t.Fatalf("poison route sweep recovered = %d, %v; want 1, nil", got, err)
+			if got, err := bus.SweepUndispatched(testAuthorActivityContext(t, context.Background()), 10); err != nil || got != 2 {
+				t.Fatalf("poison route sweep recovered = %d, %v; want 2 handled obligations, nil", got, err)
 			}
 			assertGateRecoveryObligationStatus(t, selected, poisonEventID, "quarantined")
 			assertGateRecoveryErrorReceipt(t, selected, poisonEventID, "event_interceptor_failed")
 			assertGateRecoveryProcessedReceipt(t, selected, validEventID)
-			if got, err := bus.SweepUndispatched(testAuthorActivityContext(t, context.Background()), time.Hour, 10); err != nil || got != 0 {
+			if got, err := bus.SweepUndispatched(testAuthorActivityContext(t, context.Background()), 10); err != nil || got != 0 {
 				t.Fatalf("second poison route sweep recovered = %d, %v; want 0, nil", got, err)
 			}
 		})
@@ -898,7 +913,7 @@ func TestDecisionRouteStartupRecoveryQuarantinesPoisonAndContinuesOnBothStores(t
 			if err != nil {
 				t.Fatal(err)
 			}
-			recovery := runtimepipeline.NewRecoveryManagerWith(selected.events, bus)
+			recovery := runtimepipeline.NewRecoveryManagerWith(bus)
 			if err := recovery.Recover(testAuthorActivityContext(t, context.Background())); err != nil {
 				t.Fatalf("startup poison route recovery: %v", err)
 			}
@@ -1000,11 +1015,11 @@ func testDecisionRouteSettlementFailureFairness(t *testing.T, selected gateRecov
 
 	switch recovery {
 	case "periodic":
-		if _, err := bus.SweepUndispatched(ctx, time.Hour, 10); err != nil {
+		if _, err := bus.SweepUndispatched(ctx, 10); err != nil {
 			t.Fatalf("periodic settlement fairness: %v", err)
 		}
 	case "startup":
-		if err := runtimepipeline.NewRecoveryManagerWith(failingStore, bus).Recover(ctx); err != nil {
+		if err := runtimepipeline.NewRecoveryManagerWith(bus).Recover(ctx); err != nil {
 			t.Fatalf("startup settlement fairness: %v", err)
 		}
 	}
@@ -1100,11 +1115,11 @@ func testDecisionRouteSettlementRetry(t *testing.T, selected gateRecoveryStoreCa
 	makeGateRecoveryRouteDue(t, selected, eventID, time.Now().UTC().Add(-time.Second))
 	switch recovery {
 	case "periodic":
-		if _, err := bus.SweepUndispatched(ctx, time.Hour, 10); err != nil {
+		if _, err := bus.SweepUndispatched(ctx, 10); err != nil {
 			t.Fatalf("periodic settlement retry: %v", err)
 		}
 	case "startup":
-		if err := runtimepipeline.NewRecoveryManagerWith(failingStore, bus).Recover(ctx); err != nil {
+		if err := runtimepipeline.NewRecoveryManagerWith(bus).Recover(ctx); err != nil {
 			t.Fatalf("startup settlement retry: %v", err)
 		}
 	}
@@ -1162,12 +1177,12 @@ func TestDecisionRouteForegroundFailureQuarantinesOnBothStoresAndPublicationForm
 				}
 
 				validEventID := seedGateRecoveryRouteObligation(t, selected, runID, time.Now().UTC())
-				if _, err := bus.SweepUndispatched(testAuthorActivityContext(t, context.Background()), time.Hour, 10); err != nil {
+				if _, err := bus.SweepUndispatched(testAuthorActivityContext(t, context.Background()), 10); err != nil {
 					t.Fatalf("sweep unrelated route behind quarantined foreground failure: %v", err)
 				}
 				assertGateRecoveryProcessedReceipt(t, selected, validEventID)
 				assertGateRecoveryObligationStatus(t, selected, validEventID, "completed")
-				if got, err := bus.SweepUndispatched(testAuthorActivityContext(t, context.Background()), time.Hour, 10); err != nil || got != 0 {
+				if got, err := bus.SweepUndispatched(testAuthorActivityContext(t, context.Background()), 10); err != nil || got != 0 {
 					t.Fatalf("second foreground quarantine sweep recovered = %d, %v; want 0, nil", got, err)
 				}
 			})
@@ -1377,7 +1392,7 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 	}
 	makeGateRecoveryRouteDue(t, tc, eventID, time.Now().Add(-time.Second))
 	bus.SetInterceptors(matching)
-	if err := runtimepipeline.NewRecoveryManagerWith(tc.events, bus).Recover(ctx); err != nil {
+	if err := runtimepipeline.NewRecoveryManagerWith(bus).Recover(ctx); err != nil {
 		t.Fatal(err)
 	}
 	assertGateRecoveryActivation(t, tc.workflowStore, ctx, entityID, "completed", gateruntime.StatusRouted)
@@ -1471,7 +1486,7 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	if got := gateRecoveryPipelineReceiptCount(t, tc, decisionEventID); got != 0 {
 		t.Fatalf("unavailable pin pipeline receipt count = %d, want 0", got)
 	}
-	recovery := runtimepipeline.NewRecoveryManagerWith(tc.events, bus)
+	recovery := runtimepipeline.NewRecoveryManagerWith(bus)
 	if err := recovery.Recover(ctx); err != nil {
 		t.Fatalf("Recover while pin unavailable: %v", err)
 	}
@@ -1771,8 +1786,8 @@ func assertGateRecoveryProcessedReceipt(t *testing.T, tc gateRecoveryStoreCase, 
 	if err := tc.db.QueryRowContext(testAuthorActivityContext(t, context.Background()), query, eventID).Scan(&outcome, &reason); err != nil {
 		t.Fatalf("load final pipeline receipt: %v", err)
 	}
-	if outcome != "success" || reason != "pipeline_persisted" {
-		t.Fatalf("final pipeline receipt = %s/%s, want success/pipeline_persisted", outcome, reason)
+	if outcome != "success" || reason != "decision_route_processed" {
+		t.Fatalf("final pipeline receipt = %s/%s, want success/decision_route_processed", outcome, reason)
 	}
 }
 

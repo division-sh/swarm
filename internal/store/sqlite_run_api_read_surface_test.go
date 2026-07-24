@@ -275,10 +275,10 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 	)); err != nil {
 		t.Fatalf("seed sqlite runtime log: %v", err)
 	}
-	if err := sqliteStore.UpsertPipelineReceipt(ctx, activeEventID, "processed", nil); err != nil {
+	if err := acknowledgePipelineEventFixture(ctx, sqliteStore, activeEventID); err != nil {
 		t.Fatalf("UpsertPipelineReceipt active event: %v", err)
 	}
-	if err := sqliteStore.UpsertPipelineReceipt(ctx, readyEventID, "processed", nil); err != nil {
+	if err := acknowledgePipelineEventFixture(ctx, sqliteStore, readyEventID); err != nil {
 		t.Fatalf("UpsertPipelineReceipt ready event: %v", err)
 	}
 	activeEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, activeEventID)

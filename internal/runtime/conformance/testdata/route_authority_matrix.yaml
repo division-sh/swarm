@@ -558,8 +558,8 @@ rows:
       - {kind: spec_ref, path: platform-spec.yaml, ref: replay_scope_expectations}
       - {kind: spec_ref, path: platform-spec.yaml, ref: replay_recovery}
     proof_refs:
-      - {kind: go_test, name: TestSweepUndispatched_FailsClosedWithoutReplayClaimOwner}
-      - {kind: go_test, name: TestRecoveryManager_FailsClosedWithoutReplayClaimOwner}
+      - {kind: go_test, name: TestCompleteEventSnapshotDispatchesThroughRecoveryOwnersOnSQLiteAndPostgres}
+      - {kind: go_test, name: TestPipelineObligationSQLitePostgresParityMatrix}
       - {kind: go_test, name: TestBuildHistoricalReplayExecutionRejectsTaxonomyReadyWithoutOwnerWork}
     notes: >
       Replay can consume persisted route authority or explicitly gated replay
@@ -614,7 +614,7 @@ rows:
       - {kind: spec_ref, path: platform-spec.yaml, ref: replay_recovery}
       - {kind: artifact, path: internal/runtime/conformance/testdata/multi_bundle_option_a_matrix.yaml}
     proof_refs:
-      - {kind: go_test, name: TestRecoveryManager_UsesPersistedDeliveryRecipientsInsteadOfCurrentSubscriptions}
+      - {kind: go_test, name: TestCompleteEventSnapshotDispatchesThroughRecoveryOwnersOnSQLiteAndPostgres}
       - {kind: go_test, name: TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvancedBranchJSON}
       - {kind: go_test, name: TestTier12RuntimeFork_SelectedContractForkExecutionFixture}
       - {kind: proof_projection, projection: required-full}

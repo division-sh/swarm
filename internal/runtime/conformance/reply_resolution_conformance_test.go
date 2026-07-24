@@ -25,7 +25,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatereply"
@@ -720,6 +720,7 @@ func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend 
 	}
 	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
 		Module: module, WorkflowStore: workflowStore, DeliveryStore: backend, DecisionCards: cards,
+		PipelineObligations: backend.PipelineObligations(),
 	})
 	eb.SetInterceptors(coordinator)
 	eb.RegisterRuntimeActiveAgentDescriptor(bus.ActiveAgentDescriptor{AgentID: "provider-agent"})
@@ -770,6 +771,7 @@ type durableReplyConformanceStore interface {
 	runtimedelivery.Store
 	bus.FlowInstanceRoutePersistence
 	runtimereplycontext.Store
+	PipelineObligations() runtimepipelineobligation.Store
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
 }
 
@@ -1007,7 +1009,7 @@ type replyConformanceStore struct {
 	mu          sync.Mutex
 	events      map[string]events.Event
 	routes      map[string][]events.DeliveryRoute
-	scopes      map[string]runtimereplayclaim.CommittedReplayScope
+	scopes      map[string]runtimepipelineobligation.CommittedScope
 	contexts    map[string]runtimereplycontext.Record
 	createCalls int
 	claimCalls  int
@@ -1017,12 +1019,10 @@ func newReplyConformanceStore() *replyConformanceStore {
 	return &replyConformanceStore{
 		events:   map[string]events.Event{},
 		routes:   map[string][]events.DeliveryRoute{},
-		scopes:   map[string]runtimereplayclaim.CommittedReplayScope{},
+		scopes:   map[string]runtimepipelineobligation.CommittedScope{},
 		contexts: map[string]runtimereplycontext.Record{},
 	}
 }
-
-func (s *replyConformanceStore) SupportsPersistedReplay() bool { return true }
 
 func (s *replyConformanceStore) CommitPublish(ctx context.Context, plan bus.CommitPublishPlan) (bus.PreparedPublish, error) {
 	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, req bus.CommitPublishRequest) error {
@@ -1037,23 +1037,6 @@ func (s *replyConformanceStore) CommitPublish(ctx context.Context, plan bus.Comm
 
 func (s *replyConformanceStore) ListEventDeliveryRoutes(_ context.Context, eventID string) ([]events.DeliveryRoute, error) {
 	return s.routesFor(eventID), nil
-}
-
-func (s *replyConformanceStore) UpsertCommittedReplayScope(_ context.Context, eventID string, scope runtimereplayclaim.CommittedReplayScope) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.scopes[eventID] = scope
-	return nil
-}
-
-func (s *replyConformanceStore) LoadCommittedReplayScope(_ context.Context, eventID string) (runtimereplayclaim.CommittedReplayScope, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	scope := s.scopes[eventID]
-	if scope == "" {
-		return "", runtimereplayclaim.ErrMissingCommittedReplayScope
-	}
-	return scope, nil
 }
 
 func (s *replyConformanceStore) ListEventDeliveryRecipients(_ context.Context, eventID string) ([]string, error) {

@@ -14,11 +14,11 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -33,7 +33,8 @@ type targetRouteMemoryStore struct {
 	missing     []events.PersistedReplayEvent
 	receipts    map[string]string
 	receiptErrs map[string]*runtimefailures.Envelope
-	claimed     map[string]bool
+	claimIssuer *runtimepipelineobligation.ClaimIssuer
+	claims      map[string]runtimepipelineobligation.Claim
 	active      map[string]bool
 }
 
@@ -96,15 +97,15 @@ func (s *targetRouteMemoryStore) FinalizePreparedPublish(_ context.Context, fina
 	}
 	s.routes[evt.ID()] = events.NormalizeDeliveryRoutes(req.DeliveryRoutes)
 	s.scopes[evt.ID()] = req.ReplayScope
-	if req.PipelineReceipt != nil {
+	if req.Disposition != nil {
 		if s.receipts == nil {
 			s.receipts = map[string]string{}
 		}
 		if s.receiptErrs == nil {
 			s.receiptErrs = map[string]*runtimefailures.Envelope{}
 		}
-		s.receipts[evt.ID()] = req.PipelineReceipt.Status
-		s.receiptErrs[evt.ID()] = runtimefailures.CloneEnvelope(req.PipelineReceipt.Failure)
+		s.receipts[evt.ID()] = string(req.Disposition.Kind())
+		s.receiptErrs[evt.ID()] = req.Disposition.Failure()
 	}
 	delete(s.active, evt.ID())
 	return nil
@@ -122,65 +123,178 @@ func (s *targetRouteMemoryStore) ListEventDeliveryRecipients(_ context.Context, 
 	return uniqueStrings(out), nil
 }
 
-func (s *targetRouteMemoryStore) SupportsPersistedReplay() bool { return true }
-
 func (s *targetRouteMemoryStore) ListEventDeliveryRoutes(_ context.Context, eventID string) ([]events.DeliveryRoute, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]events.DeliveryRoute(nil), s.routes[eventID]...), nil
 }
 
-func (s *targetRouteMemoryStore) UpsertPipelineReceipt(_ context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
+func (s *targetRouteMemoryStore) PipelineObligations() runtimepipelineobligation.Store {
+	return s
+}
+
+func (s *targetRouteMemoryStore) ClaimPublication(_ context.Context, eventID string) (runtimepipelineobligation.Claim, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.issuePipelineClaim(eventID, runtimepipelineobligation.PurposePublication)
+}
+
+func (s *targetRouteMemoryStore) ClaimEvent(_ context.Context, eventID string, purpose runtimepipelineobligation.Purpose) (runtimepipelineobligation.ClaimedWork, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.claimPipelineWork(eventID, purpose)
+}
+
+func (s *targetRouteMemoryStore) ClaimNext(_ context.Context, query runtimepipelineobligation.ClaimQuery) (runtimepipelineobligation.ClaimedWork, bool, error) {
+	if err := query.Validate(); err != nil {
+		return runtimepipelineobligation.ClaimedWork{}, false, err
+	}
+	if query.Purpose == runtimepipelineobligation.PurposeDecisionRoute {
+		return runtimepipelineobligation.ClaimedWork{}, false, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, record := range s.missing {
+		if strings.TrimSpace(query.RunID) != "" && record.Event.RunID() != strings.TrimSpace(query.RunID) {
+			continue
+		}
+		work, err := s.claimPipelineWork(record.Event.ID(), query.Purpose)
+		if errors.Is(err, runtimepipelineobligation.ErrBusy) || errors.Is(err, runtimepipelineobligation.ErrIneligible) {
+			continue
+		}
+		return work, err == nil, err
+	}
+	return runtimepipelineobligation.ClaimedWork{}, false, nil
+}
+
+func (s *targetRouteMemoryStore) issuePipelineClaim(eventID string, purpose runtimepipelineobligation.Purpose) (runtimepipelineobligation.Claim, error) {
+	eventID = strings.TrimSpace(eventID)
+	if s.claimIssuer == nil {
+		s.claimIssuer = runtimepipelineobligation.NewClaimIssuer()
+	}
+	if s.claims == nil {
+		s.claims = map[string]runtimepipelineobligation.Claim{}
+	}
+	if _, exists := s.claims[eventID]; exists {
+		return runtimepipelineobligation.Claim{}, runtimepipelineobligation.ErrBusy
+	}
+	claim, err := s.claimIssuer.Issue(eventID, purpose)
+	if err != nil {
+		return runtimepipelineobligation.Claim{}, err
+	}
+	s.claims[eventID] = claim
+	return claim, nil
+}
+
+func (s *targetRouteMemoryStore) claimPipelineWork(eventID string, purpose runtimepipelineobligation.Purpose) (runtimepipelineobligation.ClaimedWork, error) {
+	eventID = strings.TrimSpace(eventID)
+	evt, exists := s.events[eventID]
+	if !exists {
+		for _, record := range s.missing {
+			if record.Event.ID() == eventID {
+				evt, exists = record.Event, true
+				break
+			}
+		}
+	}
+	if !exists || s.receipts[eventID] != "" {
+		return runtimepipelineobligation.ClaimedWork{}, runtimepipelineobligation.ErrIneligible
+	}
+	scope, err := runtimepipelineobligation.ParseCommittedScope(string(s.scopes[eventID]))
+	if err != nil {
+		return runtimepipelineobligation.ClaimedWork{}, runtimepipelineobligation.ErrMissingScope
+	}
+	claim, err := s.issuePipelineClaim(eventID, purpose)
+	if err != nil {
+		return runtimepipelineobligation.ClaimedWork{}, err
+	}
+	return runtimepipelineobligation.ClaimedWork{Event: evt, Scope: scope, Claim: claim}, nil
+}
+
+func (s *targetRouteMemoryStore) MarkDecisionProcessed(context.Context, runtimepipelineobligation.Claim) error {
+	return runtimepipelineobligation.ErrIneligible
+}
+
+func (s *targetRouteMemoryStore) Settle(_ context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.verifyPipelineClaim(claim); err != nil {
+		return err
+	}
+	if err := disposition.ValidateFor(claim.Purpose()); err != nil {
+		return err
+	}
 	if s.receipts == nil {
 		s.receipts = map[string]string{}
 	}
 	if s.receiptErrs == nil {
 		s.receiptErrs = map[string]*runtimefailures.Envelope{}
 	}
-	s.receipts[eventID] = status
-	s.receiptErrs[eventID] = runtimefailures.CloneEnvelope(failure)
+	status := "processed"
+	if !disposition.Successful() {
+		status = "dead_letter"
+	}
+	s.receipts[claim.EventID()] = status
+	s.receiptErrs[claim.EventID()] = disposition.Failure()
+	delete(s.claims, claim.EventID())
 	return nil
 }
 
-func (s *targetRouteMemoryStore) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
+func (s *targetRouteMemoryStore) Release(_ context.Context, claim runtimepipelineobligation.Claim) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]events.PersistedReplayEvent(nil), s.missing...), nil
+	if err := s.verifyPipelineClaim(claim); err != nil {
+		return err
+	}
+	delete(s.claims, claim.EventID())
+	return nil
 }
 
-func (s *targetRouteMemoryStore) ClaimPipelineReplay(_ context.Context, eventID string) (runtimeownership.Lease, bool, error) {
+func (s *targetRouteMemoryStore) verifyPipelineClaim(claim runtimepipelineobligation.Claim) error {
+	if s.claimIssuer == nil {
+		return runtimepipelineobligation.ErrStaleClaim
+	}
+	stored, exists := s.claims[claim.EventID()]
+	if !exists {
+		return runtimepipelineobligation.ErrStaleClaim
+	}
+	if err := s.claimIssuer.Verify(claim, claim.EventID(), claim.Purpose()); err != nil {
+		return err
+	}
+	storedToken, err := s.claimIssuer.Token(stored)
+	if err != nil {
+		return err
+	}
+	claimToken, err := s.claimIssuer.Token(claim)
+	if err != nil {
+		return err
+	}
+	if storedToken != claimToken {
+		return runtimepipelineobligation.ErrStaleClaim
+	}
+	return nil
+}
+
+func (s *targetRouteMemoryStore) GlobalWorkPresence(context.Context) (runtimepipelineobligation.GlobalWorkPresence, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.claimed == nil {
-		s.claimed = map[string]bool{}
-	}
-	if s.claimed[eventID] {
-		return nil, false, nil
-	}
-	s.claimed[eventID] = true
-	return targetRouteMemoryLease{store: s, eventID: eventID}, true, nil
+	return runtimepipelineobligation.GlobalWorkPresence{ProcessingEligible: len(s.missing) > 0}, nil
 }
 
-func (s *targetRouteMemoryStore) ClaimPipelinePublication(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
-	return s.ClaimPipelineReplay(ctx, eventID)
-}
-
-type targetRouteMemoryLease struct {
-	store   *targetRouteMemoryStore
-	eventID string
-}
-
-func (l targetRouteMemoryLease) Release(context.Context) error {
-	if l.store != nil {
-		l.store.mu.Lock()
-		defer l.store.mu.Unlock()
-		if l.store.claimed != nil {
-			delete(l.store.claimed, l.eventID)
+func (s *targetRouteMemoryStore) SummarizeRun(_ context.Context, runID string) (runtimepipelineobligation.RunSummary, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	summary := runtimepipelineobligation.RunSummary{RunID: strings.TrimSpace(runID)}
+	for _, record := range s.missing {
+		if record.Event.RunID() == summary.RunID && s.receipts[record.Event.ID()] == "" {
+			summary.Replayable++
 		}
 	}
-	return nil
+	return summary, nil
+}
+
+func (s *targetRouteMemoryStore) TerminalizeRun(context.Context, string, runtimepipelineobligation.Disposition, time.Time) (int, error) {
+	return 0, nil
 }
 
 type materializedRoutePersistedBeforeInterceptor struct {
@@ -190,7 +304,7 @@ type materializedRoutePersistedBeforeInterceptor struct {
 	want    events.DeliveryRoute
 }
 
-func (i materializedRoutePersistedBeforeInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
+func (i materializedRoutePersistedBeforeInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	i.t.Helper()
 	if evt.ID() != i.eventID {
 		i.t.Fatalf("interceptor event_id = %q, want %q", evt.ID(), i.eventID)
@@ -202,31 +316,31 @@ func (i materializedRoutePersistedBeforeInterceptor) Intercept(ctx context.Conte
 	if !deliveryRoutesContain(routes, i.want) {
 		i.t.Fatalf("persisted routes before interceptor = %#v, want %#v", routes, i.want)
 	}
-	return true, nil, nil
+	return true, nil, runtimepipelineobligation.Continue(), nil
 }
 
 type targetRouteConsumingInterceptor struct {
 	targetCalls int
 }
 
-func (i *targetRouteConsumingInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, error) {
+func (i *targetRouteConsumingInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	if evt.TargetRoute().Empty() {
-		return true, nil, nil
+		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
 	i.targetCalls++
-	return false, nil, nil
+	return false, nil, runtimepipelineobligation.Continue(), nil
 }
 
-func (i *targetRouteConsumingInterceptor) InterceptDeliveryRoute(_ context.Context, delivery events.DeliveryEvent, route events.DeliveryRoute) (bool, []events.Event, error) {
+func (i *targetRouteConsumingInterceptor) InterceptDeliveryRoute(_ context.Context, delivery events.DeliveryEvent, route events.DeliveryRoute) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	evt := delivery.Event()
 	if route.Target.Normalized().Empty() {
-		return true, nil, nil
+		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
 	if evt.TargetRoute().Normalized() != route.Target.Normalized() {
-		return true, nil, nil
+		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
 	i.targetCalls++
-	return false, nil, nil
+	return false, nil, runtimepipelineobligation.Continue(), nil
 }
 
 func TestEventBusRecipientPlanMaterializerPersistsRoutesBeforeInterceptors(t *testing.T) {
@@ -478,16 +592,6 @@ func deliveryRoutesContain(routes []events.DeliveryRoute, want events.DeliveryRo
 	return false
 }
 
-func (s *targetRouteMemoryStore) LoadCommittedReplayScope(_ context.Context, eventID string) (replayclaim.CommittedReplayScope, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	scope := s.scopes[eventID]
-	if scope == "" {
-		return "", replayclaim.ErrMissingCommittedReplayScope
-	}
-	return scope, nil
-}
-
 func nodeOnlyDeliveryPlanner(nodeID string) deliveryPlanner {
 	return newDeliveryPlanner(
 		deliveryRouteResolver{
@@ -580,7 +684,14 @@ func TestEventBusCommittedPublishDispatch_NodeOnlyRouteDoesNotRequireAgentChanne
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
 		events.EventType("custom.node_only_tx"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	eb.completeCommittedPublishDispatch(context.Background(), evt, nodeOnlyDeliveryPlan(evt, "workflow-node"))
+	claim, err := store.ClaimPublication(context.Background(), evt.ID())
+	if err != nil {
+		t.Fatalf("claim node-only publication: %v", err)
+	}
+	publication := &pipelinePublicationClaim{bus: eb, eventID: evt.ID(), claim: claim}
+	if err := eb.completeCommittedPublishDispatch(context.Background(), evt, nodeOnlyDeliveryPlan(evt, "workflow-node"), publication); err != nil {
+		t.Fatalf("dispatch committed node-only publication: %v", err)
+	}
 
 	if got := store.receipts[evt.ID()]; got != "processed" {
 		t.Fatalf("pipeline receipt = %q err=%#v, want processed", got, store.receiptErrs[evt.ID()])
@@ -598,6 +709,7 @@ func TestEngineDispatcher_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) 
 
 	store.events[evt.ID()] = evt
 	store.routes[evt.ID()] = []events.DeliveryRoute{{SubscriberType: "node", SubscriberID: "workflow-node"}}
+	store.scopes[evt.ID()] = replayclaim.CommittedReplayScopeSubscribed
 
 	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{{Event: evt}}); err != nil {
 		t.Fatalf("DispatchPostCommit node-only route without agent channel: %v", err)
@@ -623,7 +735,7 @@ func TestSweepUndispatched_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T)
 	}
 	eb.deliveryPlanner = nodeOnlyDeliveryPlanner("workflow-node")
 
-	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
+	count, err := eb.SweepUndispatched(context.Background(), 10)
 	if err != nil {
 		t.Fatalf("SweepUndispatched node-only route without agent channel: %v", err)
 	}
@@ -728,8 +840,10 @@ func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing
 		}
 	}
 
-	if err := eb.PublishPersistedRecipients(context.Background(), evt, nil); err != nil {
-		t.Fatalf("PublishPersistedRecipients: %v", err)
+	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
+		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
+	}, nil); err != nil {
+		t.Fatalf("RecoverPersistedPipeline: %v", err)
 	}
 	assertTargetRouteDeliveries(t, ch, eventtest.UUID("ent-a"), eventtest.UUID("ent-b"))
 }
@@ -1773,8 +1887,10 @@ func TestEventBusPublish_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 		t.Fatalf("replay routes = %#v, want empty node/portfolio-node route", replayRoutes)
 	}
 
-	if err := eb.PublishPersistedRecipients(context.Background(), evt, nil); err != nil {
-		t.Fatalf("PublishPersistedRecipients: %v", err)
+	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
+		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
+	}, nil); err != nil {
+		t.Fatalf("RecoverPersistedPipeline: %v", err)
 	}
 	got = requireBusEvent(t, ch, "root routed node replay delivery")
 	if got.FlowInstance() != "" {
@@ -1832,8 +1948,10 @@ func TestEventBusPublish_NoTargetRootRoutedNodePersistsSemanticRouteWithoutInter
 	if len(replayRoutes) != 1 || replayRoutes[0].SubscriberType != "node" || replayRoutes[0].SubscriberID != "portfolio-node" {
 		t.Fatalf("replay routes = %#v, want retained semantic node/portfolio-node evidence", replayRoutes)
 	}
-	if err := eb.PublishPersistedRecipients(context.Background(), evt, nil); err != nil {
-		t.Fatalf("PublishPersistedRecipients without internal carrier: %v", err)
+	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
+		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
+	}, nil); err != nil {
+		t.Fatalf("RecoverPersistedPipeline without internal carrier: %v", err)
 	}
 }
 
@@ -1944,7 +2062,7 @@ func (rejectingDeliveryRouteStore) FinalizePreparedPublish(_ context.Context, fi
 }
 
 func (rejectingDeliveryRouteStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
-	return nil, replayclaim.ErrAuthoritativeRecipientManifestUnavailable
+	return nil, ErrAuthoritativeRecipientManifestUnavailable
 }
 
 func assertTargetRouteDeliveries(t *testing.T, ch <-chan *LocalDelivery, wantEntityIDs ...string) {

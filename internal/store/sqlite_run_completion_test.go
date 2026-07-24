@@ -79,7 +79,7 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionMarksCompletedAndIgnoresRu
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	fixture := seedSQLiteNormalRunCompletionFixture(t, store, "done")
-	if err := store.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", nil); err != nil {
+	if err := acknowledgePipelineEventFixture(ctx, store, fixture.EventID); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
 	runtimeLog := eventtest.DiagnosticDirect(
@@ -202,7 +202,7 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionFailsClosedWhileDeliveryAc
 	if err := commitDeliveryObligationFixture(ctx, store, event, route); err != nil {
 		t.Fatalf("seed sqlite active delivery: %v", err)
 	}
-	if err := store.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", nil); err != nil {
+	if err := acknowledgePipelineEventFixture(ctx, store, fixture.EventID); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
 	if err := store.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, nil); err != nil {

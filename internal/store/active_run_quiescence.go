@@ -11,11 +11,11 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
-	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
 
@@ -152,23 +152,15 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 		return out, nil
 	}
 
-	eventIDs := map[string]struct{}{}
 	for _, runID := range runIDs {
-		transitions, err := s.terminalizeRunDeliveriesTx(ctx, tx, runID, out.ReasonCode)
+		if _, err := s.terminalizeRunDeliveriesTx(ctx, tx, runID, out.ReasonCode); err != nil {
+			return runtimerunquiescence.Result{}, err
+		}
+		terminalized, err := s.terminalizePostgresPipelineRunTx(ctx, tx, runID, runtimepipelineobligation.DeadLetter(out.ReasonCode, nil), now)
 		if err != nil {
 			return runtimerunquiescence.Result{}, err
 		}
-		for _, transition := range transitions {
-			if transition.Current.EventID != "" {
-				eventIDs[transition.Current.EventID] = struct{}{}
-			}
-		}
-	}
-	for eventID := range eventIDs {
-		if err := upsertActiveRunQuiescencePipelineReceiptTx(ctx, tx, eventID, out.ReasonCode, deliveryNote, now); err != nil {
-			return runtimerunquiescence.Result{}, err
-		}
-		out.PipelineReceiptCount++
+		out.PipelineReceiptCount += terminalized
 	}
 	out.SessionCount, err = terminateActiveRunSessionsTx(ctx, tx, runIDs, out.ReasonCode, now)
 	if err != nil {
@@ -315,23 +307,15 @@ func (s *SQLiteRuntimeStore) ApplyActiveRunQuiescence(ctx context.Context, req r
 			return nil
 		}
 
-		eventIDs := map[string]struct{}{}
 		for _, runID := range attemptRunIDs {
-			transitions, err := s.terminalizeRunDeliveriesTx(txctx, tx, runID, attemptOut.ReasonCode)
+			if _, err := s.terminalizeRunDeliveriesTx(txctx, tx, runID, attemptOut.ReasonCode); err != nil {
+				return err
+			}
+			terminalized, err := s.terminalizeSQLitePipelineRunTx(txctx, tx, runID, runtimepipelineobligation.DeadLetter(attemptOut.ReasonCode, nil), now)
 			if err != nil {
 				return err
 			}
-			for _, transition := range transitions {
-				if transition.Current.EventID != "" {
-					eventIDs[transition.Current.EventID] = struct{}{}
-				}
-			}
-		}
-		for eventID := range eventIDs {
-			if err := sqliteUpsertActiveRunQuiescencePipelineReceiptTx(txctx, tx, eventID, attemptOut.ReasonCode, deliveryNote, now); err != nil {
-				return err
-			}
-			attemptOut.PipelineReceiptCount++
+			attemptOut.PipelineReceiptCount += terminalized
 		}
 		attemptOut.SessionCount, err = sqliteTerminateActiveRunSessionsTx(txctx, tx, attemptRunIDs, attemptOut.ReasonCode, now)
 		if err != nil {
@@ -483,50 +467,6 @@ func sqliteLockActiveQuiescenceRunsTx(ctx context.Context, tx *sql.Tx, runIDs []
 		return nil, fmt.Errorf("lock sqlite active quiescence runs: %w", err)
 	}
 	return scanActiveRunQuiescenceRuns(rows)
-}
-
-func upsertActiveRunQuiescencePipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, reasonCode, note string, at time.Time) error {
-	sideEffects, err := marshalPipelineReceiptSideEffects(newPipelineReceiptSideEffects("dead_letter", reasonCode))
-	if err != nil {
-		return fmt.Errorf("marshal active run quiescence pipeline receipt: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-			outcome, reason_code, side_effects, processed_at
-		)
-		SELECT
-			e.event_id, 'platform', $2, e.entity_id, e.flow_instance,
-			'dead_letter', $3, $4::jsonb, $5
-		FROM events e
-		WHERE e.event_id = $1::uuid
-		ON CONFLICT (event_id, subscriber_type, subscriber_id) DO NOTHING
-	`, eventID, activeRunQuiescencePipelineSubscriberID, reasonCode, string(sideEffects), at.UTC()); err != nil {
-		return fmt.Errorf("upsert active run quiescence pipeline receipt: %w", err)
-	}
-	return nil
-}
-
-func sqliteUpsertActiveRunQuiescencePipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, reasonCode, note string, at time.Time) error {
-	sideEffects, err := marshalPipelineReceiptSideEffects(newPipelineReceiptSideEffects("dead_letter", reasonCode))
-	if err != nil {
-		return fmt.Errorf("marshal sqlite active run quiescence pipeline receipt: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO event_receipts (
-			receipt_id, event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-			outcome, reason_code, side_effects, processed_at
-		)
-		SELECT
-			?, e.event_id, 'platform', ?, e.entity_id, e.flow_instance,
-			'dead_letter', ?, ?, ?
-		FROM events e
-		WHERE e.event_id = ?
-		ON CONFLICT(event_id, subscriber_type, subscriber_id) DO NOTHING
-	`, uuid.NewString(), activeRunQuiescencePipelineSubscriberID, reasonCode, string(sideEffects), at.UTC(), eventID); err != nil {
-		return fmt.Errorf("upsert sqlite active run quiescence pipeline receipt: %w", err)
-	}
-	return nil
 }
 
 func terminateActiveRunSessionsTx(ctx context.Context, tx *sql.Tx, runIDs []string, reason string, at time.Time) (int, error) {

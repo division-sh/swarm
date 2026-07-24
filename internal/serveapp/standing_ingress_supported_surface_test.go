@@ -299,8 +299,15 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 		t.Fatalf("%s settle reset successor ingress: %v", backend, err)
 	}
 	assertServedStandingState(t, db, string(backend), serviceID, reset.RunID, reset.Generation, "active", "running")
-	requireServedParitySettlementPostconditions(t, secondEndpoint, db, string(backend), firstRunID, servedparity.MustScenario(servedparity.ScenarioStandingServiceResetLifecycle))
-	requireServedParitySettlementPostconditions(t, secondEndpoint, db, string(backend), reset.RunID, servedparity.MustScenario(servedparity.ScenarioStandingServiceResetLifecycle))
+	debugBackend := "postgres"
+	if backend == servedparity.BackendDefaultSQLite {
+		debugBackend = "sqlite"
+	}
+	debugRun := func(runID string) func() string {
+		return func() string { return servedEventPublishDebugSummary(t, db, debugBackend, runID) }
+	}
+	requireServedParitySettlementPostconditionsWithDebug(t, secondEndpoint, db, string(backend), firstRunID, servedparity.MustScenario(servedparity.ScenarioStandingServiceResetLifecycle), debugRun(firstRunID))
+	requireServedParitySettlementPostconditionsWithDebug(t, secondEndpoint, db, string(backend), reset.RunID, servedparity.MustScenario(servedparity.ScenarioStandingServiceResetLifecycle), debugRun(reset.RunID))
 	if code := second.stop(); code != 0 {
 		t.Fatalf("%s second standing serve exit = %d", backend, code)
 	}

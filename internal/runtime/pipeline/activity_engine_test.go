@@ -389,10 +389,10 @@ func TestChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStores(t 
 			if err != nil {
 				t.Fatalf("activityRequestEmitIntent: %v", err)
 			}
-			if handled, err := pc.handleEventResult(ctx, request.Event); err != nil || !handled {
+			if handled, _, err := pc.handleEventResult(ctx, request.Event); err != nil || !handled {
 				t.Fatalf("first handle = %v, err=%v", handled, err)
 			}
-			if handled, err := pc.handleEventResult(ctx, request.Event); err != nil || !handled {
+			if handled, _, err := pc.handleEventResult(ctx, request.Event); err != nil || !handled {
 				t.Fatalf("replay handle = %v, err=%v", handled, err)
 			}
 			if calls.Load() != 1 {
@@ -443,7 +443,7 @@ func TestChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcrossS
 			if err != nil {
 				t.Fatalf("activityRequestEmitIntent: %v", err)
 			}
-			if handled, err := pc.handleEventResult(ctx, request.Event); err != nil || !handled {
+			if handled, _, err := pc.handleEventResult(ctx, request.Event); err != nil || !handled {
 				t.Fatalf("reconcile committed claim = %v, err=%v", handled, err)
 			}
 			if calls.Load() != 0 || len(bus.publishes) != 0 {
@@ -555,7 +555,7 @@ func TestPipelineActivityRequestEventExecutesHTTPToolAndPublishesGeneratedSucces
 	if err != nil {
 		t.Fatalf("activityRequestEmitIntent: %v", err)
 	}
-	handled, err := pc.handleEventResult(testAuthorActivityContext(t, context.Background()), eventtest.ForDelivery(request.Event, intent.Context))
+	handled, _, err := pc.handleEventResult(testAuthorActivityContext(t, context.Background()), eventtest.ForDelivery(request.Event, intent.Context))
 	if err != nil {
 		t.Fatalf("handleEventResult: %v", err)
 	}
@@ -633,7 +633,7 @@ func TestPipelineActivityRequestRetriesReadOnlyHTTPTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("activityRequestEmitIntent: %v", err)
 	}
-	handled, err := pc.handleEventResult(testAuthorActivityContext(t, context.Background()), request.Event)
+	handled, _, err := pc.handleEventResult(testAuthorActivityContext(t, context.Background()), request.Event)
 	if err != nil {
 		t.Fatalf("handleEventResult: %v", err)
 	}
@@ -688,7 +688,7 @@ func TestPipelineActivityRequestFailsClosedForWriteEffectClass(t *testing.T) {
 	if err != nil {
 		t.Fatalf("activityRequestEmitIntent: %v", err)
 	}
-	handled, err := pc.handleEventResult(testAuthorActivityContext(t, context.Background()), request.Event)
+	handled, _, err := pc.handleEventResult(testAuthorActivityContext(t, context.Background()), request.Event)
 	if err != nil {
 		t.Fatalf("handleEventResult: %v", err)
 	}
@@ -761,7 +761,7 @@ func TestPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCrede
 	if err != nil {
 		t.Fatalf("activityRequestEmitIntent: %v", err)
 	}
-	handled, err := pc.handleEventResult(ctx, request.Event)
+	handled, _, err := pc.handleEventResult(ctx, request.Event)
 	if err != nil {
 		t.Fatalf("handleEventResult: %v", err)
 	}
@@ -787,7 +787,7 @@ func TestPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCrede
 		t.Fatalf("redacted result authorization = %#v", got)
 	}
 
-	handled, err = pc.handleEventResult(ctx, request.Event)
+	handled, _, err = pc.handleEventResult(ctx, request.Event)
 	if err != nil {
 		t.Fatalf("duplicate handleEventResult: %v", err)
 	}
@@ -1095,7 +1095,7 @@ func TestGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplay(t *test
 	}
 
 	for attempt := 1; attempt <= 2; attempt++ {
-		handled, err := pc.handleEventResult(ctx, request.Event)
+		handled, _, err := pc.handleEventResult(ctx, request.Event)
 		if err != nil {
 			t.Fatalf("handleEventResult attempt %d: %v", attempt, err)
 		}
@@ -1208,7 +1208,7 @@ func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, ctx conte
 		t.Fatalf("activityRequestEmitIntent: %v", err)
 	}
 
-	handled, err := pc.handleEventResult(ctx, request.Event)
+	handled, _, err := pc.handleEventResult(ctx, request.Event)
 	if err != nil {
 		t.Fatalf("handleEventResult: %v", err)
 	}
@@ -1239,7 +1239,7 @@ func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, ctx conte
 		t.Fatalf("activity attempt = (%v, %q), want succeeded", ok, rec.Status)
 	}
 
-	handled, err = pc.handleEventResult(ctx, request.Event)
+	handled, _, err = pc.handleEventResult(ctx, request.Event)
 	if err != nil {
 		t.Fatalf("duplicate handleEventResult: %v", err)
 	}
@@ -1292,7 +1292,7 @@ func TestPipelineActivityRequestNonIdempotentFailureDoesNotRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("activityRequestEmitIntent: %v", err)
 	}
-	if _, err := pc.handleEventResult(ctx, request.Event); err != nil {
+	if _, _, err := pc.handleEventResult(ctx, request.Event); err != nil {
 		t.Fatalf("handleEventResult: %v", err)
 	}
 	if calls != 1 {
@@ -1415,7 +1415,7 @@ func TestPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutTer
 	if err != nil {
 		t.Fatalf("activityRequestEmitIntent: %v", err)
 	}
-	if _, err := pc.handleEventResult(ctx, request.Event); err != nil {
+	if _, _, err := pc.handleEventResult(ctx, request.Event); err != nil {
 		t.Fatalf("handleEventResult: %v", err)
 	}
 	if calls != 0 {
@@ -1562,12 +1562,12 @@ func TestPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResu
 	}
 	firstDone := make(chan error, 1)
 	go func() {
-		_, err := pc.handleEventResult(ctx, request.Event)
+		_, _, err := pc.handleEventResult(ctx, request.Event)
 		firstDone <- err
 	}()
 	<-providerEntered
 
-	if _, err := pc.handleEventResult(ctx, request.Event); err != nil {
+	if _, _, err := pc.handleEventResult(ctx, request.Event); err != nil {
 		t.Fatalf("duplicate handleEventResult: %v", err)
 	}
 	if got := calls.Load(); got != 1 {
@@ -1644,7 +1644,7 @@ func TestPipelineActivityRequestMissingCredentialFailsAfterClaimBeforeDispatch(t
 	if err != nil {
 		t.Fatalf("activityRequestEmitIntent: %v", err)
 	}
-	if _, err := pc.handleEventResult(ctx, request.Event); err != nil {
+	if _, _, err := pc.handleEventResult(ctx, request.Event); err != nil {
 		t.Fatalf("handleEventResult: %v", err)
 	}
 	if calls != 0 {
@@ -1700,7 +1700,7 @@ func TestPipelineActivityRequestTelegramConnectorMissingTokenFailsAfterClaimBefo
 	if err != nil {
 		t.Fatalf("activityRequestEmitIntent: %v", err)
 	}
-	if _, err := pc.handleEventResult(ctx, request.Event); err != nil {
+	if _, _, err := pc.handleEventResult(ctx, request.Event); err != nil {
 		t.Fatalf("handleEventResult: %v", err)
 	}
 	if calls != 0 {

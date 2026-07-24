@@ -36,17 +36,20 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 		Reason:    "prove recovery fails closed when durable replay-scope evidence is missing",
 	}, `DELETE FROM committed_replay_scopes WHERE event_id = ?`, "", executableID)
 
-	globalMissing, err := store.ListEventsMissingPipelineReceipt(ctx, now.Add(-time.Hour), 20)
+	presence, err := store.PipelineObligations().GlobalWorkPresence(ctx)
 	if err != nil {
-		t.Fatalf("ListEventsMissingPipelineReceipt: %v", err)
+		t.Fatalf("GlobalWorkPresence: %v", err)
 	}
-	assertReplayEventIDs(t, globalMissing, []string{executableID})
-
-	runMissing, err := store.ListEventsMissingPipelineReceiptForRun(ctx, runID, now.Add(-time.Hour), 20)
+	if !presence.ProcessingEligible {
+		t.Fatalf("pipeline work presence = %#v, want executable recovery work", presence)
+	}
+	summary, err := store.PipelineObligations().SummarizeRun(ctx, runID)
 	if err != nil {
-		t.Fatalf("ListEventsMissingPipelineReceiptForRun: %v", err)
+		t.Fatalf("SummarizeRun: %v", err)
 	}
-	assertReplayEventIDs(t, runMissing, []string{executableID})
+	if summary.Replayable != 1 || summary.DiagnosticExcluded == 0 {
+		t.Fatalf("pipeline summary = %#v, want one executable and diagnostic exclusion", summary)
+	}
 
 	logs, err := store.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
 		RunID:     runID,
@@ -65,7 +68,7 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 	if err != nil {
 		t.Fatalf("NewEventBus(sqlite): %v", err)
 	}
-	swept, err := bus.SweepUndispatched(ctx, time.Hour, 20)
+	swept, err := bus.SweepUndispatched(ctx, 20)
 	if err != nil {
 		t.Fatalf("SweepUndispatched(sqlite): %v", err)
 	}
@@ -74,7 +77,7 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 	}
 
 	assertNoSQLitePipelineReceipt(t, ctx, store, runtimeLogID)
-	assertSQLitePipelineReceipt(t, ctx, store, executableID, "dead_letter", "committed_replay_scope_missing")
+	assertSQLitePipelineReceipt(t, ctx, store, executableID, "dead_letter", "committed_pipeline_scope_missing")
 }
 
 func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEvents(t *testing.T) {
@@ -98,17 +101,20 @@ func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEv
 		Reason:    "prove recovery fails closed when durable replay-scope evidence is missing",
 	}, "", `DELETE FROM committed_replay_scopes WHERE event_id = $1::uuid`, executableID)
 
-	globalMissing, err := pg.ListEventsMissingPipelineReceipt(ctx, now.Add(-time.Hour), 20)
+	presence, err := pg.PipelineObligations().GlobalWorkPresence(ctx)
 	if err != nil {
-		t.Fatalf("ListEventsMissingPipelineReceipt: %v", err)
+		t.Fatalf("GlobalWorkPresence: %v", err)
 	}
-	assertReplayEventIDs(t, globalMissing, []string{executableID})
-
-	runMissing, err := pg.ListEventsMissingPipelineReceiptForRun(ctx, runID, now.Add(-time.Hour), 20)
+	if !presence.ProcessingEligible {
+		t.Fatalf("pipeline work presence = %#v, want executable recovery work", presence)
+	}
+	summary, err := pg.PipelineObligations().SummarizeRun(ctx, runID)
 	if err != nil {
-		t.Fatalf("ListEventsMissingPipelineReceiptForRun: %v", err)
+		t.Fatalf("SummarizeRun: %v", err)
 	}
-	assertReplayEventIDs(t, runMissing, []string{executableID})
+	if summary.Replayable != 1 || summary.DiagnosticExcluded == 0 {
+		t.Fatalf("pipeline summary = %#v, want one executable and diagnostic exclusion", summary)
+	}
 
 	logs, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
 		RunID:     runID,
@@ -127,7 +133,7 @@ func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEv
 	if err != nil {
 		t.Fatalf("NewEventBus(postgres): %v", err)
 	}
-	swept, err := bus.SweepUndispatched(ctx, time.Hour, 20)
+	swept, err := bus.SweepUndispatched(ctx, 20)
 	if err != nil {
 		t.Fatalf("SweepUndispatched(postgres): %v", err)
 	}
@@ -136,7 +142,7 @@ func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEv
 	}
 
 	assertNoPostgresPipelineReceipt(t, ctx, pg, runtimeLogID)
-	assertPostgresPipelineReceipt(t, ctx, pg, executableID, "dead_letter", "committed_replay_scope_missing")
+	assertPostgresPipelineReceipt(t, ctx, pg, executableID, "dead_letter", "committed_pipeline_scope_missing")
 }
 
 func persistSQLiteRuntimeLogForReplayTest(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, runID string) string {

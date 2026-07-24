@@ -46,6 +46,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
@@ -66,6 +67,7 @@ type Stores struct {
 	ConversationStore   llm.ConversationPersistence
 	ManagerStore        runtimemanager.ManagerPersistence
 	DeliveryStore       runtimedelivery.Store
+	PipelineObligations runtimepipelineobligation.Store
 	ScheduleStore       runtimepipeline.SchedulePersistence
 	MailboxMaterializer runtimepipeline.MailboxWriteMaterializationStore
 	DecisionCards       decisioncard.Store
@@ -933,7 +935,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	}
 	payloadValidator := boot.payloadValidator(rt.Logger)
 	rt.payloadValidator = payloadValidator
-	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, source, boot.TrimmedBundleFingerprint, boot.BundleSourceFact, opts.RuntimeInstanceID, workOccurrence, func() []runtimebus.EventInterceptor {
+	bus, err := newRuntimeEventBus(stores.EventStore, stores.PipelineObligations, rt.Logger, source, boot.TrimmedBundleFingerprint, boot.BundleSourceFact, opts.RuntimeInstanceID, workOccurrence, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
 		}
@@ -1010,9 +1012,10 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			return nil, fmt.Errorf("artifact repo root validation failed: %w", err)
 		}
 		rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, stores.SQLDB, runtimepipeline.PipelineCoordinatorOptions{
-			Module:        opts.WorkflowModule,
-			WorkflowStore: pipelineStore,
-			DeliveryStore: stores.DeliveryStore,
+			Module:              opts.WorkflowModule,
+			WorkflowStore:       pipelineStore,
+			DeliveryStore:       stores.DeliveryStore,
+			PipelineObligations: stores.PipelineObligations,
 			InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 				if managerRef == nil {
 					return fmt.Errorf("flow instance activator is required")

@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/lib/pq"
@@ -93,6 +94,7 @@ type WorkflowInstanceStore struct {
 	dialect         workflowStoreDialect
 	runtimeMutation RuntimeMutationRunner
 	deliveryStore   runtimedelivery.Store
+	pipelineStore   runtimepipelineobligation.Store
 	decisionCards   decisioncard.Store
 	gateEvents      workflowGateMutationPublisher
 }
@@ -160,6 +162,12 @@ func (s *WorkflowInstanceStore) ConfigureRuntimeMutationRunner(runner RuntimeMut
 func (s *WorkflowInstanceStore) ConfigureDeliveryLifecycleStore(store runtimedelivery.Store) {
 	if s != nil {
 		s.deliveryStore = store
+	}
+}
+
+func (s *WorkflowInstanceStore) ConfigurePipelineObligationStore(store runtimepipelineobligation.Store) {
+	if s != nil {
+		s.pipelineStore = store
 	}
 }
 

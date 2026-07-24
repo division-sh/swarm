@@ -23,7 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"time"
 )
@@ -61,21 +61,17 @@ func (l emitWorkflowInstanceLoader) Load(_ context.Context, ref string) (runtime
 }
 
 type emitRoutePlanStore struct {
-	events      map[string]events.Event
-	routes      map[string][]events.DeliveryRoute
-	scopes      map[string]runtimereplayclaim.CommittedReplayScope
-	receipts    map[string]string
-	receiptErrs map[string]*failures.Envelope
-	active      []string
+	events map[string]events.Event
+	routes map[string][]events.DeliveryRoute
+	scopes map[string]runtimepipelineobligation.CommittedScope
+	active []string
 }
 
 func newEmitRoutePlanStore() *emitRoutePlanStore {
 	return &emitRoutePlanStore{
-		events:      map[string]events.Event{},
-		routes:      map[string][]events.DeliveryRoute{},
-		scopes:      map[string]runtimereplayclaim.CommittedReplayScope{},
-		receipts:    map[string]string{},
-		receiptErrs: map[string]*failures.Envelope{},
+		events: map[string]events.Event{},
+		routes: map[string][]events.DeliveryRoute{},
+		scopes: map[string]runtimepipelineobligation.CommittedScope{},
 	}
 }
 
@@ -131,10 +127,6 @@ func (s *emitRoutePlanStore) finalizePublish(_ context.Context, req runtimebus.C
 	}
 	s.routes[event.ID()] = events.NormalizeDeliveryRoutes(req.DeliveryRoutes)
 	s.scopes[event.ID()] = req.ReplayScope
-	if req.PipelineReceipt != nil {
-		s.receipts[event.ID()] = req.PipelineReceipt.Status
-		s.receiptErrs[event.ID()] = failures.CloneEnvelope(req.PipelineReceipt.Failure)
-	}
 	s.active = s.active[:len(s.active)-1]
 	return nil
 }
@@ -147,14 +139,6 @@ func (s *emitRoutePlanStore) ListEventDeliveryRecipients(_ context.Context, even
 		}
 	}
 	return out, nil
-}
-
-func (s *emitRoutePlanStore) SupportsPersistedReplay() bool { return true }
-
-func (s *emitRoutePlanStore) UpsertPipelineReceipt(_ context.Context, eventID, status string, failure *failures.Envelope) error {
-	s.receipts[eventID] = status
-	s.receiptErrs[eventID] = failures.CloneEnvelope(failure)
-	return nil
 }
 
 func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
@@ -1012,10 +996,7 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 	if !emitDeliveryRoutesContain(store.routes[eventID], wantRoute) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", store.routes[eventID], wantRoute)
 	}
-	if got := store.receipts[eventID]; got != "processed" {
-		t.Fatalf("pipeline receipt = %q, want processed", got)
-	}
-	if got := store.scopes[eventID]; got != runtimereplayclaim.CommittedReplayScopeSubscribed {
+	if got := store.scopes[eventID]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
 }
@@ -1073,9 +1054,6 @@ func TestHandleEmitTool_RootReceiverConnectMaterializesParentTargetBeforePreflig
 	}
 	if !emitDeliveryRoutesContain(store.routes[eventID], wantRoute) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", store.routes[eventID], wantRoute)
-	}
-	if got := store.receipts[eventID]; got != "processed" {
-		t.Fatalf("pipeline receipt = %q, want processed", got)
 	}
 }
 

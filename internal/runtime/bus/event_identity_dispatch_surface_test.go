@@ -19,10 +19,9 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -33,7 +32,7 @@ type completeEventDispatchStore interface {
 	runtimebus.EventStore
 	runtimedelivery.Store
 	runtimemanager.ManagerPersistence
-	UpsertPipelineReceipt(context.Context, string, string, *runtimefailures.Envelope) error
+	PipelineObligations() runtimepipelineobligation.Store
 }
 
 type completeEventDispatchFixture struct {
@@ -87,8 +86,20 @@ func TestCompleteEventSnapshotDispatchesThroughManagerBacklogOnSQLiteAndPostgres
 			}); err != nil {
 				t.Fatalf("UpsertAgent: %v", err)
 			}
-			if err := fixture.store.UpsertPipelineReceipt(fixture.ctx, fixture.event.ID(), "processed", nil); err != nil {
-				t.Fatalf("UpsertPipelineReceipt: %v", err)
+			work, err := fixture.store.PipelineObligations().ClaimEvent(
+				fixture.ctx,
+				fixture.event.ID(),
+				runtimepipelineobligation.PurposeRecovery,
+			)
+			if err != nil {
+				t.Fatalf("claim pipeline obligation: %v", err)
+			}
+			if err := fixture.store.PipelineObligations().Settle(
+				fixture.ctx,
+				work.Claim,
+				runtimepipelineobligation.Acknowledged("pipeline_persisted"),
+			); err != nil {
+				t.Fatalf("settle pipeline obligation: %v", err)
 			}
 
 			if err := fixture.updateChainDepth(-1); err == nil {
@@ -149,7 +160,7 @@ func newCompleteEventDispatchFixture(t *testing.T, backend string, decisionOblig
 		createdAt,
 	), executionmode.Mock)
 	agentID := "complete-event-agent"
-	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: agentID}}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: agentID}}, runtimepipelineobligation.ScopeSubscribed)
 	fixture := completeEventDispatchFixture{
 		store: selected, db: db, dialect: backend, ctx: ctx, bus: bus, event: event, agentID: agentID,
 	}
@@ -173,11 +184,11 @@ func seedCompleteEventDispatchRun(t testing.TB, ctx context.Context, db *sql.DB,
 func (f completeEventDispatchFixture) invoke(surface string) (int, error) {
 	switch surface {
 	case "startup":
-		return 0, runtimepipeline.NewRecoveryManagerWith(f.store, f.bus).Recover(f.ctx)
+		return 0, runtimepipeline.NewRecoveryManagerWith(f.bus).Recover(f.ctx)
 	case "global_sweeper", "decision_obligation":
-		return f.bus.SweepUndispatched(f.ctx, time.Hour, 10)
+		return f.bus.SweepUndispatched(f.ctx, 10)
 	case "run_queue":
-		return f.bus.ReleaseRunQueue(f.ctx, f.event.RunID(), time.Hour, 10)
+		return f.bus.ReleaseRunQueue(f.ctx, f.event.RunID(), 10)
 	default:
 		return 0, errors.New("unknown complete event dispatch surface")
 	}

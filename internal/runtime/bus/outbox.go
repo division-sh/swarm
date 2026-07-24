@@ -12,7 +12,7 @@ import (
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
 type engineOutbox struct {
@@ -80,7 +80,6 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 		if err != nil {
 			return err
 		}
-		intentCtx = publicationClaim.BindContext(intentCtx)
 		if publicationClaim != nil && !runtimepipeline.QueuePipelineRollbackAction(intentCtx, func(actionCtx context.Context) { publicationClaim.Release(actionCtx) }) {
 			publicationClaim.Release(intentCtx)
 			return errors.New("engine outbox requires event publication rollback ownership")
@@ -97,16 +96,17 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 		if err != nil {
 			return err
 		}
-		var receipt *InitialPipelineReceipt
+		var disposition *runtimepipelineobligation.Disposition
 		var deadLetter *runtimedeadletters.Record
 		if plan.TargetFailure != "" {
-			receipt = &InitialPipelineReceipt{Status: "dead_letter", Failure: targetDeliveryFailureEnvelope(plan.TargetFailure)}
+			value := runtimepipelineobligation.DeadLetter(string(plan.TargetFailure), targetDeliveryFailureEnvelope(plan.TargetFailure))
+			disposition = &value
 			_, _, record := targetDeliveryFailureRecord(intent.Event, plan, plan.TargetFailure)
 			deadLetter = &record
 		}
 		if err := finalizePreparedPublish(intentCtx, transaction, CommitPublishRequest{
 			Event: admitted, DeliveryRoutes: plan.DeliveryRoutes(), ReplayScope: replayScopeForEmitIntent(*intent),
-			PipelineReceipt: receipt, DeadLetter: deadLetter,
+			PipelineClaim: publicationClaim.Claim(), Disposition: disposition, DeadLetter: deadLetter,
 		}); err != nil {
 			return fmt.Errorf("finalize event publish: %w", err)
 		}
@@ -189,7 +189,7 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 		if handled {
 			continue
 		}
-		if err := d.dispatchAndRecord(ctx, intent); err != nil {
+		if err := d.dispatchAndRecord(ctx, intent, nil); err != nil {
 			return err
 		}
 	}
@@ -201,7 +201,6 @@ func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fa
 	if !ok {
 		return false, nil
 	}
-	ctx = operation.publicationClaim.BindContext(ctx)
 	defer operation.publicationClaim.Release(ctx)
 	if operation.intent.Event.Type() != fallback.Event.Type() {
 		return true, fmt.Errorf("pending outbox event type mismatch for %s: persisted=%s dispatch=%s", fallback.Event.ID(), operation.intent.Event.Type(), fallback.Event.Type())
@@ -212,21 +211,57 @@ func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fa
 	if operation.outcome != EventAppendInserted {
 		return true, errors.New("pending outbox operation has invalid append outcome")
 	}
-	return true, d.dispatchAndRecord(ctx, operation.intent)
+	return true, d.dispatchAndRecord(ctx, operation.intent, operation.publicationClaim)
 }
 
-func (d engineDispatcher) dispatchAndRecord(ctx context.Context, intent runtimeengine.EmitIntent) error {
-	queued, err := d.dispatchIntent(ctx, intent)
-	if err != nil {
-		if !errors.Is(err, errAuthoritativeDeliveryIncomplete) {
-			d.bus.markPipelineReceipt(ctx, intent.Event.ID(), "error", eventBusFailure(err, "dispatch_outbox"))
+func (d engineDispatcher) dispatchAndRecord(ctx context.Context, intent runtimeengine.EmitIntent, publicationClaim *pipelinePublicationClaim) (err error) {
+	var recoveryClaim runtimepipelineobligation.Claim
+	claimOpen := false
+	if publicationClaim == nil && d.bus.pipelineObligations != nil {
+		work, err := d.bus.pipelineObligations.ClaimEvent(ctx, intent.Event.ID(), runtimepipelineobligation.PurposeRecovery)
+		if errors.Is(err, runtimepipelineobligation.ErrBusy) || errors.Is(err, runtimepipelineobligation.ErrIneligible) {
+			// A post-commit duplicate cannot acquire an already-owned or
+			// terminal obligation and therefore has no dispatch work.
+			return nil
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		recoveryClaim = work.Claim
+		claimOpen = true
+		defer func() {
+			if claimOpen {
+				err = errors.Join(err, d.bus.pipelineObligations.Release(context.WithoutCancel(ctx), recoveryClaim))
+			}
+		}()
 	}
-	if !queued {
-		d.bus.markPipelineReceipt(ctx, intent.Event.ID(), "processed", nil)
+	settle := func(disposition runtimepipelineobligation.Disposition) error {
+		if publicationClaim != nil {
+			return publicationClaim.Settle(ctx, disposition)
+		}
+		if d.bus.pipelineObligations == nil {
+			return nil
+		}
+		if err := d.bus.pipelineObligations.Settle(ctx, recoveryClaim, disposition); err != nil {
+			return err
+		}
+		claimOpen = false
+		return nil
 	}
-	return nil
+	queued, outcome, err := d.dispatchIntent(ctx, intent)
+	if err != nil {
+		if errors.Is(err, ErrRuntimeIngressPaused) || errors.Is(err, ErrRunDispatchBlocked) || errors.Is(err, errAuthoritativeDeliveryIncomplete) {
+			return err
+		}
+		return errors.Join(err, settle(runtimepipelineobligation.Terminal("pipeline_outbox_dispatch_failed", eventBusFailure(err, "dispatch_outbox"))))
+	}
+	if queued {
+		return nil
+	}
+	if disposition, ok := outcome.Disposition(); ok {
+		return settle(disposition)
+	}
+	return settle(runtimepipelineobligation.Acknowledged("pipeline_persisted"))
 }
 
 func clonePostCommitEmitIntents(intents []runtimeengine.EmitIntent) []runtimeengine.EmitIntent {
@@ -249,36 +284,39 @@ func clonePostCommitPublish(evt events.Event) events.Event {
 	return evt.Clone()
 }
 
-func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengine.EmitIntent) (bool, error) {
+func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengine.EmitIntent) (bool, runtimepipelineobligation.ExecutionOutcome, error) {
 	ctx = events.WithDeliveryContext(ctx, intent.Context)
 	if reason, err := d.bus.dispatchQueueReason(ctx, intent.Event); err != nil {
-		return false, err
+		return false, runtimepipelineobligation.Continue(), err
 	} else if reason != "" {
 		d.bus.logDispatchQueued(ctx, reason, intent.Event, len(intent.Recipients), len(intent.Recipients) > 0, false)
-		return true, nil
+		return true, runtimepipelineobligation.Continue(), nil
 	}
 	deliveryRoutes := d.bus.deliveryRoutesForPostCommitIntent(ctx, intent.Event.ID())
 	if intent.Recipients == nil {
-		passthrough, deferred, err := d.bus.runInterceptorsForDeliveryRoutes(ctx, intent.Event, deliveryRoutes)
+		passthrough, deferred, outcome, err := d.bus.runInterceptorsForDeliveryRoutes(ctx, intent.Event, deliveryRoutes)
 		if err != nil {
-			return false, err
+			return false, runtimepipelineobligation.Continue(), err
+		}
+		if !outcome.ContinueDispatch() {
+			return false, outcome, nil
 		}
 		for _, next := range deferred {
 			if err := d.bus.publishDeferred(ctx, next); err != nil {
-				return false, err
+				return false, runtimepipelineobligation.Continue(), err
 			}
 		}
 		if !passthrough {
 			d.bus.clearPendingInternalDeliveryRoutes(intent.Event.ID())
-			return false, nil
+			return false, runtimepipelineobligation.Continue(), nil
 		}
 	}
 	recipients, err := d.bus.authoritativeRecipientsForEvent(ctx, intent.Event.ID())
 	if err != nil {
-		if len(intent.Recipients) > 0 && errors.Is(err, runtimereplayclaim.ErrAuthoritativeRecipientManifestUnavailable) {
-			return false, d.dispatchExplicitDirectIntent(ctx, intent)
+		if intent.Recipients == nil || !errors.Is(err, ErrAuthoritativeRecipientManifestUnavailable) {
+			return false, runtimepipelineobligation.Continue(), err
 		}
-		return false, err
+		recipients = uniqueStrings(intent.Recipients)
 	}
 	pendingInternalRoutes := d.bus.pendingInternalDeliveryRoutes(intent.Event.ID())
 	if len(recipients) > 0 {
@@ -299,16 +337,15 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 			plan.TargetFailure = runtimepinrouting.FailureTargetNotSubscribed
 			plan = plan.Normalized()
 			d.bus.recordTargetDeliveryFailure(ctx, intent.Event, plan)
-			d.bus.markPipelineReceipt(ctx, intent.Event.ID(), "dead_letter", targetDeliveryFailureEnvelope(plan.TargetFailure))
-			return true, nil
+			return false, runtimepipelineobligation.DeadLetterExecution(string(plan.TargetFailure), targetDeliveryFailureEnvelope(plan.TargetFailure)), nil
 		}
-		return false, nil
+		return false, runtimepipelineobligation.Continue(), nil
 	}
 	if len(deliveryRoutes) == 0 {
 		deliveryRoutes = deliveryRoutesFromTargetMap(recipients, "agent", d.bus.deliveryTargetsForEvent(ctx, intent.Event.ID()))
 	}
 	if err := d.bus.deliverToRecipientsWithRoutes(ctx, intent.Event, liveRecipients, deliveryRoutes); err != nil {
-		return false, err
+		return false, runtimepipelineobligation.Continue(), err
 	}
 	d.bus.clearPendingInternalDeliveryRoutes(intent.Event.ID())
 	d.bus.logRuntime(ctx, "debug", "Persisted event intent was delivered", "eventbus", "delivered", intent.Event.ID(), string(intent.Event.Type()), "", intent.Event.EntityID(), "", nil, map[string]any{
@@ -321,7 +358,7 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		"persisted_recipients":       append([]string(nil), recipients...),
 		"internal_recipients":        append([]string(nil), internalRecipients...),
 	}, nil, 0)
-	return false, nil
+	return false, runtimepipelineobligation.Continue(), nil
 }
 
 func (eb *EventBus) deliveryRoutesForPostCommitIntent(ctx context.Context, eventID string) []events.DeliveryRoute {
@@ -330,33 +367,11 @@ func (eb *EventBus) deliveryRoutesForPostCommitIntent(ctx context.Context, event
 	return events.NormalizeDeliveryRoutes(append(persistedRoutes, pendingInternalRoutes...))
 }
 
-func (d engineDispatcher) dispatchExplicitDirectIntent(ctx context.Context, intent runtimeengine.EmitIntent) error {
-	ctx = events.WithDeliveryContext(ctx, intent.Context)
-	plan, err := d.bus.planDirectRoutePlan(ctx, intent.Event, intent.Recipients)
-	if err != nil {
-		return err
-	}
-	recipients := plan.RecipientIDs()
-	if err := d.bus.deliverToRecipientsWithRoutes(ctx, intent.Event, recipients, plan.DeliveryRoutes()); err != nil {
-		return err
-	}
-	detail := map[string]any{
-		"direct":           true,
-		"recipients_count": len(recipients),
-		"parent_event_id":  intent.Event.ParentEventID(),
-	}
-	for k, v := range plan.ExtraDetail {
-		detail[k] = v
-	}
-	d.bus.logRuntime(ctx, "debug", "Deferred direct event intent was delivered", "eventbus", "delivered", intent.Event.ID(), string(intent.Event.Type()), "", intent.Event.EntityID(), "", nil, detail, nil, 0)
-	return nil
-}
-
-func replayScopeForEmitIntent(intent runtimeengine.EmitIntent) runtimereplayclaim.CommittedReplayScope {
+func replayScopeForEmitIntent(intent runtimeengine.EmitIntent) runtimepipelineobligation.CommittedScope {
 	if len(intent.Recipients) > 0 {
-		return runtimereplayclaim.CommittedReplayScopeDirect
+		return runtimepipelineobligation.ScopeDirect
 	}
-	return runtimereplayclaim.CommittedReplayScopeSubscribed
+	return runtimepipelineobligation.ScopeSubscribed
 }
 
 func (eb *EventBus) setPendingInternalDeliveryRoutes(eventID string, deliveryRoutes []events.DeliveryRoute) {

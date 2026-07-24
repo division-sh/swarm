@@ -42,6 +42,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunforkadmission "github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
@@ -126,6 +127,7 @@ type storeBundle struct {
 	ConversationStore            runtimellm.ConversationPersistence
 	ManagerStore                 runtimemanager.ManagerPersistence
 	DeliveryStore                runtimedelivery.Store
+	PipelineObligations          runtimepipelineobligation.Store
 	ScheduleStore                runtimepipeline.SchedulePersistence
 	MailboxMaterializer          runtimepipeline.MailboxWriteMaterializationStore
 	MailboxStore                 runtimetools.MailboxPersistence
@@ -291,6 +293,7 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, cfg *config.Config) st
 		ConversationStore:           pg,
 		ManagerStore:                pg,
 		DeliveryStore:               pg,
+		PipelineObligations:         pg.PipelineObligations(),
 		ScheduleStore:               pg,
 		MailboxMaterializer:         pg,
 		MailboxStore:                pg,
@@ -1943,6 +1946,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			ConversationStore:           sqliteStore,
 			ManagerStore:                sqliteStore,
 			DeliveryStore:               sqliteStore,
+			PipelineObligations:         sqliteStore.PipelineObligations(),
 			ScheduleStore:               sqliteStore,
 			MailboxMaterializer:         sqliteStore,
 			MailboxStore:                sqliteStore,

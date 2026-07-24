@@ -3,6 +3,7 @@ package storetest
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -12,18 +13,19 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/eventrecord/sqlite"
+	"github.com/google/uuid"
 )
 
-type semanticFixtureTarget interface {
-	UpsertCommittedReplayScopeTx(context.Context, *sql.Tx, string, runtimereplayclaim.CommittedReplayScope) error
-	UpsertPipelineReceiptTx(context.Context, *sql.Tx, string, string, *runtimefailures.Envelope) error
+func AcknowledgedPipelineDisposition() *runtimepipelineobligation.Disposition {
+	disposition := runtimepipelineobligation.Acknowledged("pipeline_persisted")
+	return &disposition
 }
 
 // InsertCanonicalEventRecord seeds an already-persisted event precondition.
@@ -237,7 +239,7 @@ func InsertDiagnosticDirectEventRecordForRun(
 
 func CommitSemanticEvent(t testing.TB, ctx context.Context, selectedStore any, event events.Event) runtimebus.EventAppendOutcome {
 	t.Helper()
-	return CommitSemanticEventWithInitialFacts(t, ctx, selectedStore, event, nil, runtimereplayclaim.CommittedReplayScopeDirect, nil)
+	return CommitSemanticEventWithInitialFacts(t, ctx, selectedStore, event, nil, runtimepipelineobligation.ScopeDirect, nil)
 }
 
 func CommitSemanticEventWithRoutes(
@@ -246,7 +248,7 @@ func CommitSemanticEventWithRoutes(
 	selectedStore any,
 	event events.Event,
 	routes []events.DeliveryRoute,
-	scope runtimereplayclaim.CommittedReplayScope,
+	scope runtimepipelineobligation.CommittedScope,
 ) runtimebus.EventAppendOutcome {
 	t.Helper()
 	return CommitSemanticEventWithInitialFacts(t, ctx, selectedStore, event, routes, scope, nil)
@@ -258,11 +260,11 @@ func CommitSemanticEventWithInitialFacts(
 	selectedStore any,
 	event events.Event,
 	routes []events.DeliveryRoute,
-	scope runtimereplayclaim.CommittedReplayScope,
-	pipelineReceipt *runtimebus.InitialPipelineReceipt,
+	scope runtimepipelineobligation.CommittedScope,
+	pipelineDisposition *runtimepipelineobligation.Disposition,
 ) runtimebus.EventAppendOutcome {
 	t.Helper()
-	return commitSemanticEventWithInitialFacts(t, ctx, selectedStore, event, routes, scope, pipelineReceipt, false)
+	return commitSemanticEventWithInitialFacts(t, ctx, selectedStore, event, routes, scope, pipelineDisposition, false)
 }
 
 // CommitSemanticForkFrontier seeds the exact PostgreSQL fact families that a
@@ -274,13 +276,13 @@ func CommitSemanticForkFrontier(
 	selectedStore *store.PostgresStore,
 	event events.Event,
 	routes []events.DeliveryRoute,
-	pipelineReceipt *runtimebus.InitialPipelineReceipt,
+	pipelineDisposition *runtimepipelineobligation.Disposition,
 ) runtimebus.EventAppendOutcome {
 	t.Helper()
 	return commitSemanticEventWithInitialFacts(
 		t, ctx, selectedStore, event, routes,
-		runtimereplayclaim.CommittedReplayScopeSubscribed,
-		pipelineReceipt,
+		runtimepipelineobligation.ScopeSubscribed,
+		pipelineDisposition,
 		true,
 	)
 }
@@ -291,8 +293,8 @@ func commitSemanticEventWithInitialFacts(
 	selectedStore any,
 	event events.Event,
 	routes []events.DeliveryRoute,
-	scope runtimereplayclaim.CommittedReplayScope,
-	pipelineReceipt *runtimebus.InitialPipelineReceipt,
+	scope runtimepipelineobligation.CommittedScope,
+	pipelineDisposition *runtimepipelineobligation.Disposition,
 	captureForkFrontier bool,
 ) runtimebus.EventAppendOutcome {
 	t.Helper()
@@ -310,14 +312,15 @@ func commitSemanticEventWithInitialFacts(
 
 	var (
 		db              *sql.DB
-		target          semanticFixtureTarget
 		deliveryAdapter *runtimedelivery.Adapter
 		insert          func(context.Context, *sql.Tx, eventrecord.Record) (bool, error)
 		load            func(context.Context, *sql.Tx, string) (eventrecord.Record, bool, error)
+		postgres        bool
 	)
 	switch selected := selectedStore.(type) {
 	case *store.PostgresStore:
-		db, target = selected.DB, selected
+		db = selected.DB
+		postgres = true
 		deliveryAdapter, err = runtimedelivery.NewAdapter(runtimedelivery.DialectPostgres)
 		insert = func(ctx context.Context, tx *sql.Tx, record eventrecord.Record) (bool, error) {
 			return eventrecordpostgres.Insert(ctx, tx, record)
@@ -326,7 +329,7 @@ func commitSemanticEventWithInitialFacts(
 			return eventrecordpostgres.Load(ctx, tx, eventID)
 		}
 	case *store.SQLiteRuntimeStore:
-		db, target = selected.DB, selected
+		db = selected.DB
 		deliveryAdapter, err = runtimedelivery.NewAdapter(runtimedelivery.DialectSQLite)
 		insert = func(ctx context.Context, tx *sql.Tx, record eventrecord.Record) (bool, error) {
 			return eventrecordsqlite.Insert(ctx, tx, record)
@@ -340,7 +343,7 @@ func commitSemanticEventWithInitialFacts(
 	if err != nil {
 		t.Fatalf("construct semantic delivery fixture adapter: %v", err)
 	}
-	if db == nil || target == nil || deliveryAdapter == nil {
+	if db == nil || deliveryAdapter == nil {
 		t.Fatalf("semantic event fixture store %T is not initialized", selectedStore)
 	}
 
@@ -369,12 +372,12 @@ func commitSemanticEventWithInitialFacts(
 	if _, err := deliveryAdapter.CommitInitial(ctx, tx, record.EventID, record.RunID, events.NormalizeDeliveryRoutes(routes)); err != nil {
 		t.Fatalf("commit semantic event fixture routes: %v", err)
 	}
-	if err := target.UpsertCommittedReplayScopeTx(ctx, tx, record.EventID, scope); err != nil {
-		t.Fatalf("commit semantic event fixture replay scope: %v", err)
+	if err := insertPipelineScopeFixture(ctx, tx, record.EventID, scope, postgres, time.Now().UTC()); err != nil {
+		t.Fatalf("commit semantic event fixture pipeline scope: %v", err)
 	}
-	if pipelineReceipt != nil {
-		if err := target.UpsertPipelineReceiptTx(ctx, tx, record.EventID, pipelineReceipt.Status, pipelineReceipt.Failure); err != nil {
-			t.Fatalf("commit semantic event fixture pipeline receipt: %v", err)
+	if pipelineDisposition != nil {
+		if err := insertPipelineDispositionFixture(ctx, tx, record.EventID, *pipelineDisposition, postgres, time.Now().UTC()); err != nil {
+			t.Fatalf("commit semantic event fixture pipeline disposition: %v", err)
 		}
 	}
 	if captureForkFrontier {
@@ -397,6 +400,120 @@ func commitSemanticEventWithInitialFacts(
 		t.Fatalf("commit semantic event fixture: %v", err)
 	}
 	return runtimebus.EventAppendInserted
+}
+
+func insertPipelineScopeFixture(
+	ctx context.Context,
+	tx *sql.Tx,
+	eventID string,
+	scope runtimepipelineobligation.CommittedScope,
+	postgres bool,
+	now time.Time,
+) error {
+	if _, err := runtimepipelineobligation.ParseCommittedScope(string(scope)); err != nil {
+		return err
+	}
+	query := `
+		INSERT INTO committed_replay_scopes (event_id, run_id, scope, created_at, updated_at)
+		SELECT e.event_id, e.run_id, ?, ?, ? FROM events e WHERE e.event_id = ?
+		ON CONFLICT(event_id) DO NOTHING`
+	args := []any{string(scope), now, now, eventID}
+	if postgres {
+		query = `
+			INSERT INTO committed_replay_scopes (event_id, run_id, scope, created_at, updated_at)
+			SELECT e.event_id, e.run_id, $2, $3, $3 FROM events e WHERE e.event_id = $1::uuid
+			ON CONFLICT(event_id) DO NOTHING`
+		args = []any{eventID, string(scope), now}
+	}
+	result, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("pipeline scope fixture affected %d rows, want 1", rows)
+	}
+	return nil
+}
+
+func insertPipelineDispositionFixture(
+	ctx context.Context,
+	tx *sql.Tx,
+	eventID string,
+	disposition runtimepipelineobligation.Disposition,
+	postgres bool,
+	now time.Time,
+) error {
+	if err := disposition.ValidateFor(runtimepipelineobligation.PurposeRecovery); err != nil {
+		return err
+	}
+	outcome := "success"
+	managerStatus := "processed"
+	if !disposition.Successful() {
+		outcome = "dead_letter"
+		managerStatus = "error"
+		if disposition.Kind() == runtimepipelineobligation.DispositionDeadLetter {
+			managerStatus = "dead_letter"
+		}
+	}
+	reasonCode := disposition.ReasonCode()
+	if reasonCode == "" {
+		if disposition.Successful() {
+			reasonCode = "pipeline_persisted"
+		} else {
+			reasonCode = "pipeline_error"
+		}
+	}
+	var failureJSON any
+	if failure := disposition.Failure(); failure != nil {
+		raw, err := runtimefailures.MarshalEnvelope(*failure)
+		if err != nil {
+			return err
+		}
+		failureJSON = string(raw)
+	}
+	sideEffects, err := json.Marshal(map[string]string{
+		"manager_status": managerStatus,
+		"reason_code":    reasonCode,
+	})
+	if err != nil {
+		return err
+	}
+	query := `
+		INSERT INTO event_receipts (
+			receipt_id, event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
+			outcome, reason_code, failure, side_effects, processed_at
+		)
+		SELECT ?, e.event_id, 'platform', 'pipeline', e.entity_id, e.flow_instance, ?, ?, ?, ?, ?
+		FROM events e WHERE e.event_id = ?
+		ON CONFLICT(event_id, subscriber_type, subscriber_id) DO NOTHING`
+	args := []any{uuid.NewString(), outcome, reasonCode, failureJSON, string(sideEffects), now, eventID}
+	if postgres {
+		query = `
+			INSERT INTO event_receipts (
+				receipt_id, event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
+				outcome, reason_code, failure, side_effects, processed_at
+			)
+			SELECT $1::uuid, e.event_id, 'platform', 'pipeline', e.entity_id, e.flow_instance,
+				$2, $3, $4::jsonb, $5::jsonb, $6
+			FROM events e WHERE e.event_id = $7::uuid
+			ON CONFLICT(event_id, subscriber_type, subscriber_id) DO NOTHING`
+	}
+	result, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("pipeline disposition fixture affected %d rows, want 1", rows)
+	}
+	return nil
 }
 
 func ensureSemanticFixtureRun(ctx context.Context, tx *sql.Tx, record eventrecord.Record, selectedStore any) error {

@@ -419,7 +419,7 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 
 	configurePipelineTestDeliveryOwner(t, pc)
 	route := seedPipelineNodeDeliveryAuthority(t, db, completion, "parent-listener")
-	passThrough, emitted, err := pc.Intercept(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route), completion)
+	passThrough, emitted, _, err := pc.Intercept(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route), completion)
 	if err != nil {
 		t.Fatalf("Intercept: %v", err)
 	}
@@ -500,7 +500,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 
 	configurePipelineTestDeliveryOwner(t, pc)
 	route := seedPipelineNodeDeliveryAuthority(t, db, completion, "root-collector")
-	passThrough, emitted, err := pc.Intercept(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route), completion)
+	passThrough, emitted, _, err := pc.Intercept(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route), completion)
 	if err != nil {
 		t.Fatalf("Intercept: %v", err)
 	}
@@ -602,7 +602,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRo
 
 	configurePipelineTestDeliveryOwner(t, pc)
 	route := seedPipelineNodeDeliveryAuthority(t, db, completion, "root-collector")
-	passThrough, emitted, err := pc.Intercept(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route), completion)
+	passThrough, emitted, _, err := pc.Intercept(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route), completion)
 	if err != nil {
 		t.Fatalf("Intercept: %v", err)
 	}
@@ -689,7 +689,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectInsideOuterSQLTxDo
 	if err != nil {
 		t.Fatalf("begin nested completion author activity story: %v", err)
 	}
-	passThrough, emitted, err := pc.Intercept(withWorkflowNodeDeliveryRoute(ctx, route), completion)
+	passThrough, emitted, _, err := pc.Intercept(withWorkflowNodeDeliveryRoute(ctx, route), completion)
 	if err != nil {
 		t.Fatalf("Intercept: %v", err)
 	}

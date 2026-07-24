@@ -31,6 +31,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/httpresponsesuccess"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -262,9 +263,6 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 		return err
 	}
 	source := d.coordinator.SemanticSource()
-	if err := d.admitActivityContractPin(ctx, intent, source); err != nil {
-		return err
-	}
 	if source == nil {
 		return runtimefailures.New(runtimefailures.ClassInternalFailure, "activity_semantic_source_missing", "activity-runtime", "execute_activity", nil)
 	}
@@ -410,14 +408,15 @@ func activityExecutionContext(ctx context.Context, intent runtimeengine.Activity
 	return runtimeeffects.WithExecutionMode(ctx, intent.ExecutionMode), nil
 }
 
-func (d pipelineActivityDispatcher) admitActivityContractPin(ctx context.Context, intent runtimeengine.ActivityIntent, source semanticview.Source) error {
+func (d pipelineActivityDispatcher) activityContractPinFailure(ctx context.Context, intent runtimeengine.ActivityIntent, source semanticview.Source) *runtimefailures.Envelope {
 	if intent.BundleHash == "" && intent.WorkflowVersion == "" {
 		return nil
 	}
 	if intent.BundleHash == "" || intent.WorkflowVersion == "" {
-		return runtimefailures.New(runtimefailures.ClassSchemaInvalid, "activity_contract_pin_incomplete", "activity-runtime", "admit_activity_contract", map[string]any{
+		failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassSchemaInvalid, "activity_contract_pin_incomplete", "activity-runtime", "admit_activity_contract", map[string]any{
 			"activity_id": intent.ActivityID, "bundle_hash": intent.BundleHash, "workflow_version": intent.WorkflowVersion,
-		})
+		}), "activity-runtime", "admit_activity_contract")
+		return &failure
 	}
 	currentBundleHash := workflowGateBundleHash(ctx, d.coordinator)
 	currentWorkflowVersion := ""
@@ -427,7 +426,7 @@ func (d pipelineActivityDispatcher) admitActivityContractPin(ctx context.Context
 	if currentBundleHash == intent.BundleHash && currentWorkflowVersion == intent.WorkflowVersion {
 		return nil
 	}
-	return DeferPipelineReceipt(runtimefailures.New(
+	failure := runtimefailures.Normalize(runtimefailures.New(
 		runtimefailures.ClassDependencyUnavailable,
 		"activity_contract_pin_unavailable",
 		"activity-runtime",
@@ -439,7 +438,8 @@ func (d pipelineActivityDispatcher) admitActivityContractPin(ctx context.Context
 			"required_workflow_version": intent.WorkflowVersion,
 			"current_workflow_version":  currentWorkflowVersion,
 		},
-	))
+	), "activity-runtime", "admit_activity_contract")
+	return &failure
 }
 
 func (d pipelineActivityDispatcher) admitReadOnlyActivityGeneration(ctx context.Context, intent runtimeengine.ActivityIntent) error {
@@ -696,19 +696,25 @@ func (d pipelineActivityDispatcher) logActivityRuntime(ctx context.Context, inte
 	})
 }
 
-func (pc *PipelineCoordinator) handleActivityRequestEvent(ctx context.Context, evt events.Event) (bool, error) {
+func (pc *PipelineCoordinator) handleActivityRequestEvent(ctx context.Context, evt events.Event) (bool, runtimepipelineobligation.ExecutionOutcome, error) {
 	if pc == nil || evt.Type() != activityRequestEventType {
-		return false, nil
+		return false, runtimepipelineobligation.Continue(), nil
 	}
 	intent, err := activityIntentFromRequestEvent(evt)
 	if err != nil {
-		return true, err
+		return true, runtimepipelineobligation.Continue(), err
 	}
 	dispatcher := pipelineActivityDispatcher{coordinator: pc}
-	if err := dispatcher.executeActivityIntent(ctx, intent); err != nil {
-		return true, err
+	if failure := dispatcher.activityContractPinFailure(ctx, intent, pc.SemanticSource()); failure != nil {
+		if failure.Class == runtimefailures.ClassDependencyUnavailable {
+			return true, runtimepipelineobligation.DeferExecution(failure.Detail.Code, time.Now().UTC().Add(runtimepipelineobligation.DecisionRouteRetryDelay), failure), nil
+		}
+		return true, runtimepipelineobligation.DeadLetterExecution(failure.Detail.Code, failure), nil
 	}
-	return true, nil
+	if err := dispatcher.executeActivityIntent(ctx, intent); err != nil {
+		return true, runtimepipelineobligation.Continue(), err
+	}
+	return true, runtimepipelineobligation.Continue(), nil
 }
 
 type activityRequestPayload struct {

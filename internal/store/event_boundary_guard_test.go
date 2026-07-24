@@ -20,7 +20,7 @@ type eventBoundaryCallsite struct {
 
 var admittedEventCallsites = map[eventBoundaryCallsite]int{
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "admitEventForPublish", name: "AdmitForPublish"}:                                      1,
-	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.publishPersistedRecipients", name: "RevalidatePersistedEvent"}:              1,
+	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.publishClaimedPipeline", name: "RevalidatePersistedEvent"}:                  1,
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.PrepareSelectedForkPublish", name: "AdmitForPersistence"}:                   1,
 	{path: "internal/runtime/manager/runtime.go", scope: "AgentManager.SendDirective", name: "AdmitForPersistence"}:                                 1,
 	{path: "internal/store/eventfixture/event.go", scope: "Insert", name: "AdmitForPersistence"}:                                                    1,
@@ -51,10 +51,9 @@ var eventRecordSQLFiles = map[string]struct{}{
 }
 
 var directEventSQLTestFixtures = map[string]int{
-	"internal/cliapp/raw_sql_boundary_test.go":               1,
-	"internal/runtime/pipeline/coordinator_recovery_test.go": 1,
-	"internal/store/event_schema_contract_test.go":           2,
-	"internal/store/runtime_mutation_guard_test.go":          3,
+	"internal/cliapp/raw_sql_boundary_test.go":      1,
+	"internal/store/event_schema_contract_test.go":  2,
+	"internal/store/runtime_mutation_guard_test.go": 3,
 }
 
 var eventInsertSQL = regexp.MustCompile(`(?is)\bINSERT\s+INTO\s+events\b`)
