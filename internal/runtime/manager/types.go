@@ -39,7 +39,6 @@ type AgentFactory func(cfg models.AgentConfig) (Agent, error)
 type Bus interface {
 	Publish(ctx context.Context, evt events.Event) error
 	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
-	SweepUndispatched(ctx context.Context, limit int) (int, error)
 	SweepPipelineObligations(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error)
 	PipelineWorkPresence(context.Context) (runtimepipelineobligation.GlobalWorkPresence, error)
 	Store() runtimebus.EventStore

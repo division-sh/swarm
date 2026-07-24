@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
 func TestControllerContinueDoesNotFailAfterCommittedTransitionWhenReleaseFails(t *testing.T) {
@@ -30,9 +32,12 @@ func TestControllerContinueDoesNotFailAfterCommittedTransitionWhenReleaseFails(t
 	}
 }
 
-func TestControllerContinueRetriesTransientEmptyQueueRelease(t *testing.T) {
+func TestControllerContinueDrainsUntilExplicitExhaustion(t *testing.T) {
 	store := &fakeRunControlStore{}
-	queue := &fakeRunControlQueue{releases: []int{0, 1}}
+	queue := &fakeRunControlQueue{results: []runtimepipelineobligation.SweepResult{
+		{Examined: 2},
+		{Settled: 1, Examined: 1, Exhausted: true},
+	}}
 	controller := NewController(store, queue, Options{})
 
 	result, err := controller.Continue(context.Background(), TransitionRequest{RunID: "run-1"})
@@ -40,7 +45,7 @@ func TestControllerContinueRetriesTransientEmptyQueueRelease(t *testing.T) {
 		t.Fatalf("Continue() error = %v, want nil", err)
 	}
 	if result.ReleasedDeliveries != 1 {
-		t.Fatalf("released deliveries = %d, want 1 after retry", result.ReleasedDeliveries)
+		t.Fatalf("released deliveries = %d, want 1 after explicit exhaustion", result.ReleasedDeliveries)
 	}
 	if queue.calls != 2 {
 		t.Fatalf("queue release calls = %d, want 2", queue.calls)
@@ -69,22 +74,22 @@ func (s *fakeRunControlStore) RunDispatchBlocked(context.Context, string) (bool,
 }
 
 type fakeRunControlQueue struct {
-	called   bool
-	calls    int
-	err      error
-	releases []int
+	called  bool
+	calls   int
+	err     error
+	results []runtimepipelineobligation.SweepResult
 }
 
-func (q *fakeRunControlQueue) ReleaseRunQueue(context.Context, string, int) (int, error) {
+func (q *fakeRunControlQueue) ReleaseRunQueue(context.Context, string, int) (runtimepipelineobligation.SweepResult, error) {
 	q.called = true
 	q.calls++
-	if len(q.releases) > 0 {
-		released := q.releases[0]
-		q.releases = q.releases[1:]
-		return released, nil
+	if len(q.results) > 0 {
+		result := q.results[0]
+		q.results = q.results[1:]
+		return result, nil
 	}
 	if q.err != nil {
-		return 0, q.err
+		return runtimepipelineobligation.SweepResult{}, q.err
 	}
-	return 1, nil
+	return runtimepipelineobligation.SweepResult{Settled: 1, Exhausted: true}, nil
 }

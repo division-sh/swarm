@@ -10,8 +10,10 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -55,6 +57,40 @@ func (o *recordingPipelineRecoveryOwner) SweepPipelineObligations(ctx context.Co
 	return result, err
 }
 
+type recordingIngressRecoveryPublisher struct {
+	bus              *runtimebus.EventBus
+	results          []runtimepipelineobligation.SweepResult
+	cancelAfterFirst context.CancelFunc
+}
+
+func (p *recordingIngressRecoveryPublisher) Publish(ctx context.Context, event events.Event) error {
+	return p.bus.Publish(ctx, event)
+}
+
+func (p *recordingIngressRecoveryPublisher) ReleaseRuntimeIngressQueue(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error) {
+	result, err := p.bus.ReleaseRuntimeIngressQueue(ctx, limit)
+	p.results = append(p.results, result)
+	if len(p.results) == 1 && p.cancelAfterFirst != nil {
+		p.cancelAfterFirst()
+	}
+	return result, err
+}
+
+type recordingRunRecoveryQueue struct {
+	bus              *runtimebus.EventBus
+	results          []runtimepipelineobligation.SweepResult
+	cancelAfterFirst context.CancelFunc
+}
+
+func (q *recordingRunRecoveryQueue) ReleaseRunQueue(ctx context.Context, runID string, limit int) (runtimepipelineobligation.SweepResult, error) {
+	result, err := q.bus.ReleaseRunQueue(ctx, runID, limit)
+	q.results = append(q.results, result)
+	if len(q.results) == 1 && q.cancelAfterFirst != nil {
+		q.cancelAfterFirst()
+	}
+	return result, err
+}
+
 func TestPipelineRetryReleasePreservesReplayAcrossDispatchSurfacesOnSQLiteAndPostgres(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend+"/foreground", func(t *testing.T) {
@@ -91,12 +127,12 @@ func TestPipelineRetryReleasePreservesReplayAcrossDispatchSurfacesOnSQLiteAndPos
 			)
 			fixture.bus.SetInterceptors(retryReleaseInterceptor{eventID: fixture.event.ID()})
 
-			processed, err := fixture.bus.SweepUndispatched(fixture.ctx, 10)
+			result, err := fixture.bus.SweepPipelineObligations(fixture.ctx, 10)
 			if err != nil {
-				t.Fatalf("SweepUndispatched: %v", err)
+				t.Fatalf("SweepPipelineObligations: %v", err)
 			}
-			if processed != 1 {
-				t.Fatalf("processed = %d, want later obligation only", processed)
+			if result.Settled != 1 {
+				t.Fatalf("processed = %d, want later obligation only", result.Settled)
 			}
 			if got := retryReleasePipelineReceiptCount(t, fixture, later.ID()); got != 1 {
 				t.Fatalf("later event pipeline receipts = %d, want 1", got)
@@ -147,6 +183,227 @@ func TestStartupRecoveryDrainsPastFullRetryReleasePageOnSQLiteAndPostgres(t *tes
 				assertRetryReleaseReplayable(t, fixture, event.ID())
 			}
 		})
+	}
+}
+
+func TestIngressResumeDrainsPartialBatchesUntilExplicitTerminationOnSQLiteAndPostgres(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture, later := newControllerContinuationFixture(t, backend)
+			ingressStore := fixture.store.(runtimeingress.Store)
+			if _, changed, err := ingressStore.TransitionRuntimeIngressState(
+				fixture.ctx,
+				runtimeingress.StatusPaused,
+				"continuation proof",
+				"test",
+				fixture.event.CreatedAt().Add(time.Second),
+			); err != nil {
+				t.Fatalf("pause ingress: %v", err)
+			} else if !changed {
+				t.Fatal("pause ingress did not change state")
+			}
+			publisher := &recordingIngressRecoveryPublisher{bus: fixture.bus}
+			controller := runtimeingress.NewController(ingressStore, publisher, runtimeingress.Options{ReleaseLimit: 2})
+			fixture.bus.SetRuntimeIngressDispatchGate(controller)
+			t.Cleanup(func() {
+				fixture.bus.SetRuntimeIngressDispatchGate(nil)
+				runtimebus.ResumeRuntimeIngress()
+			})
+
+			result, err := controller.Resume(fixture.ctx, runtimeingress.TransitionRequest{
+				Reason: "continue recovery proof",
+				Now:    fixture.event.CreatedAt().Add(2 * time.Second),
+			})
+			if err != nil {
+				t.Fatalf("Resume: %v", err)
+			}
+			assertControllerContinuation(t, publisher.results, result.ReleasedCount)
+			for _, event := range later {
+				if got := retryReleasePipelineReceiptCount(t, fixture, event.ID()); got != 1 {
+					t.Fatalf("later event %s pipeline receipts = %d, want 1", event.ID(), got)
+				}
+			}
+			assertRetryReleaseReplayable(t, fixture, fixture.event.ID())
+		})
+	}
+}
+
+func TestRunContinueDrainsPartialBatchesUntilExplicitTerminationOnSQLiteAndPostgres(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture, later := newControllerContinuationFixture(t, backend)
+			runStore := fixture.store.(runtimeruncontrol.Store)
+			if _, err := runStore.PauseRunControl(fixture.ctx, runtimeruncontrol.TransitionRequest{
+				RunID:        fixture.event.RunID(),
+				Reason:       "continuation proof",
+				ControlledBy: "test",
+				Now:          fixture.event.CreatedAt().Add(time.Second),
+			}); err != nil {
+				t.Fatalf("PauseRunControl: %v", err)
+			}
+			queue := &recordingRunRecoveryQueue{bus: fixture.bus}
+			controller := runtimeruncontrol.NewController(runStore, queue, runtimeruncontrol.Options{ReleaseLimit: 2})
+			fixture.bus.SetRunDispatchGate(controller)
+			t.Cleanup(func() { fixture.bus.SetRunDispatchGate(nil) })
+
+			result, err := controller.Continue(fixture.ctx, runtimeruncontrol.TransitionRequest{
+				RunID:  fixture.event.RunID(),
+				Reason: "continue recovery proof",
+				Now:    fixture.event.CreatedAt().Add(2 * time.Second),
+			})
+			if err != nil {
+				t.Fatalf("Continue: %v", err)
+			}
+			assertControllerContinuation(t, queue.results, result.ReleasedDeliveries)
+			for _, event := range later {
+				if got := retryReleasePipelineReceiptCount(t, fixture, event.ID()); got != 1 {
+					t.Fatalf("later event %s pipeline receipts = %d, want 1", event.ID(), got)
+				}
+			}
+			assertRetryReleaseReplayable(t, fixture, fixture.event.ID())
+		})
+	}
+}
+
+func TestControllerCancellationBetweenBatchesAbandonsCursorOnSQLiteAndPostgres(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, surface := range []string{"ingress_resume", "run_continue"} {
+			t.Run(backend+"/"+surface, func(t *testing.T) {
+				fixture, later := newControllerContinuationFixture(t, backend)
+				ctx, cancel := context.WithCancel(fixture.ctx)
+				switch surface {
+				case "ingress_resume":
+					ingressStore := fixture.store.(runtimeingress.Store)
+					if _, _, err := ingressStore.TransitionRuntimeIngressState(
+						fixture.ctx,
+						runtimeingress.StatusPaused,
+						"cancellation proof",
+						"test",
+						fixture.event.CreatedAt().Add(time.Second),
+					); err != nil {
+						t.Fatalf("pause ingress: %v", err)
+					}
+					publisher := &recordingIngressRecoveryPublisher{bus: fixture.bus, cancelAfterFirst: cancel}
+					controller := runtimeingress.NewController(ingressStore, publisher, runtimeingress.Options{ReleaseLimit: 2})
+					fixture.bus.SetRuntimeIngressDispatchGate(controller)
+					t.Cleanup(func() {
+						fixture.bus.SetRuntimeIngressDispatchGate(nil)
+						runtimebus.ResumeRuntimeIngress()
+					})
+					result, err := controller.Resume(ctx, runtimeingress.TransitionRequest{
+						Reason: "continue cancellation proof",
+						Now:    fixture.event.CreatedAt().Add(2 * time.Second),
+					})
+					if err != nil {
+						t.Fatalf("Resume: %v", err)
+					}
+					if result.ReleasedCount != 1 || len(publisher.results) != 2 {
+						t.Fatalf("cancelled ingress continuation = released:%d results:%#v, want one settlement and explicit failed continuation", result.ReleasedCount, publisher.results)
+					}
+				case "run_continue":
+					runStore := fixture.store.(runtimeruncontrol.Store)
+					if _, err := runStore.PauseRunControl(fixture.ctx, runtimeruncontrol.TransitionRequest{
+						RunID:        fixture.event.RunID(),
+						Reason:       "cancellation proof",
+						ControlledBy: "test",
+						Now:          fixture.event.CreatedAt().Add(time.Second),
+					}); err != nil {
+						t.Fatalf("PauseRunControl: %v", err)
+					}
+					queue := &recordingRunRecoveryQueue{bus: fixture.bus, cancelAfterFirst: cancel}
+					controller := runtimeruncontrol.NewController(runStore, queue, runtimeruncontrol.Options{ReleaseLimit: 2})
+					fixture.bus.SetRunDispatchGate(controller)
+					t.Cleanup(func() { fixture.bus.SetRunDispatchGate(nil) })
+					result, err := controller.Continue(ctx, runtimeruncontrol.TransitionRequest{
+						RunID:  fixture.event.RunID(),
+						Reason: "continue cancellation proof",
+						Now:    fixture.event.CreatedAt().Add(2 * time.Second),
+					})
+					if err != nil {
+						t.Fatalf("Continue: %v", err)
+					}
+					if result.ReleasedDeliveries != 1 || len(queue.results) != 2 {
+						t.Fatalf("cancelled run continuation = released:%d results:%#v, want one settlement and explicit failed continuation", result.ReleasedDeliveries, queue.results)
+					}
+				}
+
+				reclaimed := drainControllerRecovery(t, fixture, surface)
+				if reclaimed != 1 {
+					t.Fatalf("fresh recovery settled %d abandoned later obligations, want 1", reclaimed)
+				}
+				assertRetryReleaseReplayable(t, fixture, fixture.event.ID())
+				for _, event := range later {
+					if got := retryReleasePipelineReceiptCount(t, fixture, event.ID()); got != 1 {
+						t.Fatalf("reclaimed event %s pipeline receipts = %d, want 1", event.ID(), got)
+					}
+				}
+			})
+		}
+	}
+}
+
+func newControllerContinuationFixture(t *testing.T, backend string) (completeEventDispatchFixture, []events.Event) {
+	t.Helper()
+	fixture := newCompleteEventDispatchFixture(t, backend, false)
+	later := []events.Event{
+		newRetryReleaseTestEvent(fixture, fixture.event.CreatedAt().Add(time.Microsecond)),
+		newRetryReleaseTestEvent(fixture, fixture.event.CreatedAt().Add(2*time.Microsecond)),
+	}
+	for _, event := range later {
+		storetest.CommitSemanticEventWithRoutes(
+			t,
+			fixture.ctx,
+			fixture.store,
+			event,
+			nil,
+			runtimepipelineobligation.ScopeSubscribed,
+		)
+	}
+	fixture.bus.SetInterceptors(retryReleaseInterceptor{eventID: fixture.event.ID()})
+	return fixture, later
+}
+
+func assertControllerContinuation(t *testing.T, results []runtimepipelineobligation.SweepResult, settled int) {
+	t.Helper()
+	if settled != 2 {
+		t.Fatalf("controller settled = %d, want both later obligations", settled)
+	}
+	if len(results) < 2 {
+		t.Fatalf("controller batches = %#v, want at least two", results)
+	}
+	first := results[0]
+	if first.Settled != 1 || first.Examined != 2 || first.Exhausted || first.Blocked {
+		t.Fatalf("first controller batch = %#v, want under-filled settlement without termination", first)
+	}
+	last := results[len(results)-1]
+	if !last.Exhausted || !last.Blocked {
+		t.Fatalf("final controller batch = %#v, want explicit exhaustion with retained local blockage", last)
+	}
+}
+
+func drainControllerRecovery(t *testing.T, fixture completeEventDispatchFixture, surface string) int {
+	t.Helper()
+	total := 0
+	for {
+		var (
+			result runtimepipelineobligation.SweepResult
+			err    error
+		)
+		switch surface {
+		case "ingress_resume":
+			result, err = fixture.bus.ReleaseRuntimeIngressQueue(fixture.ctx, 2)
+		case "run_continue":
+			result, err = fixture.bus.ReleaseRunQueue(fixture.ctx, fixture.event.RunID(), 2)
+		default:
+			t.Fatalf("unknown controller recovery surface %q", surface)
+		}
+		if err != nil {
+			t.Fatalf("fresh %s recovery: %v", surface, err)
+		}
+		total += result.Settled
+		if result.Exhausted || result.Blocked {
+			return total
+		}
 	}
 }
 

@@ -500,10 +500,10 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 	}
 	commitRunForkTestEvent(t, controlCtx, pg, controlEvent, controlPreflight.DeliveryRoutes)
 	sourceBus.SetInterceptors(sourcePipeline)
-	if count, err := sourceBus.ReleaseRunQueue(controlCtx, controlRunID, 10); err != nil {
+	if result, err := sourceBus.ReleaseRunQueue(controlCtx, controlRunID, 10); err != nil {
 		t.Fatalf("execute control delivery: %v", err)
-	} else if count != 1 {
-		t.Fatalf("executed control pipeline obligations = %d, want 1", count)
+	} else if result.Settled != 1 {
+		t.Fatalf("executed control pipeline obligations = %d, want 1", result.Settled)
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

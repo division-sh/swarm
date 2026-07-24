@@ -80,11 +80,6 @@ func (b *directiveRecoveryTestBus) ReconcileDirectiveOperations(ctx context.Cont
 	return b.DirectiveOperationStore.ReconcileDirectiveOperations(ctx, now, ttl)
 }
 
-func (b *directiveRecoveryTestBus) SweepUndispatched(ctx context.Context, limit int) (int, error) {
-	b.order = append(b.order, "pipeline")
-	return b.recoveryTestBus.SweepUndispatched(ctx, limit)
-}
-
 func (b *directiveRecoveryTestBus) SweepPipelineObligations(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error) {
 	b.order = append(b.order, "pipeline")
 	return b.recoveryTestBus.SweepPipelineObligations(ctx, limit)
@@ -105,10 +100,6 @@ func (b *recoveryTestBus) LogRuntime(_ context.Context, entry runtimepipeline.Ru
 	return nil
 }
 func (b *recoveryTestBus) Store() runtimebus.EventStore { return b }
-func (b *recoveryTestBus) SweepUndispatched(context.Context, int) (int, error) {
-	b.pipelineSweeps++
-	return 0, nil
-}
 func (b *recoveryTestBus) SweepPipelineObligations(context.Context, int) (runtimepipelineobligation.SweepResult, error) {
 	b.pipelineSweeps++
 	return runtimepipelineobligation.SweepResult{Exhausted: true}, nil

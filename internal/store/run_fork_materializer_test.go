@@ -1097,8 +1097,8 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 		Invariant: "store.event_record.exact_persistence",
 		Reason:    "prove historical replay refuses a malformed durable route object",
 	}, "", `UPDATE events SET target_route = $1::jsonb WHERE event_id = $2::uuid`, `"bad"`, forkEventID)
-	if replayed, err := eb.SweepUndispatched(ctx, 10); err == nil || !strings.Contains(err.Error(), "target_route") {
-		t.Fatalf("SweepUndispatched corrupt replay = count:%d err:%v, want target_route failure", replayed, err)
+	if result, err := eb.SweepPipelineObligations(ctx, 10); err == nil || !strings.Contains(err.Error(), "target_route") {
+		t.Fatalf("SweepPipelineObligations corrupt replay = count:%d err:%v, want target_route failure", result.Settled, err)
 	}
 	select {
 	case evt := <-ch:
@@ -1120,12 +1120,12 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 		Invariant: "store.event_record.exact_persistence",
 		Reason:    "restore the exact target route after the corruption proof",
 	}, "", `UPDATE events SET target_route = $1::jsonb WHERE event_id = $2::uuid`, string(targetRoute), forkEventID)
-	replayed, err := eb.SweepUndispatched(ctx, 10)
+	result, err := eb.SweepPipelineObligations(ctx, 10)
 	if err != nil {
-		t.Fatalf("SweepUndispatched: %v", err)
+		t.Fatalf("SweepPipelineObligations: %v", err)
 	}
-	if replayed != 1 {
-		t.Fatalf("SweepUndispatched replayed = %d, want 1", replayed)
+	if result.Settled != 1 {
+		t.Fatalf("SweepPipelineObligations replayed = %d, want 1", result.Settled)
 	}
 	select {
 	case delivery := <-ch:

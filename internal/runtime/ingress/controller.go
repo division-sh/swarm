@@ -14,6 +14,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/google/uuid"
 )
 
@@ -60,7 +61,7 @@ type Store interface {
 
 type EventPublisher interface {
 	Publish(context.Context, events.Event) error
-	ReleaseRuntimeIngressQueue(context.Context, int) (int, error)
+	ReleaseRuntimeIngressQueue(context.Context, int) (runtimepipelineobligation.SweepResult, error)
 }
 
 type Options struct {
@@ -305,12 +306,12 @@ func (c *Controller) releaseQueued(ctx context.Context) (int, error) {
 	}
 	total := 0
 	for {
-		n, err := c.publisher.ReleaseRuntimeIngressQueue(ctx, c.releaseLimit)
-		total += n
+		result, err := c.publisher.ReleaseRuntimeIngressQueue(ctx, c.releaseLimit)
+		total += result.Settled
 		if err != nil {
 			return total, err
 		}
-		if n < c.releaseLimit {
+		if result.Exhausted || result.Blocked {
 			return total, nil
 		}
 	}

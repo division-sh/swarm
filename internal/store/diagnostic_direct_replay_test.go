@@ -68,12 +68,12 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 	if err != nil {
 		t.Fatalf("NewEventBus(sqlite): %v", err)
 	}
-	swept, err := bus.SweepUndispatched(ctx, 20)
+	result, err := bus.SweepPipelineObligations(ctx, 20)
 	if err != nil {
-		t.Fatalf("SweepUndispatched(sqlite): %v", err)
+		t.Fatalf("SweepPipelineObligations(sqlite): %v", err)
 	}
-	if swept != 1 {
-		t.Fatalf("SweepUndispatched(sqlite) settled = %d, want typed corrupt-work settlement", swept)
+	if result.Settled != 1 {
+		t.Fatalf("SweepPipelineObligations(sqlite) settled = %d, want typed corrupt-work settlement", result.Settled)
 	}
 
 	assertNoSQLitePipelineReceipt(t, ctx, store, runtimeLogID)
@@ -133,12 +133,12 @@ func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEv
 	if err != nil {
 		t.Fatalf("NewEventBus(postgres): %v", err)
 	}
-	swept, err := bus.SweepUndispatched(ctx, 20)
+	result, err := bus.SweepPipelineObligations(ctx, 20)
 	if err != nil {
-		t.Fatalf("SweepUndispatched(postgres): %v", err)
+		t.Fatalf("SweepPipelineObligations(postgres): %v", err)
 	}
-	if swept != 1 {
-		t.Fatalf("SweepUndispatched(postgres) settled = %d, want typed corrupt-work settlement", swept)
+	if result.Settled != 1 {
+		t.Fatalf("SweepPipelineObligations(postgres) settled = %d, want typed corrupt-work settlement", result.Settled)
 	}
 
 	assertNoPostgresPipelineReceipt(t, ctx, pg, runtimeLogID)

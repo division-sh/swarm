@@ -30748,11 +30748,13 @@ durable_pipeline_processing_obligation_authority:
       that fixed order; a run cursor traverses ordinary recovery for exactly one run. Callers cannot supply a keyset,
       reset a phase, assemble query families, or durably persist a cursor. Every batch limit bounds candidate rows examined,
       including busy and newly ineligible rows, rather than settlements or returned work. Position advances before a claim
-      may be retained or released. A full batch therefore continues monotonically on the next call, and startup and
-      periodic consumers continue until the store reports explicit exhaustion. A fresh cursor is opened only after prior
-      exhaustion or explicit abandonment. One cursor step returns at most one claimed work item: the consumer processes
-      and durably settles or releases that item before asking the cursor to examine further candidates, because an earlier
-      mutation may change later eligibility. Bulk preclaiming and processing from a stale eligibility snapshot are forbidden.
+      may be retained or released. A full batch therefore continues monotonically on the next call. Startup,
+      ingress-resume, and run-continue consumers drain bounded batches until explicit exhaustion or blockage. The periodic
+      consumer performs one bounded batch per tick and retains the same cursor for the next tick until explicit exhaustion.
+      A fresh cursor is opened only after prior exhaustion or explicit abandonment. One cursor step returns at most one
+      claimed work item: the consumer processes and durably settles or releases that item before asking the cursor to
+      examine further candidates, because an earlier mutation may change later eligibility. Bulk preclaiming and processing
+      from a stale eligibility snapshot are forbidden.
     scan_blockage: >
       Busy claims, typed retry release, and run-local dispatch blockage are remembered for the current cursor but do not
       stop examination of later candidates or later runs in either decision-route or ordinary-recovery ordering. The
@@ -30762,8 +30764,12 @@ durable_pipeline_processing_obligation_authority:
     scan_result: >
       Every sweep reports settled, examined, exhausted, and blocked facts explicitly. Examined never exceeds the requested
       batch limit. Exhausted means every fixed phase reached its ordered end, not that a batch returned no work or reached
-      a settlement count. Startup recovery drains bounded batches until explicit exhaustion or global blockage and never
-      infers exhaustion from settled count, retry-only batches, corrupt work, or a run-local blocked prefix.
+      a settlement count. Startup, ingress-resume, run-continue, and periodic recovery all consume this same result without
+      a count-only adapter. Settled is accumulated only as a user-visible effect count. Startup, ingress-resume, and
+      run-continue terminate normally only on explicit exhaustion or blockage; periodic recovery retains its cursor across
+      ticks until that same explicit state. Cancellation, query failure, or processing failure explicitly abandons the
+      current cursor through the selected-store owner before the consumer returns. No consumer infers exhaustion from
+      settled count, retry-only batches, corrupt work, an under-filled settlement count, or a run-local blocked prefix.
     current_claim: >
       One event has at most one process-local current claim in the exclusively owned selected-store runtime. PostgreSQL
       advisory locks and SQLite mutation serialization fence each database mutation edge; opaque capability identity
@@ -30849,9 +30855,9 @@ durable_pipeline_processing_obligation_authority:
     PPO-CLM-001: Exclusion precedes final eligibility recheck and only one current claim exists per event.
     PPO-PUB-001: Foreground publication, executable event commit, and every recovery surface share the exact current event-identity exclusion; only closed diagnostic-direct named commits are claim-free.
     PPO-SET-001: Acknowledgement and decision-route disposition require the current claim and commit atomically.
-    PPO-REL-001: Cancellation, cursor abandonment, non-durable retry release, failed settlement, explicit release, and restart preserve reclaimability without stranded ownership or blocking later sweep candidates; startup stops only on explicit exhaustion or global blockage.
+    PPO-REL-001: Cancellation, cursor abandonment, non-durable retry release, failed settlement, explicit release, and restart preserve reclaimability without stranded ownership or blocking later sweep candidates; startup, ingress resume, and run continue stop normally only on explicit exhaustion or blockage.
     PPO-SCP-001: Committed scope is exact persisted truth; missing or invalid scope returns typed claim-bound quarantine work to the consumer, and no store-side settlement, delivery marker, current-route inference, fallback, or repair exists.
-    PPO-CUR-001: Cursor continuation is monotonic across fixed global/run phases, advances before release, remembers local blockage until exhaustion, and cannot be reset or positioned by a caller.
+    PPO-CUR-001: Cursor continuation is monotonic across fixed global/run phases, advances before release, remembers local blockage until exhaustion, reaches every consumer as one typed SweepResult, survives periodic tick boundaries, and cannot be reset or positioned by a caller.
     PPO-DSP-001: Dispatch consumes the process-local owner and cannot outlive runtime retirement or selected-store release.
     PPO-DCR-001: Decision-route defer, quarantine, processed acknowledgement, convergence retry, completion, and inactive-parent supersession are age-independent and ordered.
     PPO-GLO-001: Global durable-work presence is one typed age-independent projection.

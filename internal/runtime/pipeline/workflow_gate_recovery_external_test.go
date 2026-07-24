@@ -866,7 +866,7 @@ func TestDecisionRouteObligationFairnessAdmitsNewWorkBehindFullDeferredPageOnBot
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := bus.SweepUndispatched(ctx, 200); err != nil {
+			if _, err := bus.SweepPipelineObligations(ctx, 200); err != nil {
 				t.Fatal(err)
 			}
 			assertGateRecoveryProcessedReceipt(t, selected, newEventID)
@@ -894,14 +894,14 @@ func TestDecisionRouteObligationQuarantinesPoisonAndContinuesOnBothStores(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got, err := bus.SweepUndispatched(testAuthorActivityContext(t, context.Background()), 10); err != nil || got != 2 {
-				t.Fatalf("poison route sweep recovered = %d, %v; want 2 handled obligations, nil", got, err)
+			if result, err := bus.SweepPipelineObligations(testAuthorActivityContext(t, context.Background()), 10); err != nil || result.Settled != 2 {
+				t.Fatalf("poison route sweep recovered = %d, %v; want 2 handled obligations, nil", result.Settled, err)
 			}
 			assertGateRecoveryObligationStatus(t, selected, poisonEventID, "quarantined")
 			assertGateRecoveryErrorReceipt(t, selected, poisonEventID, "event_interceptor_failed")
 			assertGateRecoveryProcessedReceipt(t, selected, validEventID)
-			if got, err := bus.SweepUndispatched(testAuthorActivityContext(t, context.Background()), 10); err != nil || got != 0 {
-				t.Fatalf("second poison route sweep recovered = %d, %v; want 0, nil", got, err)
+			if result, err := bus.SweepPipelineObligations(testAuthorActivityContext(t, context.Background()), 10); err != nil || result.Settled != 0 {
+				t.Fatalf("second poison route sweep recovered = %d, %v; want 0, nil", result.Settled, err)
 			}
 		})
 	}
@@ -1026,7 +1026,7 @@ func testDecisionRouteSettlementFailureFairness(t *testing.T, selected gateRecov
 
 	switch recovery {
 	case "periodic":
-		if _, err := bus.SweepUndispatched(ctx, 10); err != nil {
+		if _, err := bus.SweepPipelineObligations(ctx, 10); err != nil {
 			t.Fatalf("periodic settlement fairness: %v", err)
 		}
 	case "startup":
@@ -1126,7 +1126,7 @@ func testDecisionRouteSettlementRetry(t *testing.T, selected gateRecoveryStoreCa
 	makeGateRecoveryRouteDue(t, selected, eventID, time.Now().UTC().Add(-time.Second))
 	switch recovery {
 	case "periodic":
-		if _, err := bus.SweepUndispatched(ctx, 10); err != nil {
+		if _, err := bus.SweepPipelineObligations(ctx, 10); err != nil {
 			t.Fatalf("periodic settlement retry: %v", err)
 		}
 	case "startup":
@@ -1188,13 +1188,13 @@ func TestDecisionRouteForegroundFailureQuarantinesOnBothStoresAndPublicationForm
 				}
 
 				validEventID := seedGateRecoveryRouteObligation(t, selected, runID, time.Now().UTC())
-				if _, err := bus.SweepUndispatched(testAuthorActivityContext(t, context.Background()), 10); err != nil {
+				if _, err := bus.SweepPipelineObligations(testAuthorActivityContext(t, context.Background()), 10); err != nil {
 					t.Fatalf("sweep unrelated route behind quarantined foreground failure: %v", err)
 				}
 				assertGateRecoveryProcessedReceipt(t, selected, validEventID)
 				assertGateRecoveryObligationStatus(t, selected, validEventID, "completed")
-				if got, err := bus.SweepUndispatched(testAuthorActivityContext(t, context.Background()), 10); err != nil || got != 0 {
-					t.Fatalf("second foreground quarantine sweep recovered = %d, %v; want 0, nil", got, err)
+				if result, err := bus.SweepPipelineObligations(testAuthorActivityContext(t, context.Background()), 10); err != nil || result.Settled != 0 {
+					t.Fatalf("second foreground quarantine sweep recovered = %d, %v; want 0, nil", result.Settled, err)
 				}
 			})
 		}

@@ -38,7 +38,7 @@ func TestRecoveryManagerDrainsCanonicalOwnerUntilExplicitExhaustion(t *testing.T
 		t.Fatalf("Recover: %v", err)
 	}
 	if owner.calls != 3 {
-		t.Fatalf("SweepUndispatched calls = %d, want 3", owner.calls)
+		t.Fatalf("SweepPipelineObligations calls = %d, want 3", owner.calls)
 	}
 }
 
@@ -50,7 +50,7 @@ func TestRecoveryManagerPropagatesCanonicalOwnerFailure(t *testing.T) {
 		t.Fatalf("Recover error = %v, want %v", err, want)
 	}
 	if owner.calls != 1 {
-		t.Fatalf("SweepUndispatched calls = %d, want 1", owner.calls)
+		t.Fatalf("SweepPipelineObligations calls = %d, want 1", owner.calls)
 	}
 }
 

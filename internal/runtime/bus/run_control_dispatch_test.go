@@ -287,6 +287,12 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 	if got := countPipelineReceiptsForEvent(t, ctx, db, intent.Event.ID()); got != 0 {
 		t.Fatalf("post-commit event receipts while paused = %d, want 0", got)
 	}
+	blockedWaitCtx, blockedWaitCancel := context.WithTimeout(ctx, 5*time.Second)
+	if err := eb.WaitForQuiescence(blockedWaitCtx); err != nil {
+		blockedWaitCancel()
+		t.Fatalf("wait for paused post-commit owner to release its claim: %v", err)
+	}
+	blockedWaitCancel()
 
 	result, err := controller.Continue(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test", ControlledBy: "test"})
 	if err != nil {

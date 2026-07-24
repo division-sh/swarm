@@ -89,7 +89,7 @@ func (eb *EventBus) StartOutboxSweeper(ctx context.Context, cfg OutboxSweeperCon
 		}()
 		workCtx := lease.Context()
 		for {
-			if _, err := eb.SweepUndispatched(workCtx, cfg.Limit); err != nil {
+			if _, err := eb.SweepPipelineObligations(workCtx, cfg.Limit); err != nil {
 				eb.logRuntime(workCtx, "warn", "Outbox sweep failed", "eventbus", "outbox_sweep_failed", "", "", "", "", "", nil, map[string]any{
 					"limit": cfg.Limit,
 				}, eventBusDependencyFailure(err, "outbox_sweep_failed", "sweep_outbox"), 0)
@@ -131,11 +131,6 @@ func (eb *EventBus) OutboxSweeperActive() bool {
 	return eb.outboxSweeperActive
 }
 
-func (eb *EventBus) SweepUndispatched(ctx context.Context, limit int) (int, error) {
-	result, err := eb.SweepPipelineObligations(ctx, limit)
-	return result.Settled, err
-}
-
 func (eb *EventBus) SweepPipelineObligations(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error) {
 	if eb == nil || eb.store == nil {
 		return runtimepipelineobligation.SweepResult{}, errors.New("event bus and event store are required")
@@ -149,7 +144,8 @@ func (eb *EventBus) SweepPipelineObligations(ctx context.Context, limit int) (ru
 		paused, err = ingressGate.QueueableIngressPaused(ctx)
 	}
 	if err != nil {
-		return runtimepipelineobligation.SweepResult{}, err
+		closeErr := eb.closePipelineScan(context.WithoutCancel(ctx), runtimepipelineobligation.GlobalScanRequest())
+		return runtimepipelineobligation.SweepResult{}, errors.Join(err, closeErr)
 	}
 	if paused {
 		if err := eb.closePipelineScan(context.WithoutCancel(ctx), runtimepipelineobligation.GlobalScanRequest()); err != nil {
@@ -194,8 +190,8 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 	for result.Examined < limit {
 		batch, batchErr := eb.pipelineObligations.ClaimBatch(ctx, state.cursor, limit-result.Examined)
 		if batchErr != nil {
-			delete(eb.pipelineScans, request)
-			return result, batchErr
+			closeErr := eb.closePipelineScanLocked(context.WithoutCancel(ctx), request)
+			return result, errors.Join(batchErr, closeErr)
 		}
 		if len(batch.Work) > 1 {
 			closeErr := eb.closePipelineScanLocked(context.WithoutCancel(ctx), request)
@@ -438,26 +434,25 @@ func (eb *EventBus) settleClaimedDecisionRoute(ctx context.Context, work runtime
 	return eb.pipelineObligations.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("decision_route_converged"))
 }
 
-func (eb *EventBus) ReleaseRuntimeIngressQueue(ctx context.Context, limit int) (int, error) {
-	return eb.SweepUndispatched(ctx, limit)
+func (eb *EventBus) ReleaseRuntimeIngressQueue(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error) {
+	return eb.SweepPipelineObligations(ctx, limit)
 }
 
 // ReleaseRunQueue owns only the #2106 half. Executable delivery backlog is
 // continuously recovered by #2105's agent/node owners and is not republished
 // or acknowledged through this pipeline operation.
-func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, limit int) (int, error) {
+func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, limit int) (runtimepipelineobligation.SweepResult, error) {
 	if eb == nil || eb.pipelineObligations == nil {
-		return 0, nil
+		return runtimepipelineobligation.SweepResult{}, errors.New("pipeline obligation owner is required")
 	}
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
-		return 0, nil
+		return runtimepipelineobligation.SweepResult{}, errors.New("run ID is required")
 	}
 	if limit <= 0 {
 		limit = DefaultOutboxSweeperConfig().Limit
 	}
-	result, err := eb.sweepPipelineObligations(ctx, runtimepipelineobligation.RunScanRequest(runID), limit)
-	return result.Settled, err
+	return eb.sweepPipelineObligations(ctx, runtimepipelineobligation.RunScanRequest(runID), limit)
 }
 
 func (eb *EventBus) authoritativeRecipientsForEvent(ctx context.Context, eventID string) ([]string, error) {
