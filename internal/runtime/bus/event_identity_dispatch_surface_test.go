@@ -261,7 +261,24 @@ func (f completeEventDispatchFixture) hasDecisionObligation(t *testing.T) bool {
 	return count > 0
 }
 
+func (f completeEventDispatchFixture) decisionObligationStatus(t *testing.T, eventID string) string {
+	t.Helper()
+	query := `SELECT status FROM decision_card_route_obligations WHERE event_id = ?`
+	if f.dialect == "postgres" {
+		query = `SELECT status FROM decision_card_route_obligations WHERE event_id = $1::uuid`
+	}
+	var status string
+	if err := f.db.QueryRowContext(f.ctx, query, eventID).Scan(&status); err != nil {
+		t.Fatalf("load decision route status for %s: %v", eventID, err)
+	}
+	return status
+}
+
 func (f completeEventDispatchFixture) insertDecisionObligation(t *testing.T) {
+	f.insertDecisionObligationFor(t, f.event)
+}
+
+func (f completeEventDispatchFixture) insertDecisionObligationFor(t *testing.T, event events.Event) {
 	t.Helper()
 	cardID := uuid.NewString()
 	if f.dialect == "postgres" {
@@ -276,14 +293,14 @@ func (f completeEventDispatchFixture) insertDecisionObligation(t *testing.T) {
 				'card-hash', 'schema-hash', 'bundle-hash', '{}'::jsonb,
 				'{}'::jsonb, 'approve', '{}'::jsonb, 'test', $3, $4::uuid, $3, $3
 			)
-		`, cardID, f.event.RunID(), f.event.CreatedAt(), f.event.ID()); err != nil {
+		`, cardID, event.RunID(), event.CreatedAt(), event.ID()); err != nil {
 			t.Fatalf("insert decision card: %v", err)
 		}
 		if _, err := f.db.ExecContext(f.ctx, `
 			INSERT INTO decision_card_route_obligations (
 				event_id, card_id, run_id, status, attempt_count, next_attempt_at, created_at, updated_at
 			) VALUES ($1::uuid, $2::uuid, $3::uuid, 'pending', 0, $4, $4, $4)
-		`, f.event.ID(), cardID, f.event.RunID(), f.event.CreatedAt()); err != nil {
+		`, event.ID(), cardID, event.RunID(), event.CreatedAt()); err != nil {
 			t.Fatalf("insert decision obligation: %v", err)
 		}
 		return
@@ -297,14 +314,14 @@ func (f completeEventDispatchFixture) insertDecisionObligation(t *testing.T) {
 		) VALUES (?, ?, 'stage_gate', '{}', 'decided', 'mock', '{}',
 			'card-hash', 'schema-hash', 'bundle-hash', '{}', '{}', 'approve', '{}',
 			'test', ?, ?, ?, ?)
-	`, cardID, f.event.RunID(), f.event.CreatedAt(), f.event.ID(), f.event.CreatedAt(), f.event.CreatedAt()); err != nil {
+	`, cardID, event.RunID(), event.CreatedAt(), event.ID(), event.CreatedAt(), event.CreatedAt()); err != nil {
 		t.Fatalf("insert decision card: %v", err)
 	}
 	if _, err := f.db.ExecContext(f.ctx, `
 		INSERT INTO decision_card_route_obligations (
 			event_id, card_id, run_id, status, attempt_count, next_attempt_at, created_at, updated_at
 		) VALUES (?, ?, ?, 'pending', 0, ?, ?, ?)
-	`, f.event.ID(), cardID, f.event.RunID(), f.event.CreatedAt(), f.event.CreatedAt(), f.event.CreatedAt()); err != nil {
+	`, event.ID(), cardID, event.RunID(), event.CreatedAt(), event.CreatedAt(), event.CreatedAt()); err != nil {
 		t.Fatalf("insert decision obligation: %v", err)
 	}
 }

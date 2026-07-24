@@ -19,6 +19,7 @@ var (
 	ErrInvalidScope = errors.New("committed pipeline processing scope is invalid")
 	ErrStaleClaim   = errors.New("pipeline processing claim is stale or released")
 	ErrWrongClaim   = errors.New("pipeline processing claim does not own this obligation")
+	ErrStaleScan    = errors.New("pipeline processing scan is stale or closed")
 )
 
 const DecisionRouteRetryDelay = 30 * time.Second
@@ -295,6 +296,81 @@ func DecisionRouteQuery() ClaimQuery {
 	return ClaimQuery{Purpose: PurposeDecisionRoute}
 }
 
+type ScanRequest struct {
+	runID  string
+	global bool
+}
+
+func GlobalScanRequest() ScanRequest {
+	return ScanRequest{global: true}
+}
+
+func RunScanRequest(runID string) ScanRequest {
+	return ScanRequest{runID: strings.TrimSpace(runID)}
+}
+
+func (r ScanRequest) Validate() error {
+	if r.global {
+		if r.runID != "" {
+			return errors.New("global pipeline scan cannot select a run")
+		}
+		return nil
+	}
+	if _, err := uuid.Parse(r.runID); err != nil {
+		return fmt.Errorf("pipeline scan run id: %w", err)
+	}
+	return nil
+}
+
+// QueryAt exposes only the fixed phase order owned by the durable processing
+// contract. Callers cannot assemble arbitrary scans or carry keyset positions.
+func (r ScanRequest) QueryAt(phase int) (ClaimQuery, bool) {
+	if r.global {
+		switch phase {
+		case 0:
+			return DecisionRouteQuery(), true
+		case 1:
+			return GlobalRecoveryQuery(), true
+		default:
+			return ClaimQuery{}, false
+		}
+	}
+	if phase == 0 {
+		return RunRecoveryQuery(r.runID), true
+	}
+	return ClaimQuery{}, false
+}
+
+// Scan is an opaque, process-local continuation capability issued by one
+// selected store. Its keyset position and outstanding claims remain private to
+// that store.
+type Scan struct {
+	token  string
+	issuer string
+}
+
+type ScanIssuer struct {
+	id string
+}
+
+func NewScanIssuer() *ScanIssuer {
+	return &ScanIssuer{id: uuid.NewString()}
+}
+
+func (i *ScanIssuer) Issue() (Scan, error) {
+	if i == nil || strings.TrimSpace(i.id) == "" {
+		return Scan{}, errors.New("pipeline scan issuer is required")
+	}
+	return Scan{token: uuid.NewString(), issuer: i.id}, nil
+}
+
+func (i *ScanIssuer) Token(scan Scan) (string, error) {
+	if i == nil || scan.issuer != i.id || strings.TrimSpace(scan.token) == "" {
+		return "", ErrStaleScan
+	}
+	return scan.token, nil
+}
+
 type ClaimedWork struct {
 	Event        events.Event
 	Scope        CommittedScope
@@ -329,6 +405,13 @@ func (w ClaimedWork) PreDispatchDisposition() (Disposition, bool) {
 	return *w.preDispatchDisposition, true
 }
 
+type ScanBatch struct {
+	Work           []ClaimedWork
+	Examined       int
+	Exhausted      bool
+	LocallyBlocked bool
+}
+
 type GlobalWorkPresence struct {
 	ProcessingEligible  bool
 	DecisionRouteDue    bool
@@ -347,15 +430,6 @@ type SweepResult struct {
 	Examined  int
 	Exhausted bool
 	Blocked   bool
-}
-
-func (r SweepResult) Add(other SweepResult) SweepResult {
-	return SweepResult{
-		Settled:   r.Settled + other.Settled,
-		Examined:  r.Examined + other.Examined,
-		Exhausted: r.Exhausted && other.Exhausted,
-		Blocked:   r.Blocked || other.Blocked,
-	}
 }
 
 type startupRecoveryDiagnosticsKey struct{}
@@ -401,7 +475,9 @@ func (s RunSummary) BlocksCompletion() bool {
 type Store interface {
 	ClaimPublication(context.Context, string) (Claim, error)
 	ClaimEvent(context.Context, string, Purpose) (ClaimedWork, error)
-	ClaimNext(context.Context, ClaimQuery) (ClaimedWork, bool, error)
+	OpenScan(context.Context, ScanRequest) (Scan, error)
+	ClaimBatch(context.Context, Scan, int) (ScanBatch, error)
+	CloseScan(context.Context, Scan) error
 	MarkDecisionProcessed(context.Context, Claim) error
 	Settle(context.Context, Claim, Disposition) error
 	Release(context.Context, Claim) error

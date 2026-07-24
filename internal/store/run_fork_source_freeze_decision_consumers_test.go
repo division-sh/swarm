@@ -119,7 +119,7 @@ func TestForkedSourceDecisionCardsContinuationsDraftsAndRoutesCannotAdvance(t *t
 				ctx, fixture.sourceRun, uuid.NewString(), nil, "loop_advanced", now.Add(time.Minute),
 			))
 
-			due, ok, err := surface.PipelineObligations().ClaimNext(ctx, runtimepipelineobligation.DecisionRouteQuery())
+			due, ok, err := claimNextPipelineWorkForTest(t, ctx, surface.PipelineObligations(), runtimepipelineobligation.DecisionRouteQuery())
 			if err != nil || ok {
 				t.Fatalf("frozen decision-route selector = %#v, %t, %v", due, ok, err)
 			}

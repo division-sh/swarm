@@ -23,8 +23,16 @@ func (unavailablePipelineTestObligationOwner) ClaimEvent(context.Context, string
 	return runtimepipelineobligation.ClaimedWork{}, errPipelineTestObligationUnavailable
 }
 
-func (unavailablePipelineTestObligationOwner) ClaimNext(context.Context, runtimepipelineobligation.ClaimQuery) (runtimepipelineobligation.ClaimedWork, bool, error) {
-	return runtimepipelineobligation.ClaimedWork{}, false, errPipelineTestObligationUnavailable
+func (unavailablePipelineTestObligationOwner) OpenScan(context.Context, runtimepipelineobligation.ScanRequest) (runtimepipelineobligation.Scan, error) {
+	return runtimepipelineobligation.Scan{}, errPipelineTestObligationUnavailable
+}
+
+func (unavailablePipelineTestObligationOwner) ClaimBatch(context.Context, runtimepipelineobligation.Scan, int) (runtimepipelineobligation.ScanBatch, error) {
+	return runtimepipelineobligation.ScanBatch{}, errPipelineTestObligationUnavailable
+}
+
+func (unavailablePipelineTestObligationOwner) CloseScan(context.Context, runtimepipelineobligation.Scan) error {
+	return errPipelineTestObligationUnavailable
 }
 
 func (unavailablePipelineTestObligationOwner) MarkDecisionProcessed(context.Context, runtimepipelineobligation.Claim) error {

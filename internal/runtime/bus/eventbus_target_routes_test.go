@@ -33,7 +33,9 @@ type targetRouteMemoryStore struct {
 	receipts    map[string]string
 	receiptErrs map[string]*runtimefailures.Envelope
 	claimIssuer *runtimepipelineobligation.ClaimIssuer
+	scanIssuer  *runtimepipelineobligation.ScanIssuer
 	claims      map[string]runtimepipelineobligation.Claim
+	scans       map[string]runtimepipelineobligation.ScanRequest
 	active      map[string]bool
 }
 
@@ -144,26 +146,88 @@ func (s *targetRouteMemoryStore) ClaimEvent(_ context.Context, eventID string, p
 	return s.claimPipelineWork(eventID, purpose)
 }
 
-func (s *targetRouteMemoryStore) ClaimNext(_ context.Context, query runtimepipelineobligation.ClaimQuery) (runtimepipelineobligation.ClaimedWork, bool, error) {
-	if err := query.Validate(); err != nil {
-		return runtimepipelineobligation.ClaimedWork{}, false, err
-	}
-	if query.Purpose == runtimepipelineobligation.PurposeDecisionRoute {
-		return runtimepipelineobligation.ClaimedWork{}, false, nil
+func (s *targetRouteMemoryStore) OpenScan(_ context.Context, request runtimepipelineobligation.ScanRequest) (runtimepipelineobligation.Scan, error) {
+	if err := request.Validate(); err != nil {
+		return runtimepipelineobligation.Scan{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, record := range s.missing {
-		if strings.TrimSpace(query.RunID) != "" && record.Event.RunID() != strings.TrimSpace(query.RunID) {
-			continue
-		}
-		work, err := s.claimPipelineWork(record.Event.ID(), query.Purpose)
-		if errors.Is(err, runtimepipelineobligation.ErrBusy) || errors.Is(err, runtimepipelineobligation.ErrIneligible) {
-			continue
-		}
-		return work, err == nil, err
+	if s.scanIssuer == nil {
+		s.scanIssuer = runtimepipelineobligation.NewScanIssuer()
 	}
-	return runtimepipelineobligation.ClaimedWork{}, false, nil
+	if s.scans == nil {
+		s.scans = map[string]runtimepipelineobligation.ScanRequest{}
+	}
+	scan, err := s.scanIssuer.Issue()
+	if err == nil {
+		token, tokenErr := s.scanIssuer.Token(scan)
+		if tokenErr != nil {
+			err = tokenErr
+		} else {
+			s.scans[token] = request
+		}
+	}
+	return scan, err
+}
+
+func (s *targetRouteMemoryStore) ClaimBatch(_ context.Context, scan runtimepipelineobligation.Scan, limit int) (runtimepipelineobligation.ScanBatch, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	token, err := s.scanIssuer.Token(scan)
+	if err != nil {
+		return runtimepipelineobligation.ScanBatch{}, err
+	}
+	request, ok := s.scans[token]
+	if !ok {
+		return runtimepipelineobligation.ScanBatch{}, runtimepipelineobligation.ErrStaleScan
+	}
+	batch := runtimepipelineobligation.ScanBatch{}
+	for phase := 0; batch.Examined < limit; phase++ {
+		query, ok := request.QueryAt(phase)
+		if !ok {
+			batch.Exhausted = true
+			return batch, nil
+		}
+		if query.Purpose == runtimepipelineobligation.PurposeDecisionRoute {
+			continue
+		}
+		for _, record := range s.missing {
+			if strings.TrimSpace(query.RunID) != "" && record.Event.RunID() != strings.TrimSpace(query.RunID) {
+				continue
+			}
+			batch.Examined++
+			work, err := s.claimPipelineWork(record.Event.ID(), query.Purpose)
+			if errors.Is(err, runtimepipelineobligation.ErrBusy) {
+				batch.LocallyBlocked = true
+				continue
+			}
+			if errors.Is(err, runtimepipelineobligation.ErrIneligible) {
+				continue
+			}
+			if err != nil {
+				return batch, err
+			}
+			batch.Work = append(batch.Work, work)
+			if batch.Examined == limit {
+				return batch, nil
+			}
+		}
+	}
+	return batch, nil
+}
+
+func (s *targetRouteMemoryStore) CloseScan(_ context.Context, scan runtimepipelineobligation.Scan) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	token, err := s.scanIssuer.Token(scan)
+	if err != nil {
+		return err
+	}
+	if _, ok := s.scans[token]; !ok {
+		return runtimepipelineobligation.ErrStaleScan
+	}
+	delete(s.scans, token)
+	return nil
 }
 
 func (s *targetRouteMemoryStore) issuePipelineClaim(eventID string, purpose runtimepipelineobligation.Purpose) (runtimepipelineobligation.Claim, error) {

@@ -32,6 +32,11 @@ type OutboxSweeperConfig struct {
 	Limit    int
 }
 
+type pipelineSweepScan struct {
+	cursor         runtimepipelineobligation.Scan
+	locallyBlocked bool
+}
+
 func DefaultOutboxSweeperConfig() OutboxSweeperConfig {
 	return OutboxSweeperConfig{
 		Interval: 15 * time.Second,
@@ -74,6 +79,7 @@ func (eb *EventBus) StartOutboxSweeper(ctx context.Context, cfg OutboxSweeperCon
 	go func() {
 		defer close(done)
 		defer func() { _ = lease.Done() }()
+		defer func() { _ = eb.closeAllPipelineScans(context.Background()) }()
 		ticker := time.NewTicker(cfg.Interval)
 		defer ticker.Stop()
 		defer func() {
@@ -106,11 +112,11 @@ func (eb *EventBus) WaitForOutboxSweeper(ctx context.Context) error {
 	done := eb.outboxSweeperDone
 	eb.mu.RUnlock()
 	if done == nil {
-		return nil
+		return eb.closeAllPipelineScans(context.Background())
 	}
 	select {
 	case <-done:
-		return nil
+		return eb.closeAllPipelineScans(context.Background())
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -146,6 +152,9 @@ func (eb *EventBus) SweepPipelineObligations(ctx context.Context, limit int) (ru
 		return runtimepipelineobligation.SweepResult{}, err
 	}
 	if paused {
+		if err := eb.closePipelineScan(context.WithoutCancel(ctx), runtimepipelineobligation.GlobalScanRequest()); err != nil {
+			return runtimepipelineobligation.SweepResult{}, err
+		}
 		return runtimepipelineobligation.SweepResult{Blocked: true}, nil
 	}
 	if eb.pipelineObligations == nil {
@@ -154,48 +163,118 @@ func (eb *EventBus) SweepPipelineObligations(ctx context.Context, limit int) (ru
 	if limit <= 0 {
 		limit = DefaultOutboxSweeperConfig().Limit
 	}
-	decisionRoutes, err := eb.sweepPipelineObligations(ctx, runtimepipelineobligation.DecisionRouteQuery(), limit)
-	if err != nil {
-		return decisionRoutes, err
-	}
-	recovered, err := eb.sweepPipelineObligations(ctx, runtimepipelineobligation.GlobalRecoveryQuery(), limit)
-	return decisionRoutes.Add(recovered), err
+	return eb.sweepPipelineObligations(ctx, runtimepipelineobligation.GlobalScanRequest(), limit)
 }
 
-func (eb *EventBus) sweepPipelineObligations(ctx context.Context, query runtimepipelineobligation.ClaimQuery, limit int) (result runtimepipelineobligation.SweepResult, err error) {
-	retryClaims := make([]runtimepipelineobligation.Claim, 0)
+func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtimepipelineobligation.ScanRequest, limit int) (result runtimepipelineobligation.SweepResult, err error) {
+	eb.pipelineSweepMu.Lock()
+	defer eb.pipelineSweepMu.Unlock()
+	if eb.pipelineScans == nil {
+		eb.pipelineScans = map[runtimepipelineobligation.ScanRequest]*pipelineSweepScan{}
+	}
+	state := eb.pipelineScans[request]
+	if state == nil {
+		cursor, openErr := eb.pipelineObligations.OpenScan(ctx, request)
+		if openErr != nil {
+			return result, openErr
+		}
+		state = &pipelineSweepScan{cursor: cursor}
+		eb.pipelineScans[request] = state
+	}
+	retryClaims := make([]runtimepipelineobligation.Claim, 0, limit)
 	defer func() {
 		releaseCtx := context.WithoutCancel(ctx)
 		for _, claim := range retryClaims {
-			err = errors.Join(err, eb.pipelineObligations.Release(releaseCtx, claim))
+			releaseErr := eb.pipelineObligations.Release(releaseCtx, claim)
+			if !errors.Is(releaseErr, runtimepipelineobligation.ErrStaleClaim) {
+				err = errors.Join(err, releaseErr)
+			}
 		}
 	}()
-	for result.Settled < limit {
-		work, ok, err := eb.pipelineObligations.ClaimNext(ctx, query)
-		if err != nil {
-			return result, err
+	for result.Examined < limit {
+		batch, batchErr := eb.pipelineObligations.ClaimBatch(ctx, state.cursor, limit-result.Examined)
+		if batchErr != nil {
+			delete(eb.pipelineScans, request)
+			return result, batchErr
 		}
-		if !ok {
-			result.Exhausted = true
-			return result, nil
+		if len(batch.Work) > 1 {
+			closeErr := eb.closePipelineScanLocked(context.WithoutCancel(ctx), request)
+			return result, errors.Join(errors.New("pipeline scan returned more than one mutation-ordered work item"), closeErr)
 		}
-		result.Examined++
-		settled, retry, err := eb.processClaimedPipelineWork(ctx, work)
-		if err != nil {
-			if errors.Is(err, ErrRuntimeIngressPaused) || errors.Is(err, ErrRunDispatchBlocked) {
-				result.Blocked = true
-				return result, nil
+		if batch.Examined == 0 && !batch.Exhausted {
+			closeErr := eb.closePipelineScanLocked(context.WithoutCancel(ctx), request)
+			return result, errors.Join(errors.New("pipeline scan made no progress without exhaustion"), closeErr)
+		}
+		result.Examined += batch.Examined
+		state.locallyBlocked = state.locallyBlocked || batch.LocallyBlocked
+		for _, work := range batch.Work {
+			settled, retry, processErr := eb.processClaimedPipelineWork(ctx, work)
+			if processErr != nil {
+				if errors.Is(processErr, ErrRunDispatchBlocked) {
+					state.locallyBlocked = true
+					continue
+				}
+				if errors.Is(processErr, ErrRuntimeIngressPaused) {
+					result.Blocked = true
+					closeErr := eb.closePipelineScanLocked(context.WithoutCancel(ctx), request)
+					return result, errors.Join(closeErr)
+				}
+				closeErr := eb.closePipelineScanLocked(context.WithoutCancel(ctx), request)
+				return result, errors.Join(processErr, closeErr)
 			}
-			return result, err
+			if retry {
+				state.locallyBlocked = true
+				retryClaims = append(retryClaims, work.Claim)
+			}
+			if settled {
+				result.Settled++
+			}
 		}
-		if retry {
-			retryClaims = append(retryClaims, work.Claim)
-		}
-		if settled {
-			result.Settled++
+		if batch.Exhausted {
+			result.Exhausted = true
+			result.Blocked = state.locallyBlocked
+			if err := eb.closePipelineScanLocked(context.WithoutCancel(ctx), request); err != nil {
+				return result, err
+			}
+			return result, nil
 		}
 	}
 	return result, nil
+}
+
+func (eb *EventBus) closePipelineScan(ctx context.Context, request runtimepipelineobligation.ScanRequest) error {
+	if eb == nil || eb.pipelineObligations == nil {
+		return nil
+	}
+	eb.pipelineSweepMu.Lock()
+	defer eb.pipelineSweepMu.Unlock()
+	return eb.closePipelineScanLocked(ctx, request)
+}
+
+func (eb *EventBus) closePipelineScanLocked(ctx context.Context, request runtimepipelineobligation.ScanRequest) error {
+	state := eb.pipelineScans[request]
+	if state == nil {
+		return nil
+	}
+	delete(eb.pipelineScans, request)
+	err := eb.pipelineObligations.CloseScan(ctx, state.cursor)
+	if errors.Is(err, runtimepipelineobligation.ErrStaleScan) {
+		return nil
+	}
+	return err
+}
+
+func (eb *EventBus) closeAllPipelineScans(ctx context.Context) error {
+	if eb == nil || eb.pipelineObligations == nil {
+		return nil
+	}
+	eb.pipelineSweepMu.Lock()
+	defer eb.pipelineSweepMu.Unlock()
+	var err error
+	for request := range eb.pipelineScans {
+		err = errors.Join(err, eb.closePipelineScanLocked(ctx, request))
+	}
+	return err
 }
 
 func (eb *EventBus) processClaimedPipelineWork(ctx context.Context, work runtimepipelineobligation.ClaimedWork) (settled bool, retry bool, err error) {
@@ -377,7 +456,7 @@ func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, limit int
 	if limit <= 0 {
 		limit = DefaultOutboxSweeperConfig().Limit
 	}
-	result, err := eb.sweepPipelineObligations(ctx, runtimepipelineobligation.RunRecoveryQuery(runID), limit)
+	result, err := eb.sweepPipelineObligations(ctx, runtimepipelineobligation.RunScanRequest(runID), limit)
 	return result.Settled, err
 }
 

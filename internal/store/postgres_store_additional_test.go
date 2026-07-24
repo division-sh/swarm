@@ -965,7 +965,7 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 		t.Fatalf("upsert processed receipt: %v", err)
 	}
 
-	missing, ok, err := pg.PipelineObligations().ClaimNext(ctx, runtimepipelineobligation.GlobalRecoveryQuery())
+	missing, ok, err := claimNextPipelineWorkForTest(t, ctx, pg.PipelineObligations(), runtimepipelineobligation.GlobalRecoveryQuery())
 	if err != nil {
 		t.Fatalf("claim missing pipeline obligation: %v", err)
 	}

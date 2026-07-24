@@ -753,7 +753,7 @@ func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *
 	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
 		t.Fatalf("pipeline receipts after injected failure = %d, want 0", got)
 	}
-	missing, ok, err := pg.PipelineObligations().ClaimNext(ctx, runtimepipelineobligation.GlobalRecoveryQuery())
+	missing, ok, err := claimNextAPIPipelineWork(t, ctx, pg.PipelineObligations())
 	if err != nil {
 		t.Fatalf("claim recoverable pipeline obligation: %v", err)
 	}

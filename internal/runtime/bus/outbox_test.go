@@ -40,6 +40,7 @@ type outboxClaimStore struct {
 	directRecipientTransactionalStore
 	claimMu    sync.Mutex
 	claimOwner *runtimepipelineobligation.ClaimIssuer
+	scanOwner  *runtimepipelineobligation.ScanIssuer
 	claims     map[string]runtimepipelineobligation.Claim
 }
 
@@ -76,8 +77,23 @@ func (s *outboxClaimStore) ClaimEvent(_ context.Context, eventID string, purpose
 	return runtimepipelineobligation.ClaimedWork{Event: event, Scope: scope, Claim: claim}, nil
 }
 
-func (s *outboxClaimStore) ClaimNext(context.Context, runtimepipelineobligation.ClaimQuery) (runtimepipelineobligation.ClaimedWork, bool, error) {
-	return runtimepipelineobligation.ClaimedWork{}, false, nil
+func (s *outboxClaimStore) OpenScan(_ context.Context, request runtimepipelineobligation.ScanRequest) (runtimepipelineobligation.Scan, error) {
+	if err := request.Validate(); err != nil {
+		return runtimepipelineobligation.Scan{}, err
+	}
+	if s.scanOwner == nil {
+		s.scanOwner = runtimepipelineobligation.NewScanIssuer()
+	}
+	return s.scanOwner.Issue()
+}
+
+func (*outboxClaimStore) ClaimBatch(context.Context, runtimepipelineobligation.Scan, int) (runtimepipelineobligation.ScanBatch, error) {
+	return runtimepipelineobligation.ScanBatch{Exhausted: true}, nil
+}
+
+func (s *outboxClaimStore) CloseScan(_ context.Context, scan runtimepipelineobligation.Scan) error {
+	_, err := s.scanOwner.Token(scan)
+	return err
 }
 
 func (s *outboxClaimStore) issueClaim(eventID string, purpose runtimepipelineobligation.Purpose) (runtimepipelineobligation.Claim, error) {

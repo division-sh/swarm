@@ -19,13 +19,26 @@ import (
 )
 
 type pipelineClaimState struct {
-	claim runtimepipelineobligation.Claim
+	claim     runtimepipelineobligation.Claim
+	scanToken string
+}
+
+type pipelineScanState struct {
+	mu         sync.Mutex
+	scan       runtimepipelineobligation.Scan
+	request    runtimepipelineobligation.ScanRequest
+	phase      int
+	after      *pipelineCandidate
+	openClaims map[string]runtimepipelineobligation.Claim
+	closed     bool
 }
 
 type postgresPipelineClaimRegistry struct {
 	mu                          sync.Mutex
 	issuer                      *runtimepipelineobligation.ClaimIssuer
+	scanIssuer                  *runtimepipelineobligation.ScanIssuer
 	claims                      map[string]*pipelineClaimState
+	scans                       map[string]*pipelineScanState
 	testBeforeClaimRegistryLock func()
 	testAfterParentClaimScan    func()
 }
@@ -62,11 +75,23 @@ func (s *PostgresStore) postgresPipelineClaims() *postgresPipelineClaimRegistry 
 		return nil
 	}
 	created := &postgresPipelineClaimRegistry{
-		issuer: runtimepipelineobligation.NewClaimIssuer(),
-		claims: map[string]*pipelineClaimState{},
+		issuer:     runtimepipelineobligation.NewClaimIssuer(),
+		scanIssuer: runtimepipelineobligation.NewScanIssuer(),
+		claims:     map[string]*pipelineClaimState{},
+		scans:      map[string]*pipelineScanState{},
 	}
 	actual, _ := postgresPipelineClaimRegistries.LoadOrStore(s.DB, created)
 	return actual.(*postgresPipelineClaimRegistry)
+}
+
+func (s *SQLiteRuntimeStore) pipelineScanOwner() (*runtimepipelineobligation.ScanIssuer, map[string]*pipelineScanState) {
+	if s.pipelineScanIssuer == nil {
+		s.pipelineScanIssuer = runtimepipelineobligation.NewScanIssuer()
+	}
+	if s.pipelineScans == nil {
+		s.pipelineScans = map[string]*pipelineScanState{}
+	}
+	return s.pipelineScanIssuer, s.pipelineScans
 }
 
 func (s *SQLiteRuntimeStore) pipelineClaimOwner() (*runtimepipelineobligation.ClaimIssuer, map[string]*pipelineClaimState) {
@@ -151,82 +176,355 @@ func (s *sqlitePipelineObligationStore) ClaimEvent(ctx context.Context, eventID 
 	return work, nil
 }
 
-func (s *postgresPipelineObligationStore) ClaimNext(ctx context.Context, query runtimepipelineobligation.ClaimQuery) (runtimepipelineobligation.ClaimedWork, bool, error) {
-	if err := query.Validate(); err != nil {
-		return runtimepipelineobligation.ClaimedWork{}, false, err
+func (s *postgresPipelineObligationStore) OpenScan(ctx context.Context, request runtimepipelineobligation.ScanRequest) (runtimepipelineobligation.Scan, error) {
+	if err := request.Validate(); err != nil {
+		return runtimepipelineobligation.Scan{}, err
 	}
-	var after *pipelineCandidate
-	for {
-		candidates, err := s.postgresPipelineCandidates(ctx, query, after, pipelineCandidatePageSize)
-		if err != nil {
-			return runtimepipelineobligation.ClaimedWork{}, false, err
-		}
-		for i := range candidates {
-			candidate := candidates[i]
-			after = &candidate
-			claim, err := s.claimPostgresPipelineEvent(ctx, candidate.eventID, query.Purpose)
-			if errors.Is(err, runtimepipelineobligation.ErrBusy) || errors.Is(err, runtimepipelineobligation.ErrIneligible) {
-				continue
-			}
-			if err != nil {
-				return runtimepipelineobligation.ClaimedWork{}, false, err
-			}
-			work, err := s.loadPostgresClaimedPipelineWork(ctx, claim)
-			if disposition, corrupt := corruptPipelineScopeDisposition(candidate.eventID, err); corrupt {
-				if settleErr := s.Settle(ctx, claim, disposition); settleErr != nil {
-					return runtimepipelineobligation.ClaimedWork{}, false, errors.Join(err, settleErr)
-				}
-				continue
-			}
-			if err != nil {
-				_ = s.Release(context.WithoutCancel(ctx), claim)
-				return runtimepipelineobligation.ClaimedWork{}, false, err
-			}
-			return work, true, nil
-		}
-		if len(candidates) < pipelineCandidatePageSize {
-			return runtimepipelineobligation.ClaimedWork{}, false, nil
-		}
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimepipelineobligation.Scan{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return runtimepipelineobligation.Scan{}, err
+	}
+	registry := s.postgresPipelineClaims()
+	scan, err := registry.scanIssuer.Issue()
+	if err != nil {
+		return runtimepipelineobligation.Scan{}, err
+	}
+	token, err := registry.scanIssuer.Token(scan)
+	if err != nil {
+		return runtimepipelineobligation.Scan{}, err
+	}
+	registry.mu.Lock()
+	registry.scans[token] = &pipelineScanState{
+		scan:       scan,
+		request:    request,
+		openClaims: map[string]runtimepipelineobligation.Claim{},
+	}
+	registry.mu.Unlock()
+	return scan, nil
 }
 
-func (s *sqlitePipelineObligationStore) ClaimNext(ctx context.Context, query runtimepipelineobligation.ClaimQuery) (runtimepipelineobligation.ClaimedWork, bool, error) {
-	if err := query.Validate(); err != nil {
-		return runtimepipelineobligation.ClaimedWork{}, false, err
+func (s *sqlitePipelineObligationStore) OpenScan(ctx context.Context, request runtimepipelineobligation.ScanRequest) (runtimepipelineobligation.Scan, error) {
+	if err := request.Validate(); err != nil {
+		return runtimepipelineobligation.Scan{}, err
 	}
-	var after *pipelineCandidate
-	for {
-		candidates, err := s.sqlitePipelineCandidates(ctx, query, after, pipelineCandidatePageSize)
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimepipelineobligation.Scan{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return runtimepipelineobligation.Scan{}, err
+	}
+	s.pipelineClaimMu.Lock()
+	issuer, scans := s.pipelineScanOwner()
+	scan, err := issuer.Issue()
+	if err == nil {
+		token, tokenErr := issuer.Token(scan)
+		if tokenErr != nil {
+			err = tokenErr
+		} else {
+			scans[token] = &pipelineScanState{
+				scan:       scan,
+				request:    request,
+				openClaims: map[string]runtimepipelineobligation.Claim{},
+			}
+		}
+	}
+	s.pipelineClaimMu.Unlock()
+	return scan, err
+}
+
+type pipelineBatchBackend struct {
+	candidates func(context.Context, runtimepipelineobligation.ClaimQuery, *pipelineCandidate, int) ([]pipelineCandidate, error)
+	claim      func(context.Context, string, runtimepipelineobligation.Purpose) (runtimepipelineobligation.Claim, error)
+	associate  func(runtimepipelineobligation.Scan, runtimepipelineobligation.Claim) error
+	load       func(context.Context, runtimepipelineobligation.Claim) (runtimepipelineobligation.ClaimedWork, error)
+	release    func(context.Context, runtimepipelineobligation.Claim) error
+}
+
+func (s *postgresPipelineObligationStore) ClaimBatch(ctx context.Context, scan runtimepipelineobligation.Scan, limit int) (runtimepipelineobligation.ScanBatch, error) {
+	state, err := s.postgresPipelineScanState(scan)
+	if err != nil {
+		return runtimepipelineobligation.ScanBatch{}, err
+	}
+	state.mu.Lock()
+	if state.closed {
+		state.mu.Unlock()
+		return runtimepipelineobligation.ScanBatch{}, runtimepipelineobligation.ErrStaleScan
+	}
+	batch, err := claimPipelineBatch(ctx, state, limit, pipelineBatchBackend{
+		candidates: s.postgresPipelineCandidates,
+		claim:      s.claimPostgresPipelineEvent,
+		associate:  s.associatePostgresPipelineClaim,
+		load:       s.loadPostgresClaimedPipelineWork,
+		release:    s.Release,
+	})
+	state.mu.Unlock()
+	if err != nil {
+		_ = s.CloseScan(context.WithoutCancel(ctx), scan)
+	}
+	return batch, err
+}
+
+func (s *sqlitePipelineObligationStore) ClaimBatch(ctx context.Context, scan runtimepipelineobligation.Scan, limit int) (runtimepipelineobligation.ScanBatch, error) {
+	state, err := s.sqlitePipelineScanState(scan)
+	if err != nil {
+		return runtimepipelineobligation.ScanBatch{}, err
+	}
+	state.mu.Lock()
+	if state.closed {
+		state.mu.Unlock()
+		return runtimepipelineobligation.ScanBatch{}, runtimepipelineobligation.ErrStaleScan
+	}
+	batch, err := claimPipelineBatch(ctx, state, limit, pipelineBatchBackend{
+		candidates: s.sqlitePipelineCandidates,
+		claim:      s.claimSQLitePipelineEvent,
+		associate:  s.associateSQLitePipelineClaim,
+		load:       s.loadSQLiteClaimedPipelineWork,
+		release:    s.Release,
+	})
+	state.mu.Unlock()
+	if err != nil {
+		_ = s.CloseScan(context.WithoutCancel(ctx), scan)
+	}
+	return batch, err
+}
+
+func claimPipelineBatch(
+	ctx context.Context,
+	state *pipelineScanState,
+	limit int,
+	backend pipelineBatchBackend,
+) (batch runtimepipelineobligation.ScanBatch, err error) {
+	if state == nil {
+		return batch, runtimepipelineobligation.ErrStaleScan
+	}
+	if limit <= 0 {
+		return batch, errors.New("pipeline scan batch limit must be positive")
+	}
+	batch.Work = make([]runtimepipelineobligation.ClaimedWork, 0, limit)
+	acquired := make([]runtimepipelineobligation.Claim, 0, limit)
+	defer func() {
+		if err == nil {
+			return
+		}
+		releaseCtx := context.WithoutCancel(ctx)
+		for _, claim := range acquired {
+			releaseErr := backend.release(releaseCtx, claim)
+			if !errors.Is(releaseErr, runtimepipelineobligation.ErrStaleClaim) {
+				err = errors.Join(err, releaseErr)
+			}
+		}
+	}()
+	for batch.Examined < limit {
+		if err := ctx.Err(); err != nil {
+			return batch, err
+		}
+		query, ok := state.request.QueryAt(state.phase)
+		if !ok {
+			batch.Exhausted = true
+			return batch, nil
+		}
+		remaining := limit - batch.Examined
+		pageLimit := min(remaining, pipelineCandidatePageSize)
+		candidates, err := backend.candidates(ctx, query, state.after, pageLimit)
 		if err != nil {
-			return runtimepipelineobligation.ClaimedWork{}, false, err
+			return batch, err
+		}
+		if len(candidates) == 0 {
+			state.phase++
+			state.after = nil
+			continue
 		}
 		for i := range candidates {
+			if err := ctx.Err(); err != nil {
+				return batch, err
+			}
 			candidate := candidates[i]
-			after = &candidate
-			claim, err := s.claimSQLitePipelineEvent(ctx, candidate.eventID, query.Purpose)
-			if errors.Is(err, runtimepipelineobligation.ErrBusy) || errors.Is(err, runtimepipelineobligation.ErrIneligible) {
+			// Continuation advances before a claim can be released or retained.
+			state.after = &candidate
+			batch.Examined++
+			claim, err := backend.claim(ctx, candidate.eventID, query.Purpose)
+			if errors.Is(err, runtimepipelineobligation.ErrBusy) {
+				batch.LocallyBlocked = true
+				continue
+			}
+			if errors.Is(err, runtimepipelineobligation.ErrIneligible) {
 				continue
 			}
 			if err != nil {
-				return runtimepipelineobligation.ClaimedWork{}, false, err
+				return batch, err
 			}
-			work, err := s.loadSQLiteClaimedPipelineWork(ctx, claim)
-			if disposition, corrupt := corruptPipelineScopeDisposition(candidate.eventID, err); corrupt {
-				if settleErr := s.Settle(ctx, claim, disposition); settleErr != nil {
-					return runtimepipelineobligation.ClaimedWork{}, false, errors.Join(err, settleErr)
+			acquired = append(acquired, claim)
+			if err := backend.associate(state.scan, claim); err != nil {
+				return batch, err
+			}
+			work, err := backend.load(ctx, claim)
+			if errors.Is(err, runtimepipelineobligation.ErrIneligible) {
+				if releaseErr := backend.release(context.WithoutCancel(ctx), claim); releaseErr != nil {
+					return batch, errors.Join(err, releaseErr)
 				}
 				continue
 			}
 			if err != nil {
-				_ = s.Release(context.WithoutCancel(ctx), claim)
-				return runtimepipelineobligation.ClaimedWork{}, false, err
+				return batch, err
 			}
-			return work, true, nil
+			batch.Work = append(batch.Work, work)
+			if i == len(candidates)-1 && len(candidates) < pageLimit {
+				state.phase++
+				state.after = nil
+				if _, more := state.request.QueryAt(state.phase); !more {
+					batch.Exhausted = true
+				}
+			}
+			// Processing one claimed item may change the eligibility of every
+			// later candidate. The cursor preserves the examination budget,
+			// while the consumer preserves mutation order between steps.
+			return batch, nil
 		}
-		if len(candidates) < pipelineCandidatePageSize {
-			return runtimepipelineobligation.ClaimedWork{}, false, nil
+		if len(candidates) < pageLimit {
+			state.phase++
+			state.after = nil
 		}
 	}
+	return batch, nil
+}
+
+func (s *postgresPipelineObligationStore) CloseScan(_ context.Context, scan runtimepipelineobligation.Scan) error {
+	registry := s.postgresPipelineClaims()
+	token, err := registry.scanIssuer.Token(scan)
+	if err != nil {
+		return err
+	}
+	registry.mu.Lock()
+	state := registry.scans[token]
+	registry.mu.Unlock()
+	if state == nil {
+		return runtimepipelineobligation.ErrStaleScan
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if registry.scans[token] != state {
+		return runtimepipelineobligation.ErrStaleScan
+	}
+	state.closed = true
+	for claimToken := range state.openClaims {
+		delete(registry.claims, claimToken)
+	}
+	delete(registry.scans, token)
+	return nil
+}
+
+func (s *sqlitePipelineObligationStore) CloseScan(_ context.Context, scan runtimepipelineobligation.Scan) error {
+	s.pipelineClaimMu.Lock()
+	issuer, scans := s.pipelineScanOwner()
+	token, err := issuer.Token(scan)
+	if err != nil {
+		s.pipelineClaimMu.Unlock()
+		return err
+	}
+	state := scans[token]
+	s.pipelineClaimMu.Unlock()
+	if state == nil {
+		return runtimepipelineobligation.ErrStaleScan
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	s.pipelineClaimMu.Lock()
+	defer s.pipelineClaimMu.Unlock()
+	if scans[token] != state {
+		return runtimepipelineobligation.ErrStaleScan
+	}
+	state.closed = true
+	_, claims := s.pipelineClaimOwner()
+	for claimToken := range state.openClaims {
+		delete(claims, claimToken)
+	}
+	delete(scans, token)
+	return nil
+}
+
+func (s *PostgresStore) postgresPipelineScanState(scan runtimepipelineobligation.Scan) (*pipelineScanState, error) {
+	registry := s.postgresPipelineClaims()
+	if registry == nil {
+		return nil, runtimepipelineobligation.ErrStaleScan
+	}
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	token, err := registry.scanIssuer.Token(scan)
+	if err != nil {
+		return nil, err
+	}
+	state := registry.scans[token]
+	if state == nil {
+		return nil, runtimepipelineobligation.ErrStaleScan
+	}
+	return state, nil
+}
+
+func (s *SQLiteRuntimeStore) sqlitePipelineScanState(scan runtimepipelineobligation.Scan) (*pipelineScanState, error) {
+	s.pipelineClaimMu.Lock()
+	defer s.pipelineClaimMu.Unlock()
+	issuer, scans := s.pipelineScanOwner()
+	token, err := issuer.Token(scan)
+	if err != nil {
+		return nil, err
+	}
+	state := scans[token]
+	if state == nil {
+		return nil, runtimepipelineobligation.ErrStaleScan
+	}
+	return state, nil
+}
+
+func (s *PostgresStore) associatePostgresPipelineClaim(scan runtimepipelineobligation.Scan, claim runtimepipelineobligation.Claim) error {
+	registry := s.postgresPipelineClaims()
+	if registry == nil {
+		return runtimepipelineobligation.ErrStaleScan
+	}
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	scanToken, err := registry.scanIssuer.Token(scan)
+	if err != nil {
+		return err
+	}
+	claimToken, err := registry.issuer.Token(claim)
+	if err != nil {
+		return err
+	}
+	scanState := registry.scans[scanToken]
+	claimState := registry.claims[claimToken]
+	if scanState == nil || claimState == nil {
+		return runtimepipelineobligation.ErrStaleScan
+	}
+	claimState.scanToken = scanToken
+	scanState.openClaims[claimToken] = claim
+	return nil
+}
+
+func (s *SQLiteRuntimeStore) associateSQLitePipelineClaim(scan runtimepipelineobligation.Scan, claim runtimepipelineobligation.Claim) error {
+	s.pipelineClaimMu.Lock()
+	defer s.pipelineClaimMu.Unlock()
+	scanIssuer, scans := s.pipelineScanOwner()
+	claimIssuer, claims := s.pipelineClaimOwner()
+	scanToken, err := scanIssuer.Token(scan)
+	if err != nil {
+		return err
+	}
+	claimToken, err := claimIssuer.Token(claim)
+	if err != nil {
+		return err
+	}
+	scanState := scans[scanToken]
+	claimState := claims[claimToken]
+	if scanState == nil || claimState == nil {
+		return runtimepipelineobligation.ErrStaleScan
+	}
+	claimState.scanToken = scanToken
+	scanState.openClaims[claimToken] = claim
+	return nil
 }
 
 func corruptPipelineScopeDisposition(eventID string, err error) (runtimepipelineobligation.Disposition, bool) {
@@ -555,10 +853,6 @@ func loadClaimedPipelineWork(ctx context.Context, q pipelineQueryer, claim runti
 	if len(records) != 1 {
 		return runtimepipelineobligation.ClaimedWork{}, runtimepipelineobligation.ErrIneligible
 	}
-	scope, err := loadCommittedPipelineScope(ctx, q, claim.EventID(), postgres)
-	if err != nil {
-		return runtimepipelineobligation.ClaimedWork{}, err
-	}
 	if postgres {
 		err = q.QueryRowContext(ctx, `SELECT outcome FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, claim.EventID()).Scan(&outcome)
 	} else {
@@ -569,10 +863,17 @@ func loadClaimedPipelineWork(ctx context.Context, q pipelineQueryer, claim runti
 	}
 	work := runtimepipelineobligation.ClaimedWork{
 		Event:        records[0].Event,
-		Scope:        scope,
 		Claim:        claim,
 		Acknowledged: strings.TrimSpace(outcome.String) == "success",
 	}
+	scope, err := loadCommittedPipelineScope(ctx, q, claim.EventID(), postgres)
+	if disposition, corrupt := corruptPipelineScopeDisposition(claim.EventID(), err); corrupt {
+		return runtimepipelineobligation.PreclassifiedWork(work, disposition)
+	}
+	if err != nil {
+		return runtimepipelineobligation.ClaimedWork{}, err
+	}
+	work.Scope = scope
 	if failure := records[0].ReplayFailure; failure != nil {
 		reasonCode := strings.TrimSpace(failure.Detail.Code)
 		if reasonCode == "" {
@@ -1370,6 +1671,9 @@ func (s *PostgresStore) releasePostgresPipelineClaim(ctx context.Context, claim 
 		registry.mu.Unlock()
 		return runtimepipelineobligation.ErrStaleClaim
 	}
+	if scanState := registry.scans[state.scanToken]; scanState != nil {
+		delete(scanState.openClaims, token)
+	}
 	delete(registry.claims, token)
 	registry.mu.Unlock()
 	return nil
@@ -1383,8 +1687,13 @@ func (s *SQLiteRuntimeStore) releaseSQLitePipelineClaim(claim runtimepipelineobl
 	if err != nil {
 		return err
 	}
-	if claims[token] == nil {
+	state := claims[token]
+	if state == nil {
 		return runtimepipelineobligation.ErrStaleClaim
+	}
+	_, scans := s.pipelineScanOwner()
+	if scanState := scans[state.scanToken]; scanState != nil {
+		delete(scanState.openClaims, token)
 	}
 	delete(claims, token)
 	return nil

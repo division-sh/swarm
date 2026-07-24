@@ -1138,7 +1138,7 @@ func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *te
 	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
 		t.Fatalf("pipeline receipts = %d, want 0 after injected failure", got)
 	}
-	missing, ok, err := pg.PipelineObligations().ClaimNext(ctx, runtimepipelineobligation.GlobalRecoveryQuery())
+	missing, ok, err := claimNextPipelineWork(t, ctx, pg.PipelineObligations(), runtimepipelineobligation.GlobalRecoveryQuery())
 	if err != nil {
 		t.Fatalf("claim recoverable pipeline obligation: %v", err)
 	}
@@ -2153,23 +2153,19 @@ func (s *blockingPipelineObligationStore) ClaimPublication(ctx context.Context, 
 	return s.awaitClaim(ctx, claim, err)
 }
 
-func (s *blockingPipelineObligationStore) ClaimNext(ctx context.Context, query runtimepipelineobligation.ClaimQuery) (runtimepipelineobligation.ClaimedWork, bool, error) {
-	if strings.TrimSpace(s.eventID) == "" {
-		return s.Store.ClaimNext(ctx, query)
-	}
-	work, err := s.Store.ClaimEvent(ctx, s.eventID, query.Purpose)
-	if errors.Is(err, runtimepipelineobligation.ErrBusy) || errors.Is(err, runtimepipelineobligation.ErrIneligible) {
-		return runtimepipelineobligation.ClaimedWork{}, false, nil
-	}
+func (s *blockingPipelineObligationStore) ClaimBatch(ctx context.Context, scan runtimepipelineobligation.Scan, limit int) (runtimepipelineobligation.ScanBatch, error) {
+	batch, err := s.Store.ClaimBatch(ctx, scan, 1)
 	if err != nil {
-		return runtimepipelineobligation.ClaimedWork{}, false, err
+		return batch, err
 	}
-	claim, err := s.awaitClaim(ctx, work.Claim, nil)
-	if err != nil {
-		return runtimepipelineobligation.ClaimedWork{}, false, err
+	for i := range batch.Work {
+		claim, err := s.awaitClaim(ctx, batch.Work[i].Claim, nil)
+		if err != nil {
+			return runtimepipelineobligation.ScanBatch{}, err
+		}
+		batch.Work[i].Claim = claim
 	}
-	work.Claim = claim
-	return work, true, nil
+	return batch, nil
 }
 
 func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing.T) {

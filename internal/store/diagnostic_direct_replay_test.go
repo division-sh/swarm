@@ -72,8 +72,8 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 	if err != nil {
 		t.Fatalf("SweepUndispatched(sqlite): %v", err)
 	}
-	if swept != 0 {
-		t.Fatalf("SweepUndispatched(sqlite) redelivered = %d, want 0", swept)
+	if swept != 1 {
+		t.Fatalf("SweepUndispatched(sqlite) settled = %d, want typed corrupt-work settlement", swept)
 	}
 
 	assertNoSQLitePipelineReceipt(t, ctx, store, runtimeLogID)
@@ -137,8 +137,8 @@ func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEv
 	if err != nil {
 		t.Fatalf("SweepUndispatched(postgres): %v", err)
 	}
-	if swept != 0 {
-		t.Fatalf("SweepUndispatched(postgres) redelivered = %d, want 0", swept)
+	if swept != 1 {
+		t.Fatalf("SweepUndispatched(postgres) settled = %d, want typed corrupt-work settlement", swept)
 	}
 
 	assertNoPostgresPipelineReceipt(t, ctx, pg, runtimeLogID)
