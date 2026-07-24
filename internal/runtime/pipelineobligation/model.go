@@ -273,9 +273,6 @@ func (q ClaimQuery) Validate() error {
 		return fmt.Errorf("pipeline claim query purpose %q is invalid", q.Purpose)
 	}
 	runID := strings.TrimSpace(q.RunID)
-	if q.Purpose == PurposeDecisionRoute && runID != "" {
-		return errors.New("decision-route pipeline claim query cannot select a run")
-	}
 	if runID != "" {
 		if _, err := uuid.Parse(runID); err != nil {
 			return fmt.Errorf("pipeline claim query run id: %w", err)
@@ -294,6 +291,10 @@ func RunRecoveryQuery(runID string) ClaimQuery {
 
 func DecisionRouteQuery() ClaimQuery {
 	return ClaimQuery{Purpose: PurposeDecisionRoute}
+}
+
+func RunDecisionRouteQuery(runID string) ClaimQuery {
+	return ClaimQuery{RunID: strings.TrimSpace(runID), Purpose: PurposeDecisionRoute}
 }
 
 type ScanRequest struct {
@@ -335,10 +336,14 @@ func (r ScanRequest) QueryAt(phase int) (ClaimQuery, bool) {
 			return ClaimQuery{}, false
 		}
 	}
-	if phase == 0 {
+	switch phase {
+	case 0:
+		return RunDecisionRouteQuery(r.runID), true
+	case 1:
 		return RunRecoveryQuery(r.runID), true
+	default:
+		return ClaimQuery{}, false
 	}
-	return ClaimQuery{}, false
 }
 
 // Scan is an opaque, process-local continuation capability issued by one
