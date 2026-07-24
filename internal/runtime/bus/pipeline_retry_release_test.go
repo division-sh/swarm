@@ -271,6 +271,7 @@ func TestControllerCancellationBetweenBatchesAbandonsCursorOnSQLiteAndPostgres(t
 			t.Run(backend+"/"+surface, func(t *testing.T) {
 				fixture, later := newControllerContinuationFixture(t, backend)
 				ctx, cancel := context.WithCancel(fixture.ctx)
+				defer cancel()
 				switch surface {
 				case "ingress_resume":
 					ingressStore := fixture.store.(runtimeingress.Store)
