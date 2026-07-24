@@ -258,6 +258,9 @@ func (d engineDispatcher) dispatchAndRecord(ctx context.Context, intent runtimee
 	if queued {
 		return nil
 	}
+	if _, retry := outcome.RetryRelease(); retry {
+		return nil
+	}
 	if disposition, ok := outcome.Disposition(); ok {
 		return settle(disposition)
 	}

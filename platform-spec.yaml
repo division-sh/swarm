@@ -30740,10 +30740,17 @@ durable_pipeline_processing_obligation_authority:
       rejects foreign, stale, released, duplicate, and wrong-purpose mutation. Settlement does not accept a caller-selected
       event ID, so redirecting a capability to another obligation is structurally unrepresentable.
     release: >
-      Cancellation or retry releases the current claim without changing the durable obligation. Release and failed
-      settlement preserve later reclaimability; a released claim cannot settle.
+      Cancellation or a typed non-durable retry-release execution outcome releases the current claim without changing
+      the durable obligation. Retry release writes no receipt, does not mutate a decision-route obligation, and cannot
+      reach settlement. Foreground and post-commit dispatch release after the execution outcome returns. A bounded
+      recovery sweep retains each retry-release claim until later eligible candidates in that sweep have been examined,
+      then releases every retained claim before returning. Release and failed settlement preserve later reclaimability;
+      a released claim cannot settle.
   disposition_contract:
     vocabulary: [acknowledged, deferred, terminal_error, dead_letter, quarantined]
+    retry_release: >
+      A typed execution outcome outside the durable disposition vocabulary. It stops current dispatch and leaves the
+      exact durable obligation replayable solely by releasing its current claim; it is never encoded as deferred.
     acknowledged: writes the exact successful platform/pipeline row and closes any pending decision-route obligation
     deferred: >
       Valid only for publication or decision-route ownership, requires an exact retry time, leaves the platform/pipeline
@@ -30802,7 +30809,7 @@ durable_pipeline_processing_obligation_authority:
     PPO-CLM-001: Exclusion precedes final eligibility recheck and only one current claim exists per event.
     PPO-PUB-001: Foreground publication and every recovery surface share the exact event-identity exclusion.
     PPO-SET-001: Acknowledgement and decision-route disposition require the current claim and commit atomically.
-    PPO-REL-001: Cancellation, failed settlement, release, and restart preserve reclaimability without stranded ownership.
+    PPO-REL-001: Cancellation, non-durable retry release, failed settlement, explicit release, and restart preserve reclaimability without stranded ownership or blocking later sweep candidates.
     PPO-SCP-001: Committed scope is exact persisted truth; no delivery marker, current-route inference, fallback, or repair exists.
     PPO-DSP-001: Dispatch consumes the process-local owner and cannot outlive runtime retirement or selected-store release.
     PPO-DCR-001: Decision-route defer, quarantine, processed acknowledgement, convergence retry, and completion are age-independent and ordered.

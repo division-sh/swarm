@@ -74,11 +74,25 @@ type Disposition struct {
 	retryAt    time.Time
 }
 
+// RetryRelease is a non-durable execution result. The current claim owner
+// releases the claim without writing a receipt or mutating a decision route.
+type RetryRelease struct {
+	reasonCode string
+	failure    *runtimefailures.Envelope
+}
+
+func (r RetryRelease) ReasonCode() string { return r.reasonCode }
+func (r RetryRelease) Failure() *runtimefailures.Envelope {
+	return runtimefailures.CloneEnvelope(r.failure)
+}
+
 // ExecutionOutcome is the domain handler's typed processing result. Continue
-// leaves final acknowledgement to the enclosing dispatch. Deferred and
-// dead-letter outcomes stop that dispatch and are settled by the durable owner.
+// leaves final acknowledgement to the enclosing dispatch. Durable dispositions
+// are settled by the durable owner; retry release leaves the obligation
+// unchanged and replayable.
 type ExecutionOutcome struct {
-	disposition *Disposition
+	disposition  *Disposition
+	retryRelease *RetryRelease
 }
 
 func Continue() ExecutionOutcome {
@@ -95,6 +109,14 @@ func DeadLetterExecution(reasonCode string, failure *runtimefailures.Envelope) E
 	return ExecutionOutcome{disposition: &disposition}
 }
 
+func ReleaseForRetry(reasonCode string, failure *runtimefailures.Envelope) ExecutionOutcome {
+	retryRelease := RetryRelease{
+		reasonCode: strings.TrimSpace(reasonCode),
+		failure:    runtimefailures.CloneEnvelope(failure),
+	}
+	return ExecutionOutcome{retryRelease: &retryRelease}
+}
+
 func (o ExecutionOutcome) Disposition() (Disposition, bool) {
 	if o.disposition == nil {
 		return Disposition{}, false
@@ -102,8 +124,15 @@ func (o ExecutionOutcome) Disposition() (Disposition, bool) {
 	return *o.disposition, true
 }
 
+func (o ExecutionOutcome) RetryRelease() (RetryRelease, bool) {
+	if o.retryRelease == nil {
+		return RetryRelease{}, false
+	}
+	return *o.retryRelease, true
+}
+
 func (o ExecutionOutcome) ContinueDispatch() bool {
-	return o.disposition == nil
+	return o.disposition == nil && o.retryRelease == nil
 }
 
 func Acknowledged(reasonCode string) Disposition {

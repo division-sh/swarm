@@ -39,6 +39,26 @@ func TestPipelineDispositionContractIsClosed(t *testing.T) {
 	}
 }
 
+func TestPipelineRetryReleaseIsNotDurableDisposition(t *testing.T) {
+	outcome := ReleaseForRetry(" activity_contract_pin_unavailable ", nil)
+	if outcome.ContinueDispatch() {
+		t.Fatal("retry release continued dispatch")
+	}
+	if disposition, ok := outcome.Disposition(); ok {
+		t.Fatalf("retry release exposed durable disposition %#v", disposition)
+	}
+	retry, ok := outcome.RetryRelease()
+	if !ok {
+		t.Fatal("retry release outcome did not expose retry release")
+	}
+	if got := retry.ReasonCode(); got != "activity_contract_pin_unavailable" {
+		t.Fatalf("retry release reason = %q", got)
+	}
+	if retry.Failure() != nil {
+		t.Fatal("retry release unexpectedly carried failure")
+	}
+}
+
 func TestPipelineClaimIssuerRejectsWrongEventAndForeignIssuer(t *testing.T) {
 	eventID := uuid.NewString()
 	otherEventID := uuid.NewString()

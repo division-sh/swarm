@@ -281,6 +281,11 @@ func gateRecoveryDeferred(outcome runtimepipelineobligation.ExecutionOutcome) bo
 	return ok && disposition.Kind() == runtimepipelineobligation.DispositionDeferred
 }
 
+func gateRecoveryRetryReleased(outcome runtimepipelineobligation.ExecutionOutcome) bool {
+	retry, ok := outcome.RetryRelease()
+	return ok && retry.ReasonCode() == "activity_contract_pin_unavailable"
+}
+
 func TestWorkflowGateUnavailablePinRecoversThroughPersistedEventBusOnBothStores(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -452,8 +457,8 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			}
 			releasedRequest := loadProposedEffectProofRequest(t, selected, runID)
 			changedCoordinator := newCoordinator(otherGateBundle)
-			if changedForward, changedEmitted, changedOutcome, changedErr := changedCoordinator.Intercept(ctx, releasedRequest); changedErr != nil || !gateRecoveryDeferred(changedOutcome) {
-				t.Fatalf("consume released request under changed bundle = forward:%v emitted:%d outcome:%#v error:%v, want recoverable deferral", changedForward, len(changedEmitted), changedOutcome, changedErr)
+			if changedForward, changedEmitted, changedOutcome, changedErr := changedCoordinator.Intercept(ctx, releasedRequest); changedErr != nil || !gateRecoveryRetryReleased(changedOutcome) {
+				t.Fatalf("consume released request under changed bundle = forward:%v emitted:%d outcome:%#v error:%v, want replayable claim release", changedForward, len(changedEmitted), changedOutcome, changedErr)
 			}
 			if got := calls.Load(); got != 0 {
 				t.Fatalf("provider calls while released request pin unavailable = %d, want 0", got)
