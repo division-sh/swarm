@@ -15,6 +15,8 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
+	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -256,6 +258,161 @@ func TestPipelineScanDecisionPhaseHighWaterPreventsRecoveryStarvationOnSQLiteAnd
 			}
 		})
 	}
+}
+
+func TestPostgresPipelineScanSnapshotExcludesEarlierSequenceCommittedAfterBoundary(t *testing.T) {
+	fixture := openPostgresAuthorActivityReceiptFixture(t)
+	selected := fixture.store.(pipelineObligationParityStore)
+	postgres := fixture.store.(*PostgresStore)
+	owner := selected.PipelineObligations()
+	ctx := testAuthorActivityContext()
+	runID := uuid.NewString()
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
+	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+
+	lateCommit := reviewClosureEvent(runID, base.Add(time.Second))
+	inserted := make(chan struct{})
+	commit := make(chan struct{})
+	txDone := make(chan error, 1)
+	var commitOnce sync.Once
+	releaseCommit := func() {
+		commitOnce.Do(func() { close(commit) })
+	}
+	txFinished := false
+	defer func() {
+		if txFinished {
+			return
+		}
+		releaseCommit()
+		select {
+		case err := <-txDone:
+			if err != nil {
+				t.Errorf("cleanup earlier-sequence transaction: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Error("cleanup earlier-sequence transaction timed out")
+		}
+	}()
+	go func() {
+		txDone <- postgres.runPostgresRuntimeMutation(context.Background(), func(txctx context.Context, tx *sql.Tx) error {
+			if err := insertPostgresPipelineSnapshotFixtureTx(txctx, tx, lateCommit); err != nil {
+				return err
+			}
+			close(inserted)
+			select {
+			case <-commit:
+				return nil
+			case <-txctx.Done():
+				return txctx.Err()
+			}
+		})
+	}()
+	select {
+	case <-inserted:
+	case err := <-txDone:
+		txFinished = true
+		t.Fatalf("prepare earlier-sequence transaction: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("earlier-sequence transaction did not reach the pre-commit barrier")
+	}
+
+	visibleAtBoundary := reviewClosureEvent(runID, base)
+	if err := postgres.runPostgresRuntimeMutation(context.Background(), func(txctx context.Context, tx *sql.Tx) error {
+		return insertPostgresPipelineSnapshotFixtureTx(txctx, tx, visibleAtBoundary)
+	}); err != nil {
+		t.Fatalf("commit boundary-visible event: %v", err)
+	}
+	scan, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID))
+	if err != nil {
+		t.Fatalf("OpenScan: %v", err)
+	}
+	defer func() {
+		if err := owner.CloseScan(context.WithoutCancel(ctx), scan); err != nil &&
+			!errors.Is(err, runtimepipelineobligation.ErrStaleScan) {
+			t.Errorf("CloseScan: %v", err)
+		}
+	}()
+
+	first, err := owner.ClaimBatch(ctx, scan, 1)
+	if err != nil {
+		t.Fatalf("first ClaimBatch: %v", err)
+	}
+	if len(first.Work) != 1 || first.Work[0].Event.ID() != visibleAtBoundary.ID() {
+		t.Fatalf("first batch = %#v, want boundary-visible event %s", first, visibleAtBoundary.ID())
+	}
+	if err := owner.Settle(ctx, first.Work[0].Claim, runtimepipelineobligation.Acknowledged("boundary_visible")); err != nil {
+		t.Fatalf("settle boundary-visible event: %v", err)
+	}
+
+	releaseCommit()
+	txErr := <-txDone
+	txFinished = true
+	if txErr != nil {
+		t.Fatalf("commit earlier-sequence transaction: %v", txErr)
+	}
+	var lateSequence, visibleSequence int64
+	if err := fixture.db.QueryRowContext(ctx, `
+			SELECT
+				(SELECT insertion_sequence FROM events WHERE event_id = $1::uuid),
+				(SELECT insertion_sequence FROM events WHERE event_id = $2::uuid)`,
+		lateCommit.ID(), visibleAtBoundary.ID(),
+	).Scan(&lateSequence, &visibleSequence); err != nil {
+		t.Fatalf("read insertion sequences: %v", err)
+	}
+	if lateSequence >= visibleSequence {
+		t.Fatalf("late commit sequence = %d, boundary-visible sequence = %d; test did not create allocation/commit inversion", lateSequence, visibleSequence)
+	}
+
+	second, err := owner.ClaimBatch(ctx, scan, 1)
+	if err != nil {
+		t.Fatalf("second ClaimBatch: %v", err)
+	}
+	if len(second.Work) != 0 || !second.Exhausted {
+		t.Fatalf("same snapshot admitted post-boundary commit: %#v", second)
+	}
+	if err := owner.CloseScan(ctx, scan); err != nil {
+		t.Fatalf("CloseScan: %v", err)
+	}
+	fresh, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID))
+	if err != nil {
+		t.Fatalf("OpenScan fresh: %v", err)
+	}
+	deferred, err := owner.ClaimBatch(ctx, fresh, 1)
+	if err != nil {
+		t.Fatalf("fresh ClaimBatch: %v", err)
+	}
+	if len(deferred.Work) != 1 || deferred.Work[0].Event.ID() != lateCommit.ID() {
+		t.Fatalf("fresh batch = %#v, want deferred event %s", deferred, lateCommit.ID())
+	}
+	if err := owner.CloseScan(ctx, fresh); err != nil {
+		t.Fatalf("CloseScan fresh: %v", err)
+	}
+}
+
+func insertPostgresPipelineSnapshotFixtureTx(ctx context.Context, tx *sql.Tx, event events.Event) error {
+	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		return err
+	}
+	record, err := eventrecord.FromAdmitted(admitted)
+	if err != nil {
+		return err
+	}
+	inserted, err := eventrecordpostgres.Insert(ctx, tx, record)
+	if err != nil {
+		return err
+	}
+	if !inserted {
+		return fmt.Errorf("snapshot fixture event %s was not inserted", event.ID())
+	}
+	return insertCommittedPipelineScopeTx(
+		ctx,
+		tx,
+		event.ID(),
+		runtimepipelineobligation.ScopeDirect,
+		true,
+		event.CreatedAt(),
+	)
 }
 
 func TestPipelineScanCancellationAndAbandonmentReleaseClaimsOnSQLiteAndPostgres(t *testing.T) {
