@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -20,122 +22,325 @@ type advisoryLockLease interface {
 }
 
 type sqlAdvisoryLockLease struct {
-	conn            *sql.Conn
+	mu              sync.Mutex
+	session         *postgresSessionAuthority
 	lockKey         string
-	lifetime        *sharedSQLConnLifetime
-	releaseConn     func() error
+	releaseSession  func() error
 	releaseCapacity func()
+	unlocked        bool
+	released        bool
+	testUnlock      func(context.Context, *postgresSessionAuthority, string) (bool, error)
 }
 
-type sharedSQLConnLifetimeContextKey struct{}
+type postgresSessionAuthorityContextKey struct{}
 
-type sharedSQLConnLifetime struct {
-	mu     sync.Mutex
-	conn   *sql.Conn
-	refs   int
-	closed bool
+type postgresSessionAuthority struct {
+	mu       sync.Mutex
+	conn     *sql.Conn
+	activeTx *sql.Tx
+	refs     int
+	closed   bool
 }
 
-func newSharedSQLConnLifetime(conn *sql.Conn) *sharedSQLConnLifetime {
-	return &sharedSQLConnLifetime{conn: conn, refs: 1}
+func newPostgresSessionAuthority(conn *sql.Conn) *postgresSessionAuthority {
+	return &postgresSessionAuthority{conn: conn, refs: 1}
 }
 
-func withSharedSQLConnLifetime(ctx context.Context, lifetime *sharedSQLConnLifetime) context.Context {
-	if lifetime == nil {
+func (a *postgresSessionAuthority) bindContext(ctx context.Context) context.Context {
+	if a == nil {
 		return ctx
 	}
-	return context.WithValue(ctx, sharedSQLConnLifetimeContextKey{}, lifetime)
-}
-
-func sharedSQLConnLifetimeFromContext(ctx context.Context) (*sharedSQLConnLifetime, bool) {
 	if ctx == nil {
-		return nil, false
+		ctx = context.Background()
 	}
-	lifetime, ok := ctx.Value(sharedSQLConnLifetimeContextKey{}).(*sharedSQLConnLifetime)
-	return lifetime, ok && lifetime != nil
+	conn, err := a.connection()
+	if err != nil {
+		return ctx
+	}
+	ctx = runtimepipeline.WithPipelineSQLConnContext(ctx, conn)
+	return context.WithValue(ctx, postgresSessionAuthorityContextKey{}, a)
 }
 
-func (l *sharedSQLConnLifetime) retain() (func() error, bool) {
-	if l == nil {
-		return nil, false
+func postgresSessionAuthorityFromContext(ctx context.Context) (*postgresSessionAuthority, bool, error) {
+	if ctx == nil {
+		return nil, false, nil
 	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.closed || l.conn == nil {
-		return nil, false
+	authority, ok := ctx.Value(postgresSessionAuthorityContextKey{}).(*postgresSessionAuthority)
+	if !ok || authority == nil {
+		if _, borrowed := runtimepipeline.PipelineSQLConnFromContext(ctx); borrowed {
+			return nil, false, errors.New("borrowed PostgreSQL connection lacks private session authority")
+		}
+		if _, borrowed := runtimepipeline.PipelineSQLTxFromContext(ctx); borrowed {
+			return nil, false, errors.New("borrowed PostgreSQL transaction lacks private session authority")
+		}
+		return nil, false, nil
 	}
-	l.refs++
-	return l.release, true
+	borrowedConn, hasConn := runtimepipeline.PipelineSQLConnFromContext(ctx)
+	borrowedTx, hasTx := runtimepipeline.PipelineSQLTxFromContext(ctx)
+	if !hasConn && !hasTx {
+		// Detached work contexts deliberately strip public SQL capabilities.
+		// A private token left in the value chain cannot revive that authority.
+		return nil, false, nil
+	}
+	if !hasConn {
+		return nil, false, errors.New("borrowed PostgreSQL transaction lacks its exact private session connection")
+	}
+	conn, err := authority.connection()
+	if err != nil {
+		return nil, false, err
+	}
+	if borrowedConn != conn {
+		return nil, false, errors.New("borrowed PostgreSQL connection does not match private session authority")
+	}
+	if hasTx {
+		authority.mu.Lock()
+		exact := authority.activeTx == borrowedTx
+		authority.mu.Unlock()
+		if !exact {
+			return nil, false, errors.New("borrowed PostgreSQL transaction does not match private session authority")
+		}
+	}
+	return authority, true, nil
 }
 
-func (l *sharedSQLConnLifetime) release() error {
-	if l == nil {
+func (a *postgresSessionAuthority) connection() (*sql.Conn, error) {
+	if a == nil {
+		return nil, errors.New("PostgreSQL session authority is missing")
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closed || a.conn == nil {
+		return nil, errors.New("PostgreSQL session authority is closed")
+	}
+	return a.conn, nil
+}
+
+func (a *postgresSessionAuthority) retain() (func() error, bool) {
+	if a == nil {
+		return nil, false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closed || a.conn == nil {
+		return nil, false
+	}
+	a.refs++
+	var (
+		mu   sync.Mutex
+		done bool
+	)
+	return func() error {
+		mu.Lock()
+		defer mu.Unlock()
+		if done {
+			return nil
+		}
+		if err := a.release(); err != nil {
+			return err
+		}
+		done = true
+		return nil
+	}, true
+}
+
+func (a *postgresSessionAuthority) release() error {
+	if a == nil {
 		return nil
 	}
-	l.mu.Lock()
-	if l.closed || l.refs <= 0 {
-		l.mu.Unlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closed || a.refs <= 0 {
 		return nil
 	}
-	l.refs--
-	if l.refs > 0 {
-		l.mu.Unlock()
+	if a.refs > 1 {
+		a.refs--
 		return nil
 	}
-	l.closed = true
-	conn := l.conn
-	l.conn = nil
-	l.mu.Unlock()
-	if conn == nil {
+	if a.activeTx != nil {
+		return errors.New("close PostgreSQL session authority while its transaction is active")
+	}
+	if a.conn == nil {
+		a.closed = true
+		a.refs = 0
 		return nil
 	}
-	return conn.Close()
+	if err := a.conn.Close(); err != nil {
+		return err
+	}
+	a.conn = nil
+	a.refs = 0
+	a.closed = true
+	return nil
+}
+
+func (a *postgresSessionAuthority) forceDiscard() error {
+	if a == nil {
+		return nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closed || a.conn == nil {
+		return nil
+	}
+	if a.activeTx != nil {
+		return errors.New("discard PostgreSQL session authority while its transaction is active")
+	}
+	if a.refs != 1 {
+		return fmt.Errorf("discard shared PostgreSQL session authority with %d references", a.refs)
+	}
+	rawErr := a.conn.Raw(func(any) error { return driver.ErrBadConn })
+	if errors.Is(rawErr, driver.ErrBadConn) {
+		rawErr = nil
+	}
+	closeErr := a.conn.Close()
+	if rawErr != nil || (closeErr != nil && !errors.Is(closeErr, sql.ErrConnDone)) {
+		return errors.Join(rawErr, closeErr)
+	}
+	a.conn = nil
+	a.refs = 0
+	a.closed = true
+	return nil
+}
+
+func (a *postgresSessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error) {
+	if a == nil {
+		return nil, errors.New("PostgreSQL session authority is missing")
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closed || a.conn == nil {
+		return nil, errors.New("PostgreSQL session authority is closed")
+	}
+	if a.activeTx != nil {
+		return nil, errors.New("PostgreSQL session authority already has an active transaction")
+	}
+	tx, err := a.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	a.activeTx = tx
+	return tx, nil
+}
+
+func (a *postgresSessionAuthority) endTx(tx *sql.Tx) error {
+	if a == nil || tx == nil {
+		return errors.New("PostgreSQL session transaction is missing")
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.activeTx != tx {
+		return errors.New("PostgreSQL transaction does not match private session authority")
+	}
+	a.activeTx = nil
+	return nil
+}
+
+func (a *postgresSessionAuthority) queryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	a.mu.Lock()
+	tx := a.activeTx
+	conn := a.conn
+	a.mu.Unlock()
+	if tx != nil {
+		return tx.QueryRowContext(ctx, query, args...)
+	}
+	return conn.QueryRowContext(ctx, query, args...)
+}
+
+func (a *postgresSessionAuthority) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	a.mu.Lock()
+	tx := a.activeTx
+	conn := a.conn
+	a.mu.Unlock()
+	if tx != nil {
+		return tx.QueryContext(ctx, query, args...)
+	}
+	return conn.QueryContext(ctx, query, args...)
+}
+
+func (a *postgresSessionAuthority) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return a.queryRowContext(ctx, query, args...)
 }
 
 func (l *sqlAdvisoryLockLease) BindContext(ctx context.Context) context.Context {
-	if l == nil || l.conn == nil {
+	if l == nil || l.session == nil {
 		return ctx
 	}
-	ctx = runtimepipeline.WithPipelineSQLConnContext(ctx, l.conn)
-	if l.lifetime != nil {
-		ctx = withSharedSQLConnLifetime(ctx, l.lifetime)
-	}
-	return ctx
+	return l.session.bindContext(ctx)
 }
 
 func (l *sqlAdvisoryLockLease) Release(ctx context.Context) error {
 	if l == nil {
 		return nil
 	}
-	releaseCapacity := l.releaseCapacity
-	l.releaseCapacity = nil
-	if releaseCapacity != nil {
-		defer releaseCapacity()
-	}
-	if l.conn == nil {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.released {
 		return nil
+	}
+	if l.session == nil {
+		return errors.New("advisory lock lease has no private session authority")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	exec := l.conn.ExecContext
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		exec = tx.ExecContext
+	ctx = context.WithoutCancel(ctx)
+	if !l.unlocked {
+		var (
+			unlocked bool
+			err      error
+		)
+		if l.testUnlock != nil {
+			unlocked, err = l.testUnlock(ctx, l.session, l.lockKey)
+		} else {
+			err = l.session.queryRowContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, l.lockKey).Scan(&unlocked)
+		}
+		if err != nil {
+			return fmt.Errorf("release advisory lock: %w", err)
+		}
+		if !unlocked {
+			return errors.New("release advisory lock: PostgreSQL session did not own the lock")
+		}
+		l.unlocked = true
 	}
-	_, unlockErr := exec(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, l.lockKey)
-	releaseErr := error(nil)
-	if l.releaseConn != nil {
-		releaseErr = l.releaseConn()
+	if l.releaseSession != nil {
+		if err := l.releaseSession(); err != nil {
+			return fmt.Errorf("close advisory lock session: %w", err)
+		}
 	}
-	l.conn = nil
-	l.releaseConn = nil
-	if unlockErr != nil {
-		return fmt.Errorf("release advisory lock: %w", unlockErr)
+	if l.releaseCapacity != nil {
+		l.releaseCapacity()
 	}
-	if releaseErr != nil {
-		return fmt.Errorf("close advisory lock connection: %w", releaseErr)
-	}
+	l.releaseCapacity = nil
+	l.releaseSession = nil
+	l.session = nil
+	l.released = true
 	return nil
+}
+
+func (l *sqlAdvisoryLockLease) ReleaseOrDiscard(ctx context.Context) error {
+	releaseErr := l.Release(ctx)
+	if releaseErr == nil || l == nil {
+		return releaseErr
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.released {
+		return releaseErr
+	}
+	if l.session == nil {
+		return errors.Join(releaseErr, errors.New("advisory lock lease has no session to discard"))
+	}
+	if discardErr := l.session.forceDiscard(); discardErr != nil {
+		return errors.Join(releaseErr, fmt.Errorf("discard advisory lock session: %w", discardErr))
+	}
+	if l.releaseCapacity != nil {
+		l.releaseCapacity()
+	}
+	l.releaseCapacity = nil
+	l.releaseSession = nil
+	l.session = nil
+	l.released = true
+	return releaseErr
 }
 
 func acquireAdvisoryLockLease(ctx context.Context, db *sql.DB, lockKey string) (*sqlAdvisoryLockLease, bool, error) {
@@ -146,43 +351,86 @@ func acquireAdvisoryLockLease(ctx context.Context, db *sql.DB, lockKey string) (
 	if lockKey == "" {
 		return nil, false, fmt.Errorf("advisory lock key is required")
 	}
-	conn, borrowed := runtimepipeline.PipelineSQLConnFromContext(ctx)
-	var lifetime *sharedSQLConnLifetime
-	var releaseConn func() error
+	authority, borrowed, err := postgresSessionAuthorityFromContext(ctx)
+	var releaseSession func() error
+	if err != nil {
+		return nil, false, err
+	}
 	if !borrowed {
-		var err error
-		conn, err = db.Conn(ctx)
+		conn, err := db.Conn(ctx)
 		if err != nil {
 			return nil, false, fmt.Errorf("acquire advisory lock connection: %w", err)
 		}
-		lifetime = newSharedSQLConnLifetime(conn)
-		releaseConn = lifetime.release
-	} else if borrowedLifetime, ok := sharedSQLConnLifetimeFromContext(ctx); ok {
-		lifetime = borrowedLifetime
+		authority = newPostgresSessionAuthority(conn)
+		releaseSession = authority.release
+	} else {
 		var retained bool
-		releaseConn, retained = lifetime.retain()
+		releaseSession, retained = authority.retain()
 		if !retained {
-			return nil, false, fmt.Errorf("acquire advisory lock connection: shared connection lifetime is closed")
+			return nil, false, fmt.Errorf("acquire advisory lock connection: private session authority is closed")
 		}
 	}
 	var acquired bool
-	query := conn.QueryRowContext
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		query = tx.QueryRowContext
-	}
-	if err := query(ctx, `SELECT pg_try_advisory_lock(hashtext($1))`, lockKey).Scan(&acquired); err != nil {
-		if releaseConn != nil {
-			_ = releaseConn()
-		}
-		return nil, false, fmt.Errorf("acquire advisory lock: %w", err)
+	if err := authority.queryRowContext(ctx, `SELECT pg_try_advisory_lock(hashtext($1))`, lockKey).Scan(&acquired); err != nil {
+		return nil, false, errors.Join(
+			fmt.Errorf("acquire advisory lock: %w", err),
+			releaseSession(),
+		)
 	}
 	if !acquired {
-		if releaseConn != nil {
-			_ = releaseConn()
+		if err := releaseSession(); err != nil {
+			return nil, false, fmt.Errorf("release unacquired advisory lock session: %w", err)
 		}
 		return nil, false, nil
 	}
-	return &sqlAdvisoryLockLease{conn: conn, lockKey: lockKey, lifetime: lifetime, releaseConn: releaseConn}, true, nil
+	return &sqlAdvisoryLockLease{
+		session:        authority,
+		lockKey:        lockKey,
+		releaseSession: releaseSession,
+	}, true, nil
+}
+
+func runPostgresSessionTransaction(
+	ctx context.Context,
+	db *sql.DB,
+	fn func(context.Context, *sql.Tx) error,
+) (err error) {
+	if db == nil {
+		return errors.New("PostgreSQL store is required")
+	}
+	if fn == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	session, borrowed, err := postgresSessionAuthorityFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	if !borrowed {
+		conn, connErr := db.Conn(ctx)
+		if connErr != nil {
+			return connErr
+		}
+		session = newPostgresSessionAuthority(conn)
+		defer func() {
+			err = errors.Join(err, session.release())
+		}()
+	}
+	ctx = session.bindContext(ctx)
+	tx, err := session.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	if runErr := fn(txctx, tx); runErr != nil {
+		return errors.Join(runErr, rollbackPostgresSessionTransaction(tx, session))
+	}
+	if commitErr := tx.Commit(); commitErr != nil {
+		return errors.Join(commitErr, rollbackPostgresSessionTransaction(tx, session))
+	}
+	return session.endTx(tx)
 }
 
 func replayClaimLockKey(eventID string) string {

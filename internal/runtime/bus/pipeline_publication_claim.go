@@ -50,6 +50,7 @@ func (c *pipelinePublicationClaim) Release(ctx context.Context) {
 		ctx = context.Background()
 	}
 	if err := c.bus.pipelineObligations.Release(context.WithoutCancel(ctx), c.claim); err != nil {
+		c.released.Store(false)
 		c.bus.logRuntime(context.WithoutCancel(ctx), "error", "Releasing foreground pipeline publication claim failed", "eventbus", "pipeline_publication_claim_release_failed", c.eventID, "", "", "", "", nil, nil, eventBusDependencyFailure(err, "pipeline_publication_claim_release_failed", "release_pipeline_publication_claim"), 0)
 	}
 }

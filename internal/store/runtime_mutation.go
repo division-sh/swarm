@@ -51,7 +51,7 @@ func (s *PostgresStore) runEventTransaction(ctx context.Context, fn func(context
 	return s.runAuthorActivityMutation(ctx, "postgres event transaction", fn)
 }
 
-func (s *PostgresStore) runPostgresRuntimeMutation(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
+func (s *PostgresStore) runPostgresRuntimeMutation(ctx context.Context, fn func(context.Context, *sql.Tx) error) (err error) {
 	if fn == nil {
 		return nil
 	}
@@ -64,45 +64,63 @@ func (s *PostgresStore) runPostgresRuntimeMutation(ctx context.Context, fn func(
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	conn, borrowed := runtimepipeline.PipelineSQLConnFromContext(ctx)
-	var connLifetime *sharedSQLConnLifetime
-	if !borrowed {
-		var err error
-		conn, err = s.DB.Conn(ctx)
-		if err != nil {
-			return err
-		}
-		connLifetime = newSharedSQLConnLifetime(conn)
-		ctx = withSharedSQLConnLifetime(ctx, connLifetime)
-		defer connLifetime.release()
+	session, borrowed, err := postgresSessionAuthorityFromContext(ctx)
+	if err != nil {
+		return err
 	}
-	tx, err := conn.BeginTx(ctx, nil)
+	if !borrowed {
+		conn, connErr := s.DB.Conn(ctx)
+		if connErr != nil {
+			return connErr
+		}
+		session = newPostgresSessionAuthority(conn)
+		defer func() {
+			err = errors.Join(err, session.release())
+		}()
+	}
+	ctx = session.bindContext(ctx)
+	tx, err := session.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	postCommit := make([]runtimepipeline.OwnerAction, 0, 4)
 	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 4)
-	txctx := runtimepipeline.WithPipelineSQLConnContext(ctx, conn)
-	txctx = runtimepipeline.WithPipelineSQLTxContext(txctx, tx)
+	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
 	if eventCtx, ok := eventCommitterForPipelineContext(txctx, s); ok {
 		txctx = eventCtx
 	} else {
-		_ = tx.Rollback()
-		return fmt.Errorf("postgres runtime mutation could not attach the event commit owner")
+		rollbackErr := rollbackPostgresSessionTransaction(tx, session)
+		return errors.Join(
+			fmt.Errorf("postgres runtime mutation could not attach the event commit owner"),
+			rollbackErr,
+		)
 	}
 	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
 	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
-	if err := fn(txctx, tx); err != nil {
-		_ = tx.Rollback()
+	if runErr := fn(txctx, tx); runErr != nil {
+		rollbackErr := rollbackPostgresSessionTransaction(tx, session)
 		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
-		return err
+		return errors.Join(runErr, rollbackErr)
 	}
-	if err := tx.Commit(); err != nil {
+	if commitErr := tx.Commit(); commitErr != nil {
+		rollbackErr := rollbackPostgresSessionTransaction(tx, session)
 		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
-		return err
+		return errors.Join(commitErr, rollbackErr)
 	}
+	endErr := session.endTx(tx)
 	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-	return nil
+	return endErr
+}
+
+func rollbackPostgresSessionTransaction(tx *sql.Tx, session *postgresSessionAuthority) error {
+	if tx == nil || session == nil {
+		return errors.New("PostgreSQL session transaction is missing")
+	}
+	rollbackErr := tx.Rollback()
+	if errors.Is(rollbackErr, sql.ErrTxDone) {
+		rollbackErr = nil
+	}
+	return errors.Join(rollbackErr, session.endTx(tx))
 }
 
 func (s *SQLiteRuntimeStore) runRuntimeMutation(ctx context.Context, label string, fn func(context.Context, *sql.Tx) error) error {
@@ -215,21 +233,35 @@ func (s *SQLiteRuntimeStore) runRuntimeMutationOnceLocked(ctx context.Context, f
 	if eventCtx, ok := eventCommitterForPipelineContext(txctx, s); ok {
 		txctx = eventCtx
 	} else {
-		_ = tx.Rollback()
-		return nil, fmt.Errorf("sqlite runtime mutation could not attach the event commit owner")
+		return nil, errors.Join(
+			fmt.Errorf("sqlite runtime mutation could not attach the event commit owner"),
+			rollbackSQLTransaction(tx),
+		)
 	}
 	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
 	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
 	if err := fn(txctx, tx); err != nil {
-		_ = tx.Rollback()
+		rollbackErr := rollbackSQLTransaction(tx)
 		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
-		return nil, err
+		return nil, errors.Join(err, rollbackErr)
 	}
 	if err := tx.Commit(); err != nil {
+		rollbackErr := rollbackSQLTransaction(tx)
 		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
-		return nil, err
+		return nil, errors.Join(err, rollbackErr)
 	}
 	return postCommit, nil
+}
+
+func rollbackSQLTransaction(tx *sql.Tx) error {
+	if tx == nil {
+		return errors.New("SQL transaction is missing")
+	}
+	err := tx.Rollback()
+	if errors.Is(err, sql.ErrTxDone) {
+		return nil
+	}
+	return err
 }
 
 func sqliteRuntimeMutationRetryBudgetError(label string, lastErr error) error {

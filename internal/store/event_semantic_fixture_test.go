@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -154,7 +155,7 @@ func commitSelectedForkEventFixture(
 	store selectedForkEventFixtureStore,
 	event events.Event,
 	lineage RunForkSelectedContractExecutionLineage,
-) error {
+) (err error) {
 	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return err
@@ -169,7 +170,9 @@ func commitSelectedForkEventFixture(
 	if err != nil {
 		return err
 	}
-	defer func() { _ = owner.Release(context.WithoutCancel(ctx), claim) }()
+	defer func() {
+		err = errors.Join(err, owner.Release(context.WithoutCancel(ctx), claim))
+	}()
 	outcome, err := store.CommitSelectedForkEvent(ctx, CommitSelectedForkEventRequest{
 		Commit: runtimebus.CommitPublishRequest{
 			Event:         admitted,
@@ -271,7 +274,7 @@ func commitAdmittedSemanticEventFixtureOutcome(
 	admitted events.AdmittedEvent,
 	routes []events.DeliveryRoute,
 	scope runtimepipelineobligation.CommittedScope,
-) (runtimebus.EventAppendOutcome, error) {
+) (outcome runtimebus.EventAppendOutcome, err error) {
 	if admitted.Class() == events.EventAdmissionSelectedForkReplay {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("selected-fork replay events require their closed named persistence operation")
 	}
@@ -280,7 +283,9 @@ func commitAdmittedSemanticEventFixtureOutcome(
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	defer func() { _ = owner.Release(context.WithoutCancel(ctx), claim) }()
+	defer func() {
+		err = errors.Join(err, owner.Release(context.WithoutCancel(ctx), claim))
+	}()
 	req := runtimebus.CommitPublishRequest{
 		Event: admitted, DeliveryRoutes: events.NormalizeDeliveryRoutes(routes), ReplayScope: scope, PipelineClaim: claim,
 	}
@@ -289,12 +294,11 @@ func commitAdmittedSemanticEventFixtureOutcome(
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	defer release()
-	var outcome runtimebus.EventAppendOutcome
 	commit := func(txctx context.Context, tx *sql.Tx, selected eventCommitTxStore) error {
-		var err error
-		outcome, err = selected.appendAdmittedEventTxOutcome(txctx, tx, admitted)
-		if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
-			return err
+		var appendErr error
+		outcome, appendErr = selected.appendAdmittedEventTxOutcome(txctx, tx, admitted)
+		if appendErr != nil || outcome == runtimebus.EventAppendExactDuplicate {
+			return appendErr
 		}
 		return (sqlPublishCommitter{tx: tx, store: selected}).commitInitialSideEffects(txctx, req, true)
 	}
@@ -316,7 +320,7 @@ func commitSemanticEventFixtureTx(ctx context.Context, store eventCommitTxStore,
 	return commitSemanticEventFixtureWithRoutesTx(ctx, store, tx, event, nil)
 }
 
-func commitSemanticEventFixtureWithRoutesTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, event events.Event, routes []events.DeliveryRoute) error {
+func commitSemanticEventFixtureWithRoutesTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, event events.Event, routes []events.DeliveryRoute) (err error) {
 	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return err
@@ -334,7 +338,9 @@ func commitSemanticEventFixtureWithRoutesTx(ctx context.Context, store eventComm
 	if err != nil {
 		return err
 	}
-	defer func() { _ = owner.Release(context.WithoutCancel(ctx), claim) }()
+	defer func() {
+		err = errors.Join(err, owner.Release(context.WithoutCancel(ctx), claim))
+	}()
 	outcome, err := store.appendAdmittedEventTxOutcome(ctx, tx, admitted)
 	if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
 		return err
