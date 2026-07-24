@@ -30720,6 +30720,8 @@ durable_pipeline_processing_obligation_authority:
     forbidden:
     - new generic replay or processing queue
     - optional capability assembly
+    - nil, no-op, alias, or legacy durable-obligation owners
+    - durable EventBus, runtime, coordinator, or recovery construction without the exact selected-store owner
     - caller-owned status strings or context overrides
     - backend lease, connection, transaction, advisory-lock, or mutex capability escape
     - route, recipient, source, or scope inference
@@ -30727,18 +30729,27 @@ durable_pipeline_processing_obligation_authority:
   claim_contract:
     publication: >
       Foreground publication acquires the exact event-identity claim before the event can become visible and retains
-      it through post-commit dispatch, durable disposition, and release.
+      it through post-commit dispatch, durable disposition, and release. Every executable event commit verifies the
+      exact current publication-purpose claim inside the event and initial-side-effect transaction. Missing, foreign,
+      wrong-purpose, stale, or released claims reject the whole operation before commit. Closed diagnostic-direct
+      named operations are non-executable and are the only claim-free event commits.
     recovery: >
       Global, per-run, startup, periodic, ingress-resume, and selected-fork recovery select without an age cutoff,
       acquire the same event-identity exclusion, recheck mutable eligibility, and return one immutable event, exact
       committed scope, and opaque current claim. Canonical hydration that retains exact event evidence but proves the
       event unsafe to dispatch returns a typed terminal pre-dispatch disposition bound to that same claim; the recovery
       consumer commits it and emits aftermath evidence without invoking any interceptor, recipient, provider, or handler.
+      Candidate selection traverses the complete ordered eligible set in bounded keyset pages; a busy or newly ineligible
+      prefix cannot hide later work. A sweep reports settled, examined, exhausted, and blocked facts explicitly. Startup
+      recovery drains until explicit owner exhaustion or blockage and never infers exhaustion from a settled-count limit.
     current_claim: >
       One event has at most one process-local current claim in the exclusively owned selected-store runtime. PostgreSQL
       advisory locks and SQLite mutation serialization fence each database mutation edge; opaque capability identity
       rejects foreign, stale, released, duplicate, and wrong-purpose mutation. Settlement does not accept a caller-selected
-      event ID, so redirecting a capability to another obligation is structurally unrepresentable.
+      event ID, so redirecting a capability to another obligation is structurally unrepresentable. PostgreSQL claim
+      registration and parent terminalization share one registry/advisory-lock order: a parent either observes the
+      registered claim and fails busy or acquires the transaction fence before a later claim can register. There is no
+      scan-to-lock interval in which both can proceed.
     release: >
       Cancellation or a typed non-durable retry-release execution outcome releases the current claim without changing
       the durable obligation. Retry release writes no receipt, does not mutate a decision-route obligation, and cannot
@@ -30772,10 +30783,14 @@ durable_pipeline_processing_obligation_authority:
     poison: >
       A route failure before processed acknowledgement writes one typed non-success disposition and quarantines the
       route before recovery advances to later work.
+    inactive_parent: >
+      Decision-route claims are eligible only while the owning run is running or paused. Parent terminalization of an
+      inactive run closes a still-pending route. When the route already carries its successful processed acknowledgement,
+      terminalization preserves that success and supersedes only the pending route; the route cannot remain reclaimable.
   projection_contracts:
     global_presence: >
       GlobalWorkPresence reports age-independent processing eligibility, due decision-route work, and the oldest eligible
-      event time. Diagnostic-direct events and inactive or forked-run work are not processing eligible.
+      event time. Diagnostic-direct events and work outside running or paused runs are not processing eligible.
     run_summary: >
       RunSummary separately counts replayable absent acknowledgements, successful acknowledgements, terminal non-success
       acknowledgements, pending decision-route obligations, the pending subset that already has its processed
@@ -30787,7 +30802,9 @@ durable_pipeline_processing_obligation_authority:
     rule: >
       Active quiescence, preservation, run stop, standing lifecycle, directive, and decision-route parent operations use
       one private typed primitive inside their named transaction. The operation fails busy while a foreground or recovery
-      claim is current, so a late claim-owned success cannot overwrite or outlive the parent disposition.
+      claim is current, so a late claim-owned success cannot overwrite or outlive the parent disposition. Claim registration
+      and parent terminalization linearize before either durable mutation. A processed pending decision route is superseded
+      without replacing its successful acknowledgement when the parent becomes inactive.
   process_local_handoff:
     owner: process_local_work_lifetime_authority under '#2073'
     rule: >
@@ -30803,21 +30820,21 @@ durable_pipeline_processing_obligation_authority:
     - dead-letter diagnostics
     - destructive-reset and preservation physical cleanup
   invariants:
-    PPO-OWN-001: One selected-store owner; no optional capability, reader, writer, settler, or fake-store assembler survives.
+    PPO-OWN-001: One mandatory selected-store owner; no optional, nil, no-op, alias, legacy, reader, writer, settler, or fake-store assembler survives on durable runtime, EventBus, coordinator, or recovery paths.
     PPO-DIS-001: One closed typed disposition vocabulary owns every foreground, recovery, directive, decision-route, and initial outcome.
-    PPO-SEL-001: Eligibility and canonical hydration are exact and age-independent; diagnostic, inactive, and forked exclusions are explicit.
+    PPO-SEL-001: Eligibility and canonical hydration are exact, age-independent, and exhaustive across bounded keyset pages; diagnostic and non-running/non-paused exclusions are explicit.
     PPO-CLM-001: Exclusion precedes final eligibility recheck and only one current claim exists per event.
-    PPO-PUB-001: Foreground publication and every recovery surface share the exact event-identity exclusion.
+    PPO-PUB-001: Foreground publication, executable event commit, and every recovery surface share the exact current event-identity exclusion; only closed diagnostic-direct named commits are claim-free.
     PPO-SET-001: Acknowledgement and decision-route disposition require the current claim and commit atomically.
-    PPO-REL-001: Cancellation, non-durable retry release, failed settlement, explicit release, and restart preserve reclaimability without stranded ownership or blocking later sweep candidates.
+    PPO-REL-001: Cancellation, non-durable retry release, failed settlement, explicit release, and restart preserve reclaimability without stranded ownership or blocking later sweep candidates; startup stops only on explicit exhaustion or blockage.
     PPO-SCP-001: Committed scope is exact persisted truth; no delivery marker, current-route inference, fallback, or repair exists.
     PPO-DSP-001: Dispatch consumes the process-local owner and cannot outlive runtime retirement or selected-store release.
-    PPO-DCR-001: Decision-route defer, quarantine, processed acknowledgement, convergence retry, and completion are age-independent and ordered.
+    PPO-DCR-001: Decision-route defer, quarantine, processed acknowledgement, convergence retry, completion, and inactive-parent supersession are age-independent and ordered.
     PPO-GLO-001: Global durable-work presence is one typed age-independent projection.
     PPO-SUM-001: Per-run summary preserves absent, successful, terminal non-success, deferred, diagnostic, inactive, and forked distinctions.
     PPO-FAM-001: Exact platform acknowledgement remains structurally separate from every other receipt, delivery, evidence, and cleanup family.
     PPO-PRV-001: SQL and backend synchronization mechanics are private to selected-store adapters.
-    PPO-PAR-001: Named parent terminalization is typed, transactional, and serialized against current processing ownership.
+    PPO-PAR-001: Named parent terminalization is typed, transactional, and linearized with claim registration before either durable mutation.
 
 agent_lifecycle_authority:
   owner: typed AgentManager lifecycle coordinator plus the selected SQLite/Postgres store

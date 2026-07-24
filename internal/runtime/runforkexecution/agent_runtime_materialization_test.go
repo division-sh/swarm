@@ -31,7 +31,7 @@ func TestSelectedContractAgentRuntimeWaitsForCurrentRouteSettlementAfterPredeces
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	eventBus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: runtimeOwner})
+	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: runtimeOwner})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -159,7 +159,7 @@ func (selectedContractSelfReleaseAgent) OnEvent(context.Context, events.Event) (
 
 func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 	owner := testGatewayWorkOwner(t)
-	eventBus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: owner})
+	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: owner})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 
 func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkScopeForSelfRelease(t *testing.T) {
 	owner := testGatewayWorkOwner(t)
-	eventBus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: owner})
+	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: owner})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

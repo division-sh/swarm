@@ -47,7 +47,9 @@ func TestTypeformManualLiveHTTPSWebhookSmoke(t *testing.T) {
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	seedProviderTriggerSmokeRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
-	bus, err := runtimebus.NewEventBus(sqliteStore)
+	bus, err := runtimebus.NewEventBusWithOptions(sqliteStore, runtimebus.EventBusOptions{
+		PipelineObligations: sqliteStore.PipelineObligations(),
+	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

@@ -126,8 +126,13 @@ func (eb *EventBus) OutboxSweeperActive() bool {
 }
 
 func (eb *EventBus) SweepUndispatched(ctx context.Context, limit int) (int, error) {
+	result, err := eb.SweepPipelineObligations(ctx, limit)
+	return result.Settled, err
+}
+
+func (eb *EventBus) SweepPipelineObligations(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error) {
 	if eb == nil || eb.store == nil {
-		return 0, nil
+		return runtimepipelineobligation.SweepResult{}, errors.New("event bus and event store are required")
 	}
 	eb.mu.RLock()
 	ingressGate := eb.runtimeIngressDispatchGate
@@ -138,13 +143,13 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, limit int) (int, erro
 		paused, err = ingressGate.QueueableIngressPaused(ctx)
 	}
 	if err != nil {
-		return 0, err
+		return runtimepipelineobligation.SweepResult{}, err
 	}
 	if paused {
-		return 0, nil
+		return runtimepipelineobligation.SweepResult{Blocked: true}, nil
 	}
 	if eb.pipelineObligations == nil {
-		return 0, errors.New("pipeline obligation owner is required")
+		return runtimepipelineobligation.SweepResult{}, errors.New("pipeline obligation owner is required")
 	}
 	if limit <= 0 {
 		limit = DefaultOutboxSweeperConfig().Limit
@@ -154,10 +159,10 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, limit int) (int, erro
 		return decisionRoutes, err
 	}
 	recovered, err := eb.sweepPipelineObligations(ctx, runtimepipelineobligation.GlobalRecoveryQuery(), limit)
-	return decisionRoutes + recovered, err
+	return decisionRoutes.Add(recovered), err
 }
 
-func (eb *EventBus) sweepPipelineObligations(ctx context.Context, query runtimepipelineobligation.ClaimQuery, limit int) (processed int, err error) {
+func (eb *EventBus) sweepPipelineObligations(ctx context.Context, query runtimepipelineobligation.ClaimQuery, limit int) (result runtimepipelineobligation.SweepResult, err error) {
 	retryClaims := make([]runtimepipelineobligation.Claim, 0)
 	defer func() {
 		releaseCtx := context.WithoutCancel(ctx)
@@ -165,29 +170,32 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, query runtimep
 			err = errors.Join(err, eb.pipelineObligations.Release(releaseCtx, claim))
 		}
 	}()
-	for examined := 0; examined < limit; examined++ {
+	for result.Settled < limit {
 		work, ok, err := eb.pipelineObligations.ClaimNext(ctx, query)
 		if err != nil {
-			return processed, err
+			return result, err
 		}
 		if !ok {
-			return processed, nil
+			result.Exhausted = true
+			return result, nil
 		}
+		result.Examined++
 		settled, retry, err := eb.processClaimedPipelineWork(ctx, work)
 		if err != nil {
 			if errors.Is(err, ErrRuntimeIngressPaused) || errors.Is(err, ErrRunDispatchBlocked) {
-				return processed, nil
+				result.Blocked = true
+				return result, nil
 			}
-			return processed, err
+			return result, err
 		}
 		if retry {
 			retryClaims = append(retryClaims, work.Claim)
 		}
 		if settled {
-			processed++
+			result.Settled++
 		}
 	}
-	return processed, nil
+	return result, nil
 }
 
 func (eb *EventBus) processClaimedPipelineWork(ctx context.Context, work runtimepipelineobligation.ClaimedWork) (settled bool, retry bool, err error) {
@@ -369,7 +377,8 @@ func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, limit int
 	if limit <= 0 {
 		limit = DefaultOutboxSweeperConfig().Limit
 	}
-	return eb.sweepPipelineObligations(ctx, runtimepipelineobligation.RunRecoveryQuery(runID), limit)
+	result, err := eb.sweepPipelineObligations(ctx, runtimepipelineobligation.RunRecoveryQuery(runID), limit)
+	return result.Settled, err
 }
 
 func (eb *EventBus) authoritativeRecipientsForEvent(ctx context.Context, eventID string) ([]string, error) {

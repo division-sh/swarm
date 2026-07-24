@@ -492,6 +492,7 @@ func TestPipelineObligationHasNoLegacyCapabilityAssemblers(t *testing.T) {
 		"ClaimPipelineReplay", "ClaimPipelinePublication", "ClaimPipelineSettlement",
 		"SupportsPersistedReplay", "PipelineReceiptOverride", "InitialPipelineReceipt",
 		"PipelineReceiptDeferred", "BindLeaseContext", "RequireStore",
+		"runtime/replayclaim", "NewEventBus(", "NewRecoveryManager()",
 	}
 	allowedScopeFiles := map[string]bool{
 		"internal/store/pipeline_obligation.go":                           true,

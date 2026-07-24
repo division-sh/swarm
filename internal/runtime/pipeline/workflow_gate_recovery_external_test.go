@@ -29,7 +29,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -97,6 +96,13 @@ type proposedEffectRouteProofBus struct {
 
 type proposedEffectRouteProofOutbox struct{ bus *proposedEffectRouteProofBus }
 type proposedEffectRouteProofDispatcher struct{ bus *proposedEffectRouteProofBus }
+
+func (b *proposedEffectRouteProofBus) PipelineObligationOwner() runtimepipelineobligation.Store {
+	if b == nil || b.eventBus == nil {
+		return nil
+	}
+	return b.eventBus.PipelineObligationOwner()
+}
 
 func (*proposedEffectRouteProofBus) SubscribeInternal(string, ...events.EventType) <-chan events.Event {
 	return make(chan events.Event)
@@ -1293,13 +1299,13 @@ func seedGateRecoveryRouteObligation(t *testing.T, tc gateRecoveryStoreCase, run
 	stageAnchor := recoveryStageAnchor(t, card)
 	evt := eventtest.RuntimeControl(eventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, stageAnchor.EntityID), stageAnchor.FlowInstance), at)
-	storetest.CommitSemanticEventWithRoutes(t, testAuthorActivityContext(t, context.Background()), tc.events, evt, nil, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, testAuthorActivityContext(t, context.Background()), tc.events, evt, nil, runtimepipelineobligation.ScopeSubscribed)
 	return eventID
 }
 
 func persistGateRecoveryRouteEvent(t *testing.T, tc gateRecoveryStoreCase, evt events.Event) {
 	t.Helper()
-	storetest.CommitSemanticEventWithRoutes(t, testAuthorActivityContext(t, context.Background()), tc.events, evt, nil, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, testAuthorActivityContext(t, context.Background()), tc.events, evt, nil, runtimepipelineobligation.ScopeSubscribed)
 }
 
 func setGateRecoveryRouteAttempt(t *testing.T, tc gateRecoveryStoreCase, eventID string, attempt int) {
@@ -1673,7 +1679,7 @@ func seedProposedEffectProofDelivery(t *testing.T, selected gateRecoveryStoreCas
 	t.Helper()
 	ctx := testAuthorActivityContext(t, context.Background())
 	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: nodeID}
-	storetest.CommitSemanticEventWithRoutes(t, ctx, selected.events, evt, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, selected.events, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 	return route
 }
 

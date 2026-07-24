@@ -19,7 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	"github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
@@ -29,7 +28,7 @@ type targetRouteMemoryStore struct {
 	mu          sync.Mutex
 	events      map[string]events.Event
 	routes      map[string][]events.DeliveryRoute
-	scopes      map[string]replayclaim.CommittedReplayScope
+	scopes      map[string]runtimepipelineobligation.CommittedScope
 	missing     []events.PersistedReplayEvent
 	receipts    map[string]string
 	receiptErrs map[string]*runtimefailures.Envelope
@@ -46,7 +45,7 @@ func newTargetRouteMemoryStore() *targetRouteMemoryStore {
 	return &targetRouteMemoryStore{
 		events: map[string]events.Event{},
 		routes: map[string][]events.DeliveryRoute{},
-		scopes: map[string]replayclaim.CommittedReplayScope{},
+		scopes: map[string]runtimepipelineobligation.CommittedScope{},
 		active: map[string]bool{},
 	}
 }
@@ -709,7 +708,7 @@ func TestEngineDispatcher_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) 
 
 	store.events[evt.ID()] = evt
 	store.routes[evt.ID()] = []events.DeliveryRoute{{SubscriberType: "node", SubscriberID: "workflow-node"}}
-	store.scopes[evt.ID()] = replayclaim.CommittedReplayScopeSubscribed
+	store.scopes[evt.ID()] = runtimepipelineobligation.ScopeSubscribed
 
 	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{{Event: evt}}); err != nil {
 		t.Fatalf("DispatchPostCommit node-only route without agent channel: %v", err)
@@ -727,7 +726,7 @@ func TestSweepUndispatched_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T)
 
 	store.events[evt.ID()] = evt
 	store.routes[evt.ID()] = []events.DeliveryRoute{{SubscriberType: "node", SubscriberID: "workflow-node"}}
-	store.scopes[evt.ID()] = replayclaim.CommittedReplayScopeSubscribed
+	store.scopes[evt.ID()] = runtimepipelineobligation.ScopeSubscribed
 	store.missing = []events.PersistedReplayEvent{{Event: evt}}
 	eb, err := newScopedTestEventBus(store)
 	if err != nil {
@@ -1140,7 +1139,7 @@ func TestEventBusPublish_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 		t.Fatalf("delivery target = %#v, want operating/inst-1 ent-operating", route.Target)
 	}
 
-	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, replayclaim.CommittedReplayScopeSubscribed)
+	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, runtimepipelineobligation.ScopeSubscribed)
 	if err != nil {
 		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
 	}
@@ -1655,7 +1654,7 @@ func TestEventBusPublish_RootInputFlowNodePersistsRouteBeforeDispatch(t *testing
 	if !deliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
 	}
-	if got := store.scopes[evt.ID()]; got != replayclaim.CommittedReplayScopeSubscribed {
+	if got := store.scopes[evt.ID()]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
 }
@@ -1712,7 +1711,7 @@ func TestEventBusPublish_RootInputFlowNodePersistsRouteBeforeInterceptorWithoutI
 	if routes := store.routes[evt.ID()]; !deliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
 	}
-	if got := store.scopes[evt.ID()]; got != replayclaim.CommittedReplayScopeSubscribed {
+	if got := store.scopes[evt.ID()]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
 }
@@ -1873,7 +1872,7 @@ func TestEventBusPublish_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 		t.Fatalf("delivery target = %#v, want empty root target", route.Target)
 	}
 
-	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, replayclaim.CommittedReplayScopeSubscribed)
+	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, runtimepipelineobligation.ScopeSubscribed)
 	if err != nil {
 		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
 	}
@@ -1932,10 +1931,10 @@ func TestEventBusPublish_NoTargetRootRoutedNodePersistsSemanticRouteWithoutInter
 	if !route.Target.Empty() {
 		t.Fatalf("delivery target = %#v, want empty root target", route.Target)
 	}
-	if got := store.scopes[evt.ID()]; got != replayclaim.CommittedReplayScopeSubscribed {
+	if got := store.scopes[evt.ID()]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
-	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, replayclaim.CommittedReplayScopeSubscribed)
+	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, runtimepipelineobligation.ScopeSubscribed)
 	if err != nil {
 		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
 	}

@@ -12,7 +12,6 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring"
 	"github.com/google/uuid"
 )
@@ -114,7 +113,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 	if !deliveryRoutesContain(persistedRoutes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want lifecycle-created template route %#v", persistedRoutes, want)
 	}
-	if got := store.scopes[evt.ID()]; got != runtimereplayclaim.CommittedReplayScopeSubscribed {
+	if got := store.scopes[evt.ID()]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
 	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)

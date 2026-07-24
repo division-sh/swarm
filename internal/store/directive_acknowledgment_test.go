@@ -487,7 +487,9 @@ func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBacken
 	runID := uuid.NewString()
 	seedDirectiveAmbiguityRun(t, backend.db, runID)
 	faults := &faultingDirectiveIntegrationStore{directiveIntegrationStore: backend.store}
-	bus, err := newStoreTestEventBus(t, faults)
+	bus, err := newStoreTestEventBus(t, faults, runtimebus.EventBusOptions{
+		PipelineObligations: pipelineObligationOwnerForFixture(backend.store),
+	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

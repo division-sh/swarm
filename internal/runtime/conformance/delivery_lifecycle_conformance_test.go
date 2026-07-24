@@ -14,7 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -44,7 +44,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					Target:         events.RouteIdentity{FlowID: "flow-a"},
 				}
 				node := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-a"}
-				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{agent, sibling, node}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{agent, sibling, node}, runtimepipelineobligation.ScopeSubscribed)
 
 				agentProof, err := backend.store.ProveHandoff(ctx, event.ID(), agent)
 				if err != nil {
@@ -96,7 +96,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				}
 
 				// Exact duplicate event admission cannot mint, replace, or reset obligations.
-				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{agent, sibling, node}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{agent, sibling, node}, runtimepipelineobligation.ScopeSubscribed)
 				afterDuplicate, err := backend.store.Snapshot(ctx, agentProof.DeliveryID())
 				if err != nil {
 					t.Fatalf("snapshot after exact duplicate: %v", err)
@@ -114,7 +114,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 			t.Run("claim_renewal_fences_reclaim_and_preserves_settlement", func(t *testing.T) {
 				event := deliveryLifecycleEvent("claim-renewal-" + backend.name)
 				route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "renewal-agent"}
-				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 				claimed, err := backend.store.ClaimAgentDelivery(ctx, event, route)
 				if err != nil {
 					t.Fatalf("claim delivery: %v", err)
@@ -159,7 +159,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 			t.Run("parent_terminalization_fences_late_writer", func(t *testing.T) {
 				event := deliveryLifecycleEvent("terminalize-" + backend.name)
 				route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "terminal-agent"}
-				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 				claimed, err := backend.store.ClaimAgentDelivery(ctx, event, route)
 				if err != nil {
 					t.Fatal(err)
@@ -194,7 +194,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 			t.Run("concurrent_claim_and_restart_reclaim_are_fenced", func(t *testing.T) {
 				event := deliveryLifecycleEvent("claim-race-" + backend.name)
 				route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "race-agent"}
-				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 
 				type claimResult struct {
 					claimed runtimedelivery.ClaimedObligation
@@ -265,7 +265,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				agentID := "selector-agent-" + backend.name
 				expiredEvent := deliveryLifecycleEvent("selector-expired-" + backend.name)
 				route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: agentID}
-				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, expiredEvent, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, expiredEvent, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 				claimed, err := backend.store.ClaimAgentDelivery(ctx, expiredEvent, route)
 				if err != nil {
 					t.Fatalf("claim selector expiry candidate: %v", err)
@@ -273,7 +273,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				expireDeliveryClaimForConformance(t, ctx, backend, claimed.Snapshot.DeliveryID)
 				for index := 0; index < 12; index++ {
 					pending := deliveryLifecycleEvent(fmt.Sprintf("selector-pending-%s-%02d", backend.name, index))
-					storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, pending, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+					storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, pending, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 				}
 				backlog, err := backend.restart.ClaimAgentBacklog(ctx, agentID, 1)
 				if err != nil {
@@ -290,7 +290,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					t.Run(string(class), func(t *testing.T) {
 						event := deliveryLifecycleEvent(fmt.Sprintf("atomic-diagnostic-%s-%s", backend.name, class))
 						route := events.DeliveryRoute{SubscriberType: string(class), SubscriberID: "diagnostic-" + string(class)}
-						storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+						storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 						var claimed runtimedelivery.ClaimedObligation
 						var err error
 						if class == runtimedelivery.SubscriberAgent {
@@ -442,8 +442,8 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "schema-agent-" + backend.name}
 	event := deliveryLifecycleEvent("schema-event-" + backend.name)
 	other := deliveryLifecycleEvent("schema-other-run-" + backend.name)
-	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
-	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, other, nil, runtimereplayclaim.CommittedReplayScopeDirect)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, other, nil, runtimepipelineobligation.ScopeDirect)
 	proof, err := backend.store.ProveHandoff(ctx, event.ID(), route)
 	if err != nil {
 		t.Fatal(err)
@@ -454,7 +454,7 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 		[]any{other.RunID(), proof.DeliveryID()})
 
 	missingAttemptEvent := deliveryLifecycleEvent("schema-missing-attempt-" + backend.name)
-	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, missingAttemptEvent, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, missingAttemptEvent, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 	missingAttempt, err := backend.store.ProveHandoff(ctx, missingAttemptEvent.ID(), route)
 	if err != nil {
 		t.Fatal(err)
@@ -466,7 +466,7 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 		[]any{now, missingAttempt.DeliveryID()})
 
 	sessionEvent := deliveryLifecycleEvent("schema-session-" + backend.name)
-	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, sessionEvent, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, sessionEvent, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 	claimed, err := backend.store.ClaimAgentDelivery(ctx, sessionEvent, route)
 	if err != nil {
 		t.Fatal(err)
@@ -477,7 +477,7 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 		[]any{uuid.NewString(), sessionEvent.RunID(), route.SubscriberID, claimed.Snapshot.DeliveryID, claimed.Claim.Version()})
 
 	otherSessionEvent := deliveryLifecycleEvent("schema-session-other-owner-" + backend.name)
-	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, otherSessionEvent, nil, runtimereplayclaim.CommittedReplayScopeDirect)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, otherSessionEvent, nil, runtimepipelineobligation.ScopeDirect)
 	otherSessionID := uuid.NewString()
 	otherAgentID := "schema-other-agent-" + backend.name
 	seedDeliveryAgentSession(t, ctx, backend, otherSessionID, otherSessionEvent.RunID(), otherAgentID)
@@ -496,7 +496,7 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 
 	terminatedRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "terminated-session-agent-" + backend.name}
 	terminatedEvent := deliveryLifecycleEvent("schema-terminated-session-" + backend.name)
-	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, terminatedEvent, []events.DeliveryRoute{terminatedRoute}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, terminatedEvent, []events.DeliveryRoute{terminatedRoute}, runtimepipelineobligation.ScopeSubscribed)
 	terminatedClaim, err := backend.store.ClaimAgentDelivery(ctx, terminatedEvent, terminatedRoute)
 	if err != nil {
 		t.Fatal(err)
@@ -521,7 +521,7 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 	}
 
 	outcomeEvent := deliveryLifecycleEvent("schema-outcome-" + backend.name)
-	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, outcomeEvent, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, outcomeEvent, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 	outcomeProof, err := backend.store.ProveHandoff(ctx, outcomeEvent.ID(), route)
 	if err != nil {
 		t.Fatal(err)
@@ -532,7 +532,7 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 		[]any{outcomeProof.DeliveryID(), now})
 
 	deadLetterEvent := deliveryLifecycleEvent("schema-dead-letter-failure-" + backend.name)
-	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, deadLetterEvent, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, deadLetterEvent, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 	deadLetterProof, err := backend.store.ProveHandoff(ctx, deadLetterEvent.ID(), route)
 	if err != nil {
 		t.Fatal(err)
@@ -561,7 +561,7 @@ func assertDeliveryRetryBudget(t *testing.T, ctx context.Context, backend delive
 	t.Helper()
 	event := deliveryLifecycleEvent(fmt.Sprintf("retry-%s-%s", backend.name, class))
 	route := events.DeliveryRoute{SubscriberType: string(class), SubscriberID: subscriberID}
-	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 	proof, err := backend.store.ProveHandoff(ctx, event.ID(), route)
 	if err != nil {
 		t.Fatal(err)

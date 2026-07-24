@@ -91,6 +91,9 @@ func newScopedTestEventBus(store EventStore, options ...EventBusOptions) (*Event
 		}
 		_ = lease // The store and its catalog are scoped to the test that owns them.
 	}
+	if opts.PipelineObligations == nil {
+		return NewEphemeralEventBusWithOptions(store, opts)
+	}
 	return NewEventBusWithOptions(store, opts)
 }
 

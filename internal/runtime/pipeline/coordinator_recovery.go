@@ -2,12 +2,13 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
 type PipelineRecoveryOwner interface {
-	SweepUndispatched(context.Context, int) (int, error)
+	SweepPipelineObligations(context.Context, int) (runtimepipelineobligation.SweepResult, error)
 }
 
 type RecoveryManager struct {
@@ -15,19 +16,23 @@ type RecoveryManager struct {
 	limit int
 }
 
-func NewRecoveryManager() *RecoveryManager {
-	return &RecoveryManager{limit: 5000}
+func NewRecoveryManagerWith(owner PipelineRecoveryOwner) *RecoveryManager {
+	return NewRecoveryManagerWithLimit(owner, 5000)
 }
 
-func NewRecoveryManagerWith(owner PipelineRecoveryOwner) *RecoveryManager {
-	rm := NewRecoveryManager()
-	rm.owner = owner
-	return rm
+func NewRecoveryManagerWithLimit(owner PipelineRecoveryOwner, limit int) *RecoveryManager {
+	if owner == nil {
+		panic("pipeline recovery owner is required")
+	}
+	if limit <= 0 {
+		panic("pipeline recovery limit must be positive")
+	}
+	return &RecoveryManager{owner: owner, limit: limit}
 }
 
 func (r *RecoveryManager) Recover(ctx context.Context) error {
 	if r == nil || r.owner == nil {
-		return nil
+		return errors.New("pipeline recovery owner is required")
 	}
 	ctx = runtimepipelineobligation.WithStartupRecoveryDiagnostics(ctx)
 	limit := r.limit
@@ -35,11 +40,11 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 		limit = 500
 	}
 	for {
-		processed, err := r.owner.SweepUndispatched(ctx, limit)
+		result, err := r.owner.SweepPipelineObligations(ctx, limit)
 		if err != nil {
 			return err
 		}
-		if processed < limit {
+		if result.Blocked || result.Exhausted {
 			return nil
 		}
 	}

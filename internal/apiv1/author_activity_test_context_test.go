@@ -96,7 +96,13 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 		}
 		t.Cleanup(lease.Release)
 	}
-	bus, err := runtimebus.NewEventBusWithOptions(eventStore, opts)
+	var bus *runtimebus.EventBus
+	var err error
+	if opts.PipelineObligations == nil {
+		bus, err = runtimebus.NewEphemeralEventBusWithOptions(eventStore, opts)
+	} else {
+		bus, err = runtimebus.NewEventBusWithOptions(eventStore, opts)
+	}
 	if err != nil {
 		return nil, err
 	}

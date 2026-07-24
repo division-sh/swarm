@@ -82,7 +82,13 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 			opts.PipelineObligations = provider.PipelineObligations()
 		}
 	}
-	bus, err := runtimebus.NewEventBusWithOptions(store, opts)
+	var bus *runtimebus.EventBus
+	var err error
+	if opts.PipelineObligations == nil {
+		bus, err = runtimebus.NewEphemeralEventBusWithOptions(store, opts)
+	} else {
+		bus, err = runtimebus.NewEventBusWithOptions(store, opts)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -346,6 +346,22 @@ func commitSemanticEventWithInitialFacts(
 	if db == nil || deliveryAdapter == nil {
 		t.Fatalf("semantic event fixture store %T is not initialized", selectedStore)
 	}
+	obligationProvider, ok := selectedStore.(interface {
+		PipelineObligations() runtimepipelineobligation.Store
+	})
+	if !ok {
+		t.Fatalf("semantic event fixture store %T has no pipeline obligation owner", selectedStore)
+	}
+	obligationOwner := obligationProvider.PipelineObligations()
+	publicationClaim, err := obligationOwner.ClaimPublication(ctx, record.EventID)
+	if err != nil {
+		t.Fatalf("claim semantic event fixture publication: %v", err)
+	}
+	defer func() {
+		if err := obligationOwner.Release(context.WithoutCancel(ctx), publicationClaim); err != nil {
+			t.Fatalf("release semantic event fixture publication: %v", err)
+		}
+	}()
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {

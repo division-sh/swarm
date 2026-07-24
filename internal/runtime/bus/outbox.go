@@ -80,7 +80,7 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 		if err != nil {
 			return err
 		}
-		if publicationClaim != nil && !runtimepipeline.QueuePipelineRollbackAction(intentCtx, func(actionCtx context.Context) { publicationClaim.Release(actionCtx) }) {
+		if publicationClaim != nil && publicationClaim.durable() && !runtimepipeline.QueuePipelineRollbackAction(intentCtx, func(actionCtx context.Context) { publicationClaim.Release(actionCtx) }) {
 			publicationClaim.Release(intentCtx)
 			return errors.New("engine outbox requires event publication rollback ownership")
 		}

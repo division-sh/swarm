@@ -115,6 +115,9 @@ func (b *projectionTestBus) Store() runtimebus.EventStore { return b.store }
 func (*projectionTestBus) SweepUndispatched(context.Context, int) (int, error) {
 	return 0, nil
 }
+func (*projectionTestBus) SweepPipelineObligations(context.Context, int) (runtimepipelineobligation.SweepResult, error) {
+	return runtimepipelineobligation.SweepResult{Exhausted: true}, nil
+}
 func (*projectionTestBus) PipelineWorkPresence(context.Context) (runtimepipelineobligation.GlobalWorkPresence, error) {
 	return runtimepipelineobligation.GlobalWorkPresence{}, nil
 }

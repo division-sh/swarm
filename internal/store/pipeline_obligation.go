@@ -23,9 +23,11 @@ type pipelineClaimState struct {
 }
 
 type postgresPipelineClaimRegistry struct {
-	mu     sync.Mutex
-	issuer *runtimepipelineobligation.ClaimIssuer
-	claims map[string]*pipelineClaimState
+	mu                          sync.Mutex
+	issuer                      *runtimepipelineobligation.ClaimIssuer
+	claims                      map[string]*pipelineClaimState
+	testBeforeClaimRegistryLock func()
+	testAfterParentClaimScan    func()
 }
 
 var postgresPipelineClaimRegistries sync.Map
@@ -37,6 +39,15 @@ var (
 
 type postgresPipelineObligationStore struct{ *PostgresStore }
 type sqlitePipelineObligationStore struct{ *SQLiteRuntimeStore }
+
+const pipelineCandidatePageSize = 32
+
+type pipelineCandidate struct {
+	eventID       string
+	attemptCount  int
+	nextAttemptAt time.Time
+	createdAt     time.Time
+}
 
 func (s *PostgresStore) PipelineObligations() runtimepipelineobligation.Store {
 	return &postgresPipelineObligationStore{PostgresStore: s}
@@ -66,6 +77,44 @@ func (s *SQLiteRuntimeStore) pipelineClaimOwner() (*runtimepipelineobligation.Cl
 		s.pipelineClaims = map[string]*pipelineClaimState{}
 	}
 	return s.pipelineClaimIssuer, s.pipelineClaims
+}
+
+func (s *PostgresStore) requirePipelinePublicationClaimTx(
+	_ context.Context,
+	tx *sql.Tx,
+	eventID string,
+	claim runtimepipelineobligation.Claim,
+) error {
+	if tx == nil {
+		return errors.New("PostgreSQL event commit transaction is required")
+	}
+	state, err := s.postgresPipelineClaimState(claim)
+	if err != nil {
+		return err
+	}
+	if state.claim.EventID() != strings.TrimSpace(eventID) || state.claim.Purpose() != runtimepipelineobligation.PurposePublication {
+		return runtimepipelineobligation.ErrWrongClaim
+	}
+	return nil
+}
+
+func (s *SQLiteRuntimeStore) requirePipelinePublicationClaimTx(
+	_ context.Context,
+	tx *sql.Tx,
+	eventID string,
+	claim runtimepipelineobligation.Claim,
+) error {
+	if tx == nil {
+		return errors.New("SQLite event commit transaction is required")
+	}
+	state, err := s.sqlitePipelineClaimState(claim)
+	if err != nil {
+		return err
+	}
+	if state.claim.EventID() != strings.TrimSpace(eventID) || state.claim.Purpose() != runtimepipelineobligation.PurposePublication {
+		return runtimepipelineobligation.ErrWrongClaim
+	}
+	return nil
 }
 
 func (s *postgresPipelineObligationStore) ClaimPublication(ctx context.Context, eventID string) (runtimepipelineobligation.Claim, error) {
@@ -106,64 +155,78 @@ func (s *postgresPipelineObligationStore) ClaimNext(ctx context.Context, query r
 	if err := query.Validate(); err != nil {
 		return runtimepipelineobligation.ClaimedWork{}, false, err
 	}
-	eventIDs, err := s.postgresPipelineCandidates(ctx, query, 32)
-	if err != nil {
-		return runtimepipelineobligation.ClaimedWork{}, false, err
-	}
-	for _, eventID := range eventIDs {
-		claim, err := s.claimPostgresPipelineEvent(ctx, eventID, query.Purpose)
-		if errors.Is(err, runtimepipelineobligation.ErrBusy) || errors.Is(err, runtimepipelineobligation.ErrIneligible) {
-			continue
-		}
+	var after *pipelineCandidate
+	for {
+		candidates, err := s.postgresPipelineCandidates(ctx, query, after, pipelineCandidatePageSize)
 		if err != nil {
 			return runtimepipelineobligation.ClaimedWork{}, false, err
 		}
-		work, err := s.loadPostgresClaimedPipelineWork(ctx, claim)
-		if disposition, corrupt := corruptPipelineScopeDisposition(eventID, err); corrupt {
-			if settleErr := s.Settle(ctx, claim, disposition); settleErr != nil {
-				return runtimepipelineobligation.ClaimedWork{}, false, errors.Join(err, settleErr)
+		for i := range candidates {
+			candidate := candidates[i]
+			after = &candidate
+			claim, err := s.claimPostgresPipelineEvent(ctx, candidate.eventID, query.Purpose)
+			if errors.Is(err, runtimepipelineobligation.ErrBusy) || errors.Is(err, runtimepipelineobligation.ErrIneligible) {
+				continue
 			}
-			continue
+			if err != nil {
+				return runtimepipelineobligation.ClaimedWork{}, false, err
+			}
+			work, err := s.loadPostgresClaimedPipelineWork(ctx, claim)
+			if disposition, corrupt := corruptPipelineScopeDisposition(candidate.eventID, err); corrupt {
+				if settleErr := s.Settle(ctx, claim, disposition); settleErr != nil {
+					return runtimepipelineobligation.ClaimedWork{}, false, errors.Join(err, settleErr)
+				}
+				continue
+			}
+			if err != nil {
+				_ = s.Release(context.WithoutCancel(ctx), claim)
+				return runtimepipelineobligation.ClaimedWork{}, false, err
+			}
+			return work, true, nil
 		}
-		if err != nil {
-			_ = s.Release(context.WithoutCancel(ctx), claim)
-			return runtimepipelineobligation.ClaimedWork{}, false, err
+		if len(candidates) < pipelineCandidatePageSize {
+			return runtimepipelineobligation.ClaimedWork{}, false, nil
 		}
-		return work, true, nil
 	}
-	return runtimepipelineobligation.ClaimedWork{}, false, nil
 }
 
 func (s *sqlitePipelineObligationStore) ClaimNext(ctx context.Context, query runtimepipelineobligation.ClaimQuery) (runtimepipelineobligation.ClaimedWork, bool, error) {
 	if err := query.Validate(); err != nil {
 		return runtimepipelineobligation.ClaimedWork{}, false, err
 	}
-	eventIDs, err := s.sqlitePipelineCandidates(ctx, query, 32)
-	if err != nil {
-		return runtimepipelineobligation.ClaimedWork{}, false, err
-	}
-	for _, eventID := range eventIDs {
-		claim, err := s.claimSQLitePipelineEvent(ctx, eventID, query.Purpose)
-		if errors.Is(err, runtimepipelineobligation.ErrBusy) || errors.Is(err, runtimepipelineobligation.ErrIneligible) {
-			continue
-		}
+	var after *pipelineCandidate
+	for {
+		candidates, err := s.sqlitePipelineCandidates(ctx, query, after, pipelineCandidatePageSize)
 		if err != nil {
 			return runtimepipelineobligation.ClaimedWork{}, false, err
 		}
-		work, err := s.loadSQLiteClaimedPipelineWork(ctx, claim)
-		if disposition, corrupt := corruptPipelineScopeDisposition(eventID, err); corrupt {
-			if settleErr := s.Settle(ctx, claim, disposition); settleErr != nil {
-				return runtimepipelineobligation.ClaimedWork{}, false, errors.Join(err, settleErr)
+		for i := range candidates {
+			candidate := candidates[i]
+			after = &candidate
+			claim, err := s.claimSQLitePipelineEvent(ctx, candidate.eventID, query.Purpose)
+			if errors.Is(err, runtimepipelineobligation.ErrBusy) || errors.Is(err, runtimepipelineobligation.ErrIneligible) {
+				continue
 			}
-			continue
+			if err != nil {
+				return runtimepipelineobligation.ClaimedWork{}, false, err
+			}
+			work, err := s.loadSQLiteClaimedPipelineWork(ctx, claim)
+			if disposition, corrupt := corruptPipelineScopeDisposition(candidate.eventID, err); corrupt {
+				if settleErr := s.Settle(ctx, claim, disposition); settleErr != nil {
+					return runtimepipelineobligation.ClaimedWork{}, false, errors.Join(err, settleErr)
+				}
+				continue
+			}
+			if err != nil {
+				_ = s.Release(context.WithoutCancel(ctx), claim)
+				return runtimepipelineobligation.ClaimedWork{}, false, err
+			}
+			return work, true, nil
 		}
-		if err != nil {
-			_ = s.Release(context.WithoutCancel(ctx), claim)
-			return runtimepipelineobligation.ClaimedWork{}, false, err
+		if len(candidates) < pipelineCandidatePageSize {
+			return runtimepipelineobligation.ClaimedWork{}, false, nil
 		}
-		return work, true, nil
 	}
-	return runtimepipelineobligation.ClaimedWork{}, false, nil
 }
 
 func corruptPipelineScopeDisposition(eventID string, err error) (runtimepipelineobligation.Disposition, bool) {
@@ -244,6 +307,9 @@ func (s *PostgresStore) claimPostgresPipelineEvent(ctx context.Context, eventID 
 	registry := s.postgresPipelineClaims()
 	if registry == nil {
 		return runtimepipelineobligation.Claim{}, errors.New("PostgreSQL pipeline claim registry is required")
+	}
+	if registry.testBeforeClaimRegistryLock != nil {
+		registry.testBeforeClaimRegistryLock()
 	}
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
@@ -567,14 +633,14 @@ func postgresPipelineEligible(ctx context.Context, q pipelineQueryer, eventID st
 		return eligible, err
 	case runtimepipelineobligation.PurposeDecisionRoute:
 		err := q.QueryRowContext(ctx, `
-			SELECT EXISTS (
-				SELECT 1
-				FROM decision_card_route_obligations route
-				JOIN runs run ON run.run_id = route.run_id
-				WHERE route.event_id = $1::uuid
-				  AND route.status = 'pending'
-				  AND run.status <> 'forked'
-			)`, eventID).Scan(&eligible)
+				SELECT EXISTS (
+					SELECT 1
+					FROM decision_card_route_obligations route
+					JOIN runs run ON run.run_id = route.run_id
+					WHERE route.event_id = $1::uuid
+					  AND route.status = 'pending'
+					  AND run.status IN ('running', 'paused')
+				)`, eventID).Scan(&eligible)
 		return eligible, err
 	default:
 		return false, fmt.Errorf("pipeline claim purpose %q cannot hydrate work", purpose)
@@ -607,103 +673,143 @@ func sqlitePipelineEligible(ctx context.Context, q pipelineQueryer, eventID stri
 		return eligible, err
 	case runtimepipelineobligation.PurposeDecisionRoute:
 		err := q.QueryRowContext(ctx, `
-			SELECT EXISTS (
-				SELECT 1
-				FROM decision_card_route_obligations route
-				JOIN runs run ON run.run_id = route.run_id
-				WHERE route.event_id = ?
-				  AND route.status = 'pending'
-				  AND run.status <> 'forked'
-			)`, eventID).Scan(&eligible)
+				SELECT EXISTS (
+					SELECT 1
+					FROM decision_card_route_obligations route
+					JOIN runs run ON run.run_id = route.run_id
+					WHERE route.event_id = ?
+					  AND route.status = 'pending'
+					  AND run.status IN ('running', 'paused')
+				)`, eventID).Scan(&eligible)
 		return eligible, err
 	default:
 		return false, fmt.Errorf("pipeline claim purpose %q cannot hydrate work", purpose)
 	}
 }
 
-func (s *PostgresStore) postgresPipelineCandidates(ctx context.Context, query runtimepipelineobligation.ClaimQuery, limit int) ([]string, error) {
+func (s *PostgresStore) postgresPipelineCandidates(ctx context.Context, query runtimepipelineobligation.ClaimQuery, after *pipelineCandidate, limit int) ([]pipelineCandidate, error) {
 	if query.Purpose == runtimepipelineobligation.PurposeDecisionRoute {
-		rows, err := s.DB.QueryContext(ctx, `
-			SELECT route.event_id::text
-			FROM decision_card_route_obligations route
-			JOIN runs run ON run.run_id = route.run_id
-			WHERE route.status = 'pending' AND route.next_attempt_at <= now() AND run.status <> 'forked'
-			ORDER BY route.attempt_count, route.next_attempt_at, route.created_at, route.event_id
-			LIMIT $1`, limit)
+		whereAfter := ""
+		args := []any{}
+		if after != nil {
+			whereAfter = `
+				AND (route.attempt_count, route.next_attempt_at, route.created_at, route.event_id) >
+				    ($1, $2, $3, $4::uuid)`
+			args = append(args, after.attemptCount, after.nextAttemptAt, after.createdAt, after.eventID)
+		}
+		args = append(args, limit)
+		rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
+				SELECT route.event_id::text
+				     , route.attempt_count
+				     , route.next_attempt_at
+				     , route.created_at
+				FROM decision_card_route_obligations route
+				JOIN runs run ON run.run_id = route.run_id
+				WHERE route.status = 'pending'
+				  AND route.next_attempt_at <= now()
+				  AND run.status IN ('running', 'paused')
+				  %s
+				ORDER BY route.attempt_count, route.next_attempt_at, route.created_at, route.event_id
+				LIMIT $%d`, whereAfter, len(args)), args...)
 		if err != nil {
 			return nil, err
 		}
-		return scanOrderedEventIDs(rows, "postgres decision-route pipeline candidates")
+		return scanPipelineCandidates(rows, true, "postgres decision-route pipeline candidates")
 	}
 	args := diagnosticDirectReplayEventArgs()
 	whereRun := ""
-	limitPosition := len(args) + 1
 	if runID := strings.TrimSpace(query.RunID); runID != "" {
-		whereRun = fmt.Sprintf("AND e.run_id = $%d::uuid", limitPosition)
+		whereRun = fmt.Sprintf("AND e.run_id = $%d::uuid", len(args)+1)
 		args = append(args, runID)
-		limitPosition++
+	}
+	whereAfter := ""
+	if after != nil {
+		whereAfter = fmt.Sprintf("AND (e.created_at, e.event_id) > ($%d, $%d::uuid)", len(args)+1, len(args)+2)
+		args = append(args, after.createdAt, after.eventID)
 	}
 	args = append(args, limit)
 	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
-		SELECT e.event_id::text
-		FROM events e
-		LEFT JOIN runs run ON run.run_id = e.run_id
-		LEFT JOIN event_receipts receipt
+			SELECT e.event_id::text, 0, e.created_at, e.created_at
+			FROM events e
+			LEFT JOIN runs run ON run.run_id = e.run_id
+			LEFT JOIN event_receipts receipt
 		  ON receipt.event_id = e.event_id
 		 AND receipt.subscriber_type = 'platform'
 		 AND receipt.subscriber_id = 'pipeline'
 		WHERE receipt.event_id IS NULL
-		  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
-		  %s
-		  AND NOT EXISTS (
-			SELECT 1 FROM decision_card_route_obligations route
-			WHERE route.event_id = e.event_id AND route.status <> 'completed'
-		  )
-		  AND %s
-		ORDER BY e.created_at, e.event_id
-		LIMIT $%d`, whereRun, postgresDiagnosticDirectReplayExclusionSQL("e", 1), limitPosition), args...)
+			  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
+			  %s
+			  %s
+			  AND NOT EXISTS (
+				SELECT 1 FROM decision_card_route_obligations route
+				WHERE route.event_id = e.event_id AND route.status <> 'completed'
+			  )
+			  AND %s
+			ORDER BY e.created_at, e.event_id
+			LIMIT $%d`, whereRun, whereAfter, postgresDiagnosticDirectReplayExclusionSQL("e", 1), len(args)), args...)
 	if err != nil {
 		return nil, err
 	}
-	return scanOrderedEventIDs(rows, "postgres pipeline candidates")
+	return scanPipelineCandidates(rows, false, "postgres pipeline candidates")
 }
 
-func (s *SQLiteRuntimeStore) sqlitePipelineCandidates(ctx context.Context, query runtimepipelineobligation.ClaimQuery, limit int) ([]string, error) {
+func (s *SQLiteRuntimeStore) sqlitePipelineCandidates(ctx context.Context, query runtimepipelineobligation.ClaimQuery, after *pipelineCandidate, limit int) ([]pipelineCandidate, error) {
 	if query.Purpose == runtimepipelineobligation.PurposeDecisionRoute {
+		whereAfter := ""
+		args := []any{time.Now().UTC()}
+		if after != nil {
+			whereAfter = `
+				AND (route.attempt_count, route.next_attempt_at, route.created_at, route.event_id) >
+				    (?, ?, ?, ?)`
+			args = append(args, after.attemptCount, after.nextAttemptAt, after.createdAt, after.eventID)
+		}
+		args = append(args, limit)
 		rows, err := s.DB.QueryContext(ctx, `
-			SELECT route.event_id
-			FROM decision_card_route_obligations route
-			JOIN runs run ON run.run_id = route.run_id
-			WHERE route.status = 'pending' AND route.next_attempt_at <= ? AND run.status <> 'forked'
-			ORDER BY route.attempt_count, route.next_attempt_at, route.created_at, route.event_id
-			LIMIT ?`, time.Now().UTC(), limit)
+				SELECT route.event_id
+				     , route.attempt_count
+				     , route.next_attempt_at
+				     , route.created_at
+				FROM decision_card_route_obligations route
+				JOIN runs run ON run.run_id = route.run_id
+				WHERE route.status = 'pending'
+				  AND route.next_attempt_at <= ?
+				  AND run.status IN ('running', 'paused')
+				  `+whereAfter+`
+				ORDER BY route.attempt_count, route.next_attempt_at, route.created_at, route.event_id
+				LIMIT ?`, args...)
 		if err != nil {
 			return nil, err
 		}
-		return scanOrderedEventIDs(rows, "sqlite decision-route pipeline candidates")
+		return scanPipelineCandidates(rows, true, "sqlite decision-route pipeline candidates")
 	}
-	args := make([]any, 0, len(diagnosticDirectReplayEventArgs())+2)
+	args := make([]any, 0, len(diagnosticDirectReplayEventArgs())+4)
 	whereRun := ""
 	if runID := strings.TrimSpace(query.RunID); runID != "" {
 		whereRun = "AND e.run_id = ?"
 		args = append(args, runID)
 	}
+	whereAfter := ""
+	if after != nil {
+		whereAfter = "AND (e.created_at, e.event_id) > (?, ?)"
+		args = append(args, after.createdAt, after.eventID)
+	}
 	args = append(args, diagnosticDirectReplayEventArgs()...)
 	args = append(args, limit)
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT e.event_id
-		FROM events e
-		LEFT JOIN runs run ON run.run_id = e.run_id
-		LEFT JOIN event_receipts receipt
+			SELECT e.event_id, 0, e.created_at, e.created_at
+			FROM events e
+			LEFT JOIN runs run ON run.run_id = e.run_id
+			LEFT JOIN event_receipts receipt
 		  ON receipt.event_id = e.event_id
 		 AND receipt.subscriber_type = 'platform'
 		 AND receipt.subscriber_id = 'pipeline'
-		WHERE receipt.event_id IS NULL
-		  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
-		  `+whereRun+`
-		  AND NOT EXISTS (
-			SELECT 1 FROM decision_card_route_obligations route
-			WHERE route.event_id = e.event_id AND route.status <> 'completed'
+			WHERE receipt.event_id IS NULL
+			  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
+			  `+whereRun+`
+			  `+whereAfter+`
+			  AND NOT EXISTS (
+				SELECT 1 FROM decision_card_route_obligations route
+				WHERE route.event_id = e.event_id AND route.status <> 'completed'
 		  )
 		  AND `+sqliteDiagnosticDirectReplayExclusionSQL("e")+`
 		ORDER BY e.created_at, e.event_id
@@ -711,7 +817,47 @@ func (s *SQLiteRuntimeStore) sqlitePipelineCandidates(ctx context.Context, query
 	if err != nil {
 		return nil, err
 	}
-	return scanOrderedEventIDs(rows, "sqlite pipeline candidates")
+	return scanPipelineCandidates(rows, false, "sqlite pipeline candidates")
+}
+
+func scanPipelineCandidates(rows *sql.Rows, decisionRoute bool, operation string) ([]pipelineCandidate, error) {
+	defer rows.Close()
+	out := make([]pipelineCandidate, 0)
+	for rows.Next() {
+		var (
+			candidate  pipelineCandidate
+			nextRaw    any
+			createdRaw any
+		)
+		if err := rows.Scan(&candidate.eventID, &candidate.attemptCount, &nextRaw, &createdRaw); err != nil {
+			return nil, fmt.Errorf("%s: %w", operation, err)
+		}
+		var ok bool
+		var err error
+		candidate.createdAt, ok, err = sqliteTimeValue(createdRaw)
+		if err != nil {
+			return nil, fmt.Errorf("%s created_at: %w", operation, err)
+		}
+		if !ok {
+			return nil, fmt.Errorf("%s created_at is missing", operation)
+		}
+		candidate.nextAttemptAt, ok, err = sqliteTimeValue(nextRaw)
+		if err != nil {
+			return nil, fmt.Errorf("%s next_attempt_at: %w", operation, err)
+		}
+		if !ok {
+			return nil, fmt.Errorf("%s next_attempt_at is missing", operation)
+		}
+		candidate.eventID = strings.TrimSpace(candidate.eventID)
+		if !decisionRoute {
+			candidate.nextAttemptAt = candidate.createdAt
+		}
+		out = append(out, candidate)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("%s: %w", operation, err)
+	}
+	return out, nil
 }
 
 func (s *postgresPipelineObligationStore) Settle(ctx context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) error {
@@ -787,13 +933,15 @@ func (s *PostgresStore) terminalizePipelineObligationTx(
 		return errors.New("PostgreSQL pipeline claim registry is required")
 	}
 	registry.mu.Lock()
+	defer registry.mu.Unlock()
 	for _, state := range registry.claims {
 		if state != nil && state.claim.EventID() == strings.TrimSpace(eventID) {
-			registry.mu.Unlock()
 			return runtimepipelineobligation.ErrBusy
 		}
 	}
-	registry.mu.Unlock()
+	if registry.testAfterParentClaimScan != nil {
+		registry.testAfterParentClaimScan()
+	}
 	var acquired bool
 	if err := tx.QueryRowContext(ctx, `SELECT pg_try_advisory_xact_lock(hashtext($1))`, replayClaimLockKey(eventID)).Scan(&acquired); err != nil {
 		return fmt.Errorf("fence pipeline parent terminalization: %w", err)
@@ -838,6 +986,13 @@ func terminalizeUnclaimedPipelineObligationTx(
 	postgres bool,
 	at time.Time,
 ) error {
+	pending, receiptOutcome, err := pipelineDispositionState(ctx, tx, eventID, postgres)
+	if err != nil {
+		return err
+	}
+	if pending && receiptOutcome == "success" && !disposition.Successful() {
+		return supersedeProcessedParentDecisionRouteTx(ctx, tx, eventID, postgres, at)
+	}
 	exact, found, err := exactStoredPipelineDisposition(ctx, tx, eventID, disposition, postgres)
 	if err != nil {
 		return err
@@ -849,6 +1004,23 @@ func terminalizeUnclaimedPipelineObligationTx(
 		return runtimepipelineobligation.ErrIneligible
 	}
 	return writePipelineDispositionTx(ctx, tx, eventID, runtimepipelineobligation.PurposeRecovery, disposition, postgres, at)
+}
+
+func supersedeProcessedParentDecisionRouteTx(
+	ctx context.Context,
+	tx pipelineExecer,
+	eventID string,
+	postgres bool,
+	at time.Time,
+) error {
+	query := `UPDATE decision_card_route_obligations SET status = 'superseded', superseded_at = ?, updated_at = ? WHERE event_id = ? AND status = 'pending'`
+	args := []any{at, at, eventID}
+	if postgres {
+		query = `UPDATE decision_card_route_obligations SET status = 'superseded', superseded_at = $2, updated_at = $2 WHERE event_id = $1::uuid AND status = 'pending'`
+		args = []any{eventID, at}
+	}
+	result, err := tx.ExecContext(ctx, query, args...)
+	return requireOnePipelineMutation(result, err, "supersede processed parent decision-route obligation")
 }
 
 func settleExactParentDecisionRouteTx(
@@ -1232,7 +1404,7 @@ func (s *postgresPipelineObligationStore) GlobalWorkPresence(ctx context.Context
 			  AND %s
 		), EXISTS (
 			SELECT 1 FROM decision_card_route_obligations route JOIN runs run ON run.run_id = route.run_id
-			WHERE route.status = 'pending' AND route.next_attempt_at <= now() AND run.status <> 'forked'
+				WHERE route.status = 'pending' AND route.next_attempt_at <= now() AND run.status IN ('running', 'paused')
 		), COALESCE((
 			SELECT MIN(e.created_at) FROM events e
 				LEFT JOIN runs run ON run.run_id = e.run_id
@@ -1268,7 +1440,7 @@ func (s *sqlitePipelineObligationStore) GlobalWorkPresence(ctx context.Context) 
 			  AND `+sqliteDiagnosticDirectReplayExclusionSQL("e")+`
 		), EXISTS (
 			SELECT 1 FROM decision_card_route_obligations route JOIN runs run ON run.run_id = route.run_id
-			WHERE route.status = 'pending' AND route.next_attempt_at <= ? AND run.status <> 'forked'
+				WHERE route.status = 'pending' AND route.next_attempt_at <= ? AND run.status IN ('running', 'paused')
 		), (
 			SELECT MIN(e.created_at) FROM events e
 				LEFT JOIN runs run ON run.run_id = e.run_id
@@ -1351,9 +1523,18 @@ func (s *PostgresStore) terminalizePostgresPipelineRunTx(
 		  ON receipt.event_id = e.event_id
 		 AND receipt.subscriber_type = 'platform'
 		 AND receipt.subscriber_id = 'pipeline'
-		WHERE e.run_id = $1::uuid
-		  AND receipt.event_id IS NULL
-		  AND %s
+			WHERE e.run_id = $1::uuid
+			  AND (
+				receipt.event_id IS NULL
+				OR (
+					receipt.outcome = 'success'
+					AND EXISTS (
+						SELECT 1 FROM decision_card_route_obligations route
+						WHERE route.event_id = e.event_id AND route.status = 'pending'
+					)
+				)
+			  )
+			  AND %s
 		ORDER BY e.created_at, e.event_id`,
 		postgresDiagnosticDirectReplayExclusionSQL("e", 2)), args...)
 	if err != nil {
@@ -1389,9 +1570,18 @@ func (s *SQLiteRuntimeStore) terminalizeSQLitePipelineRunTx(
 		  ON receipt.event_id = e.event_id
 		 AND receipt.subscriber_type = 'platform'
 		 AND receipt.subscriber_id = 'pipeline'
-		WHERE e.run_id = ?
-		  AND receipt.event_id IS NULL
-		  AND `+sqliteDiagnosticDirectReplayExclusionSQL("e")+`
+			WHERE e.run_id = ?
+			  AND (
+				receipt.event_id IS NULL
+				OR (
+					receipt.outcome = 'success'
+					AND EXISTS (
+						SELECT 1 FROM decision_card_route_obligations route
+						WHERE route.event_id = e.event_id AND route.status = 'pending'
+					)
+				)
+			  )
+			  AND `+sqliteDiagnosticDirectReplayExclusionSQL("e")+`
 		ORDER BY e.created_at, e.event_id`, args...)
 	if err != nil {
 		return 0, fmt.Errorf("list SQLite pipeline parent terminalization targets: %w", err)

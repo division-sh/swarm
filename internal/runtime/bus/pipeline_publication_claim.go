@@ -16,9 +16,16 @@ type pipelinePublicationClaim struct {
 	released atomic.Bool
 }
 
+func (c *pipelinePublicationClaim) durable() bool {
+	return c != nil && c.bus != nil && c.bus.pipelineObligations != nil
+}
+
 func (eb *EventBus) claimPipelinePublication(ctx context.Context, eventID string) (*pipelinePublicationClaim, error) {
 	if eb == nil || eb.pipelineObligations == nil {
-		return nil, nil
+		if eb != nil && eb.ephemeral {
+			return &pipelinePublicationClaim{bus: eb, eventID: strings.TrimSpace(eventID)}, nil
+		}
+		return nil, fmt.Errorf("pipeline obligation owner is required")
 	}
 	eventID = strings.TrimSpace(eventID)
 	claim, err := eb.pipelineObligations.ClaimPublication(ctx, eventID)
@@ -30,7 +37,11 @@ func (eb *EventBus) claimPipelinePublication(ctx context.Context, eventID string
 
 func (c *pipelinePublicationClaim) Release(ctx context.Context) {
 	if c == nil || c.bus == nil || c.bus.pipelineObligations == nil {
-		return
+		if c != nil && c.bus != nil && c.bus.ephemeral {
+			c.released.CompareAndSwap(false, true)
+			return
+		}
+		panic("pipeline publication claim owner is required")
 	}
 	if !c.released.CompareAndSwap(false, true) {
 		return
@@ -45,7 +56,13 @@ func (c *pipelinePublicationClaim) Release(ctx context.Context) {
 
 func (c *pipelinePublicationClaim) Settle(ctx context.Context, disposition runtimepipelineobligation.Disposition) error {
 	if c == nil || c.bus == nil || c.bus.pipelineObligations == nil {
-		return nil
+		if c != nil && c.bus != nil && c.bus.ephemeral {
+			if !c.released.CompareAndSwap(false, true) {
+				return runtimepipelineobligation.ErrStaleClaim
+			}
+			return nil
+		}
+		return fmt.Errorf("pipeline publication claim owner is required")
 	}
 	if !c.released.CompareAndSwap(false, true) {
 		return runtimepipelineobligation.ErrStaleClaim
@@ -62,7 +79,13 @@ func (c *pipelinePublicationClaim) Settle(ctx context.Context, disposition runti
 
 func (c *pipelinePublicationClaim) MarkDecisionProcessed(ctx context.Context) error {
 	if c == nil || c.bus == nil || c.bus.pipelineObligations == nil {
-		return nil
+		if c != nil && c.bus != nil && c.bus.ephemeral {
+			if c.released.Load() {
+				return runtimepipelineobligation.ErrStaleClaim
+			}
+			return nil
+		}
+		return fmt.Errorf("pipeline publication claim owner is required")
 	}
 	if c.released.Load() {
 		return runtimepipelineobligation.ErrStaleClaim

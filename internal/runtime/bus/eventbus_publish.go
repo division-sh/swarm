@@ -513,7 +513,7 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 		return PreparedPublish{}, errors.New("typed CommitPublish transaction context is required")
 	}
 	txctx := WithCommitPublishTransaction(ctx, transaction)
-	if publicationClaim != nil && !runtimepipeline.QueuePipelineRollbackAction(txctx, func(actionCtx context.Context) { publicationClaim.Release(actionCtx) }) {
+	if publicationClaim != nil && publicationClaim.durable() && !runtimepipeline.QueuePipelineRollbackAction(txctx, func(actionCtx context.Context) { publicationClaim.Release(actionCtx) }) {
 		publicationClaim.Release(txctx)
 		return PreparedPublish{}, errors.New("event mutation rollback actions are required for pipeline publication claim")
 	}

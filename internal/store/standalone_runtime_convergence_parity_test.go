@@ -16,7 +16,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/google/uuid"
 )
 
@@ -239,7 +239,7 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 		{SubscriberType: "agent", SubscriberID: agents[0]},
 		{SubscriberType: "agent", SubscriberID: agents[1]},
 	}
-	outcome, err := commitAdmittedSemanticEventFixtureOutcome(ctx, pg, admitted, routes, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	outcome, err := commitAdmittedSemanticEventFixtureOutcome(ctx, pg, admitted, routes, runtimepipelineobligation.ScopeSubscribed)
 	if err != nil || outcome != runtimebus.EventAppendInserted {
 		t.Fatalf("commit standalone runtime event: outcome=%v err=%v", outcome, err)
 	}

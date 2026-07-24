@@ -68,7 +68,7 @@ func TestHandler_LegacyWebSocketRoutesDoNotUpgrade(t *testing.T) {
 }
 
 func TestHandler_RuntimeControllerHasNoResetCallback(t *testing.T) {
-	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	eb, err := runtimebus.NewEphemeralEventBus(runtimebus.InMemoryEventStore{})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
