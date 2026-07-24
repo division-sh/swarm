@@ -1169,7 +1169,7 @@ func (s *PostgresStore) postgresPipelineCandidatePage(
 			args = append(args, after.attemptCount, after.nextAttemptAt, after.createdAt, after.eventID)
 		}
 		whereVisibility := fmt.Sprintf(
-			"AND pg_visible_in_snapshot(route.xmin::text::xid8, $%d::pg_snapshot)",
+			"AND pg_visible_in_snapshot(route.insertion_transaction_id, $%d::pg_snapshot)",
 			len(args)+1,
 		)
 		args = append(args, visibilitySnapshot)

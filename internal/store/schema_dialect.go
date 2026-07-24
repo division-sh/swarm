@@ -360,6 +360,10 @@ func sqliteRenderType(raw string) (string, error) {
 		// BIGSERIAL PRIMARY KEY is rendered with AUTOINCREMENT by the column
 		// renderer so deleted high values are never reused.
 		return "INTEGER", nil
+	case "XID8":
+		// PostgreSQL transaction identity is used only for snapshot membership.
+		// SQLite serializes writes and uses the insertion-sequence boundary.
+		return "INTEGER", nil
 	case "DOUBLE PRECISION":
 		return "REAL", nil
 	case "BOOLEAN":
@@ -381,6 +385,8 @@ func sqliteRenderDefault(typeSpec, raw string) (string, error) {
 	switch {
 	case strings.EqualFold(raw, "gen_random_uuid()"):
 		return sqliteUUIDDefaultExpression(), nil
+	case strings.EqualFold(raw, "pg_current_xact_id()"):
+		return "0", nil
 	case strings.EqualFold(raw, "NOW()"):
 		return "CURRENT_TIMESTAMP", nil
 	case normalized == "FALSE":

@@ -12848,7 +12848,9 @@ platform_tables:
     decision_card_route_obligations:
       description: 'Durable, age-independent retry owner for a committed decision whose frozen route has not completed.
         insertion_sequence is selected-store-generated immutable insertion identity used only to bound one internal scan pass;
-        route producers and callers cannot supply it.
+        route producers and callers cannot supply it. PostgreSQL also records insertion_transaction_id from
+        pg_current_xact_id() when the row is inserted; this immutable fact, never the mutable row version xmin, determines
+        visibility in a captured scan snapshot. SQLite write serialization makes that transaction identity unnecessary.
         The obligation is created atomically with the card verdict, remains pending until EventBus receipt persistence and
         normal-run convergence both succeed, and is scheduled by attempt count plus next_attempt_at so an unavailable bundle
         cannot starve newer route work. A non-deferred route-execution failure before processed receipt persistence atomically
@@ -12858,6 +12860,7 @@ platform_tables:
       ddl: |
         CREATE TABLE decision_card_route_obligations (
             insertion_sequence BIGSERIAL PRIMARY KEY,
+            insertion_transaction_id XID8 NOT NULL DEFAULT pg_current_xact_id(),
             event_id       UUID NOT NULL UNIQUE,
             card_id        UUID NOT NULL REFERENCES decision_cards(card_id) ON DELETE CASCADE,
             run_id         UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
@@ -30762,8 +30765,9 @@ durable_pipeline_processing_obligation_authority:
       including busy and newly ineligible rows, rather than settlements or returned work. Position advances before a claim
       may be retained or released. On first entry to each fixed phase, the selected store captures that phase's exact
       store-generated insertion-sequence high-water mark; PostgreSQL also captures an exact visibility snapshot for that
-      phase, while SQLite write serialization makes its non-reusable sequence ceiling the visibility boundary. The cursor
-      never examines a row outside that captured membership. Work committed or persisted after that boundary belongs to
+      phase and tests mutable route rows through their immutable insertion transaction identity rather than their current
+      tuple version, while SQLite write serialization makes its non-reusable sequence ceiling the visibility boundary. The
+      cursor never examines a row outside that captured membership. Work committed or persisted after that boundary belongs to
       the next fresh scan, so sustained ingress cannot indefinitely extend ordinary recovery or
       prevent a later scan from re-entering decision routing. A full batch therefore continues monotonically on the next call. Startup,
       ingress-resume, and run-continue consumers drain bounded batches until explicit exhaustion or blockage. The periodic
@@ -30893,7 +30897,7 @@ durable_pipeline_processing_obligation_authority:
     PPO-SET-001: Acknowledgement and decision-route disposition require the current claim and commit atomically.
     PPO-REL-001: Cancellation, cursor abandonment, non-durable retry release, failed settlement, explicit release, and restart preserve reclaimability without stranded ownership or blocking later sweep candidates; PostgreSQL owner and capacity retirement require a true exact-session unlock, and failed teardown remains retryable; startup, ingress resume, and run continue stop normally only on explicit exhaustion or blockage.
     PPO-SCP-001: Committed scope is exact persisted truth; missing or invalid scope returns typed claim-bound quarantine work to the consumer, and no store-side settlement, delivery marker, current-route inference, fallback, or repair exists.
-    PPO-CUR-001: Cursor continuation is monotonic across fixed global/run phases, captures one selected-store-generated immutable insertion-sequence high-water boundary per phase plus an exact PostgreSQL visibility snapshot, advances before release, remembers local blockage until bounded-pass exhaustion, reaches every consumer as one typed SweepResult, survives periodic tick boundaries, excludes transactions committed after phase entry regardless of sequence allocation order, and cannot be reset, extended, or positioned by a caller.
+    PPO-CUR-001: Cursor continuation is monotonic across fixed global/run phases, captures one selected-store-generated immutable insertion-sequence high-water boundary per phase plus an exact PostgreSQL visibility snapshot, tests mutable rows through immutable insertion transaction identity rather than current tuple versions, advances before release, remembers local blockage until bounded-pass exhaustion, reaches every consumer as one typed SweepResult, survives periodic tick boundaries, excludes transactions committed after phase entry regardless of sequence allocation order, and cannot be reset, extended, or positioned by a caller.
     PPO-DSP-001: Dispatch consumes the process-local owner and cannot outlive runtime retirement or selected-store release.
     PPO-DCR-001: Decision-route defer, quarantine, processed acknowledgement, convergence retry, completion, and inactive-parent supersession are age-independent and ordered.
     PPO-GLO-001: Global durable-work presence is one typed age-independent projection.

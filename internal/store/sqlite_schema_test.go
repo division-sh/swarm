@@ -160,6 +160,7 @@ func TestSQLiteStatementsForPlanPreservesNonReusableBigserialIdentity(t *testing
 		SchemaKind: "test",
 		Statements: []string{`CREATE TABLE IF NOT EXISTS sequenced (
     insertion_sequence BIGSERIAL PRIMARY KEY,
+    insertion_transaction_id XID8 NOT NULL DEFAULT pg_current_xact_id(),
     event_id UUID NOT NULL UNIQUE
 )`},
 	})
@@ -168,6 +169,9 @@ func TestSQLiteStatementsForPlanPreservesNonReusableBigserialIdentity(t *testing
 	}
 	if len(statements) != 1 || !strings.Contains(statements[0], `"insertion_sequence" INTEGER PRIMARY KEY AUTOINCREMENT`) {
 		t.Fatalf("rendered statements = %#v, want non-reusable SQLite sequence identity", statements)
+	}
+	if !strings.Contains(statements[0], `"insertion_transaction_id" INTEGER NOT NULL DEFAULT 0`) {
+		t.Fatalf("rendered statements = %#v, want inert SQLite transaction identity", statements)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, statements[0]); err != nil {
 		t.Fatalf("create sequenced table: %v", err)
