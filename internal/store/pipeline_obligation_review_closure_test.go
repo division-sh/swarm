@@ -111,6 +111,7 @@ func TestPipelineScanBoundsExaminationAndContinuesPastBusyCandidatesOnSQLiteAndP
 
 			const heldCount = 5
 			held := make([]runtimepipelineobligation.Claim, 0, heldCount)
+			heldIDs := make([]string, 0, heldCount)
 			for i := 0; i < heldCount; i++ {
 				eventID := commitPipelineParityEvent(t, ctx, selected, runID, base.Add(time.Duration(i)*time.Microsecond))
 				work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
@@ -118,6 +119,7 @@ func TestPipelineScanBoundsExaminationAndContinuesPastBusyCandidatesOnSQLiteAndP
 					t.Fatalf("claim blocker %d: %v", i, err)
 				}
 				held = append(held, work.Claim)
+				heldIDs = append(heldIDs, eventID)
 			}
 			laterID := commitPipelineParityEvent(t, ctx, selected, runID, base.Add(heldCount*time.Microsecond))
 
@@ -158,6 +160,17 @@ func TestPipelineScanBoundsExaminationAndContinuesPastBusyCandidatesOnSQLiteAndP
 				if err := owner.Release(ctx, claim); err != nil {
 					t.Fatalf("release blocker: %v", err)
 				}
+			}
+			fresh, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID))
+			if err != nil {
+				t.Fatalf("OpenScan after exhaustion: %v", err)
+			}
+			restarted, err := owner.ClaimBatch(ctx, fresh, 1)
+			if err != nil || len(restarted.Work) != 1 || restarted.Work[0].Event.ID() != heldIDs[0] {
+				t.Fatalf("fresh scan after exhaustion = %#v err=%v, want oldest event %s", restarted, err, heldIDs[0])
+			}
+			if err := owner.CloseScan(ctx, fresh); err != nil {
+				t.Fatalf("CloseScan after reset proof: %v", err)
 			}
 		})
 	}
@@ -234,6 +247,66 @@ func TestCorruptPipelineScopeClassificationIsTypedForMissingAndInvalidFacts(t *t
 				t.Fatalf("classification = %#v, %v", disposition, ok)
 			}
 		})
+	}
+}
+
+func TestClaimEventReturnsTypedCorruptDecisionWorkForAcknowledgedAndUnacknowledgedOnSQLiteAndPostgres(t *testing.T) {
+	for _, backend := range []struct {
+		name string
+		open func(*testing.T) authorActivityReceiptFixture
+	}{
+		{name: "sqlite", open: openSQLiteAuthorActivityReceiptFixture},
+		{name: "postgres", open: openPostgresAuthorActivityReceiptFixture},
+	} {
+		for _, acknowledged := range []bool{false, true} {
+			name := "unacknowledged"
+			if acknowledged {
+				name = "acknowledged"
+			}
+			t.Run(backend.name+"/"+name, func(t *testing.T) {
+				fixture := backend.open(t)
+				selected := fixture.store.(pipelineObligationParityStore)
+				owner := selected.PipelineObligations()
+				ctx := testAuthorActivityContext()
+				runID := uuid.NewString()
+				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+				at := time.Now().UTC().Add(-time.Minute)
+				eventID := commitPipelineParityEvent(t, ctx, selected, runID, at)
+				insertProducerIdentityDecisionObligation(t, fixture, ctx, eventID, runID, at)
+				if acknowledged {
+					current, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeDecisionRoute)
+					if err != nil {
+						t.Fatalf("ClaimEvent before acknowledgement: %v", err)
+					}
+					if err := owner.MarkDecisionProcessed(ctx, current.Claim); err != nil {
+						t.Fatalf("MarkDecisionProcessed: %v", err)
+					}
+					if err := owner.Release(ctx, current.Claim); err != nil {
+						t.Fatalf("Release acknowledged claim: %v", err)
+					}
+				}
+				if err := deletePipelineScope(ctx, fixture, eventID); err != nil {
+					t.Fatalf("delete committed scope corruption fixture: %v", err)
+				}
+
+				work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeDecisionRoute)
+				if err != nil {
+					t.Fatalf("ClaimEvent corrupt decision work: %v", err)
+				}
+				disposition, preclassified := work.PreDispatchDisposition()
+				if !preclassified ||
+					disposition.Kind() != runtimepipelineobligation.DispositionQuarantined ||
+					disposition.ReasonCode() != "committed_pipeline_scope_missing" {
+					t.Fatalf("corrupt decision classification = %#v classified=%v", disposition, preclassified)
+				}
+				if work.Acknowledged != acknowledged {
+					t.Fatalf("acknowledged = %v, want %v", work.Acknowledged, acknowledged)
+				}
+				if err := owner.Release(ctx, work.Claim); err != nil {
+					t.Fatalf("Release corrupt decision claim: %v", err)
+				}
+			})
+		}
 	}
 }
 

@@ -3,9 +3,11 @@ package bus_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestPipelineScanReturnsCorruptScopeToStartupConsumerOnSQLiteAndPostgres(t *testing.T) {
@@ -46,6 +48,68 @@ func TestPipelineScanReturnsCorruptScopeToStartupConsumerOnSQLiteAndPostgres(t *
 	}
 }
 
+func TestPipelineScanBoundsCorruptScopeSettlementAndContinuesOnSQLiteAndPostgres(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := newCompleteEventDispatchFixture(t, backend, false)
+			logger := &recordingLoggerHook{}
+			bus, err := newScopedTestEventBus(fixture.store, runtimebus.EventBusOptions{Logger: logger})
+			if err != nil {
+				t.Fatalf("NewEventBus: %v", err)
+			}
+			fixture.bus = bus
+			events := []string{fixture.event.ID()}
+			for i := 1; i < 3; i++ {
+				event := newRetryReleaseTestEvent(fixture, fixture.event.CreatedAt().Add(time.Duration(i)*time.Microsecond))
+				storetest.CommitSemanticEventWithRoutes(
+					t,
+					fixture.ctx,
+					fixture.store,
+					event,
+					nil,
+					runtimepipelineobligation.ScopeSubscribed,
+				)
+				events = append(events, event.ID())
+			}
+			for _, eventID := range events {
+				deleteCommittedReplayScope(t, fixture, eventID)
+			}
+
+			ctx := runtimepipelineobligation.WithStartupRecoveryDiagnostics(fixture.ctx)
+			first, err := fixture.bus.SweepPipelineObligations(ctx, 2)
+			if err != nil {
+				t.Fatalf("first SweepPipelineObligations: %v", err)
+			}
+			if first.Settled != 2 || first.Examined != 2 || first.Exhausted || first.Blocked {
+				t.Fatalf("first corrupt-scope batch = %#v", first)
+			}
+			if got := settledPipelineReceiptCount(t, fixture, events); got != 2 {
+				t.Fatalf("receipts after first bounded batch = %d, want 2", got)
+			}
+
+			second, err := fixture.bus.SweepPipelineObligations(ctx, 2)
+			if err != nil {
+				t.Fatalf("second SweepPipelineObligations: %v", err)
+			}
+			if second.Settled != 1 || second.Examined != 1 || !second.Exhausted || second.Blocked {
+				t.Fatalf("second corrupt-scope batch = %#v", second)
+			}
+			if got := settledPipelineReceiptCount(t, fixture, events); got != 3 {
+				t.Fatalf("receipts after continuation = %d, want 3", got)
+			}
+			aftermath := 0
+			for _, entry := range logger.entries {
+				if entry.Action == "startup_recovery_pipeline_replay_aftermath" {
+					aftermath++
+				}
+			}
+			if aftermath != 3 {
+				t.Fatalf("startup corrupt-scope aftermath entries = %d, want 3", aftermath)
+			}
+		})
+	}
+}
+
 func TestAcknowledgedDecisionRouteWinsBeforeCorruptScopeQuarantineOnSQLiteAndPostgres(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -79,6 +143,15 @@ func TestAcknowledgedDecisionRouteWinsBeforeCorruptScopeQuarantineOnSQLiteAndPos
 			}
 		})
 	}
+}
+
+func settledPipelineReceiptCount(t *testing.T, fixture completeEventDispatchFixture, eventIDs []string) int {
+	t.Helper()
+	total := 0
+	for _, eventID := range eventIDs {
+		total += retryReleasePipelineReceiptCount(t, fixture, eventID)
+	}
+	return total
 }
 
 func deleteCommittedReplayScope(t testing.TB, fixture completeEventDispatchFixture, eventID string) {
