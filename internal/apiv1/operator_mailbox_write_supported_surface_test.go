@@ -304,14 +304,7 @@ func releaseMailboxWritePendingNodeDeliveries(t *testing.T, parent context.Conte
 	}
 	nodeID := mailboxWriteNodeDeliverySubscriberID(t, db, backend, eventID)
 	waitForMailboxWriteLifecycleDeliveryStatus(t, probe, backend, eventID, nodeID, "pending")
-	if status := mailboxWriteNodeDeliveryStatus(t, db, backend, eventID, nodeID); status == "pending" {
-		evt := loadMailboxWritePersistedEvent(t, db, backend, eventID)
-		ctx, cancel := context.WithTimeout(parent, 5*time.Second)
-		defer cancel()
-		if err := bus.ReleasePendingPersistedDeliveriesForEvent(ctx, evt); err != nil {
-			t.Fatalf("%s release pending node deliveries for event %s: %v", backend, eventID, err)
-		}
-	}
+	_ = parent
 	waitForMailboxWriteNodeDeliveryStatus(t, db, backend, eventID, nodeID, "delivered")
 }
 
@@ -575,7 +568,7 @@ func drainMailboxWriteBus(ctx context.Context, bus *runtimebus.EventBus) error {
 		if err := bus.WaitForQuiescence(ctx); err != nil {
 			return err
 		}
-		swept, err := bus.SweepUndispatched(ctx, time.Hour, 10)
+		swept, err := bus.SweepUndispatched(ctx, 10)
 		if err != nil {
 			return err
 		}

@@ -134,8 +134,8 @@ func ActivityResultEventsForSite(site ActivitySite) ActivityResultEvents {
 	}
 	base := activityID
 	flowID := strings.TrimSpace(site.FlowID)
-	if flowID != "" && !strings.HasPrefix(base, flowID+".") {
-		base = flowID + "." + base
+	if flowID != "" && !strings.HasPrefix(base, flowID+"/") {
+		base = flowID + "/" + base
 	}
 	base = eventidentity.Normalize(base)
 	return ActivityResultEvents{

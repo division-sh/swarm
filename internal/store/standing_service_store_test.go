@@ -21,6 +21,7 @@ func TestSQLiteStandingServiceReconcileCreatesPublishesAndRepairsRestartAbandon(
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
 	workflowStore.ConfigureDeliveryLifecycleStore(store)
+	workflowStore.ConfigurePipelineObligationStore(store.PipelineObligations())
 	packageKey := "project"
 	flowID := "ingress"
 	serviceID := runtimeflowidentity.StandingServiceID(packageKey, flowID)
@@ -90,6 +91,7 @@ func TestSQLiteStandingServiceReconcileRejectsUnknownTerminalityWithCommand(t *t
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
 	workflowStore.ConfigureDeliveryLifecycleStore(store)
+	workflowStore.ConfigurePipelineObligationStore(store.PipelineObligations())
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
@@ -114,6 +116,7 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
 	workflowStore.ConfigureDeliveryLifecycleStore(store)
+	workflowStore.ConfigurePipelineObligationStore(store.PipelineObligations())
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
@@ -234,6 +237,7 @@ func TestSQLiteStandingServiceSetOrphansRemovedDeclaration(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
 	workflowStore.ConfigureDeliveryLifecycleStore(store)
+	workflowStore.ConfigurePipelineObligationStore(store.PipelineObligations())
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
@@ -268,6 +272,7 @@ func TestSQLiteStandingServiceReplacementIsScopedAndAtomic(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
 	workflowStore.ConfigureDeliveryLifecycleStore(store)
+	workflowStore.ConfigurePipelineObligationStore(store.PipelineObligations())
 	testStandingServiceReplacementIsScopedAndAtomic(t, workflowStore)
 }
 
@@ -277,6 +282,7 @@ func TestPostgresStandingServiceReplacementIsScopedAndAtomic(t *testing.T) {
 	selected := admitTestPostgresStore(t, db)
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	workflowStore.ConfigureDeliveryLifecycleStore(selected)
+	workflowStore.ConfigurePipelineObligationStore(selected.PipelineObligations())
 	testStandingServiceReplacementIsScopedAndAtomic(t, workflowStore)
 }
 
@@ -355,6 +361,7 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	selected := admitTestPostgresStore(t, db)
 	workflowStore.ConfigureDeliveryLifecycleStore(selected)
+	workflowStore.ConfigurePipelineObligationStore(selected.PipelineObligations())
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
@@ -453,6 +460,7 @@ func TestSQLiteRunStopRefusesCurrentStandingGenerationWithTeachingCommand(t *tes
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
 	workflowStore.ConfigureDeliveryLifecycleStore(store)
+	workflowStore.ConfigurePipelineObligationStore(store.PipelineObligations())
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
 	created, err := workflowStore.ReconcileStandingService(ctx, runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress", InstanceID: uuid.NewString(), EntityID: uuid.NewString(),

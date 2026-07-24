@@ -67,28 +67,3 @@ func decodeAgentReceiptSideEffects(raw []byte) (agentReceiptSideEffects, error) 
 	}
 	return payload, nil
 }
-
-func newPipelineReceiptSideEffects(status, reasonCode string) pipelineReceiptSideEffects {
-	return pipelineReceiptSideEffects{
-		ManagerStatus: strings.TrimSpace(status),
-		ReasonCode:    strings.TrimSpace(reasonCode),
-	}
-}
-
-func (p pipelineReceiptSideEffects) validate() error {
-	if strings.TrimSpace(p.ManagerStatus) == "" {
-		return fmt.Errorf("manager_status is required")
-	}
-	return nil
-}
-
-func marshalPipelineReceiptSideEffects(payload pipelineReceiptSideEffects) ([]byte, error) {
-	if err := payload.validate(); err != nil {
-		return nil, err
-	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-	return raw, nil
-}

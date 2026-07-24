@@ -11,6 +11,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/google/uuid"
 )
 
@@ -79,7 +80,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, store *Pos
 			if err != nil {
 				return result, err
 			}
-			if err := store.upsertCommittedReplayScopeSpec(ctx, tx, forkEventID, "direct"); err != nil {
+			if err := insertCommittedPipelineScopeTx(ctx, tx, forkEventID, runtimepipelineobligation.ScopeDirect, true, now); err != nil {
 				return result, err
 			}
 			if outcome == runtimebus.EventAppendInserted {

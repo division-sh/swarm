@@ -235,6 +235,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	var lifecycleManager *runtimemanager.AgentManager
 	bus, err := runtimebus.NewEventBusWithOptions(req.Store, runtimebus.EventBusOptions{
 		WorkOwner:                   forkOwner,
+		PipelineObligations:         req.Store.PipelineObligations(),
 		ContractBundle:              req.LoadedSource.Source,
 		Logger:                      selectedContractRuntimeContainerLogger(req.Store),
 		RecipientPlanAdmissionGuard: guard.AuthorizeEvent,

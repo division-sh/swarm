@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
 type routeGenerationPlanBarrier struct {
@@ -16,13 +17,13 @@ type routeGenerationPlanBarrier struct {
 	release chan struct{}
 }
 
-func (b routeGenerationPlanBarrier) Intercept(context.Context, events.Event) (bool, []events.Event, error) {
+func (b routeGenerationPlanBarrier) Intercept(context.Context, events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	select {
 	case b.started <- struct{}{}:
 	default:
 	}
 	<-b.release
-	return true, nil, nil
+	return true, nil, runtimepipelineobligation.Continue(), nil
 }
 
 func TestEventBusSubscribedPublishDoesNotCrossAgentRouteGenerations(t *testing.T) {
@@ -60,7 +61,10 @@ func TestEventBusSubscribedPublishDoesNotCrossAgentRouteGenerations(t *testing.T
 			assertNoRouteGenerationReceipt(t, store, evt.ID())
 
 			eb.SetInterceptors()
-			if err := eb.RecoverPersistedPipeline(context.Background(), evt, []string{agentID}); err != nil {
+			if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
+				Event: evt,
+				Scope: runtimepipelineobligation.ScopeSubscribed,
+			}, []string{agentID}); err != nil {
 				t.Fatalf("RecoverPersistedPipeline: %v", err)
 			}
 			select {

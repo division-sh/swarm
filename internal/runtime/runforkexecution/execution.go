@@ -371,6 +371,7 @@ func selectedContractPipelineCoordinatorOptions(
 		Module:                 loaded.Module,
 		WorkflowStore:          workflowStore,
 		DeliveryStore:          store,
+		PipelineObligations:    store.PipelineObligations(),
 		InstanceActivator:      instanceActivator,
 		MailboxMaterializer:    store,
 		DecisionCards:          store,

@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
@@ -717,7 +718,10 @@ func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	failing := &failStandalonePipelineReceiptOnceStore{
 		PostgresStore: pg,
-		err:           errors.New("simulated post-commit receipt failure"),
+		obligations: &failAPIPipelineSettlementOnceStore{
+			Store: pg.PipelineObligations(),
+			err:   errors.New("simulated post-commit receipt failure"),
+		},
 	}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, failing, runStartTestEventBusOptions(source))
@@ -749,12 +753,15 @@ func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *
 	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
 		t.Fatalf("pipeline receipts after injected failure = %d, want 0", got)
 	}
-	missing, err := pg.ListEventsMissingPipelineReceipt(ctx, time.Now().Add(-time.Hour), 10)
+	missing, ok, err := pg.PipelineObligations().ClaimNext(ctx, runtimepipelineobligation.GlobalRecoveryQuery())
 	if err != nil {
-		t.Fatalf("ListEventsMissingPipelineReceipt: %v", err)
+		t.Fatalf("claim recoverable pipeline obligation: %v", err)
 	}
-	if !containsMissingPipelineReceiptEvent(missing, eventID) {
-		t.Fatalf("missing pipeline receipt events = %#v, want %s", missing, eventID)
+	if !ok || missing.Event.ID() != eventID {
+		t.Fatalf("recoverable pipeline obligation = %#v, %t; want %s", missing.Event, ok, eventID)
+	}
+	if err := pg.PipelineObligations().Release(ctx, missing.Claim); err != nil {
+		t.Fatalf("release recoverable pipeline obligation: %v", err)
 	}
 	requireAPIV1RuntimeBusEvent(t, ch, "event delivery after post-commit receipt failure")
 
@@ -812,8 +819,8 @@ func TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate(
 	}
 	probe.RequirePostCommitDispatchCompleted(eventID)
 	outcome, failure := loadPipelineReceiptOutcomeAndFailure(t, ctx, db, eventID)
-	if outcome != "dead_letter" || failure == nil || failure.Class != runtimefailures.ClassDependencyUnavailable || failure.Detail.Code != "normal_run_completion_failed" {
-		t.Fatalf("pipeline receipt outcome=%q failure=%#v, want canonical completion failure", outcome, failure)
+	if outcome != "success" || failure != nil {
+		t.Fatalf("pipeline receipt outcome=%q failure=%#v, want successful processing acknowledgement", outcome, failure)
 	}
 	requireAPIV1RuntimeBusEvent(t, ch, "event delivery after post-commit completion failure")
 
@@ -1849,13 +1856,13 @@ type blockingAPIV1PublishInterceptor struct {
 	release <-chan struct{}
 }
 
-func (i blockingAPIV1PublishInterceptor) Intercept(_ context.Context, _ events.Event) (bool, []events.Event, error) {
+func (i blockingAPIV1PublishInterceptor) Intercept(_ context.Context, _ events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	select {
 	case i.started <- struct{}{}:
 	default:
 	}
 	<-i.release
-	return true, nil, nil
+	return true, nil, runtimepipelineobligation.Continue(), nil
 }
 
 type legacyOnlyEventPublisher struct {
@@ -1873,20 +1880,25 @@ func (p *legacyOnlyEventPublisher) WithBundleFingerprint(ctx context.Context) co
 
 type failStandalonePipelineReceiptOnceStore struct {
 	*store.PostgresStore
+	obligations runtimepipelineobligation.Store
+}
+
+func (s *failStandalonePipelineReceiptOnceStore) PipelineObligations() runtimepipelineobligation.Store {
+	return s.obligations
+}
+
+type failAPIPipelineSettlementOnceStore struct {
+	runtimepipelineobligation.Store
 	err error
 }
 
-func (s *failStandalonePipelineReceiptOnceStore) UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
-	return s.UpsertPipelineReceiptTx(ctx, nil, eventID, status, failure)
-}
-
-func (s *failStandalonePipelineReceiptOnceStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status string, failure *runtimefailures.Envelope) error {
-	if tx == nil && s.err != nil {
+func (s *failAPIPipelineSettlementOnceStore) Settle(ctx context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) error {
+	if s.err != nil {
 		err := s.err
 		s.err = nil
 		return err
 	}
-	return s.PostgresStore.UpsertPipelineReceiptTx(ctx, tx, eventID, status, failure)
+	return s.Store.Settle(ctx, claim, disposition)
 }
 
 type failCommittedReplayScopeStore struct {
@@ -2600,20 +2612,14 @@ func loadPipelineReceiptOutcomeAndFailure(t *testing.T, ctx context.Context, db 
 	`, eventID).Scan(&outcome, &raw); err != nil {
 		t.Fatalf("load pipeline receipt for %s: %v", eventID, err)
 	}
+	if len(raw) == 0 {
+		return outcome, nil
+	}
 	failure, err := runtimefailures.UnmarshalEnvelope(raw)
 	if err != nil {
 		t.Fatalf("decode pipeline receipt failure for %s: %v", eventID, err)
 	}
 	return outcome, &failure
-}
-
-func containsMissingPipelineReceiptEvent(items []events.PersistedReplayEvent, eventID string) bool {
-	for _, evt := range items {
-		if strings.TrimSpace(evt.Event.ID()) == strings.TrimSpace(eventID) {
-			return true
-		}
-	}
-	return false
 }
 
 func stringValue(t *testing.T, value any, field string) string {

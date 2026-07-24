@@ -32,6 +32,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
@@ -83,6 +84,7 @@ type claudeAttemptProofStore interface {
 	runtimeeffects.RecoveryStore
 	runtimellm.ConversationPersistence
 	runtimedelivery.Store
+	PipelineObligations() runtimepipelineobligation.Store
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 }
 
@@ -536,9 +538,10 @@ func newClaudeAttemptProofEventBus(t *testing.T, backend claudeAttemptProofBacke
 	}
 	t.Cleanup(lease.Release)
 	eventBus, err := runtimebus.NewEventBusWithOptions(backend.store, runtimebus.EventBusOptions{
-		RuntimeInstanceID: claudeAttemptProofRuntimeID,
-		BundleSourceFact:  claudeAttemptProofBundleSourceFact,
-		WorkOwner:         workOwner,
+		RuntimeInstanceID:   claudeAttemptProofRuntimeID,
+		BundleSourceFact:    claudeAttemptProofBundleSourceFact,
+		WorkOwner:           workOwner,
+		PipelineObligations: backend.store.PipelineObligations(),
 	})
 	if err != nil {
 		t.Fatalf("new Claude proof event bus: %v", err)

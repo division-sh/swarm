@@ -576,7 +576,7 @@ func countNotionManagedConnectorActivityAttemptsForSource(t *testing.T, backend 
 
 func countNotionManagedConnectorFailureEventsForSource(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string) int {
 	t.Helper()
-	failureEventType := boundedProviderFlowID + ".notion_append_block_children.failed"
+	failureEventType := boundedProviderFlowID + "/notion_append_block_children.failed"
 	var count int
 	var err error
 	if backend.sqlite {

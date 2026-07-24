@@ -759,13 +759,8 @@ func deriveWorkflowEventPolicy(source semanticview.Source, eventType string, dri
 	}
 }
 
-func (pc *PipelineCoordinator) BackgroundNodes(bus systemNodeBus, _ *sql.DB) []BackgroundNode {
-	if pc == nil || bus == nil {
-		return nil
-	}
-	out := make([]BackgroundNode, 0, 1)
-	out = append(out, newActivityBackgroundNode(pc, bus))
-	return out
+func (pc *PipelineCoordinator) BackgroundNodes(_ any, _ *sql.DB) []BackgroundNode {
+	return nil
 }
 
 func (pc *PipelineCoordinator) backgroundWorkflowExecutor(nodeID string) WorkflowNodeExecutor {

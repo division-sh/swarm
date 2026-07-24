@@ -12,6 +12,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -143,9 +144,7 @@ func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t 
 		t.Fatalf("Publish paused run event: %v", err)
 	}
 	requireNoBusEvent(t, ch, "paused run with pipeline receipt before continue")
-	if err := pg.UpsertPipelineReceipt(ctx, eventID, "processed", nil); err != nil {
-		t.Fatalf("UpsertPipelineReceipt queued event: %v", err)
-	}
+	acknowledgePipelineTestEvent(t, ctx, pg, eventID)
 	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
 		t.Fatalf("queued event pipeline receipts = %d, want 1", got)
 	}
@@ -154,13 +153,10 @@ func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t 
 	if err != nil {
 		t.Fatalf("Continue: %v", err)
 	}
-	if result.ReleasedDeliveries != 1 {
-		t.Fatalf("released deliveries = %d, want 1", result.ReleasedDeliveries)
+	if result.ReleasedDeliveries != 0 {
+		t.Fatalf("released pipeline obligations = %d, want 0 for already acknowledged event", result.ReleasedDeliveries)
 	}
-	got := requireBusEvent(t, ch, "paused run release with existing pipeline receipt")
-	if got.ID() != eventID {
-		t.Fatalf("released event = %s, want %s", got.ID(), eventID)
-	}
+	requireNoBusEvent(t, ch, "acknowledged event is not re-dispatched by the pipeline owner")
 }
 
 func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t *testing.T) {
@@ -325,9 +321,9 @@ type runControlRecordingInterceptor struct {
 	seen         []string
 }
 
-func (i *runControlRecordingInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, error) {
+func (i *runControlRecordingInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	if evt.Type() != i.triggerType {
-		return true, nil, nil
+		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
 	i.mu.Lock()
 	i.seen = append(i.seen, evt.ID())
@@ -343,7 +339,7 @@ func (i *runControlRecordingInterceptor) Intercept(_ context.Context, evt events
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "22000000-0000-0000-0000-000000000002"),
 		time.Now().UTC(),
-	)}, nil
+	)}, runtimepipelineobligation.Continue(), nil
 }
 
 func (i *runControlRecordingInterceptor) count() int {

@@ -25,7 +25,6 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -956,7 +955,7 @@ func (am *AgentManager) ReplayAfterStartupAdmission(ctx context.Context, startup
 	if am == nil || am.bus == nil {
 		return summary, nil
 	}
-	if err := runtimepipeline.NewRecoveryManagerWith(am.bus.Store(), am.bus).Recover(ctx); err != nil {
+	if err := runtimepipeline.NewRecoveryManagerWith(am.bus).Recover(ctx); err != nil {
 		return summary, fmt.Errorf("recover pipeline receipts: %w", err)
 	}
 	if startupReplayDiagnostics {
@@ -1041,14 +1040,11 @@ func (am *AgentManager) RecoverableStateSnapshot(ctx context.Context) (Recoverab
 		}
 		snapshot.PersistedSelectedContractRouteRecoveryCount = len(recoveries)
 	}
-	replayStore, ok := store.(runtimereplayclaim.Lister)
-	if ok && replayStore != nil {
-		eventsToReplay, err := replayStore.ListEventsMissingPipelineReceipt(ctx, time.Now().Add(-30*24*time.Hour), 1)
-		if err != nil {
-			return RecoverableStateSnapshot{}, fmt.Errorf("list events missing pipeline receipts: %w", err)
-		}
-		snapshot.ReplayEligibleEventPresent = len(eventsToReplay) > 0
+	presence, err := am.bus.PipelineWorkPresence(ctx)
+	if err != nil {
+		return RecoverableStateSnapshot{}, fmt.Errorf("load pipeline work presence: %w", err)
 	}
+	snapshot.ReplayEligibleEventPresent = presence.Any()
 	return snapshot, nil
 }
 

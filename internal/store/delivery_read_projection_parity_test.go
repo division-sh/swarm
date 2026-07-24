@@ -15,7 +15,6 @@ import (
 
 type deliveryReadProjectionStore interface {
 	authorActivityReceiptStore
-	ListEventsWithPendingDeliveriesForRun(context.Context, string, time.Time, int) ([]events.PersistedReplayEvent, error)
 	ListPendingAgentDeliveryFacts(context.Context, []string, time.Time) (map[string]PendingAgentDeliveryFacts, error)
 	ListPendingAgentDeliveryDetails(context.Context, PendingAgentDeliveryListOptions) (PendingAgentDeliveryPage, error)
 	ListAgentDeliveryLifecycleFacts(context.Context, []string) (map[string]AgentDeliveryLifecycleFacts, error)
@@ -96,14 +95,6 @@ func TestDeliveryReadProjectionBoundsAndExactIdentityParity(t *testing.T) {
 			}
 			if len(second.PendingDeliveries) != 1 || second.PendingDeliveries[0].DeliveryID != siblingIDs[1] || second.NextCursor == "" {
 				t.Fatalf("second pending page = %#v, want second exact sibling plus cursor", second)
-			}
-
-			replay, err := selected.ListEventsWithPendingDeliveriesForRun(ctx, runID, base.Add(-time.Minute), 1)
-			if err != nil {
-				t.Fatalf("load bounded pending-run replay: %v", err)
-			}
-			if len(replay) != 1 || replay[0].Event.ID() != siblingEvent.ID() {
-				t.Fatalf("bounded pending-run replay = %#v, want deduplicated sibling event %s", replay, siblingEvent.ID())
 			}
 
 			currentAgent := "current-agent"

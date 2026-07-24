@@ -11,12 +11,14 @@ import (
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
+
+var ErrAuthoritativeRecipientManifestUnavailable = errors.New("authoritative delivery recipient manifest is unavailable for non-persistent event stores")
 
 type EventStore interface {
 	CommitPublishOwner
-	runtimereplayclaim.RecipientReader
+	ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error)
 }
 
 type CommitPublishOwner interface {
@@ -39,20 +41,16 @@ const (
 	EventAppendExactDuplicate
 )
 
-type InitialPipelineReceipt struct {
-	Status  string
-	Failure *runtimefailures.Envelope
-}
-
 // CommitPublishRequest is the closed journal operation for event classes whose
 // mandatory initial side effects are the delivery manifest, replay scope, and
 // optional failure evidence declared here.
 type CommitPublishRequest struct {
-	Event           events.AdmittedEvent
-	DeliveryRoutes  []events.DeliveryRoute
-	ReplayScope     runtimereplayclaim.CommittedReplayScope
-	PipelineReceipt *InitialPipelineReceipt
-	DeadLetter      *runtimedeadletters.Record
+	Event          events.AdmittedEvent
+	DeliveryRoutes []events.DeliveryRoute
+	ReplayScope    runtimepipelineobligation.CommittedScope
+	PipelineClaim  runtimepipelineobligation.Claim
+	Disposition    *runtimepipelineobligation.Disposition
+	DeadLetter     *runtimedeadletters.Record
 }
 
 // CommitPublishTransaction is the transaction-local half of the sealed
@@ -240,16 +238,6 @@ func normalizeDescriptorAddressFields(in map[string]string) map[string]string {
 	return out
 }
 
-// PipelineReceiptPersistence is an optional capability for marking whether
-// persisted events were fully routed/delivered by the runtime publish path.
-type PipelineReceiptPersistence interface {
-	UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error
-}
-
-type ProcessedPipelineReceiptReader interface {
-	HasProcessedPipelineReceipt(ctx context.Context, eventID string) (bool, error)
-}
-
 // RunLifecyclePersistence owns explicit failed, cancelled, and forked
 // terminalization. Successful completion is owned by normal-run convergence.
 type RunLifecyclePersistence interface {
@@ -285,10 +273,6 @@ type EventDeliveryTargetReader interface {
 type EventDeliveryRouteSetReader interface {
 	ListEventDeliveryRoutes(ctx context.Context, eventID string) ([]events.DeliveryRoute, error)
 }
-
-type PipelineReceiptSweeperStore = runtimereplayclaim.Lister
-
-type PipelineReplayClaimStore = runtimereplayclaim.Owner
 
 type InMemoryEventStore struct{}
 
@@ -344,6 +328,5 @@ func (t *inMemoryCommitPublishTransaction) FinalizePreparedPublish(_ context.Con
 }
 
 func (InMemoryEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
-	return nil, runtimereplayclaim.ErrAuthoritativeRecipientManifestUnavailable
+	return nil, ErrAuthoritativeRecipientManifestUnavailable
 }
-func (InMemoryEventStore) SupportsPersistedReplay() bool { return false }

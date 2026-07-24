@@ -11,7 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
@@ -24,10 +24,7 @@ type forkedDecisionConsumerSurface interface {
 	CreateProposedEffectCard(context.Context, decisioncard.Card, decisioncard.ProposedEffectContinuation) error
 	CompleteProposedEffectRoute(context.Context, string, string, time.Time) (decisioncard.ProposedEffectContinuation, error)
 	SupersedeProposedEffectsForLoopGenerations(context.Context, string, string, []attemptgeneration.Generation, string, time.Time) error
-	ListDueDecisionRouteObligations(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error)
-	DeferDecisionRouteObligation(context.Context, string, time.Time, *runtimefailures.Envelope) error
-	QuarantineDecisionRouteObligation(context.Context, string, time.Time, *runtimefailures.Envelope) error
-	CompleteDecisionRouteObligation(context.Context, string, time.Time) error
+	PipelineObligations() runtimepipelineobligation.Store
 }
 
 func TestForkedSourceDecisionCardsContinuationsDraftsAndRoutesCannotAdvance(t *testing.T) {
@@ -122,13 +119,10 @@ func TestForkedSourceDecisionCardsContinuationsDraftsAndRoutesCannotAdvance(t *t
 				ctx, fixture.sourceRun, uuid.NewString(), nil, "loop_advanced", now.Add(time.Minute),
 			))
 
-			due, err := surface.ListDueDecisionRouteObligations(ctx, now.Add(time.Hour), 20)
-			if err != nil || len(due) != 0 {
-				t.Fatalf("frozen decision-route selector = %#v, %v", due, err)
+			due, ok, err := surface.PipelineObligations().ClaimNext(ctx, runtimepipelineobligation.DecisionRouteQuery())
+			if err != nil || ok {
+				t.Fatalf("frozen decision-route selector = %#v, %t, %v", due, ok, err)
 			}
-			requireForkedSourceRefusal(t, "defer route obligation", surface.DeferDecisionRouteObligation(ctx, decisionEventID, now.Add(time.Hour), nil))
-			requireForkedSourceRefusal(t, "quarantine route obligation", surface.QuarantineDecisionRouteObligation(ctx, decisionEventID, now.Add(time.Minute), nil))
-			requireForkedSourceRefusal(t, "complete route obligation", surface.CompleteDecisionRouteObligation(ctx, decisionEventID, now.Add(time.Minute)))
 
 			var expired []events.Event
 			err = runDecisionCardTestPipelineMutation(t, ctx, surface, func(txctx context.Context, _ *sql.Tx) error {

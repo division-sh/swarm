@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
 func TestSyntheticCarryProjectionIsRouteScopedForMixedDeliveries(t *testing.T) {
@@ -100,7 +101,7 @@ func TestDeliveryRouteProjectionHasOneProductionOwner(t *testing.T) {
 		PayloadProjection: mustDeliveryPayloadProjection(t, map[string]string{"validation_case_id": "case-1"}),
 	}
 	interceptor := &projectionCaptureInterceptor{}
-	if _, _, err := eb.runNodeDeliveryRouteInterceptors(context.Background(), evt, []events.DeliveryRoute{route}, []DeliveryRouteInterceptor{interceptor}); err != nil {
+	if _, _, _, err := eb.runNodeDeliveryRouteInterceptors(context.Background(), evt, []events.DeliveryRoute{route}, []DeliveryRouteInterceptor{interceptor}); err != nil {
 		t.Fatalf("run route interceptor: %v", err)
 	}
 	ch := subscribeInternalDeliveriesForTest(t, eb, "validator")
@@ -117,9 +118,9 @@ type projectionCaptureInterceptor struct {
 	events []events.Event
 }
 
-func (i *projectionCaptureInterceptor) InterceptDeliveryRoute(_ context.Context, evt events.DeliveryEvent, _ events.DeliveryRoute) (bool, []events.Event, error) {
+func (i *projectionCaptureInterceptor) InterceptDeliveryRoute(_ context.Context, evt events.DeliveryEvent, _ events.DeliveryRoute) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	i.events = append(i.events, evt.Event())
-	return true, nil, nil
+	return true, nil, runtimepipelineobligation.Continue(), nil
 }
 
 func payloadStringField(t *testing.T, evt events.Event, field string) string {

@@ -371,8 +371,9 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 	workOwner := testGatewayWorkOwner(t)
 	var manager *runtimemanager.AgentManager
 	sourceBus, err := bus.NewEventBusWithOptions(pg, bus.EventBusOptions{
-		WorkOwner:      workOwner,
-		ContractBundle: loaded.Source,
+		WorkOwner:           workOwner,
+		PipelineObligations: pg.PipelineObligations(),
+		ContractBundle:      loaded.Source,
 		InterceptorProvider: func() []bus.EventInterceptor {
 			return nil
 		},
@@ -499,8 +500,10 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 	}
 	commitRunForkTestEvent(t, controlCtx, pg, controlEvent, controlPreflight.DeliveryRoutes)
 	sourceBus.SetInterceptors(sourcePipeline)
-	if err := sourceBus.RecoverPersistedPipeline(controlCtx, controlEvent, nil); err != nil {
+	if count, err := sourceBus.ReleaseRunQueue(controlCtx, controlRunID, 10); err != nil {
 		t.Fatalf("execute control delivery: %v", err)
+	} else if count != 1 {
+		t.Fatalf("executed control pipeline obligations = %d, want 1", count)
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -2942,7 +2945,7 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew(t *t
 			contractsRoot,
 		),
 	})
-	if err == nil || !strings.Contains(err.Error(), "committed replay scope conflicts") {
+	if err == nil || !strings.Contains(err.Error(), "committed pipeline scope conflicts") {
 		t.Fatalf("ExecuteSelectedContractRunFork error = %v, want atomic same-event replay-scope conflict", err)
 	}
 	if result.Activation.Activated {

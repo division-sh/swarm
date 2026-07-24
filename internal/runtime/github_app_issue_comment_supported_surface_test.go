@@ -644,7 +644,7 @@ func countGitHubAppIssueCommentActivityAttemptsForSource(t *testing.T, backend s
 
 func countGitHubAppIssueCommentFailureEventsForSource(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string) int {
 	t.Helper()
-	failureEventType := boundedProviderFlowID + ".github_create_issue_comment.failed"
+	failureEventType := boundedProviderFlowID + "/github_create_issue_comment.failed"
 	var count int
 	var err error
 	if backend.sqlite {

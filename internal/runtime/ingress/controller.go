@@ -60,24 +60,22 @@ type Store interface {
 
 type EventPublisher interface {
 	Publish(context.Context, events.Event) error
-	ReleaseRuntimeIngressQueue(context.Context, time.Duration, int) (int, error)
+	ReleaseRuntimeIngressQueue(context.Context, int) (int, error)
 }
 
 type Options struct {
-	Now             func() time.Time
-	ReleaseLookback time.Duration
-	ReleaseLimit    int
+	Now          func() time.Time
+	ReleaseLimit int
 }
 
 type Controller struct {
-	mu              sync.Mutex
-	store           Store
-	publisher       EventPublisher
-	now             func() time.Time
-	releaseLookback time.Duration
-	releaseLimit    int
-	memory          State
-	memoryInit      bool
+	mu           sync.Mutex
+	store        Store
+	publisher    EventPublisher
+	now          func() time.Time
+	releaseLimit int
+	memory       State
+	memoryInit   bool
 }
 
 func NewController(store Store, publisher EventPublisher, opts Options) *Controller {
@@ -85,20 +83,15 @@ func NewController(store Store, publisher EventPublisher, opts Options) *Control
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
-	lookback := opts.ReleaseLookback
-	if lookback <= 0 {
-		lookback = 24 * time.Hour
-	}
 	limit := opts.ReleaseLimit
 	if limit <= 0 {
 		limit = 200
 	}
 	return &Controller{
-		store:           store,
-		publisher:       publisher,
-		now:             now,
-		releaseLookback: lookback,
-		releaseLimit:    limit,
+		store:        store,
+		publisher:    publisher,
+		now:          now,
+		releaseLimit: limit,
 	}
 }
 
@@ -312,7 +305,7 @@ func (c *Controller) releaseQueued(ctx context.Context) (int, error) {
 	}
 	total := 0
 	for {
-		n, err := c.publisher.ReleaseRuntimeIngressQueue(ctx, c.releaseLookback, c.releaseLimit)
+		n, err := c.publisher.ReleaseRuntimeIngressQueue(ctx, c.releaseLimit)
 		total += n
 		if err != nil {
 			return total, err

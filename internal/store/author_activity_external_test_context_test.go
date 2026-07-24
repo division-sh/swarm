@@ -12,6 +12,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -80,6 +81,13 @@ func newStoreTestEventBus(t *testing.T, selected runtimebus.EventStore, options 
 	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = storeTestWorkOwner(t)
+	}
+	if opts.PipelineObligations == nil {
+		if provider, ok := selected.(interface {
+			PipelineObligations() runtimepipelineobligation.Store
+		}); ok {
+			opts.PipelineObligations = provider.PipelineObligations()
+		}
 	}
 	return runtimebus.NewEventBusWithOptions(selected, opts)
 }

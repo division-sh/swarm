@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -197,8 +198,8 @@ type selectedContractWorkflowTimerInterceptor struct {
 	results  chan selectedContractWorkflowTimerInterceptResult
 }
 
-func (i *selectedContractWorkflowTimerInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
-	pass, out, err := i.delegate.Intercept(ctx, evt)
+func (i *selectedContractWorkflowTimerInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
+	pass, out, outcome, err := i.delegate.Intercept(ctx, evt)
 	result := selectedContractWorkflowTimerInterceptResult{
 		EventID: evt.ID(), RunID: runtimecorrelation.RunIDFromContext(ctx), Err: err,
 	}
@@ -222,7 +223,7 @@ func (i *selectedContractWorkflowTimerInterceptor) Intercept(ctx context.Context
 	case i.results <- result:
 	default:
 	}
-	return pass, out, err
+	return pass, out, outcome, err
 }
 
 func selectedContractForkTimerReceipt(

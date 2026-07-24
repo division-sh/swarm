@@ -18,8 +18,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
@@ -637,9 +637,10 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 			insertGateRecoveryRun(t, selected, runID)
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(false))
-			failingStore, failures := failNextWorkflowTimerPipelineReceipt(t, selected.events)
-			bus, err := newScopedTestEventBus(t, failingStore, runtimebus.EventBusOptions{
+			failingOwner, failures := failNextWorkflowTimerPipelineDisposition(t, selected.events)
+			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 				ContractBundle: source, PayloadValidator: strictWorkflowTimerPayloadValidator,
+				PipelineObligations: failingOwner,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -703,7 +704,7 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 			recovered := 0
 			for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline) && recovered == 0; {
 				var err error
-				recovered, err = bus.SweepUndispatched(ctx, time.Hour, 10)
+				recovered, err = bus.SweepUndispatched(ctx, 10)
 				if err != nil {
 					t.Fatalf("SweepUndispatched: %v", err)
 				}
@@ -775,45 +776,37 @@ func (v *failOnceWorkflowTimerPayloadValidator) validate(ctx context.Context, ev
 	return nil
 }
 
-type failOncePostgresPipelineReceiptStore struct {
-	*store.PostgresStore
+type failOncePipelineDispositionStore struct {
+	runtimepipelineobligation.Store
 	failures atomic.Int32
 }
 
-func (s *failOncePostgresPipelineReceiptStore) UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
+func (s *failOncePipelineDispositionStore) Settle(
+	ctx context.Context,
+	claim runtimepipelineobligation.Claim,
+	disposition runtimepipelineobligation.Disposition,
+) error {
 	if s.failures.CompareAndSwap(1, 0) {
-		return errors.New("injected workflow timer pipeline receipt failure")
+		return errors.New("injected workflow timer pipeline disposition failure")
 	}
-	return s.PostgresStore.UpsertPipelineReceipt(ctx, eventID, status, failure)
+	return s.Store.Settle(ctx, claim, disposition)
 }
 
-type failOnceSQLitePipelineReceiptStore struct {
-	*store.SQLiteRuntimeStore
-	failures atomic.Int32
-}
-
-func (s *failOnceSQLitePipelineReceiptStore) UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
-	if s.failures.CompareAndSwap(1, 0) {
-		return errors.New("injected workflow timer pipeline receipt failure")
-	}
-	return s.SQLiteRuntimeStore.UpsertPipelineReceipt(ctx, eventID, status, failure)
-}
-
-func failNextWorkflowTimerPipelineReceipt(t *testing.T, selected runtimebus.EventStore) (runtimebus.EventStore, *atomic.Int32) {
+func failNextWorkflowTimerPipelineDisposition(t *testing.T, selected runtimebus.EventStore) (runtimepipelineobligation.Store, *atomic.Int32) {
 	t.Helper()
+	var owner runtimepipelineobligation.Store
 	switch typed := selected.(type) {
 	case *store.PostgresStore:
-		wrapped := &failOncePostgresPipelineReceiptStore{PostgresStore: typed}
-		wrapped.failures.Store(1)
-		return wrapped, &wrapped.failures
+		owner = typed.PipelineObligations()
 	case *store.SQLiteRuntimeStore:
-		wrapped := &failOnceSQLitePipelineReceiptStore{SQLiteRuntimeStore: typed}
-		wrapped.failures.Store(1)
-		return wrapped, &wrapped.failures
+		owner = typed.PipelineObligations()
 	default:
 		t.Fatalf("unsupported selected event store %T", selected)
 		return nil, nil
 	}
+	wrapped := &failOncePipelineDispositionStore{Store: owner}
+	wrapped.failures.Store(1)
+	return wrapped, &wrapped.failures
 }
 
 func workflowTimerPersistedEventID(t *testing.T, selected gateRecoveryStoreCase, runID string) string {

@@ -76,7 +76,7 @@ func TestActivityBoringProofHandAuthoredFlowDispatchesOutsideTransactionAndReuse
 
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), sourceEvent.RunID())
 			ctx = withWorkflowNodeDeliveryRoute(ctx, activityBoringNodeRoute(sourceEvent, "scanner"))
-			handled, err := fixture.pc.handleEventResult(ctx, sourceEvent)
+			handled, _, err := fixture.pc.handleEventResult(ctx, sourceEvent)
 			if err != nil {
 				t.Fatalf("hand-authored source handleEventResult: %v", err)
 			}
@@ -91,7 +91,7 @@ func TestActivityBoringProofHandAuthoredFlowDispatchesOutsideTransactionAndReuse
 			assertActivityBoringDeliveryStatus(t, fixture.db, tc.kind, sourceEvent.ID(), "scanner", "delivered")
 
 			request := fixture.bus.outboxIntent(0)
-			handled, err = fixture.pc.handleEventResult(ctx, request.Event)
+			handled, _, err = fixture.pc.handleEventResult(ctx, request.Event)
 			if err != nil {
 				t.Fatalf("duplicate supported activity request handleEventResult: %v", err)
 			}
@@ -123,7 +123,7 @@ func TestActivityBoringProofHandAuthoredFlowCrashAfterRequestBeforeResultComplet
 	seedActivityBoringSourceFlow(t, fixture, activityBoringStorePostgres, sourceEvent)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), sourceEvent.RunID())
 	ctx = withWorkflowNodeDeliveryRoute(ctx, activityBoringNodeRoute(sourceEvent, "scanner"))
-	handled, err := fixture.pc.handleEventResult(ctx, sourceEvent)
+	handled, _, err := fixture.pc.handleEventResult(ctx, sourceEvent)
 	if err != nil {
 		t.Fatalf("source handleEventResult before crash: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestActivityBoringProofHandAuthoredFlowCrashAfterRequestBeforeResultComplet
 	restarted := newActivityBoringFullFlowCoordinator(t, fixture.db, activityBoringStorePostgres, server.URL, true)
 	request := loadActivityBoringPersistedEvent(t, fixture.db, activityBoringStorePostgres, activityRequestEventID(expected))
 	assertActivityBoringPersistedRequestMatches(t, request, expected)
-	handled, err = restarted.pc.handleEventResult(ctx, request)
+	handled, _, err = restarted.pc.handleEventResult(ctx, request)
 	if err != nil {
 		t.Fatalf("restart supported activity request handleEventResult: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestActivityBoringProofHandAuthoredFlowCrashAfterRequestBeforeResultComplet
 	}
 	assertActivityBoringEventCount(t, fixture.db, activityBoringStorePostgres, activityResultEventID(expected, expected.SuccessEvent), 1)
 
-	handled, err = restarted.pc.handleEventResult(ctx, request)
+	handled, _, err = restarted.pc.handleEventResult(ctx, request)
 	if err != nil {
 		t.Fatalf("duplicate post-restart supported request handleEventResult: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestActivityBoringProofHandAuthoredReadOnlyForkReexecuteUsesForkLocalIdenti
 				seedActivityBoringSourceFlow(t, fixture, tc.kind, evt)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), evt.RunID())
 				ctx = withWorkflowNodeDeliveryRoute(ctx, activityBoringNodeRoute(evt, "scanner"))
-				handled, err := fixture.pc.handleEventResult(ctx, evt)
+				handled, _, err := fixture.pc.handleEventResult(ctx, evt)
 				if err != nil {
 					t.Fatalf("hand-authored fork source handleEventResult(%s): %v", evt.RunID(), err)
 				}
@@ -223,7 +223,7 @@ func TestActivityBoringProofDuplicateRequestReusesRecordedReadResult(t *testing.
 				t.Fatalf("activityRequestEmitIntent: %v", err)
 			}
 
-			handled, err := fixture.pc.handleEventResult(ctx, request.Event)
+			handled, _, err := fixture.pc.handleEventResult(ctx, request.Event)
 			if err != nil {
 				t.Fatalf("first handleEventResult: %v", err)
 			}
@@ -235,7 +235,7 @@ func TestActivityBoringProofDuplicateRequestReusesRecordedReadResult(t *testing.
 			}
 			assertActivityBoringEventCount(t, fixture.db, tc.kind, activityResultEventID(intent, intent.SuccessEvent), 1)
 
-			handled, err = fixture.pc.handleEventResult(ctx, request.Event)
+			handled, _, err = fixture.pc.handleEventResult(ctx, request.Event)
 			if err != nil {
 				t.Fatalf("second handleEventResult: %v", err)
 			}
@@ -277,7 +277,7 @@ func TestActivityBoringProofCrashAfterIntentBeforeResultCompletesOncePostgres(t 
 	restarted := newActivityBoringCoordinator(t, fixture.db, activityBoringStorePostgres, server.URL)
 	request := loadActivityBoringPersistedEvent(t, fixture.db, activityBoringStorePostgres, requestID)
 	assertActivityBoringPersistedRequestMatches(t, request, intent)
-	handled, err := restarted.pc.handleEventResult(ctx, request)
+	handled, _, err := restarted.pc.handleEventResult(ctx, request)
 	if err != nil {
 		t.Fatalf("restart handleEventResult: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestActivityBoringProofCrashAfterIntentBeforeResultCompletesOncePostgres(t 
 	}
 	assertActivityBoringEventCount(t, fixture.db, activityBoringStorePostgres, resultID, 1)
 
-	handled, err = restarted.pc.handleEventResult(ctx, request)
+	handled, _, err = restarted.pc.handleEventResult(ctx, request)
 	if err != nil {
 		t.Fatalf("duplicate post-restart handleEventResult: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestActivityBoringProofReadOnlyForkReexecuteUsesForkLocalRequestIdentity(t 
 					t.Fatalf("activityRequestEmitIntent: %v", err)
 				}
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), intent.SourceRunID)
-				handled, err := fixture.pc.handleEventResult(ctx, request.Event)
+				handled, _, err := fixture.pc.handleEventResult(ctx, request.Event)
 				if err != nil {
 					t.Fatalf("handleEventResult(%s): %v", intent.SourceRunID, err)
 				}
@@ -370,7 +370,7 @@ func TestActivityBoringProofRetryIsBoundedAndTraced(t *testing.T) {
 				t.Fatalf("activityRequestEmitIntent: %v", err)
 			}
 
-			handled, err := fixture.pc.handleEventResult(ctx, request.Event)
+			handled, _, err := fixture.pc.handleEventResult(ctx, request.Event)
 			if err != nil {
 				t.Fatalf("handleEventResult: %v", err)
 			}
@@ -403,7 +403,7 @@ func TestActivityBoringProofRuntimeLogFailureDoesNotBlockReadOnlyActivity(t *tes
 	if err != nil {
 		t.Fatalf("activityRequestEmitIntent: %v", err)
 	}
-	handled, err := pc.handleEventResult(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), intent.SourceRunID), request.Event)
+	handled, _, err := pc.handleEventResult(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), intent.SourceRunID), request.Event)
 	if err != nil {
 		t.Fatalf("handleEventResult with failing runtime log: %v", err)
 	}
@@ -809,7 +809,7 @@ func (d persistingActivityBoringDispatcher) DispatchPostCommit(ctx context.Conte
 					return err
 				}
 			}
-			handled, err := d.bus.coordinator.handleEventResult(ctx, intent.Event)
+			handled, _, err := d.bus.coordinator.handleEventResult(ctx, intent.Event)
 			if err != nil {
 				return err
 			}

@@ -48,7 +48,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			name:               "read-only reexecutes exactly once",
 			effectClass:        runtimecontracts.ActivityEffectClassReadOnly,
 			forkPolicy:         runtimecontracts.ActivityForkReexecuteRead,
-			resultEventType:    "flow_a.connector.succeeded",
+			resultEventType:    "flow_a/connector.succeeded",
 			wantConnectorCalls: 1,
 		},
 		{
@@ -56,7 +56,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			effectClass:           runtimecontracts.ActivityEffectClassNonIdempotentWrite,
 			forkPolicy:            runtimecontracts.ActivityForkReuseRecordedResult,
 			sourceAttemptStatus:   "succeeded",
-			resultEventType:       "flow_a.connector.succeeded",
+			resultEventType:       "flow_a/connector.succeeded",
 			wantForkAttemptStatus: "succeeded",
 		},
 		{
@@ -64,7 +64,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			effectClass:           runtimecontracts.ActivityEffectClassNonIdempotentWrite,
 			forkPolicy:            runtimecontracts.ActivityForkReuseRecordedResult,
 			sourceAttemptStatus:   "failed",
-			resultEventType:       "flow_a.connector.failed",
+			resultEventType:       "flow_a/connector.failed",
 			failureClass:          string(runtimefailures.ClassDependencyUnavailable),
 			failureCode:           "provider_unavailable",
 			wantForkAttemptStatus: "failed",
@@ -74,7 +74,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			effectClass:           runtimecontracts.ActivityEffectClassNonIdempotentWrite,
 			forkPolicy:            runtimecontracts.ActivityForkReuseRecordedResult,
 			sourceAttemptStatus:   "uncertain",
-			resultEventType:       "flow_a.connector.failed",
+			resultEventType:       "flow_a/connector.failed",
 			failureClass:          string(runtimefailures.ClassOutcomeUncertain),
 			failureCode:           "activity_provider_outcome_uncertain",
 			wantForkAttemptStatus: "uncertain",
@@ -104,7 +104,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			seedSelectedContractActivityLoop(t, db, sourceRunID, entityID, sourceRequestEventID, activation, at)
 			seedSelectedContractActivityRequest(t, db, sourceRunID, sourceRequestEventID, selectedContractActivityRequestPayload{
 				ActivityID: "connector", Tool: "provider.connector", Input: map[string]any{"value": "x"},
-				EffectClass: string(tt.effectClass), SuccessEvent: "flow_a.connector.succeeded", FailureEvent: "flow_a.connector.failed",
+				EffectClass: string(tt.effectClass), SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed",
 				RetryMaxAttempts: 1, ForkPolicy: string(tt.forkPolicy), EntityID: entityID, FlowInstance: "flow-a/1",
 				NodeID: "test-node", FlowID: "flow_a", HandlerEventKey: "review.requested",
 				SourceEventID: initiatingEventID, SourceRunID: sourceRunID, Attempt: 1,
@@ -260,7 +260,7 @@ func selectedContractActivitySource(serverURL string, effectClass runtimecontrac
 				"test-node": {
 					ID: "test-node", ExecutionType: runtimecontracts.SystemNodeExecutionType,
 					RuntimeSubscriptions: []string{"platform.activity_requested"},
-					Produces:             []string{"flow_a.connector.succeeded", "flow_a.connector.failed"},
+					Produces:             []string{"flow_a/connector.succeeded", "flow_a/connector.failed"},
 				},
 			},
 		},
@@ -350,7 +350,7 @@ func seedSelectedContractActivityAttempt(t *testing.T, db *sql.DB, fact activity
 			started_at, completed_at, updated_at
 		) VALUES (
 			$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'flow-a/1', 'test-node', 'review.requested',
-			'connector', 'provider.connector', 'non_idempotent_write', 1, $5, 'activity.succeeded', 'activity.failed',
+			'connector', 'provider.connector', 'non_idempotent_write', 1, $5, 'flow_a/connector.succeeded', 'flow_a/connector.failed',
 			$6::uuid, $7, $8::jsonb, $9::jsonb, $10, $11::jsonb, 'review', $12, $12, $12
 		)
 	`, requestEventID, fact.RunID, fact.SourceEventID, fact.EntityID, status, resultEventID, resultEventType,

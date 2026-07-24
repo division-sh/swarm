@@ -39,7 +39,7 @@ func TestRunAcceptsNestedFlowGeneratedActivityResultOwnership(t *testing.T) {
 
 	generated := generatedActivityResultEventNamesLocal(source)
 	census := semanticview.BuildAuthoredEventEndpointCensus(source)
-	for _, eventType := range []string{"child.send.succeeded", "child.send.failed"} {
+	for _, eventType := range []string{"child/send.succeeded", "child/send.failed"} {
 		if _, ok := generated[eventType]; !ok {
 			t.Fatalf("nested generated identities = %#v, missing %s", generated, eventType)
 		}
@@ -49,7 +49,7 @@ func TestRunAcceptsNestedFlowGeneratedActivityResultOwnership(t *testing.T) {
 		}
 		routed := false
 		for _, endpoint := range census.MatchingConsumers("child", proof.EventKey()) {
-			if endpoint.Kind == semanticview.EventEndpointNodeHandler && endpoint.NodeID == "observer-node" && endpoint.HandlerEvent == eventType {
+			if endpoint.Kind == semanticview.EventEndpointNodeHandler && endpoint.NodeID == "observer-node" && endpoint.HandlerEvent == eventidentity.LeafName(eventType) {
 				routed = true
 				break
 			}

@@ -86,7 +86,10 @@ func NewPostgresStore(dsn string) (*PostgresStore, error) {
 	db.SetMaxIdleConns(10)
 	db.SetConnMaxIdleTime(5 * time.Minute)
 	db.SetConnMaxLifetime(30 * time.Minute)
-	return &PostgresStore{DB: db, sessionLockTTL: 120 * time.Second}, nil
+	return &PostgresStore{
+		DB:             db,
+		sessionLockTTL: 120 * time.Second,
+	}, nil
 }
 
 func (s *PostgresStore) SetSessionLockTTL(ttl time.Duration) {
@@ -105,5 +108,3 @@ func (s *PostgresStore) Ping(ctx context.Context) error {
 	}
 	return s.DB.PingContext(ctx)
 }
-
-func (*PostgresStore) SupportsPersistedReplay() bool { return true }

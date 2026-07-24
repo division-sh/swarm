@@ -12842,7 +12842,7 @@
             "type": "boolean"
           },
           "unsettled_pipeline_events": {
-            "description": "Same-run non-runtime-log events whose platform/pipeline receipt is absent or not successful.",
+            "description": "Same-run non-runtime-log events whose platform/pipeline receipt is absent or whose canonical decision-route disposition remains deferred. Terminal non-success receipts are immutable settled evidence: they block successful normal completion but are not live work.",
             "minimum": 0,
             "type": "integer"
           }

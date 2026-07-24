@@ -12,16 +12,14 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/google/uuid"
 )
 
 type eventProducerIdentityLifecycleStore interface {
 	semanticEventFixtureStore
-	ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error)
-	ListEventsMissingPipelineReceiptForRun(context.Context, string, time.Time, int) ([]events.PersistedReplayEvent, error)
-	ListEventsWithPendingDeliveriesForRun(context.Context, string, time.Time, int) ([]events.PersistedReplayEvent, error)
+	PipelineObligations() runtimepipelineobligation.Store
 	ListPendingAgentDeliveryDetails(context.Context, PendingAgentDeliveryListOptions) (PendingAgentDeliveryPage, error)
-	ListDueDecisionRouteObligations(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error)
 	LoadOperatorEvent(context.Context, string) (OperatorEventFull, error)
 }
 
@@ -112,11 +110,17 @@ func TestEventProducerIdentityPersistenceToReadbackParity(t *testing.T) {
 			}
 
 			insertProducerIdentityDecisionObligation(t, fixture, ctx, eventID, runID, createdAt)
-			due, err := surface.ListDueDecisionRouteObligations(ctx, createdAt.Add(time.Hour), 10)
+			due, ok, err := surface.PipelineObligations().ClaimNext(ctx, runtimepipelineobligation.DecisionRouteQuery())
 			if err != nil {
-				t.Fatalf("ListDueDecisionRouteObligations: %v", err)
+				t.Fatalf("claim decision-route obligation: %v", err)
 			}
-			assertPersistedNodeProducerEvent(t, persistedEventByID(t, due, eventID), eventID, runID, producer, true)
+			if !ok {
+				t.Fatal("decision-route obligation was not claimable")
+			}
+			assertPersistedNodeProducerEvent(t, due.Event, eventID, runID, producer, true)
+			if err := surface.PipelineObligations().Release(ctx, due.Claim); err != nil {
+				t.Fatalf("release decision-route obligation: %v", err)
+			}
 
 		})
 	}
@@ -129,18 +133,22 @@ type eventProducerIdentityReadback struct {
 }
 
 func eventProducerIdentityReadbacks(surface eventProducerIdentityLifecycleStore, fixture authorActivityReceiptFixture, ctx context.Context, eventID, runID, agentID string, createdAt time.Time) []eventProducerIdentityReadback {
-	fromReplayRecords := func(load func() ([]events.PersistedReplayEvent, error)) func() (events.Event, error) {
+	fromPipelineClaim := func(query runtimepipelineobligation.ClaimQuery) func() (events.Event, error) {
 		return func() (events.Event, error) {
-			records, err := load()
+			work, ok, err := surface.PipelineObligations().ClaimNext(ctx, query)
 			if err != nil {
 				return events.Event{}, err
 			}
-			for _, record := range records {
-				if record.Event.ID() == eventID {
-					return record.Event, nil
-				}
+			if !ok {
+				return events.Event{}, fmt.Errorf("event %s was not claimable", eventID)
 			}
-			return events.Event{}, fmt.Errorf("event %s not returned", eventID)
+			if err := surface.PipelineObligations().Release(ctx, work.Claim); err != nil {
+				return events.Event{}, err
+			}
+			if work.Event.ID() != eventID {
+				return events.Event{}, fmt.Errorf("claimed event %s, want %s", work.Event.ID(), eventID)
+			}
+			return work.Event, nil
 		}
 	}
 	since := createdAt.Add(-time.Minute)
@@ -148,23 +156,12 @@ func eventProducerIdentityReadbacks(surface eventProducerIdentityLifecycleStore,
 		{
 			name:         "global_pipeline_recovery",
 			runtimeEvent: true,
-			load: fromReplayRecords(func() ([]events.PersistedReplayEvent, error) {
-				return surface.ListEventsMissingPipelineReceipt(ctx, since, 10)
-			}),
+			load:         fromPipelineClaim(runtimepipelineobligation.GlobalRecoveryQuery()),
 		},
 		{
 			name:         "run_pipeline_recovery",
 			runtimeEvent: true,
-			load: fromReplayRecords(func() ([]events.PersistedReplayEvent, error) {
-				return surface.ListEventsMissingPipelineReceiptForRun(ctx, runID, since, 10)
-			}),
-		},
-		{
-			name:         "pending_run_delivery_replay",
-			runtimeEvent: true,
-			load: fromReplayRecords(func() ([]events.PersistedReplayEvent, error) {
-				return surface.ListEventsWithPendingDeliveriesForRun(ctx, runID, since, 10)
-			}),
+			load:         fromPipelineClaim(runtimepipelineobligation.RunRecoveryQuery(runID)),
 		},
 		{
 			name:         "pending_delivery_diagnostics",
@@ -222,17 +219,6 @@ func assertPersistedNodeProducerEvent(t *testing.T, event events.Event, eventID,
 		event.SourceRoute().FlowInstance != "source-flow/one" {
 		t.Fatalf("event-owned facts changed: task=%q depth=%d payload=%s", event.TaskID(), event.ChainDepth(), event.Payload())
 	}
-}
-
-func persistedEventByID(t *testing.T, records []events.PersistedReplayEvent, eventID string) events.Event {
-	t.Helper()
-	for _, record := range records {
-		if record.Event.ID() == eventID {
-			return record.Event
-		}
-	}
-	t.Fatalf("event %s not returned in %#v", eventID, records)
-	return events.Event{}
 }
 
 func setPersistedEventProducerIdentity(fixture authorActivityReceiptFixture, ctx context.Context, eventID, producerID, producerType string) error {

@@ -25,7 +25,7 @@ func (p *transitionFailurePublisher) Publish(_ context.Context, event events.Eve
 	return p.publishErr
 }
 
-func (p *transitionFailurePublisher) ReleaseRuntimeIngressQueue(context.Context, time.Duration, int) (int, error) {
+func (p *transitionFailurePublisher) ReleaseRuntimeIngressQueue(context.Context, int) (int, error) {
 	return p.releaseN, p.releaseErr
 }
 

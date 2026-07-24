@@ -17,6 +17,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -136,7 +137,7 @@ type runtimeLogStatusHarness struct {
 }
 
 type terminalAdmissionCompletionOwner interface {
-	UpsertPipelineReceipt(context.Context, string, string, *runtimefailures.Envelope) error
+	PipelineObligations() runtimepipelineobligation.Store
 	ConvergeNormalRunCompletion(context.Context, string, []string, map[string][]string) error
 }
 
@@ -187,7 +188,11 @@ func convergeTerminalAdmissionRun(
 	if _, err := db.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("seed terminal completion entity: %w", err)
 	}
-	if err := owner.UpsertPipelineReceipt(ctx, eventID, "processed", nil); err != nil {
+	work, err := owner.PipelineObligations().ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
+	if err != nil {
+		return fmt.Errorf("claim terminal completion event: %w", err)
+	}
+	if err := owner.PipelineObligations().Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
 		return fmt.Errorf("settle terminal completion event: %w", err)
 	}
 	if err := owner.ConvergeNormalRunCompletion(ctx, eventID, nil, map[string][]string{"terminal-admission": {"done"}}); err != nil {

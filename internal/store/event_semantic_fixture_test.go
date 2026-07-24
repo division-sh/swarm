@@ -12,7 +12,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/eventrecord/sqlite"
@@ -31,7 +31,7 @@ type selectedForkEventFixtureStore interface {
 }
 
 func commitSemanticEventFixture(ctx context.Context, store any, event events.Event) error {
-	_, err := commitSemanticEventFixtureOutcome(ctx, store, event, nil, runtimereplayclaim.CommittedReplayScopeDirect)
+	_, err := commitSemanticEventFixtureOutcome(ctx, store, event, nil, runtimepipelineobligation.ScopeDirect)
 	return err
 }
 
@@ -40,16 +40,16 @@ func commitSemanticEventFixtureWithAgents(ctx context.Context, store any, event 
 	for _, agentID := range agentIDs {
 		routes = append(routes, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: agentID})
 	}
-	scope := runtimereplayclaim.CommittedReplayScopeDirect
+	scope := runtimepipelineobligation.ScopeDirect
 	if len(routes) > 0 {
-		scope = runtimereplayclaim.CommittedReplayScopeSubscribed
+		scope = runtimepipelineobligation.ScopeSubscribed
 	}
 	_, err := commitSemanticEventFixtureOutcome(ctx, store, event, routes, scope)
 	return err
 }
 
 func commitSemanticEventFixtureWithRoutes(ctx context.Context, store any, event events.Event, routes []events.DeliveryRoute) error {
-	_, err := commitSemanticEventFixtureOutcome(ctx, store, event, routes, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	_, err := commitSemanticEventFixtureOutcome(ctx, store, event, routes, runtimepipelineobligation.ScopeSubscribed)
 	return err
 }
 
@@ -61,14 +61,15 @@ func commitSemanticParentFixture(ctx context.Context, store any, runID, parentEv
 	if err := commitSemanticEventFixture(ctx, store, parent); err != nil {
 		return err
 	}
-	switch selected := store.(type) {
-	case *PostgresStore:
-		return selected.UpsertPipelineReceipt(ctx, parentEventID, "processed", nil)
-	case *SQLiteRuntimeStore:
-		return selected.UpsertPipelineReceipt(ctx, parentEventID, "processed", nil)
-	default:
-		return fmt.Errorf("semantic parent fixture store %T is unsupported", store)
+	owner, err := pipelineObligationFixtureOwner(store)
+	if err != nil {
+		return err
 	}
+	work, err := owner.ClaimEvent(ctx, parentEventID, runtimepipelineobligation.PurposeRecovery)
+	if err != nil {
+		return err
+	}
+	return owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted"))
 }
 
 func commitSemanticParentFixtureTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, runID, parentEventID string, createdAt time.Time) error {
@@ -79,14 +80,46 @@ func commitSemanticParentFixtureTx(ctx context.Context, store eventCommitTxStore
 	if err := commitSemanticEventFixtureTx(ctx, store, tx, parent); err != nil {
 		return err
 	}
-	switch selected := store.(type) {
+	postgres := false
+	switch store.(type) {
 	case *PostgresStore:
-		return selected.UpsertPipelineReceiptTx(ctx, tx, parentEventID, "processed", nil)
+		postgres = true
 	case *SQLiteRuntimeStore:
-		return selected.UpsertPipelineReceiptTx(ctx, tx, parentEventID, "processed", nil)
 	default:
 		return fmt.Errorf("semantic parent fixture store %T is unsupported", store)
 	}
+	return writePipelineDispositionTx(
+		ctx,
+		tx,
+		parentEventID,
+		runtimepipelineobligation.PurposeRecovery,
+		runtimepipelineobligation.Acknowledged("pipeline_persisted"),
+		postgres,
+		createdAt,
+	)
+}
+
+func pipelineObligationFixtureOwner(selectedStore any) (runtimepipelineobligation.Store, error) {
+	switch selected := selectedStore.(type) {
+	case *PostgresStore:
+		return selected.PipelineObligations(), nil
+	case *SQLiteRuntimeStore:
+		return selected.PipelineObligations(), nil
+	default:
+		return nil, fmt.Errorf("semantic fixture store %T has no pipeline obligation owner", selectedStore)
+	}
+}
+
+func acknowledgePipelineEventFixture(ctx context.Context, selectedStore any, eventID string) error {
+	owner, err := pipelineObligationFixtureOwner(selectedStore)
+	if err != nil {
+		return err
+	}
+	work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
+	if err != nil {
+		return err
+	}
+	return owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted"))
 }
 
 func commitDiagnosticRuntimeLogFixture(ctx context.Context, store diagnosticRuntimeLogFixtureStore, event events.Event) error {
@@ -134,7 +167,7 @@ func commitSelectedForkEventFixture(
 	outcome, err := store.CommitSelectedForkEvent(ctx, CommitSelectedForkEventRequest{
 		Commit: runtimebus.CommitPublishRequest{
 			Event:       admitted,
-			ReplayScope: runtimereplayclaim.CommittedReplayScopeDirect,
+			ReplayScope: runtimepipelineobligation.ScopeDirect,
 		},
 		Lineage: lineage,
 	})
@@ -179,7 +212,7 @@ func commitDeliveryReplayEventFixture(
 		if outcome != runtimebus.EventAppendInserted {
 			return fmt.Errorf("delivery-replay fixture append outcome = %d, want inserted", outcome)
 		}
-		if err := store.upsertCommittedReplayScopeSpec(txctx, tx, forkEventID, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
+		if err := insertCommittedPipelineScopeTx(txctx, tx, forkEventID, runtimepipelineobligation.ScopeDirect, true, time.Now().UTC()); err != nil {
 			return err
 		}
 		route := events.DeliveryRoute{SubscriberType: subscriberType, SubscriberID: subscriberID}
@@ -216,7 +249,7 @@ func commitSemanticEventFixtureOutcome(
 	store any,
 	event events.Event,
 	routes []events.DeliveryRoute,
-	scope runtimereplayclaim.CommittedReplayScope,
+	scope runtimepipelineobligation.CommittedScope,
 ) (runtimebus.EventAppendOutcome, error) {
 	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
@@ -230,7 +263,7 @@ func commitAdmittedSemanticEventFixtureOutcome(
 	store any,
 	admitted events.AdmittedEvent,
 	routes []events.DeliveryRoute,
-	scope runtimereplayclaim.CommittedReplayScope,
+	scope runtimepipelineobligation.CommittedScope,
 ) (runtimebus.EventAppendOutcome, error) {
 	if admitted.Class() == events.EventAdmissionSelectedForkReplay {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("selected-fork replay events require their closed named persistence operation")
@@ -285,9 +318,9 @@ func commitSemanticEventFixtureWithRoutesTx(ctx context.Context, store eventComm
 	if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
 		return err
 	}
-	scope := runtimereplayclaim.CommittedReplayScopeDirect
+	scope := runtimepipelineobligation.ScopeDirect
 	if len(routes) > 0 {
-		scope = runtimereplayclaim.CommittedReplayScopeSubscribed
+		scope = runtimepipelineobligation.ScopeSubscribed
 	}
 	return (sqlPublishCommitter{tx: tx, store: store}).commitInitialSideEffects(ctx, runtimebus.CommitPublishRequest{
 		Event: admitted, DeliveryRoutes: events.NormalizeDeliveryRoutes(routes), ReplayScope: scope,

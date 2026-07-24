@@ -14,12 +14,14 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
@@ -863,20 +865,27 @@ func seedDecisionCardCompletionEvent(t *testing.T, ctx context.Context, cards de
 		if err := commitSemanticEventFixture(ctx, selected, evt); err != nil {
 			t.Fatal(err)
 		}
-		if err := selected.UpsertPipelineReceipt(ctx, eventID, "processed", nil); err != nil {
-			t.Fatal(err)
-		}
+		acknowledgeDecisionCardPipelineEvent(t, ctx, selected.PipelineObligations(), eventID)
 	case *SQLiteRuntimeStore:
 		if err := commitSemanticEventFixture(ctx, selected, evt); err != nil {
 			t.Fatal(err)
 		}
-		if err := selected.UpsertPipelineReceipt(ctx, eventID, "processed", nil); err != nil {
-			t.Fatal(err)
-		}
+		acknowledgeDecisionCardPipelineEvent(t, ctx, selected.PipelineObligations(), eventID)
 	default:
 		t.Fatalf("unexpected decision card store %T", cards)
 	}
 	return eventID
+}
+
+func acknowledgeDecisionCardPipelineEvent(t *testing.T, ctx context.Context, owner runtimepipelineobligation.Store, eventID string) {
+	t.Helper()
+	work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func setDecisionCardCompletionEntityState(t *testing.T, db *sql.DB, postgres bool, runID, entityID, state string) {
@@ -1070,12 +1079,12 @@ func appendDecisionCardTestEvent(t *testing.T, ctx context.Context, cards decisi
 		if err := commitSemanticEventFixtureTx(ctx, selected, tx, evt); err != nil {
 			return err
 		}
-		return selected.UpsertPipelineReceiptTx(ctx, tx, evt.ID(), "processed", nil)
+		return writePipelineDispositionTx(ctx, tx, evt.ID(), runtimepipelineobligation.PurposeRecovery, runtimepipelineobligation.Acknowledged("pipeline_persisted"), true, time.Now().UTC())
 	case *SQLiteRuntimeStore:
 		if err := commitSemanticEventFixtureTx(ctx, selected, tx, evt); err != nil {
 			return err
 		}
-		return selected.UpsertPipelineReceiptTx(ctx, tx, evt.ID(), "processed", nil)
+		return writePipelineDispositionTx(ctx, tx, evt.ID(), runtimepipelineobligation.PurposeRecovery, runtimepipelineobligation.Acknowledged("pipeline_persisted"), false, time.Now().UTC())
 	default:
 		return fmt.Errorf("unexpected decision card store %T", cards)
 	}
@@ -1178,15 +1187,26 @@ func completeProposedEffectRouteInTestMutation(t *testing.T, ctx context.Context
 
 func requireDecisionCardPipelineReceipt(t *testing.T, ctx context.Context, cards decisioncard.Store, role, eventID string) {
 	t.Helper()
-	reader, ok := cards.(interface {
-		HasProcessedPipelineReceipt(context.Context, string) (bool, error)
-	})
-	if !ok {
-		t.Fatalf("decision card store %T has no pipeline receipt reader", cards)
+	var fixture authorActivityReceiptFixture
+	switch selected := cards.(type) {
+	case *SQLiteRuntimeStore:
+		fixture = authorActivityReceiptFixture{
+			store:   selected,
+			db:      selected.DB,
+			dialect: runtimeauthoractivity.DialectSQLite,
+		}
+	case *PostgresStore:
+		fixture = authorActivityReceiptFixture{
+			store:   selected,
+			db:      selected.DB,
+			dialect: runtimeauthoractivity.DialectPostgres,
+		}
+	default:
+		t.Fatalf("decision card store %T has no selected-store receipt fixture", cards)
 	}
-	processed, err := reader.HasProcessedPipelineReceipt(ctx, eventID)
-	if err != nil || !processed {
-		t.Fatalf("%s event %s pipeline receipt processed=%v err=%v", role, eventID, processed, err)
+	count, outcome, _ := readExactPipelineReceipt(t, ctx, fixture, eventID)
+	if count != 1 || outcome != "success" {
+		t.Fatalf("%s event %s exact pipeline receipt count=%d outcome=%q", role, eventID, count, outcome)
 	}
 }
 

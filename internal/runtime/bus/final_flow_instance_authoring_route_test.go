@@ -11,6 +11,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring"
 	"github.com/google/uuid"
@@ -146,8 +147,10 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 	}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)
 	}
-	if err := eb.PublishPersistedRecipients(context.Background(), evt, nil); err != nil {
-		t.Fatalf("PublishPersistedRecipients: %v", err)
+	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
+		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
+	}, nil); err != nil {
+		t.Fatalf("RecoverPersistedPipeline: %v", err)
 	}
 	replayed := requireBusEvent(t, retryTarget, "persisted replay after descriptor drift")
 	if replayed.FlowInstance() != activation.Instance.InstancePath || replayed.EntityID() != activation.Instance.EntityID {

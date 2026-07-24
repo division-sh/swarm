@@ -13,7 +13,7 @@ import (
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
 var errInboundPublicationNotFound = errors.New("inbound publication not found")
@@ -115,7 +115,7 @@ func (m *sqlInboundPublicationMutation) FinalizeInboundPublication(ctx context.C
 		return fmt.Errorf("admit inbound evidence: %w", err)
 	}
 	committer := sqlPublishCommitter{tx: m.tx, store: m.eventStore}
-	if _, err := committer.commitNamedEvent(ctx, "finalize inbound publication evidence", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformInboundRecord, runtimebus.CommitPublishRequest{Event: evidence, ReplayScope: runtimereplayclaim.CommittedReplayScopeDirect}); err != nil {
+	if _, err := committer.commitNamedEvent(ctx, "finalize inbound publication evidence", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformInboundRecord, runtimebus.CommitPublishRequest{Event: evidence, ReplayScope: runtimepipelineobligation.ScopeDirect}); err != nil {
 		return fmt.Errorf("commit inbound evidence: %w", err)
 	}
 	if err := recordInboundAuthorActivity(ctx, finalization.EvidenceEvent, m.request.Provider); err != nil {
@@ -524,12 +524,8 @@ func validatePostgresInboundPublicationIntegrityTx(ctx context.Context, db inbou
 	}
 	for index := range record.Events {
 		child := &record.Events[index]
-		var scopeCount int
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM committed_replay_scopes WHERE event_id = $1::uuid`, child.EventID).Scan(&scopeCount); err != nil {
-			return fmt.Errorf("validate inbound publication child replay scope: %w", err)
-		}
-		if scopeCount != 1 {
-			return fmt.Errorf("inbound publication %s child ordinal %d is missing committed replay scope", record.PublicationID, index)
+		if _, err := loadCommittedPipelineScope(ctx, db, child.EventID, true); err != nil {
+			return fmt.Errorf("inbound publication %s child ordinal %d committed pipeline scope: %w", record.PublicationID, index, err)
 		}
 		routes, err := loadPostgresInboundPublicationRoutes(ctx, db, child.EventID)
 		if err != nil {

@@ -351,12 +351,8 @@ func validateSQLiteInboundPublicationIntegrityTx(ctx context.Context, db inbound
 	}
 	for index := range record.Events {
 		child := &record.Events[index]
-		var scopeCount int
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM committed_replay_scopes WHERE event_id = ?`, child.EventID).Scan(&scopeCount); err != nil {
-			return fmt.Errorf("validate sqlite inbound publication child replay scope: %w", err)
-		}
-		if scopeCount != 1 {
-			return fmt.Errorf("sqlite inbound publication %s child ordinal %d is missing committed replay scope", record.PublicationID, index)
+		if _, err := loadCommittedPipelineScope(ctx, db, child.EventID, false); err != nil {
+			return fmt.Errorf("sqlite inbound publication %s child ordinal %d committed pipeline scope: %w", record.PublicationID, index, err)
 		}
 		routes, err := loadSQLiteInboundPublicationRoutes(ctx, db, child.EventID)
 		if err != nil {

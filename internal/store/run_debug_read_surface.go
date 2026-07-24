@@ -654,25 +654,16 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 
 func (s *PostgresStore) loadRunTestQuiescence(ctx context.Context, runID string) (RunTestQuiescence, error) {
 	var out RunTestQuiescence
-	quiescenceArgs := append([]any{runID}, diagnosticDirectReplayEventArgs()...)
 	summary, err := s.SummarizeRun(ctx, runID)
 	if err != nil {
 		return RunTestQuiescence{}, fmt.Errorf("load run test quiescence active deliveries: %w", err)
 	}
 	out.ActiveDeliveries = summary.Pending + summary.InProgress + summary.RetryScheduled
-	if err := s.DB.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM events e
-		LEFT JOIN event_receipts r
-			ON r.event_id = e.event_id
-			AND r.subscriber_type = 'platform'
-			AND r.subscriber_id = 'pipeline'
-		WHERE e.run_id = $1::uuid
-		  AND `+postgresDiagnosticDirectReplayExclusionSQL("e", 2)+`
-		  AND r.event_id IS NULL
-	`, quiescenceArgs...).Scan(&out.UnsettledPipelineEvents); err != nil {
+	pipelineSummary, err := s.PipelineObligations().SummarizeRun(ctx, runID)
+	if err != nil {
 		return RunTestQuiescence{}, fmt.Errorf("load run test quiescence unsettled pipeline events: %w", err)
 	}
+	out.UnsettledPipelineEvents = pipelineSummary.Replayable + pipelineSummary.Deferred
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM timers

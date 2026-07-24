@@ -1094,7 +1094,7 @@ func (m *providerRollbackMutation) FinalizePreparedPublish(ctx context.Context, 
 			return err
 		}
 	}
-	if req.PipelineReceipt != nil {
+	if req.Disposition != nil {
 		if err := m.proof.fail(providerRollbackBeforeReceipt); err != nil {
 			return err
 		}

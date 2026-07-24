@@ -712,7 +712,7 @@ func telegramConnectorSupportedSurfaceActivityStatusForEvent(t *testing.T, backe
 func countTelegramConnectorSupportedSurfaceFailureEventsForEvent(t *testing.T, backend telegramConnectorSupportedSurfaceBackend, providerEventID string) int {
 	t.Helper()
 	inboundEventID := loadTelegramConnectorSupportedSurfaceInboundEventIDByRun(t, backend, backend.runID, providerEventID)
-	failureEventType := boundedProviderFlowID + ".telegram_send_message.failed"
+	failureEventType := boundedProviderFlowID + "/telegram_send_message.failed"
 	var count int
 	var err error
 	if backend.sqlite {

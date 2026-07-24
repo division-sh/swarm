@@ -214,23 +214,11 @@ func normalRunCompletionGateObligationsSettledTx(ctx context.Context, tx *sql.Tx
 }
 
 func normalRunCompletionPipelinesSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
-	var unsettled bool
-	if err := tx.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM events e
-			LEFT JOIN event_receipts r
-				ON r.event_id = e.event_id
-				AND r.subscriber_type = 'platform'
-				AND r.subscriber_id = 'pipeline'
-			WHERE e.run_id = $1::uuid
-			  AND e.event_name <> '`+runtimeLogEventName+`'
-			  AND (r.event_id IS NULL OR COALESCE(r.outcome, '') <> 'success')
-		)
-	`, runID).Scan(&unsettled); err != nil {
+	summary, err := summarizePipelineRun(ctx, tx, runID, true)
+	if err != nil {
 		return false, fmt.Errorf("check normal run pipeline settlement: %w", err)
 	}
-	return !unsettled, nil
+	return !summary.BlocksCompletion(), nil
 }
 
 func normalRunCompletionDeliveriesSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {

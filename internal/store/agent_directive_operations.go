@@ -15,7 +15,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
@@ -62,7 +62,7 @@ func (s *PostgresStore) ReserveDirectiveOperation(ctx context.Context, req runti
 			}
 		}
 		outcome, err := (sqlPublishCommitter{tx: tx, store: s}).commitNamedEvent(txctx, "reserve directive operation", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformAgentDirective, runtimebus.CommitPublishRequest{
-			Event: req.Event, ReplayScope: runtimereplayclaim.CommittedReplayScopeDirect,
+			Event: req.Event, ReplayScope: runtimepipelineobligation.ScopeDirect,
 		})
 		if err != nil {
 			return err
@@ -112,7 +112,7 @@ func (s *SQLiteRuntimeStore) ReserveDirectiveOperation(ctx context.Context, req 
 			}
 		}
 		outcome, err := (sqlPublishCommitter{tx: tx, store: s}).commitNamedEvent(txctx, "reserve directive operation", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformAgentDirective, runtimebus.CommitPublishRequest{
-			Event: req.Event, ReplayScope: runtimereplayclaim.CommittedReplayScopeDirect,
+			Event: req.Event, ReplayScope: runtimepipelineobligation.ScopeDirect,
 		})
 		if err != nil {
 			return err
@@ -321,7 +321,7 @@ func (s *PostgresStore) FinalizeDirectiveSuccess(ctx context.Context, operationI
 		if op.State != runtimeagentcontrol.DirectiveOperationExecuted && op.State != runtimeagentcontrol.DirectiveOperationSucceeded {
 			return runtimeagentcontrol.ErrorForDirectiveOperation(op)
 		}
-		if err := s.UpsertPipelineReceiptTx(txctx, tx, op.DirectiveEventID, "processed", nil); err != nil {
+		if err := s.terminalizePipelineObligationTx(txctx, tx, op.DirectiveEventID, runtimepipelineobligation.Acknowledged("processed"), now); err != nil {
 			return err
 		}
 		if err := storePostgresDirectiveProjection(txctx, tx, op, now, ttl); err != nil {
@@ -352,7 +352,7 @@ func (s *SQLiteRuntimeStore) FinalizeDirectiveSuccess(ctx context.Context, opera
 		if op.State != runtimeagentcontrol.DirectiveOperationExecuted && op.State != runtimeagentcontrol.DirectiveOperationSucceeded {
 			return runtimeagentcontrol.ErrorForDirectiveOperation(op)
 		}
-		if err := s.UpsertPipelineReceiptTx(txctx, tx, op.DirectiveEventID, "processed", nil); err != nil {
+		if err := s.terminalizePipelineObligationTx(txctx, tx, op.DirectiveEventID, runtimepipelineobligation.Acknowledged("processed"), now); err != nil {
 			return err
 		}
 		if err := storeSQLiteDirectiveProjectionTx(txctx, tx, op, now, ttl); err != nil {
@@ -454,7 +454,7 @@ func (s *PostgresStore) finalizePostgresDirectiveFailure(ctx context.Context, op
 		if op.State != from || (ownerID != "" && op.ExecutionOwnerID != ownerID) {
 			return runtimeagentcontrol.ErrorForDirectiveOperation(op)
 		}
-		if err := s.UpsertPipelineReceiptTx(txctx, tx, op.DirectiveEventID, "error", &failure); err != nil {
+		if err := s.terminalizePipelineObligationTx(txctx, tx, op.DirectiveEventID, runtimepipelineobligation.Terminal("", &failure), now); err != nil {
 			return err
 		}
 		res, err := tx.ExecContext(txctx, `UPDATE agent_directive_operations SET state = $3, failure = $4::jsonb, execution_lease_expires_at = NULL, completed_at = $5, updated_at = $5, expires_at = $6 WHERE operation_id = $1::uuid AND state = $2`, operationID, string(from), string(to), string(failureRaw), now.UTC(), terminalDirectiveExpiry(to, now, ttl))
@@ -494,7 +494,7 @@ func (s *SQLiteRuntimeStore) finalizeSQLiteDirectiveFailure(ctx context.Context,
 		if op.State != from || (ownerID != "" && op.ExecutionOwnerID != ownerID) {
 			return runtimeagentcontrol.ErrorForDirectiveOperation(op)
 		}
-		if err := s.UpsertPipelineReceiptTx(txctx, tx, op.DirectiveEventID, "error", &failure); err != nil {
+		if err := s.terminalizePipelineObligationTx(txctx, tx, op.DirectiveEventID, runtimepipelineobligation.Terminal("", &failure), now); err != nil {
 			return err
 		}
 		res, err := tx.ExecContext(txctx, `UPDATE agent_directive_operations SET state = ?, failure = ?, execution_lease_expires_at = NULL, completed_at = ?, updated_at = ?, expires_at = ? WHERE operation_id = ? AND state = ?`, string(to), string(failureRaw), now.UTC(), now.UTC(), terminalDirectiveExpiry(to, now, ttl), operationID, string(from))

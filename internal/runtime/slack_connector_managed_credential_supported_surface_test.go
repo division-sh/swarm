@@ -669,7 +669,7 @@ func countSlackManagedConnectorActivityAttemptsForSource(t *testing.T, backend s
 
 func countSlackManagedConnectorFailureEventsForSource(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string) int {
 	t.Helper()
-	failureEventType := boundedProviderFlowID + ".slack_post_message.failed"
+	failureEventType := boundedProviderFlowID + "/slack_post_message.failed"
 	var count int
 	var err error
 	if backend.sqlite {

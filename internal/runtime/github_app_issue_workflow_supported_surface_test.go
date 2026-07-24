@@ -649,7 +649,7 @@ func assertGitHubAppIssueWorkflowManagedCredentialFailureBeforeDispatch(t *testi
 	if got := countGitHubActivityAttemptsForSource(t, backend, "github.create_issue_comment", inboundEventID); got != 1 {
 		t.Fatalf("%s %s activity attempts = %d, want one failed claim", backend.name, label, got)
 	}
-	requireGitHubFailureEventEventually(t, backend, label, boundedProviderFlowID+".github_create_issue_comment.failed", inboundEventID)
+	requireGitHubFailureEventEventually(t, backend, label, boundedProviderFlowID+"/github_create_issue_comment.failed", inboundEventID)
 	if got := fake.tokenRequestCount(); got != beforeTokens {
 		t.Fatalf("%s %s token requests = %d, want still %d", backend.name, label, got, beforeTokens)
 	}

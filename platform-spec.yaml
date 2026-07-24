@@ -5459,21 +5459,23 @@ engine:
         dead_letters row before the transaction may commit. Every terminal dead-letter delivery therefore has exact
         `{delivery_id, claim_version}` evidence; terminalization cannot leave lifecycle state visible without that evidence.
     - name: platform_pipeline_receipt_rows
-      owner: runtimebus.CommitPublishOwner and named parent quiescence operations
-      sqlite_owner: internal/store.SQLiteRuntimeStore private platform receipt adapter
-      postgres_owner: internal/store.PostgresStore private platform receipt adapter
+      owner: internal/runtime/pipelineobligation.Store
+      sqlite_owner: internal/store.SQLiteRuntimeStore private pipeline-obligation adapter
+      postgres_owner: internal/store.PostgresStore private pipeline-obligation adapter
       scope: >
-        event_receipts records platform pipeline acknowledgement only. It never represents an executable agent/node claim,
-        retry, settlement, idempotency key, or terminality decision. Ordinary writes require an active run; parent
-        quiescence writes its terminal platform receipt inside the parent transaction.
+        The exact event_receipts row identified by subscriber_type=platform and subscriber_id=pipeline records only the
+        canonical processing-obligation disposition. It never represents an executable agent/node claim, workflow-transition
+        receipt, retry attempt, idempotency key, fork evidence, compute evidence, physical cleanup, or a caller-owned status.
+        Every write is claim-fenced or occurs through a named parent transaction serialized against the current claim.
     - name: committed_replay_scope_rows
-      owner: runtimereplayclaim committed replay contracts under '#2106'
-      sqlite_owner: internal/store.SQLiteRuntimeStore committed replay scope and replay-claim methods
-      postgres_owner: internal/store.PostgresStore committed replay scope and replay-claim methods
+      owner: internal/runtime/pipelineobligation.Store
+      sqlite_owner: internal/store.SQLiteRuntimeStore private pipeline-obligation adapter
+      postgres_owner: internal/store.PostgresStore private pipeline-obligation adapter
       scope: >
-        committed_replay_scopes is event-level replay participation truth. It is separate from executable delivery rows;
-        no synthetic subscriber, marker delivery, discriminator, or legacy interpretation is permitted. Process-local and
-        cross-process replay exclusion remain selected-store concerns behind the named replay-claim contract.
+        committed_replay_scopes is the exact event-level direct/subscribed processing-scope fact. Named event commits invoke
+        the private owner adapter in the same transaction. Recovery consumes the persisted value without route inference,
+        marker deliveries, synthetic subscribers, fallback, or repair. Missing or invalid scope fails closed and is
+        quarantined by the owner. Existing selected stores are unsupported; there is no migration or compatibility reader.
     - name: llm_conversation_and_turn_rows
       owner: internal/runtime/llm TurnPersistence and ConversationPersistence
       sqlite_owner: internal/store.SQLiteRuntimeStore conversation and agent turn methods
@@ -12405,7 +12407,7 @@ platform_tables:
         CREATE TABLE committed_replay_scopes (
             event_id   UUID PRIMARY KEY REFERENCES events(event_id),
             run_id     UUID REFERENCES runs(run_id),
-            scope      TEXT NOT NULL CHECK (scope IN ('direct', 'subscribed', 'direct_and_subscribed')),
+            scope      TEXT NOT NULL CHECK (scope IN ('direct', 'subscribed')),
             created_at TIMESTAMPTZ NOT NULL,
             updated_at TIMESTAMPTZ NOT NULL,
             CHECK (updated_at >= created_at),
@@ -24859,7 +24861,10 @@ api_specification:
           unsettled_pipeline_events:
             type: integer
             minimum: 0
-            description: Same-run non-runtime-log events whose platform/pipeline receipt is absent or not successful.
+            description: >-
+              Same-run non-runtime-log events whose platform/pipeline receipt is absent or whose canonical decision-route
+              disposition remains deferred. Terminal non-success receipts are immutable settled evidence: they block
+              successful normal completion but are not live work.
           due_timers:
             type: integer
             minimum: 0
@@ -30699,6 +30704,113 @@ process_local_work_lifetime_authority:
     unactivated_store_composition: '#2107'
     durable_run_completion: '#2111'
     durable_timer_state: '#2113'
+
+durable_pipeline_processing_obligation_authority:
+  implemented_by: '#2106'
+  owner: internal/runtime/pipelineobligation.Store through one required selected-store capability
+  broadest_concept: >
+    The complete durable platform-pipeline processing obligation from pre-visibility publication exclusion through
+    age-independent recovery, exact scope hydration, dispatch handoff, typed disposition, release/reclaim, summaries,
+    and claim-fenced parent terminalization.
+  durable_facts:
+    event: the immutable admitted event record owned by the event record contract
+    scope: one exact committed_replay_scopes direct/subscribed fact written with the event
+    acknowledgement: one exact event_receipts platform/pipeline row for a terminal disposition
+    decision_route: one age-independent decision_card_route_obligations row where human-decision routing requires it
+    forbidden:
+    - new generic replay or processing queue
+    - optional capability assembly
+    - caller-owned status strings or context overrides
+    - backend lease, connection, transaction, advisory-lock, or mutex capability escape
+    - route, recipient, source, or scope inference
+    - migration, compatibility, fallback, or dual ownership
+  claim_contract:
+    publication: >
+      Foreground publication acquires the exact event-identity claim before the event can become visible and retains
+      it through post-commit dispatch, durable disposition, and release.
+    recovery: >
+      Global, per-run, startup, periodic, ingress-resume, and selected-fork recovery select without an age cutoff,
+      acquire the same event-identity exclusion, recheck mutable eligibility, and return one immutable event, exact
+      committed scope, and opaque current claim. Canonical hydration that retains exact event evidence but proves the
+      event unsafe to dispatch returns a typed terminal pre-dispatch disposition bound to that same claim; the recovery
+      consumer commits it and emits aftermath evidence without invoking any interceptor, recipient, provider, or handler.
+    current_claim: >
+      One event has at most one process-local current claim in the exclusively owned selected-store runtime. PostgreSQL
+      advisory locks and SQLite mutation serialization fence each database mutation edge; opaque capability identity
+      rejects foreign, stale, released, duplicate, and wrong-purpose mutation. Settlement does not accept a caller-selected
+      event ID, so redirecting a capability to another obligation is structurally unrepresentable.
+    release: >
+      Cancellation or retry releases the current claim without changing the durable obligation. Release and failed
+      settlement preserve later reclaimability; a released claim cannot settle.
+  disposition_contract:
+    vocabulary: [acknowledged, deferred, terminal_error, dead_letter, quarantined]
+    acknowledged: writes the exact successful platform/pipeline row and closes any pending decision-route obligation
+    deferred: >
+      Valid only for publication or decision-route ownership, requires an exact retry time, leaves the platform/pipeline
+      row absent, and advances the pending decision-route obligation.
+    terminal_error: writes a typed non-success platform/pipeline row and quarantines any pending decision-route obligation
+    dead_letter: writes a typed non-success platform/pipeline row and quarantines any pending decision-route obligation
+    quarantined: >
+      Writes a typed schema/poison non-success row and quarantines any pending decision-route obligation. Malformed
+      recovery work classified during canonical hydration must use this disposition before dispatch.
+    atomicity: >
+      Receipt and decision-route mutation commit in one transaction. Any failed mutation leaves no partial disposition
+      and retains the current claim for explicit retry or release.
+  decision_route_contract:
+    ordering: >
+      Successful route execution first writes decision_route_processed through the current claim. Run convergence and
+      decision-obligation completion follow without rerouting. While convergence remains pending, the typed run summary
+      deliberately reports both one successful acknowledgement and one deferred obligation; these are orthogonal facts,
+      not mutually exclusive statuses.
+    poison: >
+      A route failure before processed acknowledgement writes one typed non-success disposition and quarantines the
+      route before recovery advances to later work.
+  projection_contracts:
+    global_presence: >
+      GlobalWorkPresence reports age-independent processing eligibility, due decision-route work, and the oldest eligible
+      event time. Diagnostic-direct events and inactive or forked-run work are not processing eligible.
+    run_summary: >
+      RunSummary separately counts replayable absent acknowledgements, successful acknowledgements, terminal non-success
+      acknowledgements, pending decision-route obligations, the pending subset that already has its processed
+      acknowledgement, and diagnostic-direct exclusions, and reports inactive and forked run state. Open-work projections
+      include every pending route. Successful-completion policy excludes the already-processed pending subset because its
+      route execution is complete and only convergence settlement remains. Final run policy is owned by #2111 and consumes
+      this projection without reinterpreting receipts.
+  parent_terminalization:
+    rule: >
+      Active quiescence, preservation, run stop, standing lifecycle, directive, and decision-route parent operations use
+      one private typed primitive inside their named transaction. The operation fails busy while a foreground or recovery
+      claim is current, so a late claim-owned success cannot overwrite or outlive the parent disposition.
+  process_local_handoff:
+    owner: process_local_work_lifetime_authority under '#2073'
+    rule: >
+      The durable claim and process-local occurrence are distinct capabilities. Accepted dispatch retains the #2073
+      occurrence until disposition and claim release complete; runtime retirement joins it before selected-store close.
+  receipt_family_boundary:
+    exact_identity: '{subscriber_type: platform, subscriber_id: pipeline}'
+    excluded_families:
+    - workflow-transition receipts such as pipeline:<node>
+    - executable agent/node delivery outcomes under '#2105'
+    - selected-fork revision and lineage evidence
+    - compute-module evidence
+    - dead-letter diagnostics
+    - destructive-reset and preservation physical cleanup
+  invariants:
+    PPO-OWN-001: One selected-store owner; no optional capability, reader, writer, settler, or fake-store assembler survives.
+    PPO-DIS-001: One closed typed disposition vocabulary owns every foreground, recovery, directive, decision-route, and initial outcome.
+    PPO-SEL-001: Eligibility and canonical hydration are exact and age-independent; diagnostic, inactive, and forked exclusions are explicit.
+    PPO-CLM-001: Exclusion precedes final eligibility recheck and only one current claim exists per event.
+    PPO-PUB-001: Foreground publication and every recovery surface share the exact event-identity exclusion.
+    PPO-SET-001: Acknowledgement and decision-route disposition require the current claim and commit atomically.
+    PPO-REL-001: Cancellation, failed settlement, release, and restart preserve reclaimability without stranded ownership.
+    PPO-SCP-001: Committed scope is exact persisted truth; no delivery marker, current-route inference, fallback, or repair exists.
+    PPO-DSP-001: Dispatch consumes the process-local owner and cannot outlive runtime retirement or selected-store release.
+    PPO-DCR-001: Decision-route defer, quarantine, processed acknowledgement, convergence retry, and completion are age-independent and ordered.
+    PPO-GLO-001: Global durable-work presence is one typed age-independent projection.
+    PPO-SUM-001: Per-run summary preserves absent, successful, terminal non-success, deferred, diagnostic, inactive, and forked distinctions.
+    PPO-FAM-001: Exact platform acknowledgement remains structurally separate from every other receipt, delivery, evidence, and cleanup family.
+    PPO-PRV-001: SQL and backend synchronization mechanics are private to selected-store adapters.
+    PPO-PAR-001: Named parent terminalization is typed, transactional, and serialized against current processing ownership.
 
 agent_lifecycle_authority:
   owner: typed AgentManager lifecycle coordinator plus the selected SQLite/Postgres store

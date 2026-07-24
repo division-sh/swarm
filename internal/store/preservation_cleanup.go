@@ -9,6 +9,7 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	"github.com/lib/pq"
 )
@@ -186,24 +187,16 @@ func (s *PostgresStore) applyPreservationCleanup(ctx context.Context, req preser
 		})
 	}
 
-	eventReasons := map[string]string{}
 	for _, runID := range activeRunIDs {
 		target := targetByRun[runID]
-		transitions, err := s.terminalizeRunDeliveriesTx(ctx, tx, runID, target.ReasonCode)
+		if _, err := s.terminalizeRunDeliveriesTx(ctx, tx, runID, target.ReasonCode); err != nil {
+			return preservationcleanup.Result{}, err
+		}
+		terminalized, err := s.terminalizePostgresPipelineRunTx(ctx, tx, runID, runtimepipelineobligation.DeadLetter(target.ReasonCode, nil), now)
 		if err != nil {
 			return preservationcleanup.Result{}, err
 		}
-		for _, transition := range transitions {
-			if transition.Current.EventID != "" {
-				eventReasons[transition.Current.EventID] = target.ReasonCode
-			}
-		}
-	}
-	for eventID, reason := range eventReasons {
-		if err := upsertActiveRunQuiescencePipelineReceiptTx(ctx, tx, eventID, reason, reason, now); err != nil {
-			return preservationcleanup.Result{}, err
-		}
-		out.PipelineReceiptCount++
+		out.PipelineReceiptCount += terminalized
 	}
 	for _, session := range sessions {
 		target := targetByRun[session.RunID]

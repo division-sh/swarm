@@ -888,6 +888,23 @@ func runtimeWriterRules() []runtimeWriterRule {
 			reason:         "private executable-delivery lifecycle operations consume the named selected-store event transaction",
 		},
 		{
+			name:           "canonical postgres pipeline obligation owner",
+			path:           rx(`^internal/store/pipeline_obligation\.go$`),
+			function:       rx(`^(MarkDecisionProcessed|Settle)$`),
+			receiver:       rx(`^postgresPipelineObligationStore$`),
+			kinds:          kinds(primitiveBegin),
+			classification: classConsumesCanonical,
+			reason:         "the canonical PostgreSQL processing owner opens a short claim-fenced disposition transaction",
+		},
+		{
+			name:           "private exact platform pipeline receipt adapter",
+			path:           rx(`^internal/store/pipeline_obligation\.go$`),
+			function:       rx(`^writeExactPlatformPipelineReceipt$`),
+			kinds:          kinds(primitiveWrite),
+			classification: classActiveTxHelper,
+			reason:         "the exact platform/pipeline row is private to a current claim or named parent transaction",
+		},
+		{
 			name:           "delivery heartbeat work admission",
 			path:           rx(`^internal/runtime/deliverylifecycle/heartbeat\.go$`),
 			function:       rx(`^startClaimHeartbeat$`),

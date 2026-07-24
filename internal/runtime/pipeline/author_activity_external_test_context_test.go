@@ -13,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -104,6 +105,13 @@ func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts 
 	t.Helper()
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = pipelineExternalTestWorkOwner(t)
+	}
+	if opts.PipelineObligations == nil {
+		if provider, ok := eventStore.(interface {
+			PipelineObligations() runtimepipelineobligation.Store
+		}); ok {
+			opts.PipelineObligations = provider.PipelineObligations()
+		}
 	}
 	if registrar, ok := eventStore.(testAuthorActivityCatalogRegistrar); ok {
 		descriptors := testAuthorActivityEventDescriptors(t, opts)

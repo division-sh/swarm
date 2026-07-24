@@ -15,6 +15,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
@@ -86,6 +87,13 @@ func newStoreTestEventBus(t *testing.T, store runtimebus.EventStore, options ...
 	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = storeTestWorkOwner(t)
+	}
+	if opts.PipelineObligations == nil {
+		if provider, ok := store.(interface {
+			PipelineObligations() runtimepipelineobligation.Store
+		}); ok {
+			opts.PipelineObligations = provider.PipelineObligations()
+		}
 	}
 	return runtimebus.NewEventBusWithOptions(store, opts)
 }
