@@ -703,17 +703,17 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 
 			recovered := 0
 			for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline) && recovered == 0; {
-				var err error
-				recovered, err = bus.SweepUndispatched(ctx, 10)
+				result, err := bus.SweepPipelineObligations(ctx, 10)
 				if err != nil {
-					t.Fatalf("SweepUndispatched: %v", err)
+					t.Fatalf("SweepPipelineObligations: %v", err)
 				}
+				recovered = result.Settled
 				if recovered == 0 {
 					time.Sleep(10 * time.Millisecond)
 				}
 			}
 			if recovered != 1 {
-				t.Fatalf("SweepUndispatched recovered=%d, want 1", recovered)
+				t.Fatalf("SweepPipelineObligations recovered=%d, want 1", recovered)
 			}
 			instance, found, err := selected.workflowStore.Load(ctx, entityID)
 			if err != nil || !found {

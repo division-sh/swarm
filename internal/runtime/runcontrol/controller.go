@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
 const (
@@ -79,7 +81,7 @@ type Store interface {
 }
 
 type QueueReleaser interface {
-	ReleaseRunQueue(context.Context, string, int) (int, error)
+	ReleaseRunQueue(context.Context, string, int) (runtimepipelineobligation.SweepResult, error)
 }
 
 type Options struct {
@@ -162,27 +164,17 @@ func (c *Controller) releaseQueuedAfterContinue(ctx context.Context, runID strin
 	if c == nil || c.queue == nil {
 		return 0
 	}
-	const attempts = 3
-	const retryDelay = 25 * time.Millisecond
 	releasedTotal := 0
-	for attempt := 0; attempt < attempts; attempt++ {
-		released, err := c.queue.ReleaseRunQueue(ctx, runID, c.releaseLimit)
-		if err == nil {
-			releasedTotal += released
-			if released > 0 {
-				return releasedTotal
-			}
-		}
-		if attempt == attempts-1 {
+	for {
+		result, err := c.queue.ReleaseRunQueue(ctx, runID, c.releaseLimit)
+		releasedTotal += result.Settled
+		if err != nil {
 			return releasedTotal
 		}
-		select {
-		case <-ctx.Done():
+		if result.Exhausted || result.Blocked {
 			return releasedTotal
-		case <-time.After(retryDelay):
 		}
 	}
-	return releasedTotal
 }
 
 func (c *Controller) QueueableRunDispatchBlocked(ctx context.Context, runID string) (bool, error) {

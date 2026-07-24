@@ -14,9 +14,6 @@ func emptyPipelineSweep(context.Context, int) (runtimepipelineobligation.SweepRe
 	return runtimepipelineobligation.SweepResult{Exhausted: true}, nil
 }
 
-func (*recordingReceiptBus) SweepUndispatched(context.Context, int) (int, error) {
-	return 0, nil
-}
 func (*recordingReceiptBus) SweepPipelineObligations(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error) {
 	return emptyPipelineSweep(ctx, limit)
 }
@@ -25,9 +22,6 @@ func (*recordingReceiptBus) PipelineWorkPresence(ctx context.Context) (runtimepi
 	return emptyPipelineWorkPresence(ctx)
 }
 
-func (*partialOutputRetryBus) SweepUndispatched(context.Context, int) (int, error) {
-	return 0, nil
-}
 func (*partialOutputRetryBus) SweepPipelineObligations(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error) {
 	return emptyPipelineSweep(ctx, limit)
 }
@@ -36,9 +30,6 @@ func (*partialOutputRetryBus) PipelineWorkPresence(ctx context.Context) (runtime
 	return emptyPipelineWorkPresence(ctx)
 }
 
-func (*flowActivationTestBus) SweepUndispatched(context.Context, int) (int, error) {
-	return 0, nil
-}
 func (*flowActivationTestBus) SweepPipelineObligations(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error) {
 	return emptyPipelineSweep(ctx, limit)
 }
@@ -47,9 +38,6 @@ func (*flowActivationTestBus) PipelineWorkPresence(ctx context.Context) (runtime
 	return emptyPipelineWorkPresence(ctx)
 }
 
-func (*directiveTestBus) SweepUndispatched(context.Context, int) (int, error) {
-	return 0, nil
-}
 func (*directiveTestBus) SweepPipelineObligations(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error) {
 	return emptyPipelineSweep(ctx, limit)
 }
@@ -58,9 +46,6 @@ func (*directiveTestBus) PipelineWorkPresence(ctx context.Context) (runtimepipel
 	return emptyPipelineWorkPresence(ctx)
 }
 
-func (*resetTestBus) SweepUndispatched(context.Context, int) (int, error) {
-	return 0, nil
-}
 func (*resetTestBus) SweepPipelineObligations(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error) {
 	return emptyPipelineSweep(ctx, limit)
 }

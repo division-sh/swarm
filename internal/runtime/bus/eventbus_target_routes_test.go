@@ -782,7 +782,7 @@ func TestEngineDispatcher_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) 
 	}
 }
 
-func TestSweepUndispatched_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
+func TestSweepPipelineObligations_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	eventID := uuid.NewString()
 	evt := eventtest.ExistingRunRootIngress(eventID,
@@ -798,12 +798,12 @@ func TestSweepUndispatched_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T)
 	}
 	eb.deliveryPlanner = nodeOnlyDeliveryPlanner("workflow-node")
 
-	count, err := eb.SweepUndispatched(context.Background(), 10)
+	result, err := eb.SweepPipelineObligations(context.Background(), 10)
 	if err != nil {
-		t.Fatalf("SweepUndispatched node-only route without agent channel: %v", err)
+		t.Fatalf("SweepPipelineObligations node-only route without agent channel: %v", err)
 	}
-	if count != 1 {
-		t.Fatalf("swept count = %d, want 1", count)
+	if result.Settled != 1 {
+		t.Fatalf("swept count = %d, want 1", result.Settled)
 	}
 	if got := store.receipts[evt.ID()]; got != "processed" {
 		t.Fatalf("pipeline receipt = %q err=%#v, want processed", got, store.receiptErrs[evt.ID()])

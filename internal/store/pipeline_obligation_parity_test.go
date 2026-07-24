@@ -502,6 +502,11 @@ func TestPipelineObligationHasNoLegacyCapabilityAssemblers(t *testing.T) {
 		"SupportsPersistedReplay", "PipelineReceiptOverride", "InitialPipelineReceipt",
 		"PipelineReceiptDeferred", "BindLeaseContext", "RequireStore",
 		"runtime/replayclaim", "NewEventBus(", "NewRecoveryManager()", "ClaimNext",
+		"SweepUndispatched",
+		"ReleaseRuntimeIngressQueue(context.Context, int) (int, error)",
+		"ReleaseRuntimeIngressQueue(ctx context.Context, limit int) (int, error)",
+		"ReleaseRunQueue(context.Context, string, int) (int, error)",
+		"ReleaseRunQueue(ctx context.Context, runID string, limit int) (int, error)",
 	}
 	allowedScopeFiles := map[string]bool{
 		"internal/store/pipeline_obligation.go":                           true,

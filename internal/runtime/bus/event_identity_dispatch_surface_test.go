@@ -186,9 +186,11 @@ func (f completeEventDispatchFixture) invoke(surface string) (int, error) {
 	case "startup":
 		return 0, runtimepipeline.NewRecoveryManagerWith(f.bus).Recover(f.ctx)
 	case "global_sweeper", "decision_obligation":
-		return f.bus.SweepUndispatched(f.ctx, 10)
+		result, err := f.bus.SweepPipelineObligations(f.ctx, 10)
+		return result.Settled, err
 	case "run_queue":
-		return f.bus.ReleaseRunQueue(f.ctx, f.event.RunID(), 10)
+		result, err := f.bus.ReleaseRunQueue(f.ctx, f.event.RunID(), 10)
+		return result.Settled, err
 	default:
 		return 0, errors.New("unknown complete event dispatch surface")
 	}

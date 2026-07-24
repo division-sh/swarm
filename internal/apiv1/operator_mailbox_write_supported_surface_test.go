@@ -568,11 +568,11 @@ func drainMailboxWriteBus(ctx context.Context, bus *runtimebus.EventBus) error {
 		if err := bus.WaitForQuiescence(ctx); err != nil {
 			return err
 		}
-		swept, err := bus.SweepUndispatched(ctx, 10)
+		result, err := bus.SweepPipelineObligations(ctx, 10)
 		if err != nil {
 			return err
 		}
-		if swept == 0 {
+		if result.Exhausted || result.Blocked {
 			return bus.WaitForQuiescence(ctx)
 		}
 	}

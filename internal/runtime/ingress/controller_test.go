@@ -10,12 +10,13 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/google/uuid"
 )
 
 type transitionFailurePublisher struct {
 	publishErr error
-	releaseN   int
+	release    runtimepipelineobligation.SweepResult
 	releaseErr error
 	events     []events.Event
 }
@@ -25,8 +26,11 @@ func (p *transitionFailurePublisher) Publish(_ context.Context, event events.Eve
 	return p.publishErr
 }
 
-func (p *transitionFailurePublisher) ReleaseRuntimeIngressQueue(context.Context, int) (int, error) {
-	return p.releaseN, p.releaseErr
+func (p *transitionFailurePublisher) ReleaseRuntimeIngressQueue(context.Context, int) (runtimepipelineobligation.SweepResult, error) {
+	if p.release == (runtimepipelineobligation.SweepResult{}) && p.releaseErr == nil {
+		return runtimepipelineobligation.SweepResult{Exhausted: true}, nil
+	}
+	return p.release, p.releaseErr
 }
 
 func TestSafetyPauseAndResumePreserveInboundLineage(t *testing.T) {
@@ -72,7 +76,7 @@ func TestTransitionPostCommitFailuresRemainCallerSuccess(t *testing.T) {
 	}
 
 	publisher.publishErr = nil
-	publisher.releaseN = 1
+	publisher.release = runtimepipelineobligation.SweepResult{Settled: 1}
 	publisher.releaseErr = errors.New("release unavailable")
 	resumed, err := controller.Resume(ctx, TransitionRequest{Now: now.Add(time.Second)})
 	if err != nil {

@@ -2088,8 +2088,8 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 				t.Fatal(err)
 			}
 
-			if got, err := sibling.SweepUndispatched(context.Background(), 10); err != nil || got != 0 {
-				t.Fatalf("sibling sweep while foreground owns event = %d, %v; want 0, nil", got, err)
+			if result, err := sibling.SweepPipelineObligations(context.Background(), 10); err != nil || result.Settled != 0 {
+				t.Fatalf("sibling sweep while foreground owns event = %d, %v; want 0, nil", result.Settled, err)
 			}
 			close(release)
 			waitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -2097,8 +2097,8 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 			if err := foreground.WaitForQuiescence(waitCtx); err != nil {
 				t.Fatalf("wait foreground completion: %v", err)
 			}
-			if got, err := sibling.SweepUndispatched(context.Background(), 10); err != nil || got != 0 {
-				t.Fatalf("sibling sweep after foreground settlement = %d, %v; want 0, nil", got, err)
+			if result, err := sibling.SweepPipelineObligations(context.Background(), 10); err != nil || result.Settled != 0 {
+				t.Fatalf("sibling sweep after foreground settlement = %d, %v; want 0, nil", result.Settled, err)
 			}
 		})
 	}
@@ -2302,7 +2302,7 @@ func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
 					defer cancel()
 					switch surface {
 					case "generic_periodic", "decision_periodic":
-						_, err := bus.SweepUndispatched(ctx, 10)
+						_, err := bus.SweepPipelineObligations(ctx, 10)
 						errs <- err
 					case "run_queue":
 						_, err := bus.ReleaseRunQueue(ctx, runID, 10)

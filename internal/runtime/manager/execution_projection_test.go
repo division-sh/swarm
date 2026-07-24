@@ -112,9 +112,6 @@ func (*projectionTestBus) Subscribe(string, ...events.EventType) <-chan events.E
 }
 func (*projectionTestBus) Unsubscribe(string)             { panic("generic agent Unsubscribe must not be used") }
 func (b *projectionTestBus) Store() runtimebus.EventStore { return b.store }
-func (*projectionTestBus) SweepUndispatched(context.Context, int) (int, error) {
-	return 0, nil
-}
 func (*projectionTestBus) SweepPipelineObligations(context.Context, int) (runtimepipelineobligation.SweepResult, error) {
 	return runtimepipelineobligation.SweepResult{Exhausted: true}, nil
 }
