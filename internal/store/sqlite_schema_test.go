@@ -144,6 +144,61 @@ func TestSQLiteStatementsForPlanAcceptsDeferredCompositeForeignKey(t *testing.T)
 	}
 }
 
+func TestSQLiteStatementsForPlanPreservesNonReusableBigserialIdentity(t *testing.T) {
+	ctx := testAuthorActivityContext()
+	sqliteStore, err := NewSQLiteSchemaStore(filepath.Join(t.TempDir(), "bigserial.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteSchemaStore: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := sqliteStore.Close(); err != nil {
+			t.Fatalf("close sqlite schema store: %v", err)
+		}
+	})
+	statements, err := SQLiteStatementsForPlan(SchemaTableDDL{
+		TableName:  "sequenced",
+		SchemaKind: "test",
+		Statements: []string{`CREATE TABLE IF NOT EXISTS sequenced (
+    insertion_sequence BIGSERIAL PRIMARY KEY,
+    event_id UUID NOT NULL UNIQUE
+)`},
+	})
+	if err != nil {
+		t.Fatalf("SQLiteStatementsForPlan: %v", err)
+	}
+	if len(statements) != 1 || !strings.Contains(statements[0], `"insertion_sequence" INTEGER PRIMARY KEY AUTOINCREMENT`) {
+		t.Fatalf("rendered statements = %#v, want non-reusable SQLite sequence identity", statements)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, statements[0]); err != nil {
+		t.Fatalf("create sequenced table: %v", err)
+	}
+	firstID := "00000000-0000-4000-8000-000000000001"
+	secondID := "00000000-0000-4000-8000-000000000002"
+	thirdID := "00000000-0000-4000-8000-000000000003"
+	for _, eventID := range []string{firstID, secondID} {
+		if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO sequenced (event_id) VALUES (?)`, eventID); err != nil {
+			t.Fatalf("insert %s: %v", eventID, err)
+		}
+	}
+	var removedSequence int64
+	if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT insertion_sequence FROM sequenced WHERE event_id = ?`, secondID).Scan(&removedSequence); err != nil {
+		t.Fatalf("read removed sequence: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `DELETE FROM sequenced WHERE event_id = ?`, secondID); err != nil {
+		t.Fatalf("delete second row: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO sequenced (event_id) VALUES (?)`, thirdID); err != nil {
+		t.Fatalf("insert replacement row: %v", err)
+	}
+	var replacementSequence int64
+	if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT insertion_sequence FROM sequenced WHERE event_id = ?`, thirdID).Scan(&replacementSequence); err != nil {
+		t.Fatalf("read replacement sequence: %v", err)
+	}
+	if replacementSequence <= removedSequence {
+		t.Fatalf("replacement sequence = %d, want greater than deleted high-water %d", replacementSequence, removedSequence)
+	}
+}
+
 func TestSQLiteSchemaStoreRendersExplicitUUIDDefaults(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	sqliteStore, err := NewSQLiteSchemaStore(filepath.Join(t.TempDir(), "uuid-defaults.db"))

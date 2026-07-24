@@ -379,7 +379,7 @@ func TestPeriodicGlobalScanReentersDecisionRoutesUnderSustainedRecoveryBacklogOn
 
 			base := fixture.event.CreatedAt().Add(time.Second)
 			for i := 0; i < 3; i++ {
-				event := newRetryReleaseTestEvent(fixture, base.Add(time.Duration(i)*time.Microsecond))
+				event := newRetryReleaseTestEvent(fixture, base.Add(time.Duration(i*100)*time.Microsecond))
 				storetest.CommitSemanticEventWithRoutes(
 					t,
 					fixture.ctx,
@@ -411,8 +411,10 @@ func TestPeriodicGlobalScanReentersDecisionRoutesUnderSustainedRecoveryBacklogOn
 			defer runtimebustest.Unsubscribe(fixture.bus, fixture.agentID)
 
 			completed := false
+			// Each write sorts after the cursor but before the original phase tail.
+			backdatedOffsets := [...]int{50, 75, 87, 93, 96, 98, 99}
 			for pass := 0; pass < 7; pass++ {
-				appended := newRetryReleaseTestEvent(fixture, base.Add(time.Duration(20+pass)*time.Microsecond))
+				appended := newRetryReleaseTestEvent(fixture, base.Add(time.Duration(backdatedOffsets[pass])*time.Microsecond))
 				storetest.CommitSemanticEventWithRoutes(
 					t,
 					fixture.ctx,

@@ -62,10 +62,11 @@ type sqlitePipelineObligationStore struct{ *SQLiteRuntimeStore }
 const pipelineCandidatePageSize = 32
 
 type pipelineCandidate struct {
-	eventID       string
-	attemptCount  int
-	nextAttemptAt time.Time
-	createdAt     time.Time
+	eventID           string
+	insertionSequence int64
+	attemptCount      int
+	nextAttemptAt     time.Time
+	createdAt         time.Time
 }
 
 func (s *PostgresStore) PipelineObligations() runtimepipelineobligation.Store {
@@ -1133,12 +1134,8 @@ func (s *PostgresStore) postgresPipelineCandidatePage(
 	after *pipelineCandidate,
 	through *pipelineCandidate,
 	limit int,
-	descending bool,
+	boundary bool,
 ) ([]pipelineCandidate, error) {
-	order := "ASC"
-	if descending {
-		order = "DESC"
-	}
 	if query.Purpose == runtimepipelineobligation.PurposeDecisionRoute {
 		whereAfter := ""
 		args := []any{}
@@ -1156,15 +1153,17 @@ func (s *PostgresStore) postgresPipelineCandidatePage(
 		}
 		whereThrough := ""
 		if through != nil {
-			whereThrough = fmt.Sprintf(`
-				AND (route.attempt_count, route.next_attempt_at, route.created_at, route.event_id) <=
-				    ($%d, $%d, $%d, $%d::uuid)`,
-				len(args)+1, len(args)+2, len(args)+3, len(args)+4)
-			args = append(args, through.attemptCount, through.nextAttemptAt, through.createdAt, through.eventID)
+			whereThrough = fmt.Sprintf("AND route.insertion_sequence <= $%d", len(args)+1)
+			args = append(args, through.insertionSequence)
+		}
+		orderBy := "route.attempt_count ASC, route.next_attempt_at ASC, route.created_at ASC, route.event_id ASC"
+		if boundary {
+			orderBy = "route.insertion_sequence DESC"
 		}
 		args = append(args, limit)
 		rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
 				SELECT route.event_id::text
+				     , route.insertion_sequence
 				     , route.attempt_count
 				     , route.next_attempt_at
 				     , route.created_at
@@ -1176,8 +1175,8 @@ func (s *PostgresStore) postgresPipelineCandidatePage(
 				  %s
 				  %s
 				  %s
-				ORDER BY route.attempt_count %s, route.next_attempt_at %s, route.created_at %s, route.event_id %s
-				LIMIT $%d`, whereRun, whereAfter, whereThrough, order, order, order, order, len(args)), args...)
+				ORDER BY %s
+				LIMIT $%d`, whereRun, whereAfter, whereThrough, orderBy, len(args)), args...)
 		if err != nil {
 			return nil, err
 		}
@@ -1196,12 +1195,16 @@ func (s *PostgresStore) postgresPipelineCandidatePage(
 	}
 	whereThrough := ""
 	if through != nil {
-		whereThrough = fmt.Sprintf("AND (e.created_at, e.event_id) <= ($%d, $%d::uuid)", len(args)+1, len(args)+2)
-		args = append(args, through.createdAt, through.eventID)
+		whereThrough = fmt.Sprintf("AND e.insertion_sequence <= $%d", len(args)+1)
+		args = append(args, through.insertionSequence)
+	}
+	orderBy := "e.created_at ASC, e.event_id ASC"
+	if boundary {
+		orderBy = "e.insertion_sequence DESC"
 	}
 	args = append(args, limit)
 	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
-			SELECT e.event_id::text, 0, e.created_at, e.created_at
+			SELECT e.event_id::text, e.insertion_sequence, 0, e.created_at, e.created_at
 			FROM events e
 			LEFT JOIN runs run ON run.run_id = e.run_id
 			LEFT JOIN event_receipts receipt
@@ -1218,8 +1221,8 @@ func (s *PostgresStore) postgresPipelineCandidatePage(
 				WHERE route.event_id = e.event_id AND route.status <> 'completed'
 			  )
 			  AND %s
-			ORDER BY e.created_at %s, e.event_id %s
-			LIMIT $%d`, whereRun, whereAfter, whereThrough, postgresDiagnosticDirectReplayExclusionSQL("e", 1), order, order, len(args)), args...)
+			ORDER BY %s
+			LIMIT $%d`, whereRun, whereAfter, whereThrough, postgresDiagnosticDirectReplayExclusionSQL("e", 1), orderBy, len(args)), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1247,12 +1250,8 @@ func (s *SQLiteRuntimeStore) sqlitePipelineCandidatePage(
 	after *pipelineCandidate,
 	through *pipelineCandidate,
 	limit int,
-	descending bool,
+	boundary bool,
 ) ([]pipelineCandidate, error) {
-	order := "ASC"
-	if descending {
-		order = "DESC"
-	}
 	if query.Purpose == runtimepipelineobligation.PurposeDecisionRoute {
 		whereAfter := ""
 		args := []any{time.Now().UTC()}
@@ -1269,14 +1268,17 @@ func (s *SQLiteRuntimeStore) sqlitePipelineCandidatePage(
 		}
 		whereThrough := ""
 		if through != nil {
-			whereThrough = `
-				AND (route.attempt_count, route.next_attempt_at, route.created_at, route.event_id) <=
-				    (?, ?, ?, ?)`
-			args = append(args, through.attemptCount, through.nextAttemptAt, through.createdAt, through.eventID)
+			whereThrough = "AND route.insertion_sequence <= ?"
+			args = append(args, through.insertionSequence)
+		}
+		orderBy := "route.attempt_count ASC, route.next_attempt_at ASC, route.created_at ASC, route.event_id ASC"
+		if boundary {
+			orderBy = "route.insertion_sequence DESC"
 		}
 		args = append(args, limit)
 		rows, err := s.DB.QueryContext(ctx, `
 				SELECT route.event_id
+				     , route.insertion_sequence
 				     , route.attempt_count
 				     , route.next_attempt_at
 				     , route.created_at
@@ -1288,7 +1290,7 @@ func (s *SQLiteRuntimeStore) sqlitePipelineCandidatePage(
 				  `+whereRun+`
 				  `+whereAfter+`
 				  `+whereThrough+`
-				ORDER BY route.attempt_count `+order+`, route.next_attempt_at `+order+`, route.created_at `+order+`, route.event_id `+order+`
+				ORDER BY `+orderBy+`
 				LIMIT ?`, args...)
 		if err != nil {
 			return nil, err
@@ -1308,13 +1310,17 @@ func (s *SQLiteRuntimeStore) sqlitePipelineCandidatePage(
 	}
 	whereThrough := ""
 	if through != nil {
-		whereThrough = "AND (e.created_at, e.event_id) <= (?, ?)"
-		args = append(args, through.createdAt, through.eventID)
+		whereThrough = "AND e.insertion_sequence <= ?"
+		args = append(args, through.insertionSequence)
+	}
+	orderBy := "e.created_at ASC, e.event_id ASC"
+	if boundary {
+		orderBy = "e.insertion_sequence DESC"
 	}
 	args = append(args, diagnosticDirectReplayEventArgs()...)
 	args = append(args, limit)
 	rows, err := s.DB.QueryContext(ctx, `
-			SELECT e.event_id, 0, e.created_at, e.created_at
+			SELECT e.event_id, e.insertion_sequence, 0, e.created_at, e.created_at
 			FROM events e
 			LEFT JOIN runs run ON run.run_id = e.run_id
 			LEFT JOIN event_receipts receipt
@@ -1331,7 +1337,7 @@ func (s *SQLiteRuntimeStore) sqlitePipelineCandidatePage(
 				WHERE route.event_id = e.event_id AND route.status <> 'completed'
 		  )
 		  AND `+sqliteDiagnosticDirectReplayExclusionSQL("e")+`
-		ORDER BY e.created_at `+order+`, e.event_id `+order+`
+		ORDER BY `+orderBy+`
 		LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
@@ -1364,7 +1370,13 @@ func scanPipelineCandidates(rows *sql.Rows, decisionRoute bool, operation string
 			nextRaw    any
 			createdRaw any
 		)
-		if err := rows.Scan(&candidate.eventID, &candidate.attemptCount, &nextRaw, &createdRaw); err != nil {
+		if err := rows.Scan(
+			&candidate.eventID,
+			&candidate.insertionSequence,
+			&candidate.attemptCount,
+			&nextRaw,
+			&createdRaw,
+		); err != nil {
 			return nil, fmt.Errorf("%s: %w", operation, err)
 		}
 		var ok bool
