@@ -13,18 +13,21 @@ import (
 type periodicContinuationStore struct {
 	runtimepipelineobligation.Store
 
-	mu        sync.Mutex
-	issuer    *runtimepipelineobligation.ScanIssuer
-	scan      runtimepipelineobligation.Scan
-	openCount int
-	claimScan []runtimepipelineobligation.Scan
-	exhausted chan struct{}
+	mu         sync.Mutex
+	issuer     *runtimepipelineobligation.ScanIssuer
+	scan       runtimepipelineobligation.Scan
+	openCount  int
+	claimScan  []runtimepipelineobligation.Scan
+	exhausted  chan struct{}
+	allowClose chan struct{}
+	closeOnce  sync.Once
 }
 
 func newPeriodicContinuationStore() *periodicContinuationStore {
 	return &periodicContinuationStore{
-		issuer:    runtimepipelineobligation.NewScanIssuer(),
-		exhausted: make(chan struct{}),
+		issuer:     runtimepipelineobligation.NewScanIssuer(),
+		exhausted:  make(chan struct{}),
+		allowClose: make(chan struct{}),
 	}
 }
 
@@ -50,15 +53,16 @@ func (s *periodicContinuationStore) ClaimBatch(_ context.Context, scan runtimepi
 	if len(s.claimScan) == 1 {
 		return runtimepipelineobligation.ScanBatch{Examined: limit}, nil
 	}
-	if len(s.claimScan) == 2 {
-		close(s.exhausted)
-	}
 	return runtimepipelineobligation.ScanBatch{Exhausted: true}, nil
 }
 
 func (s *periodicContinuationStore) CloseScan(_ context.Context, scan runtimepipelineobligation.Scan) error {
-	_, err := s.issuer.Token(scan)
-	return err
+	if _, err := s.issuer.Token(scan); err != nil {
+		return err
+	}
+	s.closeOnce.Do(func() { close(s.exhausted) })
+	<-s.allowClose
+	return nil
 }
 
 func TestPeriodicSweeperRetainsCursorAcrossTicksUntilExplicitExhaustion(t *testing.T) {
@@ -81,9 +85,11 @@ func TestPeriodicSweeperRetainsCursorAcrossTicksUntilExplicitExhaustion(t *testi
 	case <-owner.exhausted:
 	case <-time.After(5 * time.Second):
 		cancel()
+		close(owner.allowClose)
 		t.Fatal("periodic sweeper did not continue to explicit exhaustion")
 	}
 	cancel()
+	close(owner.allowClose)
 	waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer waitCancel()
 	if err := bus.WaitForOutboxSweeper(waitCtx); err != nil {
