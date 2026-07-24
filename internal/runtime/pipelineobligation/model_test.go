@@ -92,7 +92,7 @@ func TestPipelineClaimQueryIsClosed(t *testing.T) {
 		{Purpose: PurposePublication},
 		{Purpose: Purpose("other")},
 		{RunID: "not-a-uuid", Purpose: PurposeRecovery},
-		{RunID: uuid.NewString(), Purpose: PurposeDecisionRoute},
+		{RunID: "not-a-uuid", Purpose: PurposeDecisionRoute},
 	} {
 		if err := query.Validate(); err == nil {
 			t.Fatalf("invalid query %#v was accepted", query)
@@ -122,9 +122,16 @@ func TestPipelineScanRequestOwnsFixedPhaseOrderAndOpaqueIdentity(t *testing.T) {
 	if err := run.Validate(); err != nil {
 		t.Fatalf("run scan request: %v", err)
 	}
-	query, ok := run.QueryAt(0)
-	if !ok || query.Purpose != PurposeRecovery || query.RunID != runID {
-		t.Fatalf("run phase = %#v, %v", query, ok)
+	first, ok = run.QueryAt(0)
+	if !ok || first.Purpose != PurposeDecisionRoute || first.RunID != runID {
+		t.Fatalf("run phase 0 = %#v, %v", first, ok)
+	}
+	second, ok = run.QueryAt(1)
+	if !ok || second.Purpose != PurposeRecovery || second.RunID != runID {
+		t.Fatalf("run phase 1 = %#v, %v", second, ok)
+	}
+	if _, ok := run.QueryAt(2); ok {
+		t.Fatal("run scan exposed an undeclared third phase")
 	}
 	if err := RunScanRequest("not-a-uuid").Validate(); err == nil {
 		t.Fatal("run scan accepted invalid run identity")

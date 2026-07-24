@@ -1096,10 +1096,16 @@ func (s *PostgresStore) postgresPipelineCandidates(ctx context.Context, query ru
 	if query.Purpose == runtimepipelineobligation.PurposeDecisionRoute {
 		whereAfter := ""
 		args := []any{}
+		whereRun := ""
+		if runID := strings.TrimSpace(query.RunID); runID != "" {
+			whereRun = fmt.Sprintf("AND route.run_id = $%d::uuid", len(args)+1)
+			args = append(args, runID)
+		}
 		if after != nil {
-			whereAfter = `
+			whereAfter = fmt.Sprintf(`
 				AND (route.attempt_count, route.next_attempt_at, route.created_at, route.event_id) >
-				    ($1, $2, $3, $4::uuid)`
+				    ($%d, $%d, $%d, $%d::uuid)`,
+				len(args)+1, len(args)+2, len(args)+3, len(args)+4)
 			args = append(args, after.attemptCount, after.nextAttemptAt, after.createdAt, after.eventID)
 		}
 		args = append(args, limit)
@@ -1114,8 +1120,9 @@ func (s *PostgresStore) postgresPipelineCandidates(ctx context.Context, query ru
 				  AND route.next_attempt_at <= now()
 				  AND run.status IN ('running', 'paused')
 				  %s
+				  %s
 				ORDER BY route.attempt_count, route.next_attempt_at, route.created_at, route.event_id
-				LIMIT $%d`, whereAfter, len(args)), args...)
+				LIMIT $%d`, whereRun, whereAfter, len(args)), args...)
 		if err != nil {
 			return nil, err
 		}
@@ -1162,6 +1169,11 @@ func (s *SQLiteRuntimeStore) sqlitePipelineCandidates(ctx context.Context, query
 	if query.Purpose == runtimepipelineobligation.PurposeDecisionRoute {
 		whereAfter := ""
 		args := []any{time.Now().UTC()}
+		whereRun := ""
+		if runID := strings.TrimSpace(query.RunID); runID != "" {
+			whereRun = "AND route.run_id = ?"
+			args = append(args, runID)
+		}
 		if after != nil {
 			whereAfter = `
 				AND (route.attempt_count, route.next_attempt_at, route.created_at, route.event_id) >
@@ -1179,6 +1191,7 @@ func (s *SQLiteRuntimeStore) sqlitePipelineCandidates(ctx context.Context, query
 				WHERE route.status = 'pending'
 				  AND route.next_attempt_at <= ?
 				  AND run.status IN ('running', 'paused')
+				  `+whereRun+`
 				  `+whereAfter+`
 				ORDER BY route.attempt_count, route.next_attempt_at, route.created_at, route.event_id
 				LIMIT ?`, args...)

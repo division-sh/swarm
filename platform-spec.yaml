@@ -30749,7 +30749,9 @@ durable_pipeline_processing_obligation_authority:
     scan: >
       Recovery uses one selected-store-issued opaque process-local cursor. The store alone owns its keyset position,
       current phase, and outstanding claims. A global cursor traverses due decision routes and then ordinary recovery in
-      that fixed order; a run cursor traverses ordinary recovery for exactly one run. Callers cannot supply a keyset,
+      that fixed order; a run cursor traverses due decision routes and then ordinary recovery for exactly one run in the
+      same fixed order. A run continuation therefore cannot report recovery exhaustion while a due decision-route
+      obligation for that run remains pending. Callers cannot supply a keyset,
       reset a phase, assemble query families, or durably persist a cursor. Every batch limit bounds candidate rows examined,
       including busy and newly ineligible rows, rather than settlements or returned work. Position advances before a claim
       may be retained or released. A full batch therefore continues monotonically on the next call. Startup,

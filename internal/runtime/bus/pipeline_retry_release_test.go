@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
@@ -79,12 +80,14 @@ func (p *recordingIngressRecoveryPublisher) ReleaseRuntimeIngressQueue(ctx conte
 type recordingRunRecoveryQueue struct {
 	bus              *runtimebus.EventBus
 	results          []runtimepipelineobligation.SweepResult
+	errors           []error
 	cancelAfterFirst context.CancelFunc
 }
 
 func (q *recordingRunRecoveryQueue) ReleaseRunQueue(ctx context.Context, runID string, limit int) (runtimepipelineobligation.SweepResult, error) {
 	result, err := q.bus.ReleaseRunQueue(ctx, runID, limit)
 	q.results = append(q.results, result)
+	q.errors = append(q.errors, err)
 	if len(q.results) == 1 && q.cancelAfterFirst != nil {
 		q.cancelAfterFirst()
 	}
@@ -261,6 +264,95 @@ func TestRunContinueDrainsPartialBatchesUntilExplicitTerminationOnSQLiteAndPostg
 				}
 			}
 			assertRetryReleaseReplayable(t, fixture, fixture.event.ID())
+		})
+	}
+}
+
+func TestRunContinueProcessesOnlyTargetRunDecisionRoutesOnSQLiteAndPostgres(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := newCompleteEventDispatchFixture(t, backend, false)
+			seedWork, err := fixture.store.PipelineObligations().ClaimEvent(
+				fixture.ctx,
+				fixture.event.ID(),
+				runtimepipelineobligation.PurposeRecovery,
+			)
+			if err != nil {
+				t.Fatalf("claim fixture seed obligation: %v", err)
+			}
+			if err := fixture.store.PipelineObligations().Settle(
+				fixture.ctx,
+				seedWork.Claim,
+				runtimepipelineobligation.Acknowledged("fixture_seeded"),
+			); err != nil {
+				t.Fatalf("settle fixture seed obligation: %v", err)
+			}
+			runStore := fixture.store.(runtimeruncontrol.Store)
+			pausedAt := fixture.event.CreatedAt().Add(time.Second)
+			if _, err := runStore.PauseRunControl(fixture.ctx, runtimeruncontrol.TransitionRequest{
+				RunID:        fixture.event.RunID(),
+				Reason:       "decision-route continuation proof",
+				ControlledBy: "test",
+				Now:          pausedAt,
+			}); err != nil {
+				t.Fatalf("PauseRunControl: %v", err)
+			}
+			target := newRetryReleaseTestEvent(fixture, pausedAt.Add(time.Microsecond))
+			storetest.CommitSemanticEventWithRoutes(
+				t,
+				fixture.ctx,
+				fixture.store,
+				target,
+				[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: fixture.agentID}},
+				runtimepipelineobligation.ScopeSubscribed,
+			)
+			fixture.insertDecisionObligationFor(t, target)
+			deliveries := runtimebustest.Subscribe(t, fixture.bus, fixture.agentID, target.Type())
+			defer runtimebustest.Unsubscribe(fixture.bus, fixture.agentID)
+
+			foreignRunID := uuid.NewString()
+			foreignAt := target.CreatedAt().Add(time.Microsecond)
+			seedCompleteEventDispatchRun(t, fixture.ctx, fixture.db, backend, foreignRunID, foreignAt.Add(-time.Second))
+			foreign := newRetryReleaseRunRoot(foreignRunID, foreignAt)
+			storetest.CommitSemanticEventWithRoutes(
+				t,
+				fixture.ctx,
+				fixture.store,
+				foreign,
+				nil,
+				runtimepipelineobligation.ScopeSubscribed,
+			)
+			fixture.insertDecisionObligationFor(t, foreign)
+
+			queue := &recordingRunRecoveryQueue{bus: fixture.bus}
+			controller := runtimeruncontrol.NewController(runStore, queue, runtimeruncontrol.Options{ReleaseLimit: 2})
+			fixture.bus.SetRunDispatchGate(controller)
+			t.Cleanup(func() { fixture.bus.SetRunDispatchGate(nil) })
+
+			result, err := controller.Continue(fixture.ctx, runtimeruncontrol.TransitionRequest{
+				RunID:  target.RunID(),
+				Reason: "continue pending decision route",
+				Now:    target.CreatedAt().Add(time.Second),
+			})
+			if err != nil {
+				t.Fatalf("Continue: %v", err)
+			}
+			if result.ReleasedDeliveries != 1 {
+				t.Fatalf("released pipeline obligations = %d with sweeps %#v and errors %v, want target decision route only", result.ReleasedDeliveries, queue.results, queue.errors)
+			}
+			if got := fixture.decisionObligationStatus(t, target.ID()); got != "completed" {
+				t.Fatalf("target decision route status = %q, want completed", got)
+			}
+			if got := fixture.decisionObligationStatus(t, foreign.ID()); got != "pending" {
+				t.Fatalf("foreign decision route status = %q, want pending", got)
+			}
+			if got := retryReleasePipelineReceiptCount(t, fixture, target.ID()); got != 1 {
+				t.Fatalf("target event pipeline receipts = %d, want 1", got)
+			}
+			if got := retryReleasePipelineReceiptCount(t, fixture, foreign.ID()); got != 0 {
+				t.Fatalf("foreign event pipeline receipts = %d, want 0", got)
+			}
+			assertCompleteLocalDelivery(t, deliveries, target)
 		})
 	}
 }
