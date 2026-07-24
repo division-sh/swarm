@@ -106,13 +106,14 @@ type schemaTableShape struct {
 }
 
 type schemaColumnShape struct {
-	Type       string
-	NotNull    bool
-	Default    string
-	PrimaryKey bool
-	Unique     bool
-	Reference  string
-	Checks     []string
+	Type          string
+	NotNull       bool
+	Default       string
+	PrimaryKey    bool
+	AutoIncrement bool
+	Unique        bool
+	Reference     string
+	Checks        []string
 }
 
 var (
@@ -235,6 +236,9 @@ func parseColumnShape(typeSpec, clauses string) (schemaColumnShape, error) {
 		case strings.HasPrefix(upper, "PRIMARY KEY"):
 			column.PrimaryKey, column.NotNull = true, true
 			clauses = strings.TrimSpace(clauses[len("PRIMARY KEY"):])
+		case strings.HasPrefix(upper, "AUTOINCREMENT"):
+			column.AutoIncrement = true
+			clauses = strings.TrimSpace(clauses[len("AUTOINCREMENT"):])
 		case strings.HasPrefix(upper, "NOT NULL"):
 			column.NotNull = true
 			clauses = strings.TrimSpace(clauses[len("NOT NULL"):])
@@ -452,6 +456,9 @@ func compareSchemaShapes(expected, actual schemaShape) []string {
 			}
 			if wantColumn.Default != gotColumn.Default {
 				drift = append(drift, fmt.Sprintf("column %s.%s default is %q, want %q", tableName, columnName, gotColumn.Default, wantColumn.Default))
+			}
+			if wantColumn.AutoIncrement != gotColumn.AutoIncrement {
+				drift = append(drift, fmt.Sprintf("column %s.%s autoincrement differs", tableName, columnName))
 			}
 		}
 		for columnName := range got.Columns {

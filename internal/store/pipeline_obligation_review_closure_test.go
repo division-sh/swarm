@@ -196,14 +196,15 @@ func TestPipelineScanDecisionPhaseHighWaterPreventsRecoveryStarvationOnSQLiteAnd
 
 			recoveryID := commitPipelineParityEvent(t, ctx, selected, runID, base)
 			for i := 1; i <= 3; i++ {
-				eventID := commitPipelineParityEvent(t, ctx, selected, runID, base.Add(time.Duration(i)*time.Microsecond))
+				createdAt := base.Add(time.Duration(i*100) * time.Microsecond)
+				eventID := commitPipelineParityEvent(t, ctx, selected, runID, createdAt)
 				insertProducerIdentityDecisionObligation(
 					t,
 					fixture,
 					ctx,
 					eventID,
 					runID,
-					base.Add(time.Duration(i)*time.Microsecond),
+					createdAt,
 				)
 			}
 
@@ -244,7 +245,9 @@ func TestPipelineScanDecisionPhaseHighWaterPreventsRecoveryStarvationOnSQLiteAnd
 				if err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("decision_route_converged")); err != nil {
 					t.Fatalf("settle decision route: %v", err)
 				}
-				appendedAt := base.Add(time.Duration(20+pass) * time.Microsecond)
+				// Each write sorts after the cursor but before the original phase tail.
+				backdatedOffsets := [...]int{150, 175, 187, 193, 196, 198, 199}
+				appendedAt := base.Add(time.Duration(backdatedOffsets[pass]) * time.Microsecond)
 				appendedID := commitPipelineParityEvent(t, ctx, selected, runID, appendedAt)
 				insertProducerIdentityDecisionObligation(t, fixture, ctx, appendedID, runID, appendedAt)
 			}

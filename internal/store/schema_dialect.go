@@ -186,7 +186,13 @@ func sqliteRenderColumnDefinition(line string) (string, error) {
 		switch {
 		case strings.HasPrefix(upper, "PRIMARY KEY"):
 			parts = append(parts, "PRIMARY KEY")
+			if strings.EqualFold(strings.TrimSpace(typeSpec), "BIGSERIAL") {
+				parts = append(parts, "AUTOINCREMENT")
+			}
 			clauses = strings.TrimSpace(clauses[len("PRIMARY KEY"):])
+		case strings.HasPrefix(upper, "AUTOINCREMENT"):
+			parts = append(parts, "AUTOINCREMENT")
+			clauses = strings.TrimSpace(clauses[len("AUTOINCREMENT"):])
 		case strings.HasPrefix(upper, "NOT NULL"):
 			parts = append(parts, "NOT NULL")
 			clauses = strings.TrimSpace(clauses[len("NOT NULL"):])
@@ -351,7 +357,8 @@ func sqliteRenderType(raw string) (string, error) {
 	case "BIGINT":
 		return "INTEGER", nil
 	case "BIGSERIAL":
-		// INTEGER PRIMARY KEY is SQLite's rowid-backed monotonic sequence owner.
+		// BIGSERIAL PRIMARY KEY is rendered with AUTOINCREMENT by the column
+		// renderer so deleted high values are never reused.
 		return "INTEGER", nil
 	case "DOUBLE PRECISION":
 		return "REAL", nil
