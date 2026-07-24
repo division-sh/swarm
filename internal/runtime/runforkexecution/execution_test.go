@@ -42,7 +42,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -371,8 +371,9 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 	workOwner := testGatewayWorkOwner(t)
 	var manager *runtimemanager.AgentManager
 	sourceBus, err := bus.NewEventBusWithOptions(pg, bus.EventBusOptions{
-		WorkOwner:      workOwner,
-		ContractBundle: loaded.Source,
+		WorkOwner:           workOwner,
+		PipelineObligations: pg.PipelineObligations(),
+		ContractBundle:      loaded.Source,
 		InterceptorProvider: func() []bus.EventInterceptor {
 			return nil
 		},
@@ -499,8 +500,10 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 	}
 	commitRunForkTestEvent(t, controlCtx, pg, controlEvent, controlPreflight.DeliveryRoutes)
 	sourceBus.SetInterceptors(sourcePipeline)
-	if err := sourceBus.RecoverPersistedPipeline(controlCtx, controlEvent, nil); err != nil {
+	if count, err := sourceBus.ReleaseRunQueue(controlCtx, controlRunID, 10); err != nil {
 		t.Fatalf("execute control delivery: %v", err)
+	} else if count != 1 {
+		t.Fatalf("executed control pipeline obligations = %d, want 1", count)
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -2127,7 +2130,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", staleContainerURL)
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	owner := testGatewayWorkOwner(t)
-	eventBus, err := bus.NewEventBusWithOptions(nil, bus.EventBusOptions{WorkOwner: owner})
+	eventBus, err := bus.NewEphemeralEventBusWithOptions(nil, bus.EventBusOptions{WorkOwner: owner})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -2942,7 +2945,7 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew(t *t
 			contractsRoot,
 		),
 	})
-	if err == nil || !strings.Contains(err.Error(), "committed replay scope conflicts") {
+	if err == nil || !strings.Contains(err.Error(), "committed pipeline scope conflicts") {
 		t.Fatalf("ExecuteSelectedContractRunFork error = %v, want atomic same-event replay-scope conflict", err)
 	}
 	if result.Activation.Activated {
@@ -3861,12 +3864,12 @@ func seedSelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, db *sql.DB,
 
 func seedSelectedExecutionSourceReplayScopeMarker(t *testing.T, db *sql.DB, sourceRunID, sourceEventID, reasonCode string, at time.Time) {
 	t.Helper()
-	var scope runtimereplayclaim.CommittedReplayScope
+	var scope runtimepipelineobligation.CommittedScope
 	switch strings.TrimSpace(reasonCode) {
 	case "replay_scope_direct":
-		scope = runtimereplayclaim.CommittedReplayScopeDirect
+		scope = runtimepipelineobligation.ScopeDirect
 	case "replay_scope_subscribed":
-		scope = runtimereplayclaim.CommittedReplayScopeSubscribed
+		scope = runtimepipelineobligation.ScopeSubscribed
 	default:
 		t.Fatalf("unsupported replay-scope fixture reason %q", reasonCode)
 	}
@@ -4000,5 +4003,5 @@ func TestSelectedContractForkEventPreservesSourceExecutionMode(t *testing.T) {
 
 func commitRunForkTestEvent(t testing.TB, ctx context.Context, pg *store.PostgresStore, event events.Event, routes []events.DeliveryRoute) {
 	t.Helper()
-	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, routes, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, routes, runtimepipelineobligation.ScopeSubscribed)
 }

@@ -30,7 +30,7 @@ func (*shutdownAdmissionManagerStore) EnsureEntitySchema(context.Context, string
 }
 
 func TestRun_UsesRuntimeShutdownAdmissionOwner(t *testing.T) {
-	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestRun_UsesRuntimeShutdownAdmissionOwner(t *testing.T) {
 }
 
 func TestReplayAgentBacklog_UsesRuntimeShutdownAdmissionOwnerBeforeStoreAccess(t *testing.T) {
-	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestIdleManagerConstructionOwnsNoRuntimeLease(t *testing.T) {
 }
 
 func TestRestartAgent_DeniesWhenRuntimeShutdownAdmissionClosed(t *testing.T) {
-	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestRestartAgent_DeniesWhenRuntimeShutdownAdmissionClosed(t *testing.T) {
 }
 
 func TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown(t *testing.T) {
-	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdo
 	runtimebus.ResumeRuntimeIngress()
 	defer runtimebus.ResumeRuntimeIngress()
 
-	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

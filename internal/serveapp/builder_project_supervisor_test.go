@@ -415,7 +415,7 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 		eventsStore := &processIngressEventStore{}
 		persistence.store = eventsStore
 		workOwner := newSupervisorTestRuntimeOccurrence(t, hash)
-		bus, err := runtimebus.NewEventBusWithOptions(eventsStore, runtimebus.EventBusOptions{ProviderOutputVerifier: catalog, WorkOwner: workOwner})
+		bus, err := runtimebus.NewEphemeralEventBusWithOptions(eventsStore, runtimebus.EventBusOptions{ProviderOutputVerifier: catalog, WorkOwner: workOwner})
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions(%s): %v", alias, err)
 		}
@@ -477,11 +477,11 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 
 func TestRuntimeProjectSupervisorFailedSameHashReplacementRestoresOldContext(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
-	oldBus, err := runtimebus.NewEventBus(nil)
+	oldBus, err := runtimebus.NewEphemeralEventBus(nil)
 	if err != nil {
 		t.Fatalf("NewEventBus(old): %v", err)
 	}
-	newBus, err := runtimebus.NewEventBus(nil)
+	newBus, err := runtimebus.NewEphemeralEventBus(nil)
 	if err != nil {
 		t.Fatalf("NewEventBus(new): %v", err)
 	}
@@ -536,11 +536,11 @@ func TestRuntimeProjectSupervisorChangedNonStandingBundleReplacesManagerContext(
 	newBundle := &runtimecontracts.WorkflowContractBundle{}
 	oldSource := semanticview.Wrap(oldBundle)
 	newSource := semanticview.Wrap(newBundle)
-	oldBus, err := runtimebus.NewEventBus(nil)
+	oldBus, err := runtimebus.NewEphemeralEventBus(nil)
 	if err != nil {
 		t.Fatalf("NewEventBus(old): %v", err)
 	}
-	newBus, err := runtimebus.NewEventBus(nil)
+	newBus, err := runtimebus.NewEphemeralEventBus(nil)
 	if err != nil {
 		t.Fatalf("NewEventBus(new): %v", err)
 	}
@@ -606,11 +606,11 @@ func TestRuntimeProjectSupervisorChangedNonStandingBundleReplacesManagerContext(
 func TestRuntimeProjectSupervisorReplacementPublishesDowntimeAcrossPublicSurfaces(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{}
 	source := semanticview.Wrap(bundle)
-	oldBus, err := runtimebus.NewEventBus(nil)
+	oldBus, err := runtimebus.NewEphemeralEventBus(nil)
 	if err != nil {
 		t.Fatalf("NewEventBus(old): %v", err)
 	}
-	newBus, err := runtimebus.NewEventBus(nil)
+	newBus, err := runtimebus.NewEphemeralEventBus(nil)
 	if err != nil {
 		t.Fatalf("NewEventBus(new): %v", err)
 	}
@@ -1594,7 +1594,7 @@ func newSupervisorTestProcessOwner(t *testing.T) *worklifetime.Process {
 }
 
 func TestRuntimeProjectSupervisorManagerBackedClosePropagatesShutdownOptions(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := runtimebus.NewEphemeralEventBus(nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -2295,7 +2295,7 @@ func TestDashboardDynamicAgentControl_DeniesWhenRuntimeShutdownAdmissionClosed(t
 	agent := builderControlTestAgent{id: "agent-1"}
 	hash := runtimeContextTestHash("8")
 	workOwner := newSupervisorTestRuntimeOccurrence(t, hash)
-	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: workOwner})
+	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: workOwner})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}

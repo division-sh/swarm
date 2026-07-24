@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -331,50 +330,6 @@ type sqlConnContextKey struct{}
 type pipelinePostCommitActionsKey struct{}
 type pipelineRollbackActionsKey struct{}
 type pipelineAfterPublishActionsKey struct{}
-type pipelineReceiptOverrideKey struct{}
-
-type PipelineReceiptOverride struct {
-	Status  string
-	Failure *runtimefailures.Envelope
-}
-
-var ErrPipelineReceiptDeferred = errors.New("pipeline receipt deferred for recoverable dependency")
-
-type PipelineReceiptDeferredError struct {
-	err error
-}
-
-func (e *PipelineReceiptDeferredError) Error() string {
-	if e == nil || e.err == nil {
-		return ErrPipelineReceiptDeferred.Error()
-	}
-	return e.err.Error()
-}
-
-func (e *PipelineReceiptDeferredError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.err
-}
-
-func (e *PipelineReceiptDeferredError) Is(target error) bool {
-	return target == ErrPipelineReceiptDeferred
-}
-
-func DeferPipelineReceipt(err error) error {
-	if err == nil {
-		return nil
-	}
-	if errors.Is(err, ErrPipelineReceiptDeferred) {
-		return err
-	}
-	return &PipelineReceiptDeferredError{err: err}
-}
-
-func IsPipelineReceiptDeferred(err error) bool {
-	return errors.Is(err, ErrPipelineReceiptDeferred)
-}
 
 func withSQLTxContext(ctx context.Context, tx *sql.Tx) context.Context {
 	if tx == nil {
@@ -590,46 +545,6 @@ func flushPipelineAfterPublishActions(actions []OwnerAction) {
 
 func FlushPipelineAfterPublishActions(actions []OwnerAction) {
 	flushPipelineAfterPublishActions(actions)
-}
-
-func withPipelineReceiptOverride(ctx context.Context, override *PipelineReceiptOverride) context.Context {
-	if override == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, pipelineReceiptOverrideKey{}, override)
-}
-
-func WithPipelineReceiptOverride(ctx context.Context, override *PipelineReceiptOverride) context.Context {
-	return withPipelineReceiptOverride(ctx, override)
-}
-
-func setPipelineReceiptOverride(ctx context.Context, status string, failure *runtimefailures.Envelope) bool {
-	if ctx == nil {
-		return false
-	}
-	override, ok := ctx.Value(pipelineReceiptOverrideKey{}).(*PipelineReceiptOverride)
-	if !ok || override == nil {
-		return false
-	}
-	override.Status = strings.TrimSpace(strings.ToLower(status))
-	override.Failure = runtimefailures.CloneEnvelope(failure)
-	return true
-}
-
-func PipelineReceiptOverrideFromContext(ctx context.Context) (status string, failure *runtimefailures.Envelope, ok bool) {
-	if ctx == nil {
-		return "", nil, false
-	}
-	override, ok := ctx.Value(pipelineReceiptOverrideKey{}).(*PipelineReceiptOverride)
-	if !ok || override == nil {
-		return "", nil, false
-	}
-	status = strings.TrimSpace(strings.ToLower(override.Status))
-	failure = runtimefailures.CloneEnvelope(override.Failure)
-	if status == "" && failure == nil {
-		return "", nil, false
-	}
-	return status, failure, true
 }
 
 func CollectPipelineEmitIntents(ctx context.Context, intents []runtimeengine.EmitIntent) bool {

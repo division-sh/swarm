@@ -16,13 +16,14 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 // EventInterceptor runs deterministic coordination in the publish path.
 // It may consume the inbound event and/or emit deferred events.
 type EventInterceptor interface {
-	Intercept(ctx context.Context, evt events.Event) (passthrough bool, deferred []events.Event, err error)
+	Intercept(ctx context.Context, evt events.Event) (passthrough bool, deferred []events.Event, outcome runtimepipelineobligation.ExecutionOutcome, err error)
 }
 
 // DeliveryRouteInterceptor runs deterministic coordination for one
@@ -30,7 +31,7 @@ type EventInterceptor interface {
 // routes so Pipeline receives "execute this node for this route" semantics
 // instead of inferring route authority from an event-wide context.
 type DeliveryRouteInterceptor interface {
-	InterceptDeliveryRoute(ctx context.Context, evt events.DeliveryEvent, route events.DeliveryRoute) (passthrough bool, deferred []events.Event, err error)
+	InterceptDeliveryRoute(ctx context.Context, evt events.DeliveryEvent, route events.DeliveryRoute) (passthrough bool, deferred []events.Event, outcome runtimepipelineobligation.ExecutionOutcome, err error)
 }
 
 // PayloadValidator validates canonical event-store admission before an event is
@@ -61,6 +62,8 @@ type EventBus struct {
 	interceptors                []EventInterceptor
 	interceptorProvider         func() []EventInterceptor
 	store                       EventStore
+	pipelineObligations         runtimepipelineobligation.Store
+	ephemeral                   bool
 	logger                      LoggerHook
 	semanticSource              semanticview.Source
 	templateInstanceActivator   runtimepipeline.FlowInstanceActivator
@@ -90,6 +93,13 @@ func (eb *EventBus) RuntimeMutationRunner() runtimepipeline.RuntimeMutationRunne
 	}
 	runner, _ := eb.store.(runtimepipeline.RuntimeMutationRunner)
 	return runner
+}
+
+func (eb *EventBus) PipelineObligationOwner() runtimepipelineobligation.Store {
+	if eb == nil {
+		return nil
+	}
+	return eb.pipelineObligations
 }
 
 type transactionRouteOverlay struct {
@@ -169,6 +179,7 @@ type EventBusOptions struct {
 	TestLifecycleProbe          runtimelifecycleprobe.Observer
 	ProviderOutputVerifier      ProviderOutputAuthorizationVerifier
 	WorkOwner                   worklifetime.Occurrence
+	PipelineObligations         runtimepipelineobligation.Store
 }
 
 const deliverySendTimeout = 250 * time.Millisecond
@@ -188,11 +199,39 @@ func closedSignal() chan struct{} {
 	return done
 }
 
-func NewEventBus(store EventStore) (*EventBus, error) {
-	return NewEventBusWithOptions(store, EventBusOptions{})
+type pipelineObligationStoreProvider interface {
+	PipelineObligations() runtimepipelineobligation.Store
 }
 
 func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, error) {
+	if opts.PipelineObligations == nil {
+		return nil, errors.New("durable event bus requires the pipeline obligation owner")
+	}
+	return newEventBusWithOptions(store, opts)
+}
+
+// NewEphemeralEventBus is the explicit non-durable constructor for isolated
+// previews and tests. A selected store cannot cross this boundary.
+func NewEphemeralEventBus(store EventStore) (*EventBus, error) {
+	return NewEphemeralEventBusWithOptions(store, EventBusOptions{})
+}
+
+func NewEphemeralEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, error) {
+	if opts.PipelineObligations != nil {
+		return nil, errors.New("ephemeral event bus cannot accept a durable pipeline obligation owner")
+	}
+	if _, selected := store.(pipelineObligationStoreProvider); selected {
+		return nil, errors.New("selected event store requires the durable event bus constructor")
+	}
+	eb, err := newEventBusWithOptions(store, opts)
+	if err != nil {
+		return nil, err
+	}
+	eb.ephemeral = true
+	return eb, nil
+}
+
+func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, error) {
 	if store == nil {
 		store = InMemoryEventStore{}
 	}
@@ -230,6 +269,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		pendingOutboxByID:           make(map[string][]pendingOutboxOperation),
 		routeTable:                  routeTable,
 		store:                       store,
+		pipelineObligations:         opts.PipelineObligations,
 		logger:                      opts.Logger,
 		interceptors:                filtered,
 		interceptorProvider:         opts.InterceptorProvider,
@@ -301,6 +341,16 @@ func (eb *EventBus) Store() EventStore {
 		return nil
 	}
 	return eb.store
+}
+
+func (eb *EventBus) PipelineWorkPresence(ctx context.Context) (runtimepipelineobligation.GlobalWorkPresence, error) {
+	if eb == nil || eb.pipelineObligations == nil {
+		if eb != nil && eb.ephemeral {
+			return runtimepipelineobligation.GlobalWorkPresence{}, nil
+		}
+		return runtimepipelineobligation.GlobalWorkPresence{}, errors.New("pipeline obligation owner is required")
+	}
+	return eb.pipelineObligations.GlobalWorkPresence(ctx)
 }
 
 func (eb *EventBus) MarkDeliveryInProgress(ctx context.Context, agentID, sessionID string) (bool, error) {

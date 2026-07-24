@@ -29,7 +29,7 @@ func (a shutdownTestAgent) OnEvent(ctx context.Context, evt events.Event) ([]eve
 }
 
 func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
-	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
 }
 
 func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t *testing.T) {
-	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t
 }
 
 func TestShutdownWithOptions_RejectsNegativeGrace(t *testing.T) {
-	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestShutdownWithOptions_RejectsNegativeGrace(t *testing.T) {
 }
 
 func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
-	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
 }
 
 func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing.T) {
-	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

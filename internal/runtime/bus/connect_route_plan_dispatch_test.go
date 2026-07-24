@@ -22,7 +22,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -98,15 +98,15 @@ func (s *connectRoutePlanReplyMutationStore) ClaimReplyContext(context.Context, 
 	return runtimereplycontext.Record{}, runtimereplycontext.ClaimAccepted, nil
 }
 
-func (*connectRoutePlanNodeInterceptor) Intercept(context.Context, events.Event) (bool, []events.Event, error) {
-	return true, nil, nil
+func (*connectRoutePlanNodeInterceptor) Intercept(context.Context, events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
+	return true, nil, runtimepipelineobligation.Continue(), nil
 }
 
-func (i *connectRoutePlanNodeInterceptor) InterceptDeliveryRoute(context.Context, events.DeliveryEvent, events.DeliveryRoute) (bool, []events.Event, error) {
+func (i *connectRoutePlanNodeInterceptor) InterceptDeliveryRoute(context.Context, events.DeliveryEvent, events.DeliveryRoute) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	i.count++
-	return false, nil, nil
+	return false, nil, runtimepipelineobligation.Continue(), nil
 }
 
 func (i *connectRoutePlanNodeInterceptor) Count() int {
@@ -701,9 +701,9 @@ func connectRoutePlanActivationVariables(req runtimepipeline.FlowInstanceActivat
 	return out
 }
 
-func (s *targetRouteMemoryStore) UpsertCommittedReplayScope(_ context.Context, eventID string, scope runtimereplayclaim.CommittedReplayScope) error {
+func (s *targetRouteMemoryStore) UpsertCommittedReplayScope(_ context.Context, eventID string, scope runtimepipelineobligation.CommittedScope) error {
 	if s.scopes == nil {
-		s.scopes = map[string]runtimereplayclaim.CommittedReplayScope{}
+		s.scopes = map[string]runtimepipelineobligation.CommittedScope{}
 	}
 	s.scopes[eventID] = scope
 	return nil
@@ -769,13 +769,13 @@ func TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscr
 	if routes := store.routes[eventID]; !deliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
 	}
-	if got := store.scopes[eventID]; got != runtimereplayclaim.CommittedReplayScopeSubscribed {
+	if got := store.scopes[eventID]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
 	if got := store.receipts[eventID]; got != "processed" {
 		t.Fatalf("pipeline receipt = %q, want processed", got)
 	}
-	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, runtimepipelineobligation.ScopeSubscribed)
 	if err != nil {
 		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
 	}
@@ -909,7 +909,7 @@ func TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget(t *testing.T
 	if routes := store.routes[eventID]; !deliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
 	}
-	if got := store.scopes[eventID]; got != runtimereplayclaim.CommittedReplayScopeSubscribed {
+	if got := store.scopes[eventID]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
 	if got := store.receipts[eventID]; got != "processed" {
@@ -1098,7 +1098,7 @@ func TestEventBusPublishInMutation_ConnectRoutePlanPersistsSharedRoutePlan(t *te
 	if routes := store.routes[eventID]; !deliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
 	}
-	if got := store.scopes[eventID]; got != runtimereplayclaim.CommittedReplayScopeSubscribed {
+	if got := store.scopes[eventID]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
 	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
@@ -1142,7 +1142,7 @@ func TestEngineOutbox_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 	if routes := store.routes[eventID]; !deliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
 	}
-	if got := store.scopes[eventID]; got != runtimereplayclaim.CommittedReplayScopeSubscribed {
+	if got := store.scopes[eventID]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
 }
@@ -1365,7 +1365,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *te
 	if !deliveryRoutesContain(store.routes[eventID], want) || len(store.routes[eventID]) != 1 {
 		t.Fatalf("persisted delivery routes = %#v, want instance-key route %#v", store.routes[eventID], want)
 	}
-	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, runtimepipelineobligation.ScopeSubscribed)
 	if err != nil {
 		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
 	}
@@ -1463,8 +1463,10 @@ func TestEventBusPublish_ConnectRoutePlanCreatesTemplateInstanceOnMissingCreate(
 	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", "drift")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)
 	}
-	if err := eb.PublishPersistedRecipients(context.Background(), evt, nil); err != nil {
-		t.Fatalf("PublishPersistedRecipients: %v", err)
+	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
+		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
+	}, nil); err != nil {
+		t.Fatalf("RecoverPersistedPipeline: %v", err)
 	}
 	replayed := requireBusEvent(t, replayTarget, "persisted replay after lifecycle-created descriptor drift")
 	if replayed.FlowInstance() != activation.Instance.InstancePath || replayed.EntityID() != activation.Instance.EntityID {
@@ -1626,8 +1628,10 @@ func TestCommittedReplayReusesPersistedSyntheticCarryWithoutReminting(t *testing
 	}
 	requireNoConnectRoutePlanBusEvent(t, replayTarget, "create resolution same-event retry")
 
-	if err := eb.PublishPersistedRecipients(context.Background(), evt, nil); err != nil {
-		t.Fatalf("PublishPersistedRecipients: %v", err)
+	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
+		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
+	}, nil); err != nil {
+		t.Fatalf("RecoverPersistedPipeline: %v", err)
 	}
 	replayed := requireBusEvent(t, replayTarget, "create resolution explicit committed replay")
 	if replayed.FlowInstance() != activation.Instance.InstancePath || replayed.EntityID() != activation.Instance.EntityID {
@@ -1805,8 +1809,10 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("account", "drift")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)
 	}
-	if err := eb.PublishPersistedRecipients(context.Background(), evt, nil); err != nil {
-		t.Fatalf("PublishPersistedRecipients: %v", err)
+	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
+		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
+	}, nil); err != nil {
+		t.Fatalf("RecoverPersistedPipeline: %v", err)
 	}
 	replayed := requireBusEvent(t, replayTarget, "select resolution committed replay")
 	if replayed.FlowInstance() != "account/one" || replayed.EntityID() != eventtest.UUID("ent-1") {
@@ -2037,8 +2043,10 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("account", "drift")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)
 	}
-	if err := eb.PublishPersistedRecipients(context.Background(), missing, nil); err != nil {
-		t.Fatalf("PublishPersistedRecipients: %v", err)
+	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
+		Event: missing, Scope: runtimepipelineobligation.ScopeSubscribed,
+	}, nil); err != nil {
+		t.Fatalf("RecoverPersistedPipeline: %v", err)
 	}
 	replayed := requireBusEvent(t, replayTarget, "select-or-create committed replay")
 	if replayed.FlowInstance() != activation.Instance.InstancePath || replayed.EntityID() != activation.Instance.EntityID {
@@ -2387,8 +2395,10 @@ func TestEventBusPublish_ConnectRoutePlanCreateRejectSameEventRetryIsNoOpAndExpl
 	}
 	requireNoConnectRoutePlanBusEvent(t, replayTarget, "same-event retry")
 
-	if err := eb.PublishPersistedRecipients(context.Background(), evt, nil); err != nil {
-		t.Fatalf("PublishPersistedRecipients: %v", err)
+	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
+		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
+	}, nil); err != nil {
+		t.Fatalf("RecoverPersistedPipeline: %v", err)
 	}
 	replayed := requireBusEvent(t, replayTarget, "explicit committed replay")
 	if replayed.FlowInstance() != activation.Instance.InstancePath || replayed.EntityID() != activation.Instance.EntityID {
@@ -2615,8 +2625,10 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 		t.Fatalf("AddFlowInstanceRoute(two): %v", err)
 	}
 
-	if err := eb.PublishPersistedRecipients(context.Background(), evt, nil); err != nil {
-		t.Fatalf("PublishPersistedRecipients: %v", err)
+	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
+		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
+	}, nil); err != nil {
+		t.Fatalf("RecoverPersistedPipeline: %v", err)
 	}
 	got = requireBusEvent(t, consumerOne, "persisted replay after descriptor drift")
 	if got.FlowInstance() != "consumer/one" || got.EntityID() != eventtest.UUID("ent-1") {
@@ -2686,7 +2698,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarge
 	if !deliveryRoutesContain(store.routes[eventID], want) || len(store.routes[eventID]) != 1 {
 		t.Fatalf("persisted delivery routes = %#v, want renamed instance-key route %#v", store.routes[eventID], want)
 	}
-	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, runtimepipelineobligation.ScopeSubscribed)
 	if err != nil {
 		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
 	}
@@ -3116,7 +3128,7 @@ func TestEventBusPublish_ConnectRoutePlanWithoutCanonicalSubscriberFailsClosed(t
 	if routes := store.routes[eventID]; len(routes) != 0 {
 		t.Fatalf("persisted delivery routes = %#v, want none when matched connect receiver is unsubscribed", routes)
 	}
-	if got := store.scopes[eventID]; got != runtimereplayclaim.CommittedReplayScopeSubscribed {
+	if got := store.scopes[eventID]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
 	if got := store.receipts[eventID]; got != "dead_letter" {

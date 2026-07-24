@@ -57,6 +57,7 @@ func TestSQLiteInboundPublicationOperationCommitsRetriesAndRollsBackAtomically(t
 	store.SetEventPayloadValidator(currentPlatformPayloadValidatorForStoreTest(t))
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
 	workflowStore.ConfigureDeliveryLifecycleStore(store)
+	workflowStore.ConfigurePipelineObligationStore(store.PipelineObligations())
 	runInboundPublicationOperationProof(t, store.DB, true, store, workflowStore)
 }
 
@@ -67,6 +68,7 @@ func TestPostgresInboundPublicationOperationCommitsRetriesAndRollsBackAtomically
 	store.SetEventPayloadValidator(currentPlatformPayloadValidatorForStoreTest(t))
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	workflowStore.ConfigureDeliveryLifecycleStore(store)
+	workflowStore.ConfigurePipelineObligationStore(store.PipelineObligations())
 	runInboundPublicationOperationProof(t, db, false, store, workflowStore)
 }
 

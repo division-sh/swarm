@@ -32,6 +32,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -2928,15 +2929,15 @@ type blockingInboundInterceptor struct {
 	release <-chan struct{}
 }
 
-func (i blockingInboundInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
+func (i blockingInboundInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	select {
 	case i.started <- struct{}{}:
 	default:
 	}
 	select {
 	case <-i.release:
-		return true, nil, nil
+		return true, nil, runtimepipelineobligation.Continue(), nil
 	case <-ctx.Done():
-		return false, nil, ctx.Err()
+		return false, nil, runtimepipelineobligation.Continue(), ctx.Err()
 	}
 }

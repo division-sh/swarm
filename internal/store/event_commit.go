@@ -9,16 +9,16 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
 type eventCommitTxStore interface {
 	appendAdmittedEventTxOutcome(context.Context, *sql.Tx, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
+	requirePipelinePublicationClaimTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim) error
 	commitInitialDeliveryObligationsTx(context.Context, *sql.Tx, string, string, []events.DeliveryRoute) error
-	UpsertCommittedReplayScopeTx(context.Context, *sql.Tx, string, runtimereplayclaim.CommittedReplayScope) error
-	UpsertPipelineReceiptTx(context.Context, *sql.Tx, string, string, *runtimefailures.Envelope) error
+	commitInitialPipelineScopeTx(context.Context, *sql.Tx, string, runtimepipelineobligation.CommittedScope) error
+	commitInitialPipelineDispositionTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) error
 	RecordDeadLetterTx(context.Context, *sql.Tx, runtimedeadletters.Record) error
 }
 
@@ -58,7 +58,7 @@ func (c *sqlPublishCommitter) FinalizePreparedPublish(ctx context.Context, final
 	if len(c.activeEventIDs) == 0 || c.activeEventIDs[len(c.activeEventIDs)-1] != req.Event.ID() {
 		return fmt.Errorf("prepared event finalization does not match the active event")
 	}
-	if err := c.commitInitialSideEffects(ctx, req); err != nil {
+	if err := c.commitInitialSideEffects(ctx, req, true); err != nil {
 		return err
 	}
 	c.activeEventIDs = c.activeEventIDs[:len(c.activeEventIDs)-1]
@@ -79,21 +79,26 @@ func (c sqlPublishCommitter) commitNamedEvent(ctx context.Context, operation str
 	if outcome != runtimebus.EventAppendInserted {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("event commit returned invalid append outcome")
 	}
-	if err := c.commitInitialSideEffects(ctx, req); err != nil {
+	if err := c.commitInitialSideEffects(ctx, req, class != events.EventAdmissionDiagnosticDirect); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	return outcome, nil
 }
 
-func (c sqlPublishCommitter) commitInitialSideEffects(ctx context.Context, req runtimebus.CommitPublishRequest) error {
+func (c sqlPublishCommitter) commitInitialSideEffects(ctx context.Context, req runtimebus.CommitPublishRequest, requirePublicationClaim bool) error {
+	if requirePublicationClaim {
+		if err := c.store.requirePipelinePublicationClaimTx(ctx, c.tx, req.Event.ID(), req.PipelineClaim); err != nil {
+			return fmt.Errorf("executable event commit requires its current publication claim: %w", err)
+		}
+	}
 	if err := c.store.commitInitialDeliveryObligationsTx(ctx, c.tx, req.Event.ID(), req.Event.Event().RunID(), req.DeliveryRoutes); err != nil {
 		return err
 	}
-	if err := c.store.UpsertCommittedReplayScopeTx(ctx, c.tx, req.Event.ID(), req.ReplayScope); err != nil {
+	if err := c.store.commitInitialPipelineScopeTx(ctx, c.tx, req.Event.ID(), req.ReplayScope); err != nil {
 		return err
 	}
-	if req.PipelineReceipt != nil {
-		if err := c.store.UpsertPipelineReceiptTx(ctx, c.tx, req.Event.ID(), req.PipelineReceipt.Status, req.PipelineReceipt.Failure); err != nil {
+	if req.Disposition != nil {
+		if err := c.store.commitInitialPipelineDispositionTx(ctx, c.tx, req.Event.ID(), req.PipelineClaim, *req.Disposition); err != nil {
 			return err
 		}
 	}
@@ -158,7 +163,7 @@ func commitSelectedForkEvent(
 		if err := insertLineage(txctx, tx, req.Lineage); err != nil {
 			return err
 		}
-		return committer.commitInitialSideEffects(txctx, req.Commit)
+		return committer.commitInitialSideEffects(txctx, req.Commit, true)
 	})
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err

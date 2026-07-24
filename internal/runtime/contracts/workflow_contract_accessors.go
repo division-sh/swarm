@@ -1052,7 +1052,23 @@ func (b *WorkflowContractBundle) flowLocalEvents(flowID string) []string {
 	if autoEmit := strings.TrimSpace(view.Schema.AutoEmitOnCreate.Event); autoEmit != "" {
 		out = append(out, autoEmit)
 	}
-	return out
+	for _, site := range b.ActivitySites() {
+		if strings.TrimSpace(site.FlowID) != flowID {
+			continue
+		}
+		result := ActivityResultEventsForSite(site)
+		out = append(out,
+			eventidentity.LeafName(result.SuccessEvent),
+			eventidentity.LeafName(result.FailureEvent),
+		)
+		if site.Spec.Approval != nil {
+			out = append(out,
+				eventidentity.LeafName(result.RevisionRequested),
+				eventidentity.LeafName(result.Rejected),
+			)
+		}
+	}
+	return uniqueOrderedStrings(out)
 }
 
 func (b *WorkflowContractBundle) flowEventScope(flowID string) eventidentity.Scope {

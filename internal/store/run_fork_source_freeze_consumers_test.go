@@ -14,7 +14,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -159,95 +159,44 @@ func TestForkedSourceEventDeliveryAndReplayConsumersRefuseAndSelectorsExclude(t 
 func assertForkedEventConsumerRefusals(t *testing.T, store any, event events.Event, route events.DeliveryRoute, claim runtimedelivery.Claim) {
 	t.Helper()
 	ctx := testAuthorActivityBundleSourceContext()
-	switch s := store.(type) {
-	case *PostgresStore:
-		_, err := s.ClaimAgentDelivery(ctx, event, route)
-		requireForkedSourceRefusal(t, "delivery claim", err)
-		_, err = s.SettleSuccess(ctx, claim, nil, 0)
-		requireForkedSourceRefusal(t, "delivery settlement", err)
-		requireForkedSourceRefusal(t, "replay scope", s.UpsertCommittedReplayScope(ctx, event.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed))
-		requireForkedSourceRefusal(t, "pipeline receipt", s.UpsertPipelineReceipt(ctx, event.ID(), "processed", nil))
-		for label, claim := range map[string]func(context.Context, string) (interface{ Release(context.Context) error }, bool, error){
-			"replay claim": func(ctx context.Context, id string) (interface{ Release(context.Context) error }, bool, error) {
-				lease, ok, err := s.ClaimPipelineReplay(ctx, id)
-				return lease, ok, err
-			},
-			"settlement claim": func(ctx context.Context, id string) (interface{ Release(context.Context) error }, bool, error) {
-				lease, ok, err := s.ClaimPipelineSettlement(ctx, id)
-				return lease, ok, err
-			},
-		} {
-			lease, claimed, err := claim(ctx, event.ID())
-			if err != nil || claimed || lease != nil {
-				t.Fatalf("%s = lease:%v claimed:%v err:%v", label, lease, claimed, err)
-			}
-		}
-		lease, claimed, err := s.ClaimPipelinePublication(ctx, event.ID())
-		if err != nil || !claimed || lease == nil {
-			t.Fatalf("publication serialization claim = lease:%v claimed:%v err:%v", lease, claimed, err)
-		}
-		if err := lease.Release(ctx); err != nil {
-			t.Fatalf("release publication serialization claim: %v", err)
-		}
-	case *SQLiteRuntimeStore:
-		_, err := s.ClaimAgentDelivery(ctx, event, route)
-		requireForkedSourceRefusal(t, "delivery claim", err)
-		_, err = s.SettleSuccess(ctx, claim, nil, 0)
-		requireForkedSourceRefusal(t, "delivery settlement", err)
-		requireForkedSourceRefusal(t, "replay scope", s.UpsertCommittedReplayScope(ctx, event.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed))
-		requireForkedSourceRefusal(t, "pipeline receipt", s.UpsertPipelineReceipt(ctx, event.ID(), "processed", nil))
-		for label, claim := range map[string]func(context.Context, string) (interface{ Release(context.Context) error }, bool, error){
-			"replay claim": func(ctx context.Context, id string) (interface{ Release(context.Context) error }, bool, error) {
-				lease, ok, err := s.ClaimPipelineReplay(ctx, id)
-				return lease, ok, err
-			},
-			"settlement claim": func(ctx context.Context, id string) (interface{ Release(context.Context) error }, bool, error) {
-				lease, ok, err := s.ClaimPipelineSettlement(ctx, id)
-				return lease, ok, err
-			},
-		} {
-			lease, claimed, err := claim(ctx, event.ID())
-			if err != nil || claimed || lease != nil {
-				t.Fatalf("%s = lease:%v claimed:%v err:%v", label, lease, claimed, err)
-			}
-		}
-		lease, claimed, err := s.ClaimPipelinePublication(ctx, event.ID())
-		if err != nil || !claimed || lease == nil {
-			t.Fatalf("publication serialization claim = lease:%v claimed:%v err:%v", lease, claimed, err)
-		}
-		if err := lease.Release(ctx); err != nil {
-			t.Fatalf("release publication serialization claim: %v", err)
-		}
-	default:
+	s, ok := store.(forkedEventSelectorSurface)
+	if !ok {
 		t.Fatalf("unsupported event store %T", store)
+	}
+	_, err := s.ClaimAgentDelivery(ctx, event, route)
+	requireForkedSourceRefusal(t, "delivery claim", err)
+	_, err = s.SettleSuccess(ctx, claim, nil, 0)
+	requireForkedSourceRefusal(t, "delivery settlement", err)
+	if _, err := s.PipelineObligations().ClaimEvent(ctx, event.ID(), runtimepipelineobligation.PurposeRecovery); !errors.Is(err, runtimepipelineobligation.ErrIneligible) {
+		t.Fatalf("pipeline recovery claim error = %v, want ineligible", err)
+	}
+	publication, err := s.PipelineObligations().ClaimPublication(ctx, event.ID())
+	if err != nil {
+		t.Fatalf("publication serialization claim: %v", err)
+	}
+	if err := s.PipelineObligations().Release(ctx, publication); err != nil {
+		t.Fatalf("release publication serialization claim: %v", err)
 	}
 }
 
 type forkedEventSelectorSurface interface {
-	ListEventsMissingPipelineReceiptForRun(context.Context, string, time.Time, int) ([]events.PersistedReplayEvent, error)
-	ListEventsWithPendingDeliveriesForRun(context.Context, string, time.Time, int) ([]events.PersistedReplayEvent, error)
+	runtimedelivery.Store
+	PipelineObligations() runtimepipelineobligation.Store
 }
 
 func assertForkedEventSelectors(t *testing.T, store forkedEventSelectorSurface, runID, eventID string) {
 	t.Helper()
 	ctx := testAuthorActivityBundleSourceContext()
-	for label, list := range map[string]func() ([]events.PersistedReplayEvent, error){
-		"missing receipt": func() ([]events.PersistedReplayEvent, error) {
-			return store.ListEventsMissingPipelineReceiptForRun(ctx, runID, time.Time{}, 10)
-		},
-		"pending delivery": func() ([]events.PersistedReplayEvent, error) {
-			return store.ListEventsWithPendingDeliveriesForRun(ctx, runID, time.Time{}, 10)
-		},
-	} {
-		rows, err := list()
-		if err != nil {
-			t.Fatalf("%s selector: %v", label, err)
-		}
-		for _, row := range rows {
-			if row.Event.ID() == eventID {
-				t.Fatalf("%s selector returned frozen event %s", label, eventID)
-			}
-		}
+	work, ok, err := store.PipelineObligations().ClaimNext(ctx, runtimepipelineobligation.RunRecoveryQuery(runID))
+	if err != nil || ok {
+		t.Fatalf("pipeline selector returned frozen event: work=%#v ok=%t err=%v", work, ok, err)
+	}
+	summary, err := store.SummarizeRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("delivery summary: %v", err)
+	}
+	if !summary.Settled() {
+		t.Fatalf("delivery selector retained frozen work for %s: %#v", eventID, summary)
 	}
 }
 

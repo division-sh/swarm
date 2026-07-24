@@ -65,7 +65,8 @@ func newRunStatusEventBus(t *testing.T, pg *store.PostgresStore) (*runtimebus.Ev
 		BundleSourceFact: runtimecorrelation.BundleSourceFact{
 			BundleHash: runStatusTestBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral,
 		},
-		WorkOwner: workOwner,
+		WorkOwner:           workOwner,
+		PipelineObligations: pg.PipelineObligations(),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)

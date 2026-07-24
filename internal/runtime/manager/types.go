@@ -17,6 +17,7 @@ import (
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -38,7 +39,9 @@ type AgentFactory func(cfg models.AgentConfig) (Agent, error)
 type Bus interface {
 	Publish(ctx context.Context, evt events.Event) error
 	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
-	PublishPersistedRecipients(ctx context.Context, evt events.Event, recipients []string) error
+	SweepUndispatched(ctx context.Context, limit int) (int, error)
+	SweepPipelineObligations(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error)
+	PipelineWorkPresence(context.Context) (runtimepipelineobligation.GlobalWorkPresence, error)
 	Store() runtimebus.EventStore
 	ResetInMemoryState() error
 	LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry) error

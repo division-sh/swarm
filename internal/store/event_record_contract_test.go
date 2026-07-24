@@ -13,7 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/eventrecord/sqlite"
@@ -81,8 +81,16 @@ func TestEventRecordExactPersistenceParity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			owner := pipelineObligationOwnerForFixture(store)
+			claim, err := owner.ClaimPublication(ctx, selected.ID())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = owner.Release(context.WithoutCancel(ctx), claim) }()
 			outcome, err := store.CommitSelectedForkEvent(ctx, CommitSelectedForkEventRequest{
-				Commit: runtimebus.CommitPublishRequest{Event: admitted, ReplayScope: runtimereplayclaim.CommittedReplayScopeDirect},
+				Commit: runtimebus.CommitPublishRequest{
+					Event: admitted, ReplayScope: runtimepipelineobligation.ScopeDirect, PipelineClaim: claim,
+				},
 				Lineage: RunForkSelectedContractExecutionLineage{
 					ForkRunID: forkRunID, SourceRunID: runID,
 					SourceEventID: root.ID(), ForkEventID: selected.ID(), EventName: string(selected.Type()),

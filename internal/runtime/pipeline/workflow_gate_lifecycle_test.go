@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -165,7 +166,7 @@ func TestHumanTaskDecisionRoutesDirectlyToRequesterInOneMutationOnBothStores(t *
 					t.Fatal(err)
 				}
 				parent := eventtest.RuntimeControl(decisionEventID, workflowGateDecisionEventType, "platform", "", payload, 0, runID, "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, "provider/instance-a"), card.DecidedAt)
-				if _, err := pc.handleWorkflowGateDecisionEvent(ctx, parent); err != nil {
+				if _, _, err := pc.handleWorkflowGateDecisionEvent(ctx, parent); err != nil {
 					t.Fatal(err)
 				}
 				if len(cards.completedTx) != 1 || !cards.completedTx[0] {
@@ -540,16 +541,17 @@ func TestWorkflowGateDecisionWaitsForItsRecordedBundlePinOnBothStores(t *testing
 			cards.created[0] = card
 			pc.bundleHash = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 			parent := eventtest.RuntimeControl(decisionEventID, workflowGateDecisionEventType, "platform", "", json.RawMessage(`{"card_id":"`+card.CardID+`"}`), 0, runID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), card.DecidedAt)
-			if _, err := pc.handleWorkflowGateDecisionEvent(ctx, parent); err == nil {
-				t.Fatal("decision routed under an unavailable bundle pin")
-			} else {
-				if !IsPipelineReceiptDeferred(err) {
-					t.Fatalf("bundle-pin error = %T %v, want recoverable pipeline deferral", err, err)
-				}
-				failure := runtimefailures.Normalize(err, runtimeWorkflowID, "route_gate_decision")
-				if failure.Class != runtimefailures.ClassDependencyUnavailable || failure.Detail.Code != "decision_card_bundle_unavailable" || !failure.Retryable {
-					t.Fatalf("bundle-pin failure = %#v, want retryable dependency-unavailable classification", failure)
-				}
+			_, outcome, err := pc.handleWorkflowGateDecisionEvent(ctx, parent)
+			if err != nil {
+				t.Fatalf("decision deferral returned error: %v", err)
+			}
+			disposition, deferred := outcome.Disposition()
+			if !deferred || disposition.Kind() != runtimepipelineobligation.DispositionDeferred {
+				t.Fatalf("bundle-pin outcome = %#v, want recoverable pipeline deferral", outcome)
+			}
+			failure := disposition.Failure()
+			if failure == nil || failure.Class != runtimefailures.ClassDependencyUnavailable || failure.Detail.Code != "decision_card_bundle_unavailable" || !failure.Retryable {
+				t.Fatalf("bundle-pin failure = %#v, want retryable dependency-unavailable classification", failure)
 			}
 			assertGateLifecycleState(t, workflowStore, ctx, entityID, "awaiting_review", gateruntime.StatusDecisionCommitted)
 		})

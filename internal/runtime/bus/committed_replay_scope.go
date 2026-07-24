@@ -6,25 +6,8 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
-
-func (eb *EventBus) authoritativeReplayScopeForEvent(ctx context.Context, eventID string) (runtimereplayclaim.CommittedReplayScope, error) {
-	reader, ok := eb.store.(runtimereplayclaim.ScopeReader)
-	if !ok || reader == nil {
-		return "", runtimereplayclaim.ErrMissingCommittedReplayScope
-	}
-	scope, err := reader.LoadCommittedReplayScope(ctx, eventID)
-	if err != nil {
-		return "", err
-	}
-	switch scope {
-	case runtimereplayclaim.CommittedReplayScopeDirect, runtimereplayclaim.CommittedReplayScopeSubscribed:
-		return scope, nil
-	default:
-		return "", fmt.Errorf("authoritative replay scope: unsupported scope %q", strings.TrimSpace(string(scope)))
-	}
-}
 
 func (eb *EventBus) currentInternalRecipientsForCommittedEvent(ctx context.Context, evt events.Event) ([]string, error) {
 	plan, err := eb.deliveryPlanner.Plan(ctx, evt)
@@ -38,18 +21,19 @@ func (eb *EventBus) replayRecipientsForCommittedEvent(
 	ctx context.Context,
 	evt events.Event,
 	persisted []string,
-	scope runtimereplayclaim.CommittedReplayScope,
+	scope runtimepipelineobligation.CommittedScope,
 ) ([]string, []string, []events.DeliveryRoute, error) {
 	persisted = uniqueStrings(persisted)
 	persistedRoutes := eb.deliveryRoutesForEvent(ctx, evt.ID())
-	if scope == runtimereplayclaim.CommittedReplayScopeDirect && len(persistedRoutes) > 0 {
+	persisted = uniqueStrings(append(persisted, deliveryRouteRecipientIDsByType(persistedRoutes, "agent")...))
+	if scope == runtimepipelineobligation.ScopeDirect && len(persistedRoutes) > 0 {
 		internal := []string(nil)
 		live := deliveryRouteRecipientIDsByType(persistedRoutes, "agent")
 		if len(live) > 0 {
 			return live, internal, persistedRoutes, nil
 		}
 	}
-	if scope == runtimereplayclaim.CommittedReplayScopeSubscribed && hasDeliveryRouteSubscriberType(persistedRoutes, "node") {
+	if scope == runtimepipelineobligation.ScopeSubscribed && hasDeliveryRouteSubscriberType(persistedRoutes, "node") {
 		if hasFlowInstanceNodeDeliveryRoute(persistedRoutes) {
 			internal := deliveryRouteRecipientIDsByType(persistedRoutes, "node")
 			live := uniqueStrings(append(deliveryRouteRecipientIDsByType(persistedRoutes, "agent"), internal...))
@@ -70,9 +54,9 @@ func (eb *EventBus) replayRecipientsForCommittedEvent(
 		return live, internal, events.NormalizeDeliveryRoutes(routes), nil
 	}
 	switch scope {
-	case runtimereplayclaim.CommittedReplayScopeDirect:
+	case runtimepipelineobligation.ScopeDirect:
 		return persisted, nil, deliveryRoutesFromTargetMap(persisted, "agent", eb.deliveryTargetsForEvent(ctx, evt.ID())), nil
-	case runtimereplayclaim.CommittedReplayScopeSubscribed:
+	case runtimepipelineobligation.ScopeSubscribed:
 		internal, err := eb.currentInternalRecipientsForCommittedEvent(ctx, evt)
 		if err != nil {
 			return nil, nil, nil, err
@@ -153,10 +137,4 @@ func deliveryRouteRecipientIDsByType(routes []events.DeliveryRoute, subscriberTy
 		out = append(out, route.SubscriberID)
 	}
 	return uniqueStrings(out)
-}
-
-func replayScopePersistenceRequired(store any) bool {
-	_, hasLister := store.(runtimereplayclaim.Lister)
-	_, hasOwner := store.(runtimereplayclaim.Owner)
-	return hasLister && hasOwner
 }

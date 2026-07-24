@@ -504,23 +504,11 @@ func sqliteNormalRunCompletionGateObligationsSettledTx(ctx context.Context, tx *
 }
 
 func sqliteNormalRunCompletionPipelinesSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
-	var unsettled bool
-	if err := tx.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM events e
-			LEFT JOIN event_receipts r
-				ON r.event_id = e.event_id
-				AND r.subscriber_type = 'platform'
-				AND r.subscriber_id = 'pipeline'
-			WHERE e.run_id = ?
-			  AND e.event_name <> ?
-			  AND (r.event_id IS NULL OR COALESCE(r.outcome, '') <> 'success')
-		)
-	`, runID, runtimeLogEventName).Scan(&unsettled); err != nil {
+	summary, err := summarizePipelineRun(ctx, tx, runID, false)
+	if err != nil {
 		return false, fmt.Errorf("check sqlite normal run pipeline settlement: %w", err)
 	}
-	return !unsettled, nil
+	return !summary.BlocksCompletion(), nil
 }
 
 func sqliteNormalRunCompletionDeliveriesSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {

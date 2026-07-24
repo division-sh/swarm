@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -16,7 +17,7 @@ import (
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
@@ -1072,15 +1073,19 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 		t.Fatalf("source delivery mutated = run:%s status:%s", sourceDeliveryRun, sourceDeliveryStatus)
 	}
 
-	scope, err := pg.LoadCommittedReplayScope(ctx, forkEventID)
-	if err != nil {
-		t.Fatalf("LoadCommittedReplayScope(fork event): %v", err)
+	var rawScope string
+	if err := db.QueryRowContext(ctx, `SELECT scope FROM committed_replay_scopes WHERE event_id = $1::uuid`, forkEventID).Scan(&rawScope); err != nil {
+		t.Fatalf("load committed pipeline scope for fork event: %v", err)
 	}
-	if scope != runtimereplayclaim.CommittedReplayScopeDirect {
+	scope, err := runtimepipelineobligation.ParseCommittedScope(rawScope)
+	if err != nil {
+		t.Fatalf("parse committed pipeline scope for fork event: %v", err)
+	}
+	if scope != runtimepipelineobligation.ScopeDirect {
 		t.Fatalf("fork replay scope = %q, want direct", scope)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, eventID, "processed", nil); err == nil || !strings.Contains(err.Error(), "run is not active") {
-		t.Fatalf("post-freeze source pipeline receipt error = %v, want inactive-run refusal", err)
+	if err := acknowledgePipelineEventFixture(ctx, pg, eventID); !errors.Is(err, runtimepipelineobligation.ErrIneligible) {
+		t.Fatalf("post-freeze source pipeline receipt error = %v, want ErrIneligible", err)
 	}
 	eb, err := newStoreTestEventBus(t, pg)
 	if err != nil {
@@ -1092,7 +1097,7 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 		Invariant: "store.event_record.exact_persistence",
 		Reason:    "prove historical replay refuses a malformed durable route object",
 	}, "", `UPDATE events SET target_route = $1::jsonb WHERE event_id = $2::uuid`, `"bad"`, forkEventID)
-	if replayed, err := eb.SweepUndispatched(ctx, time.Hour, 10); err == nil || !strings.Contains(err.Error(), "target_route") {
+	if replayed, err := eb.SweepUndispatched(ctx, 10); err == nil || !strings.Contains(err.Error(), "target_route") {
 		t.Fatalf("SweepUndispatched corrupt replay = count:%d err:%v, want target_route failure", replayed, err)
 	}
 	select {
@@ -1115,7 +1120,7 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 		Invariant: "store.event_record.exact_persistence",
 		Reason:    "restore the exact target route after the corruption proof",
 	}, "", `UPDATE events SET target_route = $1::jsonb WHERE event_id = $2::uuid`, string(targetRoute), forkEventID)
-	replayed, err := eb.SweepUndispatched(ctx, time.Hour, 10)
+	replayed, err := eb.SweepUndispatched(ctx, 10)
 	if err != nil {
 		t.Fatalf("SweepUndispatched: %v", err)
 	}

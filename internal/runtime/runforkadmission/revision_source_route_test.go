@@ -11,7 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -42,11 +42,11 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 	envelope := events.EnvelopeForTargetRoute(events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute), targetRoute)
 	pendingEvent := eventtest.ExistingRunRootIngress(pendingEventID, "producer/inst-1/scan.requested", "producer-node", "", []byte(`{}`), 0, runID, envelope, at)
 	pendingRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "pending-source-node"}
-	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, pendingEvent, []events.DeliveryRoute{pendingRoute}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, pendingEvent, []events.DeliveryRoute{pendingRoute}, runtimepipelineobligation.ScopeSubscribed)
 
 	completedEvent := eventtest.ExistingRunRootIngress(completedEventID, "producer/inst-1/scan.requested", "producer-node", "", []byte(`{}`), 0, runID, envelope, at.Add(time.Second))
 	completedRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "completed-source-node"}
-	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, completedEvent, []events.DeliveryRoute{completedRoute}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, completedEvent, []events.DeliveryRoute{completedRoute}, runtimepipelineobligation.ScopeSubscribed)
 	completedClaim, err := pg.ClaimNodeDelivery(ctx, completedEvent, completedRoute)
 	if err != nil {
 		t.Fatalf("claim completed delivery: %v", err)
@@ -215,7 +215,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			event := eventtest.ExistingRunRootIngress(eventID, events.EventType(tc.eventName), "producer-node", "", []byte(`{}`), 0, runID, eventEnvelope, at)
 			if tc.deliveryStatus != "" {
 				route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "source-node"}
-				storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+				storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 				if tc.deliveryStatus == "completed" {
 					claimed, err := pg.ClaimNodeDelivery(ctx, event, route)
 					if err != nil {

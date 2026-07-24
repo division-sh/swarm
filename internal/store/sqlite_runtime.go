@@ -20,7 +20,7 @@ import (
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
@@ -42,9 +42,10 @@ type SQLiteRuntimeStore struct {
 	startupMu               sync.Mutex
 	mutationMu              sync.Mutex
 	sessionMu               sync.Mutex
-	replayMu                sync.Mutex
+	pipelineClaimMu         sync.Mutex
 	startupOwner            string
-	replayClaims            map[string]struct{}
+	pipelineClaimIssuer     *runtimepipelineobligation.ClaimIssuer
+	pipelineClaims          map[string]*pipelineClaimState
 	sessionLockTTL          time.Duration
 	nowFn                   func() time.Time
 }
@@ -61,8 +62,6 @@ var _ runtimepipeline.SchedulePersistence = (*SQLiteRuntimeStore)(nil)
 var _ runtimetools.MailboxPersistence = (*SQLiteRuntimeStore)(nil)
 var _ runtimeingress.Store = (*SQLiteRuntimeStore)(nil)
 var _ runtimeruncontrol.Store = (*SQLiteRuntimeStore)(nil)
-var _ runtimereplayclaim.Participation = (*SQLiteRuntimeStore)(nil)
-
 var sqliteAPIIdempotencyLocks = struct {
 	sync.Mutex
 	byPath map[string]*sync.Mutex
@@ -74,14 +73,13 @@ func NewSQLiteRuntimeStore(path string) (*SQLiteRuntimeStore, error) {
 		return nil, err
 	}
 	return &SQLiteRuntimeStore{
-		SQLiteSchemaStore: schemaStore,
-		replayClaims:      map[string]struct{}{},
-		sessionLockTTL:    120 * time.Second,
-		nowFn:             time.Now,
+		SQLiteSchemaStore:   schemaStore,
+		pipelineClaimIssuer: runtimepipelineobligation.NewClaimIssuer(),
+		pipelineClaims:      map[string]*pipelineClaimState{},
+		sessionLockTTL:      120 * time.Second,
+		nowFn:               time.Now,
 	}, nil
 }
-
-func (*SQLiteRuntimeStore) SupportsPersistedReplay() bool { return true }
 
 func (s *SQLiteRuntimeStore) SetSessionLockTTL(ttl time.Duration) {
 	if s == nil {
@@ -207,7 +205,7 @@ func (s *SQLiteRuntimeStore) appendAdmittedEventTxOutcome(ctx context.Context, t
 func (s *SQLiteRuntimeStore) ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error) {
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
-		return nil, runtimereplayclaim.ErrAuthoritativeRecipientManifestUnavailable
+		return nil, errors.New("event_id is required for authoritative delivery recipient readback")
 	}
 	snapshots, err := s.deliverySnapshotsForEvent(ctx, eventID)
 	if err != nil {

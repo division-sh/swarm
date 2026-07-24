@@ -13,9 +13,9 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
-	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/google/uuid"
 )
 
@@ -32,48 +32,135 @@ type directRecipientTransactionalStore struct {
 	routes        map[string][]events.DeliveryRoute
 	deadLetterErr error
 	active        []string
+	scopes        map[string]runtimepipelineobligation.CommittedScope
+	receipts      map[string]runtimepipelineobligation.DispositionKind
 }
 
 type outboxClaimStore struct {
 	directRecipientTransactionalStore
-	claimMu sync.Mutex
-	claims  map[string]struct{}
+	claimMu    sync.Mutex
+	claimOwner *runtimepipelineobligation.ClaimIssuer
+	claims     map[string]runtimepipelineobligation.Claim
 }
 
-type outboxClaimLease struct {
-	store   *outboxClaimStore
-	eventID string
+func (s *outboxClaimStore) PipelineObligations() runtimepipelineobligation.Store {
+	return s
 }
 
-func (s *outboxClaimStore) ClaimPipelinePublication(_ context.Context, eventID string) (runtimeownership.Lease, bool, error) {
-	return s.claim(eventID)
-}
-
-func (s *outboxClaimStore) ClaimPipelineReplay(_ context.Context, eventID string) (runtimeownership.Lease, bool, error) {
-	return s.claim(eventID)
-}
-
-func (s *outboxClaimStore) claim(eventID string) (runtimeownership.Lease, bool, error) {
+func (s *outboxClaimStore) ClaimPublication(_ context.Context, eventID string) (runtimepipelineobligation.Claim, error) {
 	s.claimMu.Lock()
 	defer s.claimMu.Unlock()
-	if s.claims == nil {
-		s.claims = make(map[string]struct{})
-	}
-	if _, exists := s.claims[eventID]; exists {
-		return nil, false, nil
-	}
-	s.claims[eventID] = struct{}{}
-	return &outboxClaimLease{store: s, eventID: eventID}, true, nil
+	return s.issueClaim(eventID, runtimepipelineobligation.PurposePublication)
 }
 
-func (l *outboxClaimLease) Release(context.Context) error {
-	if l == nil || l.store == nil {
-		return nil
+func (s *outboxClaimStore) ClaimEvent(_ context.Context, eventID string, purpose runtimepipelineobligation.Purpose) (runtimepipelineobligation.ClaimedWork, error) {
+	s.claimMu.Lock()
+	defer s.claimMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var event events.Event
+	for _, candidate := range s.events {
+		if candidate.ID() == eventID {
+			event = candidate
+			break
+		}
 	}
-	l.store.claimMu.Lock()
-	delete(l.store.claims, l.eventID)
-	l.store.claimMu.Unlock()
+	scope := s.scopes[eventID]
+	if event.ID() == "" || scope == "" || s.receipts[eventID] != "" {
+		return runtimepipelineobligation.ClaimedWork{}, runtimepipelineobligation.ErrIneligible
+	}
+	claim, err := s.issueClaim(eventID, purpose)
+	if err != nil {
+		return runtimepipelineobligation.ClaimedWork{}, err
+	}
+	return runtimepipelineobligation.ClaimedWork{Event: event, Scope: scope, Claim: claim}, nil
+}
+
+func (s *outboxClaimStore) ClaimNext(context.Context, runtimepipelineobligation.ClaimQuery) (runtimepipelineobligation.ClaimedWork, bool, error) {
+	return runtimepipelineobligation.ClaimedWork{}, false, nil
+}
+
+func (s *outboxClaimStore) issueClaim(eventID string, purpose runtimepipelineobligation.Purpose) (runtimepipelineobligation.Claim, error) {
+	eventID = strings.TrimSpace(eventID)
+	if s.claimOwner == nil {
+		s.claimOwner = runtimepipelineobligation.NewClaimIssuer()
+	}
+	if s.claims == nil {
+		s.claims = make(map[string]runtimepipelineobligation.Claim)
+	}
+	if _, exists := s.claims[eventID]; exists {
+		return runtimepipelineobligation.Claim{}, runtimepipelineobligation.ErrBusy
+	}
+	claim, err := s.claimOwner.Issue(eventID, purpose)
+	if err != nil {
+		return runtimepipelineobligation.Claim{}, err
+	}
+	s.claims[eventID] = claim
+	return claim, nil
+}
+
+func (s *outboxClaimStore) MarkDecisionProcessed(context.Context, runtimepipelineobligation.Claim) error {
+	return runtimepipelineobligation.ErrIneligible
+}
+
+func (s *outboxClaimStore) Settle(_ context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) error {
+	s.claimMu.Lock()
+	defer s.claimMu.Unlock()
+	if err := s.verifyClaim(claim); err != nil {
+		return err
+	}
+	if err := disposition.ValidateFor(claim.Purpose()); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	if s.receipts == nil {
+		s.receipts = map[string]runtimepipelineobligation.DispositionKind{}
+	}
+	s.receipts[claim.EventID()] = disposition.Kind()
+	s.mu.Unlock()
+	delete(s.claims, claim.EventID())
 	return nil
+}
+
+func (s *outboxClaimStore) Release(_ context.Context, claim runtimepipelineobligation.Claim) error {
+	s.claimMu.Lock()
+	defer s.claimMu.Unlock()
+	if err := s.verifyClaim(claim); err != nil {
+		return err
+	}
+	delete(s.claims, claim.EventID())
+	return nil
+}
+
+func (s *outboxClaimStore) verifyClaim(claim runtimepipelineobligation.Claim) error {
+	stored, ok := s.claims[claim.EventID()]
+	if !ok || s.claimOwner == nil {
+		return runtimepipelineobligation.ErrStaleClaim
+	}
+	storedToken, err := s.claimOwner.Token(stored)
+	if err != nil {
+		return err
+	}
+	claimToken, err := s.claimOwner.Token(claim)
+	if err != nil {
+		return err
+	}
+	if storedToken != claimToken {
+		return runtimepipelineobligation.ErrStaleClaim
+	}
+	return nil
+}
+
+func (*outboxClaimStore) GlobalWorkPresence(context.Context) (runtimepipelineobligation.GlobalWorkPresence, error) {
+	return runtimepipelineobligation.GlobalWorkPresence{}, nil
+}
+
+func (*outboxClaimStore) SummarizeRun(_ context.Context, runID string) (runtimepipelineobligation.RunSummary, error) {
+	return runtimepipelineobligation.RunSummary{RunID: strings.TrimSpace(runID)}, nil
+}
+
+func (*outboxClaimStore) TerminalizeRun(context.Context, string, runtimepipelineobligation.Disposition, time.Time) (int, error) {
+	return 0, nil
 }
 
 func (s *recordingEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
@@ -178,7 +265,17 @@ func (s *directRecipientTransactionalStore) finalizePreparedPublish(_ context.Co
 	if s.deliveries == nil {
 		s.deliveries = map[string][]string{}
 	}
+	if s.scopes == nil {
+		s.scopes = map[string]runtimepipelineobligation.CommittedScope{}
+	}
+	if s.receipts == nil {
+		s.receipts = map[string]runtimepipelineobligation.DispositionKind{}
+	}
 	s.routes[evt.ID()] = events.NormalizeDeliveryRoutes(req.DeliveryRoutes)
+	s.scopes[evt.ID()] = req.ReplayScope
+	if req.Disposition != nil {
+		s.receipts[evt.ID()] = req.Disposition.Kind()
+	}
 	s.deliveries[evt.ID()] = nil
 	for _, route := range s.routes[evt.ID()] {
 		if route.SubscriberType == "agent" {
@@ -208,9 +305,9 @@ func deliveryRoutesContain(routes []events.DeliveryRoute, want events.DeliveryRo
 
 type interceptingTestHandler struct{}
 
-func (interceptingTestHandler) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, error) {
+func (interceptingTestHandler) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	if evt.Type() != events.EventType("custom.emitted") {
-		return true, nil, nil
+		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
 	return false, []events.Event{eventtest.RunCreatingRootIngress(
 		"",
@@ -223,7 +320,7 @@ func (interceptingTestHandler) Intercept(_ context.Context, evt events.Event) (b
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, evt.EntityID()),
 		time.Now().UTC(),
-	)}, nil
+	)}, runtimepipelineobligation.Continue(), nil
 }
 
 type recordingDeliveryRouteInterceptor struct {
@@ -231,15 +328,15 @@ type recordingDeliveryRouteInterceptor struct {
 	routes []events.DeliveryRoute
 }
 
-func (*recordingDeliveryRouteInterceptor) Intercept(context.Context, events.Event) (bool, []events.Event, error) {
-	return true, nil, nil
+func (*recordingDeliveryRouteInterceptor) Intercept(context.Context, events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
+	return true, nil, runtimepipelineobligation.Continue(), nil
 }
 
-func (r *recordingDeliveryRouteInterceptor) InterceptDeliveryRoute(_ context.Context, _ events.DeliveryEvent, route events.DeliveryRoute) (bool, []events.Event, error) {
+func (r *recordingDeliveryRouteInterceptor) InterceptDeliveryRoute(_ context.Context, _ events.DeliveryEvent, route events.DeliveryRoute) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.routes = append(r.routes, route.Normalized())
-	return false, nil, nil
+	return false, nil, runtimepipelineobligation.Continue(), nil
 }
 
 func (r *recordingDeliveryRouteInterceptor) seen(route events.DeliveryRoute) bool {
@@ -691,8 +788,8 @@ func TestEngineOutboxPublicationClaimSpansCommitToDispatchAndRollsBack(t *testin
 					t.Fatalf("Commit: %v", err)
 				}
 				runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
-				if lease, claimed, err := store.ClaimPipelineReplay(context.Background(), intent.Event.ID()); err != nil || claimed || lease != nil {
-					t.Fatalf("replay claim before designated dispatch = claimed:%v lease:%T err:%v", claimed, lease, err)
+				if _, err := store.PipelineObligations().ClaimPublication(context.Background(), intent.Event.ID()); !errors.Is(err, runtimepipelineobligation.ErrBusy) {
+					t.Fatalf("publication claim before designated dispatch = %v, want busy", err)
 				}
 				if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent}); err != nil {
 					t.Fatalf("DispatchPostCommit: %v", err)
@@ -706,12 +803,12 @@ func TestEngineOutboxPublicationClaimSpansCommitToDispatchAndRollsBack(t *testin
 				requireNoBusEvent(t, reviewer, "rolled-back outbox event")
 			}
 
-			lease, claimed, err := store.ClaimPipelineReplay(context.Background(), intent.Event.ID())
-			if err != nil || !claimed || lease == nil {
-				t.Fatalf("replay claim after lifecycle completion = claimed:%v lease:%T err:%v", claimed, lease, err)
+			claim, err := store.PipelineObligations().ClaimPublication(context.Background(), intent.Event.ID())
+			if err != nil {
+				t.Fatalf("publication claim after lifecycle completion: %v", err)
 			}
-			if err := lease.Release(context.Background()); err != nil {
-				t.Fatalf("release replay claim: %v", err)
+			if err := store.PipelineObligations().Release(context.Background(), claim); err != nil {
+				t.Fatalf("release publication claim: %v", err)
 			}
 			if err := mock.ExpectationsWereMet(); err != nil {
 				t.Fatalf("sql expectations: %v", err)

@@ -13,6 +13,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -102,7 +103,20 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 			}
 		})
 	}
-	bus, err := runtimebus.NewEventBusWithOptions(store, opts)
+	if opts.PipelineObligations == nil {
+		if provider, ok := store.(interface {
+			PipelineObligations() runtimepipelineobligation.Store
+		}); ok {
+			opts.PipelineObligations = provider.PipelineObligations()
+		}
+	}
+	var bus *runtimebus.EventBus
+	var err error
+	if opts.PipelineObligations == nil {
+		bus, err = runtimebus.NewEphemeralEventBusWithOptions(store, opts)
+	} else {
+		bus, err = runtimebus.NewEventBusWithOptions(store, opts)
+	}
 	if err != nil {
 		return nil, err
 	}

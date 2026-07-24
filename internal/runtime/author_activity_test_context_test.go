@@ -12,6 +12,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
@@ -74,7 +75,20 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = runtimeTestOccurrence(t, "bundle-v1:sha256:"+strings.Repeat("a", 64))
 	}
-	bus, err := runtimebus.NewEventBusWithOptions(store, opts)
+	if opts.PipelineObligations == nil {
+		if provider, ok := store.(interface {
+			PipelineObligations() runtimepipelineobligation.Store
+		}); ok {
+			opts.PipelineObligations = provider.PipelineObligations()
+		}
+	}
+	var bus *runtimebus.EventBus
+	var err error
+	if opts.PipelineObligations == nil {
+		bus, err = runtimebus.NewEphemeralEventBusWithOptions(store, opts)
+	} else {
+		bus, err = runtimebus.NewEventBusWithOptions(store, opts)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -130,6 +144,13 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps) (
 	}
 	if deps.Options.ProcessWorkOwner == nil {
 		deps.Options.ProcessWorkOwner = runtimeTestProcessWorkOwner(t)
+	}
+	if deps.Stores.PipelineObligations == nil {
+		if provider, ok := deps.Stores.EventStore.(interface {
+			PipelineObligations() runtimepipelineobligation.Store
+		}); ok {
+			deps.Stores.PipelineObligations = provider.PipelineObligations()
+		}
 	}
 	runtime, err := NewRuntime(ctx, deps)
 	if err == nil {

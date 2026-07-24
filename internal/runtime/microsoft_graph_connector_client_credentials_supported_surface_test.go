@@ -590,7 +590,7 @@ func countMicrosoftGraphActivityAttemptsForSource(t *testing.T, backend slackMan
 
 func countMicrosoftGraphFailureEventsForSource(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string) int {
 	t.Helper()
-	failureEventType := boundedProviderFlowID + ".microsoft_graph_send_mail.failed"
+	failureEventType := boundedProviderFlowID + "/microsoft_graph_send_mail.failed"
 	var count int
 	var err error
 	if backend.sqlite {

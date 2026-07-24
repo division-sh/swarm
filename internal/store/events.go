@@ -14,12 +14,11 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -123,10 +122,6 @@ func requireEventRunNotForked(ctx context.Context, db storerunlifecycle.DBTX, ev
 	return nil
 }
 
-func (s *PostgresStore) requireActiveRunForPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID string) error {
-	return requireActiveRunForEvent(ctx, tx, eventID, storerunlifecycle.DialectPostgres)
-}
-
 func eventReadQueryerFromContext(ctx context.Context, db *sql.DB) eventReadQueryer {
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		return tx
@@ -199,209 +194,6 @@ func validateOptionalEntityUUID(raw string) (string, error) {
 		return "", fmt.Errorf("invalid entity_id %q: must be a UUID", raw)
 	}
 	return raw, nil
-}
-
-func (s *PostgresStore) UpsertCommittedReplayScope(
-	ctx context.Context,
-	eventID string,
-	scope runtimereplayclaim.CommittedReplayScope,
-) error {
-	return s.UpsertCommittedReplayScopeTx(ctx, nil, eventID, scope)
-}
-
-func (s *PostgresStore) UpsertCommittedReplayScopeTx(
-	ctx context.Context,
-	tx *sql.Tx,
-	eventID string,
-	scope runtimereplayclaim.CommittedReplayScope,
-) error {
-	if err := s.requireCurrentSchema(); err != nil {
-		return err
-	}
-	if tx == nil {
-		return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			return s.UpsertCommittedReplayScopeTx(txctx, tx, eventID, scope)
-		})
-	}
-	if err := requireActiveRunForEvent(ctx, tx, eventID, storerunlifecycle.DialectPostgres); err != nil {
-		return err
-	}
-	return s.upsertCommittedReplayScopeSpec(ctx, tx, eventID, scope)
-}
-
-func (s *PostgresStore) UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
-	return s.UpsertPipelineReceiptTx(ctx, nil, eventID, status, failure)
-}
-
-func (s *PostgresStore) HasProcessedPipelineReceipt(ctx context.Context, eventID string) (bool, error) {
-	eventID = strings.TrimSpace(eventID)
-	if eventID == "" {
-		return false, nil
-	}
-	if err := s.requireCurrentSchema(); err != nil {
-		return false, err
-	}
-	var processed bool
-	err := eventReadQueryerFromContext(ctx, s.DB).QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM event_receipts
-			WHERE event_id = $1::uuid
-			  AND subscriber_type = 'platform'
-			  AND subscriber_id = 'pipeline'
-			  AND outcome = 'success'
-			  AND reason_code = 'pipeline_persisted'
-		)
-	`, eventID).Scan(&processed)
-	if err != nil {
-		return false, fmt.Errorf("load processed pipeline receipt: %w", err)
-	}
-	return processed, nil
-}
-
-func (s *PostgresStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status string, failure *runtimefailures.Envelope) error {
-	if err := s.requireCurrentSchema(); err != nil {
-		return err
-	}
-	if tx == nil {
-		return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			return s.UpsertPipelineReceiptTx(txctx, tx, eventID, status, failure)
-		})
-	}
-	if err := s.requireActiveRunForPipelineReceiptTx(ctx, tx, eventID); err != nil {
-		return err
-	}
-	eventID = strings.TrimSpace(eventID)
-	if eventID == "" {
-		return nil
-	}
-	status = strings.TrimSpace(strings.ToLower(status))
-	if status == "" {
-		status = "processed"
-	}
-	if failure != nil && status == "processed" {
-		status = "error"
-	}
-	return s.upsertPipelineReceiptSpec(ctx, tx, eventID, status, failure)
-}
-
-func (s *PostgresStore) ListEventsMissingPipelineReceipt(ctx context.Context, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
-	if err := s.requireCurrentSchema(); err != nil {
-		return nil, err
-	}
-	if limit <= 0 {
-		limit = 200
-	}
-	if since.IsZero() {
-		since = time.Now().Add(-24 * time.Hour)
-	}
-	return s.listEventsMissingPipelineReceiptSpec(ctx, since, limit)
-}
-
-func (s *PostgresStore) ListEventsMissingPipelineReceiptForRun(ctx context.Context, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
-	if err := s.requireCurrentSchema(); err != nil {
-		return nil, err
-	}
-	runID = nullUUIDString(runID)
-	if runID == "" {
-		return nil, nil
-	}
-	if limit <= 0 {
-		limit = 200
-	}
-	if since.IsZero() {
-		since = time.Now().Add(-24 * time.Hour)
-	}
-	return s.listEventsMissingPipelineReceiptForRunSpec(ctx, runID, since, limit)
-}
-
-func (s *PostgresStore) ListEventsWithPendingDeliveriesForRun(ctx context.Context, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
-	if err := s.requireCurrentSchema(); err != nil {
-		return nil, err
-	}
-	runID = nullUUIDString(runID)
-	if runID == "" {
-		return nil, nil
-	}
-	if limit <= 0 {
-		limit = 200
-	}
-	if since.IsZero() {
-		since = time.Now().Add(-24 * time.Hour)
-	}
-	return s.listEventsWithPendingDeliveriesForRunSpec(ctx, runID, since, limit)
-}
-
-func (s *PostgresStore) ClaimPipelineReplay(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
-	if err := s.requireCurrentSchema(); err != nil {
-		return nil, false, err
-	}
-	eventID = strings.TrimSpace(eventID)
-	if eventID == "" {
-		return nil, false, fmt.Errorf("event_id is required")
-	}
-	lease, claimed, err := acquireAdvisoryLockLease(ctx, s.DB, replayClaimLockKey(eventID))
-	if err != nil || !claimed {
-		return nil, claimed, err
-	}
-	pendingQuery := `
-		SELECT EXISTS (
-			SELECT 1
-			FROM events e
-			LEFT JOIN runs run ON run.run_id = e.run_id
-			LEFT JOIN event_receipts r
-				ON r.event_id = e.event_id
-				AND r.subscriber_type = 'platform'
-				AND r.subscriber_id = 'pipeline'
-			WHERE e.event_id = $1::uuid
-			  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
-			  AND r.event_id IS NULL
-		)
-	`
-	var pending bool
-	err = lease.conn.QueryRowContext(ctx, pendingQuery, eventID).Scan(&pending)
-	if err != nil {
-		_ = lease.Release(ctx)
-		return nil, false, fmt.Errorf("claim pipeline replay: %w", err)
-	}
-	if !pending {
-		_ = lease.Release(ctx)
-		return nil, false, nil
-	}
-	return lease, true, nil
-}
-
-func (s *PostgresStore) ClaimPipelinePublication(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
-	eventID = strings.TrimSpace(eventID)
-	if eventID == "" {
-		return nil, false, fmt.Errorf("event_id is required")
-	}
-	// Publication ownership serializes same-ID attempts. Canonical append must
-	// classify exact/conflicting duplicates before applying run-status admission.
-	// A publication claim survives its creating transaction and may dispatch
-	// asynchronously, so it must never share a transaction/parent claim session.
-	claimCtx := runtimepipeline.WithoutPipelineSQLTxContext(ctx)
-	claimCtx = runtimepipeline.WithoutPipelineSQLConnContext(claimCtx)
-	return acquireAdvisoryLockLease(claimCtx, s.DB, replayClaimLockKey(eventID))
-}
-
-func (s *PostgresStore) ClaimPipelineSettlement(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
-	eventID = strings.TrimSpace(eventID)
-	if eventID == "" {
-		return nil, false, fmt.Errorf("event_id is required")
-	}
-	lease, claimed, err := acquireAdvisoryLockLease(ctx, s.DB, replayClaimLockKey(eventID))
-	if err != nil || !claimed {
-		return nil, claimed, err
-	}
-	admissionErr := requireEventRunNotForked(ctx, lease.conn, eventID, storerunlifecycle.DialectPostgres, true)
-	if admissionErr != nil {
-		_ = lease.Release(ctx)
-		if errors.Is(admissionErr, storerunlifecycle.ErrRunNotActive) {
-			return nil, false, nil
-		}
-		return nil, false, admissionErr
-	}
-	return lease, true, nil
 }
 
 func (s *PostgresStore) EventExists(ctx context.Context, eventID string) (bool, error) {
@@ -492,36 +284,6 @@ func (s *PostgresStore) ListEventDeliveryRoutes(ctx context.Context, eventID str
 		out = append(out, snapshot.Route)
 	}
 	return events.NormalizeDeliveryRoutes(out), nil
-}
-
-func (s *PostgresStore) LoadCommittedReplayScope(
-	ctx context.Context,
-	eventID string,
-) (runtimereplayclaim.CommittedReplayScope, error) {
-	if err := s.requireCurrentSchema(); err != nil {
-		return "", err
-	}
-	eventID = strings.TrimSpace(eventID)
-	if eventID == "" {
-		return "", runtimereplayclaim.ErrMissingCommittedReplayScope
-	}
-	var rawScope string
-	err := eventReadQueryerFromContext(ctx, s.DB).QueryRowContext(ctx, `
-		SELECT scope
-		FROM committed_replay_scopes
-		WHERE event_id = $1::uuid
-	`, eventID).Scan(&rawScope)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		return "", runtimereplayclaim.ErrMissingCommittedReplayScope
-	case err != nil:
-		return "", fmt.Errorf("load committed replay scope: %w", err)
-	}
-	scope := runtimereplayclaim.CommittedReplayScope(strings.TrimSpace(rawScope))
-	if _, err := committedReplayScopeReasonCode(scope); err != nil {
-		return "", fmt.Errorf("load committed replay scope: %w", err)
-	}
-	return scope, nil
 }
 
 func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
@@ -711,214 +473,26 @@ func deliveryRouteReasonCode(route events.DeliveryRoute) string {
 	}
 }
 
-func (s *PostgresStore) upsertCommittedReplayScopeSpec(
-	ctx context.Context,
-	tx *sql.Tx,
-	eventID string,
-	scope runtimereplayclaim.CommittedReplayScope,
-) error {
-	eventID = strings.TrimSpace(eventID)
-	if eventID == "" {
-		return nil
-	}
-	if _, err := committedReplayScopeReasonCode(scope); err != nil {
-		return err
-	}
-	now := time.Now().UTC()
-	execFn := s.DB.ExecContext
-	queryFn := s.DB.QueryRowContext
-	if tx != nil {
-		execFn = tx.ExecContext
-		queryFn = tx.QueryRowContext
-	}
-	res, err := execFn(ctx, `
-		INSERT INTO committed_replay_scopes (event_id, run_id, scope, created_at, updated_at)
-		SELECT e.event_id, e.run_id, $2, $3, $3 FROM events e WHERE e.event_id = $1::uuid
-		ON CONFLICT (event_id) DO NOTHING
-	`, eventID, string(scope), now)
-	if err != nil {
-		return fmt.Errorf("insert committed replay scope: %w", err)
-	}
-	if rows, _ := res.RowsAffected(); rows == 0 {
-		var persisted string
-		if err := queryFn(ctx, `SELECT scope FROM committed_replay_scopes WHERE event_id = $1::uuid`, eventID).Scan(&persisted); err != nil {
-			return fmt.Errorf("read committed replay scope duplicate: %w", err)
-		}
-		if strings.TrimSpace(persisted) != string(scope) {
-			return fmt.Errorf("committed replay scope conflicts with persisted scope")
-		}
-	}
-	return nil
-}
-
-func committedReplayScopeReasonCode(scope runtimereplayclaim.CommittedReplayScope) (string, error) {
+func committedReplayScopeReasonCode(scope runtimepipelineobligation.CommittedScope) (string, error) {
 	switch scope {
-	case runtimereplayclaim.CommittedReplayScopeDirect:
+	case runtimepipelineobligation.ScopeDirect:
 		return replayScopeReasonDirect, nil
-	case runtimereplayclaim.CommittedReplayScopeSubscribed:
+	case runtimepipelineobligation.ScopeSubscribed:
 		return replayScopeReasonSubscribed, nil
 	default:
 		return "", fmt.Errorf("committed replay scope: unsupported scope %q", strings.TrimSpace(string(scope)))
 	}
 }
 
-func committedReplayScopeFromReasonCode(reasonCode string) (runtimereplayclaim.CommittedReplayScope, bool) {
+func committedReplayScopeFromReasonCode(reasonCode string) (runtimepipelineobligation.CommittedScope, bool) {
 	switch strings.TrimSpace(reasonCode) {
 	case replayScopeReasonDirect:
-		return runtimereplayclaim.CommittedReplayScopeDirect, true
+		return runtimepipelineobligation.ScopeDirect, true
 	case replayScopeReasonSubscribed:
-		return runtimereplayclaim.CommittedReplayScopeSubscribed, true
+		return runtimepipelineobligation.ScopeSubscribed, true
 	default:
 		return "", false
 	}
-}
-
-func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.Tx, eventID, status string, failure *runtimefailures.Envelope) error {
-	reasonCode := pipelineReceiptReasonCode(status, failure)
-	failureJSON, err := encodeStoredFailure(failure)
-	if err != nil {
-		return err
-	}
-	sideEffects, err := marshalPipelineReceiptSideEffects(newPipelineReceiptSideEffects(status, reasonCode))
-	if err != nil {
-		return fmt.Errorf("marshal pipeline receipt side effects: %w", err)
-	}
-	outcome := mapPipelineStatusToOutcome(status)
-	const q = `
-		INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-			outcome, reason_code, failure, side_effects, processed_at
-		)
-		SELECT
-			e.event_id, 'platform', 'pipeline', e.entity_id, e.flow_instance,
-			$2, NULLIF($3,''), $4::jsonb, $5::jsonb, now()
-		FROM events e
-		WHERE e.event_id = $1::uuid
-		ON CONFLICT (event_id, subscriber_type, subscriber_id) DO UPDATE SET
-			outcome = EXCLUDED.outcome,
-			reason_code = EXCLUDED.reason_code,
-			failure = EXCLUDED.failure,
-			side_effects = EXCLUDED.side_effects,
-			processed_at = now()
-	`
-	execFn := s.DB.ExecContext
-	if tx != nil {
-		execFn = tx.ExecContext
-	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
-		execFn = conn.ExecContext
-	}
-	if _, err := execFn(ctx, q, eventID, outcome, reasonCode, failureJSON, string(sideEffects)); err != nil {
-		return fmt.Errorf("upsert pipeline receipt: %w", err)
-	}
-	return nil
-}
-
-func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
-	runJoin := `LEFT JOIN runs run ON run.run_id = e.run_id`
-	runAdmission := `AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))`
-	exclusionArgs := diagnosticDirectReplayEventArgs()
-	limitPlaceholder := 2 + len(exclusionArgs)
-	args := append([]any{since}, exclusionArgs...)
-	args = append(args, limit)
-	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
-		SELECT e.event_id::text
-		FROM events e
-		%s
-		LEFT JOIN event_receipts r
-			ON r.event_id = e.event_id
-			AND r.subscriber_type = 'platform'
-			AND r.subscriber_id = 'pipeline'
-		WHERE r.event_id IS NULL
-		  %s
-		  AND e.created_at >= $1
-		  AND NOT EXISTS (
-			SELECT 1 FROM decision_card_route_obligations o
-			WHERE o.event_id = e.event_id AND o.status <> 'completed'
-		  )
-		  AND %s
-		ORDER BY e.created_at ASC
-		LIMIT $%d
-	`, runJoin, runAdmission, postgresDiagnosticDirectReplayExclusionSQL("e", 2), limitPlaceholder), args...)
-	if err != nil {
-		return nil, fmt.Errorf("list events missing pipeline receipt: %w", err)
-	}
-	defer rows.Close()
-
-	eventIDs := make([]string, 0, limit)
-	for rows.Next() {
-		var eventID string
-		if err := rows.Scan(&eventID); err != nil {
-			return nil, fmt.Errorf("scan missing pipeline receipt event: %w", err)
-		}
-		eventIDs = append(eventIDs, eventID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read missing pipeline receipt events: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("close missing pipeline receipt events: %w", err)
-	}
-	return hydratePostgresPersistedReplayEvents(ctx, s.DB, eventIDs)
-}
-
-func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.Context, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
-	exclusionArgs := diagnosticDirectReplayEventArgs()
-	limitPlaceholder := 3 + len(exclusionArgs)
-	args := append([]any{runID, since}, exclusionArgs...)
-	args = append(args, limit)
-	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
-		SELECT e.event_id::text
-		FROM events e
-		JOIN runs run ON run.run_id = e.run_id
-		LEFT JOIN event_receipts r
-			ON r.event_id = e.event_id
-			AND r.subscriber_type = 'platform'
-			AND r.subscriber_id = 'pipeline'
-		WHERE r.event_id IS NULL
-		  AND e.run_id = $1::uuid
-		  AND run.status IN ('running', 'paused')
-		  AND e.created_at >= $2
-		  AND NOT EXISTS (
-			SELECT 1 FROM decision_card_route_obligations o
-			WHERE o.event_id = e.event_id AND o.status <> 'completed'
-		  )
-		  AND %s
-		ORDER BY e.created_at ASC
-		LIMIT $%d
-	`, postgresDiagnosticDirectReplayExclusionSQL("e", 3), limitPlaceholder), args...)
-	if err != nil {
-		return nil, fmt.Errorf("list run events missing pipeline receipt: %w", err)
-	}
-	defer rows.Close()
-
-	eventIDs := make([]string, 0, limit)
-	for rows.Next() {
-		var eventID string
-		if err := rows.Scan(&eventID); err != nil {
-			return nil, fmt.Errorf("scan run missing pipeline receipt event: %w", err)
-		}
-		eventIDs = append(eventIDs, eventID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read run missing pipeline receipt events: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("close run missing pipeline receipt events: %w", err)
-	}
-	return hydratePostgresPersistedReplayEvents(ctx, s.DB, eventIDs)
-}
-
-func (s *PostgresStore) listEventsWithPendingDeliveriesForRunSpec(ctx context.Context, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
-	eventIDs, err := postgresDeliveryAdapter.PendingRunEventIDs(ctx, s.DB, runtimedelivery.PendingRunEventQuery{
-		RunID:              runID,
-		Since:              since,
-		Limit:              limit,
-		ExcludedEventNames: diagnosticDirectReplayEventNames(),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("list run pending delivery event ids: %w", err)
-	}
-	return hydratePostgresPersistedReplayEvents(ctx, s.DB, eventIDs)
 }
 
 func chooseRowQueryer(db *sql.DB, tx *sql.Tx) rowQueryer {

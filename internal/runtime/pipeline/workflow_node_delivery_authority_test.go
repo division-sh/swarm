@@ -59,7 +59,7 @@ func TestPipelineCoordinatorInterceptSkipsNodeWithoutPersistedDeliveryAuthority(
 
 	postCommit := make([]OwnerAction, 0, 1)
 	ictx := WithPipelinePostCommitActions(runCtx, &postCommit)
-	passthrough, _, err := pc.Intercept(ictx, evt)
+	passthrough, _, _, err := pc.Intercept(ictx, evt)
 	if err != nil {
 		t.Fatalf("Intercept: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestPipelineCoordinatorInterceptDeliveryRouteConsumesTargetWithoutGenericAu
 	}
 	targetPostCommit := make([]OwnerAction, 0, 1)
 	targetCtx := WithPipelinePostCommitActions(runCtx, &targetPostCommit)
-	passthrough, _, err := pc.InterceptDeliveryRoute(targetCtx, delivery, route)
+	passthrough, _, _, err := pc.InterceptDeliveryRoute(targetCtx, delivery, route)
 	if err != nil {
 		t.Fatalf("target InterceptDeliveryRoute: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestPipelineCoordinatorInterceptDeliveryRouteRejectsAmbiguousConnectedInput
 	}
 
 	for attempt := 1; attempt <= 2; attempt++ {
-		passthrough, deferred, err := pc.InterceptDeliveryRoute(ctx, delivery, route)
+		passthrough, deferred, _, err := pc.InterceptDeliveryRoute(ctx, delivery, route)
 		if err == nil || !strings.Contains(err.Error(), "multiple connected input events") {
 			t.Fatalf("attempt %d InterceptDeliveryRoute error = %v, want explicit receiver-pin ambiguity", attempt, err)
 		}
@@ -189,7 +189,7 @@ func TestPipelineCoordinatorInterceptTerminalNodeDeliveryDoesNotAuthorizeExecuti
 
 			postCommit := make([]OwnerAction, 0, 1)
 			ictx := WithPipelinePostCommitActions(ctx, &postCommit)
-			passthrough, _, err := pc.Intercept(ictx, evt)
+			passthrough, _, _, err := pc.Intercept(ictx, evt)
 			if err != nil {
 				t.Fatalf("Intercept: %v", err)
 			}

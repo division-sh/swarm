@@ -689,9 +689,9 @@ connector_packs:
 telegram-revision:
   id: telegram-revision
   execution_type: system_node
-  subscribes_to: [telegram-chat.telegram_send_message.revision_requested]
+  subscribes_to: [telegram_send_message.revision_requested]
   event_handlers:
-    telegram-chat.telegram_send_message.revision_requested: {}
+    telegram_send_message.revision_requested: {}
 `)
 	files := map[string]string{
 		"flows/telegram-chat/tools.yaml": "{}\n",

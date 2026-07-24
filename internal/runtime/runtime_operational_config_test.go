@@ -20,7 +20,7 @@ import (
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -57,7 +57,7 @@ func (recoveryGuardEventLease) Release(context.Context) error { return nil }
 func (*recoveryGuardEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
 	return runtimebustest.CommitPublishNoop(ctx, plan)
 }
-func (*recoveryGuardEventStore) UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error {
+func (*recoveryGuardEventStore) UpsertCommittedReplayScope(context.Context, string, runtimepipelineobligation.CommittedScope) error {
 	return nil
 }
 func (*recoveryGuardEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
@@ -169,9 +169,10 @@ func TestNewRuntimeRejectsInvalidArtifactRootEnv(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 
 	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
-		SQLDB:         db,
-		PipelineStore: runtimepipeline.NewWorkflowInstanceStore(db),
-		EventStore:    &minimalRuntimeEventStore{},
+		SQLDB:               db,
+		PipelineStore:       runtimepipeline.NewWorkflowInstanceStore(db),
+		EventStore:          &minimalRuntimeEventStore{},
+		PipelineObligations: newStartupRecoveryPipelineOwner(nil, nil),
 	}, Options: RuntimeOptions{
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},

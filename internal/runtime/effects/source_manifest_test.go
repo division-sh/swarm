@@ -71,7 +71,6 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/mcp/client.go:newStdioRPCClient:process_launch:1":                                                   ownerRuntimeDependency,
 	"internal/runtime/mcp/client.go:Call:stdio_write:1":                                                                   ownerManagedAgent,
 	"internal/runtime/pipeline/activity_engine.go:executePreparedActivityHTTPTool:http_do:1":                              ownerPipelineActivity,
-	"internal/runtime/pipeline/activity_background.go:Run:http_do:1":                                                      ownerRuntimeDependency,
 	"internal/runtime/pipeline/coordinator.go:RecoverNodeDeliveries:http_do:1":                                            ownerRuntimeDependency,
 	"internal/runtime/pipeline/artifact_repo.go:runArtifactGit:process_launch:1":                                          ownerPipelineAction,
 	"internal/runtime/pipeline/artifact_repo.go:validateArtifactRepoWritableDirectory:filesystem_write:1":                 ownerPipelineAction,

@@ -50,8 +50,8 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -3237,8 +3237,8 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		cards, workflow, insertNotice = pg, runtimepipeline.NewWorkflowInstanceStore(rt.DB), pg.InsertMailboxItem
 		seedEvent = func(ctx context.Context, evt events.Event) error {
 			storetest.CommitSemanticEventWithInitialFacts(t, ctx, pg, evt, nil,
-				runtimereplayclaim.CommittedReplayScopeSubscribed,
-				&runtimebus.InitialPipelineReceipt{Status: "success"})
+				runtimepipelineobligation.ScopeSubscribed,
+				storetest.AcknowledgedPipelineDisposition())
 			return nil
 		}
 	case "sqlite":
@@ -3254,8 +3254,8 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		insertNotice = sqlite.InsertMailboxItem
 		seedEvent = func(ctx context.Context, evt events.Event) error {
 			storetest.CommitSemanticEventWithInitialFacts(t, ctx, sqlite, evt, nil,
-				runtimereplayclaim.CommittedReplayScopeSubscribed,
-				&runtimebus.InitialPipelineReceipt{Status: "success"})
+				runtimepipelineobligation.ScopeSubscribed,
+				storetest.AcknowledgedPipelineDisposition())
 			return nil
 		}
 	default:
@@ -4431,8 +4431,8 @@ func seedServedLiveAgentPendingBacklogDelivery(t *testing.T, rt servedControlPro
 	event := eventtest.PersistedProjection(eventID, "thing.agent_hold", "test", "", json.RawMessage(`{"note":"backlog"}`), 0, runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	storetest.CommitSemanticEventWithInitialFacts(t, ctx, selectedStore, event,
 		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "load-agent"}},
-		runtimereplayclaim.CommittedReplayScopeSubscribed,
-		&runtimebus.InitialPipelineReceipt{Status: "processed"})
+		runtimepipelineobligation.ScopeSubscribed,
+		storetest.AcknowledgedPipelineDisposition())
 	if got := servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, "platform", "pipeline", "success"); got != 1 {
 		t.Fatalf("%s seeded live-agent backlog pipeline receipt count for event=%s = %d, want 1\n%s", backend, eventID, got, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
@@ -4546,8 +4546,8 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 	event := eventtest.PersistedProjection(eventID, "control.stop.pending", "test", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	storetest.CommitSemanticEventWithInitialFacts(t, ctx, selectedStore, event,
 		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-pending"}},
-		runtimereplayclaim.CommittedReplayScopeSubscribed,
-		&runtimebus.InitialPipelineReceipt{Status: "processed"})
+		runtimepipelineobligation.ScopeSubscribed,
+		storetest.AcknowledgedPipelineDisposition())
 	if got := servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, "platform", "pipeline", "success"); got != 1 {
 		t.Fatalf("%s seeded pipeline receipt count for event=%s = %d, want 1\n%s", backend, eventID, got, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
@@ -4983,7 +4983,7 @@ func seedServedJoinForkFrontier(t *testing.T, db *sql.DB, runID, entityID, sourc
 	)
 	storetest.CommitSemanticForkFrontier(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), event,
 		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "frontier-agent"}},
-		&runtimebus.InitialPipelineReceipt{Status: "processed"})
+		storetest.AcknowledgedPipelineDisposition())
 	return eventID
 }
 

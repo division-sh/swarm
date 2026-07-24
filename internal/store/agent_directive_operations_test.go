@@ -43,12 +43,12 @@ func TestSQLiteDirectiveOperationOwnsReservationExecutionAndCompletion(t *testin
 	if !reserved.Created || reserved.Operation.State != runtimeagentcontrol.DirectiveOperationPrepared {
 		t.Fatalf("reservation = %#v", reserved)
 	}
-	missing, err := store.ListEventsMissingPipelineReceipt(ctx, now.Add(-time.Minute), 10)
+	presence, err := store.PipelineObligations().GlobalWorkPresence(ctx)
 	if err != nil {
-		t.Fatalf("ListEventsMissingPipelineReceipt: %v", err)
+		t.Fatalf("GlobalWorkPresence: %v", err)
 	}
-	if len(missing) != 0 {
-		t.Fatalf("generic pipeline recovery saw operation-owned directive events: %#v", missing)
+	if presence.Any() {
+		t.Fatalf("generic pipeline recovery saw operation-owned directive events: %#v", presence)
 	}
 	replay, err := store.ReserveDirectiveOperation(ctx, directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001003", "00000000-0000-0000-0000-000000001004", "idem-1", "hash-1", now.Add(time.Second)))
 	if err != nil {

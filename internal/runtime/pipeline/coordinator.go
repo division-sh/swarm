@@ -24,6 +24,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -74,6 +75,7 @@ type PipelineCoordinatorOptions struct {
 	Module                           WorkflowModule
 	WorkflowStore                    *WorkflowInstanceStore
 	DeliveryStore                    runtimedelivery.Store
+	PipelineObligations              runtimepipelineobligation.Store
 	InstanceActivator                FlowInstanceActivator
 	InstanceDeactivator              FlowInstanceDeactivator
 	TimerScheduler                   *Scheduler
@@ -105,6 +107,10 @@ type runtimeMutationRunnerProvider interface {
 	RuntimeMutationRunner() RuntimeMutationRunner
 }
 
+type pipelineObligationOwnerProvider interface {
+	PipelineObligationOwner() runtimepipelineobligation.Store
+}
+
 func copyActivityToolEntries(in map[string]ChannelActivityTarget) map[string]ChannelActivityTarget {
 	out := make(map[string]ChannelActivityTarget, len(in))
 	for name, target := range in {
@@ -114,6 +120,14 @@ func copyActivityToolEntries(in map[string]ChannelActivityTarget) map[string]Cha
 }
 
 func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
+	return newPipelineCoordinatorWithOptions(bus, db, opts, true)
+}
+
+func newPreviewPipelineCoordinator(bus Bus, opts PipelineCoordinatorOptions) *PipelineCoordinator {
+	return newPipelineCoordinatorWithOptions(bus, nil, opts, false)
+}
+
+func newPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions, requireObligationOwner bool) *PipelineCoordinator {
 	if bus == nil {
 		return nil
 	}
@@ -128,8 +142,19 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 	if provider, ok := bus.(runtimeMutationRunnerProvider); ok {
 		workflowStore.ConfigureRuntimeMutationRunner(provider.RuntimeMutationRunner())
 	}
+	if opts.PipelineObligations == nil {
+		if provider, ok := bus.(pipelineObligationOwnerProvider); ok {
+			opts.PipelineObligations = provider.PipelineObligationOwner()
+		}
+	}
 	if opts.DeliveryStore != nil {
 		workflowStore.ConfigureDeliveryLifecycleStore(opts.DeliveryStore)
+	}
+	if requireObligationOwner && opts.PipelineObligations == nil {
+		panic("pipeline: durable pipeline obligation owner is required")
+	}
+	if opts.PipelineObligations != nil {
+		workflowStore.ConfigurePipelineObligationStore(opts.PipelineObligations)
 	}
 	if publisher, ok := bus.(workflowGateMutationPublisher); ok {
 		workflowStore.ConfigureDecisionCardLifecycle(opts.DecisionCards, publisher)
@@ -327,73 +352,82 @@ func (pc *PipelineCoordinator) expireHumanTaskCards(ctx context.Context, expiry 
 	})
 }
 
-func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
+func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	return pc.intercept(ctx, evt, false)
 }
 
-func (pc *PipelineCoordinator) intercept(ctx context.Context, evt events.Event, exactDeliveryBoundary bool) (bool, []events.Event, error) {
+func (pc *PipelineCoordinator) intercept(ctx context.Context, evt events.Event, exactDeliveryBoundary bool) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	if pc == nil {
-		return true, nil, nil
+		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
 	eventType := strings.TrimSpace(string(evt.Type()))
 	if eventType == "" {
-		return true, nil, nil
+		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
 	if evt.Type() == workflowGateDecisionEventType {
-		emitted, err := pc.handleWorkflowGateDecisionEvent(ctx, evt)
-		return false, emitted, err
+		emitted, outcome, err := pc.handleWorkflowGateDecisionEvent(ctx, evt)
+		return false, emitted, outcome, err
 	}
 	if evt.Type() == decisionCardDeferredEventType {
 		emitted, err := pc.handleDecisionCardDeferredEvent(ctx, evt)
-		return false, emitted, err
+		return false, emitted, runtimepipelineobligation.Continue(), err
 	}
 	if evt.Type() == decisionCardExpiredEventType {
 		emitted, err := pc.handleDecisionCardExpiredEvent(ctx, evt)
-		return false, emitted, err
+		return false, emitted, runtimepipelineobligation.Continue(), err
 	}
 	stageTimer, firedStageTimer, err := pc.handleWorkflowStageTimerFire(ctx, evt)
 	if err != nil {
-		return false, nil, err
+		return false, nil, runtimepipelineobligation.Continue(), err
 	}
 	if stageTimer && (!firedStageTimer || eventType == runtimecontracts.WorkflowStageTimerInternalEvent) {
-		return false, nil, nil
+		return false, nil, runtimepipelineobligation.Continue(), nil
 	}
 	consume, handled, err := pc.interceptPolicy(ctx, eventType, evt)
 	if err != nil {
-		return false, nil, err
+		return false, nil, runtimepipelineobligation.Continue(), err
 	}
 	if !handled {
-		return true, nil, nil
+		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
 	emitted := make([]events.Event, 0, 4)
 	ictx := context.WithValue(ctx, pipelineEmitCollectorKey{}, &emitted)
-	handled, err = pc.handleEventResult(ictx, evt)
+	handled, outcome, err := pc.handleEventResult(ictx, evt)
+	if !outcome.ContinueDispatch() {
+		// A non-consuming event-wide policy has no node-delivery authority.
+		// Only an exact node route or a consuming platform policy may settle
+		// the event's pipeline obligation.
+		if !exactDeliveryBoundary && !consume {
+			return true, emitted, runtimepipelineobligation.Continue(), nil
+		}
+		return false, emitted, outcome, nil
+	}
 	if evt.Type() == activityRequestEventType && err != nil {
-		return false, emitted, err
+		return false, emitted, runtimepipelineobligation.Continue(), err
 	}
 	if err != nil {
 		if exactDeliveryBoundary {
-			return false, emitted, err
+			return false, emitted, runtimepipelineobligation.Continue(), err
 		}
 		if consume {
-			return false, emitted, nil
+			return false, emitted, outcome, nil
 		}
-		return true, emitted, nil
+		return true, emitted, outcome, nil
 	}
 	if !handled {
-		return true, nil, nil
+		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
-	return !consume, emitted, nil
+	return !consume, emitted, outcome, nil
 }
 
-func (pc *PipelineCoordinator) InterceptDeliveryRoute(ctx context.Context, delivery events.DeliveryEvent, route events.DeliveryRoute) (bool, []events.Event, error) {
+func (pc *PipelineCoordinator) InterceptDeliveryRoute(ctx context.Context, delivery events.DeliveryEvent, route events.DeliveryRoute) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	evt := delivery.Event()
 	route = route.Normalized()
 	if route.SubscriberType != "node" || route.SubscriberID == "" {
-		return true, nil, nil
+		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
 	if route.Target.Normalized() != evt.TargetRoute().Normalized() {
-		return true, nil, fmt.Errorf("workflow node delivery route target mismatch for %s: route=%#v event=%#v", route.SubscriberID, route.Target.Normalized(), evt.TargetRoute().Normalized())
+		return true, nil, runtimepipelineobligation.Continue(), fmt.Errorf("workflow node delivery route target mismatch for %s: route=%#v event=%#v", route.SubscriberID, route.Target.Normalized(), evt.TargetRoute().Normalized())
 	}
 	ctx = runtimedelivery.WithoutClaim(ctx)
 	return pc.intercept(withWorkflowNodeDeliveryRoute(ctx, route), evt, true)
@@ -403,19 +437,27 @@ func (pc *PipelineCoordinator) interceptPolicy(ctx context.Context, eventType st
 	if strings.TrimSpace(eventType) == "" {
 		return false, false, nil
 	}
+	if evt.Type() == activityRequestEventType {
+		return true, true, nil
+	}
 	return pc.workflowNodeInterceptPolicy(ctx, eventType, evt)
 }
 
 func (pc *PipelineCoordinator) handleEvent(ctx context.Context, evt events.Event) bool {
-	handled, _ := pc.handleEventResult(ctx, evt)
+	handled, _, _ := pc.handleEventResult(ctx, evt)
 	return handled
 }
 
-func (pc *PipelineCoordinator) handleEventResult(ctx context.Context, evt events.Event) (bool, error) {
+func (pc *PipelineCoordinator) handleEventResult(ctx context.Context, evt events.Event) (bool, runtimepipelineobligation.ExecutionOutcome, error) {
 	if evt.Type() == activityRequestEventType {
 		return pc.handleActivityRequestEvent(ctx, evt)
 	}
-	return pc.dispatchWorkflowNodeEventResult(ctx, evt)
+	handled, err := pc.dispatchWorkflowNodeEventResult(ctx, evt)
+	if err == nil {
+		return handled, runtimepipelineobligation.Continue(), nil
+	}
+	failure := runtimefailures.Normalize(err, runtimeWorkflowID, "execute_handler")
+	return handled, runtimepipelineobligation.DeadLetterExecution("handler_terminal_failure", &failure), nil
 }
 
 func (pc *PipelineCoordinator) executeNodeHandlerPlan(ctx context.Context, nodeID string, evt events.Event) bool {
@@ -580,7 +622,6 @@ func (pc *PipelineCoordinator) recordWorkflowHandlerFailure(ctx context.Context,
 		return
 	}
 	failure := runtimefailures.FromError(err, runtimeWorkflowID, "execute_handler")
-	setPipelineReceiptOverride(ctx, "dead_letter", &failure.Failure)
 	if pc.bus != nil {
 		pc.bus.LogRuntime(ctx, RuntimeLogEntry{
 			Level:     "error",

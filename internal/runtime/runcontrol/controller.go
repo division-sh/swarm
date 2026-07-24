@@ -79,21 +79,19 @@ type Store interface {
 }
 
 type QueueReleaser interface {
-	ReleaseRunQueue(context.Context, string, time.Duration, int) (int, error)
+	ReleaseRunQueue(context.Context, string, int) (int, error)
 }
 
 type Options struct {
-	Now             func() time.Time
-	ReleaseLookback time.Duration
-	ReleaseLimit    int
+	Now          func() time.Time
+	ReleaseLimit int
 }
 
 type Controller struct {
-	store           Store
-	queue           QueueReleaser
-	now             func() time.Time
-	releaseLookback time.Duration
-	releaseLimit    int
+	store        Store
+	queue        QueueReleaser
+	now          func() time.Time
+	releaseLimit int
 }
 
 func NewController(store Store, queue QueueReleaser, opts Options) *Controller {
@@ -104,20 +102,15 @@ func NewController(store Store, queue QueueReleaser, opts Options) *Controller {
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
-	lookback := opts.ReleaseLookback
-	if lookback <= 0 {
-		lookback = 24 * time.Hour
-	}
 	limit := opts.ReleaseLimit
 	if limit <= 0 {
 		limit = 200
 	}
 	return &Controller{
-		store:           store,
-		queue:           queue,
-		now:             now,
-		releaseLookback: lookback,
-		releaseLimit:    limit,
+		store:        store,
+		queue:        queue,
+		now:          now,
+		releaseLimit: limit,
 	}
 }
 
@@ -173,7 +166,7 @@ func (c *Controller) releaseQueuedAfterContinue(ctx context.Context, runID strin
 	const retryDelay = 25 * time.Millisecond
 	releasedTotal := 0
 	for attempt := 0; attempt < attempts; attempt++ {
-		released, err := c.queue.ReleaseRunQueue(ctx, runID, c.releaseLookback, c.releaseLimit)
+		released, err := c.queue.ReleaseRunQueue(ctx, runID, c.releaseLimit)
 		if err == nil {
 			releasedTotal += released
 			if released > 0 {

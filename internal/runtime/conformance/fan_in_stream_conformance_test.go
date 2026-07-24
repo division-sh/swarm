@@ -19,7 +19,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
@@ -247,7 +247,7 @@ type fanInStreamMemoryStore struct {
 	bus.InMemoryEventStore
 	events         map[string]events.Event
 	deliveryRoutes map[string][]events.DeliveryRoute
-	scopes         map[string]runtimereplayclaim.CommittedReplayScope
+	scopes         map[string]runtimepipelineobligation.CommittedScope
 }
 
 func (s *fanInStreamMemoryStore) CommitPublish(ctx context.Context, plan bus.CommitPublishPlan) (bus.PreparedPublish, error) {
@@ -260,31 +260,13 @@ func (s *fanInStreamMemoryStore) CommitPublish(ctx context.Context, plan bus.Com
 			s.deliveryRoutes = map[string][]events.DeliveryRoute{}
 		}
 		if s.scopes == nil {
-			s.scopes = map[string]runtimereplayclaim.CommittedReplayScope{}
+			s.scopes = map[string]runtimepipelineobligation.CommittedScope{}
 		}
 		s.events[event.ID()] = event
 		s.deliveryRoutes[event.ID()] = events.NormalizeDeliveryRoutes(req.DeliveryRoutes)
 		s.scopes[event.ID()] = req.ReplayScope
 		return nil
 	})
-}
-
-func (s *fanInStreamMemoryStore) SupportsPersistedReplay() bool { return true }
-
-func (s *fanInStreamMemoryStore) PersistEventWithDeliveryRouteSetAndScope(_ context.Context, evt events.Event, routes []events.DeliveryRoute, scope runtimereplayclaim.CommittedReplayScope) error {
-	if s.events == nil {
-		s.events = map[string]events.Event{}
-	}
-	if s.deliveryRoutes == nil {
-		s.deliveryRoutes = map[string][]events.DeliveryRoute{}
-	}
-	if s.scopes == nil {
-		s.scopes = map[string]runtimereplayclaim.CommittedReplayScope{}
-	}
-	s.events[evt.ID()] = evt
-	s.deliveryRoutes[evt.ID()] = events.NormalizeDeliveryRoutes(routes)
-	s.scopes[evt.ID()] = scope
-	return nil
 }
 
 func (s *fanInStreamMemoryStore) InsertEventDeliveryRoutes(_ context.Context, eventID string, routes []events.DeliveryRoute) error {
@@ -297,22 +279,6 @@ func (s *fanInStreamMemoryStore) InsertEventDeliveryRoutes(_ context.Context, ev
 
 func (s *fanInStreamMemoryStore) ListEventDeliveryRoutes(_ context.Context, eventID string) ([]events.DeliveryRoute, error) {
 	return append([]events.DeliveryRoute(nil), s.deliveryRoutes[eventID]...), nil
-}
-
-func (s *fanInStreamMemoryStore) UpsertCommittedReplayScope(_ context.Context, eventID string, scope runtimereplayclaim.CommittedReplayScope) error {
-	if s.scopes == nil {
-		s.scopes = map[string]runtimereplayclaim.CommittedReplayScope{}
-	}
-	s.scopes[eventID] = scope
-	return nil
-}
-
-func (s *fanInStreamMemoryStore) LoadCommittedReplayScope(_ context.Context, eventID string) (runtimereplayclaim.CommittedReplayScope, error) {
-	scope := s.scopes[eventID]
-	if scope == "" {
-		return "", runtimereplayclaim.ErrMissingCommittedReplayScope
-	}
-	return scope, nil
 }
 
 func (s *fanInStreamMemoryStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
@@ -348,11 +314,13 @@ func fanInStreamPublishAndExecute(
 	if deliveryTarget.EntityID == "" {
 		t.Fatalf("persisted route for %s has empty entity_id: %#v", evt.ID(), deliveryTarget)
 	}
-	if got := store.scopes[evt.ID()]; got != runtimereplayclaim.CommittedReplayScopeSubscribed {
+	if got := store.scopes[evt.ID()]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope for %s = %q, want subscribed", evt.ID(), got)
 	}
-	if err := eb.PublishPersistedRecipients(ctx, evt, nil); err != nil {
-		t.Fatalf("PublishPersistedRecipients(%s): %v", evt.ID(), err)
+	if _, err := eb.RecoverPersistedPipeline(ctx, runtimepipelineobligation.ClaimedWork{
+		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
+	}, nil); err != nil {
+		t.Fatalf("RecoverPersistedPipeline(%s): %v", evt.ID(), err)
 	}
 	delivered := eventtest.TargetRouted(evt, deliveryTarget)
 	if got := delivered.EntityID(); got != deliveryTarget.EntityID {

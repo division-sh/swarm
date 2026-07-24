@@ -19,7 +19,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -30,7 +29,7 @@ import (
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
@@ -249,7 +248,7 @@ func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
 	}
 	evt := exactDuplicateEventBusEvent(runID)
 	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-original"}
-	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, evt, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeDirect)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeDirect)
 	assertEventBusExactDuplicateIsOperationNoOp(t, pg, evt, func() (eventBusExactDuplicateState, error) {
 		var state eventBusExactDuplicateState
 		if err := db.QueryRowContext(ctx, `SELECT COALESCE(status, ''), COALESCE(event_count, 0) FROM runs WHERE run_id = $1::uuid`, runID).Scan(&state.Status, &state.RunEventCount); err != nil {
@@ -295,7 +294,7 @@ func TestEventBusExactDuplicateIsOperationNoOpSQLite(t *testing.T) {
 	}
 	evt := exactDuplicateEventBusEvent(runID)
 	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-original"}
-	storetest.CommitSemanticEventWithRoutes(t, ctx, sqliteStore, evt, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeDirect)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, sqliteStore, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeDirect)
 	assertEventBusExactDuplicateIsOperationNoOp(t, sqliteStore, evt, func() (eventBusExactDuplicateState, error) {
 		var state eventBusExactDuplicateState
 		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COALESCE(status, ''), COALESCE(event_count, 0) FROM runs WHERE run_id = ?`, runID).Scan(&state.Status, &state.RunEventCount); err != nil {
@@ -664,12 +663,12 @@ type waitInterceptor struct {
 
 type providerReachabilityInterceptor struct{ reached chan<- struct{} }
 
-func (i providerReachabilityInterceptor) Intercept(_ context.Context, _ events.Event) (bool, []events.Event, error) {
+func (i providerReachabilityInterceptor) Intercept(_ context.Context, _ events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	select {
 	case i.reached <- struct{}{}:
 	default:
 	}
-	return true, nil, nil
+	return true, nil, runtimepipelineobligation.Continue(), nil
 }
 
 func assertSelectedForkDispatchNotReached(t *testing.T, deliveries <-chan *runtimebus.LocalDelivery, providerReached <-chan struct{}) {
@@ -687,18 +686,18 @@ func assertSelectedForkDispatchNotReached(t *testing.T, deliveries <-chan *runti
 	}
 }
 
-func (w waitInterceptor) Intercept(_ context.Context, _ events.Event) (bool, []events.Event, error) {
+func (w waitInterceptor) Intercept(_ context.Context, _ events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	select {
 	case w.started <- struct{}{}:
 	default:
 	}
 	<-w.release
-	return true, nil, nil
+	return true, nil, runtimepipelineobligation.Continue(), nil
 }
 
 type deferredChainInterceptor struct{}
 
-func (deferredChainInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, error) {
+func (deferredChainInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	next := ""
 	switch evt.Type() {
 	case events.EventType("custom.root"):
@@ -708,16 +707,16 @@ func (deferredChainInterceptor) Intercept(_ context.Context, evt events.Event) (
 	case events.EventType("custom.leaf"):
 		next = "custom.final"
 	default:
-		return true, nil, nil
+		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
-	return false, []events.Event{eventtest.RunCreatingRootIngress("", events.EventType(next), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, evt.EntityID()), time.Now().UTC())}, nil
+	return false, []events.Event{eventtest.RunCreatingRootIngress("", events.EventType(next), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, evt.EntityID()), time.Now().UTC())}, runtimepipelineobligation.Continue(), nil
 }
 
 type singleDeferredInterceptor struct{}
 
-func (singleDeferredInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, error) {
+func (singleDeferredInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	if evt.Type() != events.EventType("custom.root") {
-		return true, nil, nil
+		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
 	return false, []events.Event{eventtest.RunCreatingRootIngress(
 		"",
@@ -730,7 +729,7 @@ func (singleDeferredInterceptor) Intercept(_ context.Context, evt events.Event) 
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, evt.EntityID()),
 		time.Now().UTC(),
-	)}, nil
+	)}, runtimepipelineobligation.Continue(), nil
 }
 
 type deliveryContextDeferredInterceptor struct {
@@ -738,7 +737,7 @@ type deliveryContextDeferredInterceptor struct {
 	want events.DeliveryContext
 }
 
-func (i deliveryContextDeferredInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
+func (i deliveryContextDeferredInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	i.t.Helper()
 	switch evt.Type() {
 	case events.EventType("custom.root"):
@@ -754,13 +753,13 @@ func (i deliveryContextDeferredInterceptor) Intercept(ctx context.Context, evt e
 			events.EnvelopeForEntityID(events.EventEnvelope{}, evt.EntityID()),
 			time.Now().UTC(),
 		), i.want)
-		return false, []events.Event{next}, nil
+		return false, []events.Event{next}, runtimepipelineobligation.Continue(), nil
 	case events.EventType("custom.middle"):
 		if got := events.DeliveryContextFromContext(ctx).ReplyContextID(); got != i.want.ReplyContextID() {
 			i.t.Fatalf("deferred publish reply context = %q, want %q", got, i.want.ReplyContextID())
 		}
 	}
-	return true, nil, nil
+	return true, nil, runtimepipelineobligation.Continue(), nil
 }
 
 type nonTransactionalPersistedBeforeInterceptor struct {
@@ -768,18 +767,18 @@ type nonTransactionalPersistedBeforeInterceptor struct {
 	store *recordingEventStore
 }
 
-func (i nonTransactionalPersistedBeforeInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
+func (i nonTransactionalPersistedBeforeInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	i.t.Helper()
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		i.t.Fatal("non-transactional interceptor unexpectedly ran with sql tx")
 	}
 	for _, got := range i.store.eventTypes() {
 		if got == string(evt.Type()) {
-			return true, nil, nil
+			return true, nil, runtimepipelineobligation.Continue(), nil
 		}
 	}
 	i.t.Fatalf("event type %s was not persisted before non-transactional interceptor ran; persisted=%v", evt.Type(), i.store.eventTypes())
-	return true, nil, nil
+	return true, nil, runtimepipelineobligation.Continue(), nil
 }
 
 type postCommitTxAbsentInterceptor struct {
@@ -788,10 +787,10 @@ type postCommitTxAbsentInterceptor struct {
 	eventID        string
 	called         chan struct{}
 	wantRecipients []string
-	wantScope      runtimereplayclaim.CommittedReplayScope
+	wantScope      runtimepipelineobligation.CommittedScope
 }
 
-func (i postCommitTxAbsentInterceptor) Intercept(ctx context.Context, _ events.Event) (bool, []events.Event, error) {
+func (i postCommitTxAbsentInterceptor) Intercept(ctx context.Context, _ events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	i.t.Helper()
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		i.t.Fatal("post-commit interceptor ran with sql tx still in context")
@@ -811,10 +810,7 @@ func (i postCommitTxAbsentInterceptor) Intercept(ctx context.Context, _ events.E
 		assertSortedStringsEqual(i.t, got, i.wantRecipients)
 	}
 	if i.wantScope != "" {
-		got, err := i.store.LoadCommittedReplayScope(ctx, i.eventID)
-		if err != nil {
-			i.t.Fatalf("LoadCommittedReplayScope(%s): %v", i.eventID, err)
-		}
+		got := loadCommittedPipelineScopePostgres(i.t, ctx, i.store.DB, i.eventID)
 		if got != i.wantScope {
 			i.t.Fatalf("committed replay scope = %q, want %q", got, i.wantScope)
 		}
@@ -823,7 +819,20 @@ func (i postCommitTxAbsentInterceptor) Intercept(ctx context.Context, _ events.E
 	case i.called <- struct{}{}:
 	default:
 	}
-	return true, nil, nil
+	return true, nil, runtimepipelineobligation.Continue(), nil
+}
+
+func loadCommittedPipelineScopePostgres(t *testing.T, ctx context.Context, db *sql.DB, eventID string) runtimepipelineobligation.CommittedScope {
+	t.Helper()
+	var raw string
+	if err := db.QueryRowContext(ctx, `SELECT scope FROM committed_replay_scopes WHERE event_id = $1::uuid`, eventID).Scan(&raw); err != nil {
+		t.Fatalf("load committed pipeline scope for %s: %v", eventID, err)
+	}
+	scope, err := runtimepipelineobligation.ParseCommittedScope(raw)
+	if err != nil {
+		t.Fatalf("parse committed pipeline scope for %s: %v", eventID, err)
+	}
+	return scope
 }
 
 type postCommitErrorInterceptor struct {
@@ -833,7 +842,7 @@ type postCommitErrorInterceptor struct {
 	err     error
 }
 
-func (i postCommitErrorInterceptor) Intercept(ctx context.Context, _ events.Event) (bool, []events.Event, error) {
+func (i postCommitErrorInterceptor) Intercept(ctx context.Context, _ events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	i.t.Helper()
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		i.t.Fatal("post-commit error interceptor ran with sql tx still in context")
@@ -845,7 +854,7 @@ func (i postCommitErrorInterceptor) Intercept(ctx context.Context, _ events.Even
 	if !ok {
 		i.t.Fatalf("expected event %s to be committed before interceptor error", i.eventID)
 	}
-	return false, nil, i.err
+	return false, nil, runtimepipelineobligation.Continue(), i.err
 }
 
 type deferredEventVisibleInterceptor struct {
@@ -855,15 +864,15 @@ type deferredEventVisibleInterceptor struct {
 	checkFor events.EventType
 }
 
-func (i deferredEventVisibleInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
+func (i deferredEventVisibleInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	i.t.Helper()
 	if evt.Type() == events.EventType("custom.root") {
 		return false, []events.Event{
 			eventtest.RunCreatingRootIngress(i.eventID, i.checkFor, "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-		}, nil
+		}, runtimepipelineobligation.Continue(), nil
 	}
 	if evt.Type() != i.checkFor {
-		return true, nil, nil
+		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		i.t.Fatal("deferred event interceptor ran with sql tx still in context")
@@ -875,7 +884,7 @@ func (i deferredEventVisibleInterceptor) Intercept(ctx context.Context, evt even
 	if !ok {
 		i.t.Fatalf("expected deferred event %s to be persisted before interceptors ran", i.eventID)
 	}
-	return true, nil, nil
+	return true, nil, runtimepipelineobligation.Continue(), nil
 }
 
 type recordingLoggerHook struct {
@@ -974,7 +983,7 @@ func (s *routeSetEventStore) ListEventDeliveryRoutes(_ context.Context, eventID 
 func (s *replayCapableAtomicStoreMissingScope) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
 	return prepareTestCommitPublish(ctx, plan, &testCommitPublishTransaction{finalize: func(_ context.Context, req runtimebus.CommitPublishRequest) error {
 		if req.ReplayScope != "" {
-			return runtimereplayclaim.ErrMissingCommittedReplayScope
+			return runtimepipelineobligation.ErrMissingScope
 		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -993,20 +1002,6 @@ func (s *replayCapableAtomicStoreMissingScope) ListEventDeliveryRecipients(conte
 	defer s.mu.Unlock()
 	return append([]string(nil), s.deliveries...), nil
 }
-
-func (*replayCapableAtomicStoreMissingScope) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
-	return nil, nil
-}
-
-func (*replayCapableAtomicStoreMissingScope) ClaimPipelineReplay(context.Context, string) (runtimeownership.Lease, bool, error) {
-	return nil, false, nil
-}
-
-func (*replayCapableAtomicStoreMissingScope) ClaimPipelinePublication(context.Context, string) (runtimeownership.Lease, bool, error) {
-	return sweeperClaimLease{}, true, nil
-}
-
-func (*replayCapableAtomicStoreMissingScope) SupportsPersistedReplay() bool { return true }
 
 func assertSortedStringsEqual(t *testing.T, got, want []string) {
 	t.Helper()
@@ -1098,7 +1093,10 @@ func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *te
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	failing := &failStandalonePipelineReceiptOnceStore{
 		PostgresStore: pg,
-		err:           errors.New("simulated post-commit receipt failure"),
+		obligations: &failPipelineSettlementOnceStore{
+			Store: pg.PipelineObligations(),
+			err:   errors.New("simulated post-commit receipt failure"),
+		},
 	}
 	logger := &recordingLoggerHook{}
 	eb, err := newScopedTestEventBus(failing, runtimebus.EventBusOptions{Logger: logger})
@@ -1112,7 +1110,7 @@ func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *te
 	ch := runtimebustest.Subscribe(t, eb, agentID, events.EventType("custom.receipt_failure"))
 	defer runtimebustest.Unsubscribe(eb, agentID)
 
-	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
+	err = eb.Publish(ctx, eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("custom.receipt_failure"),
 		"api.v1",
@@ -1123,8 +1121,9 @@ func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *te
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "21000000-0000-0000-0000-000000000012"),
 		time.Now().UTC(),
-	)); err != nil {
-		t.Fatalf("Publish with post-commit receipt failure: %v", err)
+	))
+	if err == nil || !strings.Contains(err.Error(), "simulated post-commit receipt failure") {
+		t.Fatalf("Publish error = %v, want durable settlement failure", err)
 	}
 	ok, err := pg.EventExists(ctx, eventID)
 	if err != nil {
@@ -1139,15 +1138,15 @@ func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *te
 	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
 		t.Fatalf("pipeline receipts = %d, want 0 after injected failure", got)
 	}
-	missing, err := pg.ListEventsMissingPipelineReceipt(ctx, time.Now().Add(-time.Hour), 10)
+	missing, ok, err := pg.PipelineObligations().ClaimNext(ctx, runtimepipelineobligation.GlobalRecoveryQuery())
 	if err != nil {
-		t.Fatalf("ListEventsMissingPipelineReceipt: %v", err)
+		t.Fatalf("claim recoverable pipeline obligation: %v", err)
 	}
-	if !containsMissingPipelineReceiptEvent(missing, eventID) {
-		t.Fatalf("missing pipeline receipt events = %#v, want %s", missing, eventID)
+	if !ok || missing.Event.ID() != eventID {
+		t.Fatalf("recoverable pipeline obligation = %#v, %t; want %s", missing.Event, ok, eventID)
 	}
-	if !hasRuntimeLogAction(logger.entries, "pipeline_receipt_persist_failed") {
-		t.Fatalf("logger entries = %#v, want pipeline_receipt_persist_failed", logger.entries)
+	if err := pg.PipelineObligations().Release(ctx, missing.Claim); err != nil {
+		t.Fatalf("release recoverable pipeline obligation: %v", err)
 	}
 	got := requireBusEvent(t, ch, "post-commit receipt failure delivery")
 	if got.ID() != eventID {
@@ -1202,8 +1201,8 @@ func TestEventBusPublishTransactionalPostCommitCompletionFailureIsRecoverable(t 
 		t.Fatalf("event deliveries = %d, want 1", got)
 	}
 	outcome, failure := loadPipelineReceiptOutcomeAndFailure(t, ctx, db, eventID)
-	if outcome != "dead_letter" || failure == nil || failure.Class != runtimefailures.ClassDependencyUnavailable || failure.Detail.Code != "normal_run_completion_failed" {
-		t.Fatalf("pipeline receipt outcome=%q failure=%#v, want dead_letter with canonical failure", outcome, failure)
+	if outcome != "success" || failure != nil {
+		t.Fatalf("pipeline receipt outcome=%q failure=%#v, want successful dispatch acknowledgement", outcome, failure)
 	}
 	if !hasRuntimeLogAction(logger.entries, "publish_post_commit_convergence_failed") {
 		t.Fatalf("logger entries = %#v, want publish_post_commit_convergence_failed", logger.entries)
@@ -1216,20 +1215,25 @@ func TestEventBusPublishTransactionalPostCommitCompletionFailureIsRecoverable(t 
 
 type failStandalonePipelineReceiptOnceStore struct {
 	*store.PostgresStore
+	obligations runtimepipelineobligation.Store
+}
+
+func (s *failStandalonePipelineReceiptOnceStore) PipelineObligations() runtimepipelineobligation.Store {
+	return s.obligations
+}
+
+type failPipelineSettlementOnceStore struct {
+	runtimepipelineobligation.Store
 	err error
 }
 
-func (s *failStandalonePipelineReceiptOnceStore) UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
-	return s.UpsertPipelineReceiptTx(ctx, nil, eventID, status, failure)
-}
-
-func (s *failStandalonePipelineReceiptOnceStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status string, failure *runtimefailures.Envelope) error {
-	if tx == nil && s.err != nil {
+func (s *failPipelineSettlementOnceStore) Settle(ctx context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) error {
+	if s.err != nil {
 		err := s.err
 		s.err = nil
 		return err
 	}
-	return s.PostgresStore.UpsertPipelineReceiptTx(ctx, tx, eventID, status, failure)
+	return s.Store.Settle(ctx, claim, disposition)
 }
 
 type failNormalRunCompletionStore struct {
@@ -1262,15 +1266,6 @@ func loadPipelineReceiptOutcomeAndFailure(t *testing.T, ctx context.Context, db 
 		t.Fatalf("decode pipeline receipt failure for %s: %v", eventID, err)
 	}
 	return outcome, &failure
-}
-
-func containsMissingPipelineReceiptEvent(items []events.PersistedReplayEvent, eventID string) bool {
-	for _, evt := range items {
-		if strings.TrimSpace(evt.Event.ID()) == strings.TrimSpace(eventID) {
-			return true
-		}
-	}
-	return false
 }
 
 func hasRuntimeLogAction(entries []recordedLogEntry, action string) bool {
@@ -1480,7 +1475,7 @@ func TestEventBusPublish_FailsClosedWhenReplayCapableAtomicStoreOmitsCommittedRe
 
 	err = eb.Publish(context.Background(), eventtest.RunCreatingRootIngress(uuid.NewString(),
 		events.EventType("custom.replay.checked"), "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()))
-	if !errors.Is(err, runtimereplayclaim.ErrMissingCommittedReplayScope) {
+	if !errors.Is(err, runtimepipelineobligation.ErrMissingScope) {
 		t.Fatalf("Publish error = %v, want missing committed replay scope", err)
 	}
 }
@@ -2010,12 +2005,9 @@ func TestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes(t *
 		t.Fatalf("ListEventDeliveryRecipients(%s): %v", eventID, err)
 	}
 	assertSortedStringsEqual(t, gotRecipients, []string{agentID})
-	gotScope, err := pg.LoadCommittedReplayScope(ctx, eventID)
-	if err != nil {
-		t.Fatalf("LoadCommittedReplayScope(%s): %v", eventID, err)
-	}
-	if gotScope != runtimereplayclaim.CommittedReplayScopeSubscribed {
-		t.Fatalf("committed replay scope = %q, want %q", gotScope, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	gotScope := loadCommittedPipelineScopePostgres(t, ctx, db, eventID)
+	if gotScope != runtimepipelineobligation.ScopeSubscribed {
+		t.Fatalf("committed pipeline scope = %q, want %q", gotScope, runtimepipelineobligation.ScopeSubscribed)
 	}
 
 	waitCtx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
@@ -2096,7 +2088,7 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 				t.Fatal(err)
 			}
 
-			if got, err := sibling.SweepUndispatched(context.Background(), time.Hour, 10); err != nil || got != 0 {
+			if got, err := sibling.SweepUndispatched(context.Background(), 10); err != nil || got != 0 {
 				t.Fatalf("sibling sweep while foreground owns event = %d, %v; want 0, nil", got, err)
 			}
 			close(release)
@@ -2105,7 +2097,7 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 			if err := foreground.WaitForQuiescence(waitCtx); err != nil {
 				t.Fatalf("wait foreground completion: %v", err)
 			}
-			if got, err := sibling.SweepUndispatched(context.Background(), time.Hour, 10); err != nil || got != 0 {
+			if got, err := sibling.SweepUndispatched(context.Background(), 10); err != nil || got != 0 {
 				t.Fatalf("sibling sweep after foreground settlement = %d, %v; want 0, nil", got, err)
 			}
 		})
@@ -2114,88 +2106,70 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 
 type publicationClaimBarrierStore struct {
 	*store.PostgresStore
-	claimed chan<- struct{}
-	release <-chan struct{}
+	obligations runtimepipelineobligation.Store
 }
 
 type replayClaimBarrierStore struct {
 	*store.PostgresStore
+	obligations runtimepipelineobligation.Store
+}
+
+func (s *publicationClaimBarrierStore) PipelineObligations() runtimepipelineobligation.Store {
+	return s.obligations
+}
+
+func (s *replayClaimBarrierStore) PipelineObligations() runtimepipelineobligation.Store {
+	return s.obligations
+}
+
+type blockingPipelineObligationStore struct {
+	runtimepipelineobligation.Store
 	eventID string
 	claimed chan<- struct{}
 	release <-chan struct{}
 }
 
-func (s *replayClaimBarrierStore) awaitClaim(ctx context.Context, lease runtimeownership.Lease, claimed bool, err error) (runtimeownership.Lease, bool, error) {
-	if err != nil || !claimed {
-		return lease, claimed, err
+func (s *blockingPipelineObligationStore) awaitClaim(ctx context.Context, claim runtimepipelineobligation.Claim, err error) (runtimepipelineobligation.Claim, error) {
+	if err != nil {
+		return claim, err
 	}
 	select {
 	case s.claimed <- struct{}{}:
 	case <-ctx.Done():
-		_ = lease.Release(context.WithoutCancel(ctx))
-		return nil, false, ctx.Err()
+		_ = s.Store.Release(context.WithoutCancel(ctx), claim)
+		return runtimepipelineobligation.Claim{}, ctx.Err()
 	}
 	select {
 	case <-s.release:
-		return lease, true, nil
+		return claim, nil
 	case <-ctx.Done():
-		_ = lease.Release(context.WithoutCancel(ctx))
-		return nil, false, ctx.Err()
+		_ = s.Store.Release(context.WithoutCancel(ctx), claim)
+		return runtimepipelineobligation.Claim{}, ctx.Err()
 	}
 }
 
-func (s *replayClaimBarrierStore) ClaimPipelineReplay(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
-	lease, claimed, err := s.PostgresStore.ClaimPipelineReplay(ctx, eventID)
-	return s.awaitClaim(ctx, lease, claimed, err)
+func (s *blockingPipelineObligationStore) ClaimPublication(ctx context.Context, eventID string) (runtimepipelineobligation.Claim, error) {
+	claim, err := s.Store.ClaimPublication(ctx, eventID)
+	return s.awaitClaim(ctx, claim, err)
 }
 
-func (s *replayClaimBarrierStore) ClaimPipelineSettlement(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
-	lease, claimed, err := s.PostgresStore.ClaimPipelineSettlement(ctx, eventID)
-	return s.awaitClaim(ctx, lease, claimed, err)
-}
-
-func (s *replayClaimBarrierStore) ListEventsMissingPipelineReceipt(ctx context.Context, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
-	records, err := s.PostgresStore.ListEventsMissingPipelineReceipt(ctx, since, 200)
-	return filterReplayPoolRecords(records, s.eventID), err
-}
-
-func (s *replayClaimBarrierStore) ListEventsMissingPipelineReceiptForRun(ctx context.Context, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
-	records, err := s.PostgresStore.ListEventsMissingPipelineReceiptForRun(ctx, runID, since, 200)
-	return filterReplayPoolRecords(records, s.eventID), err
-}
-
-func (s *replayClaimBarrierStore) ListDueDecisionRouteObligations(ctx context.Context, now time.Time, limit int) ([]events.PersistedReplayEvent, error) {
-	records, err := s.PostgresStore.ListDueDecisionRouteObligations(ctx, now, 200)
-	return filterReplayPoolRecords(records, s.eventID), err
-}
-
-func filterReplayPoolRecords(records []events.PersistedReplayEvent, eventID string) []events.PersistedReplayEvent {
-	for _, record := range records {
-		if record.Event.ID() == eventID {
-			return []events.PersistedReplayEvent{record}
-		}
+func (s *blockingPipelineObligationStore) ClaimNext(ctx context.Context, query runtimepipelineobligation.ClaimQuery) (runtimepipelineobligation.ClaimedWork, bool, error) {
+	if strings.TrimSpace(s.eventID) == "" {
+		return s.Store.ClaimNext(ctx, query)
 	}
-	return nil
-}
-
-func (s *publicationClaimBarrierStore) ClaimPipelinePublication(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
-	lease, claimed, err := s.PostgresStore.ClaimPipelinePublication(ctx, eventID)
-	if err != nil || !claimed {
-		return lease, claimed, err
+	work, err := s.Store.ClaimEvent(ctx, s.eventID, query.Purpose)
+	if errors.Is(err, runtimepipelineobligation.ErrBusy) || errors.Is(err, runtimepipelineobligation.ErrIneligible) {
+		return runtimepipelineobligation.ClaimedWork{}, false, nil
 	}
-	select {
-	case s.claimed <- struct{}{}:
-	case <-ctx.Done():
-		_ = lease.Release(context.WithoutCancel(ctx))
-		return nil, false, ctx.Err()
+	if err != nil {
+		return runtimepipelineobligation.ClaimedWork{}, false, err
 	}
-	select {
-	case <-s.release:
-		return lease, true, nil
-	case <-ctx.Done():
-		_ = lease.Release(context.WithoutCancel(ctx))
-		return nil, false, ctx.Err()
+	claim, err := s.awaitClaim(ctx, work.Claim, nil)
+	if err != nil {
+		return runtimepipelineobligation.ClaimedWork{}, false, err
 	}
+	work.Claim = claim
+	return work, true, nil
 }
 
 func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing.T) {
@@ -2210,7 +2184,12 @@ func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing
 
 			claimed := make(chan struct{}, poolSize)
 			release := make(chan struct{})
-			selected := &publicationClaimBarrierStore{PostgresStore: pg, claimed: claimed, release: release}
+			selected := &publicationClaimBarrierStore{
+				PostgresStore: pg,
+				obligations: &blockingPipelineObligationStore{
+					Store: pg.PipelineObligations(), claimed: claimed, release: release,
+				},
+			}
 			bus, err := newScopedTestEventBus(selected)
 			if err != nil {
 				t.Fatal(err)
@@ -2309,8 +2288,12 @@ func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
 			start := make(chan struct{})
 			errs := make(chan error, poolSize)
 			for i := 0; i < poolSize; i++ {
+				selectedStore := storetest.AdmitPostgresRuntimeStore(t, db)
 				selected := &replayClaimBarrierStore{
-					PostgresStore: storetest.AdmitPostgresRuntimeStore(t, db), eventID: eventIDs[i], claimed: claimed, release: release,
+					PostgresStore: selectedStore,
+					obligations: &blockingPipelineObligationStore{
+						Store: selectedStore.PipelineObligations(), eventID: eventIDs[i], claimed: claimed, release: release,
+					},
 				}
 				bus, err := newScopedTestEventBus(selected)
 				if err != nil {
@@ -2323,13 +2306,13 @@ func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
 					defer cancel()
 					switch surface {
 					case "generic_periodic", "decision_periodic":
-						_, err := bus.SweepUndispatched(ctx, time.Hour, 10)
+						_, err := bus.SweepUndispatched(ctx, 10)
 						errs <- err
 					case "run_queue":
-						_, err := bus.ReleaseRunQueue(ctx, runID, time.Hour, 10)
+						_, err := bus.ReleaseRunQueue(ctx, runID, 10)
 						errs <- err
 					case "startup":
-						errs <- runtimepipeline.NewRecoveryManagerWith(selected, bus).Recover(ctx)
+						errs <- runtimepipeline.NewRecoveryManagerWith(bus).Recover(ctx)
 					}
 				}()
 			}
@@ -2405,7 +2388,7 @@ func seedReplayPoolEvent(t *testing.T, selected *store.PostgresStore, runID stri
 	}
 	evt := eventtest.RunCreatingRootIngress(eventID, eventType, "test", "", payload, 0, runID, "",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
-	storetest.CommitSemanticEventWithRoutes(t, testAuthorActivityContext(context.Background()), selected, evt, nil, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, testAuthorActivityContext(context.Background()), selected, evt, nil, runtimepipelineobligation.ScopeSubscribed)
 	return eventID
 }
 
@@ -2465,7 +2448,7 @@ func TestEventBusPublishTransactional_RunsInterceptorsAfterCommit(t *testing.T) 
 			eventID:        eventID,
 			called:         called,
 			wantRecipients: []string{agentID},
-			wantScope:      runtimereplayclaim.CommittedReplayScopeSubscribed,
+			wantScope:      runtimepipelineobligation.ScopeSubscribed,
 		}},
 	})
 	if err != nil {
@@ -3970,8 +3953,8 @@ func TestEventBusPublish_GatedChildFlowCompletionWithoutSubjectLinkFailsClosed(t
 		events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID),
 		time.Now().UTC(),
 	))
-	if err == nil || !strings.Contains(err.Error(), "no such key: child/g_validated") {
-		t.Fatalf("Publish error = %v, want missing child-scoped gate failure", err)
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
 	}
 	if err := eb.WaitForQuiescence(ctx); err != nil {
 		t.Fatalf("WaitForQuiescence: %v", err)

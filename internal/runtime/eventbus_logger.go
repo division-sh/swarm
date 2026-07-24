@@ -14,17 +14,18 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
-func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, source semanticview.Source, bundleFingerprint string, bundleSourceFact runtimecorrelation.BundleSourceFact, runtimeInstanceID string, workOwner *worklifetime.RuntimeOccurrence, interceptorProvider func() []runtimebus.EventInterceptor, payloadValidator runtimebus.PayloadValidator, templateInstanceActivator runtimepipeline.FlowInstanceActivator, providerOutputVerifier runtimebus.ProviderOutputAuthorizationVerifier, testLifecycleProbe runtimelifecycleprobe.Observer) (*runtimebus.EventBus, error) {
+func newRuntimeEventBus(store runtimebus.EventStore, pipelineObligations runtimepipelineobligation.Store, logger *RuntimeLogger, source semanticview.Source, bundleFingerprint string, bundleSourceFact runtimecorrelation.BundleSourceFact, runtimeInstanceID string, workOwner *worklifetime.RuntimeOccurrence, interceptorProvider func() []runtimebus.EventInterceptor, payloadValidator runtimebus.PayloadValidator, templateInstanceActivator runtimepipeline.FlowInstanceActivator, providerOutputVerifier runtimebus.ProviderOutputAuthorizationVerifier, testLifecycleProbe runtimelifecycleprobe.Observer) (*runtimebus.EventBus, error) {
 	var hook runtimebus.LoggerHook
 	if logger != nil {
 		hook = runtimeLoggerHook{logger: logger}
 	}
-	return runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{
+	opts := runtimebus.EventBusOptions{
 		Logger:                    hook,
 		InterceptorProvider:       interceptorProvider,
 		ContractBundle:            source,
@@ -36,7 +37,12 @@ func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, sour
 		WorkOwner:                 workOwner,
 		TestLifecycleProbe:        testLifecycleProbe,
 		ProviderOutputVerifier:    providerOutputVerifier,
-	})
+		PipelineObligations:       pipelineObligations,
+	}
+	if pipelineObligations == nil {
+		return runtimebus.NewEphemeralEventBusWithOptions(store, opts)
+	}
+	return runtimebus.NewEventBusWithOptions(store, opts)
 }
 
 // newRuntimePayloadValidator owns canonical event-store admission validation.

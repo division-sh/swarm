@@ -246,7 +246,7 @@ func TestBuilderRunCompletionUsesAcquiredGeneration(t *testing.T) {
 }
 
 func TestRunHubAwaitCompletion_MarksSessionTerminalWhenCanonicalObservationIsUnavailable(t *testing.T) {
-	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	eb, err := runtimebus.NewEphemeralEventBus(runtimebus.InMemoryEventStore{})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -300,7 +300,7 @@ func TestRunHubAwaitCompletion_EmitsAuthoritativeRunSummary(t *testing.T) {
 			EndedAt:     &endedAt,
 		},
 	}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := runtimebus.NewEphemeralEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -350,7 +350,7 @@ func TestRunHubAwaitCompletion_EmitsAuthoritativeRunSummary(t *testing.T) {
 
 func TestRunHubAwaitCompletion_WaitingCanonicalRunDoesNotWriteCompleted(t *testing.T) {
 	store := &snapshotRunStore{snapshot: runtimebus.RunLifecycleSnapshot{RunID: "run-123", Status: "running", StartedAt: time.Now().UTC()}}
-	eb, err := runtimebus.NewEventBus(store)
+	eb, err := runtimebus.NewEphemeralEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

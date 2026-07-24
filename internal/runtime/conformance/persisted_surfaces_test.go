@@ -25,7 +25,6 @@ import (
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -38,7 +37,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimesemanticview "github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -274,7 +273,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	for _, evt := range []events.Event{event1, event2} {
 		storetest.CommitSemanticEventWithRoutes(t, ctx, pg, evt,
 			[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-1"}},
-			runtimereplayclaim.CommittedReplayScopeSubscribed)
+			runtimepipelineobligation.ScopeSubscribed)
 	}
 
 	previousTransport := http.DefaultTransport
@@ -453,7 +452,7 @@ func TestCLISessionFailureDoesNotRotateFromStderrProse(t *testing.T) {
 
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, evt,
 		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-1"}},
-		runtimereplayclaim.CommittedReplayScopeSubscribed)
+		runtimepipelineobligation.ScopeSubscribed)
 
 	dockerState := filepath.Join(t.TempDir(), "fake-docker-count")
 	fakeDocker := filepath.Join(t.TempDir(), "docker")
@@ -894,39 +893,14 @@ func (*conformanceTimerRecoveryScheduleStore) CompleteScheduleFireExact(context.
 	return nil
 }
 
-type conformanceTimerRecoveryEventStore struct {
-	store *store.PostgresStore
-}
-
-func (s conformanceTimerRecoveryEventStore) RegisterAuthorActivityEventCatalog(scope runtimeauthoractivity.Scope, descriptors []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error) {
-	return s.store.RegisterAuthorActivityEventCatalog(scope, descriptors)
-}
-
-func (conformanceTimerRecoveryEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublishNoop(ctx, plan)
-}
-
-func (conformanceTimerRecoveryEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
-	return nil, nil
-}
-
-func (conformanceTimerRecoveryEventStore) SupportsPersistedReplay() bool { return false }
-
 type conformanceRecoveryFailureEventStore struct {
 	store    *store.PostgresStore
-	missing  []events.PersistedReplayEvent
 	claimErr error
 }
 
 func (s conformanceRecoveryFailureEventStore) RegisterAuthorActivityEventCatalog(scope runtimeauthoractivity.Scope, descriptors []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error) {
 	return s.store.RegisterAuthorActivityEventCatalog(scope, descriptors)
 }
-
-type conformanceRecoveryReplayLease struct{}
-
-func (conformanceRecoveryReplayLease) Key() string                   { return "conformance-replay" }
-func (conformanceRecoveryReplayLease) Refresh(context.Context) error { return nil }
-func (conformanceRecoveryReplayLease) Release(context.Context) error { return nil }
 
 func (s conformanceRecoveryFailureEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
 	return s.store.CommitPublish(ctx, plan)
@@ -936,26 +910,36 @@ func (s conformanceRecoveryFailureEventStore) ListEventDeliveryRecipients(ctx co
 	return s.store.ListEventDeliveryRecipients(ctx, eventID)
 }
 
-func (conformanceRecoveryFailureEventStore) UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error {
-	return nil
-}
-
-func (s conformanceRecoveryFailureEventStore) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
-	return append([]events.PersistedReplayEvent(nil), s.missing...), nil
-}
-
-func (s conformanceRecoveryFailureEventStore) ClaimPipelineReplay(context.Context, string) (runtimeownership.Lease, bool, error) {
-	if s.claimErr != nil {
-		return nil, false, s.claimErr
+func (s conformanceRecoveryFailureEventStore) PipelineObligations() runtimepipelineobligation.Store {
+	return conformanceRecoveryFailureObligations{
+		Store: s.store.PipelineObligations(),
+		err:   s.claimErr,
 	}
-	return conformanceRecoveryReplayLease{}, true, nil
 }
 
-func (s conformanceRecoveryFailureEventStore) ClaimPipelinePublication(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
-	return s.store.ClaimPipelinePublication(ctx, eventID)
+type conformanceRecoveryFailureObligations struct {
+	runtimepipelineobligation.Store
+	err error
 }
 
-func (conformanceRecoveryFailureEventStore) SupportsPersistedReplay() bool { return true }
+func (s conformanceRecoveryFailureObligations) GlobalWorkPresence(context.Context) (runtimepipelineobligation.GlobalWorkPresence, error) {
+	return runtimepipelineobligation.GlobalWorkPresence{ProcessingEligible: true}, nil
+}
+
+func (s conformanceRecoveryFailureObligations) ClaimNext(context.Context, runtimepipelineobligation.ClaimQuery) (runtimepipelineobligation.ClaimedWork, bool, error) {
+	return runtimepipelineobligation.ClaimedWork{}, false, s.err
+}
+
+func acknowledgeConformancePipelineEvent(t testing.TB, ctx context.Context, owner runtimepipelineobligation.Store, eventID string) {
+	t.Helper()
+	work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
+	if err != nil {
+		t.Fatalf("claim pipeline obligation for %s: %v", eventID, err)
+	}
+	if err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
+		t.Fatalf("acknowledge pipeline obligation for %s: %v", eventID, err)
+	}
+}
 
 type conformanceManagerReplayStore struct {
 	agents []runtimemanager.PersistedAgent
@@ -1059,12 +1043,13 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 			Backend: "anthropic",
 		},
 	}, Stores: runtimepkg.Stores{
-		SQLDB:           db,
-		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		EventStore:      pg,
-		RuntimeLogStore: pg,
-		ManagerStore:    pg,
-		ScheduleStore:   pg,
+		SQLDB:               db,
+		PipelineStore:       runtimepipeline.NewWorkflowInstanceStore(db),
+		EventStore:          pg,
+		RuntimeLogStore:     pg,
+		ManagerStore:        pg,
+		ScheduleStore:       pg,
+		PipelineObligations: pg.PipelineObligations(),
 	}, Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
 		SelfCheck:         false,
 		WorkflowModule:    loadConformanceRuntimeWorkflowModule(t),
@@ -1132,11 +1117,7 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 	module := loadConformanceRuntimeWorkflowModule(t)
 	eventStore := conformanceRecoveryFailureEventStore{
-		store: pg,
-		missing: []events.PersistedReplayEvent{{
-			Event: eventtest.PersistedProjection(uuid.NewString(),
-				events.EventType("support.item_created"), "", "", nil, 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
-		}},
+		store:    pg,
 		claimErr: errors.New("claim failed"),
 	}
 
@@ -1148,12 +1129,13 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 			Backend: "anthropic",
 		},
 	}, Stores: runtimepkg.Stores{
-		SQLDB:           db,
-		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		EventStore:      eventStore,
-		RuntimeLogStore: pg,
-		ManagerStore:    &conformanceManagerReplayStore{},
-		DeliveryStore:   pg,
+		SQLDB:               db,
+		PipelineStore:       runtimepipeline.NewWorkflowInstanceStore(db),
+		EventStore:          eventStore,
+		RuntimeLogStore:     pg,
+		ManagerStore:        &conformanceManagerReplayStore{},
+		DeliveryStore:       pg,
+		PipelineObligations: eventStore.PipelineObligations(),
 	}, Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
 		SelfCheck:         false,
 		WorkflowModule:    module,
@@ -1257,13 +1239,14 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 			Backend: "anthropic",
 		},
 	}, Stores: runtimepkg.Stores{
-		SQLDB:           db,
-		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		EventStore:      conformanceTimerRecoveryEventStore{store: pg},
-		RuntimeLogStore: pg,
-		ManagerStore:    pg,
-		DeliveryStore:   pg,
-		ScheduleStore:   scheduleStore,
+		SQLDB:               db,
+		PipelineStore:       runtimepipeline.NewWorkflowInstanceStore(db),
+		EventStore:          pg,
+		RuntimeLogStore:     pg,
+		ManagerStore:        pg,
+		DeliveryStore:       pg,
+		ScheduleStore:       scheduleStore,
+		PipelineObligations: pg.PipelineObligations(),
 	}, Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
 		SelfCheck:         false,
 		WorkflowModule:    loadConformanceRuntimeWorkflowModule(t),
@@ -1515,6 +1498,9 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		}},
 	}
 	runID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed manager replay run: %v", err)
+	}
 	eventIDs := map[string]string{
 		"support.replay.ok":     uuid.NewString(),
 		"support.replay.skip":   uuid.NewString(),
@@ -1530,8 +1516,9 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		storetest.CommitSemanticEventWithRoutes(t, ctx, pg,
 			eventtest.PersistedProjection(eventIDs[eventType], events.EventType(eventType), "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Now().Add(time.Duration(index-4)*time.Minute).UTC()),
 			[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-a"}},
-			runtimereplayclaim.CommittedReplayScopeSubscribed,
+			runtimepipelineobligation.ScopeSubscribed,
 		)
+		acknowledgeConformancePipelineEvent(t, ctx, pg.PipelineObligations(), eventIDs[eventType])
 	}
 
 	rt, err := runtimepkg.NewRuntime(ctx, runtimepkg.RuntimeDeps{Config: &config.Config{
@@ -1542,12 +1529,13 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 			Backend: "anthropic",
 		},
 	}, Stores: runtimepkg.Stores{
-		SQLDB:           db,
-		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		EventStore:      conformanceTimerRecoveryEventStore{store: pg},
-		RuntimeLogStore: pg,
-		ManagerStore:    managerStore,
-		DeliveryStore:   pg,
+		SQLDB:               db,
+		PipelineStore:       runtimepipeline.NewWorkflowInstanceStore(db),
+		EventStore:          pg,
+		RuntimeLogStore:     pg,
+		ManagerStore:        managerStore,
+		DeliveryStore:       pg,
+		PipelineObligations: pg.PipelineObligations(),
 	}, Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
 		SelfCheck:         false,
 		WorkflowModule:    module,
@@ -1663,6 +1651,9 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	replayDeliveries := runtimebustest.Subscribe(t, bus, replayRecipient)
 
 	replayRunID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, replayRunID); err != nil {
+		t.Fatalf("seed replay run: %v", err)
+	}
 	replayParentID := uuid.NewString()
 	replayChildID := uuid.NewString()
 	storetest.CommitSemanticEvent(t, ctx, pg, eventtest.PersistedProjection(replayParentID,
@@ -1673,12 +1664,13 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 		"runtime", "", []byte(`{"ok":true}`), 0, replayRunID,
 		replayParentID, events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
 		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: replayRecipient}},
-		runtimereplayclaim.CommittedReplayScopeSubscribed)
-	if err := pg.UpsertPipelineReceipt(ctx, replayParentID, "processed", nil); err != nil {
-		t.Fatalf("UpsertPipelineReceipt(replay parent): %v", err)
-	}
+		runtimepipelineobligation.ScopeSubscribed)
+	acknowledgeConformancePipelineEvent(t, ctx, pg.PipelineObligations(), replayParentID)
 
 	skipRunID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, skipRunID); err != nil {
+		t.Fatalf("seed skipped replay run: %v", err)
+	}
 	skipParentID := uuid.NewString()
 	skipChildID := uuid.NewString()
 	storetest.CommitSemanticEvent(t, ctx, pg, eventtest.PersistedProjection(skipParentID,
@@ -1688,12 +1680,13 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 		events.EventType("system.recover.skip"),
 		"runtime", "", []byte(`{"ok":true}`), 0, skipRunID,
 		skipParentID, events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()))
-	if err := pg.UpsertPipelineReceipt(ctx, skipParentID, "processed", nil); err != nil {
-		t.Fatalf("UpsertPipelineReceipt(skip parent): %v", err)
-	}
+	acknowledgeConformancePipelineEvent(t, ctx, pg.PipelineObligations(), skipParentID)
 
 	droppedEventID := uuid.NewString()
 	droppedRunID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, droppedRunID); err != nil {
+		t.Fatalf("seed dropped replay run: %v", err)
+	}
 	storetest.CommitSemanticEvent(t, ctx, pg, eventtest.RuntimeDiagnostic(
 		droppedEventID, events.EventType("system.recover.drop"), "runtime", "", []byte(`{}`), 0,
 		droppedRunID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
@@ -1702,7 +1695,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 		t.Fatalf("plant missing-run recovery corruption: %v", err)
 	}
 
-	rm := runtimepipeline.NewRecoveryManagerWith(pg, bus)
+	rm := runtimepipeline.NewRecoveryManagerWith(bus)
 	if err := rm.Recover(ctx); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}

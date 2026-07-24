@@ -459,7 +459,7 @@ func (g *selectedContractRecipientPlanPublishGuard) MaterializeNodeDeliveryRoute
 	if err != nil {
 		return nil, err
 	}
-	return selectedContractNodeDeliveryRoutes(expected.Recipients), nil
+	return selectedContractNodeDeliveryRoutes(evt, expected.Recipients), nil
 }
 
 func (g *selectedContractRecipientPlanPublishGuard) authorizesEvent(event events.Event) bool {
@@ -489,7 +489,7 @@ func (g *selectedContractRecipientPlanPublishGuard) expectedRecipientPlanEvent(e
 	return sourceEventID, expected, nil
 }
 
-func selectedContractNodeDeliveryRoutes(in []store.RunForkContractFrontierRecipient) []events.DeliveryRoute {
+func selectedContractNodeDeliveryRoutes(evt events.Event, in []store.RunForkContractFrontierRecipient) []events.DeliveryRoute {
 	if len(in) == 0 {
 		return nil
 	}
@@ -508,6 +508,7 @@ func selectedContractNodeDeliveryRoutes(in []store.RunForkContractFrontierRecipi
 		}
 		if path := strings.Trim(strings.TrimSpace(recipient.Path), "/"); path != "" {
 			route.Target.FlowInstance = path
+			route.Target.EntityID = strings.TrimSpace(evt.EntityID())
 		}
 		out = append(out, route)
 	}

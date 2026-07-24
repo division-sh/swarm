@@ -12,7 +12,7 @@ import (
 )
 
 func TestAuthBreakerConsumesRuntimeIngressSafetyPauseOwner(t *testing.T) {
-	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
