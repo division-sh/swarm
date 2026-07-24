@@ -20,5 +20,16 @@ func (s *PostgresStore) TryAcquire(ctx context.Context, lockKey string) (destruc
 	if lease == nil {
 		return nil, acquired, err
 	}
-	return lease, acquired, err
+	return terminalAdvisoryLockLease{lease: lease}, acquired, err
+}
+
+type terminalAdvisoryLockLease struct {
+	lease *sqlAdvisoryLockLease
+}
+
+func (l terminalAdvisoryLockLease) Release(ctx context.Context) error {
+	if l.lease == nil {
+		return nil
+	}
+	return l.lease.ReleaseOrDiscard(ctx)
 }

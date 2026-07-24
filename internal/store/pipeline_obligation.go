@@ -161,8 +161,10 @@ func (s *postgresPipelineObligationStore) ClaimEvent(ctx context.Context, eventI
 	}
 	work, err := s.loadPostgresClaimedPipelineWork(ctx, claim)
 	if err != nil {
-		_ = s.Release(context.WithoutCancel(ctx), claim)
-		return runtimepipelineobligation.ClaimedWork{}, err
+		return runtimepipelineobligation.ClaimedWork{}, errors.Join(
+			err,
+			s.Release(context.WithoutCancel(ctx), claim),
+		)
 	}
 	return work, nil
 }
@@ -174,8 +176,10 @@ func (s *sqlitePipelineObligationStore) ClaimEvent(ctx context.Context, eventID 
 	}
 	work, err := s.loadSQLiteClaimedPipelineWork(ctx, claim)
 	if err != nil {
-		_ = s.Release(context.WithoutCancel(ctx), claim)
-		return runtimepipelineobligation.ClaimedWork{}, err
+		return runtimepipelineobligation.ClaimedWork{}, errors.Join(
+			err,
+			s.Release(context.WithoutCancel(ctx), claim),
+		)
 	}
 	return work, nil
 }
@@ -265,7 +269,7 @@ func (s *postgresPipelineObligationStore) ClaimBatch(ctx context.Context, scan r
 	})
 	state.mu.Unlock()
 	if err != nil {
-		_ = s.CloseScan(context.WithoutCancel(ctx), scan)
+		err = errors.Join(err, s.CloseScan(context.WithoutCancel(ctx), scan))
 	}
 	return batch, err
 }
@@ -289,7 +293,7 @@ func (s *sqlitePipelineObligationStore) ClaimBatch(ctx context.Context, scan run
 	})
 	state.mu.Unlock()
 	if err != nil {
-		_ = s.CloseScan(context.WithoutCancel(ctx), scan)
+		err = errors.Join(err, s.CloseScan(context.WithoutCancel(ctx), scan))
 	}
 	return batch, err
 }
@@ -417,34 +421,28 @@ func (s *postgresPipelineObligationStore) CloseScan(ctx context.Context, scan ru
 		return runtimepipelineobligation.ErrStaleScan
 	}
 	state.closed = true
-	type openClaim struct {
-		token string
-		state *pipelineClaimState
+	claims := make([]runtimepipelineobligation.Claim, 0, len(state.openClaims))
+	for _, claim := range state.openClaims {
+		claims = append(claims, claim)
 	}
-	claims := make([]openClaim, 0, len(state.openClaims))
-	for claimToken := range state.openClaims {
-		if claimState := registry.claims[claimToken]; claimState != nil {
-			claims = append(claims, openClaim{token: claimToken, state: claimState})
-		}
-	}
-	delete(registry.scans, token)
 	registry.mu.Unlock()
 	releaseCtx := context.WithoutCancel(ctx)
 	var releaseErr error
-	for _, open := range claims {
-		claimState := open.state
-		claimState.operationMu.Lock()
-		registry.mu.Lock()
-		current := registry.claims[open.token] == claimState
-		if current {
-			delete(registry.claims, open.token)
+	for _, claim := range claims {
+		if err := s.releasePostgresPipelineClaim(releaseCtx, claim); err != nil &&
+			!errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
+			releaseErr = errors.Join(releaseErr, err)
 		}
-		registry.mu.Unlock()
-		if current && claimState.postgresLease != nil {
-			releaseErr = errors.Join(releaseErr, claimState.postgresLease.Release(releaseCtx))
-		}
-		claimState.operationMu.Unlock()
 	}
+	registry.mu.Lock()
+	if current := registry.scans[token]; current != state {
+		releaseErr = errors.Join(releaseErr, runtimepipelineobligation.ErrStaleScan)
+	} else if len(state.openClaims) == 0 {
+		delete(registry.scans, token)
+	} else if releaseErr == nil {
+		releaseErr = errors.New("close PostgreSQL pipeline scan left current claims")
+	}
+	registry.mu.Unlock()
 	return releaseErr
 }
 
@@ -589,15 +587,17 @@ func (s *postgresPipelineObligationStore) MarkDecisionProcessed(ctx context.Cont
 	}
 	defer state.operationMu.Unlock()
 	lease := state.postgresLease
-	tx, err := lease.conn.BeginTx(ctx, nil)
+	tx, err := lease.session.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	if err := markDecisionRouteProcessedTx(ctx, tx, claim.EventID(), true, time.Now().UTC()); err != nil {
-		_ = tx.Rollback()
-		return err
+		return errors.Join(err, rollbackPostgresSessionTransaction(tx, lease.session))
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return errors.Join(err, rollbackPostgresSessionTransaction(tx, lease.session))
+	}
+	return lease.session.endTx(tx)
 }
 
 func (s *sqlitePipelineObligationStore) MarkDecisionProcessed(ctx context.Context, claim runtimepipelineobligation.Claim) error {
@@ -623,7 +623,7 @@ func markDecisionRouteProcessedTx(ctx context.Context, tx pipelineExecer, eventI
 	return writeExactPlatformPipelineReceipt(ctx, tx, eventID, runtimepipelineobligation.Acknowledged("decision_route_processed"), postgres, now)
 }
 
-func (s *PostgresStore) claimPostgresPipelineEvent(ctx context.Context, eventID string, purpose runtimepipelineobligation.Purpose) (runtimepipelineobligation.Claim, error) {
+func (s *PostgresStore) claimPostgresPipelineEvent(ctx context.Context, eventID string, purpose runtimepipelineobligation.Purpose) (claim runtimepipelineobligation.Claim, err error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimepipelineobligation.Claim{}, err
 	}
@@ -645,7 +645,7 @@ func (s *PostgresStore) claimPostgresPipelineEvent(ctx context.Context, eventID 
 	reservationOpen := true
 	defer func() {
 		if reservationOpen {
-			_ = releaseReservation()
+			err = errors.Join(err, releaseReservation())
 		}
 	}()
 	if registry.testBeforeClaimRegistryLock != nil {
@@ -667,7 +667,7 @@ func (s *PostgresStore) claimPostgresPipelineEvent(ctx context.Context, eventID 
 		registry.mu.Unlock()
 		return runtimepipelineobligation.Claim{}, runtimepipelineobligation.ErrBusy
 	}
-	claim, err := registry.issuer.Issue(eventID, purpose)
+	claim, err = registry.issuer.Issue(eventID, purpose)
 	if err == nil {
 		token, tokenErr := registry.issuer.Token(claim)
 		if tokenErr != nil {
@@ -678,23 +678,23 @@ func (s *PostgresStore) claimPostgresPipelineEvent(ctx context.Context, eventID 
 	}
 	registry.mu.Unlock()
 	if err != nil {
-		_ = lease.Release(context.WithoutCancel(claimCtx))
-		return runtimepipelineobligation.Claim{}, err
+		return runtimepipelineobligation.Claim{}, errors.Join(
+			err,
+			lease.Release(context.WithoutCancel(claimCtx)),
+		)
 	}
 	lease.releaseCapacity = registry.retainPostgresPipelineClaimCapacity(s.DB)
-	if releaseErr := releaseReservation(); releaseErr != nil {
-		_ = s.releasePostgresPipelineClaim(context.WithoutCancel(claimCtx), claim)
-		return runtimepipelineobligation.Claim{}, releaseErr
-	}
 	reservationOpen = false
+	if releaseErr := releaseReservation(); releaseErr != nil {
+		return runtimepipelineobligation.Claim{}, errors.Join(
+			releaseErr,
+			s.releasePostgresPipelineClaim(context.WithoutCancel(claimCtx), claim),
+		)
+	}
 	if purpose == runtimepipelineobligation.PurposePublication {
 		return claim, nil
 	}
-	queryer := pipelineQueryer(lease.conn)
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(claimCtx); ok && tx != nil {
-		queryer = tx
-	}
-	eligible, err := postgresPipelineEligible(ctx, queryer, eventID, purpose)
+	eligible, err := postgresPipelineEligible(ctx, lease.session, eventID, purpose)
 	if err != nil {
 		return runtimepipelineobligation.Claim{}, errors.Join(err, s.releasePostgresPipelineClaim(context.WithoutCancel(claimCtx), claim))
 	}
@@ -731,17 +731,20 @@ func (r *postgresPipelineClaimRegistry) retainPostgresPipelineClaimCapacity(db *
 }
 
 func (s *PostgresStore) reservePostgresPipelineClaimConnection(ctx context.Context) (context.Context, func() error, error) {
-	if _, borrowed := runtimepipeline.PipelineSQLConnFromContext(ctx); borrowed {
-		return ctx, func() error { return nil }, nil
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if session, borrowed, err := postgresSessionAuthorityFromContext(ctx); err != nil {
+		return nil, nil, fmt.Errorf("reserve PostgreSQL pipeline claim connection: %w", err)
+	} else if borrowed {
+		return session.bindContext(ctx), func() error { return nil }, nil
 	}
 	conn, err := s.DB.Conn(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reserve PostgreSQL pipeline claim connection: %w", err)
 	}
-	lifetime := newSharedSQLConnLifetime(conn)
-	claimCtx := runtimepipeline.WithPipelineSQLConnContext(ctx, conn)
-	claimCtx = withSharedSQLConnLifetime(claimCtx, lifetime)
-	return claimCtx, lifetime.release, nil
+	session := newPostgresSessionAuthority(conn)
+	return session.bindContext(ctx), session.release, nil
 }
 
 func (s *SQLiteRuntimeStore) claimSQLitePipelineEvent(ctx context.Context, eventID string, purpose runtimepipelineobligation.Purpose) (runtimepipelineobligation.Claim, error) {
@@ -794,12 +797,8 @@ func (s *PostgresStore) loadPostgresClaimedPipelineWork(ctx context.Context, cla
 		return runtimepipelineobligation.ClaimedWork{}, err
 	}
 	defer state.operationMu.Unlock()
-	queryer := pipelineQueryer(state.postgresLease.conn)
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		queryer = tx
-	}
 	if claim.Purpose() != runtimepipelineobligation.PurposePublication {
-		eligible, err := postgresPipelineEligible(ctx, queryer, claim.EventID(), claim.Purpose())
+		eligible, err := postgresPipelineEligible(ctx, state.postgresLease.session, claim.EventID(), claim.Purpose())
 		if err != nil {
 			return runtimepipelineobligation.ClaimedWork{}, err
 		}
@@ -807,7 +806,7 @@ func (s *PostgresStore) loadPostgresClaimedPipelineWork(ctx context.Context, cla
 			return runtimepipelineobligation.ClaimedWork{}, runtimepipelineobligation.ErrIneligible
 		}
 	}
-	return loadClaimedPipelineWork(ctx, queryer, claim, true)
+	return loadClaimedPipelineWork(ctx, state.postgresLease.session, claim, true)
 }
 
 func (s *SQLiteRuntimeStore) loadSQLiteClaimedPipelineWork(ctx context.Context, claim runtimepipelineobligation.Claim) (runtimepipelineobligation.ClaimedWork, error) {
@@ -1226,9 +1225,14 @@ func (s *SQLiteRuntimeStore) sqlitePipelineCandidates(ctx context.Context, query
 	return scanPipelineCandidates(rows, false, "sqlite pipeline candidates")
 }
 
-func scanPipelineCandidates(rows *sql.Rows, decisionRoute bool, operation string) ([]pipelineCandidate, error) {
-	defer rows.Close()
-	out := make([]pipelineCandidate, 0)
+func scanPipelineCandidates(rows *sql.Rows, decisionRoute bool, operation string) (out []pipelineCandidate, err error) {
+	if rows == nil {
+		return nil, fmt.Errorf("%s: rows are missing", operation)
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+	}()
+	out = make([]pipelineCandidate, 0)
 	for rows.Next() {
 		var (
 			candidate  pipelineCandidate
@@ -1239,17 +1243,17 @@ func scanPipelineCandidates(rows *sql.Rows, decisionRoute bool, operation string
 			return nil, fmt.Errorf("%s: %w", operation, err)
 		}
 		var ok bool
-		var err error
-		candidate.createdAt, ok, err = sqliteTimeValue(createdRaw)
-		if err != nil {
-			return nil, fmt.Errorf("%s created_at: %w", operation, err)
+		var parseErr error
+		candidate.createdAt, ok, parseErr = sqliteTimeValue(createdRaw)
+		if parseErr != nil {
+			return nil, fmt.Errorf("%s created_at: %w", operation, parseErr)
 		}
 		if !ok {
 			return nil, fmt.Errorf("%s created_at is missing", operation)
 		}
-		candidate.nextAttemptAt, ok, err = sqliteTimeValue(nextRaw)
-		if err != nil {
-			return nil, fmt.Errorf("%s next_attempt_at: %w", operation, err)
+		candidate.nextAttemptAt, ok, parseErr = sqliteTimeValue(nextRaw)
+		if parseErr != nil {
+			return nil, fmt.Errorf("%s next_attempt_at: %w", operation, parseErr)
 		}
 		if !ok {
 			return nil, fmt.Errorf("%s next_attempt_at is missing", operation)
@@ -1276,15 +1280,17 @@ func (s *postgresPipelineObligationStore) Settle(ctx context.Context, claim runt
 	}
 	defer state.operationMu.Unlock()
 	lease := state.postgresLease
-	tx, err := lease.conn.BeginTx(ctx, nil)
+	tx, err := lease.session.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	if err := writePipelineDispositionTx(ctx, tx, claim.EventID(), claim.Purpose(), disposition, true, time.Now().UTC()); err != nil {
-		_ = tx.Rollback()
-		return err
+		return errors.Join(err, rollbackPostgresSessionTransaction(tx, lease.session))
 	}
 	if err := tx.Commit(); err != nil {
+		return errors.Join(err, rollbackPostgresSessionTransaction(tx, lease.session))
+	}
+	if err := lease.session.endTx(tx); err != nil {
 		return err
 	}
 	return s.releasePostgresPipelineClaimLocked(context.WithoutCancel(ctx), claim, state)
@@ -1712,7 +1718,7 @@ func (s *PostgresStore) lockPostgresPipelineClaim(claim runtimepipelineobligatio
 		}
 		return nil, runtimepipelineobligation.ErrStaleClaim
 	}
-	if state.postgresLease == nil || state.postgresLease.conn == nil {
+	if state.postgresLease == nil || state.postgresLease.session == nil {
 		state.operationMu.Unlock()
 		return nil, runtimepipelineobligation.ErrStaleClaim
 	}
@@ -1775,15 +1781,25 @@ func (s *PostgresStore) releasePostgresPipelineClaimLocked(ctx context.Context, 
 		registry.mu.Unlock()
 		return err
 	}
+	registry.mu.Unlock()
+	if state.postgresLease == nil {
+		return runtimepipelineobligation.ErrStaleClaim
+	}
+	if err := state.postgresLease.Release(context.WithoutCancel(ctx)); err != nil {
+		return err
+	}
+	registry.mu.Lock()
+	if registry.claims[token] != state {
+		registry.mu.Unlock()
+		return runtimepipelineobligation.ErrStaleClaim
+	}
 	if scanState := registry.scans[state.scanToken]; scanState != nil {
 		delete(scanState.openClaims, token)
 	}
 	delete(registry.claims, token)
 	registry.mu.Unlock()
-	if state.postgresLease == nil {
-		return runtimepipelineobligation.ErrStaleClaim
-	}
-	return state.postgresLease.Release(context.WithoutCancel(ctx))
+	state.postgresLease = nil
+	return nil
 }
 
 func (s *SQLiteRuntimeStore) releaseSQLitePipelineClaim(claim runtimepipelineobligation.Claim) error {

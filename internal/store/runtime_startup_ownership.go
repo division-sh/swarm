@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -30,14 +31,17 @@ func (s *PostgresStore) AcquireRuntimeStartupOwnership(ctx context.Context, req 
 	}
 	authority, err := runtimestartupownership.NewColdAuthority(req, "postgres_advisory_lock")
 	if err != nil {
-		_ = lease.Release(ctx)
-		return nil, err
+		return nil, errors.Join(err, lease.ReleaseOrDiscard(ctx))
 	}
-	if err := s.RecordRuntimeStartupAuthorityTransition(ctx, nil, authority); err != nil {
-		_ = lease.Release(ctx)
-		return nil, err
+	if err := s.RecordRuntimeStartupAuthorityTransition(lease.BindContext(ctx), nil, authority); err != nil {
+		return nil, errors.Join(err, lease.ReleaseOrDiscard(ctx))
 	}
-	return runtimestartupownership.NewLease(authority, s, lease.Release)
+	ownedRecorder := postgresStartupOwnershipRecorder{store: s, lease: lease}
+	ownedLease, err := runtimestartupownership.NewLease(authority, ownedRecorder, lease.ReleaseOrDiscard)
+	if err != nil {
+		return nil, errors.Join(err, lease.ReleaseOrDiscard(ctx))
+	}
+	return ownedLease, nil
 }
 
 func (s *PostgresStore) RecordRuntimeStartupAuthorityTransition(ctx context.Context, previous *runtimestartupownership.Authority, next ...runtimestartupownership.Authority) error {
@@ -47,37 +51,50 @@ func (s *PostgresStore) RecordRuntimeStartupAuthorityTransition(ctx context.Cont
 	if err := runtimestartupownership.ValidateTransitionChain(previous, next...); err != nil {
 		return err
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	leaseID := next[0].LeaseAuthorityID
-	var persistedRaw []byte
-	headErr := tx.QueryRowContext(ctx, `
-		SELECT snapshot FROM runtime_startup_authority_facts
-		WHERE lease_authority_id=$1::uuid
-		ORDER BY transition_ordinal DESC LIMIT 1 FOR UPDATE
-	`, leaseID).Scan(&persistedRaw)
-	if err := validatePersistedStartupAuthorityHead(persistedRaw, headErr, previous); err != nil {
-		return err
-	}
-	for _, authority := range next {
-		raw, err := json.Marshal(authority)
-		if err != nil {
+	return runPostgresSessionTransaction(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
+		leaseID := next[0].LeaseAuthorityID
+		var persistedRaw []byte
+		headErr := tx.QueryRowContext(txctx, `
+			SELECT snapshot FROM runtime_startup_authority_facts
+			WHERE lease_authority_id=$1::uuid
+			ORDER BY transition_ordinal DESC LIMIT 1 FOR UPDATE
+		`, leaseID).Scan(&persistedRaw)
+		if err := validatePersistedStartupAuthorityHead(persistedRaw, headErr, previous); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO runtime_startup_authority_facts (
-				fact_id,authority_id,lease_authority_id,transition_ordinal,generation,state_version,state,owner_id,boot_id,
-				bundle_fingerprint,backend,handoff_id,snapshot,created_at
-			) VALUES (gen_random_uuid(),$1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8::uuid,$9,$10,NULLIF($11,'')::uuid,$12::jsonb,$13)
-		`, authority.AuthorityID, authority.LeaseAuthorityID, authority.TransitionOrdinal, authority.Generation, authority.StateVersion, authority.State,
-			authority.OwnerID, authority.BootID, authority.BundleFingerprint, authority.Backend, authority.HandoffID, string(raw), authority.RecordedAt.UTC()); err != nil {
-			return fmt.Errorf("record runtime startup authority: %w", err)
+		for _, authority := range next {
+			raw, err := json.Marshal(authority)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(txctx, `
+				INSERT INTO runtime_startup_authority_facts (
+					fact_id,authority_id,lease_authority_id,transition_ordinal,generation,state_version,state,owner_id,boot_id,
+					bundle_fingerprint,backend,handoff_id,snapshot,created_at
+				) VALUES (gen_random_uuid(),$1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8::uuid,$9,$10,NULLIF($11,'')::uuid,$12::jsonb,$13)
+			`, authority.AuthorityID, authority.LeaseAuthorityID, authority.TransitionOrdinal, authority.Generation, authority.StateVersion, authority.State,
+				authority.OwnerID, authority.BootID, authority.BundleFingerprint, authority.Backend, authority.HandoffID, string(raw), authority.RecordedAt.UTC()); err != nil {
+				return fmt.Errorf("record runtime startup authority: %w", err)
+			}
 		}
+		return nil
+	})
+}
+
+type postgresStartupOwnershipRecorder struct {
+	store *PostgresStore
+	lease *sqlAdvisoryLockLease
+}
+
+func (r postgresStartupOwnershipRecorder) RecordRuntimeStartupAuthorityTransition(
+	ctx context.Context,
+	previous *runtimestartupownership.Authority,
+	next ...runtimestartupownership.Authority,
+) error {
+	if r.store == nil || r.lease == nil {
+		return errors.New("PostgreSQL startup ownership recorder is missing")
 	}
-	return tx.Commit()
+	return r.store.RecordRuntimeStartupAuthorityTransition(r.lease.BindContext(ctx), previous, next...)
 }
 
 func validatePersistedStartupAuthorityHead(raw []byte, queryErr error, previous *runtimestartupownership.Authority) error {

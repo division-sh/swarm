@@ -5424,7 +5424,11 @@ engine:
         replacement/recovery operation contexts MUST NOT become their post-commit lifetime owner. A committed handoff is
         retained until exact finalization succeeds. Finalization failure keeps readiness and runtime selection unavailable;
         retry consumes the same handoff and cannot reacquire, infer, roll forward through metadata-only publication, or
-        expose the candidate before the typed authority transition is final.
+        expose the candidate before the typed authority transition is final. PostgreSQL startup ownership retains one
+        private session authority from advisory-lock acquisition through every persisted authority transition and exact
+        unlock. Transition transactions reuse that session, including with a one-connection pool. Public connection or
+        transaction context values are not ownership authority. Unlock must execute through the retained session and return
+        true; release errors are returned rather than converted into successful retirement.
     - name: executable_event_delivery_obligation_rows
       owner: internal/runtime/deliverylifecycle.Store
       sqlite_owner: internal/runtime/deliverylifecycle SQLite private adapter behind SQLiteRuntimeStore
@@ -30774,7 +30778,10 @@ durable_pipeline_processing_obligation_authority:
       One event has at most one current claim across every process sharing the selected PostgreSQL store and one
       process-local current claim in the exclusively owned SQLite runtime. PostgreSQL retains one private session advisory
       lock lease in the opaque claim state from registration until exact settlement, release, cursor abandonment, or
-      cancellation consumes the claim; the connection and lock never escape the private adapter. Each retained lease adds
+      cancellation consumes the claim; the connection and lock never escape the private adapter. One private session
+      authority structurally binds the physical connection, any active transaction, reference lifetime, lock acquisition,
+      claim mutation, unlock, and capacity retirement. A borrowed connection or transaction is accepted only when that
+      private authority exists and matches exactly; exported context values alone are never authority. Each retained lease adds
       one private claim-capacity slot after successful acquisition, preserving the configured persistence-pool capacity for
       claimed-work readback and execution; consuming the claim removes that exact slot. Connection acquisition is
       cancellable and occurs before the process registry lock and before capacity is added. A publication started outside an
@@ -30796,7 +30803,12 @@ durable_pipeline_processing_obligation_authority:
       recovery sweep retains each retry-release claim while later eligible candidates in the same bounded examination
       window are processed, advances the store-owned cursor first, then releases every retained claim before returning.
       Cursor cancellation or abandonment also releases every claim issued by that cursor. Release and failed settlement
-      preserve later reclaimability; a released claim cannot settle.
+      preserve later reclaimability; a released claim cannot settle. PostgreSQL unlock executes only through the exact
+      retained session and scans pg_advisory_unlock's boolean result, which must be true. A failed or false unlock keeps the
+      claim, scan membership, session, and private capacity current for explicit retry. Registry and capacity retirement
+      occur only after verified unlock and session teardown, never before. Synchronous reservation, hydration, scan close,
+      startup ownership, destructive-reset, and bundle-delete release failures are returned or joined with the primary
+      failure; asynchronous publication cleanup retains retryable claim ownership and records an explicit runtime failure.
   disposition_contract:
     vocabulary: [acknowledged, deferred, terminal_error, dead_letter, quarantined]
     retry_release: >
@@ -30863,10 +30875,10 @@ durable_pipeline_processing_obligation_authority:
     PPO-OWN-001: One mandatory selected-store owner; no optional, nil, no-op, alias, legacy, reader, writer, settler, or fake-store assembler survives on durable runtime, EventBus, coordinator, or recovery paths.
     PPO-DIS-001: One closed typed disposition vocabulary owns every foreground, recovery, directive, decision-route, and initial outcome.
     PPO-SEL-001: Eligibility and canonical hydration are exact, age-independent, and exhaustive through one opaque selected-store cursor whose batch limit bounds examined candidates; diagnostic and non-running/non-paused exclusions are explicit.
-    PPO-CLM-001: Exclusion precedes final eligibility recheck and only one current claim exists per event across every process sharing a selected PostgreSQL store or within the selected SQLite runtime; PostgreSQL retains the exact advisory-lock lease until the claim is consumed.
+    PPO-CLM-001: Exclusion precedes final eligibility recheck and only one current claim exists per event across every process sharing a selected PostgreSQL store or within the selected SQLite runtime; PostgreSQL retains one exact private session authority for lock acquisition, mutation, and checked unlock until the claim is consumed.
     PPO-PUB-001: Foreground publication, executable event commit, and every recovery surface share the exact current event-identity exclusion; only closed diagnostic-direct named commits are claim-free.
     PPO-SET-001: Acknowledgement and decision-route disposition require the current claim and commit atomically.
-    PPO-REL-001: Cancellation, cursor abandonment, non-durable retry release, failed settlement, explicit release, and restart preserve reclaimability without stranded ownership or blocking later sweep candidates; startup, ingress resume, and run continue stop normally only on explicit exhaustion or blockage.
+    PPO-REL-001: Cancellation, cursor abandonment, non-durable retry release, failed settlement, explicit release, and restart preserve reclaimability without stranded ownership or blocking later sweep candidates; PostgreSQL owner and capacity retirement require a true exact-session unlock, and failed teardown remains retryable; startup, ingress resume, and run continue stop normally only on explicit exhaustion or blockage.
     PPO-SCP-001: Committed scope is exact persisted truth; missing or invalid scope returns typed claim-bound quarantine work to the consumer, and no store-side settlement, delivery marker, current-route inference, fallback, or repair exists.
     PPO-CUR-001: Cursor continuation is monotonic across fixed global/run phases, advances before release, remembers local blockage until exhaustion, reaches every consumer as one typed SweepResult, survives periodic tick boundaries, and cannot be reset or positioned by a caller.
     PPO-DSP-001: Dispatch consumes the process-local owner and cannot outlive runtime retirement or selected-store release.
@@ -30874,7 +30886,7 @@ durable_pipeline_processing_obligation_authority:
     PPO-GLO-001: Global durable-work presence is one typed age-independent projection.
     PPO-SUM-001: Per-run summary preserves absent, successful, terminal non-success, deferred, diagnostic, inactive, and forked distinctions.
     PPO-FAM-001: Exact platform acknowledgement remains structurally separate from every other receipt, delivery, evidence, and cleanup family.
-    PPO-PRV-001: SQL and backend synchronization mechanics are private to selected-store adapters.
+    PPO-PRV-001: SQL and backend synchronization mechanics are private to selected-store adapters; public connection and transaction context values cannot establish or redirect PostgreSQL session-lock authority.
     PPO-PAR-001: Named parent terminalization is typed, transactional, and linearized with claim registration before either durable mutation.
 
 agent_lifecycle_authority:

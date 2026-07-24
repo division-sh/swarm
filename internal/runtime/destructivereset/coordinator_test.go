@@ -239,6 +239,25 @@ func TestCoordinatorBuildPlanWithLockHoldsLeaseThroughApply(t *testing.T) {
 	}
 }
 
+func TestCoordinatorBuildPlanWithLockPropagatesLeaseReleaseFailure(t *testing.T) {
+	releaseErr := errors.New("release lock failed")
+	locks := &recordingLockManager{acquired: true, releaseErr: releaseErr}
+	coord := &Coordinator{
+		Planner: InventoryPlanner{Reader: &recordingInventoryReader{}},
+		Locks:   locks,
+		Now:     func() time.Time { return time.Date(2026, 5, 15, 1, 2, 3, 0, time.UTC) },
+	}
+	if _, _, err := coord.BuildPlanWithLock(context.Background(), Request{
+		ActorTokenID: "operator-token",
+		DryRun:       true,
+	}, nil); !errors.Is(err, releaseErr) {
+		t.Fatalf("BuildPlanWithLock release error = %v, want %v", err, releaseErr)
+	}
+	if locks.lease == nil || locks.lease.releases != 1 {
+		t.Fatalf("lease release accounting = %#v, want one release", locks.lease)
+	}
+}
+
 func TestCoordinatorFailsClosedWhenLockLeaseIsMissing(t *testing.T) {
 	reader := &recordingInventoryReader{}
 	coord := &Coordinator{
@@ -404,10 +423,11 @@ func (r *recordingInventoryReader) ReadResetInventory(context.Context) (Inventor
 }
 
 type recordingLockManager struct {
-	acquired bool
-	err      error
-	acquires int
-	lease    *recordingLease
+	acquired   bool
+	err        error
+	releaseErr error
+	acquires   int
+	lease      *recordingLease
 }
 
 func (m *recordingLockManager) TryAcquire(context.Context, string) (LockLease, bool, error) {
@@ -418,7 +438,7 @@ func (m *recordingLockManager) TryAcquire(context.Context, string) (LockLease, b
 	if !m.acquired {
 		return nil, false, nil
 	}
-	m.lease = &recordingLease{}
+	m.lease = &recordingLease{err: m.releaseErr}
 	return m.lease, true, nil
 }
 
@@ -430,11 +450,12 @@ func (f lockManagerFunc) TryAcquire(ctx context.Context, key string) (LockLease,
 
 type recordingLease struct {
 	releases int
+	err      error
 }
 
 func (l *recordingLease) Release(context.Context) error {
 	l.releases++
-	return nil
+	return l.err
 }
 
 type recordingIdempotencyStore struct {

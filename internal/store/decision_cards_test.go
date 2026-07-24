@@ -1058,18 +1058,21 @@ func decisionCardStoreDB(t *testing.T, cards decisioncard.Store) (*sql.DB, bool)
 
 func runDecisionCardTestPipelineMutation(t *testing.T, ctx context.Context, cards decisioncard.Store, fn func(context.Context, *sql.Tx) error) error {
 	t.Helper()
-	db, postgres := decisionCardStoreDB(t, cards)
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	if !postgres {
-		workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, cards.(*SQLiteRuntimeStore))
-	}
-	return workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+	run := func(txctx context.Context) error {
 		tx, ok := runtimepipeline.PipelineSQLTxFromContext(txctx)
 		if !ok || tx == nil {
-			return fmt.Errorf("test pipeline mutation did not provide a transaction")
+			return fmt.Errorf("selected-store test mutation did not provide a transaction")
 		}
 		return fn(txctx, tx)
-	})
+	}
+	switch selected := cards.(type) {
+	case *PostgresStore:
+		return selected.RunRuntimeMutationContext(ctx, run)
+	case *SQLiteRuntimeStore:
+		return selected.RunRuntimeMutationContext(ctx, run)
+	default:
+		return fmt.Errorf("unexpected decision card store %T", cards)
+	}
 }
 
 func appendDecisionCardTestEvent(t *testing.T, ctx context.Context, cards decisioncard.Store, tx *sql.Tx, evt events.Event) error {

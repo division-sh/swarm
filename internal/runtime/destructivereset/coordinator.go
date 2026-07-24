@@ -2,6 +2,7 @@ package destructivereset
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -19,7 +20,7 @@ func (c *Coordinator) BuildPlan(ctx context.Context, req Request) (Result, bool,
 	return c.BuildPlanWithLock(ctx, req, nil)
 }
 
-func (c *Coordinator) BuildPlanWithLock(ctx context.Context, req Request, apply func(context.Context, Result) error) (Result, bool, error) {
+func (c *Coordinator) BuildPlanWithLock(ctx context.Context, req Request, apply func(context.Context, Result) error) (out Result, replay bool, retErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -75,7 +76,7 @@ func (c *Coordinator) BuildPlanWithLock(ctx context.Context, req Request, apply 
 		return Result{}, false, ErrLockLeaseMissing
 	}
 	defer func() {
-		_ = lease.Release(context.Background())
+		retErr = errors.Join(retErr, lease.Release(context.Background()))
 	}()
 
 	plan, err := c.Planner.BuildPlan(ctx, req)

@@ -2,6 +2,7 @@ package bundledelete
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -27,7 +28,7 @@ type RuntimeQuiescer interface {
 	QuiesceBundleRuntime(context.Context, string) error
 }
 
-func (c *Coordinator) Execute(ctx context.Context, req Request) (Result, error) {
+func (c *Coordinator) Execute(ctx context.Context, req Request) (out Result, retErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -60,7 +61,7 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (Result, error) 
 		return Result{}, fmt.Errorf("bundle delete lock lease is missing")
 	}
 	defer func() {
-		_ = lease.Release(context.Background())
+		retErr = errors.Join(retErr, lease.Release(context.Background()))
 	}()
 
 	plan, err := c.Planner.PlanBundleDelete(ctx, req)

@@ -113,6 +113,21 @@ func TestCoordinatorBusyFailsClosed(t *testing.T) {
 	}
 }
 
+func TestCoordinatorPropagatesLockReleaseFailure(t *testing.T) {
+	owner := newFakeOwners("00000000-0000-0000-0000-000000000101")
+	owner.lockReleaseErr = errors.New("release bundle delete lock")
+	_, err := owner.coordinator(time.Now()).Execute(context.Background(), Request{
+		ActorTokenID: "token",
+		RequestHash:  "hash",
+		BundleHash:   testBundleHash,
+		Force:        true,
+		DryRun:       true,
+	})
+	if !errors.Is(err, owner.lockReleaseErr) {
+		t.Fatalf("lock release error = %v, want %v", err, owner.lockReleaseErr)
+	}
+}
+
 const testBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 type fakeOwners struct {
@@ -123,6 +138,7 @@ type fakeOwners struct {
 	cleanupRequest  preservationcleanup.Request
 	containerFailed bool
 	quiesceErr      error
+	lockReleaseErr  error
 }
 
 func newFakeOwners(runID string) *fakeOwners {
@@ -153,7 +169,7 @@ func (o *fakeOwners) TryAcquire(_ context.Context, lockKey string) (destructiver
 	if !o.lockAcquired {
 		return nil, false, nil
 	}
-	return fakeLease{}, true, nil
+	return fakeLease{err: o.lockReleaseErr}, true, nil
 }
 
 func (o *fakeOwners) PlanBundleDelete(_ context.Context, req Request) (Plan, error) {
@@ -236,9 +252,9 @@ func (o *fakeOwners) ApplyBundleDeleteFinalMutation(_ context.Context, req Final
 	}, nil
 }
 
-type fakeLease struct{}
+type fakeLease struct{ err error }
 
-func (fakeLease) Release(context.Context) error { return nil }
+func (l fakeLease) Release(context.Context) error { return l.err }
 
 func stringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
