@@ -63,6 +63,7 @@ type EventBus struct {
 	interceptorProvider         func() []EventInterceptor
 	store                       EventStore
 	pipelineObligations         runtimepipelineobligation.Store
+	ephemeral                   bool
 	logger                      LoggerHook
 	semanticSource              semanticview.Source
 	templateInstanceActivator   runtimepipeline.FlowInstanceActivator
@@ -92,6 +93,13 @@ func (eb *EventBus) RuntimeMutationRunner() runtimepipeline.RuntimeMutationRunne
 	}
 	runner, _ := eb.store.(runtimepipeline.RuntimeMutationRunner)
 	return runner
+}
+
+func (eb *EventBus) PipelineObligationOwner() runtimepipelineobligation.Store {
+	if eb == nil {
+		return nil
+	}
+	return eb.pipelineObligations
 }
 
 type transactionRouteOverlay struct {
@@ -191,11 +199,39 @@ func closedSignal() chan struct{} {
 	return done
 }
 
-func NewEventBus(store EventStore) (*EventBus, error) {
-	return NewEventBusWithOptions(store, EventBusOptions{})
+type pipelineObligationStoreProvider interface {
+	PipelineObligations() runtimepipelineobligation.Store
 }
 
 func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, error) {
+	if opts.PipelineObligations == nil {
+		return nil, errors.New("durable event bus requires the pipeline obligation owner")
+	}
+	return newEventBusWithOptions(store, opts)
+}
+
+// NewEphemeralEventBus is the explicit non-durable constructor for isolated
+// previews and tests. A selected store cannot cross this boundary.
+func NewEphemeralEventBus(store EventStore) (*EventBus, error) {
+	return NewEphemeralEventBusWithOptions(store, EventBusOptions{})
+}
+
+func NewEphemeralEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, error) {
+	if opts.PipelineObligations != nil {
+		return nil, errors.New("ephemeral event bus cannot accept a durable pipeline obligation owner")
+	}
+	if _, selected := store.(pipelineObligationStoreProvider); selected {
+		return nil, errors.New("selected event store requires the durable event bus constructor")
+	}
+	eb, err := newEventBusWithOptions(store, opts)
+	if err != nil {
+		return nil, err
+	}
+	eb.ephemeral = true
+	return eb, nil
+}
+
+func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, error) {
 	if store == nil {
 		store = InMemoryEventStore{}
 	}
@@ -309,7 +345,10 @@ func (eb *EventBus) Store() EventStore {
 
 func (eb *EventBus) PipelineWorkPresence(ctx context.Context) (runtimepipelineobligation.GlobalWorkPresence, error) {
 	if eb == nil || eb.pipelineObligations == nil {
-		return runtimepipelineobligation.GlobalWorkPresence{}, nil
+		if eb != nil && eb.ephemeral {
+			return runtimepipelineobligation.GlobalWorkPresence{}, nil
+		}
+		return runtimepipelineobligation.GlobalWorkPresence{}, errors.New("pipeline obligation owner is required")
 	}
 	return eb.pipelineObligations.GlobalWorkPresence(ctx)
 }

@@ -128,6 +128,9 @@ func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts 
 		}
 		t.Cleanup(lease.Release)
 	}
+	if opts.PipelineObligations == nil {
+		return runtimebus.NewEphemeralEventBusWithOptions(eventStore, opts)
+	}
 	return runtimebus.NewEventBusWithOptions(eventStore, opts)
 }
 

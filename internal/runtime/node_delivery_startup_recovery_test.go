@@ -24,7 +24,7 @@ import (
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -34,6 +34,7 @@ type nodeDeliveryRecoveryStore interface {
 	runtimebus.EventStore
 	runtimedelivery.Store
 	runtimepipeline.RuntimeMutationRunner
+	PipelineObligations() runtimepipelineobligation.Store
 }
 
 type renewalTrackingDeliveryStore struct {
@@ -125,7 +126,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				templateInstanceDeliveryRunID, "", events.EventEnvelope{}, time.Now().UTC(),
 			)
 			nodeRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "complete-task"}
-			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{nodeRoute}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{nodeRoute}, runtimepipelineobligation.ScopeSubscribed)
 
 			processOwner := worklifetime.NewProcess()
 			t.Cleanup(func() {
@@ -141,6 +142,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				Stores: swarmruntime.Stores{
 					SQLDB: runtimeSQLDB, EventStore: selected, PipelineStore: workflowStore,
 					ManagerStore: selected, DeliveryStore: selected,
+					PipelineObligations: selected.PipelineObligations(),
 				},
 				Options: swarmruntime.RuntimeOptions{
 					SelfCheck: false, WorkflowModule: module, LLMRuntime: startupRecoveryOrderLLM{},
@@ -268,7 +270,7 @@ func TestPipelineCoordinatorRecoverNodeDeliveriesUsesCanonicalSelectedStoreOwner
 				time.Now().UTC(),
 			)
 			route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "repo-scaffold-node", Target: target}
-			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 
 			if err := pc.RecoverNodeDeliveries(ctx); err != nil {
 				t.Fatalf("RecoverNodeDeliveries: %v", err)
@@ -354,7 +356,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				time.Now().UTC().Add(-time.Minute),
 			)
 			poisonRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "repo-scaffold-node", Target: poisonTarget}
-			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, poison, []events.DeliveryRoute{poisonRoute}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, poison, []events.DeliveryRoute{poisonRoute}, runtimepipelineobligation.ScopeSubscribed)
 
 			healthyTarget := events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: "repo-scaffold/inst-1", EntityID: artifactActionResultEntityID}
 			healthy := eventtest.RunCreatingRootIngress(
@@ -365,7 +367,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				time.Now().UTC(),
 			)
 			healthyRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "repo-scaffold-node", Target: healthyTarget}
-			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, healthy, []events.DeliveryRoute{healthyRoute}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, healthy, []events.DeliveryRoute{healthyRoute}, runtimepipelineobligation.ScopeSubscribed)
 
 			if err := pc.RecoverNodeDeliveries(ctx); err != nil {
 				t.Fatalf("RecoverNodeDeliveries after terminal handler failure: %v", err)
@@ -487,7 +489,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 				time.Now().UTC(),
 			)
 			route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "repo-scaffold-node", Target: target}
-			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 			claimed, err := selected.ClaimNodeDelivery(ctx, event, route)
 			if err != nil {
 				t.Fatalf("claim node delivery before retry: %v", err)
@@ -515,7 +517,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 				events.EnvelopeForTargetRoute(events.EnvelopeForEntityID(events.EventEnvelope{}, artifactActionResultEntityID), target),
 				time.Now().UTC(),
 			)
-			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, expiringEvent, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, expiringEvent, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 			expiringClaim, err := selected.ClaimNodeDelivery(ctx, expiringEvent, route)
 			if err != nil {
 				t.Fatalf("claim node delivery before lease expiry: %v", err)

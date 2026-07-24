@@ -15,7 +15,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -93,7 +93,7 @@ func TestAgentDiagnoseExactDeliveryPaginationParity(t *testing.T) {
 					Target:         events.RouteIdentity{FlowID: "diagnose", FlowInstance: "diagnose/two", EntityID: uuid.NewString()},
 				},
 			}
-			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, routes, runtimereplayclaim.CommittedReplayScopeSubscribed)
+			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, routes, runtimepipelineobligation.ScopeSubscribed)
 			wantDeliveryIDs := make([]string, 0, len(routes))
 			for _, route := range routes {
 				obligation, err := runtimedelivery.NewObligation(event.ID(), runID, route)

@@ -32,7 +32,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -1584,7 +1584,7 @@ func TestSQLAgentReader_ListGenericAgents_UsesFullPendingDeliveryFactHorizon(t *
 	event := eventtest.ExistingRunRootIngress(eventID, "task.completed", "runtime", "", []byte(`{}`), 0, runID,
 		events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC().Add(-45*24*time.Hour))
 	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"}
-	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 	if _, err := db.ExecContext(ctx, `
 		UPDATE event_deliveries
 		SET created_at = now() - interval '45 days', updated_at = now() - interval '45 days'
@@ -2119,7 +2119,7 @@ func TestHandler_HealthzOnlyKeepsProcessProbeAndRetiresAliases(t *testing.T) {
 
 func TestHandler_RunStartStreamsRunEvents(t *testing.T) {
 	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
-	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
+	bus, err := runtimebus.NewEphemeralEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -2245,7 +2245,7 @@ func TestHandler_RunEventReplayUsesCanonicalPersistedRunDebugOwner(t *testing.T)
 			},
 		},
 	}
-	bus, err := runtimebus.NewEventBus(storeStub)
+	bus, err := runtimebus.NewEphemeralEventBus(storeStub)
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -2401,7 +2401,7 @@ func TestHandler_RunEventStreamPreservesCanonicalRuntimeLogWithoutEntityID(t *te
 	now := time.Unix(1700000100, 0).UTC()
 	runID := "run_live_001"
 	storeStub := &stubBuilderRunStore{}
-	bus, err := runtimebus.NewEventBus(storeStub)
+	bus, err := runtimebus.NewEphemeralEventBus(storeStub)
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -2510,7 +2510,7 @@ func TestHandler_RunEventStreamPreservesCanonicalRuntimeLogWithoutEntityID(t *te
 
 func TestHandler_RunStopUsesRunControlOwnerAndStreamsStopped(t *testing.T) {
 	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
-	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
+	bus, err := runtimebus.NewEphemeralEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -2594,7 +2594,7 @@ func TestHandler_RunStopUsesRunControlOwnerAndStreamsStopped(t *testing.T) {
 
 func TestHandler_RunPauseAndContinueStreamStateChanges(t *testing.T) {
 	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
-	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
+	bus, err := runtimebus.NewEphemeralEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -2695,7 +2695,7 @@ func TestHandler_RunPauseAndContinueStreamStateChanges(t *testing.T) {
 
 func TestHandler_RunLifecycleOverAPIAliases(t *testing.T) {
 	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
-	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
+	bus, err := runtimebus.NewEphemeralEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -2805,7 +2805,7 @@ func TestHandler_RunLifecycleOverAPIAliases(t *testing.T) {
 
 func TestHandler_RunBreakpointHitPausesRuntime(t *testing.T) {
 	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
-	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
+	bus, err := runtimebus.NewEphemeralEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -2903,7 +2903,7 @@ func TestHandler_RunBreakpointHitPausesRuntime(t *testing.T) {
 
 func TestHandler_HumanTaskWaitingAndDecisionResume(t *testing.T) {
 	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
-	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
+	bus, err := runtimebus.NewEphemeralEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -3018,7 +3018,7 @@ func TestHandler_HumanTaskWaitingAndDecisionResume(t *testing.T) {
 
 func TestHandler_RunStepPausesAfterNextRuntimeEvent(t *testing.T) {
 	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
-	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
+	bus, err := runtimebus.NewEphemeralEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -3129,7 +3129,7 @@ func TestHandler_RunStepPausesAfterNextRuntimeEvent(t *testing.T) {
 
 func TestHandler_RunRetryEmitsRetriedAndResumed(t *testing.T) {
 	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
-	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
+	bus, err := runtimebus.NewEphemeralEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -3223,7 +3223,7 @@ func TestHandler_RunRetryEmitsRetriedAndResumed(t *testing.T) {
 
 func TestHandler_RunSkipEmitsSkippedAndResumed(t *testing.T) {
 	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := runtimebus.NewEphemeralEventBus(nil)
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}

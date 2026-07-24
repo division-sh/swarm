@@ -83,7 +83,7 @@ func newBlockedManagerLifecycleFixture(t *testing.T, managerBus Bus, eventBus *r
 
 func newLifecycleTransitionEventBus(t *testing.T) *runtimebus.EventBus {
 	t.Helper()
-	eventBus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

@@ -107,6 +107,10 @@ type runtimeMutationRunnerProvider interface {
 	RuntimeMutationRunner() RuntimeMutationRunner
 }
 
+type pipelineObligationOwnerProvider interface {
+	PipelineObligationOwner() runtimepipelineobligation.Store
+}
+
 func copyActivityToolEntries(in map[string]ChannelActivityTarget) map[string]ChannelActivityTarget {
 	out := make(map[string]ChannelActivityTarget, len(in))
 	for name, target := range in {
@@ -116,6 +120,14 @@ func copyActivityToolEntries(in map[string]ChannelActivityTarget) map[string]Cha
 }
 
 func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
+	return newPipelineCoordinatorWithOptions(bus, db, opts, true)
+}
+
+func newPreviewPipelineCoordinator(bus Bus, opts PipelineCoordinatorOptions) *PipelineCoordinator {
+	return newPipelineCoordinatorWithOptions(bus, nil, opts, false)
+}
+
+func newPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions, requireObligationOwner bool) *PipelineCoordinator {
 	if bus == nil {
 		return nil
 	}
@@ -130,8 +142,16 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 	if provider, ok := bus.(runtimeMutationRunnerProvider); ok {
 		workflowStore.ConfigureRuntimeMutationRunner(provider.RuntimeMutationRunner())
 	}
+	if opts.PipelineObligations == nil {
+		if provider, ok := bus.(pipelineObligationOwnerProvider); ok {
+			opts.PipelineObligations = provider.PipelineObligationOwner()
+		}
+	}
 	if opts.DeliveryStore != nil {
 		workflowStore.ConfigureDeliveryLifecycleStore(opts.DeliveryStore)
+	}
+	if requireObligationOwner && opts.PipelineObligations == nil {
+		panic("pipeline: durable pipeline obligation owner is required")
 	}
 	if opts.PipelineObligations != nil {
 		workflowStore.ConfigurePipelineObligationStore(opts.PipelineObligations)

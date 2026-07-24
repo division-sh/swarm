@@ -15,7 +15,6 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 )
 
 type chatTestAgent struct {
@@ -139,7 +138,7 @@ func (s *directiveEventStore) CommitPublish(ctx context.Context, plan runtimebus
 	})
 }
 func (*directiveEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
-	return nil, runtimereplayclaim.ErrAuthoritativeRecipientManifestUnavailable
+	return nil, runtimebus.ErrAuthoritativeRecipientManifestUnavailable
 }
 func (*directiveEventStore) SupportsPersistedReplay() bool { return false }
 

@@ -42,7 +42,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -2130,7 +2130,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", staleContainerURL)
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	owner := testGatewayWorkOwner(t)
-	eventBus, err := bus.NewEventBusWithOptions(nil, bus.EventBusOptions{WorkOwner: owner})
+	eventBus, err := bus.NewEphemeralEventBusWithOptions(nil, bus.EventBusOptions{WorkOwner: owner})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -3864,12 +3864,12 @@ func seedSelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, db *sql.DB,
 
 func seedSelectedExecutionSourceReplayScopeMarker(t *testing.T, db *sql.DB, sourceRunID, sourceEventID, reasonCode string, at time.Time) {
 	t.Helper()
-	var scope runtimereplayclaim.CommittedReplayScope
+	var scope runtimepipelineobligation.CommittedScope
 	switch strings.TrimSpace(reasonCode) {
 	case "replay_scope_direct":
-		scope = runtimereplayclaim.CommittedReplayScopeDirect
+		scope = runtimepipelineobligation.ScopeDirect
 	case "replay_scope_subscribed":
-		scope = runtimereplayclaim.CommittedReplayScopeSubscribed
+		scope = runtimepipelineobligation.ScopeSubscribed
 	default:
 		t.Fatalf("unsupported replay-scope fixture reason %q", reasonCode)
 	}
@@ -4003,5 +4003,5 @@ func TestSelectedContractForkEventPreservesSourceExecutionMode(t *testing.T) {
 
 func commitRunForkTestEvent(t testing.TB, ctx context.Context, pg *store.PostgresStore, event events.Event, routes []events.DeliveryRoute) {
 	t.Helper()
-	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, routes, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, routes, runtimepipelineobligation.ScopeSubscribed)
 }

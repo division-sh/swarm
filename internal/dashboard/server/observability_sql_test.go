@@ -15,7 +15,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -71,7 +71,7 @@ func TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle(t *tes
 		{SubscriberType: "agent", SubscriberID: "agent-failed"},
 		{SubscriberType: "agent", SubscriberID: "agent-dead"},
 	}
-	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, routes, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, routes, runtimepipelineobligation.ScopeSubscribed)
 
 	progress, err := pg.ClaimAgentDelivery(ctx, event, routes[1])
 	if err != nil {
@@ -165,7 +165,7 @@ func TestSQLObservabilityReader_ListEvents_FiltersTypedSubscriberIdentity(t *tes
 		for _, delivery := range deliveries {
 			routes = append(routes, events.DeliveryRoute{SubscriberType: delivery.subscriberType, SubscriberID: delivery.subscriberID})
 		}
-		storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, routes, runtimereplayclaim.CommittedReplayScopeSubscribed)
+		storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, routes, runtimepipelineobligation.ScopeSubscribed)
 		return eventID
 	}
 
@@ -207,7 +207,7 @@ func TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows(t *testing.T)
 	event := eventtest.ExistingRunRootIngress(eventID, "task.completed", "runtime", "", []byte(`{}`), 0, runID,
 		events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
 	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
-	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 	claimed, err := pg.ClaimAgentDelivery(ctx, event, route)
 	if err != nil {
 		t.Fatalf("claim delivery: %v", err)

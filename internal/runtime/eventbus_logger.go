@@ -25,7 +25,7 @@ func newRuntimeEventBus(store runtimebus.EventStore, pipelineObligations runtime
 	if logger != nil {
 		hook = runtimeLoggerHook{logger: logger}
 	}
-	return runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{
+	opts := runtimebus.EventBusOptions{
 		Logger:                    hook,
 		InterceptorProvider:       interceptorProvider,
 		ContractBundle:            source,
@@ -38,7 +38,11 @@ func newRuntimeEventBus(store runtimebus.EventStore, pipelineObligations runtime
 		TestLifecycleProbe:        testLifecycleProbe,
 		ProviderOutputVerifier:    providerOutputVerifier,
 		PipelineObligations:       pipelineObligations,
-	})
+	}
+	if pipelineObligations == nil {
+		return runtimebus.NewEphemeralEventBusWithOptions(store, opts)
+	}
+	return runtimebus.NewEventBusWithOptions(store, opts)
 }
 
 // newRuntimePayloadValidator owns canonical event-store admission validation.

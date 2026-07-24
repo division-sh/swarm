@@ -6,29 +6,34 @@ import (
 	"testing"
 
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
 type recoveryOwnerProbe struct {
-	results []int
+	results []runtimepipelineobligation.SweepResult
 	err     error
 	calls   int
 }
 
-func (p *recoveryOwnerProbe) SweepUndispatched(context.Context, int) (int, error) {
+func (p *recoveryOwnerProbe) SweepPipelineObligations(context.Context, int) (runtimepipelineobligation.SweepResult, error) {
 	p.calls++
 	if p.err != nil {
-		return 0, p.err
+		return runtimepipelineobligation.SweepResult{}, p.err
 	}
 	if len(p.results) == 0 {
-		return 0, nil
+		return runtimepipelineobligation.SweepResult{Exhausted: true}, nil
 	}
 	result := p.results[0]
 	p.results = p.results[1:]
 	return result, nil
 }
 
-func TestRecoveryManagerDrainsCanonicalOwnerUntilPartialPage(t *testing.T) {
-	owner := &recoveryOwnerProbe{results: []int{5000, 5000, 7}}
+func TestRecoveryManagerDrainsCanonicalOwnerUntilExplicitExhaustion(t *testing.T) {
+	owner := &recoveryOwnerProbe{results: []runtimepipelineobligation.SweepResult{
+		{Settled: 0, Examined: 5000},
+		{Settled: 5000, Examined: 5000},
+		{Settled: 7, Examined: 7, Exhausted: true},
+	}}
 	if err := runtimepipeline.NewRecoveryManagerWith(owner).Recover(context.Background()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
@@ -49,8 +54,11 @@ func TestRecoveryManagerPropagatesCanonicalOwnerFailure(t *testing.T) {
 	}
 }
 
-func TestRecoveryManagerWithoutOwnerIsNoop(t *testing.T) {
-	if err := runtimepipeline.NewRecoveryManager().Recover(context.Background()); err != nil {
-		t.Fatalf("Recover: %v", err)
-	}
+func TestRecoveryManagerRequiresCanonicalOwner(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("NewRecoveryManagerWith(nil) did not fail closed")
+		}
+	}()
+	_ = runtimepipeline.NewRecoveryManagerWith(nil)
 }

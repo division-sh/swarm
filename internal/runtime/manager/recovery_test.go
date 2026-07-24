@@ -85,6 +85,11 @@ func (b *directiveRecoveryTestBus) SweepUndispatched(ctx context.Context, limit 
 	return b.recoveryTestBus.SweepUndispatched(ctx, limit)
 }
 
+func (b *directiveRecoveryTestBus) SweepPipelineObligations(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error) {
+	b.order = append(b.order, "pipeline")
+	return b.recoveryTestBus.SweepPipelineObligations(ctx, limit)
+}
+
 func (*recoveryTestBus) Publish(context.Context, events.Event) error                 { return nil }
 func (*recoveryTestBus) PublishDirect(context.Context, events.Event, []string) error { return nil }
 func (*recoveryTestBus) PublishPersistedRecipients(context.Context, events.Event, []string) error {
@@ -103,6 +108,10 @@ func (b *recoveryTestBus) Store() runtimebus.EventStore { return b }
 func (b *recoveryTestBus) SweepUndispatched(context.Context, int) (int, error) {
 	b.pipelineSweeps++
 	return 0, nil
+}
+func (b *recoveryTestBus) SweepPipelineObligations(context.Context, int) (runtimepipelineobligation.SweepResult, error) {
+	b.pipelineSweeps++
+	return runtimepipelineobligation.SweepResult{Exhausted: true}, nil
 }
 func (*recoveryTestBus) PipelineWorkPresence(context.Context) (runtimepipelineobligation.GlobalWorkPresence, error) {
 	return runtimepipelineobligation.GlobalWorkPresence{}, nil

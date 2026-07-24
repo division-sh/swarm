@@ -654,6 +654,9 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	if blocker := strings.TrimSpace(stores.ConstructionBlocker); blocker != "" {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime store boundary is not construction-ready: %s", blocker)
 	}
+	if stores.SQLDB != nil && stores.PipelineObligations == nil {
+		return validatedRuntimeDeps{}, fmt.Errorf("selected runtime store pipeline obligation owner is required")
+	}
 	if stores.InboundStore != nil && opts.ProviderTriggerCatalog == nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("provider trigger catalog snapshot is required when inbound store is configured")
 	}

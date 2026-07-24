@@ -158,6 +158,9 @@ func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts 
 		}
 		registerTestAuthorActivityCatalog(t, registrar, descriptors)
 	}
+	if opts.PipelineObligations == nil {
+		return runtimebus.NewEphemeralEventBusWithOptions(eventStore, opts)
+	}
 	return runtimebus.NewEventBusWithOptions(eventStore, opts)
 }
 

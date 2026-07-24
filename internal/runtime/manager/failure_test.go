@@ -167,7 +167,7 @@ func TestRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRecovery(
 				managerDeliveryTestStore: deliveryStore,
 			}
 			probe := lifecycletest.New(t)
-			eventBus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+			eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -250,7 +250,7 @@ func TestRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRecovery(
 				t.Fatalf("intervention run summary = %#v, want settled with one dead letter", summary)
 			}
 
-			recoveryBus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+			recoveryBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 			if err != nil {
 				t.Fatalf("NewEventBus(recovery): %v", err)
 			}
@@ -303,7 +303,7 @@ func TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim(t 
 				managerDeliveryTestStore: baseStore,
 			}
 			probe := lifecycletest.New(t, lifecycletest.WithTimeout(5*time.Second))
-			eventBus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+			eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -381,7 +381,7 @@ func TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim(t 
 			}
 
 			recoveryProbe := lifecycletest.New(t, lifecycletest.WithTimeout(5*time.Second))
-			recoveryBus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+			recoveryBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 			if err != nil {
 				t.Fatalf("NewEventBus(recovery): %v", err)
 			}
@@ -428,7 +428,7 @@ func TestRunningManagerStandingRetryReclaimsFailedDeliveryAutomatically(t *testi
 		managerDeliveryTestStore: deliveryStore,
 	}
 	probe := lifecycletest.New(t, lifecycletest.WithTimeout(5*time.Second))
-	eventBus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

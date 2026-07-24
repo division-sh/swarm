@@ -24,6 +24,7 @@ import (
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
@@ -1279,6 +1280,10 @@ func assertProviderRollbackRetryCommitted(t *testing.T, ctx context.Context, db 
 
 type routeMaterializationDBProofStore struct {
 	pg *store.PostgresStore
+}
+
+func (s routeMaterializationDBProofStore) PipelineObligations() runtimepipelineobligation.Store {
+	return s.pg.PipelineObligations()
 }
 
 func (s routeMaterializationDBProofStore) RegisterAuthorActivityEventCatalog(scope runtimeauthoractivity.Scope, descriptors []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error) {

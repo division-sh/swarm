@@ -15,7 +15,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	storepkg "github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -192,7 +192,7 @@ func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testin
 			continue
 		}
 		route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: fixture.agentID}
-		storetest.CommitSemanticEventWithRoutes(t, ctx, sqliteStore, evt, []events.DeliveryRoute{route}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+		storetest.CommitSemanticEventWithRoutes(t, ctx, sqliteStore, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 		claimed, err := sqliteStore.ClaimAgentDelivery(ctx, evt, route)
 		if err != nil {
 			t.Fatalf("claim sqlite delivery %s: %v", fixture.id, err)
@@ -305,7 +305,7 @@ func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store obs
 	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, store, event,
 		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-1"}},
-		runtimereplayclaim.CommittedReplayScopeSubscribed)
+		runtimepipelineobligation.ScopeSubscribed)
 	claimed, err := store.ClaimAgentDelivery(ctx, event, route)
 	if err != nil {
 		t.Fatalf("ClaimAgentDelivery: %v", err)

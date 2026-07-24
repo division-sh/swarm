@@ -339,6 +339,25 @@ func (p GlobalWorkPresence) Any() bool {
 	return p.ProcessingEligible || p.DecisionRouteDue
 }
 
+// SweepResult distinguishes durable exhaustion from work examined without a
+// terminal settlement. Startup recovery must never infer exhaustion from the
+// number of receipts written.
+type SweepResult struct {
+	Settled   int
+	Examined  int
+	Exhausted bool
+	Blocked   bool
+}
+
+func (r SweepResult) Add(other SweepResult) SweepResult {
+	return SweepResult{
+		Settled:   r.Settled + other.Settled,
+		Examined:  r.Examined + other.Examined,
+		Exhausted: r.Exhausted && other.Exhausted,
+		Blocked:   r.Blocked || other.Blocked,
+	}
+}
+
 type startupRecoveryDiagnosticsKey struct{}
 
 // WithStartupRecoveryDiagnostics marks the canonical recovery pass whose

@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/google/uuid"
 )
 
@@ -189,8 +188,16 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, store ev
 	if err != nil {
 		t.Fatal(err)
 	}
+	owner := pipelineObligationOwnerForFixture(store)
+	claim, err := owner.ClaimPublication(ctx, event.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = owner.Release(context.WithoutCancel(ctx), claim) })
 	return CommitSelectedForkEventRequest{
-		Commit: runtimebus.CommitPublishRequest{Event: admitted, ReplayScope: runtimereplayclaim.CommittedReplayScopeDirect},
+		Commit: runtimebus.CommitPublishRequest{
+			Event: admitted, ReplayScope: runtimepipelineobligation.ScopeDirect, PipelineClaim: claim,
+		},
 		Lineage: RunForkSelectedContractExecutionLineage{
 			ForkRunID: forkRunID, SourceRunID: sourceRunID, SourceEventID: sourceEventID,
 			ForkEventID: event.ID(), EventName: string(event.Type()), SelectionAuthority: lineage.AuthorityStamp(), CreatedAt: event.CreatedAt(),

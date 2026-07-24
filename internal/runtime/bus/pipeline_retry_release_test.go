@@ -10,6 +10,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -21,6 +22,17 @@ type retryReleaseInterceptor struct {
 
 func (i retryReleaseInterceptor) Intercept(_ context.Context, event events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	if event.ID() != i.eventID {
+		return true, nil, runtimepipelineobligation.Continue(), nil
+	}
+	return false, nil, runtimepipelineobligation.ReleaseForRetry("activity_contract_pin_unavailable", nil), nil
+}
+
+type retryReleaseSetInterceptor struct {
+	eventIDs map[string]struct{}
+}
+
+func (i retryReleaseSetInterceptor) Intercept(_ context.Context, event events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
+	if _, retry := i.eventIDs[event.ID()]; !retry {
 		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
 	return false, nil, runtimepipelineobligation.ReleaseForRetry("activity_contract_pin_unavailable", nil), nil
@@ -77,6 +89,31 @@ func TestPipelineRetryReleasePreservesReplayAcrossDispatchSurfacesOnSQLiteAndPos
 	}
 }
 
+func TestStartupRecoveryDrainsPastFullRetryReleasePageOnSQLiteAndPostgres(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := newCompleteEventDispatchFixture(t, backend, false)
+			secondRetry := newRetryReleaseTestEvent(fixture, fixture.event.CreatedAt().Add(time.Microsecond))
+			later := newRetryReleaseTestEvent(fixture, fixture.event.CreatedAt().Add(2*time.Microsecond))
+			storetest.CommitSemanticEventWithRoutes(t, fixture.ctx, fixture.store, secondRetry, nil, runtimepipelineobligation.ScopeSubscribed)
+			storetest.CommitSemanticEventWithRoutes(t, fixture.ctx, fixture.store, later, nil, runtimepipelineobligation.ScopeSubscribed)
+			fixture.bus.SetInterceptors(retryReleaseSetInterceptor{eventIDs: map[string]struct{}{
+				fixture.event.ID(): {},
+				secondRetry.ID():   {},
+			}})
+
+			if err := runtimepipeline.NewRecoveryManagerWithLimit(fixture.bus, 2).Recover(fixture.ctx); err != nil {
+				t.Fatalf("Recover: %v", err)
+			}
+			if got := retryReleasePipelineReceiptCount(t, fixture, later.ID()); got != 1 {
+				t.Fatalf("later event pipeline receipts = %d, want 1", got)
+			}
+			assertRetryReleaseReplayable(t, fixture, fixture.event.ID())
+			assertRetryReleaseReplayable(t, fixture, secondRetry.ID())
+		})
+	}
+}
+
 func newRetryReleaseTestEvent(fixture completeEventDispatchFixture, createdAt time.Time) events.Event {
 	sourceRoute := events.RouteIdentity{
 		FlowID:       "retry-source",
@@ -129,3 +166,4 @@ func retryReleasePipelineReceiptCount(t *testing.T, fixture completeEventDispatc
 }
 
 var _ runtimebus.EventInterceptor = retryReleaseInterceptor{}
+var _ runtimebus.EventInterceptor = retryReleaseSetInterceptor{}

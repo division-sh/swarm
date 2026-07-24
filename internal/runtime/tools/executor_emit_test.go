@@ -96,7 +96,7 @@ func newEmitRoutePlanEventBus(t *testing.T, store *emitRoutePlanStore, source se
 			t.Errorf("join emit route-plan process owner: %v", err)
 		}
 	})
-	bus, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source, WorkOwner: owner})
+	bus, err := runtimebus.NewEphemeralEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source, WorkOwner: owner})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}

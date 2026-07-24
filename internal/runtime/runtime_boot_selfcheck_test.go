@@ -48,6 +48,7 @@ func TestRuntimeStart_PipelineMaintenanceFailureUsesCanonicalBootStepIdentity(t 
 	}
 	rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, db, runtimepipeline.PipelineCoordinatorOptions{
 		Module: module, WorkOwner: rt.WorkOccurrence(),
+		PipelineObligations: newStartupRecoveryPipelineOwner(nil, nil),
 	})
 	if err := rt.Start(testAuthorActivityContext(context.Background())); err == nil {
 		t.Fatal("Start error = nil, want pipeline maintenance failure")

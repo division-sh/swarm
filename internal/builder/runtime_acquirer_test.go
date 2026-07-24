@@ -51,7 +51,7 @@ func newTestOwnedEventBus(t testing.TB, store runtimebus.EventStore, opts runtim
 	t.Helper()
 	acquirer := newTestRuntimeAcquirer(t, nil).(*testRuntimeAcquirer)
 	opts.WorkOwner = acquirer.owner
-	bus, err := runtimebus.NewEventBusWithOptions(store, opts)
+	bus, err := runtimebus.NewEphemeralEventBusWithOptions(store, opts)
 	if err != nil {
 		t.Fatalf("new owned builder event bus: %v", err)
 	}

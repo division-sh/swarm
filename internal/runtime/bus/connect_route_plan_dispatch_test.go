@@ -23,7 +23,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -702,9 +701,9 @@ func connectRoutePlanActivationVariables(req runtimepipeline.FlowInstanceActivat
 	return out
 }
 
-func (s *targetRouteMemoryStore) UpsertCommittedReplayScope(_ context.Context, eventID string, scope runtimereplayclaim.CommittedReplayScope) error {
+func (s *targetRouteMemoryStore) UpsertCommittedReplayScope(_ context.Context, eventID string, scope runtimepipelineobligation.CommittedScope) error {
 	if s.scopes == nil {
-		s.scopes = map[string]runtimereplayclaim.CommittedReplayScope{}
+		s.scopes = map[string]runtimepipelineobligation.CommittedScope{}
 	}
 	s.scopes[eventID] = scope
 	return nil
@@ -770,13 +769,13 @@ func TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscr
 	if routes := store.routes[eventID]; !deliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
 	}
-	if got := store.scopes[eventID]; got != runtimereplayclaim.CommittedReplayScopeSubscribed {
+	if got := store.scopes[eventID]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
 	if got := store.receipts[eventID]; got != "processed" {
 		t.Fatalf("pipeline receipt = %q, want processed", got)
 	}
-	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, runtimepipelineobligation.ScopeSubscribed)
 	if err != nil {
 		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
 	}
@@ -910,7 +909,7 @@ func TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget(t *testing.T
 	if routes := store.routes[eventID]; !deliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
 	}
-	if got := store.scopes[eventID]; got != runtimereplayclaim.CommittedReplayScopeSubscribed {
+	if got := store.scopes[eventID]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
 	if got := store.receipts[eventID]; got != "processed" {
@@ -1099,7 +1098,7 @@ func TestEventBusPublishInMutation_ConnectRoutePlanPersistsSharedRoutePlan(t *te
 	if routes := store.routes[eventID]; !deliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
 	}
-	if got := store.scopes[eventID]; got != runtimereplayclaim.CommittedReplayScopeSubscribed {
+	if got := store.scopes[eventID]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
 	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
@@ -1143,7 +1142,7 @@ func TestEngineOutbox_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 	if routes := store.routes[eventID]; !deliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
 	}
-	if got := store.scopes[eventID]; got != runtimereplayclaim.CommittedReplayScopeSubscribed {
+	if got := store.scopes[eventID]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
 }
@@ -1366,7 +1365,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *te
 	if !deliveryRoutesContain(store.routes[eventID], want) || len(store.routes[eventID]) != 1 {
 		t.Fatalf("persisted delivery routes = %#v, want instance-key route %#v", store.routes[eventID], want)
 	}
-	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, runtimepipelineobligation.ScopeSubscribed)
 	if err != nil {
 		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
 	}
@@ -2699,7 +2698,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarge
 	if !deliveryRoutesContain(store.routes[eventID], want) || len(store.routes[eventID]) != 1 {
 		t.Fatalf("persisted delivery routes = %#v, want renamed instance-key route %#v", store.routes[eventID], want)
 	}
-	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, runtimepipelineobligation.ScopeSubscribed)
 	if err != nil {
 		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
 	}
@@ -3129,7 +3128,7 @@ func TestEventBusPublish_ConnectRoutePlanWithoutCanonicalSubscriberFailsClosed(t
 	if routes := store.routes[eventID]; len(routes) != 0 {
 		t.Fatalf("persisted delivery routes = %#v, want none when matched connect receiver is unsubscribed", routes)
 	}
-	if got := store.scopes[eventID]; got != runtimereplayclaim.CommittedReplayScopeSubscribed {
+	if got := store.scopes[eventID]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
 	if got := store.receipts[eventID]; got != "dead_letter" {

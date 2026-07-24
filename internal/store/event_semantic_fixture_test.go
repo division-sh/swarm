@@ -164,10 +164,17 @@ func commitSelectedForkEventFixture(
 		return err
 	}
 	defer release()
+	owner := pipelineObligationOwnerForFixture(store)
+	claim, err := owner.ClaimPublication(ctx, admitted.Event().ID())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = owner.Release(context.WithoutCancel(ctx), claim) }()
 	outcome, err := store.CommitSelectedForkEvent(ctx, CommitSelectedForkEventRequest{
 		Commit: runtimebus.CommitPublishRequest{
-			Event:       admitted,
-			ReplayScope: runtimepipelineobligation.ScopeDirect,
+			Event:         admitted,
+			ReplayScope:   runtimepipelineobligation.ScopeDirect,
+			PipelineClaim: claim,
 		},
 		Lineage: lineage,
 	})
@@ -268,7 +275,15 @@ func commitAdmittedSemanticEventFixtureOutcome(
 	if admitted.Class() == events.EventAdmissionSelectedForkReplay {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("selected-fork replay events require their closed named persistence operation")
 	}
-	req := runtimebus.CommitPublishRequest{Event: admitted, DeliveryRoutes: events.NormalizeDeliveryRoutes(routes), ReplayScope: scope}
+	owner := pipelineObligationOwnerForFixture(store)
+	claim, err := owner.ClaimPublication(ctx, admitted.ID())
+	if err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
+	}
+	defer func() { _ = owner.Release(context.WithoutCancel(ctx), claim) }()
+	req := runtimebus.CommitPublishRequest{
+		Event: admitted, DeliveryRoutes: events.NormalizeDeliveryRoutes(routes), ReplayScope: scope, PipelineClaim: claim,
+	}
 	ctx, release, err := semanticEventFixtureContext(ctx, store, admitted.Event())
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
@@ -281,7 +296,7 @@ func commitAdmittedSemanticEventFixtureOutcome(
 		if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
 			return err
 		}
-		return (sqlPublishCommitter{tx: tx, store: selected}).commitInitialSideEffects(txctx, req)
+		return (sqlPublishCommitter{tx: tx, store: selected}).commitInitialSideEffects(txctx, req, true)
 	}
 	switch selected := store.(type) {
 	case *PostgresStore:
@@ -314,6 +329,12 @@ func commitSemanticEventFixtureWithRoutesTx(ctx context.Context, store eventComm
 		return err
 	}
 	defer release()
+	owner := pipelineObligationOwnerForFixture(store)
+	claim, err := owner.ClaimPublication(ctx, admitted.ID())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = owner.Release(context.WithoutCancel(ctx), claim) }()
 	outcome, err := store.appendAdmittedEventTxOutcome(ctx, tx, admitted)
 	if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
 		return err
@@ -323,8 +344,19 @@ func commitSemanticEventFixtureWithRoutesTx(ctx context.Context, store eventComm
 		scope = runtimepipelineobligation.ScopeSubscribed
 	}
 	return (sqlPublishCommitter{tx: tx, store: store}).commitInitialSideEffects(ctx, runtimebus.CommitPublishRequest{
-		Event: admitted, DeliveryRoutes: events.NormalizeDeliveryRoutes(routes), ReplayScope: scope,
-	})
+		Event: admitted, DeliveryRoutes: events.NormalizeDeliveryRoutes(routes), ReplayScope: scope, PipelineClaim: claim,
+	}, true)
+}
+
+func pipelineObligationOwnerForFixture(store any) runtimepipelineobligation.Store {
+	switch selected := store.(type) {
+	case *PostgresStore:
+		return selected.PipelineObligations()
+	case *SQLiteRuntimeStore:
+		return selected.PipelineObligations()
+	default:
+		panic(fmt.Sprintf("semantic event fixture store %T has no pipeline obligation owner", store))
+	}
 }
 
 // insertCanonicalEventRecordFixture seeds an already-persisted event precondition

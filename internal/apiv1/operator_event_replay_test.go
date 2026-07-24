@@ -22,7 +22,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -254,7 +254,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				storetest.CommitSemanticEvent(t, ctx, f.store, parent)
 				storetest.CommitSemanticEventWithRoutes(t, ctx, f.store, original,
 					[]events.DeliveryRoute{originalRoute},
-					runtimereplayclaim.CommittedReplayScopeSubscribed)
+					runtimepipelineobligation.ScopeSubscribed)
 				markOperatorReplayDeliveryTerminal(t, ctx, f.store, f.db, f.sqlite, original, originalRoute)
 				persistedOriginal, err := f.store.LoadOperatorEvent(ctx, originalID)
 				if err != nil {
@@ -410,7 +410,7 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 				json.RawMessage(`{"topic":"medicine"}`), 0, runID, parentID, events.EventEnvelope{Scope: events.EventScopeGlobal}, createdAt,
 			), "mock")
 			storetest.CommitSemanticEvent(t, ctx, f.store, parent)
-			storetest.CommitSemanticEventWithRoutes(t, ctx, f.store, original, routes, runtimereplayclaim.CommittedReplayScopeSubscribed)
+			storetest.CommitSemanticEventWithRoutes(t, ctx, f.store, original, routes, runtimepipelineobligation.ScopeSubscribed)
 
 			firstClaim, err := f.store.ClaimAgentDelivery(ctx, original, routes[0])
 			if err != nil {
@@ -955,7 +955,7 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 			time.Now().UTC())
 		storetest.CommitSemanticEventWithRoutes(t, ctx, pg, nodeOnlyEvent, []events.DeliveryRoute{{
 			SubscriberType: string(runtimedelivery.SubscriberNode), SubscriberID: "workflow-runtime",
-		}}, runtimereplayclaim.CommittedReplayScopeSubscribed)
+		}}, runtimepipelineobligation.ScopeSubscribed)
 		handler := eventReplayTestHandler(t, pg, bus)
 		resp := rpcCall(t, handler, eventReplayBody(eventID, nil, "idem-node-only-pending"))
 		if resp.Error == nil {
@@ -1332,9 +1332,9 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 	for _, subscriber := range subscribers {
 		routes = append(routes, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: subscriber})
 	}
-	scope := runtimereplayclaim.CommittedReplayScopeDirect
+	scope := runtimepipelineobligation.ScopeDirect
 	if len(routes) > 0 {
-		scope = runtimereplayclaim.CommittedReplayScopeSubscribed
+		scope = runtimepipelineobligation.ScopeSubscribed
 	}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, semanticEvent, routes, scope)
 	for _, subscriber := range subscribers {

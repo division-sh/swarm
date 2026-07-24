@@ -10,7 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/google/uuid"
 )
 
@@ -88,7 +88,7 @@ func commitNamedDiagnosticContractEvent(ctx context.Context, fixture authorActiv
 		return run(ctx, func(txctx context.Context, tx *sql.Tx) error {
 			_, err := (sqlPublishCommitter{tx: tx, store: store}).commitNamedEvent(
 				txctx, "diagnostic subtype contract proof", events.EventAdmissionDiagnosticDirect, expectedType,
-				runtimebus.CommitPublishRequest{Event: admitted, ReplayScope: runtimereplayclaim.CommittedReplayScopeDirect},
+				runtimebus.CommitPublishRequest{Event: admitted, ReplayScope: runtimepipelineobligation.ScopeDirect},
 			)
 			return err
 		})
