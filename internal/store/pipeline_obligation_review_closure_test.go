@@ -177,6 +177,84 @@ func TestPipelineScanBoundsExaminationAndContinuesPastBusyCandidatesOnSQLiteAndP
 	}
 }
 
+func TestPipelineScanDecisionPhaseHighWaterPreventsRecoveryStarvationOnSQLiteAndPostgres(t *testing.T) {
+	for _, backend := range []struct {
+		name string
+		open func(*testing.T) authorActivityReceiptFixture
+	}{
+		{name: "sqlite", open: openSQLiteAuthorActivityReceiptFixture},
+		{name: "postgres", open: openPostgresAuthorActivityReceiptFixture},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			selected := fixture.store.(pipelineObligationParityStore)
+			owner := selected.PipelineObligations()
+			ctx := testAuthorActivityContext()
+			runID := uuid.NewString()
+			base := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
+			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+
+			recoveryID := commitPipelineParityEvent(t, ctx, selected, runID, base)
+			for i := 1; i <= 3; i++ {
+				eventID := commitPipelineParityEvent(t, ctx, selected, runID, base.Add(time.Duration(i)*time.Microsecond))
+				insertProducerIdentityDecisionObligation(
+					t,
+					fixture,
+					ctx,
+					eventID,
+					runID,
+					base.Add(time.Duration(i)*time.Microsecond),
+				)
+			}
+
+			scan, err := owner.OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest())
+			if err != nil {
+				t.Fatalf("OpenScan: %v", err)
+			}
+			defer func() {
+				if err := owner.CloseScan(context.WithoutCancel(ctx), scan); err != nil &&
+					!errors.Is(err, runtimepipelineobligation.ErrStaleScan) {
+					t.Errorf("CloseScan: %v", err)
+				}
+			}()
+
+			recovered := false
+			for pass := 0; pass < 7; pass++ {
+				batch, err := owner.ClaimBatch(ctx, scan, 1)
+				if err != nil {
+					t.Fatalf("ClaimBatch pass %d: %v", pass, err)
+				}
+				if len(batch.Work) != 1 {
+					t.Fatalf("ClaimBatch pass %d = %#v, want one work item", pass, batch)
+				}
+				work := batch.Work[0]
+				if work.Claim.Purpose() == runtimepipelineobligation.PurposeRecovery {
+					if work.Event.ID() != recoveryID {
+						t.Fatalf("recovery event = %s, want %s", work.Event.ID(), recoveryID)
+					}
+					if err := owner.Release(ctx, work.Claim); err != nil {
+						t.Fatalf("release recovered work: %v", err)
+					}
+					recovered = true
+					break
+				}
+				if work.Claim.Purpose() != runtimepipelineobligation.PurposeDecisionRoute {
+					t.Fatalf("claim purpose = %q", work.Claim.Purpose())
+				}
+				if err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("decision_route_converged")); err != nil {
+					t.Fatalf("settle decision route: %v", err)
+				}
+				appendedAt := base.Add(time.Duration(20+pass) * time.Microsecond)
+				appendedID := commitPipelineParityEvent(t, ctx, selected, runID, appendedAt)
+				insertProducerIdentityDecisionObligation(t, fixture, ctx, appendedID, runID, appendedAt)
+			}
+			if !recovered {
+				t.Fatal("ordinary recovery starved behind a continuously replenished decision-route phase")
+			}
+		})
+	}
+}
+
 func TestPipelineScanCancellationAndAbandonmentReleaseClaimsOnSQLiteAndPostgres(t *testing.T) {
 	for _, backend := range []struct {
 		name string

@@ -357,6 +357,89 @@ func TestRunContinueProcessesOnlyTargetRunDecisionRoutesOnSQLiteAndPostgres(t *t
 	}
 }
 
+func TestPeriodicGlobalScanReentersDecisionRoutesUnderSustainedRecoveryBacklogOnSQLiteAndPostgres(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := newCompleteEventDispatchFixture(t, backend, false)
+			seedWork, err := fixture.store.PipelineObligations().ClaimEvent(
+				fixture.ctx,
+				fixture.event.ID(),
+				runtimepipelineobligation.PurposeRecovery,
+			)
+			if err != nil {
+				t.Fatalf("claim fixture seed obligation: %v", err)
+			}
+			if err := fixture.store.PipelineObligations().Settle(
+				fixture.ctx,
+				seedWork.Claim,
+				runtimepipelineobligation.Acknowledged("fixture_seeded"),
+			); err != nil {
+				t.Fatalf("settle fixture seed obligation: %v", err)
+			}
+
+			base := fixture.event.CreatedAt().Add(time.Second)
+			for i := 0; i < 3; i++ {
+				event := newRetryReleaseTestEvent(fixture, base.Add(time.Duration(i)*time.Microsecond))
+				storetest.CommitSemanticEventWithRoutes(
+					t,
+					fixture.ctx,
+					fixture.store,
+					event,
+					nil,
+					runtimepipelineobligation.ScopeSubscribed,
+				)
+			}
+			first, err := fixture.bus.SweepPipelineObligations(fixture.ctx, 1)
+			if err != nil {
+				t.Fatalf("first bounded sweep: %v", err)
+			}
+			if first.Examined != 1 || first.Exhausted {
+				t.Fatalf("first bounded sweep = %#v, want retained ordinary-recovery cursor", first)
+			}
+
+			target := newRetryReleaseTestEvent(fixture, base.Add(10*time.Microsecond))
+			storetest.CommitSemanticEventWithRoutes(
+				t,
+				fixture.ctx,
+				fixture.store,
+				target,
+				[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: fixture.agentID}},
+				runtimepipelineobligation.ScopeSubscribed,
+			)
+			fixture.insertDecisionObligationFor(t, target)
+			deliveries := runtimebustest.Subscribe(t, fixture.bus, fixture.agentID, target.Type())
+			defer runtimebustest.Unsubscribe(fixture.bus, fixture.agentID)
+
+			completed := false
+			for pass := 0; pass < 7; pass++ {
+				appended := newRetryReleaseTestEvent(fixture, base.Add(time.Duration(20+pass)*time.Microsecond))
+				storetest.CommitSemanticEventWithRoutes(
+					t,
+					fixture.ctx,
+					fixture.store,
+					appended,
+					nil,
+					runtimepipelineobligation.ScopeSubscribed,
+				)
+				if _, err := fixture.bus.SweepPipelineObligations(fixture.ctx, 1); err != nil {
+					t.Fatalf("bounded sweep %d: %v", pass+2, err)
+				}
+				if fixture.decisionObligationStatus(t, target.ID()) == "completed" {
+					completed = true
+					break
+				}
+			}
+			if !completed {
+				t.Fatal("newly due decision route starved behind sustained ordinary-recovery backlog")
+			}
+			if got := retryReleasePipelineReceiptCount(t, fixture, target.ID()); got != 1 {
+				t.Fatalf("target event pipeline receipts = %d, want 1", got)
+			}
+			assertCompleteLocalDelivery(t, deliveries, target)
+		})
+	}
+}
+
 func TestControllerCancellationBetweenBatchesAbandonsCursorOnSQLiteAndPostgres(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, surface := range []string{"ingress_resume", "run_continue"} {
