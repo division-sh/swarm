@@ -80,9 +80,11 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 		if err != nil {
 			return err
 		}
-		if publicationClaim != nil && publicationClaim.durable() && !runtimepipeline.QueuePipelineRollbackAction(intentCtx, func(actionCtx context.Context) { publicationClaim.Release(actionCtx) }) {
-			publicationClaim.Release(intentCtx)
-			return errors.New("engine outbox requires event publication rollback ownership")
+		if publicationClaim != nil && publicationClaim.durable() && !runtimepipeline.QueuePipelineRollbackAction(intentCtx, func(actionCtx context.Context) { publicationClaim.releaseAndLog(actionCtx) }) {
+			return errors.Join(
+				errors.New("engine outbox requires event publication rollback ownership"),
+				publicationClaim.Release(intentCtx),
+			)
 		}
 		appendOutcome, err := beginPreparedPublish(intentCtx, transaction, admitted)
 		if err != nil {
@@ -196,12 +198,14 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 	return nil
 }
 
-func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fallback runtimeengine.EmitIntent) (bool, error) {
+func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fallback runtimeengine.EmitIntent) (handled bool, err error) {
 	operation, ok := d.bus.takePendingOutboxOperation(fallback.Event.ID())
 	if !ok {
 		return false, nil
 	}
-	defer operation.publicationClaim.Release(ctx)
+	defer func() {
+		err = errors.Join(err, operation.publicationClaim.Release(ctx))
+	}()
 	if operation.intent.Event.Type() != fallback.Event.Type() {
 		return true, fmt.Errorf("pending outbox event type mismatch for %s: persisted=%s dispatch=%s", fallback.Event.ID(), operation.intent.Event.Type(), fallback.Event.Type())
 	}
@@ -218,14 +222,14 @@ func (d engineDispatcher) dispatchAndRecord(ctx context.Context, intent runtimee
 	var recoveryClaim runtimepipelineobligation.Claim
 	claimOpen := false
 	if publicationClaim == nil && d.bus.pipelineObligations != nil {
-		work, err := d.bus.pipelineObligations.ClaimEvent(ctx, intent.Event.ID(), runtimepipelineobligation.PurposeRecovery)
-		if errors.Is(err, runtimepipelineobligation.ErrBusy) || errors.Is(err, runtimepipelineobligation.ErrIneligible) {
+		work, claimErr := d.bus.pipelineObligations.ClaimEvent(ctx, intent.Event.ID(), runtimepipelineobligation.PurposeRecovery)
+		if errors.Is(claimErr, runtimepipelineobligation.ErrBusy) || errors.Is(claimErr, runtimepipelineobligation.ErrIneligible) {
 			// A post-commit duplicate cannot acquire an already-owned or
 			// terminal obligation and therefore has no dispatch work.
 			return nil
 		}
-		if err != nil {
-			return err
+		if claimErr != nil {
+			return claimErr
 		}
 		recoveryClaim = work.Claim
 		claimOpen = true
@@ -493,6 +497,6 @@ func (eb *EventBus) clearPendingOutboxOperation(eventID string) {
 	delete(eb.pendingOutboxByID, strings.TrimSpace(eventID))
 	eb.mu.Unlock()
 	for _, operation := range operations {
-		operation.publicationClaim.Release(context.Background())
+		operation.publicationClaim.releaseAndLog(context.Background())
 	}
 }

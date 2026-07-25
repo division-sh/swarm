@@ -107,28 +107,30 @@ func TestPeriodicSweeperRetainsCursorAcrossTicksUntilExplicitExhaustion(t *testi
 	}
 }
 
-type retryingScanCloseStore struct {
+type terminalScanCloseStore struct {
 	runtimepipelineobligation.Store
 
-	issuer                    *runtimepipelineobligation.ScanIssuer
-	firstScan                 runtimepipelineobligation.Scan
-	openCount                 int
-	firstCloseAttempts        int
-	firstCloseFailed          bool
-	firstCloseSucceeded       bool
-	claimedAfterCloseFailure  bool
-	openedBeforeCloseRecovery bool
+	issuer                  *runtimepipelineobligation.ScanIssuer
+	firstScan               runtimepipelineobligation.Scan
+	openCount               int
+	closeAttempts           map[string]int
+	claimScans              []runtimepipelineobligation.Scan
+	firstCloseFailed        bool
+	openedAfterCloseFailure bool
+	persistentCloseFailure  bool
 }
 
-func newRetryingScanCloseStore() *retryingScanCloseStore {
-	return &retryingScanCloseStore{
-		issuer: runtimepipelineobligation.NewScanIssuer(),
+func newTerminalScanCloseStore(persistent bool) *terminalScanCloseStore {
+	return &terminalScanCloseStore{
+		issuer:                 runtimepipelineobligation.NewScanIssuer(),
+		closeAttempts:          map[string]int{},
+		persistentCloseFailure: persistent,
 	}
 }
 
-func (s *retryingScanCloseStore) OpenScan(context.Context, runtimepipelineobligation.ScanRequest) (runtimepipelineobligation.Scan, error) {
-	if s.firstCloseFailed && !s.firstCloseSucceeded {
-		s.openedBeforeCloseRecovery = true
+func (s *terminalScanCloseStore) OpenScan(context.Context, runtimepipelineobligation.ScanRequest) (runtimepipelineobligation.Scan, error) {
+	if s.firstCloseFailed {
+		s.openedAfterCloseFailure = true
 	}
 	scan, err := s.issuer.Issue()
 	if err != nil {
@@ -141,69 +143,81 @@ func (s *retryingScanCloseStore) OpenScan(context.Context, runtimepipelineobliga
 	return scan, nil
 }
 
-func (s *retryingScanCloseStore) ClaimBatch(_ context.Context, scan runtimepipelineobligation.Scan, _ int) (runtimepipelineobligation.ScanBatch, error) {
+func (s *terminalScanCloseStore) ClaimBatch(_ context.Context, scan runtimepipelineobligation.Scan, _ int) (runtimepipelineobligation.ScanBatch, error) {
 	if _, err := s.issuer.Token(scan); err != nil {
 		return runtimepipelineobligation.ScanBatch{}, err
 	}
-	if scan == s.firstScan && s.firstCloseFailed {
-		s.claimedAfterCloseFailure = true
-		return runtimepipelineobligation.ScanBatch{}, runtimepipelineobligation.ErrStaleScan
-	}
+	s.claimScans = append(s.claimScans, scan)
 	return runtimepipelineobligation.ScanBatch{Exhausted: true}, nil
 }
 
-func (s *retryingScanCloseStore) CloseScan(_ context.Context, scan runtimepipelineobligation.Scan) error {
-	if _, err := s.issuer.Token(scan); err != nil {
+func (s *terminalScanCloseStore) CloseScan(_ context.Context, scan runtimepipelineobligation.Scan) error {
+	token, err := s.issuer.Token(scan)
+	if err != nil {
 		return err
 	}
-	if scan != s.firstScan {
-		return nil
-	}
-	s.firstCloseAttempts++
-	if s.firstCloseAttempts == 1 {
+	s.closeAttempts[token]++
+	if scan == s.firstScan {
 		s.firstCloseFailed = true
-		return errRetryPipelineScanClose
+		return errTerminalPipelineScanClose
 	}
-	s.firstCloseSucceeded = true
+	if s.persistentCloseFailure {
+		return errTerminalPipelineScanClose
+	}
 	return nil
 }
 
-var errRetryPipelineScanClose = errors.New("retry pipeline scan close")
+var errTerminalPipelineScanClose = errors.New("terminal pipeline scan close failure")
 
-func TestSweepRetriesFailedScanCloseBeforeClaimingOrOpeningReplacement(t *testing.T) {
-	owner := newRetryingScanCloseStore()
-	bus, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
-		PipelineObligations: owner,
-	})
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
+func TestSweepTreatsFailedScanCloseAsTerminal(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		persistent bool
+	}{
+		{name: "fail once"},
+		{name: "persistent failure", persistent: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			owner := newTerminalScanCloseStore(tc.persistent)
+			bus, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
+				PipelineObligations: owner,
+			})
+			if err != nil {
+				t.Fatalf("NewEventBus: %v", err)
+			}
 
-	first, err := bus.SweepPipelineObligations(context.Background(), 1)
-	if !errors.Is(err, errRetryPipelineScanClose) {
-		t.Fatalf("first sweep error = %v, want retryable close failure", err)
-	}
-	if !first.Exhausted {
-		t.Fatalf("first sweep result = %#v, want exhausted result before close failure", first)
-	}
+			first, err := bus.SweepPipelineObligations(context.Background(), 1)
+			if !errors.Is(err, errTerminalPipelineScanClose) {
+				t.Fatalf("first sweep error = %v, want terminal close failure", err)
+			}
+			if !first.Exhausted {
+				t.Fatalf("first sweep result = %#v, want exhausted result before close failure", first)
+			}
 
-	second, err := bus.SweepPipelineObligations(context.Background(), 1)
-	if err != nil {
-		t.Fatalf("second sweep: %v", err)
-	}
-	if !second.Exhausted {
-		t.Fatalf("second sweep result = %#v, want replacement scan exhaustion", second)
-	}
-	if owner.firstCloseAttempts != 2 {
-		t.Fatalf("first cursor close attempts = %d, want retry through retained cursor", owner.firstCloseAttempts)
-	}
-	if owner.claimedAfterCloseFailure {
-		t.Fatal("failed-close cursor was claimed again before teardown")
-	}
-	if owner.openedBeforeCloseRecovery {
-		t.Fatal("replacement cursor opened before failed close recovered")
-	}
-	if owner.openCount != 2 {
-		t.Fatalf("scan opens = %d, want replacement only after close recovery", owner.openCount)
+			second, err := bus.SweepPipelineObligations(context.Background(), 1)
+			if tc.persistent {
+				if !errors.Is(err, errTerminalPipelineScanClose) {
+					t.Fatalf("second sweep error = %v, want independent terminal close failure", err)
+				}
+			} else if err != nil {
+				t.Fatalf("second sweep: %v", err)
+			}
+			if !second.Exhausted {
+				t.Fatalf("second sweep result = %#v, want replacement scan exhaustion", second)
+			}
+			firstToken, _ := owner.issuer.Token(owner.firstScan)
+			if owner.closeAttempts[firstToken] != 1 {
+				t.Fatalf("first cursor close attempts = %d, want one terminal attempt", owner.closeAttempts[firstToken])
+			}
+			if !owner.openedAfterCloseFailure {
+				t.Fatal("replacement cursor was not opened after terminal close failure")
+			}
+			if owner.openCount != 2 {
+				t.Fatalf("scan opens = %d, want fresh cursor after terminal failure", owner.openCount)
+			}
+			if len(owner.claimScans) != 2 || owner.claimScans[0] == owner.claimScans[1] {
+				t.Fatalf("claimed scans = %#v, want distinct fresh cursor per sweep", owner.claimScans)
+			}
+		})
 	}
 }

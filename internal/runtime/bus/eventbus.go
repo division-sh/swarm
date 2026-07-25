@@ -566,10 +566,10 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 	}
 	eb.resetInProgress = true
 	eb.resetDone = make(chan struct{})
-	pendingClaims := make([]*pipelinePublicationClaim, 0, len(eb.pendingOutboxByID))
+	pendingOperations := make([]pendingOutboxOperation, 0, len(eb.pendingOutboxByID))
 	for _, operations := range eb.pendingOutboxByID {
 		for _, operation := range operations {
-			pendingClaims = append(pendingClaims, operation.publicationClaim)
+			pendingOperations = append(pendingOperations, operation)
 		}
 	}
 	routes := append([]*agentRouteHandle(nil), eb.retiringAgentRoutes...)
@@ -589,7 +589,6 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 	eb.subscriptions = make(map[string][]events.EventType)
 	eb.subscriptionKinds = make(map[string]inMemorySubscriberKind)
 	eb.pendingInternalByID = make(map[string][]events.DeliveryRoute)
-	eb.pendingOutboxByID = make(map[string][]pendingOutboxOperation)
 	eb.retiringAgentRoutes = nil
 	eb.retiringInternalHandles = nil
 	eb.routeTable = routeTable
@@ -598,12 +597,13 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 	eb.mu.Unlock()
 
 	resetOpened := false
+	retirementSucceeded := false
 	defer func() {
 		if resetOpened {
 			return
 		}
 		eb.mu.Lock()
-		if resetErr != nil {
+		if resetErr != nil && !retirementSucceeded {
 			for _, route := range routes {
 				eb.retainRetiringAgentRouteLocked(route)
 			}
@@ -620,18 +620,23 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 
 	// Retained queues and claims are lifecycle evidence. Prove their durable
 	// handoff and settle their leases before erasing any in-memory owner map.
+	var retirementErr error
 	for _, route := range routes {
-		if retireErr := route.retireAndWait(context.Background(), eb.store); retireErr != nil {
-			return retireErr
-		}
+		retirementErr = errors.Join(retirementErr, route.retireAndWait(context.Background(), eb.store))
 	}
 	for _, handle := range internalHandles {
-		if retireErr := handle.retireAndWait(context.Background(), eb.store); retireErr != nil {
-			return retireErr
-		}
+		retirementErr = errors.Join(retirementErr, handle.retireAndWait(context.Background(), eb.store))
 	}
-	for _, claim := range pendingClaims {
-		claim.Release(context.Background())
+	if retirementErr != nil {
+		return retirementErr
+	}
+	retirementSucceeded = true
+	var releaseErr error
+	for _, operation := range pendingOperations {
+		releaseErr = errors.Join(releaseErr, operation.publicationClaim.Release(context.Background()))
+	}
+	for _, operation := range pendingOperations {
+		eb.removePendingOutboxOperation(operation.intent.Event.ID(), operation.sequence)
 	}
 
 	// Reset's deferred epilogue opens admission. Runners that acknowledged the
@@ -652,7 +657,7 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 	for _, handle := range restartHandles {
 		restartCtx := handle.restartContext()
 		if restartCtx == nil {
-			return fmt.Errorf("internal subscriber %s restart lifecycle context is required", handle.subscriberID)
+			return errors.Join(releaseErr, fmt.Errorf("internal subscriber %s restart lifecycle context is required", handle.subscriberID))
 		}
 		if restartCtx.Err() != nil {
 			continue
@@ -661,10 +666,10 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 			if restartCtx.Err() != nil {
 				continue
 			}
-			return err
+			return errors.Join(releaseErr, err)
 		}
 	}
-	return nil
+	return releaseErr
 }
 
 func (eb *EventBus) WaitForQuiescence(ctx context.Context) error {

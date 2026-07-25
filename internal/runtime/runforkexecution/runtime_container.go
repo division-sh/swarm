@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -341,13 +342,11 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 			Commit: prepared.CommitRequest(), Lineage: lineage,
 		})
 		if err != nil {
-			bus.AbandonPreparedPublish(eventCtx, prepared)
-			return out, err
+			return out, errors.Join(err, bus.AbandonPreparedPublish(eventCtx, prepared))
 		}
 		committedPrepared, err := prepared.WithCommitOutcome(outcome)
 		if err != nil {
-			bus.AbandonPreparedPublish(eventCtx, prepared)
-			return out, err
+			return out, errors.Join(err, bus.AbandonPreparedPublish(eventCtx, prepared))
 		}
 		prepared = committedPrepared
 		if err := bus.DispatchPreparedPublishAndWait(eventCtx, prepared); err != nil {

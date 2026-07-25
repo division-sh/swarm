@@ -31,5 +31,5 @@ func (l terminalAdvisoryLockLease) Release(ctx context.Context) error {
 	if l.lease == nil {
 		return nil
 	}
-	return l.lease.ReleaseOrDiscard(ctx)
+	return l.lease.Release(ctx)
 }

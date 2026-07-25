@@ -31,15 +31,15 @@ func (s *PostgresStore) AcquireRuntimeStartupOwnership(ctx context.Context, req 
 	}
 	authority, err := runtimestartupownership.NewColdAuthority(req, "postgres_advisory_lock")
 	if err != nil {
-		return nil, errors.Join(err, lease.ReleaseOrDiscard(ctx))
+		return nil, errors.Join(err, lease.Release(ctx))
 	}
 	if err := s.RecordRuntimeStartupAuthorityTransition(lease.BindContext(ctx), nil, authority); err != nil {
-		return nil, errors.Join(err, lease.ReleaseOrDiscard(ctx))
+		return nil, errors.Join(err, lease.Release(ctx))
 	}
 	ownedRecorder := postgresStartupOwnershipRecorder{store: s, lease: lease}
-	ownedLease, err := runtimestartupownership.NewLease(authority, ownedRecorder, lease.ReleaseOrDiscard)
+	ownedLease, err := runtimestartupownership.NewLease(authority, ownedRecorder, lease.Release)
 	if err != nil {
-		return nil, errors.Join(err, lease.ReleaseOrDiscard(ctx))
+		return nil, errors.Join(err, lease.Release(ctx))
 	}
 	return ownedLease, nil
 }

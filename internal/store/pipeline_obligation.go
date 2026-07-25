@@ -52,6 +52,7 @@ type postgresPipelineClaimRegistry struct {
 	poolClaimReservations       int
 	testBeforeClaimRegistryLock func()
 	testAfterParentClaimScan    func()
+	testConfigureClaimLease     func(*sqlAdvisoryLockLease)
 }
 
 var postgresPipelineClaimRegistries sync.Map
@@ -471,10 +472,11 @@ func (s *postgresPipelineObligationStore) CloseScan(ctx context.Context, scan ru
 	registry.mu.Lock()
 	if current := registry.scans[token]; current != state {
 		releaseErr = errors.Join(releaseErr, runtimepipelineobligation.ErrStaleScan)
-	} else if len(state.openClaims) == 0 {
+	} else {
+		if len(state.openClaims) != 0 {
+			releaseErr = errors.Join(releaseErr, errors.New("close PostgreSQL pipeline scan left current claims"))
+		}
 		delete(registry.scans, token)
-	} else if releaseErr == nil {
-		releaseErr = errors.New("close PostgreSQL pipeline scan left current claims")
 	}
 	registry.mu.Unlock()
 	return releaseErr
@@ -724,6 +726,9 @@ func (s *PostgresStore) claimPostgresPipelineEvent(ctx context.Context, eventID 
 	if !acquired || lease == nil {
 		registry.mu.Unlock()
 		return runtimepipelineobligation.Claim{}, runtimepipelineobligation.ErrBusy
+	}
+	if registry.testConfigureClaimLease != nil {
+		registry.testConfigureClaimLease(lease)
 	}
 	claim, err = registry.issuer.Issue(eventID, purpose)
 	if err == nil {
@@ -2030,14 +2035,11 @@ func (s *PostgresStore) releasePostgresPipelineClaimLocked(ctx context.Context, 
 	if state.postgresLease == nil {
 		return runtimepipelineobligation.ErrStaleClaim
 	}
-	retired, releaseErr := state.postgresLease.releaseWithRetirement(context.WithoutCancel(ctx))
-	if !retired {
-		return releaseErr
-	}
+	releaseErr := state.postgresLease.releaseWithRetirement(context.WithoutCancel(ctx))
 	registry.mu.Lock()
 	if registry.claims[token] != state {
 		registry.mu.Unlock()
-		return runtimepipelineobligation.ErrStaleClaim
+		return errors.Join(releaseErr, runtimepipelineobligation.ErrStaleClaim)
 	}
 	if scanState := registry.scans[state.scanToken]; scanState != nil {
 		delete(scanState.openClaims, token)
