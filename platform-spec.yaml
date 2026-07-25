@@ -30810,7 +30810,7 @@ durable_pipeline_processing_obligation_authority:
       reuses its already-retained claim connection. Every operation on one PostgreSQL claim is serialized by its opaque
       selected-store claim state, including selected-fork commit, settlement, release, and cursor abandonment, so the retained
       session cannot run overlapping transactions or unlock while an accepted operation is active. Current claims therefore
-      cannot exhaust the persistence pool before or after their transaction begins. SQLite settlement,
+      cannot exhaust the persistence pool before or after their transaction begins. SQLite selected-fork commit, settlement,
       decision-route processed acknowledgement, explicit release, and cursor abandonment take the same per-claim operation
       lock across current-claim revalidation, durable commit, and claim retirement. SQLite release cannot return while an
       accepted claim mutation remains in flight, and a mutation cannot commit after release has consumed the claim. Opaque capability identity rejects foreign, stale,

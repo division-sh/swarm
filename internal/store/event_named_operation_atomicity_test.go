@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -161,6 +162,78 @@ func TestCommitSelectedForkEventHostileRepeatPostgres(t *testing.T) {
 		t.Fatalf("inserted=%d duplicates=%d, want 1/%d", inserted, duplicates, attempts-1)
 	}
 	assertSelectedForkOperationCounts(t, ctx, fixture, req.Commit.Event.ID(), selectedForkOperationCounts{event: 1, lineage: 1, deliveries: 1, stories: 1})
+}
+
+func TestSQLiteCommitSelectedForkEventSerializesWithClaimAbandonment(t *testing.T) {
+	fixture := openSQLiteAuthorActivityReceiptFixture(t)
+	ctx := testAuthorActivityContext()
+	selected := fixture.store.(*SQLiteRuntimeStore)
+	owner := selected.PipelineObligations()
+	req := newSelectedForkAtomicityRequest(t, ctx, selected, true)
+	state, err := selected.sqlitePipelineClaimState(req.Commit.PipelineClaim)
+	if err != nil {
+		t.Fatalf("sqlitePipelineClaimState: %v", err)
+	}
+
+	commitLocked := make(chan struct{})
+	allowCommit := make(chan struct{})
+	releaseAttempted := make(chan struct{})
+	var lockAttempts atomic.Int32
+	var blockCommit sync.Once
+	state.testBeforeSQLiteOperationLock = func() {
+		if lockAttempts.Add(1) == 2 {
+			close(releaseAttempted)
+		}
+	}
+	state.testAfterSQLiteOperationLock = func() {
+		blockCommit.Do(func() {
+			close(commitLocked)
+			<-allowCommit
+		})
+	}
+
+	type commitResult struct {
+		outcome runtimebus.EventAppendOutcome
+		err     error
+	}
+	commitDone := make(chan commitResult, 1)
+	go func() {
+		outcome, err := selected.CommitSelectedForkEvent(ctx, req)
+		commitDone <- commitResult{outcome: outcome, err: err}
+	}()
+	<-commitLocked
+
+	releaseDone := make(chan error, 1)
+	go func() {
+		releaseDone <- owner.Release(ctx, req.Commit.PipelineClaim)
+	}()
+	select {
+	case <-releaseAttempted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("claim abandonment did not reach the selected-fork operation lock")
+	}
+	select {
+	case err := <-releaseDone:
+		t.Fatalf("claim abandonment completed before selected-fork commit: %v", err)
+	default:
+	}
+
+	close(allowCommit)
+	result := <-commitDone
+	if result.err != nil || result.outcome != runtimebus.EventAppendInserted {
+		t.Fatalf("selected-fork commit outcome=%v err=%v", result.outcome, result.err)
+	}
+	if err := <-releaseDone; err != nil {
+		t.Fatalf("release after selected-fork commit: %v", err)
+	}
+	if _, err := selected.sqlitePipelineClaimState(req.Commit.PipelineClaim); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
+		t.Fatalf("claim after serialized abandonment = %v, want ErrStaleClaim", err)
+	}
+	assertSelectedForkOperationCounts(t, ctx, fixture, req.Commit.Event.ID(), selectedForkOperationCounts{
+		event:   1,
+		lineage: 1,
+		stories: 1,
+	})
 }
 
 func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, store eventRecordContractStore, persistSource bool) CommitSelectedForkEventRequest {
