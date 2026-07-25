@@ -469,6 +469,70 @@ func TestPostgresPipelineScanSnapshotRetainsRouteAfterPostBoundaryDeferral(t *te
 	}
 }
 
+func TestPipelineScanExaminesDeferredDecisionRouteOncePerPassOnSQLiteAndPostgres(t *testing.T) {
+	for _, backend := range []struct {
+		name string
+		open func(*testing.T) authorActivityReceiptFixture
+	}{
+		{name: "sqlite", open: openSQLiteAuthorActivityReceiptFixture},
+		{name: "postgres", open: openPostgresAuthorActivityReceiptFixture},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			selected := fixture.store.(pipelineObligationParityStore)
+			owner := selected.PipelineObligations()
+			ctx := testAuthorActivityContext()
+			runID := uuid.NewString()
+			at := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
+			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			eventID := commitPipelineParityEvent(t, ctx, selected, runID, at)
+			insertProducerIdentityDecisionObligation(t, fixture, ctx, eventID, runID, at)
+
+			scan, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID))
+			if err != nil {
+				t.Fatalf("OpenScan: %v", err)
+			}
+			first, err := owner.ClaimBatch(ctx, scan, 1)
+			if err != nil || len(first.Work) != 1 || first.Work[0].Event.ID() != eventID {
+				t.Fatalf("first ClaimBatch: %#v err=%v", first, err)
+			}
+			if err := owner.Settle(ctx, first.Work[0].Claim, runtimepipelineobligation.Deferred(
+				"retry_in_fresh_pass",
+				time.Now().UTC().Add(-time.Second),
+				nil,
+			)); err != nil {
+				t.Fatalf("defer route: %v", err)
+			}
+
+			second, err := owner.ClaimBatch(ctx, scan, 1)
+			if err != nil {
+				t.Fatalf("second ClaimBatch: %v", err)
+			}
+			if len(second.Work) != 0 || !second.Exhausted {
+				t.Fatalf("retained scan re-examined deferred route: %#v", second)
+			}
+			if err := owner.CloseScan(ctx, scan); err != nil {
+				t.Fatalf("CloseScan: %v", err)
+			}
+
+			fresh, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID))
+			if err != nil {
+				t.Fatalf("OpenScan fresh: %v", err)
+			}
+			retry, err := owner.ClaimBatch(ctx, fresh, 1)
+			if err != nil || len(retry.Work) != 1 || retry.Work[0].Event.ID() != eventID {
+				t.Fatalf("fresh ClaimBatch: %#v err=%v", retry, err)
+			}
+			if err := owner.Settle(ctx, retry.Work[0].Claim, runtimepipelineobligation.Acknowledged("retry_processed")); err != nil {
+				t.Fatalf("settle retry: %v", err)
+			}
+			if err := owner.CloseScan(ctx, fresh); err != nil {
+				t.Fatalf("CloseScan fresh: %v", err)
+			}
+		})
+	}
+}
+
 func insertPostgresPipelineSnapshotFixtureTx(ctx context.Context, tx *sql.Tx, event events.Event) error {
 	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {

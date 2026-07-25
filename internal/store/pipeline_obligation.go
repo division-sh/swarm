@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 type pipelineClaimState struct {
@@ -33,6 +35,7 @@ type pipelineScanState struct {
 	after      *pipelineCandidate
 	through    *pipelineCandidate
 	bound      bool
+	examined   map[int64]struct{}
 	openClaims map[string]runtimepipelineobligation.Claim
 	closed     bool
 }
@@ -248,7 +251,7 @@ func (s *sqlitePipelineObligationStore) OpenScan(ctx context.Context, request ru
 
 type pipelineBatchBackend struct {
 	boundary   func(context.Context, runtimepipelineobligation.ClaimQuery) (*pipelineCandidate, error)
-	candidates func(context.Context, runtimepipelineobligation.ClaimQuery, *pipelineCandidate, *pipelineCandidate, int) ([]pipelineCandidate, error)
+	candidates func(context.Context, runtimepipelineobligation.ClaimQuery, *pipelineCandidate, *pipelineCandidate, map[int64]struct{}, int) ([]pipelineCandidate, error)
 	claim      func(context.Context, string, runtimepipelineobligation.Purpose) (runtimepipelineobligation.Claim, error)
 	associate  func(runtimepipelineobligation.Scan, runtimepipelineobligation.Claim) error
 	load       func(context.Context, runtimepipelineobligation.Claim) (runtimepipelineobligation.ClaimedWork, error)
@@ -353,7 +356,7 @@ func claimPipelineBatch(
 		}
 		remaining := limit - batch.Examined
 		pageLimit := min(remaining, pipelineCandidatePageSize)
-		candidates, err := backend.candidates(ctx, query, state.after, state.through, pageLimit)
+		candidates, err := backend.candidates(ctx, query, state.after, state.through, state.examined, pageLimit)
 		if err != nil {
 			return batch, err
 		}
@@ -368,6 +371,12 @@ func claimPipelineBatch(
 			candidate := candidates[i]
 			// Continuation advances before a claim can be released or retained.
 			state.after = &candidate
+			if query.Purpose == runtimepipelineobligation.PurposeDecisionRoute {
+				if state.examined == nil {
+					state.examined = map[int64]struct{}{}
+				}
+				state.examined[candidate.insertionSequence] = struct{}{}
+			}
 			batch.Examined++
 			claim, err := backend.claim(ctx, candidate.eventID, query.Purpose)
 			if errors.Is(err, runtimepipelineobligation.ErrBusy) {
@@ -418,6 +427,7 @@ func advancePipelineScanPhase(state *pipelineScanState) {
 	state.after = nil
 	state.through = nil
 	state.bound = false
+	state.examined = nil
 }
 
 func (s *postgresPipelineObligationStore) CloseScan(ctx context.Context, scan runtimepipelineobligation.Scan) error {
@@ -1123,7 +1133,7 @@ func (s *PostgresStore) postgresPipelineBoundary(ctx context.Context, query runt
 	if visibilitySnapshot == "" {
 		return nil, errors.New("postgres pipeline visibility snapshot is empty")
 	}
-	candidates, err := s.postgresPipelineCandidatePage(ctx, query, nil, nil, visibilitySnapshot, 1, true)
+	candidates, err := s.postgresPipelineCandidatePage(ctx, query, nil, nil, nil, visibilitySnapshot, 1, true)
 	boundary, err := pipelineBoundaryCandidate(candidates, err)
 	if boundary != nil {
 		boundary.visibilitySnapshot = visibilitySnapshot
@@ -1136,12 +1146,13 @@ func (s *PostgresStore) postgresPipelineCandidates(
 	query runtimepipelineobligation.ClaimQuery,
 	after *pipelineCandidate,
 	through *pipelineCandidate,
+	examined map[int64]struct{},
 	limit int,
 ) ([]pipelineCandidate, error) {
 	if through == nil || strings.TrimSpace(through.visibilitySnapshot) == "" {
 		return nil, errors.New("postgres pipeline visibility snapshot is missing")
 	}
-	return s.postgresPipelineCandidatePage(ctx, query, after, through, through.visibilitySnapshot, limit, false)
+	return s.postgresPipelineCandidatePage(ctx, query, after, through, examined, through.visibilitySnapshot, limit, false)
 }
 
 func (s *PostgresStore) postgresPipelineCandidatePage(
@@ -1149,6 +1160,7 @@ func (s *PostgresStore) postgresPipelineCandidatePage(
 	query runtimepipelineobligation.ClaimQuery,
 	after *pipelineCandidate,
 	through *pipelineCandidate,
+	examined map[int64]struct{},
 	visibilitySnapshot string,
 	limit int,
 	boundary bool,
@@ -1161,12 +1173,9 @@ func (s *PostgresStore) postgresPipelineCandidatePage(
 			whereRun = fmt.Sprintf("AND route.run_id = $%d::uuid", len(args)+1)
 			args = append(args, runID)
 		}
-		if after != nil {
-			whereAfter = fmt.Sprintf(`
-				AND (route.attempt_count, route.next_attempt_at, route.created_at, route.event_id) >
-				    ($%d, $%d, $%d, $%d::uuid)`,
-				len(args)+1, len(args)+2, len(args)+3, len(args)+4)
-			args = append(args, after.attemptCount, after.nextAttemptAt, after.createdAt, after.eventID)
+		if len(examined) > 0 {
+			whereAfter = fmt.Sprintf("AND NOT (route.insertion_sequence = ANY($%d::bigint[]))", len(args)+1)
+			args = append(args, pq.Array(sortedPipelineSequences(examined)))
 		}
 		whereVisibility := fmt.Sprintf(
 			"AND pg_visible_in_snapshot(route.insertion_transaction_id, $%d::pg_snapshot)",
@@ -1259,7 +1268,7 @@ func (s *PostgresStore) postgresPipelineCandidatePage(
 }
 
 func (s *SQLiteRuntimeStore) sqlitePipelineBoundary(ctx context.Context, query runtimepipelineobligation.ClaimQuery) (*pipelineCandidate, error) {
-	candidates, err := s.sqlitePipelineCandidatePage(ctx, query, nil, nil, 1, true)
+	candidates, err := s.sqlitePipelineCandidatePage(ctx, query, nil, nil, nil, 1, true)
 	return pipelineBoundaryCandidate(candidates, err)
 }
 
@@ -1268,9 +1277,10 @@ func (s *SQLiteRuntimeStore) sqlitePipelineCandidates(
 	query runtimepipelineobligation.ClaimQuery,
 	after *pipelineCandidate,
 	through *pipelineCandidate,
+	examined map[int64]struct{},
 	limit int,
 ) ([]pipelineCandidate, error) {
-	return s.sqlitePipelineCandidatePage(ctx, query, after, through, limit, false)
+	return s.sqlitePipelineCandidatePage(ctx, query, after, through, examined, limit, false)
 }
 
 func (s *SQLiteRuntimeStore) sqlitePipelineCandidatePage(
@@ -1278,6 +1288,7 @@ func (s *SQLiteRuntimeStore) sqlitePipelineCandidatePage(
 	query runtimepipelineobligation.ClaimQuery,
 	after *pipelineCandidate,
 	through *pipelineCandidate,
+	examined map[int64]struct{},
 	limit int,
 	boundary bool,
 ) ([]pipelineCandidate, error) {
@@ -1289,11 +1300,13 @@ func (s *SQLiteRuntimeStore) sqlitePipelineCandidatePage(
 			whereRun = "AND route.run_id = ?"
 			args = append(args, runID)
 		}
-		if after != nil {
-			whereAfter = `
-				AND (route.attempt_count, route.next_attempt_at, route.created_at, route.event_id) >
-				    (?, ?, ?, ?)`
-			args = append(args, after.attemptCount, after.nextAttemptAt, after.createdAt, after.eventID)
+		if len(examined) > 0 {
+			rawExamined, err := json.Marshal(sortedPipelineSequences(examined))
+			if err != nil {
+				return nil, fmt.Errorf("encode examined SQLite decision routes: %w", err)
+			}
+			whereAfter = "AND route.insertion_sequence NOT IN (SELECT CAST(value AS INTEGER) FROM json_each(?))"
+			args = append(args, string(rawExamined))
 		}
 		whereThrough := ""
 		if through != nil {
@@ -1383,6 +1396,15 @@ func pipelineBoundaryCandidate(candidates []pipelineCandidate, err error) (*pipe
 	}
 	boundary := candidates[0]
 	return &boundary, nil
+}
+
+func sortedPipelineSequences(sequences map[int64]struct{}) []int64 {
+	sorted := make([]int64, 0, len(sequences))
+	for sequence := range sequences {
+		sorted = append(sorted, sequence)
+	}
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	return sorted
 }
 
 func scanPipelineCandidates(rows *sql.Rows, decisionRoute bool, operation string) (out []pipelineCandidate, err error) {
