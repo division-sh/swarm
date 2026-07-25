@@ -41,6 +41,40 @@ func (i retryReleaseSetInterceptor) Intercept(_ context.Context, event events.Ev
 	return false, nil, runtimepipelineobligation.ReleaseForRetry("activity_contract_pin_unavailable", nil), nil
 }
 
+type boundedRetryWindowInterceptor struct {
+	retryEventID string
+	blockEventID string
+	blocked      chan<- struct{}
+	release      <-chan struct{}
+}
+
+func (i boundedRetryWindowInterceptor) Intercept(_ context.Context, event events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
+	switch event.ID() {
+	case i.retryEventID:
+		return false, nil, runtimepipelineobligation.ReleaseForRetry("activity_contract_pin_unavailable", nil), nil
+	case i.blockEventID:
+		close(i.blocked)
+		<-i.release
+	}
+	return true, nil, runtimepipelineobligation.Continue(), nil
+}
+
+type observedRetryReleaseInterceptor struct {
+	eventID string
+	seen    chan<- struct{}
+}
+
+func (i observedRetryReleaseInterceptor) Intercept(_ context.Context, event events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
+	if event.ID() != i.eventID {
+		return true, nil, runtimepipelineobligation.Continue(), nil
+	}
+	select {
+	case i.seen <- struct{}{}:
+	default:
+	}
+	return false, nil, runtimepipelineobligation.ReleaseForRetry("activity_contract_pin_unavailable", nil), nil
+}
+
 type recordingPipelineRecoveryOwner struct {
 	bus     *runtimebus.EventBus
 	results []runtimepipelineobligation.SweepResult
@@ -142,6 +176,83 @@ func TestPipelineRetryReleasePreservesReplayAcrossDispatchSurfacesOnSQLiteAndPos
 			}
 			assertRetryReleaseReplayable(t, fixture, fixture.event.ID())
 		})
+	}
+}
+
+func TestPostgresRetryReleaseClaimSpansBoundedSweepWindow(t *testing.T) {
+	fixture := newCompleteEventDispatchFixture(t, "postgres", false)
+	later := newRetryReleaseTestEvent(fixture, fixture.event.CreatedAt().Add(time.Second))
+	storetest.CommitSemanticEventWithRoutes(
+		t,
+		fixture.ctx,
+		fixture.store,
+		later,
+		nil,
+		runtimepipelineobligation.ScopeSubscribed,
+	)
+
+	laterBlocked := make(chan struct{})
+	releaseLater := make(chan struct{})
+	fixture.bus.SetInterceptors(boundedRetryWindowInterceptor{
+		retryEventID: fixture.event.ID(),
+		blockEventID: later.ID(),
+		blocked:      laterBlocked,
+		release:      releaseLater,
+	})
+
+	competingStore := storetest.AdmitPostgresRuntimeStore(t, fixture.db)
+	competingBus, err := newScopedTestEventBus(competingStore)
+	if err != nil {
+		t.Fatalf("create competing event bus: %v", err)
+	}
+	competingRetrySeen := make(chan struct{}, 1)
+	competingBus.SetInterceptors(observedRetryReleaseInterceptor{
+		eventID: fixture.event.ID(),
+		seen:    competingRetrySeen,
+	})
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, sweepErr := fixture.bus.SweepPipelineObligations(fixture.ctx, 2)
+		firstDone <- sweepErr
+	}()
+	select {
+	case <-laterBlocked:
+	case err := <-firstDone:
+		t.Fatalf("first sweep returned before later candidate blocked: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("first sweep did not reach the later candidate")
+	}
+
+	if _, err := competingBus.SweepPipelineObligations(fixture.ctx, 2); err != nil {
+		t.Fatalf("competing sweep during bounded window: %v", err)
+	}
+	select {
+	case <-competingRetrySeen:
+		t.Fatal("competing sweep executed retry work before the bounded window returned")
+	default:
+	}
+	if err := competingBus.WaitForOutboxSweeper(fixture.ctx); err != nil {
+		t.Fatalf("abandon competing cursor: %v", err)
+	}
+
+	close(releaseLater)
+	select {
+	case err := <-firstDone:
+		if err != nil {
+			t.Fatalf("complete first bounded sweep: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("first bounded sweep did not return")
+	}
+
+	if _, err := competingBus.SweepPipelineObligations(fixture.ctx, 2); err != nil {
+		t.Fatalf("competing sweep after bounded window: %v", err)
+	}
+	select {
+	case <-competingRetrySeen:
+	default:
+		t.Fatal("retry work was not reclaimable after the bounded window returned")
 	}
 }
 

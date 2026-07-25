@@ -177,6 +177,16 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 		state = &pipelineSweepScan{cursor: cursor}
 		eb.pipelineScans[request] = state
 	}
+	boundedRetryClaims := make([]runtimepipelineobligation.Claim, 0, limit)
+	defer func() {
+		releaseCtx := context.WithoutCancel(ctx)
+		for _, claim := range boundedRetryClaims {
+			releaseErr := eb.pipelineObligations.Release(releaseCtx, claim)
+			if !errors.Is(releaseErr, runtimepipelineobligation.ErrStaleClaim) {
+				err = errors.Join(err, releaseErr)
+			}
+		}
+	}()
 	for result.Examined < limit {
 		batch, batchErr := eb.pipelineObligations.ClaimBatch(ctx, state.cursor, limit-result.Examined)
 		if batchErr != nil {
@@ -210,6 +220,7 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 			}
 			if retry {
 				state.locallyBlocked = true
+				boundedRetryClaims = append(boundedRetryClaims, work.Claim)
 			}
 			if settled {
 				result.Settled++
@@ -265,7 +276,7 @@ func (eb *EventBus) closeAllPipelineScans(ctx context.Context) error {
 func (eb *EventBus) processClaimedPipelineWork(ctx context.Context, work runtimepipelineobligation.ClaimedWork) (settled bool, retry bool, err error) {
 	claimOpen := true
 	defer func() {
-		if claimOpen {
+		if claimOpen && !retry {
 			err = errors.Join(err, eb.pipelineObligations.Release(context.WithoutCancel(ctx), work.Claim))
 		}
 	}()
