@@ -32,8 +32,8 @@ func seedNormalRunCompletionFixture(t *testing.T, db *sql.DB, state, flowInstanc
 		flowTemplate = "example"
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', now())
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', now(), 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}

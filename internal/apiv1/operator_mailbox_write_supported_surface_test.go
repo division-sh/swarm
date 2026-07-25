@@ -22,12 +22,10 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
-const mailboxWriteSupportedSurfaceFingerprint = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 const mailboxWriteSupportedSurfaceBundleHash = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *testing.T) {
@@ -193,10 +191,9 @@ func newMailboxWriteSupportedSurfaceHandler(
 ) (*Handler, *runtimebus.EventBus) {
 	t.Helper()
 	var coordinator *runtimepipeline.PipelineCoordinator
-	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, fact.BundleHash)
+	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, fact.BundleHash())
 	bus, err := newScopedAPITestEventBus(t, persistence.(runtimebus.EventStore), runtimebus.EventBusOptions{
 		ContractBundle:     source,
-		BundleFingerprint:  fact.BundleFingerprint,
 		BundleSourceFact:   fact,
 		WorkOwner:          workOwner,
 		TestLifecycleProbe: probe,
@@ -220,7 +217,7 @@ func newMailboxWriteSupportedSurfaceHandler(
 		WorkflowStore:       workflowStore,
 		DeliveryStore:       persistence.(runtimedelivery.Store),
 		MailboxMaterializer: materializer,
-		BundleHash:          fact.BundleHash,
+		BundleSourceFact:    fact,
 		TestLifecycleProbe:  probe,
 	})
 	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: "workflow-runtime"})
@@ -289,8 +286,7 @@ func newMailboxWriteSupportedSurfaceHandler(
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    source.WorkflowName(),
 				WorkflowVersion: source.WorkflowVersion(),
-				Fingerprint:     fact.BundleFingerprint,
-				BundleHash:      fact.BundleHash,
+				BundleHash:      fact.BundleHash(),
 			},
 		}),
 	})
@@ -811,11 +807,7 @@ func bundleSourceFactForTestBundle(t *testing.T, bundle *runtimecontracts.Workfl
 	if bundle == nil {
 		t.Fatal("test bundle is nil")
 	}
-	return runtimecorrelation.BundleSourceFact{
-		BundleHash:        mailboxWriteSupportedSurfaceBundleHash,
-		BundleSource:      storerunlifecycle.BundleSourceEphemeral,
-		BundleFingerprint: mailboxWriteSupportedSurfaceFingerprint,
-	}
+	return mustAPITestBundleSourceFact(mailboxWriteSupportedSurfaceBundleHash)
 }
 
 func mailboxWriteSupportedSurfaceBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {

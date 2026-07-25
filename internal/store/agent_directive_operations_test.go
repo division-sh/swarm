@@ -20,9 +20,9 @@ const directiveOperationTestRunID = "00000000-0000-0000-0000-000000001000"
 
 func seedDirectiveOperationRun(t *testing.T, db *sql.DB, postgres bool) {
 	t.Helper()
-	query := `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`
+	query := `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
 	if postgres {
-		query = `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`
+		query = `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
 	}
 	if _, err := db.Exec(query, directiveOperationTestRunID, time.Now().UTC()); err != nil {
 		t.Fatalf("seed directive operation run: %v", err)

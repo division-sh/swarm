@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
@@ -47,9 +48,7 @@ type eventPublishDelivery struct {
 }
 
 type eventPublicationParams struct {
-	BundleHash             string
-	BundleSource           string
-	BundleFingerprint      string
+	BundleSourceFact       runtimecorrelation.BundleSourceFact
 	EventID                string
 	EventName              string
 	Payload                json.RawMessage
@@ -323,7 +322,6 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 		emitter = cfg.sourceAgent(req)
 	}
 	return eventPublicationParams{
-		BundleFingerprint:      bundleIdentity.LegacyFingerprint,
 		EventID:                uuid.NewString(),
 		EventName:              eventName,
 		Payload:                payload,

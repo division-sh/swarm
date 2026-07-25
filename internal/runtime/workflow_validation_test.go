@@ -800,8 +800,11 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 			errContains: "runtime config is required",
 		},
 		{
-			name:        "missing workflow module",
-			deps:        RuntimeDeps{Config: &config.Config{}},
+			name: "missing workflow module",
+			deps: RuntimeDeps{
+				Config:  &config.Config{},
+				Options: RuntimeOptions{BundleSourceFact: testBundleSourceFact(t, runtimeContextTestHashA)},
+			},
 			errContains: "workflow contract validation failed: workflow module is required",
 		},
 		{
@@ -810,15 +813,21 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 				Config: &config.Config{
 					LLM: config.LLMConfig{RuntimeMode: "cli_test"},
 				},
-				Options: RuntimeOptions{WorkflowModule: validModule},
+				Options: RuntimeOptions{
+					WorkflowModule:   validModule,
+					BundleSourceFact: testBundleSourceFact(t, runtimeContextTestHashA),
+				},
 			},
 			errContains: "llm.runtime_mode is retired",
 		},
 		{
 			name: "valid dependency graph",
 			deps: RuntimeDeps{
-				Config:  &config.Config{},
-				Options: RuntimeOptions{WorkflowModule: validModule},
+				Config: &config.Config{},
+				Options: RuntimeOptions{
+					WorkflowModule:   validModule,
+					BundleSourceFact: testBundleSourceFact(t, runtimeContextTestHashA),
+				},
 			},
 		},
 		{
@@ -828,16 +837,22 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 				Stores: Stores{
 					ConstructionBlocker: "sqlite selected runtime persistence remains blocked",
 				},
-				Options: RuntimeOptions{WorkflowModule: validModule},
+				Options: RuntimeOptions{
+					WorkflowModule:   validModule,
+					BundleSourceFact: testBundleSourceFact(t, runtimeContextTestHashA),
+				},
 			},
 			errContains: "runtime store boundary is not construction-ready: sqlite selected runtime persistence remains blocked",
 		},
 		{
 			name: "inbound store without admitted provider registry",
 			deps: RuntimeDeps{
-				Config:  &config.Config{},
-				Stores:  Stores{InboundStore: &recordingInboundStore{}},
-				Options: RuntimeOptions{WorkflowModule: validModule},
+				Config: &config.Config{},
+				Stores: Stores{InboundStore: &recordingInboundStore{}},
+				Options: RuntimeOptions{
+					WorkflowModule:   validModule,
+					BundleSourceFact: testBundleSourceFact(t, runtimeContextTestHashA),
+				},
 			},
 			errContains: "provider trigger catalog snapshot is required when inbound store is configured",
 		},
@@ -867,8 +882,8 @@ func TestRuntimeDepsValidatedDerivesCanonicalBootGraph(t *testing.T) {
 	boot, err := (RuntimeDeps{
 		Config: &config.Config{},
 		Options: RuntimeOptions{
-			WorkflowModule:    module,
-			BundleFingerprint: "  fingerprint-1  ",
+			WorkflowModule:   module,
+			BundleSourceFact: testBundleSourceFact(t, runtimeContextTestHashA),
 		},
 	}).validated()
 	if err != nil {
@@ -889,8 +904,8 @@ func TestRuntimeDepsValidatedDerivesCanonicalBootGraph(t *testing.T) {
 	if boot.EmitRegistry == nil {
 		t.Fatal("validated RuntimeDeps EmitRegistry = nil")
 	}
-	if boot.TrimmedBundleFingerprint != "fingerprint-1" {
-		t.Fatalf("TrimmedBundleFingerprint = %q, want fingerprint-1", boot.TrimmedBundleFingerprint)
+	if boot.BundleSourceFact.BundleHash() != runtimeContextTestHashA {
+		t.Fatalf("BundleSourceFact bundle_hash = %q, want %q", boot.BundleSourceFact.BundleHash(), runtimeContextTestHashA)
 	}
 }
 

@@ -108,7 +108,7 @@ func TestEntityCommandsUseSQLiteEntityReadStoreThroughV1API(t *testing.T) {
 	entityA := "22222222-2222-2222-2222-222222222222"
 	entityB := "33333333-3333-3333-3333-333333333333"
 	now := time.Unix(1700000000, 0).UTC()
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, now); err != nil {
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, now); err != nil {
 		t.Fatalf("seed sqlite run: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `

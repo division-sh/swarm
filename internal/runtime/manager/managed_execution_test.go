@@ -15,7 +15,7 @@ func managedExecutionTestContext(t testing.TB, ctx context.Context) context.Cont
 		1,
 		"",
 		"manager-test-actors",
-		"manager-test-bundle",
+		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		nil,
 	)
 	if err != nil {

@@ -347,11 +347,6 @@ func safeRequestIdentifierFields(params map[string]any) []any {
 			fields = append(fields, key, value)
 		}
 	}
-	if bundleRef := asStringMap(params["bundle_ref"]); bundleRef != nil {
-		if fingerprint := safeRequestIdentifierValue(bundleRef["fingerprint"]); fingerprint != "" {
-			fields = append(fields, "bundle_ref_fingerprint", fingerprint)
-		}
-	}
 	if payload := asStringMap(params["payload"]); payload != nil {
 		if entityID := safeRequestIdentifierValue(payload["entity_id"]); entityID != "" {
 			fields = append(fields, "entity_id", entityID)

@@ -38,7 +38,7 @@ func newForkedPipelineBackend(t *testing.T, backend string) forkedPipelineBacken
 	}
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, frozenAt.Add(-time.Hour)); err != nil {
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, frozenAt.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	return forkedPipelineBackend{
@@ -56,7 +56,7 @@ func (b forkedPipelineBackend) freeze(t *testing.T) {
 		return
 	}
 	continuedRunID := uuid.NewString()
-	if _, err := b.db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, continuedRunID, b.frozenAt); err != nil {
+	if _, err := b.db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, continuedRunID, b.frozenAt); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := b.db.ExecContext(context.Background(), `UPDATE runs SET status = 'forked', ended_at = $2, continued_as_run_id = $3::uuid WHERE run_id = $1::uuid`, b.runID, b.frozenAt, continuedRunID); err != nil {

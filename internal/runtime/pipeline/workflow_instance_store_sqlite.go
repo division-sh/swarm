@@ -17,6 +17,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -576,10 +577,7 @@ func insertSQLiteEntityStateDiff(ctx context.Context, tx *sql.Tx, entityID strin
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT OR IGNORE INTO runs (run_id, status, started_at)
-		VALUES (?, 'running', ?)
-	`, runID, time.Now().UTC()); err != nil {
+	if err := storerunlifecycle.RequireActive(ctx, tx, runID, storerunlifecycle.DialectSQLite); err != nil {
 		return err
 	}
 	for _, rec := range records {
@@ -604,10 +602,7 @@ func insertSQLiteWorkflowCreateEntityInitialValueMutations(
 	if err != nil {
 		return runtimemutationlog.EntityStateProjection{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT OR IGNORE INTO runs (run_id, status, started_at)
-		VALUES (?, 'running', ?)
-	`, runID, time.Now().UTC()); err != nil {
+	if err := storerunlifecycle.RequireActive(ctx, tx, runID, storerunlifecycle.DialectSQLite); err != nil {
 		return runtimemutationlog.EntityStateProjection{}, err
 	}
 	adjusted := runtimemutationlog.EntityStateProjection{

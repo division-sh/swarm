@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/runbundle"
 )
 
 const (
@@ -16,7 +16,6 @@ const (
 
 	BundleEphemeralOrphanedReason = "bundle_ephemeral_orphaned"
 	BundleDeletedOrphanedReason   = "bundle_deleted_orphaned"
-	BundleLegacyOrphanedReason    = "bundle_legacy_orphaned"
 	BundleForceDeletedReason      = "bundle_force_deleted"
 
 	SessionTerminationReasonOrphaned = "orphaned"
@@ -35,11 +34,10 @@ type Request struct {
 }
 
 type RunTarget struct {
-	RunID             string
-	BundleSource      string
-	BundleHash        string
-	BundleFingerprint string
-	ReasonCode        string
+	RunID        string
+	BundleSource runbundle.AvailabilitySource
+	BundleHash   string
+	ReasonCode   string
 }
 
 type Result struct {
@@ -55,7 +53,7 @@ type Result struct {
 
 type RunResult struct {
 	RunID          string
-	BundleSource   string
+	BundleSource   runbundle.AvailabilitySource
 	PreviousStatus string
 	Status         string
 	ReasonCode     string
@@ -96,14 +94,12 @@ type TimerResult struct {
 	Changed        bool
 }
 
-func CauseForBundleSource(source string) (string, bool) {
-	switch strings.TrimSpace(source) {
-	case storerunlifecycle.BundleSourceEphemeral:
+func CauseForBundleSource(source runbundle.AvailabilitySource) (string, bool) {
+	switch source {
+	case runbundle.AvailabilitySourceEphemeral:
 		return BundleEphemeralOrphanedReason, true
-	case storerunlifecycle.BundleSourceDeleted:
+	case runbundle.AvailabilitySourceDeleted:
 		return BundleDeletedOrphanedReason, true
-	case storerunlifecycle.BundleSourceLegacy:
-		return BundleLegacyOrphanedReason, true
 	default:
 		return "", false
 	}
@@ -112,20 +108,14 @@ func CauseForBundleSource(source string) (string, bool) {
 func NormalizeRunTarget(target RunTarget) (RunTarget, error) {
 	target.RunID = strings.TrimSpace(target.RunID)
 	target.BundleHash = strings.TrimSpace(target.BundleHash)
-	target.BundleFingerprint = strings.TrimSpace(target.BundleFingerprint)
 	target.ReasonCode = strings.TrimSpace(target.ReasonCode)
-	source, err := storerunlifecycle.CanonicalBundleSource(target.BundleSource)
-	if err != nil {
-		return RunTarget{}, err
-	}
-	target.BundleSource = source
 	if target.RunID == "" {
 		return RunTarget{}, fmt.Errorf("preservation cleanup run_id is required")
 	}
 	if target.ReasonCode == "" {
-		cause, ok := CauseForBundleSource(source)
+		cause, ok := CauseForBundleSource(target.BundleSource)
 		if !ok {
-			return RunTarget{}, fmt.Errorf("preservation cleanup unsupported bundle source %q", source)
+			return RunTarget{}, fmt.Errorf("preservation cleanup unsupported bundle source %q", target.BundleSource.String())
 		}
 		target.ReasonCode = cause
 	}
@@ -153,7 +143,6 @@ func TerminalReasonCodes() []string {
 	return []string{
 		BundleEphemeralOrphanedReason,
 		BundleDeletedOrphanedReason,
-		BundleLegacyOrphanedReason,
 		BundleForceDeletedReason,
 	}
 }

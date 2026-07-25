@@ -191,9 +191,10 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	proof.ContainerPlanFingerprint = issued.ContainerPlanFingerprint
 	proof.ActorCensusFingerprint = issued.ActorCensusFingerprint
 	proof.EffectiveConfigFingerprint = issued.EffectiveConfigFingerprint
+	bundleHash := req.LoadedSource.BundleSourceFact.BundleHash()
 	admission, err := managedexecution.New(managedexecution.KindSelectedContractFork, authority.SelectedFork.ExecutionID,
 		authority.SelectedFork.Generation, authority.SelectedFork.ForkRunID, issued.ActorCensusFingerprint,
-		issued.EffectiveConfigFingerprint, nil)
+		bundleHash, nil)
 	if err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}

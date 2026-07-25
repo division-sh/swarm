@@ -24,8 +24,8 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTempl
 		t.Fatalf("seed flow_instances: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES (?, 'running'), ('44444444-4444-4444-8444-444444444444', 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'), ('44444444-4444-4444-8444-444444444444', 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
@@ -77,8 +77,8 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsOmitsAddressFieldsWi
 		t.Fatalf("seed flow_instances: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES ('44444444-4444-4444-8444-444444444444', 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ('44444444-4444-4444-8444-444444444444', 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}

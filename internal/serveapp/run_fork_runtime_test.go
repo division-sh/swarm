@@ -34,8 +34,8 @@ func TestRunForkRuntimeOwnerHarness_DryRunUsesCanonicalPlannerJSON(t *testing.T)
 	at := time.Unix(1700000300, 0).UTC()
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -85,8 +85,8 @@ func TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady(t 
 	at := time.Unix(1700000305, 0).UTC()
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -127,8 +127,8 @@ func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmission
 	at := time.Unix(1700000307, 0).UTC()
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -493,8 +493,8 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 	at := time.Unix(1700000310, 0).UTC()
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}

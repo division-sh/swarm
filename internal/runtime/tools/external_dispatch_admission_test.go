@@ -725,7 +725,7 @@ func fixedTurnContextResolver(t testing.TB, actor models.AgentConfig) func(strin
 		t.Fatalf("observe rate-limit test capability surface: %v", err)
 	}
 	admission, err := managedexecution.New(
-		managedexecution.KindNormalRuntime, actor.ID, 1, "", "rate-limit-test-actors", "rate-limit-test-bundle", []string{surface.ID},
+		managedexecution.KindNormalRuntime, actor.ID, 1, "", "rate-limit-test-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", []string{surface.ID},
 	)
 	if err != nil {
 		t.Fatalf("build rate-limit test execution admission: %v", err)

@@ -612,7 +612,7 @@ func completeOperatorReplayTestHandler(t *testing.T, owner completeOperatorRepla
 			Now: func() time.Time { return now }, Ready: func() bool { return true }, Database: fakePinger{},
 			Runs: owner, Observability: owner, Idempotency: owner, Events: bus,
 			Source: semanticview.Wrap(runStartTestBundle("scan.requested")),
-			Bundle: runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0", Fingerprint: runStartTestFingerprint},
+			Bundle: runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0", BundleHash: runStartTestBundleHash},
 		}),
 	})
 }
@@ -777,9 +777,9 @@ func TestReplayEventFromOriginalUsesCanonicalEventEntityOnly(t *testing.T) {
 
 func seedCompleteReplayRun(t testing.TB, ctx context.Context, db *sql.DB, sqlite bool, runID string, startedAt time.Time) {
 	t.Helper()
-	query := `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`
+	query := `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
 	if sqlite {
-		query = `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`
+		query = `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
 	}
 	if _, err := db.ExecContext(ctx, query, runID, startedAt); err != nil {
 		t.Fatalf("seed complete replay run: %v", err)
@@ -1306,7 +1306,7 @@ func eventReplayTestHandler(t *testing.T, pg *store.PostgresStore, bus eventRepl
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "review",
 				WorkflowVersion: "1.0.0",
-				Fingerprint:     runStartTestFingerprint,
+				BundleHash:      runStartTestBundleHash,
 			},
 		}),
 	})

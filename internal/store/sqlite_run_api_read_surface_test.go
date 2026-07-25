@@ -247,10 +247,10 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 	readyEventID := uuid.NewString()
 
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
 		VALUES
-			(?, 'running', ?),
-			(?, 'running', ?)
+			(?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),
+			(?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, blockedRunID, now.Add(-time.Minute), readyRunID, now.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed sqlite runs: %v", err)
 	}

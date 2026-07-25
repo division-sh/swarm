@@ -2,8 +2,10 @@ package managedexecution
 
 import "testing"
 
+const testCanonicalBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
 func TestAdmissionSeparatesNormalAndSelectedExecutionAuthority(t *testing.T) {
-	normal, err := New(KindNormalRuntime, "runtime-owner", 3, "", "actors", "bundle", nil)
+	normal, err := New(KindNormalRuntime, "runtime-owner", 3, "", "actors", testCanonicalBundleHash, nil)
 	if err != nil {
 		t.Fatalf("build normal admission: %v", err)
 	}
@@ -13,7 +15,7 @@ func TestAdmissionSeparatesNormalAndSelectedExecutionAuthority(t *testing.T) {
 
 	executionID := "00000000-0000-0000-0000-000000000201"
 	runID := "00000000-0000-0000-0000-000000000202"
-	selected, err := New(KindSelectedContractFork, executionID, 7, runID, "actors", "bundle", []string{
+	selected, err := New(KindSelectedContractFork, executionID, 7, runID, "actors", testCanonicalBundleHash, []string{
 		"00000000-0000-0000-0000-000000000203",
 		"00000000-0000-0000-0000-000000000203",
 	})
@@ -28,5 +30,13 @@ func TestAdmissionSeparatesNormalAndSelectedExecutionAuthority(t *testing.T) {
 	}
 	if len(selected.CapabilitySurfaceIDs) != 1 {
 		t.Fatalf("normalized surface identities = %v, want one", selected.CapabilitySurfaceIDs)
+	}
+}
+
+func TestAdmissionRequiresCanonicalBundleHash(t *testing.T) {
+	for _, bundleHash := range []string{"", "bundle", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", " " + testCanonicalBundleHash} {
+		if _, err := New(KindNormalRuntime, "runtime-owner", 1, "", "actors", bundleHash, nil); err == nil {
+			t.Fatalf("New bundle_hash %q error = nil", bundleHash)
+		}
 	}
 }

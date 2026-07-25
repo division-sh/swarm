@@ -12,6 +12,8 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -50,6 +52,54 @@ func TestSQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRo
 	assertSQLiteMutationCount(t, db, entityID, "region", "workflow_instance_store", "create", "", "", 0)
 	assertSQLiteMutationCount(t, db, entityID, "tier", "entity_initial_value", "create_entity", "null", "1", 1)
 	assertSQLiteMutationCount(t, db, entityID, "tier", "workflow_instance_store", "create", "1", "2", 1)
+}
+
+func TestSQLiteEntityStateDiffRequiresExistingCanonicalRunBeforeMutation(t *testing.T) {
+	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin transaction: %v", err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback() })
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+	err = insertSQLiteEntityStateDiff(
+		ctx,
+		tx,
+		uuid.NewString(),
+		runtimemutationlog.EntityStateProjection{},
+		runtimemutationlog.EntityStateProjection{Fields: map[string]any{"status": "ready"}},
+		runtimemutationlog.Writer{Type: "platform", ID: "hostile-proof", HandlerStep: "diff"},
+	)
+	if !errors.Is(err, storerunlifecycle.ErrRunNotFound) {
+		t.Fatalf("insertSQLiteEntityStateDiff error = %v, want ErrRunNotFound", err)
+	}
+	assertSQLiteTxTableCount(t, tx, "runs", 0)
+	assertSQLiteTxTableCount(t, tx, "entity_mutations", 0)
+}
+
+func TestSQLiteInitialValueMutationRequiresExistingCanonicalRunBeforeMutation(t *testing.T) {
+	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin transaction: %v", err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback() })
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+	_, err = insertSQLiteWorkflowCreateEntityInitialValueMutations(
+		ctx,
+		tx,
+		uuid.NewString(),
+		runtimemutationlog.EntityStateProjection{},
+		runtimemutationlog.EntityStateProjection{Fields: map[string]any{"region": "west"}},
+		map[string]any{"region": "west"},
+	)
+	if !errors.Is(err, storerunlifecycle.ErrRunNotFound) {
+		t.Fatalf("insertSQLiteWorkflowCreateEntityInitialValueMutations error = %v, want ErrRunNotFound", err)
+	}
+	assertSQLiteTxTableCount(t, tx, "runs", 0)
+	assertSQLiteTxTableCount(t, tx, "entity_mutations", 0)
 }
 
 func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *testing.T) {
@@ -177,8 +227,8 @@ func TestSQLiteWorkflowInstanceStore_RunPipelineMutationUsesRuntimeMutationRunne
 			return errors.New("queue pipeline post-commit action")
 		}
 		_, err := tx.ExecContext(txctx, `
-			INSERT INTO runs (run_id, status, started_at)
-			VALUES (?, 'running', ?)
+			INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+			VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 		`, uuid.NewString(), time.Now().UTC())
 		return err
 	})
@@ -645,5 +695,25 @@ func assertSQLiteMutationCount(t *testing.T, db *sql.DB, entityID, field, writer
 	}
 	if got != want {
 		t.Fatalf("mutation count for field=%s writer=%s step=%s old=%s new=%s = %d, want %d", field, writerID, handlerStep, oldValue, newValue, got, want)
+	}
+}
+
+func assertSQLiteTxTableCount(t *testing.T, tx *sql.Tx, table string, want int) {
+	t.Helper()
+	var query string
+	switch table {
+	case "runs":
+		query = `SELECT COUNT(*) FROM runs`
+	case "entity_mutations":
+		query = `SELECT COUNT(*) FROM entity_mutations`
+	default:
+		t.Fatalf("unsupported sqlite table %q", table)
+	}
+	var got int
+	if err := tx.QueryRow(query).Scan(&got); err != nil {
+		t.Fatalf("count sqlite %s rows: %v", table, err)
+	}
+	if got != want {
+		t.Fatalf("sqlite %s rows = %d, want %d", table, got, want)
 	}
 }

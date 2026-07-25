@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	"github.com/google/uuid"
 )
 
@@ -24,16 +25,16 @@ type Admission struct {
 	Generation             uint64    `json:"generation"`
 	RunID                  string    `json:"run_id,omitempty"`
 	ActorCensusFingerprint string    `json:"actor_census_fingerprint"`
-	BundleFingerprint      string    `json:"bundle_fingerprint"`
+	BundleHash             string    `json:"bundle_hash"`
 	CapabilitySurfaceIDs   []string  `json:"capability_surface_ids,omitempty"`
 	IssuedAt               time.Time `json:"issued_at"`
 }
 
-func New(kind Kind, executionAuthorityID string, generation uint64, runID, actorCensusFingerprint, bundleFingerprint string, surfaceIDs []string) (Admission, error) {
+func New(kind Kind, executionAuthorityID string, generation uint64, runID, actorCensusFingerprint, bundleHash string, surfaceIDs []string) (Admission, error) {
 	admission := Admission{
 		ID: uuid.NewString(), Kind: kind, ExecutionAuthorityID: strings.TrimSpace(executionAuthorityID),
 		Generation: generation, RunID: strings.TrimSpace(runID), ActorCensusFingerprint: strings.TrimSpace(actorCensusFingerprint),
-		BundleFingerprint: strings.TrimSpace(bundleFingerprint), CapabilitySurfaceIDs: normalizeUUIDs(surfaceIDs), IssuedAt: time.Now().UTC(),
+		BundleHash: bundleHash, CapabilitySurfaceIDs: normalizeUUIDs(surfaceIDs), IssuedAt: time.Now().UTC(),
 	}
 	return admission, admission.Validate()
 }
@@ -42,8 +43,11 @@ func (a Admission) Validate() error {
 	if _, err := uuid.Parse(strings.TrimSpace(a.ID)); err != nil {
 		return fmt.Errorf("managed execution admission id is invalid: %w", err)
 	}
-	if strings.TrimSpace(a.ExecutionAuthorityID) == "" || a.Generation == 0 || strings.TrimSpace(a.ActorCensusFingerprint) == "" || strings.TrimSpace(a.BundleFingerprint) == "" || a.IssuedAt.IsZero() {
+	if strings.TrimSpace(a.ExecutionAuthorityID) == "" || a.Generation == 0 || strings.TrimSpace(a.ActorCensusFingerprint) == "" || strings.TrimSpace(a.BundleHash) == "" || a.IssuedAt.IsZero() {
 		return fmt.Errorf("managed execution admission identity is incomplete")
+	}
+	if err := runtimebundleidentity.ValidateCanonicalHash(a.BundleHash); err != nil {
+		return fmt.Errorf("managed execution admission bundle_hash is invalid: %w", err)
 	}
 	switch a.Kind {
 	case KindNormalRuntime:

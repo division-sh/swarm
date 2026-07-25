@@ -917,7 +917,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 		Bundle: runtimecontracts.BundleIdentity{
 			WorkflowName:    "review",
 			WorkflowVersion: "1.0.0",
-			Fingerprint:     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			BundleHash:      "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 	}
 }

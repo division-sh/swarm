@@ -66,11 +66,11 @@ func TestCLIOutputModesForLocalConsumers(t *testing.T) {
 		}
 		if mode == "--json" {
 			result := decodeOutputJSON[versionOutputResult](t, stdout.String())
-			if result.Server == nil || result.Server.Bundle.Fingerprint != "sha256:server" {
+			if result.Server == nil || result.Server.Bundle.BundleHash == "" {
 				t.Fatalf("version --server json = %#v, want server identity", result)
 			}
-		} else if got := stdout.String(); got != versionMetadata.BinaryVersion+"\nsha256:server\n" {
-			t.Fatalf("version --server quiet stdout = %q, want binary and fingerprint", got)
+		} else if got := stdout.String(); got != versionMetadata.BinaryVersion+"\nbundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n" {
+			t.Fatalf("version --server quiet stdout = %q, want binary and bundle hash", got)
 		}
 		assertEmptyStderr(t, stderr.String())
 	}
@@ -232,7 +232,7 @@ func TestCLIOutputModesForDiagnosticConsumers(t *testing.T) {
 			}
 			if mode == "--json" {
 				result := decodeOutputJSON[diagnosticHealthCheckResult](t, stdout.String())
-				if !BoolPointerValue(result.Alive) || result.Bundle.Fingerprint != "sha256:server" {
+				if !BoolPointerValue(result.Alive) || result.Bundle.BundleHash == "" {
 					t.Fatalf("health json = %#v, want health.check result", result)
 				}
 			} else if got := stdout.String(); got != "unhealthy\n" {

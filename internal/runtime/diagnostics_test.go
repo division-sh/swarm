@@ -425,13 +425,9 @@ func TestRuntimeLogger_Log_StampsBundleSourceFactOnRunRow(t *testing.T) {
 	defer cleanup()
 	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
 	runID := uuid.NewString()
-	sourceFact := runtimecorrelation.BundleSourceFact{
-		BundleHash:        "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111",
-		BundleSource:      storerunlifecycle.BundleSourcePersisted,
-		BundleFingerprint: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-	}
-	seedRuntimeLogBundleRow(t, db, sourceFact.BundleHash)
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(testAuthorActivityContext(context.Background()), sourceFact.BundleHash), runID)
+	sourceFact := testPersistedBundleSourceFact(t, "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111")
+	seedRuntimeLogBundleRow(t, db, sourceFact.BundleHash())
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(testAuthorActivityContext(context.Background()), sourceFact.BundleHash()), runID)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
 
 	if err := logger.Log(ctx, RuntimeLogEntry{
@@ -442,16 +438,17 @@ func TestRuntimeLogger_Log_StampsBundleSourceFactOnRunRow(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("logger.Log: %v", err)
 	}
-	var gotHash, gotSource, gotFingerprint string
+	var gotHash, gotSource string
 	if err := db.QueryRow(`
-		SELECT COALESCE(bundle_hash, ''), bundle_source, COALESCE(bundle_fingerprint, '')
+		SELECT bundle_hash, bundle_source
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, runID).Scan(&gotHash, &gotSource, &gotFingerprint); err != nil {
+	`, runID).Scan(&gotHash, &gotSource); err != nil {
 		t.Fatalf("load run bundle source: %v", err)
 	}
-	if gotHash != sourceFact.BundleHash || gotSource != sourceFact.BundleSource || gotFingerprint != sourceFact.BundleFingerprint {
-		t.Fatalf("run bundle source = hash:%q source:%q fingerprint:%q, want %#v", gotHash, gotSource, gotFingerprint, sourceFact)
+	wantHash, wantSource := sourceFact.StorageValues()
+	if gotHash != wantHash || gotSource != wantSource {
+		t.Fatalf("run bundle source = hash:%q source:%q, want %#v", gotHash, gotSource, sourceFact)
 	}
 }
 
@@ -460,16 +457,12 @@ func TestRuntimeLogger_LogRejectsDeletedPersistedBundleSourceFact(t *testing.T) 
 	defer cleanup()
 	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
 	runID := uuid.NewString()
-	sourceFact := runtimecorrelation.BundleSourceFact{
-		BundleHash:        "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111",
-		BundleSource:      storerunlifecycle.BundleSourcePersisted,
-		BundleFingerprint: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-	}
-	seedRuntimeLogBundleRow(t, db, sourceFact.BundleHash)
-	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `DELETE FROM bundles WHERE bundle_hash = $1`, sourceFact.BundleHash); err != nil {
+	sourceFact := testPersistedBundleSourceFact(t, "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111")
+	seedRuntimeLogBundleRow(t, db, sourceFact.BundleHash())
+	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `DELETE FROM bundles WHERE bundle_hash = $1`, sourceFact.BundleHash()); err != nil {
 		t.Fatalf("delete bundle row: %v", err)
 	}
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(testAuthorActivityContext(context.Background()), sourceFact.BundleHash), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(testAuthorActivityContext(context.Background()), sourceFact.BundleHash()), runID)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
 
 	err := logger.Log(ctx, RuntimeLogEntry{
@@ -1043,12 +1036,7 @@ func ensureRuntimeLogRunRowInStoryForTest(ctx context.Context, db storerunlifecy
 	}
 	opts := storerunlifecycle.EnsureActiveOptions{}
 	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
-		opts.HasBundleHashCol = true
-		opts.HasBundleSourceCol = true
-		opts.HasBundleFingerprintCol = true
-		opts.BundleHash = fact.BundleHash
-		opts.BundleSource = fact.BundleSource
-		opts.BundleFingerprint = fact.BundleFingerprint
+		opts.BundleSourceFact = fact
 	}
 	return storerunlifecycle.EnsureActive(ctx, db, runID, "", "", opts)
 }

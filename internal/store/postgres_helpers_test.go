@@ -105,8 +105,8 @@ func TestPostgresStore_HelpersAndDescriptors(t *testing.T) {
 
 	entityID := uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES ($1::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 		ON CONFLICT (run_id) DO NOTHING
 	`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)

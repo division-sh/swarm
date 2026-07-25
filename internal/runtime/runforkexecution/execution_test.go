@@ -84,7 +84,7 @@ func selectedForkExecutionTestContext(t testing.TB, ctx context.Context, authori
 		authority.SelectedFork.Generation,
 		authority.SelectedFork.ForkRunID,
 		authority.SelectedFork.ActorCensusFingerprint,
-		authority.SelectedFork.EffectiveConfigFingerprint,
+		runForkTestBundleHash,
 		nil,
 	)
 	if err != nil {
@@ -110,7 +110,8 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 	}
-	sourceScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, loaded.BundleHash)
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, loaded.BundleSourceFact)
+	sourceScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, loaded.BundleSourceFact.BundleHash())
 	if err != nil {
 		t.Fatalf("resolve source scope: %v", err)
 	}
@@ -318,7 +319,7 @@ func TestSelectedContractPipelineConsumesExactMockConnectorResponseOwner(t *test
 	opts := selectedContractPipelineCoordinatorOptions(
 		&store.PostgresStore{},
 		LoadedSelectedContractSource{
-			BundleHash:             "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			BundleSourceFact:       testEphemeralBundleSourceFact("bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
 			MockConnectorResponses: plan,
 		},
 		SelectedContractAgentRuntimeOptions{},
@@ -328,8 +329,8 @@ func TestSelectedContractPipelineConsumesExactMockConnectorResponseOwner(t *test
 	if opts.MockConnectorResponses != plan {
 		t.Fatal("selected-contract pipeline did not retain exact mock connector response owner")
 	}
-	if opts.BundleHash != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
-		t.Fatalf("selected-contract pipeline bundle hash = %q", opts.BundleHash)
+	if got := opts.BundleSourceFact.BundleHash(); got != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("selected-contract pipeline bundle hash = %q", got)
 	}
 }
 
@@ -348,7 +349,7 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 	}
-	sourceScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, loaded.BundleHash)
+	sourceScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, loaded.BundleSourceFact.BundleHash())
 	if err != nil {
 		t.Fatalf("resolve source scope: %v", err)
 	}
@@ -364,7 +365,7 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 	t.Cleanup(lease.Release)
 
 	sourceRunID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES ($1::uuid, 'running', $2, $3, now())`, sourceRunID, loaded.BundleHash, storerunlifecycle.BundleSourceEphemeral); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES ($1::uuid, 'running', $2, $3, now())`, sourceRunID, loaded.BundleSourceFact.BundleHash(), storerunlifecycle.BundleSourceEphemeral); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
@@ -374,6 +375,7 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 		WorkOwner:           workOwner,
 		PipelineObligations: pg.PipelineObligations(),
 		ContractBundle:      loaded.Source,
+		BundleSourceFact:    loaded.BundleSourceFact,
 		InterceptorProvider: func() []bus.EventInterceptor {
 			return nil
 		},
@@ -474,7 +476,7 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 	// A forked source rejects ordinary post-terminal event production. Exercise
 	// the same canonical constructor on an independent active control run instead.
 	controlRunID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', now())`, controlRunID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', now(), 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, controlRunID); err != nil {
 		t.Fatalf("seed control run: %v", err)
 	}
 	controlEventID := uuid.NewString()
@@ -613,8 +615,7 @@ func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIden
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
-		BundleHash:          projection.BundleHash,
-		BundleSource:        storerunlifecycle.BundleSourcePersisted,
+		BundleSourceFact:    testPersistedBundleSourceFact(projection.BundleHash),
 		ConfirmSourceFreeze: true,
 		Store:               pg,
 		SourceLoader: BundleCatalogSelectedContractSourceLoader{
@@ -640,16 +641,16 @@ func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIden
 		sourceEventID,
 		[]string{sourceEventID},
 	)
-	var forkBundleHash, forkBundleSource, forkBundleFingerprint string
+	var forkBundleHash, forkBundleSource string
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(bundle_hash, ''), bundle_source, COALESCE(bundle_fingerprint, '')
+		SELECT bundle_hash, bundle_source
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, result.Materialization.ForkRunID).Scan(&forkBundleHash, &forkBundleSource, &forkBundleFingerprint); err != nil {
+	`, result.Materialization.ForkRunID).Scan(&forkBundleHash, &forkBundleSource); err != nil {
 		t.Fatalf("load fork run bundle identity: %v", err)
 	}
-	if forkBundleHash != projection.BundleHash || forkBundleSource != storerunlifecycle.BundleSourcePersisted || forkBundleFingerprint != "" {
-		t.Fatalf("fork run bundle identity = hash:%q source:%q fingerprint:%q", forkBundleHash, forkBundleSource, forkBundleFingerprint)
+	if forkBundleHash != projection.BundleHash || forkBundleSource != storerunlifecycle.BundleSourcePersisted {
+		t.Fatalf("fork run bundle identity = hash:%q source:%q", forkBundleHash, forkBundleSource)
 	}
 }
 
@@ -666,7 +667,7 @@ func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronolo
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 	}
-	sourceScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, loaded.BundleHash)
+	sourceScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, loaded.BundleSourceFact.BundleHash())
 	if err != nil {
 		t.Fatalf("resolve source scope: %v", err)
 	}
@@ -1548,7 +1549,7 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.
 	forkRunID := uuid.NewString()
 	forkEventID := uuid.NewString()
 	bindingID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at) VALUES ($1::uuid,'running',$3),($2::uuid,'paused',$3)`, sourceRunID, forkRunID, now); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at, bundle_hash, bundle_source) VALUES ($1::uuid,'running',$3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),($2::uuid,'paused',$3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, sourceRunID, forkRunID, now); err != nil {
 		t.Fatalf("seed selected-fork proof runs: %v", err)
 	}
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, forkEventID, sourceRunID, "selected.proof",
@@ -1574,7 +1575,8 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.
 	}
 	container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
 		Admission: admission, RecipientPlanning: planning, Store: storetest.AdmitPostgresRuntimeStore(t, db),
-		SourceRunID: sourceRunID, ForkRunID: forkRunID, ForkEventID: forkEventID, SourceEvents: []string{forkEventID},
+		LoadedSource: LoadedSelectedContractSource{BundleSourceFact: testEphemeralBundleSourceFact(runForkTestBundleHash)},
+		SourceRunID:  sourceRunID, ForkRunID: forkRunID, ForkEventID: forkEventID, SourceEvents: []string{forkEventID},
 		ExecutionOwner: store.RunForkSelectedContractExecutionOwner,
 	})
 	if err != nil {
@@ -1670,7 +1672,7 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 
 	hostileAdmission, err := managedexecution.New(
 		managedexecution.KindSelectedContractFork, uuid.NewString(), proof.RuntimeGeneration, uuid.NewString(),
-		proof.ActorCensusFingerprint, proof.EffectiveConfigFingerprint, nil,
+		proof.ActorCensusFingerprint, runForkTestBundleHash, nil,
 	)
 	if err != nil {
 		t.Fatalf("build hostile selected-fork admission: %v", err)
@@ -1830,7 +1832,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	forkRunID := uuid.NewString()
 	forkEventID := uuid.NewString()
 	bindingID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at) VALUES ($1::uuid,'running',$3),($2::uuid,'paused',$3)`, sourceRunID, forkRunID, now); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at, bundle_hash, bundle_source) VALUES ($1::uuid,'running',$3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),($2::uuid,'paused',$3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, sourceRunID, forkRunID, now); err != nil {
 		t.Fatalf("seed selected-contract container competition runs: %v", err)
 	}
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, forkEventID, sourceRunID, "selected.test",
@@ -1892,7 +1894,10 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		ContractSelection:          selection,
 	}
 	baseRequest := publishSelectedContractForkEventsRequest{
-		Admission:         admission,
+		Admission: admission,
+		LoadedSource: LoadedSelectedContractSource{
+			BundleSourceFact: testEphemeralBundleSourceFact("bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"),
+		},
 		RecipientPlanning: planning,
 		SourceRunID:       sourceRunID,
 		ForkRunID:         forkRunID,
@@ -3742,8 +3747,9 @@ func materializeSelectedExecutionForkForTest(
 	if err != nil {
 		t.Fatalf("BuildSelectedContractExecutionModel: %v", err)
 	}
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, loaded.BundleSourceFact)
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, store.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID, At: sourceEventID, ContractSelection: selection, BundleHash: loaded.BundleHash, BundleSource: loaded.BundleSource,
+		SourceRunID: sourceRunID, At: sourceEventID, ContractSelection: selection, BundleSourceFact: loaded.BundleSourceFact,
 		FrontierAdmission: frontier, RouteTopology: topology, RecipientPlanning: *model.RecipientPlanning,
 	})
 	if err != nil {

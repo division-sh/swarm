@@ -166,9 +166,9 @@ func proveLifecycleConcurrentPartialReconfigure(t *testing.T, store lifecycleOcc
 
 func seedLifecycleRun(t *testing.T, db *sql.DB, sqlite bool, runID string) {
 	t.Helper()
-	query := `INSERT INTO runs (run_id, status) VALUES (?, 'running')`
+	query := `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
 	if !sqlite {
-		query = `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`
+		query = `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
 	}
 	if _, err := db.ExecContext(testAuthorActivityContext(), query, runID); err != nil {
 		t.Fatalf("seed lifecycle run: %v", err)

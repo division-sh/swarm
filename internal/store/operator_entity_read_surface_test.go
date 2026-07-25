@@ -23,9 +23,9 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	sharedEntity := uuid.NewString()
 	base := time.Unix(1700000000, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at) VALUES
-			($1::uuid, 'running', $3),
-			($2::uuid, 'running', $3)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES
+			($1::uuid, 'running', $3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),
+			($2::uuid, 'running', $3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runA, runB, base); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
@@ -174,9 +174,9 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	sharedEntity := uuid.NewString()
 	base := time.Unix(1700000000, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at) VALUES
-			(?, 'running', ?),
-			(?, 'running', ?)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES
+			(?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),
+			(?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runA, base, runB, base); err != nil {
 		t.Fatalf("seed sqlite runs: %v", err)
 	}

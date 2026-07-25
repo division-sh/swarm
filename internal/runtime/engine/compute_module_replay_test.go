@@ -32,10 +32,11 @@ func TestExecuteWithPersistedComputeModuleReplayEvidenceLoadsAndFailsClosedOnSto
 	sqliteStore := newComputeModuleReplaySQLiteStore(t)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
-		VALUES (?, 'running', ?, ?, ?, ?)
-	`, runID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint, time.Now().UTC()); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES (?, 'running', ?, ?, ?)
+	`, runID, bundleHash, bundleSource, time.Now().UTC()); err != nil {
 		t.Fatalf("seed sqlite run: %v", err)
 	}
 

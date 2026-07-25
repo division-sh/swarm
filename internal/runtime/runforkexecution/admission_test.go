@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
@@ -155,9 +156,13 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnSourceMismatch(t *t
 	mismatched.WorkflowVersion = "other-version"
 
 	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
-		ForkRunID:         forkRunID,
-		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
-		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: LoadedSelectedContractSource{Selection: binding.ContractSelection, Source: testSelectedSource(mismatched)}},
+		ForkRunID:     forkRunID,
+		BindingReader: &fakeSelectedContractBindingReader{binding: binding},
+		SourceLoader: &fakeSelectedContractSourceLoader{loaded: LoadedSelectedContractSource{
+			Selection:        binding.ContractSelection,
+			Source:           testSelectedSource(mismatched),
+			BundleSourceFact: testEphemeralBundleSourceFact(runForkTestBundleHash),
+		}},
 		FrontierAdmission: frontier,
 		RouteAdmission:    routeAdmission,
 		RouteTopology:     testSelectedContractRouteTopologyFromAdmission(t, frontier, routeAdmission),
@@ -395,7 +400,7 @@ func TestBundleCatalogSelectedContractSourceLoaderLoadsPersistedSourceForRequest
 			RunID:            sourceRunID,
 			Status:           "running",
 			BundleHash:       projection.BundleHash,
-			BundleSource:     storerunlifecycle.BundleSourcePersisted,
+			BundleSource:     runbundle.AvailabilitySourcePersisted,
 			BundleRowPresent: true,
 		},
 		record: store.BundleCatalogRuntimeRecord{
@@ -417,8 +422,8 @@ func TestBundleCatalogSelectedContractSourceLoaderLoadsPersistedSourceForRequest
 	}
 	defer cleanupLoadedSelectedContractSource(loaded)
 
-	if loaded.BundleHash != projection.BundleHash {
-		t.Fatalf("loaded bundle hash = %q, want %q", loaded.BundleHash, projection.BundleHash)
+	if loaded.BundleSourceFact.BundleHash() != projection.BundleHash {
+		t.Fatalf("loaded bundle hash = %q, want %q", loaded.BundleSourceFact.BundleHash(), projection.BundleHash)
 	}
 	if loaded.Selection.ContractsRoot != selection.ContractsRoot ||
 		loaded.Selection.WorkflowName != "test-selected-contract-fork-execution" ||
@@ -513,7 +518,7 @@ func TestBundleCatalogSelectedContractSourceLoaderLoadsCrossBundleTargetSelectio
 			RunID:            sourceRunID,
 			Status:           "running",
 			BundleHash:       "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-			BundleSource:     storerunlifecycle.BundleSourcePersisted,
+			BundleSource:     runbundle.AvailabilitySourcePersisted,
 			BundleRowPresent: true,
 		},
 		record: store.BundleCatalogRuntimeRecord{
@@ -544,7 +549,7 @@ func TestBundleCatalogSelectedContractSourceLoaderLoadsCrossBundleTargetSelectio
 	if catalogStore.requestedBundleHash != projection.BundleHash {
 		t.Fatalf("requested target hash = %q, want %q", catalogStore.requestedBundleHash, projection.BundleHash)
 	}
-	if loaded.BundleHash != projection.BundleHash ||
+	if loaded.BundleSourceFact.BundleHash() != projection.BundleHash ||
 		loaded.Selection.Mode != store.RunForkContractSelectionModeBundleHash ||
 		loaded.Selection.BundleHash != projection.BundleHash ||
 		loaded.Selection.WorkflowName != "test-selected-contract-fork-execution" ||
@@ -709,7 +714,7 @@ func TestBundleCatalogSelectedContractSourceLoaderFailsClosedOnUnavailableStates
 				RunID:        sourceRunID,
 				Status:       "paused",
 				BundleHash:   hash,
-				BundleSource: storerunlifecycle.BundleSourceEphemeral,
+				BundleSource: runbundle.AvailabilitySourceEphemeral,
 				ErrorCode:    runbundle.CodeBundleUnavailable,
 				Cause:        storerunlifecycle.BundleSourceEphemeral,
 			},
@@ -736,7 +741,7 @@ func TestBundleCatalogSelectedContractSourceLoaderFailsClosedOnMissingCatalogByt
 				RunID:            sourceRunID,
 				Status:           "running",
 				BundleHash:       hash,
-				BundleSource:     storerunlifecycle.BundleSourcePersisted,
+				BundleSource:     runbundle.AvailabilitySourcePersisted,
 				BundleRowPresent: true,
 			},
 			recordErr: store.ErrBundleNotFound,
@@ -819,13 +824,12 @@ type fakeSelectedContractSourceLoader struct {
 func TestLoadRunForkSelectedContractSourceRejectsExpectedIdentityMismatch(t *testing.T) {
 	selection := testContractSelection()
 	for _, tc := range []struct {
-		name           string
-		expectedHash   string
-		expectedSource string
-		want           string
+		name         string
+		expectedFact runtimecorrelation.BundleSourceFact
+		want         string
 	}{
-		{name: "bundle hash", expectedHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", expectedSource: "ephemeral", want: "bundle_hash mismatch"},
-		{name: "bundle source", expectedHash: runForkTestBundleHash, expectedSource: "persisted", want: "bundle_source mismatch"},
+		{name: "bundle hash", expectedFact: testEphemeralBundleSourceFact("bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), want: "bundle_hash mismatch"},
+		{name: "bundle source", expectedFact: testPersistedBundleSourceFact(runForkTestBundleHash), want: "bundle_source mismatch"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cleaned := false
@@ -836,9 +840,8 @@ func TestLoadRunForkSelectedContractSourceRejectsExpectedIdentityMismatch(t *tes
 			}
 			loader := &fakeSelectedContractSourceLoader{loaded: loaded}
 			_, err := loadRunForkSelectedContractSource(context.Background(), loader, SelectedContractSourceLoadRequest{
-				ExpectedBundleHash:   tc.expectedHash,
-				ExpectedBundleSource: tc.expectedSource,
-				Selection:            selection,
+				BundleSourceFact: tc.expectedFact,
+				Selection:        selection,
 			})
 			if err == nil || !strings.Contains(err.Error(), runbundle.CodeBundleDataIntegrityError) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error = %v, want %s %s", err, runbundle.CodeBundleDataIntegrityError, tc.want)
@@ -986,11 +989,26 @@ func testSelectedSource(selection store.RunForkContractSelection) semanticview.S
 
 func testLoadedSelectedSource(selection store.RunForkContractSelection) LoadedSelectedContractSource {
 	return LoadedSelectedContractSource{
-		Selection:    selection,
-		Source:       testSelectedSource(selection),
-		BundleHash:   runForkTestBundleHash,
-		BundleSource: "ephemeral",
+		Selection:        selection,
+		Source:           testSelectedSource(selection),
+		BundleSourceFact: testEphemeralBundleSourceFact(runForkTestBundleHash),
 	}
+}
+
+func testEphemeralBundleSourceFact(bundleHash string) runtimecorrelation.BundleSourceFact {
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+	if err != nil {
+		panic(err)
+	}
+	return fact
+}
+
+func testPersistedBundleSourceFact(bundleHash string) runtimecorrelation.BundleSourceFact {
+	fact, err := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
+	if err != nil {
+		panic(err)
+	}
+	return fact
 }
 
 func testContractFrontierAdmission(selection store.RunForkContractSelection) store.RunForkContractFrontierAdmission {

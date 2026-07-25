@@ -32,8 +32,7 @@ type RunForkSelectedContractExecutionMaterializeRequest struct {
 	SourceRunID       string
 	At                string
 	ContractSelection RunForkContractSelection
-	BundleHash        string
-	BundleSource      string
+	BundleSourceFact  runtimecorrelation.BundleSourceFact
 	FrontierAdmission RunForkContractFrontierAdmission
 	RouteTopology     RunForkSelectedContractRouteTopology
 	RecipientPlanning RunForkSelectedContractRecipientPlanning
@@ -259,14 +258,12 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 		return RunForkMaterialization{}, err
 	}
 	now := time.Now().UTC()
-	identity, err := resolveRunForkBundleInsertIdentity(ctx, tx, plan.SourceRunID, runForkBundleInsertIdentity{
-		BundleHash:   req.BundleHash,
-		BundleSource: req.BundleSource,
-	})
+	identity, err := resolveRunForkBundleInsertIdentity(ctx, tx, plan.SourceRunID, req.BundleSourceFact)
 	if err != nil {
 		return RunForkMaterialization{}, fmt.Errorf("resolve selected-contract fork bundle identity: %w", err)
 	}
-	forkScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, identity.BundleHash)
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, identity.BundleSourceFact)
+	forkScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, identity.BundleSourceFact.BundleHash())
 	if err != nil {
 		return RunForkMaterialization{}, fmt.Errorf("resolve selected-contract fork author activity scope: %w", err)
 	}

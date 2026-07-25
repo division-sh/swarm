@@ -8,10 +8,40 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	startupBundleHashA = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	startupBundleHashB = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	startupBundleHashC = "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+)
+
+func TestStartupAuthorityRejectsNormalizedBundleHashInput(t *testing.T) {
+	if _, err := NewColdAuthority(AcquireRequest{
+		OwnerID: "owner-a", BootID: uuid.NewString(), BundleHash: " " + startupBundleHashA,
+	}, "postgres"); err == nil {
+		t.Fatal("NewColdAuthority accepted bundle_hash after normalization")
+	}
+
+	initial, err := NewColdAuthority(AcquireRequest{
+		OwnerID: "owner-a", BootID: uuid.NewString(), BundleHash: startupBundleHashA,
+	}, "postgres")
+	if err != nil {
+		t.Fatalf("NewColdAuthority: %v", err)
+	}
+	lease, err := NewLease(initial, nil, nil)
+	if err != nil {
+		t.Fatalf("NewLease: %v", err)
+	}
+	if _, err := lease.PrepareHandoff(context.Background(), HandoffRequest{
+		CandidateOwnerID: "owner-b", CandidateBootID: uuid.NewString(), CandidateBundleHash: startupBundleHashB + " ",
+	}); err == nil {
+		t.Fatal("PrepareHandoff accepted bundle_hash after normalization")
+	}
+}
+
 func TestColdStartupProbeSettledFailureReleasesLeaseForSuccessor(t *testing.T) {
 	ctx := context.Background()
 	initial, err := NewColdAuthority(AcquireRequest{
-		OwnerID: "failed-owner", BootID: uuid.NewString(), BundleFingerprint: "bundle-a",
+		OwnerID: "failed-owner", BootID: uuid.NewString(), BundleHash: startupBundleHashA,
 	}, "postgres")
 	if err != nil {
 		t.Fatalf("NewColdAuthority: %v", err)
@@ -44,7 +74,7 @@ func TestColdStartupProbeSettledFailureReleasesLeaseForSuccessor(t *testing.T) {
 	}
 
 	successor, err := NewColdAuthority(AcquireRequest{
-		OwnerID: "successor", BootID: uuid.NewString(), BundleFingerprint: "bundle-a",
+		OwnerID: "successor", BootID: uuid.NewString(), BundleHash: startupBundleHashA,
 	}, "postgres")
 	if err != nil {
 		t.Fatalf("successor NewColdAuthority: %v", err)
@@ -57,7 +87,7 @@ func TestColdStartupProbeSettledFailureReleasesLeaseForSuccessor(t *testing.T) {
 func TestFinalizedHandoffBecomesNextReplacementAuthority(t *testing.T) {
 	ctx := context.Background()
 	initial, err := NewColdAuthority(AcquireRequest{
-		OwnerID: "owner-a", BootID: uuid.NewString(), BundleFingerprint: "bundle-a",
+		OwnerID: "owner-a", BootID: uuid.NewString(), BundleHash: startupBundleHashA,
 	}, "memory")
 	if err != nil {
 		t.Fatalf("NewColdAuthority: %v", err)
@@ -74,7 +104,7 @@ func TestFinalizedHandoffBecomesNextReplacementAuthority(t *testing.T) {
 	}
 
 	first, err := lease.PrepareHandoff(ctx, HandoffRequest{
-		CandidateOwnerID: "owner-b", CandidateBootID: uuid.NewString(), CandidateBundleFingerprint: "bundle-b",
+		CandidateOwnerID: "owner-b", CandidateBootID: uuid.NewString(), CandidateBundleHash: startupBundleHashB,
 	})
 	if err != nil {
 		t.Fatalf("PrepareHandoff first: %v", err)
@@ -95,7 +125,7 @@ func TestFinalizedHandoffBecomesNextReplacementAuthority(t *testing.T) {
 	}
 
 	second, err := lease.PrepareHandoff(ctx, HandoffRequest{
-		CandidateOwnerID: "owner-c", CandidateBootID: uuid.NewString(), CandidateBundleFingerprint: "bundle-c",
+		CandidateOwnerID: "owner-c", CandidateBootID: uuid.NewString(), CandidateBundleHash: startupBundleHashC,
 	})
 	if err != nil {
 		t.Fatalf("PrepareHandoff second: %v", err)
@@ -112,7 +142,7 @@ func TestFinalizedHandoffBecomesNextReplacementAuthority(t *testing.T) {
 func TestRolledBackHandoffCanPrepareRestorationCandidate(t *testing.T) {
 	ctx := context.Background()
 	initial, err := NewColdAuthority(AcquireRequest{
-		OwnerID: "owner-a", BootID: uuid.NewString(), BundleFingerprint: "bundle-a",
+		OwnerID: "owner-a", BootID: uuid.NewString(), BundleHash: startupBundleHashA,
 	}, "memory")
 	if err != nil {
 		t.Fatalf("NewColdAuthority: %v", err)
@@ -129,7 +159,7 @@ func TestRolledBackHandoffCanPrepareRestorationCandidate(t *testing.T) {
 	}
 
 	failedCandidate, err := lease.PrepareHandoff(ctx, HandoffRequest{
-		CandidateOwnerID: "owner-b", CandidateBootID: uuid.NewString(), CandidateBundleFingerprint: "bundle-b",
+		CandidateOwnerID: "owner-b", CandidateBootID: uuid.NewString(), CandidateBundleHash: startupBundleHashB,
 	})
 	if err != nil {
 		t.Fatalf("PrepareHandoff failed candidate: %v", err)
@@ -143,7 +173,7 @@ func TestRolledBackHandoffCanPrepareRestorationCandidate(t *testing.T) {
 	}
 
 	replacement, err := lease.PrepareHandoff(ctx, HandoffRequest{
-		CandidateOwnerID: "owner-a-restored", CandidateBootID: uuid.NewString(), CandidateBundleFingerprint: "bundle-a",
+		CandidateOwnerID: "owner-a-restored", CandidateBootID: uuid.NewString(), CandidateBundleHash: startupBundleHashA,
 	})
 	if err != nil {
 		t.Fatalf("PrepareHandoff restoration candidate: %v", err)

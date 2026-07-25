@@ -205,13 +205,11 @@ func workflowGatePlanForInstance(pc *PipelineCoordinator, instance WorkflowInsta
 }
 
 func workflowGateBundleHash(ctx context.Context, pc *PipelineCoordinator) string {
-	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
-		if value := strings.TrimSpace(firstNonEmptyString(fact.BundleHash, fact.BundleFingerprint)); value != "" {
-			return value
-		}
+	if pc != nil && pc.bundleSourceFact.Validate() == nil {
+		return pc.bundleSourceFact.BundleHash()
 	}
-	if pc != nil {
-		return strings.TrimSpace(pc.bundleHash)
+	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok && fact.Validate() == nil {
+		return fact.BundleHash()
 	}
 	return ""
 }

@@ -23,7 +23,7 @@ func seedFlowRouteTestAuthority(t *testing.T, ctx context.Context, exec flowRout
 	t.Helper()
 	runID := uuid.NewString()
 	if postgres {
-		if _, err := exec.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', now())`, runID); err != nil {
+		if _, err := exec.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', now(), 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 			t.Fatalf("seed flow route run: %v", err)
 		}
 		for _, flowInstance := range flowInstances {
@@ -33,7 +33,7 @@ func seedFlowRouteTestAuthority(t *testing.T, ctx context.Context, exec flowRout
 		}
 	} else {
 		now := time.Now().UTC()
-		if _, err := exec.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, now); err != nil {
+		if _, err := exec.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, now); err != nil {
 			t.Fatalf("seed sqlite flow route run: %v", err)
 		}
 		for _, flowInstance := range flowInstances {
@@ -591,8 +591,8 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(
 		t.Fatalf("seed flow_instances: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES ($1::uuid, 'running'), ('44444444-4444-4444-8444-444444444444'::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'), ('44444444-4444-4444-8444-444444444444'::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
@@ -646,8 +646,8 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsOmitsAddressFieldsWithout
 		t.Fatalf("seed flow_instances: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES ('44444444-4444-4444-8444-444444444444'::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ('44444444-4444-4444-8444-444444444444'::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}

@@ -16,6 +16,7 @@ import (
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
+const runtimeTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
 type runtimeTestWorkFixture struct {
 	process *worklifetime.Process
@@ -73,7 +74,7 @@ func newRuntimeTestEventBus(t testing.TB, store runtimebus.EventStore) (*runtime
 func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore, opts runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
 	t.Helper()
 	if opts.WorkOwner == nil {
-		opts.WorkOwner = runtimeTestOccurrence(t, "bundle-v1:sha256:"+strings.Repeat("a", 64))
+		opts.WorkOwner = runtimeTestOccurrence(t, runtimeTestBundleHash)
 	}
 	if opts.PipelineObligations == nil {
 		if provider, ok := store.(interface {
@@ -117,16 +118,21 @@ func runtimeTestEventBusRuntimeOccurrence(t testing.TB, bus *runtimebus.EventBus
 }
 
 func testAuthorActivityContext(ctx context.Context) context.Context {
-	return testAuthorActivityContextForBundle(ctx, "bundle-v1:sha256:"+strings.Repeat("a", 64))
+	return testAuthorActivityContextForBundle(ctx, runtimeTestBundleHash)
 }
 
 func testAuthorActivityContextForBundle(ctx context.Context, bundleHash string) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+	if err != nil {
+		panic(err)
+	}
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
-		strings.TrimSpace(bundleHash),
+		bundleHash,
 	))
 }
 
@@ -135,12 +141,8 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps) (
 	if strings.TrimSpace(deps.Options.RuntimeInstanceID) == "" {
 		deps.Options.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
-	if strings.TrimSpace(deps.Options.BundleSourceFact.BundleHash) == "" {
-		deps.Options.BundleSourceFact = runtimecorrelation.BundleSourceFact{
-			BundleHash:        "bundle-v1:sha256:" + strings.Repeat("a", 64),
-			BundleSource:      "ephemeral",
-			BundleFingerprint: "sha256:" + strings.Repeat("a", 64),
-		}
+	if deps.Options.BundleSourceFact.Validate() != nil {
+		deps.Options.BundleSourceFact = testBundleSourceFact(t, runtimeTestBundleHash)
 	}
 	if deps.Options.ProcessWorkOwner == nil {
 		deps.Options.ProcessWorkOwner = runtimeTestProcessWorkOwner(t)
@@ -161,4 +163,22 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps) (
 		})
 	}
 	return runtime, err
+}
+
+func testBundleSourceFact(t testing.TB, bundleHash string) runtimecorrelation.BundleSourceFact {
+	t.Helper()
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(strings.TrimSpace(bundleHash))
+	if err != nil {
+		t.Fatalf("construct test bundle source fact: %v", err)
+	}
+	return fact
+}
+
+func testPersistedBundleSourceFact(t testing.TB, bundleHash string) runtimecorrelation.BundleSourceFact {
+	t.Helper()
+	fact, err := runtimecorrelation.NewPersistedBundleSourceFact(strings.TrimSpace(bundleHash))
+	if err != nil {
+		t.Fatalf("construct persisted test bundle source fact: %v", err)
+	}
+	return fact
 }

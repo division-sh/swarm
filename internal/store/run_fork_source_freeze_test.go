@@ -33,7 +33,7 @@ func TestRunForkSourceFreezeIsTheOnlyForkedStatusWriter(t *testing.T) {
 			if backend == "postgres" {
 				_, db, _ = testutil.StartPostgres(t)
 				pg := admitTestPostgresStore(t, db)
-				if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, now); err != nil {
+				if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, now); err != nil {
 					t.Fatal(err)
 				}
 				mark = func(ctx context.Context, runID, status string, at time.Time) error {
@@ -43,7 +43,7 @@ func TestRunForkSourceFreezeIsTheOnlyForkedStatusWriter(t *testing.T) {
 			} else {
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 				db = store.DB
-				if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, now); err != nil {
+				if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, now); err != nil {
 					t.Fatal(err)
 				}
 				mark = func(ctx context.Context, runID, status string, at time.Time) error {

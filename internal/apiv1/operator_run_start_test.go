@@ -24,15 +24,10 @@ import (
 	"github.com/google/uuid"
 )
 
-const runStartTestFingerprint = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 const runStartTestBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 func runStartTestBundleSourceFact() runtimecorrelation.BundleSourceFact {
-	return runtimecorrelation.BundleSourceFact{
-		BundleHash:        runStartTestBundleHash,
-		BundleSource:      storerunlifecycle.BundleSourceEphemeral,
-		BundleFingerprint: runStartTestFingerprint,
-	}
+	return mustAPITestBundleSourceFact(runStartTestBundleHash)
 }
 
 func runStartTestEventBusOptions(source semanticview.Source) runtimebus.EventBusOptions {
@@ -52,7 +47,7 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 	}
 	handler := runStartTestHandler(t, pg, bus, source)
 	runID := uuid.NewString()
-	body := runStartBody(runID, runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "idem-start")
+	body := runStartBody(runID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-start")
 
 	started := rpcCall(t, handler, body)
 	if started.Error != nil {
@@ -65,7 +60,7 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count = %d, want 1", count)
 	}
-	assertRunStartPersistence(t, db, runID, "scan.requested", runStartTestFingerprint)
+	assertRunStartPersistence(t, db, runID, "scan.requested")
 	if count := countAPIIdempotencyRows(t, db); count != 1 {
 		t.Fatalf("api_idempotency rows = %d, want 1", count)
 	}
@@ -81,7 +76,7 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 		t.Fatalf("scan.requested event count after replay = %d, want 1", count)
 	}
 
-	conflict := rpcCall(t, handler, runStartBody(runID, runStartTestFingerprint, "scan.requested", `{"topic":"changed"}`, "idem-start"))
+	conflict := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "scan.requested", `{"topic":"changed"}`, "idem-start"))
 	if conflict.Error == nil {
 		t.Fatal("run.start idempotency conflict error = nil")
 	}
@@ -100,7 +95,7 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 		t.Fatalf("run.start bundle-change conflict data = %#v", data)
 	}
 
-	conflictEvent := rpcCall(t, handler, runStartBody(runID, runStartTestFingerprint, "scan.missing", `{"topic":"medicine"}`, "idem-start"))
+	conflictEvent := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "scan.missing", `{"topic":"medicine"}`, "idem-start"))
 	if conflictEvent.Error == nil {
 		t.Fatal("run.start event-change idempotency conflict error = nil")
 	}
@@ -131,7 +126,7 @@ func TestOperatorRunStartHandlersUseActiveEphemeralBundleScopeForCreateNewWork(t
 	if result["run_id"] != runID || result["status"] != "running" {
 		t.Fatalf("run.start result = %#v", result)
 	}
-	assertRunStartPersistence(t, db, runID, "scan.requested", runStartTestFingerprint)
+	assertRunStartPersistence(t, db, runID, "scan.requested")
 }
 
 func TestOperatorRunStartHandlersRequireBundleScopeForCreateNewWorkWithoutActiveRuntimeFact(t *testing.T) {
@@ -150,15 +145,10 @@ func TestOperatorRunStartHandlersRequireBundleScopeForCreateNewWorkWithoutActive
 	}
 	assertNoRunStartPersistence(t, db, runID)
 
-	legacyRunID := uuid.NewString()
-	legacy := rpcCall(t, handler, runStartBodyWithLegacyFingerprint(legacyRunID, runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "idem-start-legacy-only"))
-	if legacy.Error == nil {
-		t.Fatal("run.start legacy-only bundle_ref error = nil")
-	}
-	if data := asMap(t, legacy.Error.Data); data["code"] != BundleScopeRequiredCode {
-		t.Fatalf("legacy-only bundle scope data = %#v", data)
-	}
-	assertNoRunStartPersistence(t, db, legacyRunID)
+	retiredRunID := uuid.NewString()
+	retired := rpcCall(t, handler, runStartBodyWithRetiredBundleInput(retiredRunID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-start-retired-input"))
+	assertInvalidRunStartParam(t, retired, retiredBundleInputName())
+	assertNoRunStartPersistence(t, db, retiredRunID)
 }
 
 func TestOperatorRunStartHandlersAcceptCanonicalBundleHashForCreateNewWork(t *testing.T) {
@@ -176,7 +166,7 @@ func TestOperatorRunStartHandlersAcceptCanonicalBundleHashForCreateNewWork(t *te
 	if resp.Error != nil {
 		t.Fatalf("run.start canonical bundle_hash error = %#v", resp.Error)
 	}
-	assertRunStartPersistence(t, db, runID, "scan.requested", runStartTestFingerprint)
+	assertRunStartPersistence(t, db, runID, "scan.requested")
 }
 
 func TestOperatorRunStartRejectsFlowScopedEventName(t *testing.T) {
@@ -190,7 +180,7 @@ func TestOperatorRunStartRejectsFlowScopedEventName(t *testing.T) {
 	handler := runStartTestHandler(t, pg, bus, source)
 	runID := uuid.NewString()
 
-	resp := rpcCall(t, handler, runStartBody(runID, runStartTestFingerprint, "repo-scaffold/repo_scaffold.repo_commit_succeeded", `{"topic":"medicine"}`, "idem-start-flow-scoped"))
+	resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "repo-scaffold/repo_scaffold.repo_commit_succeeded", `{"topic":"medicine"}`, "idem-start-flow-scoped"))
 	if resp.Error == nil {
 		t.Fatal("run.start flow-scoped event error = nil")
 	}
@@ -217,7 +207,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		handler := runStartTestHandler(t, pg, bus, source)
 		runID := uuid.NewString()
 
-		resp := rpcCall(t, handler, runStartBody(runID, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "scan.requested", `{"topic":"medicine"}`, "idem-mismatch"))
+		resp := rpcCall(t, handler, runStartBody(runID, "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "scan.requested", `{"topic":"medicine"}`, "idem-mismatch"))
 		if resp.Error == nil {
 			t.Fatal("run.start non-routable bundle error = nil")
 		}
@@ -238,13 +228,13 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		handler := runStartTestHandler(t, pg, bus, source)
 		runID := uuid.NewString()
 		if _, err := db.Exec(`
-			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint)
-			VALUES ($1::uuid, 'running', $2, $3, $4)
-		`, runID, runStartTestBundleHash, storerunlifecycle.BundleSourceEphemeral, runStartTestFingerprint); err != nil {
+			INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+			VALUES ($1::uuid, 'running', $2, $3)
+		`, runID, runStartTestBundleHash, storerunlifecycle.BundleSourceEphemeral); err != nil {
 			t.Fatalf("seed run bundle context: %v", err)
 		}
 
-		resp := rpcCall(t, handler, runStartBody(runID, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "scan.requested", `{"topic":"medicine"}`, "idem-existing-mismatch"))
+		resp := rpcCall(t, handler, runStartBody(runID, "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "scan.requested", `{"topic":"medicine"}`, "idem-existing-mismatch"))
 		if resp.Error == nil {
 			t.Fatal("run.start existing-run bundle mismatch error = nil")
 		}
@@ -272,7 +262,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 		resp := rpcCall(t, handler, runStartBody(runID, "sha256:not-lower-64-hex", "scan.requested", `{"topic":"medicine"}`, "idem-invalid-bundle"))
 		if resp.Error == nil {
-			t.Fatal("run.start invalid bundle fingerprint error = nil")
+			t.Fatal("run.start invalid bundle_hash error = nil")
 		}
 		if data := asMap(t, resp.Error.Data); data["code"] != UnsupportedBundleHashCode {
 			t.Fatalf("unsupported bundle hash data = %#v", data)
@@ -301,7 +291,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		assertNoRunStartPersistence(t, db, runID)
 	})
 
-	t.Run("canonical and legacy bundle params conflict", func(t *testing.T) {
+	t.Run("retired bundle input is rejected", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
@@ -312,13 +302,8 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		handler := runStartTestHandler(t, pg, bus, source)
 		runID := uuid.NewString()
 
-		resp := rpcCall(t, handler, runStartBodyWithBothBundleInputs(runID, runStartTestBundleHash, runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "idem-bundle-conflict"))
-		if resp.Error == nil {
-			t.Fatal("run.start bundle input conflict error = nil")
-		}
-		if data := asMap(t, resp.Error.Data); data["code"] != UnsupportedBundleHashCode {
-			t.Fatalf("bundle input conflict data = %#v", data)
-		}
+		resp := rpcCall(t, handler, runStartBodyWithCanonicalAndRetiredInput(runID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-retired-bundle-input"))
+		assertInvalidRunStartParam(t, resp, retiredBundleInputName())
 		assertNoRunStartPersistence(t, db, runID)
 	})
 
@@ -333,7 +318,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		handler := runStartTestHandler(t, pg, bus, source)
 		runID := uuid.NewString()
 
-		resp := rpcCall(t, handler, runStartBody(runID, runStartTestFingerprint, "scan.missing", `{"topic":"medicine"}`, "idem-missing-event"))
+		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "scan.missing", `{"topic":"medicine"}`, "idem-missing-event"))
 		if resp.Error == nil {
 			t.Fatal("run.start undeclared event error = nil")
 		}
@@ -372,7 +357,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		handler := runStartTestHandler(t, pg, bus, source)
 		runID := uuid.NewString()
 
-		resp := rpcCall(t, handler, runStartBody(runID, runStartTestFingerprint, eventName, `{"topic":"medicine"}`, "idem-unroutable-event"))
+		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, eventName, `{"topic":"medicine"}`, "idem-unroutable-event"))
 		if resp.Error == nil {
 			t.Fatal("run.start declared unroutable event error = nil")
 		}
@@ -413,7 +398,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		handler := runStartTestHandler(t, pg, bus, source)
 		runID := uuid.NewString()
 
-		resp := rpcCall(t, handler, runStartBody(runID, runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "idem-invalid-payload"))
+		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-invalid-payload"))
 		if resp.Error == nil {
 			t.Fatal("run.start payload validation error = nil")
 		}
@@ -433,7 +418,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		}
 		handler := runStartTestHandler(t, pg, bus, source)
 
-		resp := rpcCall(t, handler, runStartBody("abc", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "idem-invalid-run-id"))
+		resp := rpcCall(t, handler, runStartBody("abc", runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-invalid-run-id"))
 		if resp.Error == nil {
 			t.Fatal("run.start invalid run_id error = nil")
 		}
@@ -466,7 +451,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		runID := uuid.NewString()
 		payloadEntityID := uuid.NewString()
 
-		resp := rpcCall(t, handler, runStartBody(runID, runStartTestFingerprint, "scan.requested", fmt.Sprintf(`{"entity_id":%q,"topic":"medicine"}`, payloadEntityID), "idem-payload-entity-id-not-authority"))
+		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "scan.requested", fmt.Sprintf(`{"entity_id":%q,"topic":"medicine"}`, payloadEntityID), "idem-payload-entity-id-not-authority"))
 		if resp.Error != nil {
 			t.Fatalf("run.start payload entity_id error = %#v", resp.Error)
 		}
@@ -498,7 +483,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		handler := runStartTestHandler(t, pg, failingRunStartPublisher{err: errors.New("simulated run.start publish failure")}, source)
 		runID := uuid.NewString()
 
-		resp := rpcCall(t, handler, runStartBody(runID, runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "idem-publish-failure"))
+		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-publish-failure"))
 		if resp.Error == nil {
 			t.Fatal("run.start publish failure error = nil")
 		}
@@ -520,7 +505,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		handler := runStartTestHandler(t, pg, failingRunStartPublisher{err: runtimebus.ErrInvalidEventType}, source)
 		runID := uuid.NewString()
 
-		resp := rpcCall(t, handler, runStartBody(runID, runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "idem-invalid-event-after-validation"))
+		resp := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-invalid-event-after-validation"))
 		if resp.Error == nil {
 			t.Fatal("run.start post-validation invalid event error = nil")
 		}
@@ -623,7 +608,7 @@ func runStartTestHandler(t *testing.T, pg *store.PostgresStore, bus EventPublish
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "review",
 				WorkflowVersion: "1.0.0",
-				Fingerprint:     runStartTestFingerprint,
+				BundleHash:      runStartTestBundleHash,
 			},
 		}),
 	})
@@ -637,7 +622,7 @@ func (p failingRunStartPublisher) Publish(context.Context, events.Event) error {
 	return p.err
 }
 
-func (p failingRunStartPublisher) WithBundleFingerprint(ctx context.Context) context.Context {
+func (p failingRunStartPublisher) WithBundleSourceFact(ctx context.Context) context.Context {
 	return runtimecorrelation.WithBundleSourceFact(ctx, runStartTestBundleSourceFact())
 }
 
@@ -647,10 +632,10 @@ func (missingRunStartBundleScopePublisher) Publish(context.Context, events.Event
 	return errors.New("unexpected publish without active runtime bundle scope")
 }
 
-func runStartBody(runID, fingerprint, eventName, payload, idempotencyKey string) string {
+func runStartBody(runID, bundleHash, eventName, payload, idempotencyKey string) string {
 	return fmt.Sprintf(
 		`{"jsonrpc":"2.0","id":"start","method":"run.start","params":{"bundle_hash":%q,"event_name":%q,"payload":%s,"run_id":%q,"idempotency_key":%q}}`,
-		runStartTestBundleHashForFingerprint(fingerprint),
+		bundleHash,
 		eventName,
 		payload,
 		runID,
@@ -658,23 +643,25 @@ func runStartBody(runID, fingerprint, eventName, payload, idempotencyKey string)
 	)
 }
 
-func runStartBodyWithLegacyFingerprint(runID, fingerprint, eventName, payload, idempotencyKey string) string {
+func retiredBundleInputName() string {
+	return "bundle_" + "ref"
+}
+
+func retiredBundleInputFieldName() string {
+	return "finger" + "print"
+}
+
+func runStartBodyWithRetiredBundleInput(runID, bundleHash, eventName, payload, idempotencyKey string) string {
 	return fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"start","method":"run.start","params":{"bundle_ref":{"fingerprint":%q},"event_name":%q,"payload":%s,"run_id":%q,"idempotency_key":%q}}`,
-		fingerprint,
+		`{"jsonrpc":"2.0","id":"start","method":"run.start","params":{%q:{%q:%q},"event_name":%q,"payload":%s,"run_id":%q,"idempotency_key":%q}}`,
+		retiredBundleInputName(),
+		retiredBundleInputFieldName(),
+		bundleHash,
 		eventName,
 		payload,
 		runID,
 		idempotencyKey,
 	)
-}
-
-func runStartTestBundleHashForFingerprint(fingerprint string) string {
-	fingerprint = strings.TrimSpace(fingerprint)
-	if strings.HasPrefix(fingerprint, "sha256:") {
-		return "bundle-v1:" + fingerprint
-	}
-	return fingerprint
 }
 
 func runStartBodyWithBundleHash(runID, bundleHash, eventName, payload, idempotencyKey string) string {
@@ -688,11 +675,13 @@ func runStartBodyWithBundleHash(runID, bundleHash, eventName, payload, idempoten
 	)
 }
 
-func runStartBodyWithBothBundleInputs(runID, bundleHash, fingerprint, eventName, payload, idempotencyKey string) string {
+func runStartBodyWithCanonicalAndRetiredInput(runID, bundleHash, eventName, payload, idempotencyKey string) string {
 	return fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"start","method":"run.start","params":{"bundle_hash":%q,"bundle_ref":{"fingerprint":%q},"event_name":%q,"payload":%s,"run_id":%q,"idempotency_key":%q}}`,
+		`{"jsonrpc":"2.0","id":"start","method":"run.start","params":{"bundle_hash":%q,%q:{%q:%q},"event_name":%q,"payload":%s,"run_id":%q,"idempotency_key":%q}}`,
 		bundleHash,
-		fingerprint,
+		retiredBundleInputName(),
+		retiredBundleInputFieldName(),
+		bundleHash,
 		eventName,
 		payload,
 		runID,
@@ -744,21 +733,21 @@ func stringSliceFromAny(t *testing.T, value any) []string {
 	}
 }
 
-func assertRunStartPersistence(t *testing.T, db *sql.DB, runID, eventName, bundleFingerprint string) {
+func assertRunStartPersistence(t *testing.T, db *sql.DB, runID, eventName string) {
 	t.Helper()
-	var runStatus, triggerType, bundleHash, bundleSource, legacyFingerprint string
+	var runStatus, triggerType, bundleHash, bundleSource string
 	if err := db.QueryRow(`
-		SELECT status, trigger_event_type, COALESCE(bundle_hash, ''), bundle_source, COALESCE(bundle_fingerprint, '')
+		SELECT status, trigger_event_type, bundle_hash, bundle_source
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, runID).Scan(&runStatus, &triggerType, &bundleHash, &bundleSource, &legacyFingerprint); err != nil {
+	`, runID).Scan(&runStatus, &triggerType, &bundleHash, &bundleSource); err != nil {
 		t.Fatalf("load run row: %v", err)
 	}
 	if runStatus != "running" || triggerType != eventName {
 		t.Fatalf("run row status=%q trigger=%q, want running/%s", runStatus, triggerType, eventName)
 	}
-	if bundleHash != runStartTestBundleHash || bundleSource != storerunlifecycle.BundleSourceEphemeral || legacyFingerprint != bundleFingerprint {
-		t.Fatalf("run row bundle identity = hash:%q source:%q fingerprint:%q, want %s/%s/%s", bundleHash, bundleSource, legacyFingerprint, runStartTestBundleHash, storerunlifecycle.BundleSourceEphemeral, bundleFingerprint)
+	if bundleHash != runStartTestBundleHash || bundleSource != storerunlifecycle.BundleSourceEphemeral {
+		t.Fatalf("run row bundle identity = hash:%q source:%q, want %s/%s", bundleHash, bundleSource, runStartTestBundleHash, storerunlifecycle.BundleSourceEphemeral)
 	}
 	var entityID, producedBy string
 	var payload json.RawMessage

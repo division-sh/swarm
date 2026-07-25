@@ -532,8 +532,9 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 	missingRunID := "00000000-0000-0000-0000-000000000999"
 	otherBundleHash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	validEvent := map[string]any{"bundle_hash": runStartTestBundleHash, "event_name": "scan.requested", "payload": map[string]any{"topic": "medicine"}, "idempotency_key": "idem-error"}
-	legacyOnlyEvent := map[string]any{"bundle_ref": map[string]any{"fingerprint": runStartTestFingerprint}, "event_name": "scan.requested", "payload": map[string]any{"topic": "medicine"}, "idempotency_key": "idem-error"}
 	invalidBundleHashEvent := mergeProbeParams(validEvent, map[string]any{"bundle_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
+	missingBundleHashEvent := mergeProbeParams(validEvent, nil)
+	delete(missingBundleHashEvent, "bundle_hash")
 	setupRunID := "00000000-0000-0000-0000-000000000601"
 	setupEntityID := "00000000-0000-0000-0000-000000000602"
 	validSetup := map[string]any{
@@ -565,12 +566,12 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 		{Method: "standing.reset", Params: map[string]any{"service_id": standingServiceID, "idempotency_key": "idem-error"}, Code: StandingServiceNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.standing.errs["reset"] = runtimepipeline.ErrStandingServiceNotFound
 		}}},
-		{Method: "event.publish", Params: legacyOnlyEvent, Code: BundleScopeRequiredCode},
-		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"bundle_ref": map[string]any{"fingerprint": runStartTestFingerprint}}), Code: UnsupportedBundleHashCode},
 		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"bundle_hash": otherBundleHash}), Code: BundleUnavailableCode},
 		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"bundle_hash": otherBundleHash, "run_id": runID}), Code: BundleMismatchCode},
+		{Method: "event.publish", Params: missingBundleHashEvent, Code: BundleScopeRequiredCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.events.missingBundleSourceFact = true
+		}}},
 		{Method: "event.publish", Params: invalidBundleHashEvent, Code: UnsupportedBundleHashCode},
-		{Method: "event.publish", Params: mergeProbeParams(legacyOnlyEvent, map[string]any{"bundle_ref": map[string]any{"label": "latest"}}), Code: UnsupportedBundleRefCode},
 		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"event_name": "scan.missing"}), Code: EventNotDeclaredCode},
 		{Method: "event.publish", Params: validEvent, Code: EventPublishFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.publishErr = errors.New("simulated publish failure") }}},
 		{Method: "event.publish", Params: validEvent, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.publishErr = runtimebus.ErrPayloadValidation }}},
@@ -630,17 +631,18 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 		}}},
 		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "bundle_hash": "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "confirm_source_freeze": true, "idempotency_key": "idem-error"}, Code: BundleUnavailableCode},
 		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "idempotency_key": "idem-error"}, Code: BundleUnavailableCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runForkAvailability.rows[runForkTestSourceRunID] = runForkUnavailable(runForkTestSourceRunID, runForkTestBundleHash, "legacy")
+			s.runForkAvailability.rows[runForkTestSourceRunID] = runForkUnavailable(runForkTestSourceRunID, runForkTestBundleHash, runbundle.AvailabilitySourceDeleted)
 		}}},
 		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "idempotency_key": "idem-error"}, Code: BundleDataIntegrityErrorCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.runForkAvailability.rows[runForkTestSourceRunID] = runForkDataIntegrity(runForkTestSourceRunID, runForkTestBundleHash)
 		}}},
 
-		{Method: "run.start", Params: legacyOnlyEvent, Code: BundleScopeRequiredCode},
 		{Method: "run.start", Params: mergeProbeParams(validEvent, map[string]any{"bundle_hash": otherBundleHash}), Code: BundleUnavailableCode},
 		{Method: "run.start", Params: mergeProbeParams(validEvent, map[string]any{"bundle_hash": otherBundleHash, "run_id": runID}), Code: BundleMismatchCode},
+		{Method: "run.start", Params: missingBundleHashEvent, Code: BundleScopeRequiredCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.events.missingBundleSourceFact = true
+		}}},
 		{Method: "run.start", Params: invalidBundleHashEvent, Code: UnsupportedBundleHashCode},
-		{Method: "run.start", Params: mergeProbeParams(legacyOnlyEvent, map[string]any{"bundle_ref": map[string]any{"label": "latest"}, "run_id": runID}), Code: UnsupportedBundleRefCode},
 		{Method: "run.start", Params: mergeProbeParams(validEvent, map[string]any{"run_id": runID}), Code: BundleDataIntegrityErrorCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.runForkAvailability.rows[runID] = runForkDataIntegrity(runID, runStartTestBundleHash)
 		}}},
@@ -1053,7 +1055,7 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) OperatorReadOptions {
 		Bundle: runtimecontracts.BundleIdentity{
 			WorkflowName:    "review",
 			WorkflowVersion: "1.0.0",
-			Fingerprint:     runStartTestFingerprint,
+			BundleHash:      runStartTestBundleHash,
 		},
 	}
 }
@@ -1257,11 +1259,12 @@ var _ BundleCatalogReadStore = (*mutatingProbeBundleCatalog)(nil)
 var _ BundleCatalogRegisterStore = (*mutatingProbeBundleCatalog)(nil)
 
 type mutatingProbeEventPublisher struct {
-	state             *mutatingRuntimeProbeState
-	publishErr        error
-	directErr         error
-	checkErr          error
-	missingRecipients []string
+	state                   *mutatingRuntimeProbeState
+	publishErr              error
+	directErr               error
+	checkErr                error
+	missingBundleSourceFact bool
+	missingRecipients       []string
 }
 
 func (p *mutatingProbeEventPublisher) Publish(_ context.Context, evt events.Event) error {
@@ -1277,7 +1280,10 @@ func (p *mutatingProbeEventPublisher) PublishAcknowledged(ctx context.Context, e
 	return p.Publish(ctx, evt)
 }
 
-func (p *mutatingProbeEventPublisher) WithBundleFingerprint(ctx context.Context) context.Context {
+func (p *mutatingProbeEventPublisher) WithBundleSourceFact(ctx context.Context) context.Context {
+	if p.missingBundleSourceFact {
+		return ctx
+	}
 	return runtimecorrelation.WithBundleSourceFact(ctx, runStartTestBundleSourceFact())
 }
 

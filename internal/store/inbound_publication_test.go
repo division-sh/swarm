@@ -81,9 +81,10 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	entityID := uuid.NewString()
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: packageKey, FlowID: flowID, InstanceID: instanceID, EntityID: entityID,
-		Source: runtimecorrelation.BundleSourceFact{BundleHash: "bundle-v1:sha256:" + strings.Repeat("8", 64), BundleSource: "persisted"},
+		Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("8", 64)),
 	}
-	ctx := testAuthorActivityContextForBundle(candidate.Source.BundleHash)
+	ctx := testAuthorActivityContextForBundle(candidate.Source.BundleHash())
+	seedStoreTestPersistedBundle(t, db, candidate.Source.BundleHash())
 	registrar, ok := store.(testAuthorActivityCatalogRegistrar)
 	if !ok {
 		t.Fatalf("inbound publication proof store %T cannot register author activity catalog", store)
@@ -189,12 +190,10 @@ func runInboundPublicationStandingGenerationRebindProof(t *testing.T, db *sql.DB
 		FlowID:     "ingress",
 		InstanceID: uuid.NewString(),
 		EntityID:   uuid.NewString(),
-		Source: runtimecorrelation.BundleSourceFact{
-			BundleHash:   "bundle-v1:sha256:" + strings.Repeat("9", 64),
-			BundleSource: "persisted",
-		},
+		Source:     mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("9", 64)),
 	}
-	ctx := testAuthorActivityContextForBundle(candidate.Source.BundleHash)
+	ctx := testAuthorActivityContextForBundle(candidate.Source.BundleHash())
+	seedStoreTestPersistedBundle(t, db, candidate.Source.BundleHash())
 	registrar, ok := store.(testAuthorActivityCatalogRegistrar)
 	if !ok {
 		t.Fatalf("inbound publication proof store %T cannot register reset author activity catalog", store)

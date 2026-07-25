@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -28,13 +29,6 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 	eventID := uuid.NewString()
 	at := time.Unix(1700002400, 0).UTC()
 	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
-	if _, err := db.ExecContext(ctx, `
-		UPDATE runs
-		SET bundle_fingerprint = 'selected-source-fingerprint'
-		WHERE run_id = $1::uuid
-	`, sourceRunID); err != nil {
-		t.Fatalf("seed source bundle fingerprint: %v", err)
-	}
 
 	_, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
 	if err == nil || !strings.Contains(err.Error(), RunForkBlockerNonAgentDeliveryReplayUnsupported) {
@@ -57,16 +51,16 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 	if materialized.ForkRunID == "" || materialized.SelectedContractBinding == nil || !materialized.DeliveryResumeBlocked {
 		t.Fatalf("materialization = %#v", materialized)
 	}
-	var forkBundleHash, forkBundleSource, forkBundleFingerprint string
+	var forkBundleHash, forkBundleSource string
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(bundle_hash, ''), bundle_source, COALESCE(bundle_fingerprint, '')
+		SELECT bundle_hash, bundle_source
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, materialized.ForkRunID).Scan(&forkBundleHash, &forkBundleSource, &forkBundleFingerprint); err != nil {
+	`, materialized.ForkRunID).Scan(&forkBundleHash, &forkBundleSource); err != nil {
 		t.Fatalf("load selected fork bundle identity: %v", err)
 	}
-	if forkBundleHash != authorActivityTestBundleHash || forkBundleSource != storerunlifecycle.BundleSourceEphemeral || forkBundleFingerprint != "" {
-		t.Fatalf("selected fork bundle identity = hash:%q source:%q fingerprint:%q, want inherited canonical identity", forkBundleHash, forkBundleSource, forkBundleFingerprint)
+	if forkBundleHash != authorActivityTestBundleHash || forkBundleSource != storerunlifecycle.BundleSourceEphemeral {
+		t.Fatalf("selected fork bundle identity = hash:%q source:%q, want inherited canonical identity", forkBundleHash, forkBundleSource)
 	}
 	var replayRows int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_delivery_event_replays WHERE fork_run_id = $1::uuid`, materialized.ForkRunID).Scan(&replayRows); err != nil {
@@ -87,12 +81,16 @@ func TestSelectedContractExecutionMaterializationStampsPersistedBundleIdentity(t
 	at := time.Unix(1700002402, 0).UTC()
 	bundleHash := "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedStoreTestPersistedBundle(t, db, bundleHash)
 
+	bundleSource, err := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
+	if err != nil {
+		t.Fatalf("NewPersistedBundleSourceFact: %v", err)
+	}
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID:  sourceRunID,
-		At:           eventID,
-		BundleHash:   bundleHash,
-		BundleSource: storerunlifecycle.BundleSourcePersisted,
+		SourceRunID:      sourceRunID,
+		At:               eventID,
+		BundleSourceFact: bundleSource,
 		ContractSelection: RunForkContractSelection{
 			Mode:            "selected_contracts",
 			ContractsRoot:   "/tmp/selected-contracts",
@@ -103,16 +101,16 @@ func TestSelectedContractExecutionMaterializationStampsPersistedBundleIdentity(t
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
-	var forkBundleHash, forkBundleSource, forkBundleFingerprint string
+	var forkBundleHash, forkBundleSource string
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(bundle_hash, ''), bundle_source, COALESCE(bundle_fingerprint, '')
+		SELECT bundle_hash, bundle_source
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, materialized.ForkRunID).Scan(&forkBundleHash, &forkBundleSource, &forkBundleFingerprint); err != nil {
+	`, materialized.ForkRunID).Scan(&forkBundleHash, &forkBundleSource); err != nil {
 		t.Fatalf("load selected fork bundle identity: %v", err)
 	}
-	if forkBundleHash != bundleHash || forkBundleSource != storerunlifecycle.BundleSourcePersisted || forkBundleFingerprint != "" {
-		t.Fatalf("selected fork bundle identity = hash:%q source:%q fingerprint:%q, want persisted hash without legacy fingerprint", forkBundleHash, forkBundleSource, forkBundleFingerprint)
+	if forkBundleHash != bundleHash || forkBundleSource != storerunlifecycle.BundleSourcePersisted {
+		t.Fatalf("selected fork bundle identity = hash:%q source:%q, want persisted canonical identity", forkBundleHash, forkBundleSource)
 	}
 }
 

@@ -25,7 +25,7 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	base := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
 
 	seedSQLiteAgentUsageAgent(t, ctx, sqliteStore, agentID)
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, base.Add(-time.Hour)); err != nil {
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base.Add(-time.Hour)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `

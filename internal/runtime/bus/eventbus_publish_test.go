@@ -165,10 +165,10 @@ func eventBusTestRunContext(t *testing.T, db *sql.DB) context.Context {
 	t.Helper()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), eventBusTestRunID)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint)
-		VALUES ($1::uuid, 'running', $2, $3, $4)
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, $3)
 		ON CONFLICT (run_id) DO NOTHING
-	`, eventBusTestRunID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint); err != nil {
+	`, eventBusTestRunID, authorActivityTestBundleHash, authorActivityTestBundleSource); err != nil {
 		t.Fatalf("seed event bus test run: %v", err)
 	}
 	return ctx
@@ -179,7 +179,7 @@ func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerPostgres(t *tes
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := pg.MarkRunTerminal(ctx, runID, "cancelled", nil, time.Now().UTC()); err != nil {
@@ -205,7 +205,7 @@ func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerSQLite(t *testi
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, time.Now().UTC()); err != nil {
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, time.Now().UTC()); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := sqliteStore.MarkRunTerminal(ctx, runID, "cancelled", nil, time.Now().UTC()); err != nil {
@@ -243,7 +243,7 @@ func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
 	}
 	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	evt := exactDuplicateEventBusEvent(runID)
@@ -289,7 +289,7 @@ func TestEventBusExactDuplicateIsOperationNoOpSQLite(t *testing.T) {
 	}
 	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, time.Now().UTC()); err != nil {
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, time.Now().UTC()); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	evt := exactDuplicateEventBusEvent(runID)
@@ -1394,10 +1394,9 @@ func TestEventBusPublish_AttachesTypedRuntimeDiagnosticLineage(t *testing.T) {
 
 func TestEventBusPublish_AttachesBundleSourceFactToRuntimeLogs(t *testing.T) {
 	logger := &recordingLoggerHook{}
-	sourceFact := runtimecorrelation.BundleSourceFact{
-		BundleHash:        "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111",
-		BundleSource:      "persisted",
-		BundleFingerprint: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+	sourceFact, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111")
+	if err != nil {
+		t.Fatal(err)
 	}
 	bus, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
 		Logger:           logger,
@@ -1423,7 +1422,7 @@ func TestEventBusPublish_AttachesBundleSourceFactToRuntimeLogs(t *testing.T) {
 	}
 	_ = requireBusEvent(t, ch, "bundle source fact delivery")
 	for _, entry := range logger.entries {
-		if entry.HasSource && entry.SourceFact == sourceFact.Normalized() {
+		if entry.HasSource && entry.SourceFact == sourceFact {
 			return
 		}
 	}
@@ -2062,7 +2061,7 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 		t.Run(tc.name, func(t *testing.T) {
 			foregroundStore, siblingStore, db, runPlaceholder := tc.open(t)
 			runID, eventID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-			if _, err := db.ExecContext(context.Background(), "INSERT INTO runs (run_id, status) VALUES ("+runPlaceholder+", 'running')", runID); err != nil {
+			if _, err := db.ExecContext(context.Background(), "INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ("+runPlaceholder+", 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')", runID); err != nil {
 				t.Fatalf("insert run: %v", err)
 			}
 			started := make(chan struct{}, 1)
@@ -2178,7 +2177,7 @@ func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing
 			for i := 0; i < poolSize; i++ {
 				eventIDs[i] = uuid.NewString()
 				runIDs[i] = uuid.NewString()
-				if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runIDs[i]); err != nil {
+				if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runIDs[i]); err != nil {
 					t.Fatalf("insert run: %v", err)
 				}
 				eventID := eventIDs[i]
@@ -2243,9 +2242,9 @@ func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
 			for i := 0; i < poolSize; i++ {
 				runIDs[i] = uuid.NewString()
 				if _, err := db.ExecContext(context.Background(), `
-					INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint)
-					VALUES ($1::uuid, 'running', $2, $3, $4)
-				`, runIDs[i], authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint); err != nil {
+					INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+					VALUES ($1::uuid, 'running', $2, $3)
+				`, runIDs[i], authorActivityTestBundleHash, authorActivityTestBundleSource); err != nil {
 					t.Fatalf("insert run: %v", err)
 				}
 				eventIDs[i] = seedReplayPoolEvent(t, seedStore, runIDs[i], decisionRoute)
@@ -2338,7 +2337,7 @@ func seedReplayPoolEvent(t *testing.T, selected *store.PostgresStore, runID stri
 			CardID: uuid.NewString(), RunID: runID, Anchor: anchor,
 			ExecutionMode:    "live",
 			Snapshot:         snapshot,
-			BundleHash:       "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			BundleHash:       authorActivityTestBundleHash,
 			EffectiveCadence: decisioncard.Cadence{ReminderInterval: "24h", InputDraftTTL: "15m"}, CreatedAt: time.Now().UTC(),
 		})
 		if err != nil {
@@ -2681,13 +2680,12 @@ func TestEventBusPublish_ClassifiesCanonicalRunBundleSourceThroughRunLifecycleOw
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	runID := uuid.NewString()
-	fingerprint := "sha256:3333333333333333333333333333333333333333333333333333333333333333"
-	sourceFact := runtimecorrelation.BundleSourceFact{
-		BundleHash: "bundle-v1:" + fingerprint, BundleSource: "ephemeral", BundleFingerprint: fingerprint,
+	sourceFact, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:3333333333333333333333333333333333333333333333333333333333333333")
+	if err != nil {
+		t.Fatal(err)
 	}
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
-		BundleFingerprint: fingerprint,
-		BundleSourceFact:  sourceFact,
+		BundleSourceFact: sourceFact,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2698,16 +2696,17 @@ func TestEventBusPublish_ClassifiesCanonicalRunBundleSourceThroughRunLifecycleOw
 		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	var bundleHash, bundleSource, storedFingerprint string
+	var bundleHash, bundleSource string
 	if err := db.QueryRowContext(context.Background(), `
-		SELECT COALESCE(bundle_hash, ''), bundle_source, COALESCE(bundle_fingerprint, '')
+		SELECT bundle_hash, bundle_source
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, runID).Scan(&bundleHash, &bundleSource, &storedFingerprint); err != nil {
+	`, runID).Scan(&bundleHash, &bundleSource); err != nil {
 		t.Fatalf("load run bundle source: %v", err)
 	}
-	if bundleHash != sourceFact.BundleHash || bundleSource != sourceFact.BundleSource || storedFingerprint != fingerprint {
-		t.Fatalf("bundle identity = hash:%q source:%q fingerprint:%q, want canonical ephemeral source", bundleHash, bundleSource, storedFingerprint)
+	wantHash, wantSource := sourceFact.StorageValues()
+	if bundleHash != wantHash || bundleSource != wantSource {
+		t.Fatalf("bundle identity = hash:%q source:%q, want canonical ephemeral source", bundleHash, bundleSource)
 	}
 }
 
@@ -2715,15 +2714,14 @@ func TestEventBusPublishDirect_StampsBundleSourceFactOnRunRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	runID := uuid.NewString()
-	sourceFact := runtimecorrelation.BundleSourceFact{
-		BundleHash:        "bundle-v1:sha256:4444444444444444444444444444444444444444444444444444444444444444",
-		BundleSource:      "persisted",
-		BundleFingerprint: "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+	sourceFact, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:4444444444444444444444444444444444444444444444444444444444444444")
+	if err != nil {
+		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(context.Background(), `
 		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
 		VALUES ($1, 'name: test', '{}'::jsonb)
-	`, sourceFact.BundleHash); err != nil {
+	`, sourceFact.BundleHash()); err != nil {
 		t.Fatalf("seed bundle row: %v", err)
 	}
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
@@ -2747,16 +2745,17 @@ func TestEventBusPublishDirect_StampsBundleSourceFactOnRunRow(t *testing.T) {
 		[]string{"agent-a"}); err != nil {
 		t.Fatalf("PublishDirect: %v", err)
 	}
-	var bundleHash, bundleSource, legacyFingerprint string
+	var bundleHash, bundleSource string
 	if err := db.QueryRowContext(context.Background(), `
-		SELECT COALESCE(bundle_hash, ''), bundle_source, COALESCE(bundle_fingerprint, '')
+		SELECT bundle_hash, bundle_source
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, runID).Scan(&bundleHash, &bundleSource, &legacyFingerprint); err != nil {
+	`, runID).Scan(&bundleHash, &bundleSource); err != nil {
 		t.Fatalf("load run bundle source: %v", err)
 	}
-	if bundleHash != sourceFact.BundleHash || bundleSource != sourceFact.BundleSource || legacyFingerprint != sourceFact.BundleFingerprint {
-		t.Fatalf("bundle identity = hash:%q source:%q fingerprint:%q, want canonical source fact %#v", bundleHash, bundleSource, legacyFingerprint, sourceFact)
+	wantHash, wantSource := sourceFact.StorageValues()
+	if bundleHash != wantHash || bundleSource != wantSource {
+		t.Fatalf("bundle identity = hash:%q source:%q, want canonical source fact %#v", bundleHash, bundleSource, sourceFact)
 	}
 }
 

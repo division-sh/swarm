@@ -21,7 +21,7 @@ func (e *transactionProbeHumanTaskExpiry) ExpireHumanTaskCardsInMutation(ctx con
 	if !ok || tx == nil {
 		return nil, errors.New("pipeline transaction is required")
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, e.runID, time.Now().UTC()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, e.runID, time.Now().UTC()); err != nil {
 		return nil, err
 	}
 	return []events.Event{e.event}, nil

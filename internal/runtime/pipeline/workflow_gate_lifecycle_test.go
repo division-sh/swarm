@@ -159,7 +159,7 @@ func TestHumanTaskDecisionRoutesDirectlyToRequesterInOneMutationOnBothStores(t *
 				bus := &recordingPipelineBus{}
 				pc := NewPipelineCoordinatorWithOptions(bus, workflowStore.db, PipelineCoordinatorOptions{
 					Module:        &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())},
-					WorkflowStore: workflowStore, DecisionCards: cards, BundleHash: card.BundleHash,
+					WorkflowStore: workflowStore, DecisionCards: cards, BundleSourceFact: mustPipelineTestBundleSourceFact(card.BundleHash),
 				})
 				payload, err := canonicaljson.Bytes(map[string]any{"card_id": card.CardID})
 				if err != nil {
@@ -257,7 +257,7 @@ func TestHumanTaskDeferredAndExpiredOutcomesUseRequesterRouteOnBothStores(t *tes
 				bus := &recordingPipelineBus{}
 				pc := NewPipelineCoordinatorWithOptions(bus, workflowStore.db, PipelineCoordinatorOptions{
 					Module:        &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())},
-					WorkflowStore: workflowStore, DecisionCards: cards, BundleHash: card.BundleHash,
+					WorkflowStore: workflowStore, DecisionCards: cards, BundleSourceFact: mustPipelineTestBundleSourceFact(card.BundleHash),
 				})
 				payload, err := canonicaljson.Bytes(map[string]any{"card_id": card.CardID})
 				if err != nil {
@@ -306,7 +306,7 @@ func TestWorkflowGateEntryUsesOneTransactionAndRollsBackOnCardFailure(t *testing
 			bundle := gateLifecycleBundle()
 			pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, workflowStore.db, PipelineCoordinatorOptions{
 				Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, WorkflowStore: workflowStore,
-				DecisionCards: cards, BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				DecisionCards: cards, BundleSourceFact: mustPipelineTestBundleSourceFact(pipelineTestBundleHash),
 			})
 
 			err := pc.applyWorkflowGateIntents(ctx, entityID, "drafting", "awaiting_review", "draft.ready")
@@ -350,7 +350,7 @@ func TestWorkflowGateEntryCreatesMatchingActivationAndCardOnBothStores(t *testin
 			cards := &gateLifecycleCardStore{}
 			pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, workflowStore.db, PipelineCoordinatorOptions{
 				Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())}, WorkflowStore: workflowStore,
-				DecisionCards: cards, BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				DecisionCards: cards, BundleSourceFact: mustPipelineTestBundleSourceFact(pipelineTestBundleHash),
 			})
 			if err := pc.applyWorkflowGateIntents(ctx, entityID, "drafting", "awaiting_review", "draft.ready"); err != nil {
 				t.Fatal(err)
@@ -424,7 +424,7 @@ func TestWorkflowGateDecisionRoutePublishesAtomicallyAndRecoversIdempotentlyOnBo
 			bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 			pc := NewPipelineCoordinatorWithOptions(bus, workflowStore.db, PipelineCoordinatorOptions{
 				Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())}, WorkflowStore: workflowStore,
-				DecisionCards: cards, BundleHash: bundleHash,
+				DecisionCards: cards, BundleSourceFact: mustPipelineTestBundleSourceFact(bundleHash),
 			})
 			if err := pc.applyWorkflowGateIntents(ctx, entityID, "", "awaiting_review", "state:awaiting_review"); err != nil {
 				t.Fatal(err)
@@ -490,7 +490,7 @@ func TestWorkflowGateCommittedDecisionWinsOrdinaryAndTimerExitRacesOnBothStores(
 					t.Fatal(err)
 				}
 				cards := &gateLifecycleCardStore{}
-				pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, workflowStore.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())}, WorkflowStore: workflowStore, DecisionCards: cards, BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
+				pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, workflowStore.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())}, WorkflowStore: workflowStore, DecisionCards: cards, BundleSourceFact: mustPipelineTestBundleSourceFact(pipelineTestBundleHash)})
 				if err := pc.applyWorkflowGateIntents(ctx, entityID, "", "awaiting_review", "state:awaiting_review"); err != nil {
 					t.Fatal(err)
 				}
@@ -528,7 +528,7 @@ func TestWorkflowGateDecisionWaitsForItsRecordedBundlePinOnBothStores(t *testing
 				t.Fatal(err)
 			}
 			cards := &gateLifecycleCardStore{}
-			pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, workflowStore.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())}, WorkflowStore: workflowStore, DecisionCards: cards, BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
+			pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, workflowStore.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())}, WorkflowStore: workflowStore, DecisionCards: cards, BundleSourceFact: mustPipelineTestBundleSourceFact(pipelineTestBundleHash)})
 			if err := pc.applyWorkflowGateIntents(ctx, entityID, "", "awaiting_review", "state:awaiting_review"); err != nil {
 				t.Fatal(err)
 			}
@@ -539,7 +539,7 @@ func TestWorkflowGateDecisionWaitsForItsRecordedBundlePinOnBothStores(t *testing
 			}
 			card.Status, card.Verdict, card.DecisionEventID, card.DecidedAt = decisioncard.StatusDecided, "approve", decisionEventID, now.Add(time.Minute)
 			cards.created[0] = card
-			pc.bundleHash = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			pc.bundleSourceFact = mustPipelineTestBundleSourceFact("bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 			parent := eventtest.RuntimeControl(decisionEventID, workflowGateDecisionEventType, "platform", "", json.RawMessage(`{"card_id":"`+card.CardID+`"}`), 0, runID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), card.DecidedAt)
 			_, outcome, err := pc.handleWorkflowGateDecisionEvent(ctx, parent)
 			if err != nil {
@@ -570,7 +570,7 @@ func TestInitialStageLifecycleArmsStandingGateOnBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			cards := &gateLifecycleCardStore{}
-			pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, workflowStore.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())}, WorkflowStore: workflowStore, DecisionCards: cards, BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
+			pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, workflowStore.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())}, WorkflowStore: workflowStore, DecisionCards: cards, BundleSourceFact: mustPipelineTestBundleSourceFact(pipelineTestBundleHash)})
 			if err := workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
 				return pc.ArmFlowInstanceInitialStageLifecycle(txctx, entityID)
 			}); err != nil {
@@ -596,7 +596,7 @@ func TestWorkflowGateTerminationUsesCanonicalPersistedEntityIdentityOnBothStores
 			}
 			cards := &gateLifecycleCardStore{}
 			bus := &recordingPipelineBus{}
-			pc := NewPipelineCoordinatorWithOptions(bus, workflowStore.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())}, WorkflowStore: workflowStore, DecisionCards: cards, BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
+			pc := NewPipelineCoordinatorWithOptions(bus, workflowStore.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())}, WorkflowStore: workflowStore, DecisionCards: cards, BundleSourceFact: mustPipelineTestBundleSourceFact(pipelineTestBundleHash)})
 			if err := pc.applyWorkflowGateIntents(ctx, entityID, "", "awaiting_review", "state:awaiting_review"); err != nil {
 				t.Fatal(err)
 			}
@@ -626,7 +626,7 @@ func TestWorkflowGateOrdinaryExitSupersessionCarriesCardFlowIdentityOnBothStores
 			}
 			cards := &gateLifecycleCardStore{}
 			bus := &recordingPipelineBus{}
-			pc := NewPipelineCoordinatorWithOptions(bus, workflowStore.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())}, WorkflowStore: workflowStore, DecisionCards: cards, BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
+			pc := NewPipelineCoordinatorWithOptions(bus, workflowStore.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())}, WorkflowStore: workflowStore, DecisionCards: cards, BundleSourceFact: mustPipelineTestBundleSourceFact(pipelineTestBundleHash)})
 			if err := pc.applyWorkflowGateIntents(ctx, entityID, "drafting", "awaiting_review", "draft.ready"); err != nil {
 				t.Fatal(err)
 			}
@@ -654,9 +654,9 @@ func TestWorkflowGateOrdinaryExitSupersessionCarriesCardFlowIdentityOnBothStores
 
 func ensurePipelineTestRun(t *testing.T, store *WorkflowInstanceStore, runID string) {
 	t.Helper()
-	query := `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running') ON CONFLICT (run_id) DO NOTHING`
+	query := `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral') ON CONFLICT (run_id) DO NOTHING`
 	if store.isSQLite() {
-		query = `INSERT OR IGNORE INTO runs (run_id, status) VALUES (?, 'running')`
+		query = `INSERT OR IGNORE INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
 	}
 	if _, err := store.db.ExecContext(testAuthorActivityContext(t, context.Background()), query, runID); err != nil {
 		t.Fatal(err)

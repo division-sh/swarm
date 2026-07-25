@@ -30,10 +30,7 @@ const runStatusTestBundleHash = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 
 func runStatusAuthorActivityContext() context.Context {
 	ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runStatusTestRuntimeInstanceID)
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, runtimecorrelation.BundleSourceFact{
-		BundleHash:   runStatusTestBundleHash,
-		BundleSource: storerunlifecycle.BundleSourceEphemeral,
-	})
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, mustServeTestEphemeralBundleSourceFact(runStatusTestBundleHash))
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runStatusTestRuntimeInstanceID, runStatusTestBundleHash))
 }
 
@@ -61,10 +58,8 @@ func newRunStatusEventBus(t *testing.T, pg *store.PostgresStore) (*runtimebus.Ev
 	t.Helper()
 	workOwner := newSupervisorTestRuntimeOccurrence(t, runStatusTestBundleHash)
 	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
-		RuntimeInstanceID: runStatusTestRuntimeInstanceID,
-		BundleSourceFact: runtimecorrelation.BundleSourceFact{
-			BundleHash: runStatusTestBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral,
-		},
+		RuntimeInstanceID:   runStatusTestRuntimeInstanceID,
+		BundleSourceFact:    mustServeTestEphemeralBundleSourceFact(runStatusTestBundleHash),
 		WorkOwner:           workOwner,
 		PipelineObligations: pg.PipelineObligations(),
 	})

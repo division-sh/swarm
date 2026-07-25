@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 )
 
 const (
@@ -17,15 +17,63 @@ const (
 
 var ErrRunNotFound = errors.New("run bundle: run not found")
 
+type AvailabilitySource uint8
+
+const (
+	AvailabilitySourcePersisted AvailabilitySource = iota + 1
+	AvailabilitySourceEphemeral
+	AvailabilitySourceDeleted
+)
+
+func DecodeAvailabilitySource(raw string) (AvailabilitySource, error) {
+	if raw != strings.TrimSpace(raw) {
+		return 0, fmt.Errorf("bundle_source must not contain surrounding whitespace")
+	}
+	switch raw {
+	case "persisted":
+		return AvailabilitySourcePersisted, nil
+	case "ephemeral":
+		return AvailabilitySourceEphemeral, nil
+	case "deleted":
+		return AvailabilitySourceDeleted, nil
+	default:
+		return 0, fmt.Errorf("bundle_source must be persisted, ephemeral, or deleted")
+	}
+}
+
+func (s AvailabilitySource) String() string {
+	switch s {
+	case AvailabilitySourcePersisted:
+		return "persisted"
+	case AvailabilitySourceEphemeral:
+		return "ephemeral"
+	case AvailabilitySourceDeleted:
+		return "deleted"
+	default:
+		return ""
+	}
+}
+
+func (s AvailabilitySource) IsPersisted() bool {
+	return s == AvailabilitySourcePersisted
+}
+
+func (s AvailabilitySource) IsEphemeral() bool {
+	return s == AvailabilitySourceEphemeral
+}
+
+func (s AvailabilitySource) IsDeleted() bool {
+	return s == AvailabilitySourceDeleted
+}
+
 type Availability struct {
-	RunID             string
-	Status            string
-	BundleHash        string
-	BundleSource      string
-	BundleFingerprint string
-	BundleRowPresent  bool
-	ErrorCode         string
-	Cause             string
+	RunID            string
+	Status           string
+	BundleHash       string
+	BundleSource     AvailabilitySource
+	BundleRowPresent bool
+	ErrorCode        string
+	Cause            string
 }
 
 type queryer interface {
@@ -35,7 +83,7 @@ type queryer interface {
 
 func (a Availability) Available() bool {
 	return a.ErrorCode == "" &&
-		a.BundleSource == storerunlifecycle.BundleSourcePersisted &&
+		a.BundleSource.IsPersisted() &&
 		a.BundleHash != "" &&
 		a.BundleRowPresent
 }
@@ -52,13 +100,10 @@ func (a Availability) DetailString() string {
 	parts := []string{
 		"run_id=" + strings.TrimSpace(a.RunID),
 		"status=" + strings.TrimSpace(a.Status),
-		"bundle_source=" + strings.TrimSpace(a.BundleSource),
+		"bundle_source=" + a.BundleSource.String(),
 	}
 	if a.BundleHash != "" {
 		parts = append(parts, "bundle_hash="+a.BundleHash)
-	}
-	if a.BundleFingerprint != "" {
-		parts = append(parts, "legacy_bundle_fingerprint="+a.BundleFingerprint)
 	}
 	if a.ErrorCode != "" {
 		parts = append(parts, "code="+a.ErrorCode)
@@ -83,11 +128,10 @@ func LoadAvailability(ctx context.Context, db queryer, runID string) (Availabili
 			run_id::text,
 			COALESCE(status, ''),
 			COALESCE(bundle_hash, ''),
-			COALESCE(bundle_source, ''),
-			COALESCE(bundle_fingerprint, '')
+			COALESCE(bundle_source, '')
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, runID).Scan(&row.RunID, &row.Status, &row.BundleHash, &row.BundleSource, &row.BundleFingerprint)
+	`, runID).Scan(&row.RunID, &row.Status, &row.BundleHash, &row.BundleSource)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Availability{}, fmt.Errorf("run %s not found: %w", runID, ErrRunNotFound)
 	}
@@ -106,8 +150,7 @@ func ListActiveAvailabilities(ctx context.Context, db queryer) ([]Availability, 
 			run_id::text,
 			COALESCE(status, ''),
 			COALESCE(bundle_hash, ''),
-			COALESCE(bundle_source, ''),
-			COALESCE(bundle_fingerprint, '')
+			COALESCE(bundle_source, '')
 		FROM runs
 		WHERE lower(COALESCE(status, '')) IN ('running', 'paused')
 		ORDER BY run_id
@@ -120,7 +163,7 @@ func ListActiveAvailabilities(ctx context.Context, db queryer) ([]Availability, 
 	out := []Availability{}
 	for rows.Next() {
 		var row availabilityRow
-		if err := rows.Scan(&row.RunID, &row.Status, &row.BundleHash, &row.BundleSource, &row.BundleFingerprint); err != nil {
+		if err := rows.Scan(&row.RunID, &row.Status, &row.BundleHash, &row.BundleSource); err != nil {
 			return nil, fmt.Errorf("scan active run bundle availability: %w", err)
 		}
 		availability, err := classifyRow(ctx, db, row)
@@ -150,32 +193,30 @@ func ListActiveConflicts(ctx context.Context, db queryer) ([]Availability, error
 }
 
 type availabilityRow struct {
-	RunID             string
-	Status            string
-	BundleHash        string
-	BundleSource      string
-	BundleFingerprint string
+	RunID        string
+	Status       string
+	BundleHash   string
+	BundleSource string
 }
 
 func classifyRow(ctx context.Context, db queryer, row availabilityRow) (Availability, error) {
-	source, err := storerunlifecycle.CanonicalBundleSource(row.BundleSource)
+	source, err := DecodeAvailabilitySource(row.BundleSource)
 	if err != nil {
 		return Availability{}, err
 	}
 	availability := Availability{
-		RunID:             strings.TrimSpace(row.RunID),
-		Status:            strings.TrimSpace(row.Status),
-		BundleHash:        strings.TrimSpace(row.BundleHash),
-		BundleSource:      source,
-		BundleFingerprint: strings.TrimSpace(row.BundleFingerprint),
+		RunID:        strings.TrimSpace(row.RunID),
+		Status:       strings.TrimSpace(row.Status),
+		BundleHash:   row.BundleHash,
+		BundleSource: source,
+	}
+	if err := runtimebundleidentity.ValidateCanonicalHash(availability.BundleHash); err != nil {
+		availability.ErrorCode = CodeBundleDataIntegrityError
+		availability.Cause = "invalid_bundle_hash"
+		return availability, nil
 	}
 	switch source {
-	case storerunlifecycle.BundleSourcePersisted:
-		if availability.BundleHash == "" {
-			availability.ErrorCode = CodeBundleDataIntegrityError
-			availability.Cause = "persisted_missing_hash"
-			return availability, nil
-		}
+	case AvailabilitySourcePersisted:
 		exists, err := bundleRowExists(ctx, db, availability.BundleHash)
 		if err != nil {
 			return Availability{}, err
@@ -185,9 +226,9 @@ func classifyRow(ctx context.Context, db queryer, row availabilityRow) (Availabi
 			availability.ErrorCode = CodeBundleDataIntegrityError
 			availability.Cause = "persisted_missing_bundle_row"
 		}
-	case storerunlifecycle.BundleSourceEphemeral, storerunlifecycle.BundleSourceDeleted, storerunlifecycle.BundleSourceLegacy:
+	case AvailabilitySourceEphemeral, AvailabilitySourceDeleted:
 		availability.ErrorCode = CodeBundleUnavailable
-		availability.Cause = source
+		availability.Cause = source.String()
 	default:
 		return Availability{}, fmt.Errorf("unsupported bundle source %q", source)
 	}

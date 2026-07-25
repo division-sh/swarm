@@ -62,10 +62,10 @@ func TestRunDebugReadSurface_ListRunDebugRuns_UsesCanonicalRunScope(t *testing.T
 	now := time.Unix(1700000000, 0).UTC()
 
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, ended_at)
+		INSERT INTO runs (run_id, status, started_at, ended_at, bundle_hash, bundle_source)
 		VALUES
-			($1::uuid, 'completed', $3, $4),
-			($2::uuid, 'running', $5, NULL)
+			($1::uuid, 'completed', $3, $4, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),
+			($2::uuid, 'running', $5, NULL, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, olderRunID, newerRunID, now.Add(-2*time.Hour), now.Add(-90*time.Minute), now.Add(-1*time.Hour)); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
@@ -112,11 +112,11 @@ func TestRunDebugReadSurface_ResolveLatestRunDebugRunID_UsesLatestPersistedRun(t
 	emptyRunID := uuid.NewString()
 	now := time.Unix(1700000000, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
 		VALUES
-			($1::uuid, 'running', $4),
-			($2::uuid, 'completed', $5),
-			($3::uuid, 'running', $6)
+			($1::uuid, 'running', $4, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),
+			($2::uuid, 'completed', $5, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),
+			($3::uuid, 'running', $6, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, targetRunID, olderRunID, emptyRunID, now, now.Add(-1*time.Hour), now.Add(1*time.Hour)); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
@@ -148,8 +148,8 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 
 	for _, runID := range []string{targetRunID, otherRunID} {
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, started_at)
-			VALUES ($1::uuid, 'running', $2)
+			INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+			VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 		`, runID, now.Add(-5*time.Minute)); err != nil {
 			t.Fatalf("seed run %s: %v", runID, err)
 		}
@@ -271,10 +271,10 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 	now := time.Now().UTC()
 
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
 		VALUES
-			($1::uuid, 'running', $3),
-			($2::uuid, 'running', $3)
+			($1::uuid, 'running', $3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),
+			($2::uuid, 'running', $3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, blockedRunID, readyRunID, now.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
@@ -375,8 +375,8 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	now := time.Unix(1700000400, 0).UTC()
 
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, now.Add(-5*time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -497,8 +497,8 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 	since := base.Add(time.Second)
 
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, base.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -576,8 +576,8 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 	now := time.Unix(1700000500, 0).UTC()
 
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, now.Add(-5*time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}

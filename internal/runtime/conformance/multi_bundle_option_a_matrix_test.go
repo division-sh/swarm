@@ -114,7 +114,7 @@ func TestMultiBundleOptionAMatrixProofReferencesResolve(t *testing.T) {
 			t.Fatalf("%s missing proof_refs", row.ID)
 		}
 		for _, ref := range append(row.OwnerRefs, row.ProofRefs...) {
-			validateMultiBundleRef(t, root, ref, openRPCMethods, apiMatrixMethods, goTests)
+			validateMultiBundleProofRef(t, root, ref, openRPCMethods, apiMatrixMethods, goTests)
 		}
 
 		switch row.Classification {
@@ -191,7 +191,7 @@ func requiredMultiBundleOptionARows() []string {
 	}
 }
 
-func validateMultiBundleRef(t *testing.T, root string, ref multiBundleProofRef, openRPCMethods, apiMatrixMethods, goTests map[string]bool) {
+func validateMultiBundleProofRef(t *testing.T, root string, ref multiBundleProofRef, openRPCMethods, apiMatrixMethods, goTests map[string]bool) {
 	t.Helper()
 	switch ref.Kind {
 	case "artifact":

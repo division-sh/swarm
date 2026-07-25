@@ -58,7 +58,7 @@ func TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle(t *tes
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	now := time.Unix(1700000000, 0).UTC()
@@ -148,7 +148,7 @@ func TestSQLObservabilityReader_ListEvents_FiltersTypedSubscriberIdentity(t *tes
 	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(uuid.NewString(), "dashboard-observability"))
 
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -201,7 +201,7 @@ func TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows(t *testing.T)
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	event := eventtest.ExistingRunRootIngress(eventID, "task.completed", "runtime", "", []byte(`{}`), 0, runID,
@@ -256,7 +256,7 @@ func TestSQLObservabilityReader_EventIdentityDoesNotPromotePayloadEntity(t *test
 	payloadOnlyEventID := uuid.NewString()
 	canonicalEventID := uuid.NewString()
 	base := time.Unix(1700001200, 0).UTC()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,

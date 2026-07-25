@@ -33,25 +33,24 @@ const (
 )
 
 type runCommandOptions struct {
-	apiOptions        rootCommandOptions
-	eventName         string
-	payloadPath       string
-	connectURL        string
-	noFollow          bool
-	reattachRunID     string
-	bundleHash        string
-	bundleFingerprint string
-	configPath        string
-	backend           string
-	contractsPath     string
-	dataSource        string
-	platformSpecPath  string
-	idempotencyKey    string
-	runID             string
-	apiPort           int
-	mcpPort           int
-	detach            bool
-	changedFlags      map[string]bool
+	apiOptions       rootCommandOptions
+	eventName        string
+	payloadPath      string
+	connectURL       string
+	noFollow         bool
+	reattachRunID    string
+	bundleHash       string
+	configPath       string
+	backend          string
+	contractsPath    string
+	dataSource       string
+	platformSpecPath string
+	idempotencyKey   string
+	runID            string
+	apiPort          int
+	mcpPort          int
+	detach           bool
+	changedFlags     map[string]bool
 }
 
 type runStartResult struct {
@@ -110,7 +109,6 @@ func newRunCommand(repo string, rootOpts rootCommandOptions) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.noFollow, "no-follow", false, "Start through a connected server and print the run id without opening a trace subscription")
 	cmd.Flags().StringVar(&opts.reattachRunID, "reattach", "", "Existing run id to reattach to")
 	cmd.Flags().StringVar(&opts.bundleHash, "bundle-hash", "", "Expected server canonical bundle hash")
-	cmd.Flags().StringVar(&opts.bundleFingerprint, "bundle-fingerprint", "", "Expected server bundle fingerprint")
 	cmd.Flags().StringVar(&opts.configPath, "config", "", "Path to swarm.yaml config for local foreground startup")
 	cmd.Flags().StringVar(&opts.backend, "backend", "", "LLM backend profile for local foreground startup: anthropic, claude_cli, openai_compatible, or openai_responses")
 	cmd.Flags().StringVar(&opts.contractsPath, "contracts", "", "Path to Swarm contract bundle root for local foreground startup")
@@ -187,10 +185,6 @@ func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts
 		writeCLIAPIError(errOut, err)
 		return commandExitError{code: runCommandErrorExitCode(err)}
 	}
-	if expected := strings.TrimSpace(opts.bundleFingerprint); expected != "" && expected != health.Bundle.Fingerprint {
-		fmt.Fprintf(errOut, "bundle fingerprint mismatch: server=%s expected=%s\n", health.Bundle.Fingerprint, expected)
-		return commandExitError{code: 6}
-	}
 	traceReplaySince := time.Now().UTC()
 	start, err := runCommandStart(ctx, client, health, opts, payload)
 	if err != nil {
@@ -215,9 +209,6 @@ func (o runCommandOptions) validate() error {
 	if o.mcpPort < 0 || o.mcpPort > 65535 {
 		return fmt.Errorf("--mcp-port must be between 1 and 65535")
 	}
-	if o.changedFlags["bundle-hash"] && o.changedFlags["bundle-fingerprint"] {
-		return fmt.Errorf("--bundle-hash is mutually exclusive with --bundle-fingerprint")
-	}
 	if o.changedFlags["bundle-hash"] {
 		bundleHash := strings.TrimSpace(o.bundleHash)
 		if bundleHash == "" {
@@ -225,15 +216,6 @@ func (o runCommandOptions) validate() error {
 		}
 		if !cliBundleHashPattern.MatchString(bundleHash) {
 			return fmt.Errorf("--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>")
-		}
-	}
-	if o.changedFlags["bundle-fingerprint"] {
-		fingerprint := strings.TrimSpace(o.bundleFingerprint)
-		if fingerprint == "" {
-			return fmt.Errorf("--bundle-fingerprint must be non-empty")
-		}
-		if !cliBundleFingerprintPattern.MatchString(fingerprint) {
-			return fmt.Errorf("--bundle-fingerprint must be sha256:<64 lowercase hex>")
 		}
 	}
 	if o.changedFlags["mcp-port"] {
@@ -261,7 +243,7 @@ func (o runCommandOptions) validate() error {
 		if strings.TrimSpace(o.eventName) != "" || strings.TrimSpace(o.payloadPath) != "" || strings.TrimSpace(o.idempotencyKey) != "" || strings.TrimSpace(o.runID) != "" {
 			return fmt.Errorf("--reattach is mutually exclusive with --event, --payload, --idempotency-key, and --run-id")
 		}
-		for _, flag := range []string{"bundle-hash", "bundle-fingerprint", "config", "backend", "contracts", "data", "platform-spec", "api-port", "mcp-port"} {
+		for _, flag := range []string{"bundle-hash", "config", "backend", "contracts", "data", "platform-spec", "api-port", "mcp-port"} {
 			if o.changedFlags[flag] {
 				return fmt.Errorf("--reattach is mutually exclusive with --%s", flag)
 			}
@@ -543,8 +525,6 @@ func runCommandStart(ctx context.Context, client *cliAPIClient, health diagnosti
 	}
 	if bundleHash := strings.TrimSpace(opts.bundleHash); bundleHash != "" {
 		params["bundle_hash"] = bundleHash
-	} else if fingerprint := strings.TrimSpace(opts.bundleFingerprint); fingerprint != "" {
-		params["bundle_ref"] = map[string]any{"fingerprint": fingerprint}
 	} else if bundleHash := strings.TrimSpace(health.Bundle.BundleHash); bundleHash != "" {
 		params["bundle_hash"] = bundleHash
 	}
@@ -828,7 +808,6 @@ func runCommandErrorExitCode(err error) int {
 			"BUNDLE_UNAVAILABLE",
 			"BUNDLE_DATA_INTEGRITY_ERROR",
 			"UNSUPPORTED_BUNDLE_HASH",
-			"UNSUPPORTED_BUNDLE_REF",
 			"EVENT_NOT_DECLARED",
 			"EVENT_PUBLISH_FAILED",
 			"PAYLOAD_VALIDATION_FAILED",

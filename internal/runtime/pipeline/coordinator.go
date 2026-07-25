@@ -55,7 +55,7 @@ type PipelineCoordinator struct {
 	mockConnectorResponses *providerconnectors.MockResponsePlan
 	channelActivityTools   map[string]ChannelActivityTarget
 	artifactRoot           string
-	bundleHash             string
+	bundleSourceFact       runtimecorrelation.BundleSourceFact
 	decisionCardCadence    decisioncard.CadencePolicy
 
 	testEntityStateHook              func(entityID, state string)
@@ -87,7 +87,7 @@ type PipelineCoordinatorOptions struct {
 	MockConnectorResponses           *providerconnectors.MockResponsePlan
 	ChannelActivityTools             map[string]ChannelActivityTarget
 	ArtifactRoot                     string
-	BundleHash                       string
+	BundleSourceFact                 runtimecorrelation.BundleSourceFact
 	DecisionCardCadence              decisioncard.CadencePolicy
 	TestEntityStateHook              func(entityID, state string)
 	TestWorkflowNodeHandlerStartHook WorkflowNodeHandlerStartHook
@@ -182,7 +182,7 @@ func newPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		mockConnectorResponses:           opts.MockConnectorResponses,
 		channelActivityTools:             copyActivityToolEntries(opts.ChannelActivityTools),
 		artifactRoot:                     strings.TrimSpace(opts.ArtifactRoot),
-		bundleHash:                       strings.TrimSpace(opts.BundleHash),
+		bundleSourceFact:                 opts.BundleSourceFact,
 		decisionCardCadence:              opts.DecisionCardCadence.Normalize(),
 		testEntityStateHook:              opts.TestEntityStateHook,
 		testWorkflowNodeHandlerStartHook: opts.TestWorkflowNodeHandlerStartHook,

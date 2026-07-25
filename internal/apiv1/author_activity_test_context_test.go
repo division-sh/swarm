@@ -19,10 +19,24 @@ import (
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
 
-var authorActivityTestBundleSourceFact = runtimecorrelation.BundleSourceFact{
-	BundleHash:        "bundle-v1:sha256:" + strings.Repeat("a", 64),
-	BundleSource:      "ephemeral",
-	BundleFingerprint: "sha256:" + strings.Repeat("a", 64),
+var authorActivityTestBundleSourceFact = mustAPITestBundleSourceFact(
+	"bundle-v1:sha256:" + strings.Repeat("a", 64),
+)
+
+func mustAPITestBundleSourceFact(bundleHash string) runtimecorrelation.BundleSourceFact {
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+	if err != nil {
+		panic(err)
+	}
+	return fact
+}
+
+func mustAPITestPersistedBundleSourceFact(bundleHash string) runtimecorrelation.BundleSourceFact {
+	fact, err := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
+	if err != nil {
+		panic(err)
+	}
+	return fact
 }
 
 var authorActivityTestDifferentEventTypes = strings.Fields(`
@@ -46,11 +60,13 @@ func testAuthorActivityContextForSource(ctx context.Context, fact runtimecorrela
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	fact = fact.Normalized()
+	if err := fact.Validate(); err != nil {
+		panic(err)
+	}
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
-		authorActivityTestRuntimeInstanceID, fact.BundleHash,
+		authorActivityTestRuntimeInstanceID, fact.BundleHash(),
 	))
 }
 
@@ -70,11 +86,11 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
-	if strings.TrimSpace(opts.BundleSourceFact.BundleHash) == "" {
+	if opts.BundleSourceFact.BundleHash() == "" {
 		opts.BundleSourceFact = authorActivityTestBundleSourceFact
 	}
 	if opts.WorkOwner == nil {
-		opts.WorkOwner = newAPITestRuntimeWorkOccurrence(t, opts.RuntimeInstanceID, opts.BundleSourceFact.BundleHash)
+		opts.WorkOwner = newAPITestRuntimeWorkOccurrence(t, opts.RuntimeInstanceID, opts.BundleSourceFact.BundleHash())
 	}
 	if opts.PipelineObligations == nil {
 		if provider, ok := eventStore.(interface {
@@ -89,7 +105,7 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 			return nil, err
 		}
 		lease, err := registrar.RegisterAuthorActivityEventCatalog(
-			runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, opts.BundleSourceFact.BundleHash), descriptors,
+			runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, opts.BundleSourceFact.BundleHash()), descriptors,
 		)
 		if err != nil {
 			return nil, err
@@ -145,7 +161,7 @@ func registerScopedAPITestCatalog(t *testing.T, target authorActivityTestCatalog
 		t.Fatalf("project API test author activity catalog: %v", err)
 	}
 	lease, err := target.RegisterAuthorActivityEventCatalog(
-		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash), descriptors,
+		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash()), descriptors,
 	)
 	if err != nil {
 		t.Fatalf("register API test author activity catalog: %v", err)

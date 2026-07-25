@@ -7,15 +7,11 @@ import (
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 )
 
 type InsertForkOptions struct {
-	HasBundleHashCol        bool
-	HasBundleSourceCol      bool
-	HasBundleFingerprintCol bool
-	BundleHash              string
-	BundleSource            string
-	BundleFingerprint       string
+	BundleSourceFact runtimecorrelation.BundleSourceFact
 }
 
 func InsertFork(ctx context.Context, db DBTX, forkRunID, status, sourceRunID, forkEventID string, entityCount int, startedAt time.Time, opts InsertForkOptions) error {
@@ -41,11 +37,11 @@ func InsertFork(ctx context.Context, db DBTX, forkRunID, status, sourceRunID, fo
 	if err := runtimeauthoractivity.Require(ctx); err != nil {
 		return fmt.Errorf("insert fork run: %w", err)
 	}
-	bundleSource, err := CanonicalBundleSource(opts.BundleSource)
-	if err != nil {
-		return err
+	if err := opts.BundleSourceFact.Validate(); err != nil {
+		return fmt.Errorf("insert fork run: %w", err)
 	}
-	occurrenceScope, err := runtimeauthoractivity.BundleScopeForSource(ctx, opts.BundleHash)
+	bundleHash, bundleSource := opts.BundleSourceFact.StorageValues()
+	occurrenceScope, err := runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
 	if err != nil {
 		return fmt.Errorf("insert fork run: %w", err)
 	}
@@ -61,21 +57,9 @@ func InsertFork(ctx context.Context, db DBTX, forkRunID, status, sourceRunID, fo
 	}
 	values := []string{"$1::uuid", "$2", "$3::uuid", "$4::uuid", "$5", "0", "$6"}
 	args := []any{forkRunID, status, sourceRunID, forkEventID, entityCount, startedAt}
-	if opts.HasBundleHashCol {
-		args = append(args, strings.TrimSpace(opts.BundleHash))
-		cols = append(cols, "bundle_hash")
-		values = append(values, fmt.Sprintf("NULLIF($%d, '')", len(args)))
-	}
-	if opts.HasBundleSourceCol {
-		args = append(args, bundleSource)
-		cols = append(cols, "bundle_source")
-		values = append(values, fmt.Sprintf("$%d", len(args)))
-	}
-	if opts.HasBundleFingerprintCol {
-		args = append(args, strings.TrimSpace(opts.BundleFingerprint))
-		cols = append(cols, "bundle_fingerprint")
-		values = append(values, fmt.Sprintf("NULLIF($%d, '')", len(args)))
-	}
+	args = append(args, bundleHash, bundleSource)
+	cols = append(cols, "bundle_hash", "bundle_source")
+	values = append(values, fmt.Sprintf("$%d", len(args)-1), fmt.Sprintf("$%d", len(args)))
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO runs (`+strings.Join(cols, ", ")+`)
 		VALUES (`+strings.Join(values, ", ")+`)

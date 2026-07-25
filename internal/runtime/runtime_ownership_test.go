@@ -237,6 +237,7 @@ func TestRuntimePreparedStartupOwnershipCanBeReleasedBeforeStart(t *testing.T) {
 				return lease, nil
 			},
 		}},
+		Options: RuntimeOptions{BundleSourceFact: testBundleSourceFact(t, runtimeTestBundleHash)},
 		ownerID: "runtime-owner",
 	}
 	if err := rt.PrepareInitialStartupOwnership(context.Background()); err != nil {

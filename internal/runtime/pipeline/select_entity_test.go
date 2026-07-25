@@ -224,7 +224,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityCreatesTargetOwnedEntity(
 	assertEntityStateEntityType(t, db, FlowInstanceEntityID(instance.StorageRef), "opco_budget")
 }
 
-func TestRepairContractEntityTypesUsesBundleAvailabilityAndDoesNotPromoteLegacyFingerprint(t *testing.T) {
+func TestRepairContractEntityTypesUsesBundleAvailabilityAndDoesNotPromoteUnavailableRun(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -240,7 +240,7 @@ func TestRepairContractEntityTypesUsesBundleAvailabilityAndDoesNotPromoteLegacyF
 	ephemeralBundleID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
 		UPDATE runs
-		SET bundle_hash = $2, bundle_source = 'persisted', bundle_fingerprint = NULL
+		SET bundle_hash = $2, bundle_source = 'persisted'
 		WHERE run_id = $1::uuid
 	`, testPipelineRunID, persistedHash); err != nil {
 		t.Fatalf("seed current run bundle source: %v", err)
@@ -252,8 +252,8 @@ func TestRepairContractEntityTypesUsesBundleAvailabilityAndDoesNotPromoteLegacyF
 		t.Fatalf("seed current bundle row: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_source, bundle_fingerprint)
-		VALUES ($1::uuid, 'running', 'legacy', 'sha256:old')
+		INSERT INTO runs (run_id, status, bundle_source, bundle_hash)
+		VALUES ($1::uuid, 'running', 'deleted', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
 	`, legacyRunID); err != nil {
 		t.Fatalf("seed legacy bundle run: %v", err)
 	}
@@ -316,8 +316,7 @@ func TestRepairContractEntityTypesBlocksPersistedMissingBundleRow(t *testing.T) 
 	if _, err := db.ExecContext(ctx, `
 		UPDATE runs
 		SET bundle_hash = 'bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-		    bundle_source = $2,
-		    bundle_fingerprint = NULL
+		    bundle_source = $2
 		WHERE run_id = $1::uuid
 	`, testPipelineRunID, storerunlifecycle.BundleSourcePersisted); err != nil {
 		t.Fatalf("seed persisted-missing run bundle source: %v", err)

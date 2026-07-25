@@ -170,7 +170,7 @@ func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testin
 	eventOnlyID := "00000000-0000-0000-0000-000000001401"
 	lateDeliveryID := "00000000-0000-0000-0000-000000001402"
 	secondDeliveryID := "00000000-0000-0000-0000-000000001403"
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, base.Add(-time.Minute)); err != nil {
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed sqlite run: %v", err)
 	}
 	for _, fixture := range []struct {

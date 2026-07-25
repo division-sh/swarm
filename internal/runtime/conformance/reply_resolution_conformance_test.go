@@ -677,7 +677,7 @@ func createReplyConformanceHumanTask(t *testing.T, ctx context.Context, cards re
 	card, err := decisioncard.New(decisioncard.Card{
 		CardID: uuid.NewString(), RunID: runID, Anchor: anchor, Snapshot: snapshot,
 		ExecutionMode: "live",
-		BundleHash:    "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", CreatedAt: now,
+		BundleHash:    authorActivityTestBundleSourceFact.BundleHash(), CreatedAt: now,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -963,11 +963,11 @@ func seedDurableReplyConformanceRun(t *testing.T, ctx context.Context, backend d
 	t.Helper()
 	switch typed := backend.(type) {
 	case *store.PostgresStore:
-		if _, err := typed.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		if _, err := typed.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 			t.Fatalf("seed postgres reply conformance run: %v", err)
 		}
 	case *store.SQLiteRuntimeStore:
-		if _, err := typed.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+		if _, err := typed.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 			t.Fatalf("seed sqlite reply conformance run: %v", err)
 		}
 	default:

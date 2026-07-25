@@ -172,9 +172,9 @@ func newCompleteEventDispatchFixture(t *testing.T, backend string, decisionOblig
 
 func seedCompleteEventDispatchRun(t testing.TB, ctx context.Context, db *sql.DB, backend, runID string, startedAt time.Time) {
 	t.Helper()
-	query := `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`
+	query := `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
 	if backend == "postgres" {
-		query = `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`
+		query = `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
 	}
 	if _, err := db.ExecContext(ctx, query, runID, startedAt); err != nil {
 		t.Fatalf("seed %s complete-event run: %v", backend, err)
@@ -336,7 +336,7 @@ func (f completeEventDispatchFixture) managedContext(t *testing.T) context.Conte
 		1,
 		"",
 		"complete-event-proof",
-		"complete-event-bundle",
+		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		nil,
 	)
 	if err != nil {

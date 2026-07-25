@@ -12,7 +12,6 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -271,7 +270,7 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash)
+	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash())
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{WorkOwner: workOwner})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -327,15 +326,12 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeBundleSource(t *testing.T
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	bootFingerprint := "sha256:4444444444444444444444444444444444444444444444444444444444444444"
-	bootFact := runtimecorrelation.BundleSourceFact{
-		BundleHash: "bundle-v1:" + bootFingerprint, BundleSource: storerunlifecycle.BundleSourceEphemeral, BundleFingerprint: bootFingerprint,
-	}
-	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, bootFact.BundleHash)
+	bootHash := "bundle-v1:sha256:4444444444444444444444444444444444444444444444444444444444444444"
+	bootFact := mustAPITestBundleSourceFact(bootHash)
+	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, bootFact.BundleHash())
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
-		BundleFingerprint: bootFingerprint,
-		BundleSourceFact:  bootFact,
-		WorkOwner:         workOwner,
+		BundleSourceFact: bootFact,
+		WorkOwner:        workOwner,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -368,20 +364,20 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeBundleSource(t *testing.T
 	if newRunID == "" {
 		t.Fatalf("new-run directive result = %#v", first.Result)
 	}
-	assertRunBundleIdentity(t, db, newRunID, bootFact.BundleHash, storerunlifecycle.BundleSourceEphemeral, bootFingerprint)
+	assertRunBundleIdentity(t, db, newRunID, bootFact.BundleHash(), storerunlifecycle.BundleSourceEphemeral)
 
 	existingRunID := "00000000-0000-0000-0000-000000000755"
 	if _, err := db.Exec(`
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint)
-		VALUES ($1::uuid, 'running', $2, $3, $4)
-	`, existingRunID, bootFact.BundleHash, storerunlifecycle.BundleSourceEphemeral, bootFingerprint); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, $3)
+	`, existingRunID, bootFact.BundleHash(), storerunlifecycle.BundleSourceEphemeral); err != nil {
 		t.Fatalf("seed existing run: %v", err)
 	}
 	explicit := rpcCall(t, handler, agentDirectiveBodyWithRun("agent-1", existingRunID, "existing run", "idem-directive-bundle-existing"))
 	if explicit.Error != nil {
 		t.Fatalf("existing-run directive error = %#v", explicit.Error)
 	}
-	assertRunBundleIdentity(t, db, existingRunID, bootFact.BundleHash, storerunlifecycle.BundleSourceEphemeral, bootFingerprint)
+	assertRunBundleIdentity(t, db, existingRunID, bootFact.BundleHash(), storerunlifecycle.BundleSourceEphemeral)
 }
 
 func TestOperatorAgentControlHandlersRestrictAgentNotRunningToSendDirective(t *testing.T) {
@@ -565,18 +561,18 @@ func countDirectiveEvents(t *testing.T, db *sql.DB) int {
 	return count
 }
 
-func assertRunBundleIdentity(t *testing.T, db *sql.DB, runID, wantHash, wantSource, wantLegacyFingerprint string) {
+func assertRunBundleIdentity(t *testing.T, db *sql.DB, runID, wantHash, wantSource string) {
 	t.Helper()
-	var gotHash, gotSource, gotLegacyFingerprint string
+	var gotHash, gotSource string
 	if err := db.QueryRow(`
-		SELECT COALESCE(bundle_hash, ''), bundle_source, COALESCE(bundle_fingerprint, '')
+		SELECT bundle_hash, bundle_source
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, runID).Scan(&gotHash, &gotSource, &gotLegacyFingerprint); err != nil {
+	`, runID).Scan(&gotHash, &gotSource); err != nil {
 		t.Fatalf("load run bundle identity: %v", err)
 	}
-	if gotHash != wantHash || gotSource != wantSource || gotLegacyFingerprint != wantLegacyFingerprint {
-		t.Fatalf("run %s bundle identity = hash:%q source:%q fingerprint:%q, want hash:%q source:%q fingerprint:%q",
-			runID, gotHash, gotSource, gotLegacyFingerprint, wantHash, wantSource, wantLegacyFingerprint)
+	if gotHash != wantHash || gotSource != wantSource {
+		t.Fatalf("run %s bundle identity = hash:%q source:%q, want hash:%q source:%q",
+			runID, gotHash, gotSource, wantHash, wantSource)
 	}
 }

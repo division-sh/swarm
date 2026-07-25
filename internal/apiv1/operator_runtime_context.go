@@ -12,7 +12,6 @@ import (
 	runtimerunforkadmission "github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/runbundle"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 func runtimeContextManager(opts OperatorReadOptions) *swruntime.RuntimeContextManager {
@@ -160,15 +159,17 @@ func runtimeBundleContextByHash(ctx context.Context, opts OperatorReadOptions, b
 	contextDef := &use.Context
 	selectedRuntime := use.Runtime()
 	selected := operatorOptionsForBundleContext(opts, contextDef, selectedRuntime)
-	fact := contextDef.BundleSourceFact.Normalized()
-	if fact.BundleHash == "" {
-		fact.BundleHash = bundleHash
+	fact := contextDef.BundleSourceFact
+	if err := fact.Validate(); err != nil || fact.BundleHash() != bundleHash {
+		return ctx, opts, nil, NewApplicationError(BundleDataIntegrityErrorCode, false, map[string]any{
+			"bundle_hash": bundleHash, "cause": "runtime_source_fact_mismatch",
+		})
 	}
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
 	if selectedRuntime != nil {
 		runtimeInstanceID := selectedRuntime.Options.RuntimeInstanceID
 		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
-		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash))
+		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash()))
 	}
 	return ctx, selected, contextDef, nil
 }
@@ -194,7 +195,7 @@ func runtimeBundleContextByRun(ctx context.Context, opts OperatorReadOptions, ru
 	if availability.ErrorCode == BundleDataIntegrityErrorCode {
 		return ctx, opts, availability, NewApplicationError(BundleDataIntegrityErrorCode, false, bundleAvailabilityDetails(availability))
 	}
-	loadedEphemeral := lookup.Loaded() && availability.BundleSource == storerunlifecycle.BundleSourceEphemeral && strings.TrimSpace(availability.BundleHash) != ""
+	loadedEphemeral := lookup.Loaded() && availability.BundleSource.IsEphemeral() && strings.TrimSpace(availability.BundleHash) != ""
 	if !availability.Available() && !loadedEphemeral {
 		return ctx, opts, availability, NewApplicationError(BundleUnavailableCode, false, bundleAvailabilityDetails(availability))
 	}
@@ -211,15 +212,17 @@ func runtimeBundleContextByRun(ctx context.Context, opts OperatorReadOptions, ru
 	contextDef := &use.Context
 	selectedRuntime := use.Runtime()
 	selected := operatorOptionsForBundleContext(opts, contextDef, selectedRuntime)
-	fact := contextDef.BundleSourceFact.Normalized()
-	if fact.BundleHash == "" {
-		fact.BundleHash = availability.BundleHash
+	fact := contextDef.BundleSourceFact
+	if err := fact.Validate(); err != nil || fact.BundleHash() != availability.BundleHash {
+		return ctx, opts, availability, NewApplicationError(BundleDataIntegrityErrorCode, false, map[string]any{
+			"run_id": strings.TrimSpace(runID), "bundle_hash": availability.BundleHash, "cause": "runtime_source_fact_mismatch",
+		})
 	}
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
 	if selectedRuntime != nil {
 		runtimeInstanceID := selectedRuntime.Options.RuntimeInstanceID
 		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
-		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash))
+		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash()))
 	}
 	return ctx, selected, availability, nil
 }

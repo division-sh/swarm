@@ -22,7 +22,6 @@ const (
 	BundleHasActiveRunsCode                = "BUNDLE_HAS_ACTIVE_RUNS"
 	UnsupportedBundleHashCode              = "UNSUPPORTED_BUNDLE_HASH"
 	UnsupportedBundleHashForkCode          = "UNSUPPORTED_BUNDLE_HASH_FORK"
-	UnsupportedBundleRefCode               = "UNSUPPORTED_BUNDLE_REF"
 	EventNotDeclaredCode                   = "EVENT_NOT_DECLARED"
 	EventNotFoundCode                      = "EVENT_NOT_FOUND"
 	EventPublishFailedCode                 = "EVENT_PUBLISH_FAILED"

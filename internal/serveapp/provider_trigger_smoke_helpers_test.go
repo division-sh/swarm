@@ -185,8 +185,8 @@ func seedProviderTriggerSmokeRuntime(
 	t.Helper()
 	now := time.Now().UTC()
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES (?, 'running', ?)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, now); err != nil {
 		t.Fatalf("seed sqlite run: %v", err)
 	}

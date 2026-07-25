@@ -88,14 +88,13 @@ func Recover(ctx context.Context, req Request) (Result, error) {
 		case availability.Unavailable():
 			cause, ok := preservationcleanup.CauseForBundleSource(availability.BundleSource)
 			if !ok {
-				return result, fmt.Errorf("startup recovery unsupported unavailable bundle source %q for run %s", availability.BundleSource, availability.RunID)
+				return result, fmt.Errorf("startup recovery unsupported unavailable bundle source %q for run %s", availability.BundleSource.String(), availability.RunID)
 			}
 			result.OrphanTargets = append(result.OrphanTargets, preservationcleanup.RunTarget{
-				RunID:             availability.RunID,
-				BundleSource:      availability.BundleSource,
-				BundleHash:        availability.BundleHash,
-				BundleFingerprint: availability.BundleFingerprint,
-				ReasonCode:        cause,
+				RunID:        availability.RunID,
+				BundleSource: availability.BundleSource,
+				BundleHash:   availability.BundleHash,
+				ReasonCode:   cause,
 			})
 		default:
 			return result, fmt.Errorf("startup recovery unsupported bundle availability for run %s: %s", availability.RunID, availability.DetailString())

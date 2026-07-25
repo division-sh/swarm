@@ -69,6 +69,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const serveRuntimeTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
 type delayedRunStatusAgent struct {
 	id            string
 	subscriptions []events.EventType
@@ -128,7 +130,7 @@ func managedRuntimeAdmissionContextForTest(t testing.TB, ctx context.Context) co
 		1,
 		"",
 		"cmd-swarm-test-actors",
-		"cmd-swarm-test-bundle",
+		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		nil,
 	)
 	if err != nil {
@@ -439,9 +441,9 @@ func TestServeBundleMatchAdmissionRejectsActiveAvailabilityConflicts(t *testing.
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := context.Background()
-	bootFingerprint := "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	bootHash := "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
 	persistedMissingRunID := uuid.NewString()
-	legacyRunID := uuid.NewString()
+	deletedRunID := uuid.NewString()
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
@@ -450,13 +452,13 @@ func TestServeBundleMatchAdmissionRejectsActiveAvailabilityConflicts(t *testing.
 		t.Fatalf("seed active persisted missing run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_source, bundle_fingerprint, started_at)
-		VALUES ($1::uuid, 'paused', 'legacy', $2, now())
-	`, legacyRunID, bootFingerprint); err != nil {
-		t.Fatalf("seed active legacy run: %v", err)
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES ($1::uuid, 'paused', $2, 'deleted', now())
+	`, deletedRunID, bootHash); err != nil {
+		t.Fatalf("seed active deleted run: %v", err)
 	}
 
-	err := enforceServeBundleMatchAdmission(ctx, pg, bootFingerprint, true, "")
+	err := enforceServeBundleMatchAdmission(ctx, pg, bootHash, true, "")
 	if err == nil {
 		t.Fatal("enforceServeBundleMatchAdmission error = nil, want availability conflict")
 	}
@@ -466,10 +468,9 @@ func TestServeBundleMatchAdmissionRejectsActiveAvailabilityConflicts(t *testing.
 		persistedMissingRunID,
 		"BUNDLE_DATA_INTEGRITY_ERROR",
 		"persisted_missing_bundle_row",
-		legacyRunID,
+		deletedRunID,
 		"BUNDLE_UNAVAILABLE",
-		"cause=legacy",
-		"legacy_bundle_fingerprint=" + bootFingerprint,
+		"cause=deleted",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("admission error = %q, want detail %q", got, want)
@@ -616,13 +617,13 @@ func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing
 		t.Fatalf("serve identity = %q, want bundle hash %q", loaded.serveIdentityDetail(), projection.BundleHash)
 	}
 	authorLabel := serveRuntimeBundleAuthorLabel(loaded)
-	if authorLabel == "" || strings.Contains(authorLabel, projection.BundleHash) || strings.Contains(authorLabel, loaded.bootIdentity.Fingerprint) {
+	if authorLabel == "" || strings.Contains(authorLabel, projection.BundleHash) {
 		t.Fatalf("author label = %q, want workflow name/version without bundle identity", authorLabel)
 	}
 	if projectName := serveLifecycleProjectName(cliapp.LocalRuntimeStateResolution{}, []serveRuntimeBundle{loaded}); projectName != authorLabel {
 		t.Fatalf("no-root project name = %q, want author label %q", projectName, authorLabel)
 	}
-	if loaded.bundleSourceFact.BundleHash != projection.BundleHash || loaded.bundleSourceFact.BundleSource != storerunlifecycle.BundleSourcePersisted {
+	if loaded.bundleSourceFact.BundleHash() != projection.BundleHash || !loaded.bundleSourceFact.IsPersisted() {
 		t.Fatalf("bundle source fact = %#v, want persisted %s", loaded.bundleSourceFact, projection.BundleHash)
 	}
 	if strings.Contains(loaded.contractsRoot, filepath.Join("tests", "tier12-runtime-tools", "test-flow-data-access")) {
@@ -635,7 +636,7 @@ func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing
 	if err != nil {
 		t.Fatalf("prepareLoadedServeBundleSource: %v", err)
 	}
-	if prepared.BundleHash != projection.BundleHash || prepared.BundleSource != storerunlifecycle.BundleSourcePersisted {
+	if prepared.BundleHash() != projection.BundleHash || !prepared.IsPersisted() {
 		t.Fatalf("prepared source fact = %#v, want persisted %s", prepared, projection.BundleHash)
 	}
 	if _, err := prepareLoadedServeBundleSource(ctx, stores, loaded, true); err == nil || !strings.Contains(err.Error(), "--bundle-hash is mutually exclusive with --dev") {
@@ -817,16 +818,16 @@ func TestRunServeRuntimeDiskLoadedRunForkSupportedSurfaceExecutesAndStampsEpheme
 		t.Fatalf("run.fork source/fork outcome = %#v, want frozen source and materialized fork", result)
 	}
 
-	var forkBundleHash, forkBundleSource, forkBundleFingerprint string
+	var forkBundleHash, forkBundleSource string
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(bundle_hash, ''), COALESCE(bundle_source, ''), COALESCE(bundle_fingerprint, '')
+		SELECT bundle_hash, bundle_source
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, result.ForkRunID).Scan(&forkBundleHash, &forkBundleSource, &forkBundleFingerprint); err != nil {
+	`, result.ForkRunID).Scan(&forkBundleHash, &forkBundleSource); err != nil {
 		t.Fatalf("load fork run bundle identity: %v", err)
 	}
-	if forkBundleHash != projection.BundleHash || forkBundleSource != storerunlifecycle.BundleSourceEphemeral || forkBundleFingerprint != "" {
-		t.Fatalf("fork bundle identity = hash:%q source:%q fingerprint:%q, want disk-loaded %s/%s without legacy fingerprint", forkBundleHash, forkBundleSource, forkBundleFingerprint, projection.BundleHash, storerunlifecycle.BundleSourceEphemeral)
+	if forkBundleHash != projection.BundleHash || forkBundleSource != storerunlifecycle.BundleSourceEphemeral {
+		t.Fatalf("fork bundle identity = hash:%q source:%q, want disk-loaded %s/%s", forkBundleHash, forkBundleSource, projection.BundleHash, storerunlifecycle.BundleSourceEphemeral)
 	}
 
 	if code := serve.stop(); code != 0 {
@@ -924,16 +925,16 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 		t.Fatalf("run.fork fork identity = %#v, want fork run and source fork event %s", rpc.Result, sourceEventID)
 	}
 
-	var forkBundleHash, forkBundleSource, forkBundleFingerprint string
+	var forkBundleHash, forkBundleSource string
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(bundle_hash, ''), COALESCE(bundle_source, ''), COALESCE(bundle_fingerprint, '')
+		SELECT bundle_hash, bundle_source
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, rpc.Result.ForkRunID).Scan(&forkBundleHash, &forkBundleSource, &forkBundleFingerprint); err != nil {
+	`, rpc.Result.ForkRunID).Scan(&forkBundleHash, &forkBundleSource); err != nil {
 		t.Fatalf("load fork run bundle identity: %v", err)
 	}
-	if forkBundleHash != projection.BundleHash || forkBundleSource != storerunlifecycle.BundleSourcePersisted || forkBundleFingerprint != "" {
-		t.Fatalf("fork bundle identity = hash:%q source:%q fingerprint:%q, want persisted %s without legacy fingerprint", forkBundleHash, forkBundleSource, forkBundleFingerprint, projection.BundleHash)
+	if forkBundleHash != projection.BundleHash || forkBundleSource != storerunlifecycle.BundleSourcePersisted {
+		t.Fatalf("fork bundle identity = hash:%q source:%q, want persisted %s", forkBundleHash, forkBundleSource, projection.BundleHash)
 	}
 	var lineageRows int
 	if err := db.QueryRowContext(ctx, `
@@ -1295,16 +1296,16 @@ func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetI
 		t.Fatalf("run.fork result = %#v, want source=%s target=%s executed=1", rpcResult, sourceRunID, targetProjection.BundleHash)
 	}
 
-	var forkBundleHash, forkBundleSource, forkBundleFingerprint string
+	var forkBundleHash, forkBundleSource string
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(bundle_hash, ''), COALESCE(bundle_source, ''), COALESCE(bundle_fingerprint, '')
+		SELECT bundle_hash, bundle_source
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, rpcResult.ForkRunID).Scan(&forkBundleHash, &forkBundleSource, &forkBundleFingerprint); err != nil {
+	`, rpcResult.ForkRunID).Scan(&forkBundleHash, &forkBundleSource); err != nil {
 		t.Fatalf("load fork run bundle identity: %v", err)
 	}
-	if forkBundleHash != targetProjection.BundleHash || forkBundleSource != storerunlifecycle.BundleSourcePersisted || forkBundleFingerprint != "" {
-		t.Fatalf("fork bundle identity = hash:%q source:%q fingerprint:%q, want persisted target %s without legacy fingerprint", forkBundleHash, forkBundleSource, forkBundleFingerprint, targetProjection.BundleHash)
+	if forkBundleHash != targetProjection.BundleHash || forkBundleSource != storerunlifecycle.BundleSourcePersisted {
+		t.Fatalf("fork bundle identity = hash:%q source:%q, want persisted target %s", forkBundleHash, forkBundleSource, targetProjection.BundleHash)
 	}
 	var mode, selectedHash, contractsRoot string
 	if err := db.QueryRowContext(ctx, `
@@ -1874,13 +1875,13 @@ func servedControlProofAuthorActivityContext(t *testing.T, rt servedControlProof
 		t.Fatal("served control proof runtime is required for exact author activity scope")
 	}
 	runtimeInstanceID := strings.TrimSpace(rt.Runtime.Options.RuntimeInstanceID)
-	fact := rt.Runtime.Options.BundleSourceFact.Normalized()
-	if runtimeInstanceID == "" || fact.BundleHash == "" || fact.BundleHash != strings.TrimSpace(rt.BundleHash) {
+	fact := rt.Runtime.Options.BundleSourceFact
+	if runtimeInstanceID == "" || fact.BundleHash() == "" || fact.BundleHash() != strings.TrimSpace(rt.BundleHash) {
 		t.Fatalf("served control proof scope = runtime %q fact %#v bundle %q", runtimeInstanceID, fact, rt.BundleHash)
 	}
 	ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runtimeInstanceID)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
-	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash))
+	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash()))
 }
 
 type servedConversationForkProofRuntime struct {
@@ -3219,15 +3220,16 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	ctx := servedControlProofAuthorActivityContext(t, rt)
 	now := time.Now().UTC().Add(-time.Minute)
 	runID, entityID, sourceEventID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	bundleFact := rt.Runtime.Options.BundleSourceFact.Normalized()
-	bundleHash := strings.TrimSpace(bundleFact.BundleHash)
+	bundleFact := rt.Runtime.Options.BundleSourceFact
+	bundleHash := bundleFact.BundleHash()
+	_, bundleSource := bundleFact.StorageValues()
 	var cards decisioncard.Store
 	var workflow *runtimepipeline.WorkflowInstanceStore
 	var seedEvent func(context.Context, events.Event) error
 	var insertNotice func(context.Context, runtimetools.MailboxItem) (string, error)
 	switch rt.Backend {
 	case "postgres":
-		if _, err := rt.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES ($1::uuid, 'running', $2, $3, $4)`, runID, bundleHash, bundleFact.BundleSource, now); err != nil {
+		if _, err := rt.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES ($1::uuid, 'running', $2, $3, $4)`, runID, bundleHash, bundleSource, now); err != nil {
 			t.Fatalf("seed postgres decision-card run: %v", err)
 		}
 		pg := rt.Postgres
@@ -3242,7 +3244,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 			return nil
 		}
 	case "sqlite":
-		if _, err := rt.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES (?, 'running', ?, ?, ?)`, runID, bundleHash, bundleFact.BundleSource, now); err != nil {
+		if _, err := rt.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES (?, 'running', ?, ?, ?)`, runID, bundleHash, bundleSource, now); err != nil {
 			t.Fatalf("seed sqlite decision-card run: %v", err)
 		}
 		sqlite := rt.SQLite
@@ -4405,9 +4407,9 @@ func seedServedLiveAgentPendingBacklogDelivery(t *testing.T, rt servedControlPro
 	switch backend {
 	case "postgres":
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, bundle_source, started_at)
-			VALUES ($1::uuid, 'running', 'legacy', $2)
-		`, runID, now); err != nil {
+			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+			VALUES ($1::uuid, 'running', $2, 'ephemeral', $3)
+		`, runID, serveRuntimeTestBundleHash, now); err != nil {
 			t.Fatalf("seed postgres live-agent backlog run: %v", err)
 		}
 		if rt.Postgres == nil {
@@ -4416,9 +4418,9 @@ func seedServedLiveAgentPendingBacklogDelivery(t *testing.T, rt servedControlPro
 		selectedStore = rt.Postgres
 	case "sqlite":
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, bundle_source, started_at)
-			VALUES (?, 'running', 'legacy', ?)
-		`, runID, now); err != nil {
+			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+			VALUES (?, 'running', ?, 'ephemeral', ?)
+		`, runID, serveRuntimeTestBundleHash, now); err != nil {
 			t.Fatalf("seed sqlite live-agent backlog run: %v", err)
 		}
 		if rt.SQLite == nil {
@@ -7332,15 +7334,12 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBef
 	})
 	ctx := context.Background()
 	persistedMissingRunID := uuid.NewString()
-	legacyRunID := uuid.NewString()
 	missingHash := "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222"
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES
-			($1::uuid, 'running', $2, 'persisted', now()),
-			($3::uuid, 'running', NULL, 'legacy', now())
-	`, persistedMissingRunID, missingHash, legacyRunID); err != nil {
-		t.Fatalf("seed mixed active runs: %v", err)
+		VALUES ($1::uuid, 'running', $2, 'persisted', now())
+	`, persistedMissingRunID, missingHash); err != nil {
+		t.Fatalf("seed persisted-missing active run: %v", err)
 	}
 
 	var out lockedBuffer
@@ -7361,7 +7360,6 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBef
 		t.Fatalf("Run code = %d, want %d\noutput:\n%s", code, serveExitDataIntegrity, out.String())
 	}
 	assertServeRuntimeRunStillActive(t, ctx, &store.PostgresStore{DB: db}, persistedMissingRunID)
-	assertServeRuntimeRunStillActive(t, ctx, &store.PostgresStore{DB: db}, legacyRunID)
 	if strings.Contains(out.String(), "ready") {
 		t.Fatalf("serve reached readiness despite persisted-missing startup recovery failure:\n%s", out.String())
 	}
@@ -7372,7 +7370,7 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 	_, db, runtimePG := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{
 			managedContainers: []runtimedestructivereset.ContainerRef{
-				{Name: "swarm-legacy-agent", RunID: serveRuntimeLegacyRunIDForTest, Kind: "agent"},
+				{Name: "swarm-unavailable-agent", RunID: serveRuntimeUnavailableRunIDForTest, Kind: "agent"},
 				{Name: "swarm-unrelated-agent", RunID: uuid.NewString(), Kind: "agent"},
 			},
 			stoppedContainers: &stoppedContainers,
@@ -7390,13 +7388,9 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 	if err != nil {
 		t.Fatalf("contracts root: %v", err)
 	}
-	_, bundle, err := cliapp.NewSwarmWorkflowModule(cliapp.RepoRoot(), contractsRoot, cliapp.ResolvePath(cliapp.RepoRoot(), defaultPlatformSpecPath))
+	_, _, err = cliapp.NewSwarmWorkflowModule(cliapp.RepoRoot(), contractsRoot, cliapp.ResolvePath(cliapp.RepoRoot(), defaultPlatformSpecPath))
 	if err != nil {
 		t.Fatalf("load test workflow bundle: %v", err)
-	}
-	bootIdentity, err := runtimecontracts.BootBundleIdentity(bundle)
-	if err != nil {
-		t.Fatalf("boot bundle identity: %v", err)
 	}
 	persistedRunID := uuid.NewString()
 	persistedHash := "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
@@ -7414,17 +7408,16 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 	}
 
 	orphanTargets := []struct {
-		runID       string
-		source      string
-		cause       string
-		fingerprint string
+		runID  string
+		source string
+		cause  string
 	}{
 		{runID: uuid.NewString(), source: storerunlifecycle.BundleSourceEphemeral, cause: preservationcleanup.BundleEphemeralOrphanedReason},
 		{runID: uuid.NewString(), source: storerunlifecycle.BundleSourceDeleted, cause: preservationcleanup.BundleDeletedOrphanedReason},
-		{runID: serveRuntimeLegacyRunIDForTest, source: storerunlifecycle.BundleSourceLegacy, cause: preservationcleanup.BundleLegacyOrphanedReason, fingerprint: bootIdentity.Fingerprint},
+		{runID: serveRuntimeUnavailableRunIDForTest, source: storerunlifecycle.BundleSourceEphemeral, cause: preservationcleanup.BundleEphemeralOrphanedReason},
 	}
 	for _, target := range orphanTargets {
-		seedServeRuntimeUnavailableBundleRunState(t, ctx, runtimePG, target.runID, target.source, target.fingerprint)
+		seedServeRuntimeUnavailableBundleRunState(t, ctx, runtimePG, target.runID, target.source)
 	}
 
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
@@ -7456,12 +7449,12 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 	for _, target := range orphanTargets {
 		assertServeRuntimeUnavailableBundleRunOrphaned(t, context.Background(), &store.PostgresStore{DB: db}, target.runID, target.cause)
 	}
-	if len(stoppedContainers) != 1 || stoppedContainers[0] != "swarm-legacy-agent" {
-		t.Fatalf("stopped containers = %#v, want only legacy run container", stoppedContainers)
+	if len(stoppedContainers) != 1 || stoppedContainers[0] != "swarm-unavailable-agent" {
+		t.Fatalf("stopped containers = %#v, want only unavailable run container", stoppedContainers)
 	}
 }
 
-const serveRuntimeLegacyRunIDForTest = "11111111-2222-3333-4444-555555555555"
+const serveRuntimeUnavailableRunIDForTest = "11111111-2222-3333-4444-555555555555"
 
 func installServeRuntimePostgresTestStores(t *testing.T, workspaceFactory func() cliapp.ServeWorkspaceLifecycle) (string, *sql.DB, *store.PostgresStore) {
 	t.Helper()
@@ -7498,9 +7491,9 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 	eventID := uuid.NewString()
 	activeSessionID := uuid.NewString()
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
-		VALUES (?, 'running', ?, ?, ?, ?)
-	`, runID, bundleHash, storerunlifecycle.BundleSourceEphemeral, "sha256:2222222222222222222222222222222222222222222222222222222222222222", now.Add(-time.Hour)); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES (?, 'running', ?, ?, ?)
+	`, runID, bundleHash, storerunlifecycle.BundleSourceEphemeral, now.Add(-time.Hour)); err != nil {
 		_ = sqliteStore.Close()
 		t.Fatalf("seed sqlite active run: %v", err)
 	}
@@ -7605,17 +7598,21 @@ func assertPostgresTableExists(t *testing.T, db *sql.DB, tableName string) {
 	}
 }
 
-func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context, runtimePG *store.PostgresStore, runID, source, fingerprint string) {
+func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context, runtimePG *store.PostgresStore, runID, source string) {
 	t.Helper()
 	db := runtimePG.DB
 	bundleHash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	admissionSource := source
+	if source == storerunlifecycle.BundleSourceDeleted {
+		admissionSource = storerunlifecycle.BundleSourceEphemeral
+	}
 	sessionID := uuid.NewString()
 	timerID := uuid.NewString()
 	eventID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
-		VALUES ($1::uuid, 'running', $2, $3, NULLIF($4, ''), now())
-	`, runID, bundleHash, source, fingerprint); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES ($1::uuid, 'running', $2, $3, now())
+	`, runID, bundleHash, admissionSource); err != nil {
 		t.Fatalf("seed unavailable bundle run %s: %v", source, err)
 	}
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
@@ -7642,6 +7639,15 @@ func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context
 		VALUES ($1::uuid, $2, $3::uuid, 'timer.fired', now() + interval '1 hour', 'active')
 	`, timerID, "timer-"+source, runID); err != nil {
 		t.Fatalf("seed timer %s: %v", source, err)
+	}
+	if source == storerunlifecycle.BundleSourceDeleted {
+		if _, err := db.ExecContext(ctx, `
+			UPDATE runs
+			SET bundle_source = $2
+			WHERE run_id = $1::uuid
+		`, runID, storerunlifecycle.BundleSourceDeleted); err != nil {
+			t.Fatalf("mark unavailable bundle run deleted: %v", err)
+		}
 	}
 }
 
@@ -7757,23 +7763,18 @@ func TestPrepareServeBundleSourcePersistsCatalogForContractsServe(t *testing.T) 
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := context.Background()
 	bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier12-runtime-tools/test-flow-data-access")
-	identity, err := runtimecontracts.BootBundleIdentity(bundle)
-	if err != nil {
-		t.Fatalf("BootBundleIdentity: %v", err)
-	}
-
-	fact, err := prepareServeBundleSource(ctx, selectedPostgresStoreBundle(pg, &config.Config{}), bundle, identity.Fingerprint, false)
+	fact, err := prepareServeBundleSource(ctx, selectedPostgresStoreBundle(pg, &config.Config{}), bundle, false)
 	if err != nil {
 		t.Fatalf("prepareServeBundleSource: %v", err)
 	}
-	if fact.BundleSource != storerunlifecycle.BundleSourcePersisted || fact.BundleHash == "" || fact.BundleFingerprint != identity.Fingerprint {
+	if !fact.IsPersisted() || fact.BundleHash() == "" {
 		t.Fatalf("source fact = %#v", fact)
 	}
-	detail, err := pg.LoadBundleCatalog(ctx, fact.BundleHash)
+	detail, err := pg.LoadBundleCatalog(ctx, fact.BundleHash())
 	if err != nil {
-		t.Fatalf("LoadBundleCatalog(%s): %v", fact.BundleHash, err)
+		t.Fatalf("LoadBundleCatalog(%s): %v", fact.BundleHash(), err)
 	}
-	if detail.BundleHash != fact.BundleHash || detail.AgentCount == 0 || detail.ContentYAML == "" {
+	if detail.BundleHash != fact.BundleHash() || detail.AgentCount == 0 || detail.ContentYAML == "" {
 		t.Fatalf("bundle catalog detail = %#v", detail)
 	}
 }
@@ -7783,19 +7784,14 @@ func TestPrepareServeBundleSourceDevStampsEphemeralWithoutCatalogRow(t *testing.
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := context.Background()
 	bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier12-runtime-tools/test-flow-data-access")
-	identity, err := runtimecontracts.BootBundleIdentity(bundle)
-	if err != nil {
-		t.Fatalf("BootBundleIdentity: %v", err)
-	}
-
-	fact, err := prepareServeBundleSource(ctx, selectedPostgresStoreBundle(pg, &config.Config{}), bundle, identity.Fingerprint, true)
+	fact, err := prepareServeBundleSource(ctx, selectedPostgresStoreBundle(pg, &config.Config{}), bundle, true)
 	if err != nil {
 		t.Fatalf("prepareServeBundleSource(dev): %v", err)
 	}
-	if fact.BundleSource != storerunlifecycle.BundleSourceEphemeral || fact.BundleHash == "" || fact.BundleFingerprint != identity.Fingerprint {
+	if !fact.IsEphemeral() || fact.BundleHash() == "" {
 		t.Fatalf("source fact = %#v", fact)
 	}
-	if _, err := pg.LoadBundleCatalog(ctx, fact.BundleHash); err != store.ErrBundleNotFound {
+	if _, err := pg.LoadBundleCatalog(ctx, fact.BundleHash()); err != store.ErrBundleNotFound {
 		t.Fatalf("LoadBundleCatalog(dev hash) error = %v, want ErrBundleNotFound", err)
 	}
 }
@@ -7803,16 +7799,11 @@ func TestPrepareServeBundleSourceDevStampsEphemeralWithoutCatalogRow(t *testing.
 func TestPrepareServeBundleSourceSQLiteStampsEphemeralWithoutPostgresCatalog(t *testing.T) {
 	ctx := context.Background()
 	bundle := loadWorkflowValidationFixtureBundle(t, "examples/routing/root-ingress")
-	identity, err := runtimecontracts.BootBundleIdentity(bundle)
-	if err != nil {
-		t.Fatalf("BootBundleIdentity: %v", err)
-	}
-
-	fact, err := prepareServeBundleSource(ctx, storeBundle{}, bundle, identity.Fingerprint, false)
+	fact, err := prepareServeBundleSource(ctx, storeBundle{}, bundle, false)
 	if err != nil {
 		t.Fatalf("prepareServeBundleSource(sqlite local): %v", err)
 	}
-	if fact.BundleSource != storerunlifecycle.BundleSourceEphemeral || fact.BundleHash == "" || fact.BundleFingerprint != identity.Fingerprint {
+	if !fact.IsEphemeral() || fact.BundleHash() == "" {
 		t.Fatalf("source fact = %#v", fact)
 	}
 }
@@ -7927,9 +7918,9 @@ func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, en
 	t.Helper()
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
-	`, runID, at.Add(-time.Minute)); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES ($1::uuid, 'running', $2, 'ephemeral', $3)
+	`, runID, serveRuntimeTestBundleHash, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
@@ -8838,11 +8829,10 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	activeSessionID := uuid.NewString()
 	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
 	bundleHash := servedEventPublishFixtureBundleHash(t, filepath.Join(cliapp.RepoRoot(), contractsPath))
-	mismatchFingerprint := "sha256:2222222222222222222222222222222222222222222222222222222222222222"
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
-		VALUES ($1::uuid, 'running', $2, $3, $4, now())
-	`, runID, bundleHash, storerunlifecycle.BundleSourceEphemeral, mismatchFingerprint); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES ($1::uuid, 'running', $2, $3, now())
+	`, runID, bundleHash, storerunlifecycle.BundleSourceEphemeral); err != nil {
 		t.Fatalf("seed active mismatched run: %v", err)
 	}
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,

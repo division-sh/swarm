@@ -234,7 +234,10 @@ func TestDynamicAuthorActivityEventDescriptorRejectsStaticConflict(t *testing.T)
 func TestAuthorActivityEventAndEffectAdaptersRenderExactSubjects(t *testing.T) {
 	db := openAuthorActivityAdapterDB(t)
 	ctx := runtimecorrelation.WithRuntimeInstanceID(testAuthorActivityContext(), uuid.NewString())
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, runtimecorrelation.BundleSourceFact{BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64)})
+	ctx = runtimecorrelation.WithBundleSourceFact(
+		ctx,
+		mustStoreTestEphemeralBundleSourceFact("bundle-v1:sha256:"+strings.Repeat("a", 64)),
+	)
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)

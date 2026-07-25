@@ -40,11 +40,11 @@ func managedClaudeProviderTurnTestContext(t testing.TB, executionKind managedcap
 	)
 	switch executionKind {
 	case managedcapabilities.ExecutionNormalAgent:
-		admission, err = managedexecution.New(managedexecution.KindNormalRuntime, "normal-claude-execution", harness.Token.Generation, "", "test-actors", "test-config", nil)
+		admission, err = managedexecution.New(managedexecution.KindNormalRuntime, "normal-claude-execution", harness.Token.Generation, "", "test-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
 		authority = runtimeeffects.NormalAgentAuthority(harness.Token, "normal-claude-owner", time.Now().UTC().Add(time.Minute))
 	case managedcapabilities.ExecutionSelectedContractFork:
 		executionID := uuid.NewString()
-		admission, err = managedexecution.New(managedexecution.KindSelectedContractFork, executionID, 1, target.RunID, "test-actors", "test-config", nil)
+		admission, err = managedexecution.New(managedexecution.KindSelectedContractFork, executionID, 1, target.RunID, "test-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
 		authority = runtimeeffects.Authority{
 			Kind: runtimeeffects.AuthoritySelectedContractFork, ID: executionID,
 			SelectedFork: runtimeeffects.SelectedContractForkAuthority{
@@ -156,11 +156,11 @@ func TestTurnContextRegistryPreservesManagedEffectAuthority(t *testing.T) {
 func TestTurnContextRegistryPreservesAuthorActivityScopeAndRequiredSourceIdentity(t *testing.T) {
 	registry := NewTurnContextRegistry(models.ActorFromContext)
 	ctx, surface, _ := managedClaudeProviderTurnTestContext(t, managedcapabilities.ExecutionNormalAgent)
-	scope := runtimeauthoractivity.BundleScope("runtime-instance", "bundle-hash")
-	source := runtimecorrelation.BundleSourceFact{
-		BundleHash:        "bundle-hash",
-		BundleSource:      "test-bundle",
-		BundleFingerprint: "bundle-fingerprint",
+	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	scope := runtimeauthoractivity.BundleScope("runtime-instance", bundleHash)
+	source, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+	if err != nil {
+		t.Fatalf("NewEphemeralBundleSourceFact: %v", err)
 	}
 	ctx = runtimeauthoractivity.WithScope(ctx, scope)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, source)

@@ -38,9 +38,6 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 				if got := req.Params["bundle_hash"]; got != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 					t.Fatalf("bundle_hash = %#v, want health.check bundle hash", got)
 				}
-				if _, ok := req.Params["bundle_ref"]; ok {
-					t.Fatalf("bundle_ref unexpectedly present without bundle flag: %#v", req.Params)
-				}
 				return map[string]any{"run_id": "run-local", "status": "running"}
 			case "run.get":
 				run := validDiagnosticRunHeader("run-local")
@@ -302,27 +299,15 @@ func TestRunCommandStartIncludesOptionalRunIDAndIdempotencyKey(t *testing.T) {
 	assertRunCommandMethods(t, calls, []string{"health.check", "run.start"})
 }
 
-func TestRunCommandBundleFingerprintMismatchFailsBeforeRunStart(t *testing.T) {
-	setCLIAPITestToken(t, "test-token")
+func TestRunCommandRetiredBundleFlagFailsBeforeRPC(t *testing.T) {
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
-	server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
-		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
-			if req.Method != "health.check" {
-				t.Fatalf("unexpected method = %q; run.start must not be called after bundle mismatch", req.Method)
-			}
-			return runCommandHealthResult()
-		},
-	})
-	defer server.Close()
-
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--bundle-fingerprint", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
-	if code != 6 {
-		t.Fatalf("code = %d, want 6 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, retiredBundleIdentityFlag(), "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "--no-follow"}, &stdout, &stderr, testRunCommandOptions(nil))
+	if code != 2 {
+		t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	assertRunCommandMethods(t, calls, []string{"health.check"})
-	if !strings.Contains(stderr.String(), "bundle fingerprint mismatch") {
-		t.Fatalf("stderr = %q, want bundle mismatch", stderr.String())
+	if !strings.Contains(stderr.String(), "unknown flag") {
+		t.Fatalf("stderr = %q, want unknown flag", stderr.String())
 	}
 }
 
@@ -345,9 +330,6 @@ func TestRunCommandBundleHashSerializesCanonicalParamAndMapsUnsupported(t *testi
 		case "run.start":
 			if got := req.Params["bundle_hash"]; got != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 				t.Fatalf("bundle_hash = %#v", got)
-			}
-			if _, ok := req.Params["bundle_ref"]; ok {
-				t.Fatalf("bundle_ref unexpectedly present: %#v", req.Params)
 			}
 			writeRunCommandJSONRPCError(t, w, req.ID, "UNSUPPORTED_BUNDLE_HASH")
 		default:
@@ -480,38 +462,6 @@ func TestRunCommandStartRendersRootInputRejectionFromServerFacts(t *testing.T) {
 			t.Fatalf("stderr = %q, want substring %q", stderr.String(), want)
 		}
 	}
-}
-
-func TestRunCommandBundleFingerprintSerializesLegacyBundleRef(t *testing.T) {
-	setCLIAPITestToken(t, "test-token")
-	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
-	server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
-		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
-			switch req.Method {
-			case "health.check":
-				return runCommandHealthResult()
-			case "run.start":
-				if got := req.Params["bundle_ref"]; !reflect.DeepEqual(got, map[string]any{"fingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}) {
-					t.Fatalf("bundle_ref = %#v", got)
-				}
-				if _, ok := req.Params["bundle_hash"]; ok {
-					t.Fatalf("bundle_hash unexpectedly present: %#v", req.Params)
-				}
-				return map[string]any{"run_id": "run-legacy", "status": "running"}
-			default:
-				t.Fatalf("unexpected method = %q", req.Method)
-			}
-			return nil
-		},
-	})
-	defer server.Close()
-
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--bundle-fingerprint", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
-	if code != 0 {
-		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-	}
-	assertRunCommandMethods(t, calls, []string{"health.check", "run.start"})
 }
 
 func TestRunCommandConnectedForegroundFollowsTraceAndExitsOnTerminalRunGet(t *testing.T) {
@@ -892,10 +842,8 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 		{name: "no follow reattach rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--no-follow"}, wantCode: 2, wantStderr: "--no-follow and --reattach are mutually exclusive"},
 		{name: "invalid bundle hash rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>"},
 		{name: "blank bundle hash rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "  "}, wantCode: 2, wantStderr: "--bundle-hash must be non-empty"},
-		{name: "invalid bundle fingerprint rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-fingerprint", "sha256:BAD"}, wantCode: 2, wantStderr: "--bundle-fingerprint must be sha256:<64 lowercase hex>"},
-		{name: "bundle hash conflicts with legacy fingerprint", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--bundle-fingerprint", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "--bundle-hash is mutually exclusive with --bundle-fingerprint"},
+		{name: "retired bundle flag rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, retiredBundleIdentityFlag(), "sha256:BAD"}, wantCode: 2, wantStderr: "unknown flag"},
 		{name: "reattach rejects bundle hash", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --bundle-hash"},
-		{name: "reattach rejects bundle fingerprint", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--bundle-fingerprint", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --bundle-fingerprint"},
 		{name: "reattach rejects config flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--config", "swarm.yaml"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --config"},
 		{name: "reattach rejects backend flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--backend", "claude_cli"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --backend"},
 		{name: "reattach rejects local startup flags", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--contracts", "contracts"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --contracts"},
@@ -1144,7 +1092,6 @@ func runCommandHealthResult() map[string]any {
 		"bundle": map[string]any{
 			"workflow_name":    "review",
 			"workflow_version": "1.2.3",
-			"fingerprint":      "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			"bundle_hash":      "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 	}

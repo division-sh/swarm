@@ -205,7 +205,7 @@ func (am *AgentManager) bindRuntimeOperationContext(ctx context.Context) (contex
 		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, ownerScope.RuntimeInstanceID)
 	}
 	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(base); ok {
-		if current, currentOK := runtimecorrelation.BundleSourceFactFromContext(ctx); currentOK && current.BundleHash != "" && current.BundleHash != fact.BundleHash {
+		if current, currentOK := runtimecorrelation.BundleSourceFactFromContext(ctx); currentOK && current.BundleHash() != "" && current.BundleHash() != fact.BundleHash() {
 			return nil, fmt.Errorf("manager bundle source fact conflicts with selected operation scope")
 		}
 		ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)

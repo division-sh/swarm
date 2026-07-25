@@ -453,7 +453,7 @@ func TestValidateCLIResponseToolCallsForTurn_FailsClosedForNonEmitToolOutsideObs
 
 func TestValidateCLIResponseToolCallsForTurn_ManagedTurnRejectsMissingCapabilitySurface(t *testing.T) {
 	actor := models.AgentConfig{ID: "market-research-agent"}
-	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "runtime-owner", 1, "", "actors", "bundle", nil)
+	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "runtime-owner", 1, "", "actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
 	if err != nil {
 		t.Fatalf("build managed execution admission: %v", err)
 	}

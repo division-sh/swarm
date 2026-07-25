@@ -508,7 +508,7 @@ func runVersionCommand(ctx context.Context, out, errOut io.Writer, opts versionC
 		writeLocalVersion(w, metadata)
 		writeVersionServerIdentity(w, health)
 	}, func() ([]string, error) {
-		return []string{metadata.BinaryVersion, health.Bundle.Fingerprint}, nil
+		return []string{metadata.BinaryVersion, health.Bundle.BundleHash}, nil
 	})
 }
 

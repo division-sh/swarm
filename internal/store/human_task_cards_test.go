@@ -403,7 +403,7 @@ func newHumanTaskDecisionCardTestFixture(t *testing.T, runID, operationID string
 	card, err := decisioncard.New(decisioncard.Card{
 		CardID: uuid.NewString(), RunID: runID, Anchor: anchor, Snapshot: snapshot,
 		ExecutionMode:    "live",
-		BundleHash:       "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		BundleHash:       authorActivityTestBundleHash,
 		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"}, CreatedAt: createdAt,
 	})
 	if err != nil {

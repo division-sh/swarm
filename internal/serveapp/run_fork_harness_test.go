@@ -21,7 +21,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -196,12 +195,16 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 				writeForkContractLoadError(out, "fork failed: hash selected contracts", err)
 				return cliapp.CLIExitValidation
 			}
+			bundleSource, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+			if err != nil {
+				writeForkContractLoadError(out, "fork failed: classify selected contracts", err)
+				return cliapp.CLIExitValidation
+			}
 			result, err := runForkOwner.materialize(ctx, store.RunForkMaterializeRequest{
 				SourceRunID:       strings.TrimSpace(*runID),
 				At:                strings.TrimSpace(*at),
 				ContractSelection: contractSelection,
-				BundleHash:        bundleHash,
-				BundleSource:      storerunlifecycle.BundleSourceEphemeral,
+				BundleSourceFact:  bundleSource,
 			})
 			if err != nil {
 				if out != nil {

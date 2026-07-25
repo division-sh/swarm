@@ -168,8 +168,8 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	}
 
 	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_source, started_at)
-		VALUES (?, 'running', 'legacy', ?)
+		INSERT INTO runs (run_id, status, bundle_source, started_at, bundle_hash)
+		VALUES (?, 'running', 'ephemeral', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
 		ON CONFLICT(run_id) DO UPDATE SET status = 'running'
 	`, runID, time.Now().UTC()); err != nil {
 		t.Fatalf("seed sqlite run row: %v", err)
@@ -244,8 +244,8 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 	eventID := uuid.NewString()
 	now := time.Now().UTC()
 	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_source, started_at)
-		VALUES (?, 'running', 'ephemeral', ?)
+		INSERT INTO runs (run_id, status, bundle_source, started_at, bundle_hash)
+		VALUES (?, 'running', 'ephemeral', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
 	`, runID, now); err != nil {
 		t.Fatalf("seed sqlite run: %v", err)
 	}
@@ -374,8 +374,8 @@ func TestSQLiteRuntimeStoreUpsertAgentConsumesActivePipelineTransaction(t *testi
 
 	now := time.Now().UTC()
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES (?, 'running', ?)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runtimecorrelation.RunIDFromContext(ctx), now); err != nil {
 		t.Fatalf("seed active sqlite write transaction: %v", err)
 	}
@@ -415,7 +415,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContext()), runID)
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed activation run: %v", err)
 	}
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
@@ -460,7 +460,7 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContext()), runID)
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed fan-out run: %v", err)
 	}
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
@@ -941,8 +941,8 @@ func TestSQLiteRuntimeStoreRuntimeIngressReadDuringPublishDoesNotReenterWrite(t 
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES (?, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -997,7 +997,7 @@ func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed workflow instance run: %v", err)
 	}
 	owner := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
@@ -1055,7 +1055,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	store.SetNowFnForTest(func() time.Time { return now })
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, now); err != nil {
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, now); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -1202,7 +1202,7 @@ func TestSQLiteRuntimeStore_StatelessAuditUsesExplicitMemoryPlan(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	sessionID := uuid.NewString()
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -1263,7 +1263,7 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsEntityMetadata(t *testing.T) {
 	runID := uuid.NewString()
 	sessionID := uuid.NewString()
 	entityID := uuid.NewString()
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -1321,7 +1321,7 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsFlowInstanceMetadata(t *testin
 	runID := uuid.NewString()
 	sessionID := uuid.NewString()
 	flowInstance := "review/inst-1"
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -1379,7 +1379,7 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
 	store.SetNowFnForTest(func() time.Time { return now })
 	runID := uuid.NewString()
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, now); err != nil {
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, now); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -1658,8 +1658,8 @@ func TestSQLiteRuntimeStoreScheduleUsesPipelineTransactionForRollbackVisibility(
 func seedSQLiteScheduleRun(t *testing.T, store *SQLiteRuntimeStore, ctx context.Context, runID string) {
 	t.Helper()
 	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_source, started_at)
-		VALUES (?, 'running', 'legacy', ?)
+		INSERT INTO runs (run_id, status, bundle_source, started_at, bundle_hash)
+		VALUES (?, 'running', 'ephemeral', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
 	`, runID, time.Now().UTC()); err != nil {
 		t.Fatalf("seed sqlite run row: %v", err)
 	}

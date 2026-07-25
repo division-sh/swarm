@@ -10,7 +10,6 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/runbundle"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 type RunBundleContextStore interface {
@@ -18,7 +17,7 @@ type RunBundleContextStore interface {
 }
 
 type runtimeBundleSourceFactProvider interface {
-	WithBundleFingerprint(context.Context) context.Context
+	WithBundleSourceFact(context.Context) context.Context
 }
 
 func resolveEventPublicationBundleScope(
@@ -48,33 +47,33 @@ func resolveEventPublicationBundleScope(
 			if err != nil {
 				return ctx, opts, params, err
 			}
-			currentFact, _ := runtimecorrelation.BundleSourceFactFromContext(ctx)
-			currentFact = currentFact.Normalized()
-			params.BundleHash = runAvailability.BundleHash
-			params.BundleSource = currentFact.BundleSource
-			params.BundleFingerprint = currentFact.BundleFingerprint
+			currentFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+			if !ok || currentFact.BundleHash() != runAvailability.BundleHash {
+				return ctx, opts, params, NewApplicationError(BundleDataIntegrityErrorCode, false, map[string]any{
+					"run_id": params.RunID, "bundle_hash": runAvailability.BundleHash, "cause": "runtime_source_fact_mismatch",
+				})
+			}
+			params.BundleSourceFact = currentFact
 			return ctx, selectedOpts, params, nil
 		}
 		if err := eventPublicationRunBundleAvailable(runAvailability); err != nil {
 			return ctx, opts, params, err
 		}
 		resolvedHash = runAvailability.BundleHash
-		params.BundleSource = runAvailability.BundleSource
+		currentFact, decodeErr := runtimecorrelation.DecodeBundleSourceFact(runAvailability.BundleHash, runAvailability.BundleSource.String())
+		if decodeErr != nil {
+			return ctx, opts, params, NewApplicationError(BundleDataIntegrityErrorCode, false, bundleAvailabilityDetails(runAvailability))
+		}
+		params.BundleSourceFact = currentFact
+		ctx, err = eventPublicationSourceContext(ctx, currentFact)
+		return ctx, opts, params, err
 	}
-	if resolvedHash == "" && identity.LegacyFingerprint == "" && !hasRunContext && runtimeContextManager(opts) == nil {
-		var currentFact runtimecorrelation.BundleSourceFact
-		var hasCurrentFact bool
+	var currentFact runtimecorrelation.BundleSourceFact
+	var hasCurrentFact bool
+	if runtimeContextManager(opts) == nil {
 		ctx, currentFact, hasCurrentFact = eventPublicationRuntimeSourceContext(ctx, opts.Events)
-		currentFact = currentFact.Normalized()
-		if hasCurrentFact &&
-			currentFact.BundleHash != "" &&
-			currentFact.BundleSource == storerunlifecycle.BundleSourceEphemeral &&
-			currentFact.BundleFingerprint != "" {
-			params.BundleHash = currentFact.BundleHash
-			params.BundleSource = currentFact.BundleSource
-			params.BundleFingerprint = currentFact.BundleFingerprint
-			ctx, err = eventPublicationSourceContext(ctx, currentFact)
-			return ctx, opts, params, err
+		if resolvedHash == "" && hasCurrentFact {
+			resolvedHash = currentFact.BundleHash()
 		}
 	}
 	if resolvedHash == "" {
@@ -101,43 +100,41 @@ func resolveEventPublicationBundleScope(
 				"cause":       "runtime_context_not_loaded",
 			})
 		}
-		currentFact, _ := runtimecorrelation.BundleSourceFactFromContext(ctx)
-		currentFact = currentFact.Normalized()
-		params.BundleHash = resolvedHash
-		params.BundleSource = currentFact.BundleSource
-		params.BundleFingerprint = currentFact.BundleFingerprint
+		currentFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+		if !ok || currentFact.BundleHash() != resolvedHash {
+			return ctx, opts, params, NewApplicationError(BundleDataIntegrityErrorCode, false, map[string]any{
+				"bundle_hash": resolvedHash, "run_id": strings.TrimSpace(params.RunID), "cause": "runtime_source_fact_mismatch",
+			})
+		}
+		params.BundleSourceFact = currentFact
 		return ctx, selectedOpts, params, nil
 	}
-	var currentFact runtimecorrelation.BundleSourceFact
-	var hasCurrentFact bool
-	ctx, currentFact, hasCurrentFact = eventPublicationRuntimeSourceContext(ctx, opts.Events)
-	if !hasCurrentFact || strings.TrimSpace(currentFact.BundleHash) == "" {
+	if !hasCurrentFact {
 		return ctx, opts, params, NewApplicationError(BundleUnavailableCode, false, map[string]any{
 			"bundle_hash": resolvedHash,
 			"run_id":      strings.TrimSpace(params.RunID),
 			"cause":       "runtime_source_fact_missing",
 		})
 	}
-	currentFact = currentFact.Normalized()
-	if currentFact.BundleHash != resolvedHash {
+	if currentFact.BundleHash() != resolvedHash {
 		return ctx, opts, params, NewApplicationError(BundleUnavailableCode, false, map[string]any{
 			"bundle_hash":        resolvedHash,
 			"run_id":             strings.TrimSpace(params.RunID),
-			"active_bundle_hash": currentFact.BundleHash,
+			"active_bundle_hash": currentFact.BundleHash(),
 			"cause":              "single_active_runtime_unavailable",
 		})
 	}
 
-	params.BundleHash = resolvedHash
-	params.BundleSource = currentFact.BundleSource
-	params.BundleFingerprint = currentFact.BundleFingerprint
+	params.BundleSourceFact = currentFact
 	ctx, err = eventPublicationSourceContext(ctx, currentFact)
 	return ctx, opts, params, err
 }
 
 func eventPublicationSourceContext(ctx context.Context, fact runtimecorrelation.BundleSourceFact) (context.Context, error) {
-	fact = fact.Normalized()
-	scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, fact.BundleHash)
+	if err := fact.Validate(); err != nil {
+		return ctx, fmt.Errorf("resolve event publication bundle source fact: %w", err)
+	}
+	scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, fact.BundleHash())
 	if err != nil {
 		return ctx, fmt.Errorf("resolve event publication author activity scope: %w", err)
 	}
@@ -149,7 +146,7 @@ func eventPublicationSourceContext(ctx context.Context, fact runtimecorrelation.
 func eventPublicationRuntimeSourceContext(ctx context.Context, publisher EventPublisher) (context.Context, runtimecorrelation.BundleSourceFact, bool) {
 	provider, ok := publisher.(runtimeBundleSourceFactProvider)
 	if ok && provider != nil {
-		ctx = provider.WithBundleFingerprint(ctx)
+		ctx = provider.WithBundleSourceFact(ctx)
 	}
 	fact, found := runtimecorrelation.BundleSourceFactFromContext(ctx)
 	return ctx, fact, found
@@ -182,16 +179,11 @@ func eventPublicationRunBundleContext(
 }
 
 func eventPublicationRunBundleAvailable(availability runbundle.Availability) error {
-	source, err := storerunlifecycle.CanonicalBundleSource(availability.BundleSource)
-	if err != nil {
-		return err
-	}
-	availability.BundleSource = source
 	if availability.ErrorCode == BundleDataIntegrityErrorCode {
 		return NewApplicationError(BundleDataIntegrityErrorCode, false, bundleAvailabilityDetails(availability))
 	}
-	switch source {
-	case storerunlifecycle.BundleSourcePersisted:
+	switch {
+	case availability.BundleSource.IsPersisted():
 		if availability.BundleHash == "" || !availability.BundleRowPresent {
 			if availability.Cause == "" {
 				availability.Cause = "persisted_missing_bundle_context"
@@ -199,16 +191,16 @@ func eventPublicationRunBundleAvailable(availability runbundle.Availability) err
 			return NewApplicationError(BundleDataIntegrityErrorCode, false, bundleAvailabilityDetails(availability))
 		}
 		return nil
-	case storerunlifecycle.BundleSourceEphemeral:
+	case availability.BundleSource.IsEphemeral():
 		if availability.BundleHash != "" {
 			return nil
 		}
 		if availability.Cause == "" {
 			availability.Cause = "ephemeral_missing_hash"
 		}
-	case storerunlifecycle.BundleSourceDeleted, storerunlifecycle.BundleSourceLegacy:
+	case availability.BundleSource.IsDeleted():
 		if availability.Cause == "" {
-			availability.Cause = source
+			availability.Cause = availability.BundleSource.String()
 		}
 	}
 	return NewApplicationError(BundleUnavailableCode, false, bundleAvailabilityDetails(availability))
@@ -219,7 +211,7 @@ func bundleMismatchDetails(runID, requestedHash string, availability runbundle.A
 		"run_id":          strings.TrimSpace(runID),
 		"requested_hash":  strings.TrimSpace(requestedHash),
 		"run_bundle_hash": strings.TrimSpace(availability.BundleHash),
-		"bundle_source":   strings.TrimSpace(availability.BundleSource),
+		"bundle_source":   availability.BundleSource.String(),
 	}
 }
 
@@ -234,11 +226,8 @@ func bundleAvailabilityDetails(availability runbundle.Availability) map[string]a
 	if availability.BundleHash != "" {
 		details["bundle_hash"] = strings.TrimSpace(availability.BundleHash)
 	}
-	if availability.BundleSource != "" {
-		details["bundle_source"] = strings.TrimSpace(availability.BundleSource)
-	}
-	if availability.BundleFingerprint != "" {
-		details["legacy_bundle_fingerprint"] = strings.TrimSpace(availability.BundleFingerprint)
+	if source := availability.BundleSource.String(); source != "" {
+		details["bundle_source"] = source
 	}
 	if availability.Cause != "" {
 		details["cause"] = strings.TrimSpace(availability.Cause)

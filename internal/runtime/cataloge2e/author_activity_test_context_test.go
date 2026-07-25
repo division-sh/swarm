@@ -13,16 +13,21 @@ import (
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
 
-var authorActivityTestBundleSourceFact = runtimecorrelation.BundleSourceFact{
-	BundleHash:        "bundle-v1:sha256:" + strings.Repeat("a", 64),
-	BundleSource:      "ephemeral",
-	BundleFingerprint: "sha256:" + strings.Repeat("a", 64),
+var authorActivityTestBundleSourceFact = mustAuthorActivityTestBundleSourceFact()
+
+func mustAuthorActivityTestBundleSourceFact() runtimecorrelation.BundleSourceFact {
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("e", 64))
+	if err != nil {
+		panic(err)
+	}
+	return fact
 }
 
 func testAuthorActivityContext(ctx context.Context) context.Context {
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, authorActivityTestBundleSourceFact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
-		authorActivityTestBundleSourceFact.BundleHash,
+		authorActivityTestBundleSourceFact.BundleHash(),
 	))
 }
 
@@ -30,7 +35,7 @@ func testAuthorActivityRuntimeOptions(opts runtimepkg.RuntimeOptions) runtimepkg
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
-	if strings.TrimSpace(opts.BundleSourceFact.BundleHash) == "" {
+	if strings.TrimSpace(opts.BundleSourceFact.BundleHash()) == "" {
 		opts.BundleSourceFact = authorActivityTestBundleSourceFact
 	}
 	return opts
@@ -50,7 +55,7 @@ func registerTestAuthorActivityCatalog(t *testing.T, target testAuthorActivityCa
 		})
 	}
 	lease, err := target.RegisterAuthorActivityEventCatalog(
-		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash),
+		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash()),
 		descriptors,
 	)
 	if err != nil {

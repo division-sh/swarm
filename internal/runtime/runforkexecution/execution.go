@@ -13,6 +13,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/store"
@@ -21,8 +22,8 @@ import (
 type SelectedContractExecutionRequest struct {
 	SourceRunID         string
 	At                  string
-	BundleHash          string
-	BundleSource        string
+	ExpectedBundleHash  string
+	BundleSourceFact    runtimecorrelation.BundleSourceFact
 	ConfirmSourceFreeze bool
 	Store               *store.PostgresStore
 	SourceLoader        SelectedContractSourceLoader
@@ -58,12 +59,25 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if err != nil {
 		return SelectedContractExecutionResult{}, err
 	}
+	expectedBundleHash := strings.TrimSpace(req.ExpectedBundleHash)
+	if req.BundleSourceFact.BundleHash() != "" {
+		if err := req.BundleSourceFact.Validate(); err != nil {
+			return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract execution expected bundle source fact is invalid: %w", err)
+		}
+		if expectedBundleHash != "" && expectedBundleHash != req.BundleSourceFact.BundleHash() {
+			return SelectedContractExecutionResult{}, fmt.Errorf(
+				"selected-contract execution expected bundle_hash %s does not match source fact %s",
+				expectedBundleHash,
+				req.BundleSourceFact.BundleHash(),
+			)
+		}
+		expectedBundleHash = req.BundleSourceFact.BundleHash()
+	}
 	loadedSource, err := loadRunForkSelectedContractSource(ctx, req.SourceLoader, SelectedContractSourceLoadRequest{
-		SourceRunID:          req.SourceRunID,
-		BundleHash:           req.BundleHash,
-		ExpectedBundleHash:   req.BundleHash,
-		ExpectedBundleSource: req.BundleSource,
-		Selection:            selection,
+		SourceRunID:      req.SourceRunID,
+		BundleHash:       expectedBundleHash,
+		BundleSourceFact: req.BundleSourceFact,
+		Selection:        selection,
 	})
 	if err != nil {
 		return SelectedContractExecutionResult{}, fmt.Errorf("load selected semantic source for execution: %w", err)
@@ -73,11 +87,11 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if loadedSource.Module == nil {
 		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract execution requires executable selected workflow module")
 	}
-	materializationBundleHash := strings.TrimSpace(loadedSource.BundleHash)
-	materializationBundleSource := strings.TrimSpace(loadedSource.BundleSource)
-	if materializationBundleHash == "" || materializationBundleSource == "" {
-		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract source loader returned incomplete bundle identity")
+	if err := loadedSource.BundleSourceFact.Validate(); err != nil {
+		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract source loader returned incomplete bundle identity: %w", err)
 	}
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, loadedSource.BundleSourceFact)
+	materializationBundleHash := loadedSource.BundleSourceFact.BundleHash()
 	selectedScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, materializationBundleHash)
 	if err != nil {
 		return SelectedContractExecutionResult{}, fmt.Errorf("resolve selected-contract author activity scope: %w", err)
@@ -158,8 +172,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		SourceRunID:       plan.SourceRunID,
 		At:                plan.ForkPoint.EventID,
 		ContractSelection: selection,
-		BundleHash:        materializationBundleHash,
-		BundleSource:      materializationBundleSource,
+		BundleSourceFact:  loadedSource.BundleSourceFact,
 		FrontierAdmission: frontier,
 		RouteTopology:     routeTopology,
 		RecipientPlanning: *model.RecipientPlanning,
@@ -170,8 +183,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	admission, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         materialization.ForkRunID,
 		SourceRunID:       plan.SourceRunID,
-		BundleHash:        materializationBundleHash,
-		BundleSource:      materializationBundleSource,
+		BundleSourceFact:  loadedSource.BundleSourceFact,
 		BindingReader:     req.Store,
 		SourceLoader:      req.SourceLoader,
 		FrontierAdmission: frontier,
@@ -378,7 +390,7 @@ func selectedContractPipelineCoordinatorOptions(
 		Credentials:            agentRuntime.Credentials,
 		ManagedCredentials:     agentRuntime.ManagedCredentials,
 		MockConnectorResponses: loaded.MockConnectorResponses,
-		BundleHash:             loaded.BundleHash,
+		BundleSourceFact:       loaded.BundleSourceFact,
 	}
 }
 

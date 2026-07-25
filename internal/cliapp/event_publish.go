@@ -30,7 +30,6 @@ type eventPublishCommandOptions struct {
 	targetFlowInstance    string
 	targetEntityID        string
 	bundleHash            string
-	bundleFingerprint     string
 	emitter               string
 	idempotencyKey        string
 	payloadJSONSet        bool
@@ -39,7 +38,6 @@ type eventPublishCommandOptions struct {
 	targetFlowInstanceSet bool
 	targetEntityIDSet     bool
 	bundleHashSet         bool
-	bundleFingerprintSet  bool
 	emitterSet            bool
 	idempotencyKeySet     bool
 }
@@ -84,7 +82,6 @@ func newEventPublishCommand(opts rootCommandOptions) *cobra.Command {
 			publishOpts.targetFlowInstanceSet = cmd.Flags().Changed("target-flow-instance")
 			publishOpts.targetEntityIDSet = cmd.Flags().Changed("target-entity-id")
 			publishOpts.bundleHashSet = cmd.Flags().Changed("bundle-hash")
-			publishOpts.bundleFingerprintSet = cmd.Flags().Changed("bundle-fingerprint")
 			publishOpts.emitterSet = cmd.Flags().Changed("emitter")
 			publishOpts.idempotencyKeySet = cmd.Flags().Changed("idempotency-key")
 			return runEventPublishCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args, publishOpts)
@@ -96,7 +93,6 @@ func newEventPublishCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&publishOpts.targetFlowInstance, "target-flow-instance", "", "Optional existing-run receiver target flow instance")
 	cmd.Flags().StringVar(&publishOpts.targetEntityID, "target-entity-id", "", "Optional existing-run receiver target entity id")
 	cmd.Flags().StringVar(&publishOpts.bundleHash, "bundle-hash", "", "Optional expected server canonical bundle hash")
-	cmd.Flags().StringVar(&publishOpts.bundleFingerprint, "bundle-fingerprint", "", "Optional expected server bundle fingerprint")
 	cmd.Flags().StringVar(&publishOpts.emitter, "emitter", "", "Optional producer identifier")
 	cmd.Flags().StringVar(&publishOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
@@ -190,23 +186,11 @@ func (opts eventPublishCommandOptions) params(args []string) (string, map[string
 	if err != nil {
 		return "", nil, err
 	}
-	fingerprint, err := optionalNonEmptyFlag("--bundle-fingerprint", opts.bundleFingerprint, opts.bundleFingerprintSet)
-	if err != nil {
-		return "", nil, err
-	}
-	if bundleHash != "" && fingerprint != "" {
-		return "", nil, fmt.Errorf("--bundle-hash is mutually exclusive with --bundle-fingerprint")
-	}
 	if bundleHash != "" {
 		if !cliBundleHashPattern.MatchString(bundleHash) {
 			return "", nil, fmt.Errorf("--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>")
 		}
 		params["bundle_hash"] = bundleHash
-	} else if fingerprint != "" {
-		if !cliBundleFingerprintPattern.MatchString(fingerprint) {
-			return "", nil, fmt.Errorf("--bundle-fingerprint must be sha256:<64 lowercase hex>")
-		}
-		params["bundle_ref"] = map[string]any{"fingerprint": fingerprint}
 	}
 	if emitter, err := optionalNonEmptyFlag("--emitter", opts.emitter, opts.emitterSet); err != nil {
 		return "", nil, err
@@ -354,7 +338,6 @@ func eventPublishErrorExitCode(err error) int {
 			"BUNDLE_UNAVAILABLE",
 			"BUNDLE_DATA_INTEGRITY_ERROR",
 			"UNSUPPORTED_BUNDLE_HASH",
-			"UNSUPPORTED_BUNDLE_REF",
 			"EVENT_NOT_DECLARED",
 			"EVENT_PUBLISH_FAILED",
 			"PAYLOAD_VALIDATION_FAILED",

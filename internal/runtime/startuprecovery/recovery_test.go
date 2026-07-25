@@ -8,7 +8,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	"github.com/division-sh/swarm/internal/store/runbundle"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 func TestRecoverFailsPersistedMissingBeforeCleanupOrContainers(t *testing.T) {
@@ -16,7 +15,7 @@ func TestRecoverFailsPersistedMissingBeforeCleanupOrContainers(t *testing.T) {
 		{
 			RunID:        "11111111-1111-1111-1111-111111111111",
 			Status:       "running",
-			BundleSource: storerunlifecycle.BundleSourcePersisted,
+			BundleSource: runbundle.AvailabilitySourcePersisted,
 			BundleHash:   "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222",
 			ErrorCode:    runbundle.CodeBundleDataIntegrityError,
 			Cause:        "persisted_missing_bundle_row",
@@ -24,9 +23,9 @@ func TestRecoverFailsPersistedMissingBeforeCleanupOrContainers(t *testing.T) {
 		{
 			RunID:        "22222222-2222-2222-2222-222222222222",
 			Status:       "running",
-			BundleSource: storerunlifecycle.BundleSourceLegacy,
+			BundleSource: runbundle.AvailabilitySourceDeleted,
 			ErrorCode:    runbundle.CodeBundleUnavailable,
-			Cause:        storerunlifecycle.BundleSourceLegacy,
+			Cause:        runbundle.AvailabilitySourceDeleted.String(),
 		},
 	}}
 	cleanup := &fakeCleanupStore{}
@@ -58,14 +57,14 @@ func TestRecoverStopsRunScopedContainersThenAppliesPreservationCleanup(t *testin
 		{
 			RunID:        runID,
 			Status:       "running",
-			BundleSource: storerunlifecycle.BundleSourceLegacy,
+			BundleSource: runbundle.AvailabilitySourceEphemeral,
 			ErrorCode:    runbundle.CodeBundleUnavailable,
-			Cause:        storerunlifecycle.BundleSourceLegacy,
+			Cause:        runbundle.AvailabilitySourceEphemeral.String(),
 		},
 		{
 			RunID:            "33333333-3333-3333-3333-333333333333",
 			Status:           "running",
-			BundleSource:     storerunlifecycle.BundleSourcePersisted,
+			BundleSource:     runbundle.AvailabilitySourcePersisted,
 			BundleHash:       "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111",
 			BundleRowPresent: true,
 		},
@@ -85,8 +84,8 @@ func TestRecoverStopsRunScopedContainersThenAppliesPreservationCleanup(t *testin
 	if err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
-	if len(result.OrphanTargets) != 1 || result.OrphanTargets[0].RunID != runID || result.OrphanTargets[0].ReasonCode != preservationcleanup.BundleLegacyOrphanedReason {
-		t.Fatalf("orphan targets = %#v, want legacy run target", result.OrphanTargets)
+	if len(result.OrphanTargets) != 1 || result.OrphanTargets[0].RunID != runID || result.OrphanTargets[0].ReasonCode != preservationcleanup.BundleEphemeralOrphanedReason {
+		t.Fatalf("orphan targets = %#v, want ephemeral run target", result.OrphanTargets)
 	}
 	if len(containers.stopped) != 1 || containers.stopped[0] != "swarm-agent-selected" {
 		t.Fatalf("stopped containers = %#v, want selected run-scoped container only", containers.stopped)

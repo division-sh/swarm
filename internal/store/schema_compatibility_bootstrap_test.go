@@ -160,6 +160,8 @@ func TestSchemaBootstrapRejectsLegacyPlatformShapesUnchanged(t *testing.T) {
 			`DROP TABLE events`,
 			`ALTER TABLE events_without_source_route RENAME TO events`,
 		}},
+		{name: "run_legacy_bundle_identity_empty", table: "runs", postgres: []string{`ALTER TABLE runs ADD COLUMN bundle_fingerprint TEXT`}, sqlite: []string{`ALTER TABLE runs ADD COLUMN bundle_fingerprint TEXT`}},
+		{name: "run_legacy_bundle_identity_populated", table: "runs", postgres: legacyPostgresRunBundleIdentityShape(), sqlite: legacySQLiteRunBundleIdentityShape(), populated: true},
 		{name: "run_error_summary", table: "runs", postgres: []string{`ALTER TABLE runs ADD COLUMN error_summary TEXT`}, sqlite: []string{`ALTER TABLE runs ADD COLUMN error_summary TEXT`}},
 		{name: "directive_flat_error", table: "agent_directive_operations", postgres: []string{`ALTER TABLE agent_directive_operations ADD COLUMN error_code TEXT`}, sqlite: []string{`ALTER TABLE agent_directive_operations ADD COLUMN error_code TEXT`}},
 		{name: "mailbox_without_deferred_until", table: "mailbox", postgres: []string{`ALTER TABLE mailbox DROP COLUMN deferred_until`}, sqlite: []string{`ALTER TABLE mailbox DROP COLUMN deferred_until`}},
@@ -372,7 +374,7 @@ func legacySQLiteAgentTurnsShape(populated bool) []string {
 func legacyPostgresEntityStateShape() []string {
 	return []string{
 		`ALTER TABLE entity_state ADD COLUMN subject_id TEXT`,
-		`INSERT INTO runs (run_id, status) VALUES ('00000000-0000-0000-0000-000000002055'::uuid, 'running')`,
+		`INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ('00000000-0000-0000-0000-000000002055'::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`,
 		`INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state, subject_id) VALUES ('00000000-0000-0000-0000-000000002055'::uuid, '00000000-0000-0000-0000-000000002056'::uuid, 'legacy/one', 'active', 'subject-1')`,
 	}
 }
@@ -380,8 +382,22 @@ func legacyPostgresEntityStateShape() []string {
 func legacySQLiteEntityStateShape() []string {
 	return []string{
 		`ALTER TABLE entity_state ADD COLUMN subject_id TEXT`,
-		`INSERT INTO runs (run_id, status) VALUES ('00000000-0000-0000-0000-000000002055', 'running')`,
+		`INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ('00000000-0000-0000-0000-000000002055', 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`,
 		`INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state, subject_id) VALUES ('00000000-0000-0000-0000-000000002055', '00000000-0000-0000-0000-000000002056', 'legacy/one', 'active', 'subject-1')`,
+	}
+}
+
+func legacyPostgresRunBundleIdentityShape() []string {
+	return []string{
+		`ALTER TABLE runs ADD COLUMN bundle_fingerprint TEXT`,
+		`INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint) VALUES ('00000000-0000-0000-0000-000000002057'::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral', 'sha256:legacy')`,
+	}
+}
+
+func legacySQLiteRunBundleIdentityShape() []string {
+	return []string{
+		`ALTER TABLE runs ADD COLUMN bundle_fingerprint TEXT`,
+		`INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint) VALUES ('00000000-0000-0000-0000-000000002057', 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral', 'sha256:legacy')`,
 	}
 }
 

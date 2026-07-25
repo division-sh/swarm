@@ -1526,8 +1526,8 @@ node-a:
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	const otherRunID = "88888888-8888-8888-8888-888888888888"
 	if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `
-		INSERT INTO runs (run_id, status)
-		VALUES ($1::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 		ON CONFLICT (run_id) DO NOTHING
 	`, otherRunID); err != nil {
 		t.Fatalf("seed other run: %v", err)

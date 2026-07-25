@@ -11,11 +11,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/runbundle"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 type SelectedContractBindingReader interface {
@@ -31,19 +31,17 @@ type SelectedContractSourceRequestLoader interface {
 }
 
 type SelectedContractSourceLoadRequest struct {
-	SourceRunID          string
-	BundleHash           string
-	ExpectedBundleHash   string
-	ExpectedBundleSource string
-	Selection            store.RunForkContractSelection
+	SourceRunID      string
+	BundleHash       string
+	BundleSourceFact runtimecorrelation.BundleSourceFact
+	Selection        store.RunForkContractSelection
 }
 
 type LoadedSelectedContractSource struct {
 	Selection              store.RunForkContractSelection
 	Source                 semanticview.Source
 	Module                 runtimepipeline.WorkflowModule
-	BundleHash             string
-	BundleSource           string
+	BundleSourceFact       runtimecorrelation.BundleSourceFact
 	MockConnectorResponses *providerconnectors.MockResponsePlan
 	Cleanup                func() error
 }
@@ -142,11 +140,14 @@ func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSource(ctx contex
 	if err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
+	sourceFact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+	if err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
 	return LoadedSelectedContractSource{
 		Selection:              selection,
 		Source:                 source,
-		BundleHash:             bundleHash,
-		BundleSource:           storerunlifecycle.BundleSourceEphemeral,
+		BundleSourceFact:       sourceFact,
 		MockConnectorResponses: mockConnectorResponses,
 		Module: selectedContractWorkflowModule{
 			source:         source,
@@ -249,11 +250,15 @@ func (l BundleCatalogSelectedContractSourceLoader) LoadRunForkSelectedContractSo
 		_ = runtimeSource.Cleanup()
 		return LoadedSelectedContractSource{}, err
 	}
+	sourceFact, err := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
+	if err != nil {
+		_ = runtimeSource.Cleanup()
+		return LoadedSelectedContractSource{}, err
+	}
 	return LoadedSelectedContractSource{
 		Selection:              selection,
 		Source:                 source,
-		BundleHash:             bundleHash,
-		BundleSource:           storerunlifecycle.BundleSourcePersisted,
+		BundleSourceFact:       sourceFact,
 		MockConnectorResponses: mockConnectorResponses,
 		Module: selectedContractWorkflowModule{
 			source:         source,
@@ -291,17 +296,36 @@ func loadRunForkSelectedContractSource(ctx context.Context, loader SelectedContr
 	if err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
-	expectedHash := strings.TrimSpace(req.ExpectedBundleHash)
-	loadedHash := strings.TrimSpace(loaded.BundleHash)
-	if expectedHash != "" && expectedHash != loadedHash {
+	loadedFact := loaded.BundleSourceFact
+	if err := loadedFact.Validate(); err != nil {
 		cleanupLoadedSelectedContractSource(loaded)
-		return LoadedSelectedContractSource{}, fmt.Errorf("%s: selected-contract bundle_hash mismatch: expected %s loaded %s", runbundle.CodeBundleDataIntegrityError, expectedHash, loadedHash)
+		return LoadedSelectedContractSource{}, fmt.Errorf("%s: selected-contract loader returned invalid bundle source fact: %w", runbundle.CodeBundleDataIntegrityError, err)
 	}
-	expectedSource := strings.TrimSpace(req.ExpectedBundleSource)
-	loadedBundleSource := strings.TrimSpace(loaded.BundleSource)
-	if expectedSource != "" && expectedSource != loadedBundleSource {
+	if expectedHash := strings.TrimSpace(req.BundleHash); expectedHash != "" && expectedHash != loadedFact.BundleHash() {
 		cleanupLoadedSelectedContractSource(loaded)
-		return LoadedSelectedContractSource{}, fmt.Errorf("%s: selected-contract bundle_source mismatch: expected %s loaded %s", runbundle.CodeBundleDataIntegrityError, expectedSource, loadedBundleSource)
+		return LoadedSelectedContractSource{}, fmt.Errorf(
+			"%s: selected-contract bundle_hash mismatch: expected %s loaded %s",
+			runbundle.CodeBundleDataIntegrityError,
+			expectedHash,
+			loadedFact.BundleHash(),
+		)
+	}
+	expectedFact := req.BundleSourceFact
+	if expectedFact.BundleHash() != "" {
+		if err := expectedFact.Validate(); err != nil {
+			cleanupLoadedSelectedContractSource(loaded)
+			return LoadedSelectedContractSource{}, fmt.Errorf("%s: expected selected-contract bundle source fact is invalid: %w", runbundle.CodeBundleDataIntegrityError, err)
+		}
+		_, expectedSource := expectedFact.StorageValues()
+		_, loadedSource := loadedFact.StorageValues()
+		if expectedFact.BundleHash() != loadedFact.BundleHash() {
+			cleanupLoadedSelectedContractSource(loaded)
+			return LoadedSelectedContractSource{}, fmt.Errorf("%s: selected-contract bundle_hash mismatch: expected %s loaded %s", runbundle.CodeBundleDataIntegrityError, expectedFact.BundleHash(), loadedFact.BundleHash())
+		}
+		if expectedSource != loadedSource {
+			cleanupLoadedSelectedContractSource(loaded)
+			return LoadedSelectedContractSource{}, fmt.Errorf("%s: selected-contract bundle_source mismatch: expected %s loaded %s", runbundle.CodeBundleDataIntegrityError, expectedSource, loadedSource)
+		}
 	}
 	return loaded, nil
 }
@@ -315,8 +339,7 @@ func cleanupLoadedSelectedContractSource(source LoadedSelectedContractSource) {
 type SelectedContractExecutionAdmissionRequest struct {
 	ForkRunID         string
 	SourceRunID       string
-	BundleHash        string
-	BundleSource      string
+	BundleSourceFact  runtimecorrelation.BundleSourceFact
 	BindingReader     SelectedContractBindingReader
 	SourceLoader      SelectedContractSourceLoader
 	FrontierAdmission store.RunForkContractFrontierAdmission
@@ -347,11 +370,10 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 		return store.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("selected-contract execution admission requires selected source loader bound to %s", store.RunForkSelectedContractBindingOwner)
 	}
 	loadedSource, err := loadRunForkSelectedContractSource(ctx, req.SourceLoader, SelectedContractSourceLoadRequest{
-		SourceRunID:          firstNonEmpty(req.SourceRunID, binding.SourceRunID),
-		BundleHash:           req.BundleHash,
-		ExpectedBundleHash:   req.BundleHash,
-		ExpectedBundleSource: req.BundleSource,
-		Selection:            binding.ContractSelection,
+		SourceRunID:      firstNonEmpty(req.SourceRunID, binding.SourceRunID),
+		BundleHash:       req.BundleSourceFact.BundleHash(),
+		BundleSourceFact: req.BundleSourceFact,
+		Selection:        binding.ContractSelection,
 	})
 	if err != nil {
 		return store.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("load selected semantic source for execution admission: %w", err)

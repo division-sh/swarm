@@ -11,6 +11,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store"
@@ -93,9 +94,15 @@ func newStoreTestEventBus(t *testing.T, selected runtimebus.EventStore, options 
 }
 
 func testAuthorActivityContext() context.Context {
-	return runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(
+	bundleHash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+	if err != nil {
+		panic(err)
+	}
+	ctx := runtimecorrelation.WithBundleSourceFact(context.Background(), fact)
+	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		"11111111-1111-1111-1111-111111111111",
-		"bundle-v1:sha256:"+strings.Repeat("a", 64),
+		bundleHash,
 	))
 }
 

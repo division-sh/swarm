@@ -90,12 +90,11 @@ func TestReconstructEntityStateProjection_AppliesNestedFieldMutationsOverTopLeve
 func TestInsertRequiresExistingActiveRunAndPreservesBundleSourceFact(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	runID := uuid.NewString()
-	sourceFact := runtimecorrelation.BundleSourceFact{
-		BundleHash:        "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111",
-		BundleSource:      storerunlifecycle.BundleSourcePersisted,
-		BundleFingerprint: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+	sourceFact, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111")
+	if err != nil {
+		t.Fatalf("NewPersistedBundleSourceFact: %v", err)
 	}
-	seedMutationLogBundleRow(t, db, sourceFact.BundleHash)
+	seedMutationLogBundleRow(t, db, sourceFact.BundleHash())
 	seedMutationLogActiveRun(t, db, runID, &sourceFact)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityRuntimeContext(context.Background()), runID)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
@@ -110,37 +109,36 @@ func TestInsertRequiresExistingActiveRunAndPreservesBundleSourceFact(t *testing.
 	}); err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
-	var gotHash, gotFingerprint sql.NullString
+	var gotHash sql.NullString
 	var gotSource string
 	if err := db.QueryRow(`
-		SELECT bundle_hash, bundle_source, bundle_fingerprint
+		SELECT bundle_hash, bundle_source
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, runID).Scan(&gotHash, &gotSource, &gotFingerprint); err != nil {
+	`, runID).Scan(&gotHash, &gotSource); err != nil {
 		t.Fatalf("load run bundle source: %v", err)
 	}
-	if !gotHash.Valid || gotHash.String != sourceFact.BundleHash || gotSource != sourceFact.BundleSource || !gotFingerprint.Valid || gotFingerprint.String != sourceFact.BundleFingerprint {
-		t.Fatalf("run bundle source = hash:%q valid:%v source:%q fingerprint:%q valid:%v, want %#v", gotHash.String, gotHash.Valid, gotSource, gotFingerprint.String, gotFingerprint.Valid, sourceFact)
+	if !gotHash.Valid || gotHash.String != sourceFact.BundleHash() || gotSource != storerunlifecycle.BundleSourcePersisted {
+		t.Fatalf("run bundle source = hash:%q valid:%v source:%q, want %#v", gotHash.String, gotHash.Valid, gotSource, sourceFact)
 	}
 }
 
 func TestInsertRejectsDeletedPersistedBundleSourceFact(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	runID := uuid.NewString()
-	sourceFact := runtimecorrelation.BundleSourceFact{
-		BundleHash:        "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111",
-		BundleSource:      storerunlifecycle.BundleSourcePersisted,
-		BundleFingerprint: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+	sourceFact, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111")
+	if err != nil {
+		t.Fatalf("NewPersistedBundleSourceFact: %v", err)
 	}
-	seedMutationLogBundleRow(t, db, sourceFact.BundleHash)
+	seedMutationLogBundleRow(t, db, sourceFact.BundleHash())
 	seedMutationLogActiveRun(t, db, runID, nil)
-	if _, err := db.ExecContext(context.Background(), `DELETE FROM bundles WHERE bundle_hash = $1`, sourceFact.BundleHash); err != nil {
+	if _, err := db.ExecContext(context.Background(), `DELETE FROM bundles WHERE bundle_hash = $1`, sourceFact.BundleHash()); err != nil {
 		t.Fatalf("delete bundle row: %v", err)
 	}
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityRuntimeContext(context.Background()), runID)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
 
-	err := insertMutationLogRecord(t, ctx, db, Record{
+	err = insertMutationLogRecord(t, ctx, db, Record{
 		EntityID:   uuid.NewString(),
 		Field:      "status",
 		OldValue:   nil,
@@ -218,15 +216,16 @@ func seedMutationLogBundleRow(t *testing.T, db *sql.DB, bundleHash string) {
 func seedMutationLogActiveRun(t *testing.T, db *sql.DB, runID string, sourceFact *runtimecorrelation.BundleSourceFact) {
 	t.Helper()
 	if sourceFact == nil {
-		if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 			t.Fatalf("seed active run: %v", err)
 		}
 		return
 	}
+	bundleHash, bundleSource := sourceFact.StorageValues()
 	if _, err := db.ExecContext(context.Background(), `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint)
-		VALUES ($1::uuid, 'running', $2, $3, $4)
-	`, runID, sourceFact.BundleHash, sourceFact.BundleSource, sourceFact.BundleFingerprint); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, $3)
+	`, runID, bundleHash, bundleSource); err != nil {
 		t.Fatalf("seed active run with bundle source: %v", err)
 	}
 }

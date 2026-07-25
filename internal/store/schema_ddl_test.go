@@ -208,9 +208,8 @@ func TestPlatformSpecOwnsMultiBundleSchemaFoundation(t *testing.T) {
 	}
 	joined := strings.Join(runs.Statements, "\n")
 	for _, want := range []string{
-		"bundle_hash        TEXT CHECK",
-		"bundle_source      TEXT NOT NULL DEFAULT 'legacy'",
-		"bundle_fingerprint TEXT",
+		"bundle_hash        TEXT NOT NULL CHECK",
+		"bundle_source      TEXT NOT NULL CHECK",
 		`CREATE INDEX IF NOT EXISTS "idx_runs_bundle_hash" ON "runs"(bundle_hash) WHERE bundle_hash IS NOT NULL`,
 		`CREATE INDEX IF NOT EXISTS "idx_runs_bundle_source_status" ON "runs"(bundle_source, status, started_at)`,
 		`CREATE INDEX IF NOT EXISTS "idx_runs_bundle_delete_planning" ON "runs"(bundle_hash, status) WHERE bundle_hash IS NOT NULL`,
@@ -221,6 +220,47 @@ func TestPlatformSpecOwnsMultiBundleSchemaFoundation(t *testing.T) {
 	}
 	if strings.Contains(joined, "bundle_hash TEXT REFERENCES") || strings.Contains(joined, "FOREIGN KEY (bundle_hash)") {
 		t.Fatalf("runs ddl must not create a bundle_hash foreign key:\n%s", joined)
+	}
+	if strings.Contains(joined, "bundle_"+"fingerprint") || strings.Contains(joined, "DEFAULT '"+"legacy'") {
+		t.Fatalf("runs ddl retained legacy bundle identity:\n%s", joined)
+	}
+}
+
+func TestPlatformSchemaConstrainsStandingExecutableProvenance(t *testing.T) {
+	_, file, _, _ := stdruntime.Caller(0)
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	spec := loadPlatformSpecDocumentForStoreTest(t, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	byName := map[string]string{}
+	for _, plan := range plans {
+		byName[plan.TableName] = strings.Join(plan.Statements, "\n")
+	}
+	standing := byName["standing_services"]
+	if standing == "" {
+		t.Fatal("standing_services ddl plan missing")
+	}
+	for _, want := range []string{
+		"current_bundle_hash    TEXT NOT NULL CHECK",
+		"current_bundle_source  TEXT NOT NULL CHECK (current_bundle_source IN ('persisted', 'ephemeral'))",
+	} {
+		if !strings.Contains(standing, want) {
+			t.Fatalf("standing_services ddl missing %q:\n%s", want, standing)
+		}
+	}
+	if strings.Contains(standing, "'deleted'") {
+		t.Fatalf("standing current provenance admits non-executable deleted source:\n%s", standing)
+	}
+	for _, table := range []string{"standing_service_generations", "standing_service_journal"} {
+		ddl := byName[table]
+		if ddl == "" {
+			t.Fatalf("%s ddl plan missing", table)
+		}
+		if strings.Contains(ddl, "bundle_hash") || strings.Contains(ddl, "bundle_source") {
+			t.Fatalf("%s duplicates bundle identity:\n%s", table, ddl)
+		}
 	}
 }
 

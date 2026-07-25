@@ -19,11 +19,7 @@ import (
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
 
-var authorActivityTestBundleSourceFact = runtimecorrelation.BundleSourceFact{
-	BundleHash:        "bundle-v1:sha256:" + strings.Repeat("a", 64),
-	BundleSource:      "ephemeral",
-	BundleFingerprint: "sha256:" + strings.Repeat("a", 64),
-}
+var authorActivityTestBundleSourceFact = mustExternalTestBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("e", 64))
 
 var externalRuntimeTestEventBusOwners sync.Map
 
@@ -35,9 +31,10 @@ func testAuthorActivityContext(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, authorActivityTestBundleSourceFact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
-		authorActivityTestBundleSourceFact.BundleHash,
+		authorActivityTestBundleSourceFact.BundleHash(),
 	))
 }
 
@@ -46,7 +43,7 @@ func newScopedTestEventBus(t *testing.T, store runtimebus.EventStore, opts runti
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
-	if strings.TrimSpace(opts.BundleSourceFact.BundleHash) == "" {
+	if opts.BundleSourceFact.Validate() != nil {
 		opts.BundleSourceFact = authorActivityTestBundleSourceFact
 	}
 
@@ -58,7 +55,7 @@ func newScopedTestEventBus(t *testing.T, store runtimebus.EventStore, opts runti
 			})
 		}
 		lease, err := registrar.RegisterAuthorActivityEventCatalog(
-			runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, opts.BundleSourceFact.BundleHash),
+			runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, opts.BundleSourceFact.BundleHash()),
 			descriptors,
 		)
 		if err != nil {
@@ -79,14 +76,14 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
-	if strings.TrimSpace(opts.BundleSourceFact.BundleHash) == "" {
+	if opts.BundleSourceFact.Validate() != nil {
 		opts.BundleSourceFact = authorActivityTestBundleSourceFact
 	}
 	if opts.WorkOwner == nil {
 		process := worklifetime.NewProcess()
 		owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 			RuntimeInstanceID: opts.RuntimeInstanceID,
-			BundleHash:        opts.BundleSourceFact.BundleHash,
+			BundleHash:        opts.BundleSourceFact.BundleHash(),
 		})
 		if err != nil {
 			return nil, err
@@ -123,6 +120,23 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 	externalRuntimeTestEventBusOwners.Store(bus, opts.WorkOwner)
 	t.Cleanup(func() { externalRuntimeTestEventBusOwners.Delete(bus) })
 	return bus, nil
+}
+
+func testBundleSourceFact(t testing.TB, bundleHash string) runtimecorrelation.BundleSourceFact {
+	t.Helper()
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(strings.TrimSpace(bundleHash))
+	if err != nil {
+		t.Fatalf("construct external test bundle source fact: %v", err)
+	}
+	return fact
+}
+
+func mustExternalTestBundleSourceFact(bundleHash string) runtimecorrelation.BundleSourceFact {
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(strings.TrimSpace(bundleHash))
+	if err != nil {
+		panic(err)
+	}
+	return fact
 }
 
 func runtimeTestEventBusWorkOwner(t testing.TB, bus *runtimebus.EventBus) worklifetime.Occurrence {

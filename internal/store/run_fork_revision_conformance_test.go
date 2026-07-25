@@ -96,7 +96,7 @@ func TestRunForkRevisionCaptureReusesTransactionRevisionAndRollbackPublishesNoth
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -163,7 +163,7 @@ func TestRunForkRevisionCaptureSerializesSameRunCommitVisibility(t *testing.T) {
 	runID := uuid.NewString()
 	firstEventID := uuid.NewString()
 	secondEventID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -230,7 +230,7 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 	runID := uuid.NewString()
 	seedEventID := uuid.NewString()
 	publishedEventID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	seedEvent := seedPostgresSemanticEventRecordFixture(t, ctx, db, seedEventID, runID, "revision.delivery.seed", events.EventProducerPlatform, "revision-test", "", "", time.Now().UTC())
@@ -382,7 +382,7 @@ func TestRunForkRevisionCaptureOrdersMultiRunLocksDeterministically(t *testing.T
 	runIDs := []string{uuid.NewString(), uuid.NewString()}
 	sort.Strings(runIDs)
 	for _, runID := range runIDs {
-		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 			t.Fatalf("seed run %s: %v", runID, err)
 		}
 	}
@@ -480,7 +480,7 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 		t.Fatalf("begin lifecycle source revision: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed lifecycle source run: %v", err)
 	}
 	seedPostgresSemanticEventRecordFixtureTx(t, ctx, tx, eventID, runID, "lifecycle.revision", events.EventProducerPlatform, "revision-test", "", "", now)
@@ -546,7 +546,7 @@ func TestRunForkRevisionSessionProjectionIgnoresExcludedWriterChurnAndTracksStat
 	agentID := "revision-session-agent"
 	sessionID := uuid.NewString()
 	at := time.Unix(1700000850, 0).UTC()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed session projection run: %v", err)
 	}
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "session.projection", events.EventProducerPlatform, "revision-test", "", "", at)
@@ -622,7 +622,7 @@ func TestScheduleNoOpTerminalMutationsDoNotPublishRunForkRevision(t *testing.T) 
 	_, db, _ := testutil.StartPostgres(t)
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	store := admitTestPostgresStore(t, db)
@@ -700,7 +700,7 @@ func TestRunForkRevisionDeletionPublishesTombstoneAndUnrevisionedDriftFailsClose
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	timerID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "revision.delete", events.EventProducerPlatform, "revision-test", "", "", time.Now().UTC())

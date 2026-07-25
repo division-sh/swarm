@@ -56,7 +56,6 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/runbundle"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/versionmetadata"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
@@ -380,10 +379,10 @@ type serveRuntimeBundleContextRequest struct {
 }
 
 func (b serveRuntimeBundle) serveIdentityDetail() string {
-	if b.dbLoaded && strings.TrimSpace(b.bundleSourceFact.BundleHash) != "" {
-		return strings.TrimSpace(b.bundleSourceFact.BundleHash)
+	if b.dbLoaded && b.bundleSourceFact.BundleHash() != "" {
+		return b.bundleSourceFact.BundleHash()
 	}
-	return strings.TrimSpace(b.bootIdentity.Fingerprint)
+	return strings.TrimSpace(b.bootIdentity.BundleHash)
 }
 
 func serveRuntimeBundleIdentitiesDetail(bundles []serveRuntimeBundle) string {
@@ -404,7 +403,7 @@ func servePinnedBundleHashes(bundles []serveRuntimeBundle) []string {
 	out := []string{}
 	for _, bundle := range bundles {
 		if bundle.dbLoaded {
-			if hash := strings.TrimSpace(bundle.bundleSourceFact.BundleHash); hash != "" {
+			if hash := bundle.bundleSourceFact.BundleHash(); hash != "" {
 				out = append(out, hash)
 			}
 		}
@@ -563,10 +562,10 @@ func loadServeRuntimeBundleFromCatalog(ctx context.Context, repo string, stores 
 	if err != nil {
 		return serveRuntimeBundle{}, fmt.Errorf("compute DB-loaded boot bundle identity: %w", err)
 	}
-	fact := runtimecorrelation.BundleSourceFact{
-		BundleHash:   runtimeSource.BundleHash,
-		BundleSource: storerunlifecycle.BundleSourcePersisted,
-	}.Normalized()
+	fact, err := runtimecorrelation.NewPersistedBundleSourceFact(runtimeSource.BundleHash)
+	if err != nil {
+		return serveRuntimeBundle{}, fmt.Errorf("construct DB-loaded bundle source fact: %w", err)
+	}
 	cleanupOnError = false
 	return serveRuntimeBundle{
 		module:           module,
@@ -587,16 +586,19 @@ func prepareLoadedServeBundleSource(ctx context.Context, stores storeBundle, loa
 		if dev {
 			return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("--bundle-hash is mutually exclusive with --dev")
 		}
-		fact := loaded.bundleSourceFact.Normalized()
-		if fact.BundleSource != storerunlifecycle.BundleSourcePersisted || strings.TrimSpace(fact.BundleHash) == "" {
+		fact := loaded.bundleSourceFact
+		if err := fact.Validate(); err != nil || !fact.IsPersisted() {
 			return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("DB-loaded serve bundle source fact must be persisted with bundle_hash")
 		}
 		return fact, nil
 	}
-	if prepared := loaded.bundleSourceFact.Normalized(); strings.TrimSpace(prepared.BundleHash) != "" {
+	if prepared := loaded.bundleSourceFact; prepared.BundleHash() != "" {
+		if err := prepared.Validate(); err != nil {
+			return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("validate prepared serve bundle source fact: %w", err)
+		}
 		return prepared, nil
 	}
-	return prepareServeBundleSource(ctx, stores, loaded.bundle, loaded.bootIdentity.Fingerprint, dev && !bundleHasStandingActivation(loaded.bundle))
+	return prepareServeBundleSource(ctx, stores, loaded.bundle, dev && !bundleHasStandingActivation(loaded.bundle))
 }
 
 func bundleHasStandingActivation(bundle *runtimecontracts.WorkflowContractBundle) bool {
@@ -628,7 +630,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 		return serveRuntimeBundleContext{}, fmt.Errorf("prepare bundle source: %w", err)
 	}
 	bootIdentity := loaded.bootIdentity
-	bootIdentity.BundleHash = strings.TrimSpace(bundleSourceFact.BundleHash)
+	bootIdentity.BundleHash = bundleSourceFact.BundleHash()
 	workspaces, err := cliapp.ConfiguredWorkspaceLifecycleForServe(req.Stores.SQLDB, req.Config, loaded.contractsRoot, loaded.source, req.MountSources, req.WorkspaceBackend)
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("configure workspaces: %w", err)
@@ -638,7 +640,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	}
 	if req.RequireBundleScopeName {
 		if scoper, ok := workspaces.(interface{ SetBundleScope(string) }); ok && scoper != nil {
-			scoper.SetBundleScope(bundleSourceFact.BundleHash)
+			scoper.SetBundleScope(bundleSourceFact.BundleHash())
 		}
 	}
 	if workspaces != nil {
@@ -687,7 +689,6 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			WorkspaceLifecycle:               workspaces,
 			EnableToolGateway:                req.EnableToolGateway,
 			ToolGatewayBinding:               req.ToolGatewayBinding,
-			BundleFingerprint:                bootIdentity.Fingerprint,
 			BundleSourceFact:                 bundleSourceFact,
 			RuntimeInstanceID:                strings.TrimSpace(req.RuntimeInstanceID),
 			ProcessWorkOwner:                 req.ProcessWorkOwner,
@@ -1596,7 +1597,6 @@ func plannedServeRuntimeContexts(contexts []serveRuntimeBundleContext) ([]runtim
 			return nil, err
 		}
 		planned = append(planned, runtime.BundleContext{
-			BundleHash:       contextDef.bundleSourceFact.BundleHash,
 			BundleSourceFact: contextDef.bundleSourceFact,
 			BundleIdentity:   contextDef.bootIdentity,
 			Source:           contextDef.loaded.source,
@@ -1860,7 +1860,6 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 				}
 			}
 			if err := manager.Register(runtime.BundleContext{
-				BundleHash:       contextDef.bundleSourceFact.BundleHash,
 				BundleSourceFact: contextDef.bundleSourceFact,
 				BundleIdentity:   contextDef.bootIdentity,
 				Source:           contextDef.loaded.source,
@@ -1877,7 +1876,7 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 				hash    string
 				runtime *runtime.Runtime
 			}{
-				hash:    strings.TrimSpace(contextDef.bundleSourceFact.BundleHash),
+				hash:    contextDef.bundleSourceFact.BundleHash(),
 				runtime: contextDef.runtime,
 			})
 		}
@@ -1891,7 +1890,7 @@ func closeAdditionalServeRuntimeContexts(ctx context.Context, contexts []serveRu
 			continue
 		}
 		if manager != nil {
-			result := manager.DeactivateBundleHashWithOptions(contextDef.bundleSourceFact.BundleHash, runtime.RuntimeContextCauseUnloaded, runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadlines...)})
+			result := manager.DeactivateBundleHashWithOptions(contextDef.bundleSourceFact.BundleHash(), runtime.RuntimeContextCauseUnloaded, runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadlines...)})
 			shutdownErr = errors.Join(shutdownErr, result.ShutdownErr)
 			continue
 		}

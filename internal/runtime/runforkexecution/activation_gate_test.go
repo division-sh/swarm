@@ -259,7 +259,7 @@ func TestActivateSelectedContractRunForkFailsBeforePlanningOnPersistedIdentityMi
 		plan:               testSelectedContractStateOnlyPlan(binding),
 	}
 	loaded := testLoadedSelectedSource(binding.ContractSelection)
-	loaded.BundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	loaded.BundleSourceFact = testEphemeralBundleSourceFact("bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	loader := &fakeSelectedContractSourceLoader{loaded: loaded}
 
 	_, err := ActivateSelectedContractRunFork(context.Background(), SelectedContractActivationGateRequest{
@@ -436,6 +436,6 @@ func testSelectedContractBundleAvailability(forkRunID string) runbundle.Availabi
 		RunID:        forkRunID,
 		Status:       store.RunForkMaterializedStatus,
 		BundleHash:   runForkTestBundleHash,
-		BundleSource: "ephemeral",
+		BundleSource: runbundle.AvailabilitySourceEphemeral,
 	}
 }

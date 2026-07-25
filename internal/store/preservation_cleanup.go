@@ -11,13 +11,14 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
+	"github.com/division-sh/swarm/internal/store/runbundle"
 	"github.com/lib/pq"
 )
 
 type preservationCleanupRunTarget struct {
 	RunID        string
 	Status       string
-	BundleSource string
+	BundleSource runbundle.AvailabilitySource
 }
 
 type preservationCleanupSessionTarget struct {
@@ -244,12 +245,16 @@ func lockUnavailableBundlePreservationRunsTx(ctx context.Context, tx *sql.Tx, ru
 	var out []preservationCleanupRunTarget
 	for rows.Next() {
 		var item preservationCleanupRunTarget
-		if err := rows.Scan(&item.RunID, &item.Status, &item.BundleSource); err != nil {
+		var rawSource string
+		if err := rows.Scan(&item.RunID, &item.Status, &rawSource); err != nil {
 			return nil, fmt.Errorf("scan unavailable bundle preservation run: %w", err)
 		}
 		item.RunID = strings.TrimSpace(item.RunID)
 		item.Status = strings.TrimSpace(item.Status)
-		item.BundleSource = strings.TrimSpace(item.BundleSource)
+		item.BundleSource, err = runbundle.DecodeAvailabilitySource(rawSource)
+		if err != nil {
+			return nil, fmt.Errorf("decode unavailable bundle preservation run %s source: %w", item.RunID, err)
+		}
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {

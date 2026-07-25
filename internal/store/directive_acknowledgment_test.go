@@ -561,10 +561,10 @@ func (h *directiveAmbiguityHarness) reserveKeylessPrepared(t *testing.T) runtime
 
 func seedDirectiveAmbiguityRun(t *testing.T, db *sql.DB, runID string) {
 	t.Helper()
-	if _, err := db.Exec(`INSERT INTO runs (run_id, status) VALUES (?, 'running') ON CONFLICT(run_id) DO NOTHING`, runID); err == nil {
+	if _, err := db.Exec(`INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral') ON CONFLICT(run_id) DO NOTHING`, runID); err == nil {
 		return
 	}
-	if _, err := db.Exec(`INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running') ON CONFLICT(run_id) DO NOTHING`, runID); err != nil {
+	if _, err := db.Exec(`INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral') ON CONFLICT(run_id) DO NOTHING`, runID); err != nil {
 		t.Fatalf("seed directive run: %v", err)
 	}
 }

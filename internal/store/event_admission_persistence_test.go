@@ -145,13 +145,13 @@ func seedCanonicalForkedRunForAdmissionTest(ctx context.Context, db *sql.DB, pos
 	continuedAsRunID := uuid.NewString()
 	now := time.Now().UTC()
 	if postgres {
-		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, ended_at) VALUES ($1::uuid, 'completed', $2, $2)`, continuedAsRunID, now); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, ended_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'completed', $2, $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, continuedAsRunID, now); err != nil {
 			return err
 		}
 		_, err := db.ExecContext(ctx, `UPDATE runs SET status = 'forked', ended_at = $2, continued_as_run_id = $3::uuid WHERE run_id = $1::uuid`, runID, now, continuedAsRunID)
 		return err
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, ended_at) VALUES (?, 'completed', ?, ?)`, continuedAsRunID, now, now); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, ended_at, bundle_hash, bundle_source) VALUES (?, 'completed', ?, ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, continuedAsRunID, now, now); err != nil {
 		return err
 	}
 	_, err := db.ExecContext(ctx, `UPDATE runs SET status = 'forked', ended_at = ?, continued_as_run_id = ? WHERE run_id = ?`, now, continuedAsRunID, runID)

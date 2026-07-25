@@ -110,10 +110,8 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			}
 			var coordinator *runtimepipeline.PipelineCoordinator
 			bus, err := newRuntimeTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{
-				ContractBundle: source,
-				BundleSourceFact: runtimecorrelation.BundleSourceFact{
-					BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral,
-				},
+				ContractBundle:   source,
+				BundleSourceFact: testBundleSourceFact(t, bundleHash),
 				InterceptorProvider: func() []runtimebus.EventInterceptor {
 					if coordinator == nil {
 						return nil
@@ -343,10 +341,7 @@ func configuredChannelCallContext(t *testing.T, ctx context.Context, selectedSto
 	storetest.CommitSemanticEvent(t, ctx, selectedStore, inbound)
 	ctx = runtimebus.WithInboundEvent(ctx, inbound)
 	ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, operationID)
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, runtimecorrelation.BundleSourceFact{
-		BundleHash:   "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		BundleSource: storerunlifecycle.BundleSourceEphemeral,
-	})
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, testBundleSourceFact(t, "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	return runtimetools.WithActor(ctx, actor)
 }
 

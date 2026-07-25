@@ -47,10 +47,14 @@ const (
 	claudeAttemptProofBundleHash                  = "bundle-v1:sha256:7777777777777777777777777777777777777777777777777777777777777777"
 )
 
-var claudeAttemptProofBundleSourceFact = runtimecorrelation.BundleSourceFact{
-	BundleHash:        claudeAttemptProofBundleHash,
-	BundleSource:      "ephemeral",
-	BundleFingerprint: "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+var claudeAttemptProofBundleSourceFact = mustClaudeAttemptProofBundleSourceFact()
+
+func mustClaudeAttemptProofBundleSourceFact() runtimecorrelation.BundleSourceFact {
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(claudeAttemptProofBundleHash)
+	if err != nil {
+		panic(err)
+	}
+	return fact
 }
 
 func claudeAttemptProofContext() context.Context {
@@ -510,7 +514,7 @@ func claudeAttemptProofAdmissionContext(t testing.TB) context.Context {
 		1,
 		"",
 		"claude-attempt-proof-actors",
-		"claude-attempt-proof-bundle",
+		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		nil,
 	)
 	if err != nil {

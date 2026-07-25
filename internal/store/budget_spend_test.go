@@ -124,9 +124,9 @@ func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
 	recordedAt := time.Now().UTC().Truncate(time.Second)
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(status, '') FROM runs WHERE run_id = $1::uuid FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(status, ''), COALESCE(bundle_hash, ''), COALESCE(bundle_source, '') FROM runs WHERE run_id = $1::uuid FOR UPDATE")).
 		WithArgs(runID).
-		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("running"))
+		WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "bundle_source"}).AddRow("running", authorActivityTestBundleHash, "ephemeral"))
 	mock.ExpectQuery("SELECT EXISTS \\(SELECT 1 FROM entity_state").
 		WithArgs(runID, entityID).
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
@@ -210,8 +210,8 @@ func seedSQLiteBudgetEntity(t *testing.T, ctx context.Context, store *SQLiteRunt
 func seedSQLiteBudgetRun(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, runID string, at time.Time) {
 	t.Helper()
 	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES (?, 'running', ?)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at); err != nil {
 		t.Fatalf("seed sqlite budget run %s: %v", runID, err)
 	}

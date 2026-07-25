@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
+	"github.com/division-sh/swarm/internal/store/runbundle"
 )
 
 const (
@@ -93,11 +94,10 @@ type Plan struct {
 }
 
 type RunRef struct {
-	RunID             string `json:"run_id"`
-	Status            string `json:"status"`
-	BundleHash        string `json:"bundle_hash,omitempty"`
-	BundleSource      string `json:"bundle_source,omitempty"`
-	BundleFingerprint string `json:"bundle_fingerprint,omitempty"`
+	RunID        string `json:"run_id"`
+	Status       string `json:"status"`
+	BundleHash   string `json:"bundle_hash,omitempty"`
+	BundleSource string `json:"bundle_source,omitempty"`
 }
 
 type DeliveryRef struct {
@@ -185,18 +185,21 @@ func NormalizeRequest(req Request, now time.Time) (Request, error) {
 	return req, nil
 }
 
-func ActiveRunTargets(plan Plan) []preservationcleanup.RunTarget {
+func ActiveRunTargets(plan Plan) ([]preservationcleanup.RunTarget, error) {
 	out := make([]preservationcleanup.RunTarget, 0, len(plan.ActiveRuns))
 	for _, run := range plan.ActiveRuns {
+		source, err := runbundle.DecodeAvailabilitySource(strings.TrimSpace(run.BundleSource))
+		if err != nil {
+			return nil, fmt.Errorf("bundle delete run %s: %w", strings.TrimSpace(run.RunID), err)
+		}
 		out = append(out, preservationcleanup.RunTarget{
-			RunID:             strings.TrimSpace(run.RunID),
-			BundleSource:      strings.TrimSpace(run.BundleSource),
-			BundleHash:        strings.TrimSpace(run.BundleHash),
-			BundleFingerprint: strings.TrimSpace(run.BundleFingerprint),
-			ReasonCode:        preservationcleanup.BundleForceDeletedReason,
+			RunID:        strings.TrimSpace(run.RunID),
+			BundleSource: source,
+			BundleHash:   strings.TrimSpace(run.BundleHash),
+			ReasonCode:   preservationcleanup.BundleForceDeletedReason,
 		})
 	}
-	return out
+	return out, nil
 }
 
 func AffectedRunIDs(plan Plan) map[string]struct{} {

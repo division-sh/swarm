@@ -20,10 +20,14 @@ import (
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
 
-var authorActivityTestBundleSourceFact = runtimecorrelation.BundleSourceFact{
-	BundleHash:        "bundle-v1:sha256:" + strings.Repeat("a", 64),
-	BundleSource:      "ephemeral",
-	BundleFingerprint: "sha256:" + strings.Repeat("a", 64),
+var authorActivityTestBundleSourceFact = mustAuthorActivityTestBundleSourceFact()
+
+func mustAuthorActivityTestBundleSourceFact() runtimecorrelation.BundleSourceFact {
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("e", 64))
+	if err != nil {
+		panic(err)
+	}
+	return fact
 }
 
 var conformanceTestProcessOwners sync.Map
@@ -79,9 +83,10 @@ func ownConformanceTestAgentManager(t testing.TB, manager *runtimemanager.AgentM
 }
 
 func testAuthorActivityContext(ctx context.Context) context.Context {
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, authorActivityTestBundleSourceFact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
-		authorActivityTestBundleSourceFact.BundleHash,
+		authorActivityTestBundleSourceFact.BundleHash(),
 	))
 }
 
@@ -94,7 +99,7 @@ func testAuthorActivityRuntimeOptions(t testing.TB, opts runtimepkg.RuntimeOptio
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
-	if strings.TrimSpace(opts.BundleSourceFact.BundleHash) == "" {
+	if strings.TrimSpace(opts.BundleSourceFact.BundleHash()) == "" {
 		opts.BundleSourceFact = authorActivityTestBundleSourceFact
 	}
 	if opts.ProcessWorkOwner == nil {
@@ -110,7 +115,7 @@ type testAuthorActivityCatalogRegistrar interface {
 func registerTestAuthorActivityCatalog(t *testing.T, target testAuthorActivityCatalogRegistrar, descriptors []runtimeauthoractivity.EventDescriptor) {
 	t.Helper()
 	lease, err := target.RegisterAuthorActivityEventCatalog(
-		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash),
+		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash()),
 		descriptors,
 	)
 	if err != nil {
@@ -136,11 +141,11 @@ func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts 
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
-	if strings.TrimSpace(opts.BundleSourceFact.BundleHash) == "" {
+	if strings.TrimSpace(opts.BundleSourceFact.BundleHash()) == "" {
 		opts.BundleSourceFact = authorActivityTestBundleSourceFact
 	}
 	if opts.WorkOwner == nil {
-		opts.WorkOwner = conformanceTestRuntimeOccurrence(t, opts.BundleSourceFact.BundleHash)
+		opts.WorkOwner = conformanceTestRuntimeOccurrence(t, opts.BundleSourceFact.BundleHash())
 	}
 	if opts.PipelineObligations == nil {
 		if provider, ok := eventStore.(interface {

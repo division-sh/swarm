@@ -1452,7 +1452,7 @@ func TestSQLAgentReader_ListGenericAgents_AlignsBacklogWithCanonicalPendingSelec
 	}
 
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	pendingEventID := uuid.NewString()
@@ -1578,7 +1578,7 @@ func TestSQLAgentReader_ListGenericAgents_UsesFullPendingDeliveryFactHorizon(t *
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	event := eventtest.ExistingRunRootIngress(eventID, "task.completed", "runtime", "", []byte(`{}`), 0, runID,
@@ -1651,7 +1651,7 @@ func TestSQLAgentReader_ListGenericAgents_ScopesLiveTurnToSelectedActiveSession(
 	runID := uuid.NewString()
 	olderUpdatedAt := time.Date(2026, 4, 15, 3, 0, 0, 0, time.UTC)
 	selectedUpdatedAt := olderUpdatedAt.Add(5 * time.Minute)
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, olderUpdatedAt); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, olderUpdatedAt); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -1744,7 +1744,7 @@ func TestSQLAgentReader_ListGenericAgents_PreservesTurnLimitOnSQLite(t *testing.
 	runID := uuid.NewString()
 	olderUpdatedAt := time.Date(2026, 4, 15, 3, 0, 0, 0, time.UTC)
 	selectedUpdatedAt := olderUpdatedAt.Add(5 * time.Minute)
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, olderUpdatedAt); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, olderUpdatedAt); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `

@@ -421,7 +421,7 @@ func putTestTurnContext(t testing.TB, registry *TurnContextRegistry, token strin
 			generation,
 			"",
 			"gateway-test-actors",
-			"gateway-test-bundle",
+			"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 			nil,
 		)
 		if err != nil {

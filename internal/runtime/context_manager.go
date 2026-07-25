@@ -24,7 +24,6 @@ type RunBundleAvailabilityReader interface {
 }
 
 type BundleContext struct {
-	BundleHash        string
 	BundleSourceFact  runtimecorrelation.BundleSourceFact
 	BundleIdentity    runtimecontracts.BundleIdentity
 	Source            semanticview.Source
@@ -50,11 +49,6 @@ const (
 )
 
 func (c BundleContext) normalized() BundleContext {
-	c.BundleHash = strings.TrimSpace(c.BundleHash)
-	c.BundleSourceFact = c.BundleSourceFact.Normalized()
-	if c.BundleHash == "" {
-		c.BundleHash = strings.TrimSpace(c.BundleSourceFact.BundleHash)
-	}
 	c.ContractsRoot = strings.TrimSpace(c.ContractsRoot)
 	c.PlatformSpecPath = strings.TrimSpace(c.PlatformSpecPath)
 	c.WorkspaceScopeKey = strings.TrimSpace(c.WorkspaceScopeKey)
@@ -66,6 +60,10 @@ func (c BundleContext) normalized() BundleContext {
 		c.StandingTargets = targets
 	}
 	return c
+}
+
+func (c BundleContext) BundleHash() string {
+	return c.BundleSourceFact.BundleHash()
 }
 
 type runtimeContextEntry struct {
@@ -458,8 +456,8 @@ func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccur
 	if m.contexts == nil {
 		m.contexts = map[string]*runtimeContextEntry{}
 	}
-	if _, exists := m.contexts[contextDef.BundleHash]; exists {
-		return fmt.Errorf("duplicate runtime context bundle_hash %s", contextDef.BundleHash)
+	if _, exists := m.contexts[contextDef.BundleHash()]; exists {
+		return fmt.Errorf("duplicate runtime context bundle_hash %s", contextDef.BundleHash())
 	}
 	if collision, ok := m.duplicateLoadedAgentSlugLocked(contextDef); ok {
 		return fmt.Errorf(
@@ -484,19 +482,19 @@ func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccur
 			return err
 		}
 	}
-	m.contexts[contextDef.BundleHash] = &runtimeContextEntry{
+	m.contexts[contextDef.BundleHash()] = &runtimeContextEntry{
 		context:   &copied,
 		runtime:   runtimeOwner,
 		workOwner: workOwner,
 		standing:  standing,
 		state:     RuntimeContextStateLoaded,
 	}
-	m.order = append(m.order, contextDef.BundleHash)
+	m.order = append(m.order, contextDef.BundleHash())
 	sort.Strings(m.order)
 	if err := m.refreshCapabilitySubjectsLocked(); err != nil {
-		delete(m.contexts, contextDef.BundleHash)
+		delete(m.contexts, contextDef.BundleHash())
 		for i, bundleHash := range m.order {
-			if bundleHash == contextDef.BundleHash {
+			if bundleHash == contextDef.BundleHash() {
 				m.order = append(m.order[:i], m.order[i+1:]...)
 				break
 			}
@@ -546,56 +544,51 @@ func (m *RuntimeContextManager) newStandingOccurrencesLocked(workOwner *worklife
 
 func validateRuntimeContextDefinition(contextDef BundleContext) (BundleContext, error) {
 	contextDef = contextDef.normalized()
-	if err := runtimecontracts.ValidateBundleHash(contextDef.BundleHash); err != nil {
-		return BundleContext{}, fmt.Errorf("runtime context bundle_hash: %w", err)
+	if err := contextDef.BundleSourceFact.Validate(); err != nil {
+		return BundleContext{}, fmt.Errorf("runtime context bundle source fact: %w", err)
 	}
-	if contextDef.BundleSourceFact.BundleHash != "" && contextDef.BundleSourceFact.BundleHash != contextDef.BundleHash {
-		return BundleContext{}, fmt.Errorf("runtime context source fact hash %q does not match bundle_hash %q", contextDef.BundleSourceFact.BundleHash, contextDef.BundleHash)
-	}
+	bundleHash := contextDef.BundleHash()
 	if contextDef.Source == nil {
-		return BundleContext{}, fmt.Errorf("runtime context %s source is required", contextDef.BundleHash)
+		return BundleContext{}, fmt.Errorf("runtime context %s source is required", bundleHash)
 	}
 	if contextDef.Runtime == nil {
-		return BundleContext{}, fmt.Errorf("runtime context %s runtime is required", contextDef.BundleHash)
+		return BundleContext{}, fmt.Errorf("runtime context %s runtime is required", bundleHash)
 	}
 	if contextDef.Runtime.Bus == nil {
-		return BundleContext{}, fmt.Errorf("runtime context %s event bus is required", contextDef.BundleHash)
+		return BundleContext{}, fmt.Errorf("runtime context %s event bus is required", bundleHash)
 	}
 	if contextDef.WorkOwner == nil {
-		return BundleContext{}, fmt.Errorf("runtime context %s work owner is required", contextDef.BundleHash)
+		return BundleContext{}, fmt.Errorf("runtime context %s work owner is required", bundleHash)
 	}
-	if ownerHash := strings.TrimSpace(contextDef.WorkOwner.Identity().BundleHash); ownerHash != contextDef.BundleHash {
-		return BundleContext{}, fmt.Errorf("runtime context %s work owner belongs to bundle %s", contextDef.BundleHash, ownerHash)
+	if ownerHash := strings.TrimSpace(contextDef.WorkOwner.Identity().BundleHash); ownerHash != bundleHash {
+		return BundleContext{}, fmt.Errorf("runtime context %s work owner belongs to bundle %s", bundleHash, ownerHash)
 	}
 	if runtimeOwner := contextDef.Runtime.WorkOccurrence(); runtimeOwner != nil && runtimeOwner != contextDef.WorkOwner {
-		return BundleContext{}, fmt.Errorf("runtime context %s work owner does not belong to runtime", contextDef.BundleHash)
+		return BundleContext{}, fmt.Errorf("runtime context %s work owner does not belong to runtime", bundleHash)
 	}
 	if err := validateRuntimeContextStandingTargets(contextDef); err != nil {
 		return BundleContext{}, err
 	}
-	if contextDef.BundleSourceFact.BundleHash == "" {
-		contextDef.BundleSourceFact.BundleHash = contextDef.BundleHash
-	}
-	contextDef.BundleSourceFact = contextDef.BundleSourceFact.Normalized()
 	return contextDef, nil
 }
 
 func validateRuntimeContextStandingTargets(contextDef BundleContext) error {
+	bundleHash := contextDef.BundleHash()
 	seen := map[string]string{}
 	for _, target := range contextDef.StandingTargets {
 		target = target.normalized()
-		if target.BundleHash != contextDef.BundleHash {
-			return fmt.Errorf("runtime context %s standing target %q/%q bundle_hash %q does not match context", contextDef.BundleHash, target.Alias, target.Provider, target.BundleHash)
+		if target.BundleHash != bundleHash {
+			return fmt.Errorf("runtime context %s standing target %q/%q bundle_hash %q does not match context", bundleHash, target.Alias, target.Provider, target.BundleHash)
 		}
 		if target.Alias == "" || target.Provider == "" || target.RunID == "" || target.Generation <= 0 || target.FlowID == "" || target.FlowInstance == "" || target.EntityID == "" || !target.AdmissionPlan.Valid() {
-			return fmt.Errorf("runtime context %s standing target requires alias, provider, run_id, flow_id, flow_instance, entity_id, and compiled admission plan", contextDef.BundleHash)
+			return fmt.Errorf("runtime context %s standing target requires alias, provider, run_id, flow_id, flow_instance, entity_id, and compiled admission plan", bundleHash)
 		}
 		if target.AdmissionPlan.RequiresSecret() != (target.SigningSecret != "") {
-			return fmt.Errorf("runtime context %s standing target %q/%q signing_secret presence contradicts compiled %s request authentication", contextDef.BundleHash, target.Alias, target.Provider, target.AdmissionPlan.RequestAuthentication())
+			return fmt.Errorf("runtime context %s standing target %q/%q signing_secret presence contradicts compiled %s request authentication", bundleHash, target.Alias, target.Provider, target.AdmissionPlan.RequestAuthentication())
 		}
 		key := target.Alias + "\x00" + target.Provider
 		if previous, ok := seen[key]; ok {
-			return fmt.Errorf("runtime context %s duplicate standing target %s and %s for alias %q provider %q", contextDef.BundleHash, previous, target.SourcePath, target.Alias, target.Provider)
+			return fmt.Errorf("runtime context %s duplicate standing target %s and %s for alias %q provider %q", bundleHash, previous, target.SourcePath, target.Alias, target.Provider)
 		}
 		seen[key] = target.SourcePath
 	}
@@ -606,10 +599,10 @@ func (m *RuntimeContextManager) validateAdmissionGenerationLocked(contextDef Bun
 	for _, target := range contextDef.StandingTargets {
 		generation := target.AdmissionPlan.GenerationID()
 		if m.admissionGeneration == "" {
-			return fmt.Errorf("runtime context %s standing target %q/%q requires process admission catalog generation", contextDef.BundleHash, target.Alias, target.Provider)
+			return fmt.Errorf("runtime context %s standing target %q/%q requires process admission catalog generation", contextDef.BundleHash(), target.Alias, target.Provider)
 		}
 		if generation != m.admissionGeneration {
-			return fmt.Errorf("runtime context %s standing target %q/%q admission generation %q does not match process generation %q", contextDef.BundleHash, target.Alias, target.Provider, generation, m.admissionGeneration)
+			return fmt.Errorf("runtime context %s standing target %q/%q admission generation %q does not match process generation %q", contextDef.BundleHash(), target.Alias, target.Provider, generation, m.admissionGeneration)
 		}
 	}
 	return nil
@@ -741,14 +734,12 @@ func runtimeContextAgentIDs(source semanticview.Source) []string {
 func runtimeContextBundleLabel(contextDef BundleContext) string {
 	contextDef = contextDef.normalized()
 	parts := []string{}
-	if contextDef.BundleHash != "" {
-		parts = append(parts, "bundle_hash="+contextDef.BundleHash)
+	if bundleHash := contextDef.BundleHash(); bundleHash != "" {
+		parts = append(parts, "bundle_hash="+bundleHash)
 	}
-	if source := strings.TrimSpace(contextDef.BundleSourceFact.BundleSource); source != "" {
+	_, source := contextDef.BundleSourceFact.StorageValues()
+	if source != "" {
 		parts = append(parts, "bundle_source="+source)
-	}
-	if fingerprint := strings.TrimSpace(contextDef.BundleSourceFact.BundleFingerprint); fingerprint != "" {
-		parts = append(parts, "bundle_fingerprint="+fingerprint)
 	}
 	workflowName := strings.TrimSpace(contextDef.BundleIdentity.WorkflowName)
 	workflowVersion := strings.TrimSpace(contextDef.BundleIdentity.WorkflowVersion)
@@ -1448,7 +1439,7 @@ func (m *RuntimeContextManager) publishStandingServiceTargets(serviceID string, 
 }
 
 func (m *RuntimeContextManager) ReplaceSameBundle(contextDef BundleContext) error {
-	return m.ReplaceBundleHash(contextDef.BundleHash, contextDef)
+	return m.ReplaceBundleHash(contextDef.BundleHash(), contextDef)
 }
 
 func (m *RuntimeContextManager) ValidateReplacement(existingHash string, contextDef BundleContext) error {
@@ -1636,9 +1627,9 @@ func (m *RuntimeContextManager) PrepareRestoredBundleHashReplacementPublication(
 }
 
 func (m *RuntimeContextManager) prepareReplacementPublicationLocked(existingHash string, contextDef BundleContext, entry *runtimeContextEntry) (*replacementPublication, error) {
-	if existingHash != contextDef.BundleHash {
-		if _, exists := m.contexts[contextDef.BundleHash]; exists {
-			return nil, fmt.Errorf("replacement runtime context bundle_hash %s is already registered", contextDef.BundleHash)
+	if existingHash != contextDef.BundleHash() {
+		if _, exists := m.contexts[contextDef.BundleHash()]; exists {
+			return nil, fmt.Errorf("replacement runtime context bundle_hash %s is already registered", contextDef.BundleHash())
 		}
 	}
 	if collision, ok := m.duplicateLoadedAgentSlugLockedExcluding(contextDef, existingHash); ok {
@@ -1658,7 +1649,7 @@ func (m *RuntimeContextManager) prepareReplacementPublicationLocked(existingHash
 	}
 	return &replacementPublication{
 		existingHash:   existingHash,
-		bundleHash:     contextDef.BundleHash,
+		bundleHash:     contextDef.BundleHash(),
 		entry:          entry,
 		context:        copied,
 		runtime:        runtimeOwner,
@@ -1716,7 +1707,7 @@ func copyParkedStandingOccurrences(in map[string]*runtimepipeline.ParkedOccurren
 
 func validateRestoredAdmissionAuthority(predecessor, restored BundleContext) error {
 	if len(predecessor.StandingTargets) != len(restored.StandingTargets) {
-		return fmt.Errorf("restored runtime context %s changed standing admission target count from %d to %d", predecessor.BundleHash, len(predecessor.StandingTargets), len(restored.StandingTargets))
+		return fmt.Errorf("restored runtime context %s changed standing admission target count from %d to %d", predecessor.BundleHash(), len(predecessor.StandingTargets), len(restored.StandingTargets))
 	}
 	want := map[string]StandingTarget{}
 	for _, target := range predecessor.StandingTargets {
@@ -1730,12 +1721,12 @@ func validateRestoredAdmissionAuthority(predecessor, restored BundleContext) err
 			previous.AdmissionPlan.GenerationID() != target.AdmissionPlan.GenerationID() ||
 			previous.AdmissionPlan.PolicySource() != target.AdmissionPlan.PolicySource() ||
 			previous.AdmissionPlan.RequestAuthentication() != target.AdmissionPlan.RequestAuthentication() {
-			return fmt.Errorf("restored runtime context %s changed standing admission authority for %q/%q", predecessor.BundleHash, target.Alias, target.Provider)
+			return fmt.Errorf("restored runtime context %s changed standing admission authority for %q/%q", predecessor.BundleHash(), target.Alias, target.Provider)
 		}
 		delete(want, target.Alias+"\x00"+target.Provider)
 	}
 	if len(want) != 0 {
-		return fmt.Errorf("restored runtime context %s omitted predecessor standing admission targets", predecessor.BundleHash)
+		return fmt.Errorf("restored runtime context %s omitted predecessor standing admission targets", predecessor.BundleHash())
 	}
 	return nil
 }
@@ -1898,7 +1889,7 @@ func (m *RuntimeContextManager) validateProcessAdmissionCandidateLocked(existing
 func validateTargetsGeneration(contextDef BundleContext, generation string) error {
 	for _, target := range contextDef.StandingTargets {
 		if target.AdmissionPlan.GenerationID() != generation {
-			return fmt.Errorf("runtime context %s standing target %q/%q admission generation %q does not match candidate process generation %q", contextDef.BundleHash, target.Alias, target.Provider, target.AdmissionPlan.GenerationID(), generation)
+			return fmt.Errorf("runtime context %s standing target %q/%q admission generation %q does not match candidate process generation %q", contextDef.BundleHash(), target.Alias, target.Provider, target.AdmissionPlan.GenerationID(), generation)
 		}
 	}
 	return nil
@@ -1909,9 +1900,9 @@ func validateContextSetCollisions(contexts []BundleContext) error {
 	for _, contextDef := range contexts {
 		for _, target := range contextDef.StandingTargets {
 			if previous, ok := seenAlias[target.Alias]; ok {
-				return fmt.Errorf("duplicate standing ingress alias %q across loaded BundleContexts: existing %s; incoming %s; rename one package flow ingress alias", target.Alias, previous, contextDef.BundleHash)
+				return fmt.Errorf("duplicate standing ingress alias %q across loaded BundleContexts: existing %s; incoming %s; rename one package flow ingress alias", target.Alias, previous, contextDef.BundleHash())
 			}
-			seenAlias[target.Alias] = contextDef.BundleHash
+			seenAlias[target.Alias] = contextDef.BundleHash()
 		}
 	}
 	return nil
@@ -1929,9 +1920,9 @@ func (m *RuntimeContextManager) validateReplacementLocked(existingHash string, c
 	if entry == nil || !runtimeContextEntryLoaded(entry) {
 		return fmt.Errorf("loaded runtime context %s is required for replacement", existingHash)
 	}
-	if existingHash != contextDef.BundleHash {
-		if _, exists := m.contexts[contextDef.BundleHash]; exists {
-			return fmt.Errorf("replacement runtime context bundle_hash %s is already registered", contextDef.BundleHash)
+	if existingHash != contextDef.BundleHash() {
+		if _, exists := m.contexts[contextDef.BundleHash()]; exists {
+			return fmt.Errorf("replacement runtime context bundle_hash %s is already registered", contextDef.BundleHash())
 		}
 	}
 	if collision, ok := m.duplicateLoadedAgentSlugLockedExcluding(contextDef, existingHash); ok {

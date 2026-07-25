@@ -100,8 +100,8 @@ func seedSpecMemoryRun(t *testing.T, ctx context.Context, db execer) {
 func seedManagerRun(t *testing.T, ctx context.Context, db execer, runID string) {
 	t.Helper()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES ($1::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 		ON CONFLICT (run_id) DO NOTHING
 	`, runID); err != nil {
 		t.Fatalf("seed agent memory run: %v", err)
@@ -153,8 +153,8 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES ($1::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -225,8 +225,8 @@ func TestPostgresRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 	eventEntityB := uuid.NewString()
 	currentEntity := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, event_count, entity_count, started_at)
-		VALUES ($1::uuid, 'running', 99, 9, now())
+		INSERT INTO runs (run_id, status, event_count, entity_count, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', 99, 9, now(), 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -266,8 +266,8 @@ func TestPostgresStore_AppendEventRejectsNewEventForCompletedRun(t *testing.T) {
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, ended_at, event_count, entity_count)
-		VALUES ($1::uuid, 'completed', now(), 0, 0)
+		INSERT INTO runs (run_id, status, ended_at, event_count, entity_count, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'completed', now(), 0, 0, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID); err != nil {
 		t.Fatalf("seed completed run: %v", err)
 	}
@@ -328,8 +328,8 @@ func TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun(t *testing
 	completedAt := time.Now().UTC().Add(-time.Minute).Round(time.Second)
 	createdAt := time.Now().UTC().Add(-2 * time.Minute).Truncate(time.Microsecond)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, ended_at, event_count, entity_count)
-		VALUES ($1::uuid, 'completed', $2, 1, 1)
+		INSERT INTO runs (run_id, status, ended_at, event_count, entity_count, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'completed', $2, 1, 1, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, completedAt); err != nil {
 		t.Fatalf("seed completed run: %v", err)
 	}
@@ -561,8 +561,8 @@ func TestPostgresStore_AgentSessionSuccessorInvariantsRejectInvalidCanonicalWrit
 func seedSpecEntityState(t *testing.T, ctx context.Context, db execer, entityID, flowInstance, slug, name, state string) {
 	t.Helper()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES ($1::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 		ON CONFLICT (run_id) DO NOTHING
 	`, specEntityStateRunID); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -885,7 +885,7 @@ func TestPostgresStore_RunTerminalOwnersPersistCanonicalLifecycle(t *testing.T) 
 	}
 
 	failedRunID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, failedRunID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, failedRunID); err != nil {
 		t.Fatalf("seed failed run: %v", err)
 	}
 	failedAt := time.Now().UTC().Round(time.Second)
@@ -944,7 +944,7 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 		"human", "", []byte(`{"directive":"x"}`), 0, runID,
 		parentID, events.EventEnvelope{}, time.Now().Add(-1*time.Minute))
 
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running') ON CONFLICT (run_id) DO NOTHING`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral') ON CONFLICT (run_id) DO NOTHING`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if err := commitSemanticEventFixture(ctx, pg, eventtest.RunCreatingRootIngress(parentID,
@@ -1255,7 +1255,7 @@ func TestSchedules_RunScopedWritesUsePipelineTransaction(t *testing.T) {
 	runID := uuid.NewString()
 	ctx, cancel := context.WithTimeout(runtimecorrelation.WithRunID(context.Background(), runID), 3*time.Second)
 	defer cancel()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', now())`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', now(), 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	tx, err := db.BeginTx(ctx, nil)
@@ -1468,8 +1468,8 @@ func TestSchedules_ExactIdentityUsesRunID(t *testing.T) {
 	runB := uuid.NewString()
 	entityID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES ($1::uuid, 'running'), ($2::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'), ($2::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runA, runB); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
@@ -1585,8 +1585,8 @@ func TestSchedules_LoadActiveSchedulesIgnoresWorkflowSidecarRows(t *testing.T) {
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES ($1::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -2029,7 +2029,7 @@ func TestManagerStore_LoadRoutingRules_DoesNotJoinRunScopedEntityState(t *testin
 	runB := uuid.NewString()
 	entityID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running'), ($2::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'), ($2::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runA, runB); err != nil {
 		t.Fatalf("insert runs: %v", err)
 	}

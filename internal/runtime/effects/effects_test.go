@@ -130,7 +130,7 @@ func TestCompletionControllerRequiresSettlementProjectionOwner(t *testing.T) {
 
 func TestBeginCompletionRejectsCapabilitySurfaceFromDifferentRun(t *testing.T) {
 	token := LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 3}
-	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "test-execution-authority", 1, "", "test-actors", "test-bundle", nil)
+	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "test-execution-authority", 1, "", "test-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
 	if err != nil {
 		t.Fatalf("build managed execution admission: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestBeginNormalEffectRejectsCrossContextCapabilitySurfacesBeforeAuthorizati
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			probe := &effectStoreProbe{}
-			admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "test-execution-authority", 1, "", "test-actors", "test-bundle", nil)
+			admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "test-execution-authority", 1, "", "test-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
 			if err != nil {
 				t.Fatalf("build managed execution admission: %v", err)
 			}
@@ -275,7 +275,7 @@ func TestBeginSelectedEffectRejectsMissingOrCrossActorTurnBeforeAuthorization(t 
 	}
 	admission, err := managedexecution.New(
 		managedexecution.KindSelectedContractFork, executionID, 1, forkRunID,
-		"test-actors", "test-config", nil,
+		"test-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil,
 	)
 	if err != nil {
 		t.Fatalf("build selected managed execution admission: %v", err)
@@ -381,7 +381,7 @@ func TestBeginDerivesStableOperationAndAttemptIdentity(t *testing.T) {
 
 func managedEffectTestContext(t testing.TB, ctx context.Context, agentID string) context.Context {
 	t.Helper()
-	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "test-execution-authority", 1, "", "test-actors", "test-bundle", nil)
+	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "test-execution-authority", 1, "", "test-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
 	if err != nil {
 		t.Fatalf("build managed execution test admission: %v", err)
 	}

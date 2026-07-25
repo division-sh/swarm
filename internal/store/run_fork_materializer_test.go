@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -147,19 +148,19 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 		)
 	}
 
-	var forkStatus, forkedFromRun, forkedFromEvent, forkBundleHash, forkBundleSource, forkBundleFingerprint string
+	var forkStatus, forkedFromRun, forkedFromEvent, forkBundleHash, forkBundleSource string
 	if err := db.QueryRowContext(ctx, `
-		SELECT status, forked_from_run_id::text, forked_from_event_id::text, COALESCE(bundle_hash, ''), bundle_source, COALESCE(bundle_fingerprint, '')
+		SELECT status, forked_from_run_id::text, forked_from_event_id::text, bundle_hash, bundle_source
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, result.ForkRunID).Scan(&forkStatus, &forkedFromRun, &forkedFromEvent, &forkBundleHash, &forkBundleSource, &forkBundleFingerprint); err != nil {
+	`, result.ForkRunID).Scan(&forkStatus, &forkedFromRun, &forkedFromEvent, &forkBundleHash, &forkBundleSource); err != nil {
 		t.Fatalf("load fork run: %v", err)
 	}
 	if forkStatus != "paused" || forkedFromRun != sourceRunID || forkedFromEvent != secondEventID {
 		t.Fatalf("fork run = status:%s from:%s event:%s", forkStatus, forkedFromRun, forkedFromEvent)
 	}
-	if forkBundleHash != authorActivityTestBundleHash || forkBundleSource != storerunlifecycle.BundleSourceEphemeral || forkBundleFingerprint != "" {
-		t.Fatalf("fork bundle identity = hash:%q source:%q fingerprint:%q, want inherited canonical identity", forkBundleHash, forkBundleSource, forkBundleFingerprint)
+	if forkBundleHash != authorActivityTestBundleHash || forkBundleSource != storerunlifecycle.BundleSourceEphemeral {
+		t.Fatalf("fork bundle identity = hash:%q source:%q, want inherited canonical identity", forkBundleHash, forkBundleSource)
 	}
 	var sourceStatus string
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatus); err != nil {
@@ -448,8 +449,8 @@ func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeHasNoSourceMetadataAuthori
 	eventID := uuid.NewString()
 	at := time.Unix(1700000508, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, sourceRunID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
@@ -488,8 +489,8 @@ func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeConflictsWithSourceMetadat
 	eventID := uuid.NewString()
 	at := time.Unix(1700000509, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, sourceRunID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
@@ -614,17 +615,21 @@ func TestRunForkSelectedContractBinding_MaterializesDurableBundleHashBinding(t *
 	captureRunForkTestRevision(t, db, sourceRunID)
 
 	targetHash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	seedStoreTestPersistedBundle(t, db, targetHash)
 	selection := RunForkContractSelection{
 		Mode:            RunForkContractSelectionModeBundleHash,
 		BundleHash:      targetHash,
 		WorkflowName:    "selected-workflow",
 		WorkflowVersion: "v2",
 	}
+	targetSource, err := runtimecorrelation.NewPersistedBundleSourceFact(targetHash)
+	if err != nil {
+		t.Fatalf("NewPersistedBundleSourceFact: %v", err)
+	}
 	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{
 		SourceRunID:       sourceRunID,
 		At:                eventID,
-		BundleHash:        targetHash,
-		BundleSource:      "persisted",
+		BundleSourceFact:  targetSource,
 		ContractSelection: &selection,
 	})
 	if err != nil {
@@ -1195,8 +1200,8 @@ func TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence(t *
 				foreignRunID := uuid.NewString()
 				foreignEventID := uuid.NewString()
 				if _, err := db.ExecContext(ctx, `
-					INSERT INTO runs (run_id, status, started_at)
-					VALUES ($1::uuid, 'running', $2)
+					INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+					VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 				`, foreignRunID, at.Add(-time.Minute)); err != nil {
 					t.Fatalf("seed foreign run: %v", err)
 				}
@@ -1457,7 +1462,7 @@ func TestRunForkActivation_FailsClosedForDeliveryAdvancementAndMissingLineage(t 
 	}
 
 	orphanRunID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'paused', $2)`, orphanRunID, at); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'paused', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, orphanRunID, at); err != nil {
 		t.Fatalf("seed orphan paused run: %v", err)
 	}
 	_, err = pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: orphanRunID})

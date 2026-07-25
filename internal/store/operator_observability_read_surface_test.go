@@ -27,7 +27,7 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 	olderEventID := uuid.NewString()
 	newerEventID := uuid.NewString()
 	base := time.Unix(1700000000, 0).UTC()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	seedOperatorObservabilityEvent(t, ctx, pg, olderEventID, runID, "task.failed", events.EventProducerAgent, "agent-a", json.RawMessage(`{"entity_id":"`+entityID+`","n":1}`), entityID, base)
@@ -125,7 +125,7 @@ func TestOperatorObservabilityEventOwnerDoesNotPromotePayloadEntityIdentity(t *t
 	payloadOnlyEventID := uuid.NewString()
 	canonicalEventID := uuid.NewString()
 	base := time.Unix(1700001200, 0).UTC()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	seedOperatorObservabilityEvent(t, ctx, pg, payloadOnlyEventID, runID, "task.payload_only", events.EventProducerAgent, "agent-a", json.RawMessage(`{"entity_id":"`+targetEntityID+`","marker":"payload-only"}`), "", base)
@@ -176,7 +176,7 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 
 	runID := uuid.NewString()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	insertLog := func(code string, createdAt time.Time) string {
@@ -307,7 +307,7 @@ func TestPostgresRuntimeLogSourceFilterUsesCanonicalAgentOrRuntime(t *testing.T)
 
 	runID := uuid.NewString()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	insertLog := func(message, details string, createdAt time.Time) string {
@@ -409,7 +409,7 @@ func TestOperatorRuntimeLogsFilterBySessionAndTimeWindow(t *testing.T) {
 
 	runID := uuid.NewString()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	insertLog := func(sessionID string, createdAt time.Time) string {
@@ -535,7 +535,7 @@ func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
 
 	runID := uuid.NewString()
 	base := time.Unix(1700000300, 0).UTC()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	firstEvent := uuid.NewString()
@@ -614,7 +614,7 @@ func TestRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 	businessEvent := uuid.NewString()
 	runtimeLogEvent := uuid.NewString()
 	base := time.Unix(1700000600, 0).UTC()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	seedOperatorObservabilityEvent(t, ctx, pg, businessEvent, runID, "item.received", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), "", base)
@@ -648,7 +648,7 @@ func TestRunDebugTracePageTypedFilters(t *testing.T) {
 	secondEvent := uuid.NewString()
 	base := time.Unix(1700000400, 0).UTC()
 	until := base
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	seedOperatorObservabilityEvent(t, ctx, pg, firstEvent, runID, "first.event", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), entityOne, base)

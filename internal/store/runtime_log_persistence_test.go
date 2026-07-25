@@ -87,8 +87,8 @@ func TestSQLiteRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t *
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES (?, 'running', ?)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, time.Now().UTC()); err != nil {
 		t.Fatalf("seed sqlite run: %v", err)
 	}
@@ -133,8 +133,8 @@ func TestPostgresRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t
 	pg := newTestPostgresStore(t, db)
 	runID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', NOW())
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', NOW(), 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID); err != nil {
 		t.Fatalf("seed postgres run: %v", err)
 	}
@@ -199,8 +199,8 @@ func TestSQLiteRuntimeLogSourceProjectionAndFilterParity(t *testing.T) {
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 
 	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES (?, 'running', ?)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, time.Now().UTC()); err != nil {
 		t.Fatalf("seed sqlite run: %v", err)
 	}
@@ -307,15 +307,13 @@ func TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage(t *testing.T)
 
 	runID := uuid.NewString()
 	subjectEventID := uuid.NewString()
-	sourceFact := runtimecorrelation.BundleSourceFact{
-		BundleHash:        "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111",
-		BundleSource:      storerunlifecycle.BundleSourcePersisted,
-		BundleFingerprint: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-	}
+	sourceFact := mustStoreTestPersistedBundleSourceFact(
+		"bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111",
+	)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
 		VALUES ($1, 'name: test', '{}'::jsonb)
-	`, sourceFact.BundleHash); err != nil {
+	`, sourceFact.BundleHash()); err != nil {
 		t.Fatalf("seed bundle row: %v", err)
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
@@ -339,16 +337,16 @@ func TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage(t *testing.T)
 		t.Fatalf("RuntimeLogger.Log postgres: %v", err)
 	}
 
-	var gotHash, gotSource, gotFingerprint, sourceEventID string
+	var gotHash, gotSource, sourceEventID string
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(bundle_hash, ''), bundle_source, COALESCE(bundle_fingerprint, '')
+		SELECT bundle_hash, bundle_source
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, runID).Scan(&gotHash, &gotSource, &gotFingerprint); err != nil {
+	`, runID).Scan(&gotHash, &gotSource); err != nil {
 		t.Fatalf("load postgres run bundle source: %v", err)
 	}
-	if gotHash != sourceFact.BundleHash || gotSource != sourceFact.BundleSource || gotFingerprint != sourceFact.BundleFingerprint {
-		t.Fatalf("postgres run bundle source = hash:%q source:%q fingerprint:%q, want %#v", gotHash, gotSource, gotFingerprint, sourceFact)
+	if gotHash != sourceFact.BundleHash() || gotSource != storerunlifecycle.BundleSourcePersisted {
+		t.Fatalf("postgres run bundle source = hash:%q source:%q, want %#v", gotHash, gotSource, sourceFact)
 	}
 	if err := db.QueryRowContext(ctx, `
 		SELECT COALESCE(source_event_id::text, '')

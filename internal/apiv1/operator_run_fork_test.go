@@ -10,7 +10,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/runbundle"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 const (
@@ -60,7 +59,6 @@ func TestOperatorRunForkHandlersUseAvailabilityAndSelectedExecutor(t *testing.T)
 	if executor.last.SourceRunID != runForkTestSourceRunID || executor.last.ForkEventID != runForkTestEventID || executor.last.BundleHash != runForkTestBundleHash || !executor.last.ConfirmSourceFreeze {
 		t.Fatalf("executor request = %#v", executor.last)
 	}
-
 	replay := rpcCall(t, handler, fmt.Sprintf(
 		`{"jsonrpc":"2.0","id":"fork-replay","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"confirm_source_freeze":true,"idempotency_key":"idem-fork"}}`,
 		runForkTestSourceRunID,
@@ -148,8 +146,8 @@ func TestOperatorRunForkHandlersFailClosedOnBundleAvailability(t *testing.T) {
 		wantCode     string
 	}{
 		{
-			name:         "legacy source unavailable",
-			availability: runForkUnavailable(runForkTestSourceRunID, runForkTestBundleHash, storerunlifecycle.BundleSourceLegacy),
+			name:         "deleted source unavailable",
+			availability: runForkUnavailable(runForkTestSourceRunID, runForkTestBundleHash, runbundle.AvailabilitySourceDeleted),
 			params:       fmt.Sprintf(`{"source_run_id":%q,"fork_event_id":%q}`, runForkTestSourceRunID, runForkTestEventID),
 			wantCode:     BundleUnavailableCode,
 		},
@@ -276,17 +274,17 @@ func runForkAvailable(runID, bundleHash string) runbundle.Availability {
 		RunID:            strings.TrimSpace(runID),
 		Status:           "running",
 		BundleHash:       strings.TrimSpace(bundleHash),
-		BundleSource:     storerunlifecycle.BundleSourcePersisted,
+		BundleSource:     runbundle.AvailabilitySourcePersisted,
 		BundleRowPresent: true,
 	}
 }
 
-func runForkUnavailable(runID, bundleHash, cause string) runbundle.Availability {
+func runForkUnavailable(runID, bundleHash string, source runbundle.AvailabilitySource) runbundle.Availability {
 	availability := runForkAvailable(runID, bundleHash)
-	availability.BundleSource = strings.TrimSpace(cause)
+	availability.BundleSource = source
 	availability.BundleRowPresent = false
 	availability.ErrorCode = runbundle.CodeBundleUnavailable
-	availability.Cause = strings.TrimSpace(cause)
+	availability.Cause = source.String()
 	return availability
 }
 

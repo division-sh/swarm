@@ -75,10 +75,10 @@ func (s *SQLiteRuntimeStore) RecordRuntimeStartupAuthorityTransition(ctx context
 			if _, err := tx.ExecContext(txctx, `
 				INSERT INTO runtime_startup_authority_facts (
 					fact_id,authority_id,lease_authority_id,transition_ordinal,generation,state_version,state,owner_id,boot_id,
-					bundle_fingerprint,backend,handoff_id,snapshot,created_at
+					bundle_hash,backend,handoff_id,snapshot,created_at
 				) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 			`, uuid.NewString(), authority.AuthorityID, authority.LeaseAuthorityID, authority.TransitionOrdinal, authority.Generation, authority.StateVersion, authority.State,
-				authority.OwnerID, authority.BootID, authority.BundleFingerprint, authority.Backend, sqliteNullString(authority.HandoffID), string(raw), authority.RecordedAt.UTC()); err != nil {
+				authority.OwnerID, authority.BootID, authority.BundleHash, authority.Backend, sqliteNullString(authority.HandoffID), string(raw), authority.RecordedAt.UTC()); err != nil {
 				return fmt.Errorf("record sqlite runtime startup authority: %w", err)
 			}
 		}
