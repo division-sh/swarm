@@ -513,113 +513,144 @@ func TestPostgresSharedClaimSessionSerializesSiblingTransactionsAndRelease(t *te
 }
 
 func TestPostgresSessionPoisonDrainsConcurrentSiblingReleaseWithoutLockInversion(t *testing.T) {
-	dsn, db, _ := testutil.StartPostgres(t)
-	selected := newTestPostgresStore(t, db)
-	db.SetMaxOpenConns(2)
-	db.SetMaxIdleConns(2)
-	ctx := testAuthorActivityContext()
-	eventIDs := []string{uuid.NewString(), uuid.NewString()}
-	claims := make([]runtimepipelineobligation.Claim, 0, len(eventIDs))
+	for _, tc := range []struct {
+		name              string
+		unlocked          bool
+		unlockErr         error
+		releaseSessionErr error
+		wantDetail        string
+	}{
+		{
+			name:       "false_unlock",
+			wantDetail: "did not own the lock",
+		},
+		{
+			name:       "unlock_query_error",
+			unlockErr:  errors.New("injected concurrent unlock query failure"),
+			wantDetail: "injected concurrent unlock query failure",
+		},
+		{
+			name:              "session_close_error",
+			unlocked:          true,
+			releaseSessionErr: errors.New("injected concurrent session close failure"),
+			wantDetail:        "injected concurrent session close failure",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dsn, db, _ := testutil.StartPostgres(t)
+			selected := newTestPostgresStore(t, db)
+			db.SetMaxOpenConns(2)
+			db.SetMaxIdleConns(2)
+			ctx := testAuthorActivityContext()
+			eventIDs := []string{uuid.NewString(), uuid.NewString()}
+			claims := make([]runtimepipelineobligation.Claim, 0, len(eventIDs))
 
-	if err := selected.runPostgresRuntimeMutation(ctx, func(txctx context.Context, _ *sql.Tx) error {
-		for _, eventID := range eventIDs {
-			claim, err := selected.PipelineObligations().ClaimPublication(txctx, eventID)
-			if err != nil {
-				return err
+			if err := selected.runPostgresRuntimeMutation(ctx, func(txctx context.Context, _ *sql.Tx) error {
+				for _, eventID := range eventIDs {
+					claim, err := selected.PipelineObligations().ClaimPublication(txctx, eventID)
+					if err != nil {
+						return err
+					}
+					claims = append(claims, claim)
+				}
+				return nil
+			}); err != nil {
+				t.Fatalf("claim sibling publications: %v", err)
 			}
-			claims = append(claims, claim)
-		}
-		return nil
-	}); err != nil {
-		t.Fatalf("claim sibling publications: %v", err)
-	}
-	states := make([]*pipelineClaimState, 0, len(claims))
-	for _, claim := range claims {
-		state, err := selected.postgresPipelineClaimState(claim)
-		if err != nil {
-			t.Fatalf("load sibling claim: %v", err)
-		}
-		states = append(states, state)
-	}
-	if states[0].postgresLease.session != states[1].postgresLease.session {
-		t.Fatal("sibling claims did not retain one physical session")
-	}
-	scan, err := selected.PipelineObligations().OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest())
-	if err != nil {
-		t.Fatalf("open scan: %v", err)
-	}
-	for _, claim := range claims {
-		if err := selected.associatePostgresPipelineClaim(scan, claim); err != nil {
-			t.Fatalf("associate sibling claim with scan: %v", err)
-		}
-	}
+			states := make([]*pipelineClaimState, 0, len(claims))
+			for _, claim := range claims {
+				state, err := selected.postgresPipelineClaimState(claim)
+				if err != nil {
+					t.Fatalf("load sibling claim: %v", err)
+				}
+				states = append(states, state)
+			}
+			if states[0].postgresLease.session != states[1].postgresLease.session {
+				t.Fatal("sibling claims did not retain one physical session")
+			}
+			scan, err := selected.PipelineObligations().OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest())
+			if err != nil {
+				t.Fatalf("open scan: %v", err)
+			}
+			for _, claim := range claims {
+				if err := selected.associatePostgresPipelineClaim(scan, claim); err != nil {
+					t.Fatalf("associate sibling claim with scan: %v", err)
+				}
+			}
 
-	triggerOwnsOperation := make(chan struct{})
-	siblingOwnsLease := make(chan struct{})
-	states[0].postgresLease.testUnlock = func(context.Context, *postgresSessionAuthority, string) (bool, error) {
-		close(triggerOwnsOperation)
-		<-siblingOwnsLease
-		return false, nil
-	}
-	states[1].postgresLease.testBeforeBeginOperation = func() {
-		close(siblingOwnsLease)
-	}
-	triggerDone := make(chan error, 1)
-	siblingDone := make(chan error, 1)
-	go func() {
-		triggerDone <- selected.PipelineObligations().Release(ctx, claims[0])
-	}()
-	select {
-	case <-triggerOwnsOperation:
-	case <-time.After(5 * time.Second):
-		t.Fatal("poisoning release did not acquire the session operation boundary")
-	}
-	go func() {
-		siblingDone <- selected.PipelineObligations().Release(ctx, claims[1])
-	}()
+			triggerOwnsOperation := make(chan struct{})
+			siblingOwnsLease := make(chan struct{})
+			states[0].postgresLease.testUnlock = func(context.Context, *postgresSessionAuthority, string) (bool, error) {
+				close(triggerOwnsOperation)
+				<-siblingOwnsLease
+				return tc.unlocked, tc.unlockErr
+			}
+			if tc.releaseSessionErr != nil {
+				states[0].postgresLease.releaseSession = func() error {
+					return tc.releaseSessionErr
+				}
+			}
+			states[1].postgresLease.testBeforeBeginOperation = func() {
+				close(siblingOwnsLease)
+			}
+			triggerDone := make(chan error, 1)
+			siblingDone := make(chan error, 1)
+			go func() {
+				triggerDone <- selected.PipelineObligations().Release(ctx, claims[0])
+			}()
+			select {
+			case <-triggerOwnsOperation:
+			case <-time.After(5 * time.Second):
+				t.Fatal("poisoning release did not acquire the session operation boundary")
+			}
+			go func() {
+				siblingDone <- selected.PipelineObligations().Release(ctx, claims[1])
+			}()
 
-	select {
-	case err := <-triggerDone:
-		if err == nil || !strings.Contains(err.Error(), "did not own the lock") {
-			t.Fatalf("poisoning release error = %v, want false-unlock evidence", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("poisoning release deadlocked against sibling lease retirement")
-	}
-	select {
-	case err := <-siblingDone:
-		if err == nil || !strings.Contains(err.Error(), "session authority is closed") {
-			t.Fatalf("concurrent sibling release error = %v, want terminal session evidence", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("sibling release deadlocked against session poison")
-	}
+			select {
+			case err := <-triggerDone:
+				if err == nil || !strings.Contains(err.Error(), tc.wantDetail) {
+					t.Fatalf("poisoning release error = %v, want %q evidence", err, tc.wantDetail)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("poisoning release deadlocked against sibling lease retirement")
+			}
+			select {
+			case err := <-siblingDone:
+				if err == nil || !strings.Contains(err.Error(), "session authority is closed") {
+					t.Fatalf("concurrent sibling release error = %v, want terminal session evidence", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("sibling release deadlocked against session poison")
+			}
 
-	for index, claim := range claims {
-		if _, err := selected.postgresPipelineClaimState(claim); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
-			t.Fatalf("sibling claim %d after concurrent poison = %v, want ErrStaleClaim", index, err)
-		}
-		assertIndependentAdvisoryLockAvailable(t, dsn, replayClaimLockKey(eventIDs[index]))
-		reclaimed, err := selected.PipelineObligations().ClaimPublication(ctx, eventIDs[index])
-		if err != nil {
-			t.Fatalf("local reclaim %d after concurrent poison: %v", index, err)
-		}
-		if err := selected.PipelineObligations().Release(ctx, reclaimed); err != nil {
-			t.Fatalf("release reclaimed sibling %d: %v", index, err)
-		}
-	}
-	scanState, err := selected.postgresPipelineScanState(scan)
-	if err != nil {
-		t.Fatalf("load retained scan: %v", err)
-	}
-	if got := len(scanState.openClaims); got != 0 {
-		t.Fatalf("scan memberships after concurrent poison = %d, want 0", got)
-	}
-	if got := db.Stats().MaxOpenConnections; got != 2 {
-		t.Fatalf("capacity after concurrent poison = %d, want 2", got)
-	}
-	if err := selected.PipelineObligations().CloseScan(ctx, scan); err != nil {
-		t.Fatalf("close scan after concurrent poison: %v", err)
+			for index, claim := range claims {
+				if _, err := selected.postgresPipelineClaimState(claim); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
+					t.Fatalf("sibling claim %d after concurrent poison = %v, want ErrStaleClaim", index, err)
+				}
+				assertIndependentAdvisoryLockAvailable(t, dsn, replayClaimLockKey(eventIDs[index]))
+				reclaimed, err := selected.PipelineObligations().ClaimPublication(ctx, eventIDs[index])
+				if err != nil {
+					t.Fatalf("local reclaim %d after concurrent poison: %v", index, err)
+				}
+				if err := selected.PipelineObligations().Release(ctx, reclaimed); err != nil {
+					t.Fatalf("release reclaimed sibling %d: %v", index, err)
+				}
+			}
+			scanState, err := selected.postgresPipelineScanState(scan)
+			if err != nil {
+				t.Fatalf("load retained scan: %v", err)
+			}
+			if got := len(scanState.openClaims); got != 0 {
+				t.Fatalf("scan memberships after concurrent poison = %d, want 0", got)
+			}
+			if got := db.Stats().MaxOpenConnections; got != 2 {
+				t.Fatalf("capacity after concurrent poison = %d, want 2", got)
+			}
+			if err := selected.PipelineObligations().CloseScan(ctx, scan); err != nil {
+				t.Fatalf("close scan after concurrent poison: %v", err)
+			}
+		})
 	}
 }
 
