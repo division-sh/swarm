@@ -192,7 +192,8 @@ func newPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		nodeRecoveryReady:                make(chan struct{}),
 		entityLocks:                      make(map[string]*sync.Mutex),
 	}
-	coordinator.workflowTimers = newWorkflowTimerLifecycle(coordinator)
+	coordinator.workflowTimers = newWorkflowTimerLifecycle(workflowStore, coordinator.SemanticSource(), bus, opts.WorkOwner, opts.TimerScheduler)
+	workflowStore.ConfigureWorkflowInstanceLifecycle(pipelineWorkflowLifecycleOwner{coordinator: coordinator})
 	return coordinator
 }
 

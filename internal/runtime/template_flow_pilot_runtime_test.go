@@ -47,6 +47,13 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
+		Module:              newRuntimeTestWorkflowModule(t, source),
+		WorkflowStore:       workflowStore,
+		DeliveryStore:       pg,
+		PipelineObligations: pg.PipelineObligations(),
+	})
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,

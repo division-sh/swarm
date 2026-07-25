@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"testing"
 	"time"
 
@@ -46,11 +45,10 @@ func TestSelectedContractWorkflowTimerForkRestoresAndExecutesThroughHandler(t *t
 			fireAt := forkAt.Add(time.Second)
 			var recurrenceInterval any
 			var firedAt any
-			taskType := "timer"
+			taskType := "workflow_timer"
 			if test.recurring {
 				createdAt = forkAt.Add(-time.Second)
 				recurrenceInterval = "1s"
-				taskType = "scheduled_task"
 				if test.sourceAcceptedEarlier {
 					firedAt = forkAt
 				}
@@ -111,27 +109,13 @@ func TestSelectedContractWorkflowTimerForkRestoresAndExecutesThroughHandler(t *t
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			forkCtx := runtimecorrelation.WithRunID(ctx, materialized.ForkRunID)
-			forkScope, ok := runtimeauthoractivity.ScopeFromContext(forkCtx)
-			if !ok {
-				t.Fatal("fork timer proof requires author activity scope")
-			}
 			workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 			fireErrors := make(chan error, 4)
-			var coordinator *runtimepipeline.PipelineCoordinator
-			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(storeTestWorkOwner(t), func(taskCtx context.Context, schedule runtimepipeline.Schedule) {
-				if coordinator == nil {
-					fireErrors <- fmt.Errorf("workflow timer coordinator is unavailable")
-					return
-				}
-				fireCtx := runtimeauthoractivity.WithScope(taskCtx, forkScope)
-				fireCtx = runtimecorrelation.WithRunID(fireCtx, materialized.ForkRunID)
-				if _, err := coordinator.FireWorkflowTimer(fireCtx, schedule); err != nil {
-					fireErrors <- err
-				}
-			})
-			coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+			workOwner := storeTestWorkOwner(t)
+			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(workOwner, func(context.Context, runtimepipeline.Schedule) {})
+			coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 				Module: selectedContractWorkflowTimerModule{source: source}, WorkflowStore: workflowStore,
-				TimerScheduler: scheduler, TimerScheduleStore: pg,
+				TimerScheduler: scheduler, TimerScheduleStore: pg, WorkOwner: workOwner,
 			})
 			interceptor := &selectedContractWorkflowTimerInterceptor{
 				delegate: coordinator, store: workflowStore, results: make(chan selectedContractWorkflowTimerInterceptResult, 2),

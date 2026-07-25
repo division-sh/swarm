@@ -295,9 +295,10 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 				dialect = runtimeauthoractivity.DialectSQLite
 			}
 			seedPipelineEventRecordForDialect(t, ctx, workflowStore.db, dialect, evt)
-			if err := workflowStore.Upsert(ctx, WorkflowInstance{
+			if err := workflowStore.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "delivery-retry", WorkflowVersion: "v-test", CurrentState: "queued",
-			}); err != nil {
+				EnteredStageAt: evt.CreatedAt(), CreatedAt: evt.CreatedAt(),
+			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
 			route := events.DeliveryRoute{
@@ -325,12 +326,19 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("load node delivery snapshot: %v", err)
 			}
-			if snapshot.Status != runtimedelivery.StatusDelivered || snapshot.RetryCount != 1 {
-				t.Fatalf("node delivery snapshot = status:%s retries:%d, want delivered/1", snapshot.Status, snapshot.RetryCount)
-			}
 			outcomes, err := owner.Outcomes(ctx, proof.DeliveryID())
 			if err != nil {
 				t.Fatalf("load node delivery outcomes: %v", err)
+			}
+			if snapshot.Status != runtimedelivery.StatusDelivered || snapshot.RetryCount != 1 {
+				t.Fatalf(
+					"node delivery snapshot = status:%s retries:%d next:%s local-now:%s outcomes:%#v, want delivered/1",
+					snapshot.Status,
+					snapshot.RetryCount,
+					snapshot.NextEligibleAt,
+					time.Now().UTC(),
+					outcomes,
+				)
 			}
 			if len(outcomes) != 2 || outcomes[0].Outcome != "retry_scheduled" || outcomes[1].Outcome != string(runtimedelivery.StatusDelivered) {
 				t.Fatalf("node delivery outcomes = %#v, want retry_scheduled then delivered", outcomes)
@@ -404,13 +412,13 @@ func seedDeliveryAuthorityEvent(t *testing.T, db *sql.DB, ctx context.Context) e
 
 func seedDeliveryAuthorityWorkflowInstance(t *testing.T, pc *PipelineCoordinator, ctx context.Context, entityID string) {
 	t.Helper()
-	if err := pc.workflowStore.Upsert(ctx, WorkflowInstance{
+	if err := pc.workflowStore.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "delivery-authority",
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed delivery authority workflow instance: %v", err)
 	}
 }

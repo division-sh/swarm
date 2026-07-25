@@ -14,13 +14,13 @@ func TestWorkflowInstanceStore_RequiresRunContext(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := NewWorkflowInstanceStore(db)
 
-	err := store.Upsert(testAuthorActivityContext(t, context.Background()), WorkflowInstance{
+	err := store.Upsert(testAuthorActivityContext(t, context.Background()), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      uuid.NewString(),
 		StorageRef:      uuid.NewString(),
 		WorkflowName:    "run-scope",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "queued",
-	})
+	}))
 	if err == nil || !strings.Contains(err.Error(), "run_id is required") {
 		t.Fatalf("Upsert error = %v, want missing run_id", err)
 	}
@@ -46,13 +46,13 @@ func TestWorkflowInstanceStore_RunScopedCurrentStateRowsDoNotBleed(t *testing.T)
 		{ctx: ctxA, state: "source_state"},
 		{ctx: ctxB, state: "fork_state"},
 	} {
-		if err := store.Upsert(tc.ctx, WorkflowInstance{
+		if err := store.Upsert(tc.ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 			InstanceID:      entityID,
 			StorageRef:      entityID,
 			WorkflowName:    "run-scope",
 			WorkflowVersion: "1.0.0",
 			CurrentState:    tc.state,
-		}); err != nil {
+		})); err != nil {
 			t.Fatalf("upsert %s: %v", tc.state, err)
 		}
 	}

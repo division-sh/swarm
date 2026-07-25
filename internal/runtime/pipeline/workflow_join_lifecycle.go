@@ -19,7 +19,7 @@ const (
 	joinCompleteEvent = "platform.join_complete"
 )
 
-func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, entityID, currentStage, nextStage string) error {
+func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, entityID, currentStage, nextStage string, occurredAt time.Time) error {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() || pc.SemanticSource() == nil {
 		return nil
 	}
@@ -32,7 +32,10 @@ func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, ent
 
 	toSchedule := make([]Schedule, 0, 2)
 	toCancel := make([]Schedule, 0, 2)
-	now := time.Now().UTC()
+	now := occurredAt.UTC()
+	if now.IsZero() {
+		return fmt.Errorf("workflow join lifecycle requires an exact occurrence time")
+	}
 	err := pc.workflowStore.MutateE(ctx, entityID, func(instance *WorkflowInstance) error {
 		carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 		if err != nil {
@@ -171,40 +174,6 @@ func (pc *PipelineCoordinator) reconcileClosedJoinSchedules(ctx context.Context,
 		})
 	}
 	return nil
-}
-
-func (pc *PipelineCoordinator) armWorkflowCurrentStageLifecycle(ctx context.Context, entityID, sourceEvent string) error {
-	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
-		return nil
-	}
-	entityID = strings.TrimSpace(entityID)
-	if entityID == "" {
-		return nil
-	}
-	return pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
-		instance, ok, err := pc.workflowStore.Load(txctx, entityID)
-		if err != nil || !ok {
-			return err
-		}
-		stage := strings.TrimSpace(instance.CurrentState)
-		if stage == "" {
-			return nil
-		}
-		cause, err := workflowTimerInitialCause(instance, stage)
-		if err != nil {
-			return err
-		}
-		if err := pc.workflowTimers.Reconcile(txctx, entityID, "", stage, cause); err != nil {
-			return err
-		}
-		if err := pc.applyWorkflowJoinIntents(txctx, entityID, "", stage); err != nil {
-			return err
-		}
-		if strings.TrimSpace(sourceEvent) == "" {
-			sourceEvent = cause.EventType
-		}
-		return pc.applyWorkflowGateIntents(txctx, entityID, "", stage, sourceEvent)
-	})
 }
 
 func workflowJoinPlansForStage(source semanticview.Source, flowID, stage string) []runtimecontracts.WorkflowJoinPlan {

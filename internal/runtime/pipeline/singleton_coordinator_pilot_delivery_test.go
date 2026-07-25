@@ -149,7 +149,7 @@ func newSingletonCoordinatorPilotPipelineCoordinator(t *testing.T, db *sql.DB, b
 
 func seedSingletonCoordinatorPilotInstance(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, bundle *runtimecontracts.WorkflowContractBundle, entityID string) {
 	t.Helper()
-	if err := store.Create(ctx, WorkflowInstance{
+	if err := store.Create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      singletoncoordinatorpilot.FlowInstance,
 		WorkflowName:    singletoncoordinatorpilot.FlowID,
@@ -165,7 +165,7 @@ func seedSingletonCoordinatorPilotInstance(t *testing.T, store *WorkflowInstance
 				map[string]any{"ref": "seed", "action": "seed"},
 			},
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed singleton coordinator workflow instance: %v", err)
 	}
 }

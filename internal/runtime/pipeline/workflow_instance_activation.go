@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -21,6 +22,7 @@ type FlowInstanceActivationRequest struct {
 	Config         map[string]any
 	Metadata       map[string]any
 	TriggerEvent   events.Event
+	OccurredAt     time.Time
 }
 
 type FlowInstanceActivator func(context.Context, FlowInstanceActivationRequest) error
@@ -84,6 +86,7 @@ func (pc *PipelineCoordinator) createFlowInstance(ctx context.Context, triggerCt
 		InitialState:   strings.TrimSpace(plan.AdvancesTo),
 		Config:         map[string]any{},
 		TriggerEvent:   triggerCtx.Event,
+		OccurredAt:     triggerCtx.Event.CreatedAt(),
 	}
 	config, err := resolveFlowInstanceConfig(plan.ConfigFrom, handlerContext)
 	if err != nil {
@@ -94,9 +97,6 @@ func (pc *PipelineCoordinator) createFlowInstance(ctx context.Context, triggerCt
 		return fmt.Errorf("create_flow_instance config_from resolved empty")
 	}
 	if err := pc.instanceActivator(ctx, req); err != nil {
-		return err
-	}
-	if err := pc.armWorkflowCurrentStageLifecycle(ctx, instance.EntityID, ""); err != nil {
 		return err
 	}
 	return nil

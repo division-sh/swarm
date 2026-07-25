@@ -25,7 +25,7 @@ import (
 )
 
 type flowInstancePersistence interface {
-	Create(ctx context.Context, instance runtimepipeline.WorkflowInstance) error
+	MaterializeInitialEntry(ctx context.Context, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) error
 	MarkTerminated(ctx context.Context, storageRef string, terminatedAt time.Time) error
 	Load(ctx context.Context, instanceID string) (runtimepipeline.WorkflowInstance, bool, error)
 	LoadRouteRecoveryProjection(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error)
@@ -121,7 +121,14 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	for key, value := range flowInstanceActivationMetadata(instance, flowEntityID, instanceID, flowPath, parentEntityID) {
 		metadata[key] = value
 	}
-	if err := am.workflowInstances.Create(ctx, runtimepipeline.WorkflowInstance{
+	occurredAt := req.OccurredAt.UTC()
+	if !req.TriggerEvent.CreatedAt().IsZero() {
+		occurredAt = req.TriggerEvent.CreatedAt().UTC()
+	}
+	if occurredAt.IsZero() {
+		return fmt.Errorf("flow activation requires an exact occurrence time")
+	}
+	if err := am.workflowInstances.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      instanceID,
 		StorageRef:      flowPath,
 		WorkflowName:    templateID,
@@ -129,7 +136,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		CurrentState:    initialState,
 		Config:          cloneFlowConfig(req.Config),
 		Metadata:        metadata,
-	}); err != nil {
+	}, occurredAt); err != nil {
 		return fmt.Errorf("persist flow instance %s: %w", flowPath, err)
 	}
 	if _, inMutation := runtimepipeline.PipelineSQLTxFromContext(ctx); inMutation {

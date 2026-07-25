@@ -204,8 +204,8 @@ func TestRuntimeStart_FailsWhenRecoveryDisabledAndActiveSchedulesExist(t *testin
 		t.Fatalf("NewRuntime: %v", err)
 	}
 	err = rt.Start(testAuthorActivityContext(context.Background()))
-	if err == nil || !strings.Contains(err.Error(), "runtime.recovery_on_startup=false") || !strings.Contains(err.Error(), "active schedules") {
-		t.Fatalf("Start error = %v, want explicit active schedule denial", err)
+	if err == nil || !strings.Contains(err.Error(), "runtime.recovery_on_startup=false") || !strings.Contains(err.Error(), "timer obligations") {
+		t.Fatalf("Start error = %v, want explicit timer-obligation denial", err)
 	}
 }
 

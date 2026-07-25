@@ -10,6 +10,7 @@ import (
 	"time"
 
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
@@ -146,7 +147,7 @@ func (s *SQLiteRuntimeStore) LoadRunDebugReport(ctx context.Context, runID strin
 		return RunDebugReport{}, err
 	}
 	report.FailedDeliveries = failedDeliveries
-	testQuiescence, err := s.sqliteRunTestQuiescence(ctx, header.RunID)
+	testQuiescence, err := s.sqliteRunTestQuiescence(ctx, header.RunID, s.now())
 	if err != nil {
 		return RunDebugReport{}, err
 	}
@@ -170,7 +171,7 @@ func (s *SQLiteRuntimeStore) LoadRunDebugReport(ctx context.Context, runID strin
 	return report, nil
 }
 
-func (s *SQLiteRuntimeStore) sqliteRunTestQuiescence(ctx context.Context, runID string) (RunTestQuiescence, error) {
+func (s *SQLiteRuntimeStore) sqliteRunTestQuiescence(ctx context.Context, runID string, observedAt time.Time) (RunTestQuiescence, error) {
 	var out RunTestQuiescence
 	summary, err := s.SummarizeRun(ctx, runID)
 	if err != nil {
@@ -182,15 +183,19 @@ func (s *SQLiteRuntimeStore) sqliteRunTestQuiescence(ctx context.Context, runID 
 		return RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence unsettled pipeline events: %w", err)
 	}
 	out.UnsettledPipelineEvents = pipelineSummary.Replayable + pipelineSummary.Deferred
-	if err := s.DB.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM timers
-		WHERE run_id = ?
-		  AND status = 'active'
-		  AND fire_at <= ?
-	`, runID, s.now()).Scan(&out.DueTimers); err != nil {
-		return RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence due timers: %w", err)
+	scope, err := runtimetimerobligation.Run(runID)
+	if err != nil {
+		return RunTestQuiescence{}, err
 	}
+	timerSnapshot, err := s.ReadTimerObligations(ctx, scope, observedAt)
+	if err != nil {
+		return RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence timer obligations: %w", err)
+	}
+	runTimers, ok := timerSnapshot.Run(runID)
+	if !ok {
+		return RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence timer obligations: snapshot omitted requested run")
+	}
+	out.DueTimers = runTimers.Totals().DueCount
 	activeSessionLeases, err := s.sqliteRunActiveSessionLeaseCount(ctx, runID)
 	if err != nil {
 		return RunTestQuiescence{}, err

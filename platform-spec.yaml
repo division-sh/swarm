@@ -6481,9 +6481,15 @@ engine:
           id: Optional stable row ID. If omitted, defaults to `<stage>.<emit-event-or-advance-target>`.
         invalid_fields: [delay, interrupting, repeat, recurring]
     lifecycle:
-    - 1. A workflow timer activation is derived only from an exact persisted initial-state, event, or state-transition
-      cause. Its deterministic activation ID includes run, entity, flow instance, declaration, loop generation, and exact
-      causal identity. `timers.timer_name` carries the versioned typed activation discriminator; `fire_payload` carries
+    - 1. A workflow instance is first materialized through one named lifecycle operation that commits its initial row and
+      an `InitialEntry` effect in one selected mutation. Ordinary mutation is existing-only. An accepted event produces
+      one ordered `AcceptedEvent` effect carrying exact event identity, occurrence time, and either no transition or a
+      complete typed from/to/transition identity. Timer, join, and gate reactions consume those effects in order and do
+      not reconstruct empty-string transitions or choose local clocks. A workflow timer activation is derived only from
+      one of those exact persisted initial-entry or accepted-event causes. Its deterministic activation ID includes run,
+      entity, flow instance, declaration, loop generation, and exact causal identity. `timers.task_type=workflow_timer`
+      is the sole workflow row-family discriminator. Inside that already-selected family, `timer_name` carries the
+      versioned typed activation serialization; `fire_payload` carries
       business input only and is never interpreted as lifecycle identity. Replaying that exact cause compares immutable
       activation facts against the existing row and converges on its current active, fired, or cancelled state without
       reinsertion, resurrection, or conflict on mutable completion fields. A transition cause derives loop generation from
@@ -6491,11 +6497,9 @@ engine:
       as a new state entry, stage exit, or state-trigger match. Existing stage-owned timers remain active across event-only
       handling unless an exact event cancellation trigger applies. Exact replay within one generation keeps the activation
       identity, while loop supersession cancels the prior activation before a later generation can mint its distinct activation
-      identity or publish stale timer work. Store queries classify this discriminator by its literal prefix; SQL wildcard
-      semantics must not classify similarly spelled generic schedule names as workflow timer rows or exclude them from generic
-      schedule ownership. The literal discriminator prefix is reserved, and generic schedule writers reject any computed timer
-      name in that namespace before persistence, including names derived from an event-type fallback. Generic writers also
-      trim and reject any task ID that normalizes to a valid typed workflow occurrence identity.
+      identity or publish stale timer work. Generic schedule writers, loaders, claims, completion, cancellation, restore,
+      and fork operations are restricted to the generic task_type families and cannot act on workflow_timer rows. Prefixes,
+      owner-node markers, optional IDs, payload keys, and encoded occurrence parsing are never row-family authority.
     - 2. The platform renders delay once at activation and inserts exactly one canonical row in the same selected workflow
       mutation as the triggering state/event effect. The engine owns one fail-closed handled-outcome classification consumed
       by both public handler mapping and timer-intent production; an unhandled event produces no start or cancellation intent.
@@ -6504,25 +6508,50 @@ engine:
     - 3. Leaving an owning stage, matching cancel_on, loop-generation supersession, run quiescence, or preservation cleanup
       may only monotonically cancel or delete the canonical row. Cancellation is in the same mutation as the causal lifecycle
       transition; the in-memory scheduler is updated only after commit.
-    - 4. The scheduler projects one wake-up for the row's current persisted coordinate. A callback must carry the exact typed
-      activation and due coordinate. Callback time, random identity, timer payload metadata, or reconstructed workflow
-      snapshots are not executable authority.
+    - 4. WorkflowTimerLifecycle projects one minimal typed wake-up containing only the workflow family, exact typed
+      occurrence key, and due coordinate. The process-local wakeup owns a worklifetime occurrence lease before registration and
+      serializes replacement of the same activation key before a successor can fire. Its callback reloads and locks the
+      canonical workflow_timer activation before publication or recurrence. Callback time, copied run/entity/event/payload
+      facts, random identity, or reconstructed workflow snapshots are not executable authority.
     - 5. Fire publication and row completion occur in one selected database transaction. The event ID is deterministic from
       activation ID plus persisted due coordinate. A one-shot row becomes fired. A recurring row remains active and atomically
       advances `fire_at` by its persisted positive recurrence interval; therefore retries of one occurrence reuse its ID while
       distinct recurring occurrences receive distinct IDs.
-    - 6. Scheduler claims are released only after the outer fire transaction commits. PostgreSQL must not release a borrowed
-      claim while that transaction can still roll back. A recurring next coordinate is registered only after commit. Exact
-      registration failures remain lifecycle-owned retries until registration succeeds, the row ceases to be active, or
-      runtime shutdown begins. Previous-occurrence claim release and next-occurrence registration settle independently;
-      failure of either operation must not abandon the other.
-    - 7. The accepted timer event is authorized against the canonical row and exact deterministic occurrence ID before any
+    - 6. A recurring next coordinate is registered only after the outer fire transaction commits. Exact registration
+      failures remain lifecycle-owned, coalesced retries until registration succeeds, the row ceases to be active, or
+      runtime shutdown begins. Registration, cancellation, restore, retry, recurrence, and replacement consume one
+      lifecycle-owned wakeup set; workflow timers do not acquire or release generic schedule claims.
+    - 7. The accepted timer-event router selects the exact `platform/runtime.workflow_timer` producer before parsing the
+      typed occurrence. A malformed exact-producer event and a valid reserved occurrence from any other producer fail
+      closed. The accepted timer event is authorized against the canonical row and exact deterministic occurrence ID before any
       workflow handler or timed transition runs. Handlers do not write timer status. User-authored emit timers continue through
       normal event routing; advance-only stage timers use `platform.stage_timer` and apply their derived state transition.
     - 8. Boot-start timers remain explicitly generic global schedules with entity_id, flow_instance, and run_id NULL.
       Join completion/timeout schedules are also generic. Neither family may write or interpret a typed workflow activation row.
       Stage timer rows do not support repeat/recurring authoring; recurring lower-level workflow declarations use the same
       canonical occurrence transition.
+    obligation_projection:
+      description: >
+        One selected-store TimerObligationSnapshot is the canonical read owner for active, due, and recoverable timer
+        meaning across timer, scheduled_task, deadline, global_recurring, and workflow_timer families. Callers provide one
+        normalized nonzero UTC observed_at; the reader does not choose a clock. The snapshot groups every structural family
+        globally and by run with deterministic ordering and zero entries for missing families.
+      counts:
+        active_count: Rows whose durable status is active, independent of run status.
+        due_count: Active rows whose fire_at is less than or equal to the exact observed_at.
+        recoverable_count: Active global rows, plus active run-scoped rows whose run is running or paused.
+      transaction_rule: >
+        A selected workflow mutation must read through that exact transaction. Standing reconciliation therefore observes
+        its own timer writes and cannot escape to a different database snapshot.
+      consumers: >
+        Startup admission and recovery detail, run diagnosis/test quiescence, and standing restart-abandon liveness consume
+        this projection. Recovery-disabled startup rejects non-intrinsic recoverable timer work, permits standing intrinsic
+        timer work with the explicit recovery_disabled_with_intrinsic_timer_work reason, and never reports intrinsic work as
+        no persisted work. Executable generic and workflow restoration remain family-specific operations after admission.
+        Bundle-delete planning is a separate read-only, policy-free identity projection. Preservation, active-run quiescence,
+        standing abandonment, destructive reset, and final run completion remain their named monotonic owners.
+      failure_rule: Unknown structural families and invalid family/status/scope rows fail closed; no payload, SQL row,
+        executable schedule, or inferred identity escapes this projection.
     crash_recovery: >
       Restart restores only active typed workflow rows for active runs and registers their exact persisted occurrence
       coordinates once. A runtime that adopts an already-active standing run after startup performs the same run-scoped exact-row
@@ -13088,8 +13117,9 @@ platform_tables:
         flow_instance set, tied to a specific entity lifecycle inside run_id. Global timers: entity_id, flow_instance,
         and run_id NULL, used for boot-start workflow timers and platform-level work (periodic scans, health checks,
         digest compilation).
-        For run/entity-scoped workflow timers, timer_name carries the strict versioned WorkflowTimerLifecycle activation
-        discriminator and timer_id is that activation ID. fire_payload carries business input only; it must not carry workflow
+        For run/entity-scoped workflow timers, task_type=workflow_timer is the sole row-family discriminator. Within that
+        selected family, timer_name carries the strict versioned WorkflowTimerLifecycle activation serialization and
+        timer_id is that activation ID. fire_payload carries business input only; it must not carry workflow
         activation, occurrence, generation, status, or reconstruction authority. fire_at is the current persisted occurrence
         coordinate. One-shot completion changes status to fired; recurring completion keeps status active and advances fire_at
         atomically. Generic schedule readers must exclude typed workflow activation rows. reply_context_id separately carries
@@ -13099,20 +13129,47 @@ platform_tables:
         recurrence_cron supports cron expressions for global recurring schedules. recurrence_interval supports duration
         strings (e.g., "24h") for entity-scoped recurring timers. task_type: timer (one-shot schedule, including global
         non-recurring boot timers), scheduled_task (recurring entity), deadline (hard cutoff), global_recurring
-        (global recurring work).'
-      ddl: "CREATE TABLE timers (\n    timer_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    timer_name     \
-        \   TEXT NOT NULL,\n    run_id            UUID REFERENCES runs(run_id),\n    source_timer_id   UUID REFERENCES timers(timer_id),\n\
-        \    forked_from_run_id UUID REFERENCES runs(run_id),\n    forked_from_event_id UUID REFERENCES events(event_id),\n\
-        \    reconstruction_owner TEXT,\n    entity_id         UUID,\n    flow_instance     TEXT,\n    fire_event        TEXT NOT NULL,\n\
-        \    fire_payload      JSONB NOT NULL DEFAULT '{}',\n    fire_at           TIMESTAMPTZ NOT NULL,\n    recurring  \
-        \       BOOLEAN NOT NULL DEFAULT FALSE,\n    recurrence_cron   TEXT,\n    recurrence_interval TEXT,\n    owner_node\
-        \        TEXT,\n    owner_agent       TEXT,\n    reply_context_id  TEXT REFERENCES reply_contexts(reply_context_id),\n    task_type         TEXT NOT NULL DEFAULT 'timer' CHECK (task_type\
-        \ IN ('timer', 'scheduled_task', 'deadline', 'global_recurring')),\n    status            TEXT NOT NULL DEFAULT 'active'\
-        \ CHECK (status IN ('active', 'fired', 'cancelled', 'expired')),\n    fired_at          TIMESTAMPTZ,\n    created_at\
-        \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_timers_run (run_id, status, fire_at) WHERE run_id IS NOT NULL,\n\
-        \    INDEX idx_timers_source_lineage (source_timer_id) WHERE source_timer_id IS NOT NULL,\n    INDEX idx_timers_fire (status, fire_at),\n    INDEX idx_timers_entity\
-        \ (entity_id) WHERE entity_id IS NOT NULL,\n    INDEX idx_timers_flow (flow_instance) WHERE flow_instance IS NOT NULL,\n\
-        \    INDEX idx_timers_global (task_type, status) WHERE entity_id IS NULL\n);"
+        (global recurring work), workflow_timer (run/entity-scoped canonical workflow activation, recurring or one-shot).'
+      ddl: |
+        CREATE TABLE timers (
+            timer_id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            timer_name            TEXT NOT NULL,
+            run_id                UUID REFERENCES runs(run_id),
+            source_timer_id       UUID REFERENCES timers(timer_id),
+            forked_from_run_id     UUID REFERENCES runs(run_id),
+            forked_from_event_id   UUID REFERENCES events(event_id),
+            reconstruction_owner  TEXT,
+            entity_id             UUID,
+            flow_instance         TEXT,
+            fire_event            TEXT NOT NULL,
+            fire_payload          JSONB NOT NULL DEFAULT '{}',
+            fire_at               TIMESTAMPTZ NOT NULL,
+            recurring             BOOLEAN NOT NULL DEFAULT FALSE,
+            recurrence_cron       TEXT,
+            recurrence_interval   TEXT,
+            owner_node            TEXT,
+            owner_agent           TEXT,
+            reply_context_id      TEXT REFERENCES reply_contexts(reply_context_id),
+            task_type             TEXT NOT NULL DEFAULT 'timer' CHECK (task_type IN ('timer', 'scheduled_task', 'deadline', 'global_recurring', 'workflow_timer')),
+            status                TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'fired', 'cancelled', 'expired')),
+            fired_at              TIMESTAMPTZ,
+            created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK (task_type <> 'workflow_timer' OR (run_id IS NOT NULL AND entity_id IS NOT NULL AND flow_instance = TRIM(flow_instance) AND NULLIF(flow_instance, '') IS NOT NULL)),
+            CHECK (task_type <> 'workflow_timer' OR (timer_name = TRIM(timer_name) AND NULLIF(timer_name, '') IS NOT NULL AND fire_event = TRIM(fire_event) AND NULLIF(fire_event, '') IS NOT NULL)),
+            CHECK (task_type <> 'workflow_timer' OR (owner_node IS NULL AND owner_agent = TRIM(owner_agent) AND NULLIF(owner_agent, '') IS NOT NULL)),
+            CHECK (task_type <> 'workflow_timer' OR (recurrence_cron IS NULL AND reply_context_id IS NULL)),
+            CHECK (task_type <> 'workflow_timer' OR (SUBSTR(CAST(fire_payload AS TEXT), 1, 1) = '{' AND SUBSTR(CAST(fire_payload AS TEXT), LENGTH(CAST(fire_payload AS TEXT)), 1) = '}')),
+            CHECK (task_type <> 'workflow_timer' OR fire_at >= created_at),
+            CHECK (task_type <> 'workflow_timer' OR ((source_timer_id IS NULL AND forked_from_run_id IS NULL AND forked_from_event_id IS NULL AND reconstruction_owner IS NULL) OR (source_timer_id IS NOT NULL AND forked_from_run_id IS NOT NULL AND forked_from_event_id IS NOT NULL AND reconstruction_owner = TRIM(reconstruction_owner) AND NULLIF(reconstruction_owner, '') IS NOT NULL))),
+            CHECK (task_type <> 'workflow_timer' OR ((recurring = FALSE AND recurrence_interval IS NULL) OR (recurring = TRUE AND recurrence_interval = TRIM(recurrence_interval) AND NULLIF(recurrence_interval, '') IS NOT NULL))),
+            CHECK (task_type <> 'workflow_timer' OR ((recurring = FALSE AND ((status IN ('active', 'cancelled') AND fired_at IS NULL) OR (status = 'fired' AND fired_at IS NOT NULL AND fired_at >= fire_at))) OR (recurring = TRUE AND status IN ('active', 'cancelled') AND (fired_at IS NULL OR fired_at >= created_at)))),
+            INDEX idx_timers_run (run_id, status, fire_at) WHERE run_id IS NOT NULL,
+            INDEX idx_timers_source_lineage (source_timer_id) WHERE source_timer_id IS NOT NULL,
+            INDEX idx_timers_fire (status, fire_at),
+            INDEX idx_timers_entity (entity_id) WHERE entity_id IS NOT NULL,
+            INDEX idx_timers_flow (flow_instance) WHERE flow_instance IS NOT NULL,
+            INDEX idx_timers_global (task_type, status) WHERE entity_id IS NULL
+        );
       scope_rules:
         entity_scoped: entity_id NOT NULL, flow_instance NOT NULL, run_id set for runtime-owned entity timers. Tied to entity
           lifecycle inside run_id. Cancelled when entity reaches terminal state.
@@ -13120,6 +13177,8 @@ platform_tables:
           lifecycle.
         flow_scoped: entity_id NULL, flow_instance NOT NULL, run_id set for runtime-owned flow timers. Tied to flow instance
           inside run_id. Cancelled when flow instance terminates.
+        workflow_timer: task_type=workflow_timer with exact run_id, entity_id, flow_instance, activation serialization,
+          owner_agent, event, due coordinate, recurrence facts, status facts, and complete-or-absent fork lineage.
     dead_letters:
       description: Failed events after a terminal delivery disposition. The canonical failure envelope is preserved verbatim from the triggering runtime failure; parent terminalization supplies its typed delivery_parent_terminalized lifecycle-conflict envelope. Lifecycle and retry counters remain dead-letter-owned facts. Every terminal executable delivery, including parent terminalization, carries the exact delivery_id and claim_version pair and is structurally coupled to the committed delivery outcome. Pre-delivery diagnostics leave both fields null.
       ddl: "CREATE TABLE dead_letters (\n    dead_letter_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    original_event_id\
@@ -15579,6 +15638,10 @@ platform_events:
           outcome: string (allowed | denied | degraded)
           reason_code: string
           recovery_on_startup: boolean
+          recovery_inspection_complete: boolean
+          startup_blocking_timer_count: integer (present when recovery inspection completed)
+          standing_timer_obligation_count: integer (present when recovery inspection completed)
+          timer_obligations: TimerObligationSnapshot (present when recovery inspection completed)
           schedule_replay_count: integer
           schedule_skip_count: integer
           schedule_drop_count: integer

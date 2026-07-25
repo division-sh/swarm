@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"fmt"
 	"strings"
 )
 
@@ -13,9 +12,6 @@ func (pc *PipelineCoordinator) persistGenericSchedule(ctx context.Context, sched
 		return nil
 	}
 	schedule = scheduleWithRunIDFromContext(ctx, schedule)
-	if schedule.EffectiveTimerID() != "" {
-		return fmt.Errorf("typed workflow timer cannot enter generic schedule persistence")
-	}
 	if pc.timerScheduleStore != nil {
 		if err := pc.timerScheduleStore.UpsertSchedule(ctx, schedule); err != nil {
 			return err
@@ -43,9 +39,6 @@ func (pc *PipelineCoordinator) cancelGenericSchedule(ctx context.Context, schedu
 		return nil
 	}
 	schedule = scheduleWithRunIDFromContext(ctx, schedule)
-	if schedule.EffectiveTimerID() != "" {
-		return fmt.Errorf("typed workflow timer cannot enter generic schedule cancellation")
-	}
 	if pc.timerScheduleStore != nil {
 		if err := pc.timerScheduleStore.CancelScheduleExactTerminal(ctx, schedule); err != nil && !TerminalTransitionApplied(err) {
 			return err

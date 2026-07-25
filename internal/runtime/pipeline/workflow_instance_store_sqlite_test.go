@@ -32,7 +32,7 @@ func TestSQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRo
 	storageRef := "root/acme"
 	entityID := FlowInstanceEntityID(storageRef)
 
-	if err := store.Create(ctx, WorkflowInstance{
+	if err := store.Create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      "acme",
 		StorageRef:      storageRef,
 		WorkflowName:    "root",
@@ -44,7 +44,7 @@ func TestSQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRo
 			"region":    "west",
 			"tier":      float64(2),
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("Create workflow instance: %v", err)
 	}
 
@@ -110,7 +110,7 @@ func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *test
 	ensurePipelineTestRun(t, store, runID)
 	storageRef := "review/inst-1"
 
-	if err := store.Create(ctx, WorkflowInstance{
+	if err := store.Create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      "inst-1",
 		StorageRef:      storageRef,
 		WorkflowName:    "review",
@@ -123,7 +123,7 @@ func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *test
 			"parent_flow_instance": "operating/root",
 			"parent_entity_id":     "parent-ent",
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("Create workflow instance: %v", err)
 	}
 
@@ -250,7 +250,7 @@ func TestSQLiteWorkflowInstanceStore_MutateERollsBackCallbackFailure(t *testing.
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 	ensurePipelineTestRun(t, store, runID)
-	instance := WorkflowInstance{InstanceID: "root/item", StorageRef: "root/item", WorkflowName: "root", WorkflowVersion: "1.0.0", CurrentState: "queued", Metadata: map[string]any{}}
+	instance := materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: "root/item", StorageRef: "root/item", WorkflowName: "root", WorkflowVersion: "1.0.0", CurrentState: "queued", Metadata: map[string]any{}})
 	if err := store.Upsert(ctx, instance); err != nil {
 		t.Fatalf("seed: %v", err)
 	}

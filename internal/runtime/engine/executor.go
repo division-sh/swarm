@@ -33,6 +33,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
+	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
 
 type Step string
@@ -2425,44 +2426,37 @@ func (e *Executor) stepClear(frame *executionFrame) error {
 	return nil
 }
 
-func (e *Executor) buildTimerIntents(frame *executionFrame) ([]TimerIntent, error) {
+func (e *Executor) buildWorkflowLifecycleEffect(frame *executionFrame) (runtimeworkflowlifecycle.Effect, bool, error) {
 	if frame == nil {
-		return nil, fmt.Errorf("timer reconciliation requires an execution frame")
+		return runtimeworkflowlifecycle.Effect{}, false, fmt.Errorf("workflow lifecycle effect requires an execution frame")
 	}
 	if !IsHandledOutcome(frame.result.Status) {
-		return nil, nil
+		return runtimeworkflowlifecycle.Effect{}, false, nil
 	}
-	eventID := strings.TrimSpace(frame.req.Event.ID())
-	eventType := strings.TrimSpace(string(frame.req.Event.Type()))
-	triggeredAt := frame.req.Event.CreatedAt()
-	if eventID == "" || eventType == "" || triggeredAt.IsZero() {
-		if e.deps.Source != nil && len(e.deps.Source.WorkflowTimers()) > 0 {
-			return nil, fmt.Errorf("timer reconciliation requires exact event id, type, and time")
-		}
-		return nil, nil
+	if e.deps.WorkflowLifecycle == nil {
+		return runtimeworkflowlifecycle.Effect{}, false, nil
 	}
-	// An event handled in-place is not a state entry. Only the persisted state
-	// mutation carries transition intent into timer reconciliation.
+	if frame.req.EntityID.IsZero() {
+		return runtimeworkflowlifecycle.Effect{}, false, nil
+	}
 	toState := strings.TrimSpace(frame.result.StateMutation.NextState)
-	return []TimerIntent{
-		{
-			Operation:        TimerReconcile,
-			Owner:            frame.req.NodeID,
-			FromState:        strings.TrimSpace(frame.result.CurrentState),
-			ToState:          toState,
-			TriggerEventID:   eventID,
-			TriggerEventType: eventType,
-			TriggeredAt:      triggeredAt,
-		},
-	}, nil
+	effect, err := e.deps.WorkflowLifecycle.AcceptedEventEffect(
+		frame.req.EntityID,
+		frame.req.Event,
+		strings.TrimSpace(frame.result.CurrentState),
+		toState,
+	)
+	if err != nil {
+		return runtimeworkflowlifecycle.Effect{}, false, err
+	}
+	return effect, true, nil
 }
 
 func (e *Executor) persist(ctx context.Context, frame executionFrame) error {
-	timerIntents, err := e.buildTimerIntents(&frame)
+	lifecycleEffect, hasLifecycleEffect, err := e.buildWorkflowLifecycleEffect(&frame)
 	if err != nil {
 		return err
 	}
-	frame.result.TimerIntents = append(frame.result.TimerIntents, timerIntents...)
 	frame.result.StateMutation.TriggerEventID = strings.TrimSpace(frame.req.Event.ID())
 	frame.result.StateMutation.TriggerEventType = strings.TrimSpace(string(frame.req.Event.Type()))
 	frame.result.StateMutation.TriggeredAt = frame.req.Event.CreatedAt()
@@ -2471,11 +2465,6 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) error {
 		for i := range frame.result.EmitIntents {
 			if frame.result.EmitIntents[i].Context.Empty() {
 				frame.result.EmitIntents[i].Context = deliveryContext
-			}
-		}
-		for i := range frame.result.TimerIntents {
-			if frame.result.TimerIntents[i].Context.Empty() {
-				frame.result.TimerIntents[i].Context = deliveryContext
 			}
 		}
 		for i := range frame.result.ActivityIntents {
@@ -2493,8 +2482,8 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) error {
 	if err := e.deps.StateRepo.SaveState(ctx, frame.req.EntityID, frame.result.StateMutation); err != nil {
 		return err
 	}
-	if e.deps.TimerApplier != nil && len(frame.result.TimerIntents) > 0 {
-		if err := e.deps.TimerApplier.ApplyTimerIntents(ctx, frame.req.EntityID, frame.result.TimerIntents); err != nil {
+	if hasLifecycleEffect {
+		if err := e.deps.WorkflowLifecycle.ApplyWorkflowLifecycleEffects(ctx, []runtimeworkflowlifecycle.Effect{lifecycleEffect}); err != nil {
 			return err
 		}
 	}

@@ -22,8 +22,8 @@ const (
 	workflowTimerStatusCancelled = "cancelled"
 )
 
-// WorkflowTimerActivation is the only workflow interpretation of a timers
-// row. Generic schedule code must exclude rows carrying its timer_name type.
+// WorkflowTimerActivation is the only workflow interpretation of a
+// task_type=workflow_timer row.
 type WorkflowTimerActivation struct {
 	Ref                 timeridentity.WorkflowTimerActivationRef
 	RunID               string
@@ -81,8 +81,24 @@ func (a WorkflowTimerActivation) validate() error {
 	if a.FireAt.IsZero() || a.CreatedAt.IsZero() {
 		return fmt.Errorf("workflow timer activation requires created_at and fire_at")
 	}
-	if !json.Valid(a.Payload) {
-		return fmt.Errorf("workflow timer business payload must be valid JSON")
+	if a.FireAt.Before(a.CreatedAt) {
+		return fmt.Errorf("workflow timer fire_at cannot precede created_at")
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(a.Payload, &payload); err != nil || payload == nil {
+		return fmt.Errorf("workflow timer business payload must be a JSON object")
+	}
+	if _, reserved := payload["__schedule_task_id"]; reserved {
+		return fmt.Errorf("workflow timer business payload cannot carry generic schedule identity")
+	}
+	lineageFacts := 0
+	for _, fact := range []string{a.SourceTimerID, a.ForkedFromRunID, a.ForkedFromEventID, a.ReconstructionOwner} {
+		if fact != "" {
+			lineageFacts++
+		}
+	}
+	if lineageFacts != 0 && lineageFacts != 4 {
+		return fmt.Errorf("workflow timer fork lineage must be complete or absent")
 	}
 	if a.Recurring && a.RecurrenceInterval <= 0 {
 		return fmt.Errorf("recurring workflow timer requires a positive interval")
@@ -93,8 +109,27 @@ func (a WorkflowTimerActivation) validate() error {
 	if !a.Recurring && a.RecurrenceInterval != 0 {
 		return fmt.Errorf("one-shot workflow timer cannot carry recurrence")
 	}
+	if a.Recurring {
+		if a.Status != workflowTimerStatusActive && a.Status != workflowTimerStatusCancelled {
+			return fmt.Errorf("recurring workflow timer has unreachable status %q", a.Status)
+		}
+		if !a.FiredAt.IsZero() {
+			previousDue := canonicalWorkflowTimerTime(a.FireAt.Add(-a.RecurrenceInterval))
+			if a.FiredAt.Before(previousDue) {
+				return fmt.Errorf("recurring workflow timer fired_at precedes its previous occurrence")
+			}
+		}
+		return nil
+	}
 	switch a.Status {
-	case workflowTimerStatusActive, workflowTimerStatusFired, workflowTimerStatusCancelled:
+	case workflowTimerStatusActive, workflowTimerStatusCancelled:
+		if !a.FiredAt.IsZero() {
+			return fmt.Errorf("unfired one-shot workflow timer cannot carry fired_at")
+		}
+	case workflowTimerStatusFired:
+		if a.FiredAt.IsZero() || a.FiredAt.Before(a.FireAt) {
+			return fmt.Errorf("fired one-shot workflow timer requires fired_at at or after fire_at")
+		}
 	default:
 		return fmt.Errorf("workflow timer activation has unsupported status %q", a.Status)
 	}
@@ -104,22 +139,6 @@ func (a WorkflowTimerActivation) validate() error {
 func (a WorkflowTimerActivation) occurrence() timeridentity.WorkflowTimerOccurrenceRef {
 	a = a.normalized()
 	return timeridentity.WorkflowTimerOccurrenceRef{Activation: a.Ref, DueAt: a.FireAt}.Normalize()
-}
-
-func (a WorkflowTimerActivation) schedule() Schedule {
-	a = a.normalized()
-	return Schedule{
-		RunID:        a.RunID,
-		AgentID:      a.OwnerAgent,
-		EventType:    a.EventType,
-		Mode:         "once",
-		At:           a.FireAt,
-		EntityID:     a.EntityID,
-		FlowInstance: a.FlowInstance,
-		TaskID:       a.occurrence().TaskID(),
-		TimerID:      a.Ref.ActivationID,
-		Payload:      append([]byte(nil), a.Payload...),
-	}
 }
 
 func canonicalWorkflowTimerTime(value time.Time) time.Time {
@@ -160,7 +179,7 @@ func (s *WorkflowInstanceStore) insertWorkflowTimerActivation(ctx context.Contex
 		`, activation.Ref.ActivationID, activation.RunID, activation.Ref.TaskID(), activation.EntityID,
 			activation.FlowInstance, activation.EventType, string(activation.Payload), activation.FireAt,
 			activation.Recurring, workflowTimerIntervalString(activation), activation.OwnerAgent,
-			workflowTimerTaskType(activation), activation.CreatedAt, activation.SourceTimerID,
+			workflowTimerTaskFamily, activation.CreatedAt, activation.SourceTimerID,
 			activation.ForkedFromRunID, activation.ForkedFromEventID, activation.ReconstructionOwner)
 	} else {
 		result, err = tx.ExecContext(ctx, `
@@ -177,7 +196,7 @@ func (s *WorkflowInstanceStore) insertWorkflowTimerActivation(ctx context.Contex
 		`, activation.Ref.ActivationID, activation.RunID, activation.Ref.TaskID(), activation.EntityID,
 			activation.FlowInstance, activation.EventType, string(activation.Payload), activation.FireAt,
 			activation.Recurring, workflowTimerIntervalString(activation), activation.OwnerAgent,
-			workflowTimerTaskType(activation), activation.CreatedAt, activation.SourceTimerID,
+			workflowTimerTaskFamily, activation.CreatedAt, activation.SourceTimerID,
 			activation.ForkedFromRunID, activation.ForkedFromEventID, activation.ReconstructionOwner)
 	}
 	if err != nil {
@@ -210,13 +229,6 @@ func workflowTimerIntervalString(activation WorkflowTimerActivation) string {
 		return ""
 	}
 	return activation.RecurrenceInterval.String()
-}
-
-func workflowTimerTaskType(activation WorkflowTimerActivation) string {
-	if activation.Recurring {
-		return "scheduled_task"
-	}
-	return "timer"
 }
 
 func requireSameWorkflowTimerActivationFacts(actual, expected WorkflowTimerActivation) error {
@@ -299,9 +311,9 @@ func (s *WorkflowInstanceStore) listWorkflowTimerActivations(ctx context.Context
 	query := workflowTimerActivationSelect(true, s.isSQLite())
 	runID = strings.TrimSpace(runID)
 	entityID = strings.TrimSpace(entityID)
-	args := []any{runID, entityID, timeridentity.WorkflowTimerActivationTaskPrefix()}
+	args := []any{runID, entityID}
 	if s.isSQLite() {
-		args = []any{runID, runID, entityID, entityID, timeridentity.WorkflowTimerActivationTaskPrefix()}
+		args = []any{runID, runID, entityID, entityID}
 	}
 	if activeOnly {
 		query += " AND t.status = 'active'"
@@ -342,11 +354,13 @@ func workflowTimerActivationSelect(list bool, sqlite bool) string {
 	}
 	if list {
 		if sqlite {
-			where = "(? = '' OR t.run_id = ?) AND (? = '' OR t.entity_id = ?) AND instr(t.timer_name, ?) = 1 AND run.status IN ('running', 'paused')"
+			where = "(? = '' OR t.run_id = ?) AND (? = '' OR t.entity_id = ?) AND t.task_type = 'workflow_timer' AND run.status IN ('running', 'paused')"
 			// Duplicate run/entity arguments are expanded by the caller below.
 			return workflowTimerSelectColumns() + " WHERE " + where
 		}
-		where = "(NULLIF($1, '') IS NULL OR t.run_id = NULLIF($1, '')::uuid) AND (NULLIF($2, '') IS NULL OR t.entity_id = NULLIF($2, '')::uuid) AND strpos(t.timer_name, $3) = 1 AND run.status IN ('running', 'paused')"
+		where = "(NULLIF($1, '') IS NULL OR t.run_id = NULLIF($1, '')::uuid) AND (NULLIF($2, '') IS NULL OR t.entity_id = NULLIF($2, '')::uuid) AND t.task_type = 'workflow_timer' AND run.status IN ('running', 'paused')"
+	} else {
+		where += " AND t.task_type = 'workflow_timer'"
 	}
 	return workflowTimerSelectColumns() + " WHERE " + where
 }
@@ -384,6 +398,9 @@ func scanWorkflowTimerActivation(scanner workflowTimerScanner) (WorkflowTimerAct
 	); err != nil {
 		return WorkflowTimerActivation{}, err
 	}
+	if strings.TrimSpace(taskType) != workflowTimerTaskFamily {
+		return WorkflowTimerActivation{}, fmt.Errorf("timer row %s is not a workflow timer family", activationID)
+	}
 	ref, ok := timeridentity.ParseWorkflowTimerActivationTaskID(taskID)
 	if !ok || ref.ActivationID != strings.TrimSpace(activationID) {
 		return WorkflowTimerActivation{}, fmt.Errorf("timer row %s has invalid workflow activation discriminator", activationID)
@@ -411,10 +428,6 @@ func scanWorkflowTimerActivation(scanner workflowTimerScanner) (WorkflowTimerAct
 		}
 		activation.RecurrenceInterval = interval
 	}
-	wantTaskType := workflowTimerTaskType(activation)
-	if strings.TrimSpace(taskType) != wantTaskType {
-		return WorkflowTimerActivation{}, fmt.Errorf("workflow timer %s task_type=%s, want %s", activationID, taskType, wantTaskType)
-	}
 	activation = activation.normalized()
 	if err := activation.validate(); err != nil {
 		return WorkflowTimerActivation{}, err
@@ -437,9 +450,9 @@ func (s *WorkflowInstanceStore) cancelWorkflowTimerActivation(ctx context.Contex
 	tx, _ := sqlTxFromContext(ctx)
 	var result sql.Result
 	if s.isSQLite() {
-		result, err = tx.ExecContext(ctx, `UPDATE timers SET status = 'cancelled' WHERE timer_id = ? AND status = 'active'`, ref.ActivationID)
+		result, err = tx.ExecContext(ctx, `UPDATE timers SET status = 'cancelled' WHERE timer_id = ? AND task_type = 'workflow_timer' AND status = 'active'`, ref.ActivationID)
 	} else {
-		result, err = tx.ExecContext(ctx, `UPDATE timers SET status = 'cancelled' WHERE timer_id = $1::uuid AND status = 'active'`, ref.ActivationID)
+		result, err = tx.ExecContext(ctx, `UPDATE timers SET status = 'cancelled' WHERE timer_id = $1::uuid AND task_type = 'workflow_timer' AND status = 'active'`, ref.ActivationID)
 	}
 	if err != nil {
 		return WorkflowTimerActivation{}, false, err
@@ -484,12 +497,12 @@ func (s *WorkflowInstanceStore) completeWorkflowTimerOccurrence(ctx context.Cont
 	if s.isSQLite() {
 		result, err = tx.ExecContext(ctx, `
 			UPDATE timers SET status = ?, fired_at = ?, fire_at = ?
-			WHERE timer_id = ? AND status = 'active' AND fire_at = ?
+			WHERE timer_id = ? AND task_type = 'workflow_timer' AND status = 'active' AND fire_at = ?
 		`, nextStatus, firedAt, next.FireAt, activation.Ref.ActivationID, activation.FireAt)
 	} else {
 		result, err = tx.ExecContext(ctx, `
 			UPDATE timers SET status = $1, fired_at = $2, fire_at = $3
-			WHERE timer_id = $4::uuid AND status = 'active' AND fire_at = $5
+			WHERE timer_id = $4::uuid AND task_type = 'workflow_timer' AND status = 'active' AND fire_at = $5
 		`, nextStatus, firedAt, next.FireAt, activation.Ref.ActivationID, activation.FireAt)
 	}
 	if err != nil {
@@ -507,22 +520,6 @@ func (s *WorkflowInstanceStore) completeWorkflowTimerOccurrence(ctx context.Cont
 	}
 	next.Status = nextStatus
 	return next.normalized(), nil
-}
-
-func (s *WorkflowInstanceStore) rejectObsoleteWorkflowTimerRows(ctx context.Context) error {
-	exec := workflowTimerQueryer(s.db)
-	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
-		exec = tx
-	}
-	query := `SELECT EXISTS (SELECT 1 FROM timers WHERE owner_node = 'workflow_instance_store')`
-	var exists bool
-	if err := exec.QueryRowContext(ctx, query).Scan(&exists); err != nil {
-		return fmt.Errorf("inspect obsolete workflow timer rows: %w", err)
-	}
-	if exists {
-		return fmt.Errorf("obsolete workflow timer rows are unsupported; recreate the database")
-	}
-	return nil
 }
 
 func workflowTimerRunID(ctx context.Context, instance WorkflowInstance) string {

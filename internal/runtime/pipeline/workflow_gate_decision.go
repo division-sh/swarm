@@ -506,22 +506,7 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 			return nil
 		}
 		pc.notifyTestEntityStateUpdated(anchor.EntityID, route.AdvancesTo)
-		cause := workflowTimerCause{
-			Kind:         workflowTimerCauseTransition,
-			EventID:      evt.ID(),
-			EventType:    strings.TrimSpace(string(evt.Type())),
-			OccurredAt:   evt.CreatedAt(),
-			TransitionID: workflowTransitionIdentity(pc.WorkflowDefinition(), currentStage, route.AdvancesTo, string(evt.Type())),
-			FromState:    currentStage,
-			ToState:      route.AdvancesTo,
-		}
-		if err := pc.workflowTimers.Reconcile(txctx, anchor.EntityID, currentStage, route.AdvancesTo, cause); err != nil {
-			return err
-		}
-		if err := pc.applyWorkflowJoinIntents(txctx, anchor.EntityID, currentStage, route.AdvancesTo); err != nil {
-			return err
-		}
-		if err := pc.applyWorkflowGateIntents(txctx, anchor.EntityID, currentStage, route.AdvancesTo, string(evt.Type())); err != nil {
+		if err := pc.applyAcceptedWorkflowEvent(txctx, anchor.EntityID, evt, currentStage, route.AdvancesTo); err != nil {
 			return err
 		}
 		if emitted != nil {

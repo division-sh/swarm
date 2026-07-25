@@ -26,7 +26,7 @@ func TestTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstance(t *tes
 	entityID := uuid.NewString()
 	instanceID := "ti-template-flow-pilot"
 	flowInstance := "account/" + instanceID
-	if err := workflowStore.Create(ctx, WorkflowInstance{
+	if err := workflowStore.Create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      instanceID,
 		StorageRef:      flowInstance,
 		WorkflowName:    "account",
@@ -40,7 +40,7 @@ func TestTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstance(t *tes
 			"flow_path":   flowInstance,
 			"instance_id": instanceID,
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed scoring workflow instance: %v", err)
 	}
 

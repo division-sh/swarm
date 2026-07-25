@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 )
 
 type startupRecoveryOutcome string
@@ -24,6 +26,7 @@ type startupRecoveryReasonCode string
 const (
 	startupRecoveryReasonDisabledNoWork          startupRecoveryReasonCode = "recovery_disabled_no_persisted_work"
 	startupRecoveryReasonDisabledWithWork        startupRecoveryReasonCode = "recovery_disabled_with_persisted_work"
+	startupRecoveryReasonDisabledWithIntrinsic   startupRecoveryReasonCode = "recovery_disabled_with_intrinsic_timer_work"
 	startupRecoveryReasonDisabledWithManagerWork startupRecoveryReasonCode = "recovery_disabled_with_manager_snapshot_work"
 	startupRecoveryReasonEnabledNoWork           startupRecoveryReasonCode = "recovery_enabled_no_persisted_work"
 	startupRecoveryReasonEnabledWithWork         startupRecoveryReasonCode = "recovery_enabled_with_persisted_work"
@@ -33,25 +36,26 @@ const (
 )
 
 type startupRecoverySnapshot struct {
-	RecoveryOnStartup     bool
-	InspectionComplete    bool
-	ActiveScheduleCount   int
-	StandingScheduleCount int
-	Manager               runtimemanager.RecoverableStateSnapshot
+	RecoveryOnStartup        bool
+	InspectionComplete       bool
+	StartupBlockingTimers    int
+	StandingTimerObligations int
+	TimerObligations         runtimetimerobligation.Snapshot
+	Manager                  runtimemanager.RecoverableStateSnapshot
 }
 
 func (s startupRecoverySnapshot) HasRecoverableWork() bool {
-	return s.ActiveScheduleCount > 0 || s.Manager.HasRecoverableWork()
+	return s.StartupBlockingTimers > 0 || s.StandingTimerObligations > 0 || s.Manager.HasRecoverableWork()
 }
 
 func (s startupRecoverySnapshot) HasStartupBlockingRecoverableWork() bool {
-	return s.ActiveScheduleCount > 0
+	return s.StartupBlockingTimers > 0
 }
 
 func (s startupRecoverySnapshot) WorkClasses() []string {
 	classes := make([]string, 0, 1+len(s.Manager.Classes()))
-	if s.ActiveScheduleCount > 0 {
-		classes = append(classes, "active schedules")
+	if s.StartupBlockingTimers > 0 || s.StandingTimerObligations > 0 {
+		classes = append(classes, "timer obligations")
 	}
 	classes = append(classes, s.Manager.Classes()...)
 	sort.Strings(classes)
@@ -59,10 +63,10 @@ func (s startupRecoverySnapshot) WorkClasses() []string {
 }
 
 func (s startupRecoverySnapshot) StartupBlockingWorkClasses() []string {
-	if s.ActiveScheduleCount <= 0 {
+	if s.StartupBlockingTimers <= 0 {
 		return nil
 	}
-	return []string{"active schedules"}
+	return []string{"timer obligations"}
 }
 
 func (s startupRecoverySnapshot) Detail() map[string]any {
@@ -71,8 +75,9 @@ func (s startupRecoverySnapshot) Detail() map[string]any {
 		"recovery_inspection_complete": s.InspectionComplete,
 	}
 	if s.InspectionComplete {
-		detail["active_schedule_count"] = s.ActiveScheduleCount
-		detail["standing_schedule_count"] = s.StandingScheduleCount
+		detail["startup_blocking_timer_count"] = s.StartupBlockingTimers
+		detail["standing_timer_obligation_count"] = s.StandingTimerObligations
+		detail["timer_obligations"] = s.TimerObligations
 		detail["recoverable_work_present"] = s.HasRecoverableWork()
 		detail["startup_blocking_recoverable_work_present"] = s.HasStartupBlockingRecoverableWork()
 		detail["manager_recoverable_work_present"] = s.Manager.HasRecoverableWork()
@@ -130,6 +135,8 @@ func newStartupRecoveryDecisionReport(snapshot startupRecoverySnapshot) startupR
 		report.ReasonCode = startupRecoveryReasonDisabledWithWork
 	case snapshot.Manager.HasRecoverableWork():
 		report.ReasonCode = startupRecoveryReasonDisabledWithManagerWork
+	case snapshot.StandingTimerObligations > 0:
+		report.ReasonCode = startupRecoveryReasonDisabledWithIntrinsic
 	default:
 		report.ReasonCode = startupRecoveryReasonDisabledNoWork
 	}
@@ -152,6 +159,9 @@ func (r startupRecoveryDecisionReport) message() string {
 	case startupRecoveryOutcomeAllowed:
 		if r.ReasonCode == startupRecoveryReasonDisabledWithManagerWork {
 			return "Runtime startup allowed with manager recovery skipped"
+		}
+		if r.ReasonCode == startupRecoveryReasonDisabledWithIntrinsic {
+			return "Runtime startup allowed with intrinsic timer restoration"
 		}
 		return "Runtime startup recovery decision recorded"
 	default:
@@ -199,21 +209,28 @@ func (r startupRecoveryDecisionReport) detail() map[string]any {
 }
 
 func (r startupRecoveryDecisionReport) bootPayload() map[string]any {
-	return map[string]any{
-		"outcome":               string(r.Outcome),
-		"reason_code":           string(r.ReasonCode),
-		"recovery_on_startup":   r.Snapshot.RecoveryOnStartup,
-		"schedule_replay_count": r.ScheduleReplayCount,
-		"schedule_skip_count":   r.ScheduleSkipCount,
-		"schedule_drop_count":   r.ScheduleDropCount,
-		"manager_replay_count":  r.ManagerReplayCount,
-		"manager_skip_count":    r.ManagerSkipCount,
-		"manager_drop_count":    r.ManagerDropCount,
-		"failure":               runtimefailures.CloneEnvelope(r.Failure),
+	payload := map[string]any{
+		"outcome":                      string(r.Outcome),
+		"reason_code":                  string(r.ReasonCode),
+		"recovery_on_startup":          r.Snapshot.RecoveryOnStartup,
+		"recovery_inspection_complete": r.Snapshot.InspectionComplete,
+		"schedule_replay_count":        r.ScheduleReplayCount,
+		"schedule_skip_count":          r.ScheduleSkipCount,
+		"schedule_drop_count":          r.ScheduleDropCount,
+		"manager_replay_count":         r.ManagerReplayCount,
+		"manager_skip_count":           r.ManagerSkipCount,
+		"manager_drop_count":           r.ManagerDropCount,
+		"failure":                      runtimefailures.CloneEnvelope(r.Failure),
 	}
+	if r.Snapshot.InspectionComplete {
+		payload["startup_blocking_timer_count"] = r.Snapshot.StartupBlockingTimers
+		payload["standing_timer_obligation_count"] = r.Snapshot.StandingTimerObligations
+		payload["timer_obligations"] = r.Snapshot.TimerObligations
+	}
+	return payload
 }
 
-func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context) (startupRecoverySnapshot, error) {
+func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context, observedAt time.Time) (startupRecoverySnapshot, error) {
 	snapshot := startupRecoverySnapshot{
 		RecoveryOnStartup:  rt != nil && rt.Config != nil && rt.Config.Runtime.RecoveryOnStartup,
 		InspectionComplete: true,
@@ -222,25 +239,36 @@ func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context) (startupR
 		return snapshot, nil
 	}
 	if rt.Stores.ScheduleStore != nil {
-		schedules, err := rt.Stores.ScheduleStore.LoadActiveSchedules(ctx)
+		reader, ok := rt.Stores.ScheduleStore.(runtimetimerobligation.Reader)
+		if !ok {
+			snapshot.InspectionComplete = false
+			return snapshot, fmt.Errorf("inspect timer obligations: selected schedule store lacks timer obligation authority")
+		}
+		obligations, err := reader.ReadTimerObligations(ctx, runtimetimerobligation.All(), observedAt)
 		if err != nil {
 			snapshot.InspectionComplete = false
-			return snapshot, fmt.Errorf("inspect active schedules: %w", err)
+			return snapshot, fmt.Errorf("inspect timer obligations: %w", err)
 		}
-		for _, schedule := range schedules {
+		snapshot.TimerObligations = obligations
+		snapshot.StartupBlockingTimers += obligations.GlobalTotals().RecoverableCount
+		for _, run := range obligations.Runs {
+			recoverable := run.Totals().RecoverableCount
+			if recoverable == 0 {
+				continue
+			}
 			intrinsic := false
-			if rt.Stores.PipelineStore != nil && strings.TrimSpace(schedule.RunID) != "" {
-				intrinsic, err = rt.Stores.PipelineStore.StandingRunUsesIntrinsicRecovery(ctx, schedule.RunID)
+			if rt.Stores.PipelineStore != nil {
+				intrinsic, err = rt.Stores.PipelineStore.StandingRunUsesIntrinsicRecovery(ctx, run.RunID)
 				if err != nil {
 					snapshot.InspectionComplete = false
-					return snapshot, fmt.Errorf("classify standing schedule: %w", err)
+					return snapshot, fmt.Errorf("classify standing timer obligations: %w", err)
 				}
 			}
 			if intrinsic {
-				snapshot.StandingScheduleCount++
+				snapshot.StandingTimerObligations += recoverable
 				continue
 			}
-			snapshot.ActiveScheduleCount++
+			snapshot.StartupBlockingTimers += recoverable
 		}
 	}
 	if rt.Manager != nil {

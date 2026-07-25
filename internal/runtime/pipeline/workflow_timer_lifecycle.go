@@ -15,30 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-// ArmFlowInstanceInitialStageLifecycle materializes all stage-owned durable
-// intents in the flow-instance creation mutation.
-func (pc *PipelineCoordinator) ArmFlowInstanceInitialStageLifecycle(ctx context.Context, entityID string) error {
-	return pc.armWorkflowCurrentStageLifecycle(ctx, strings.TrimSpace(entityID), "")
-}
-
-func workflowTimerInitialCause(instance WorkflowInstance, stage string) (workflowTimerCause, error) {
-	occurredAt := instance.CreatedAt
-	if occurredAt.IsZero() {
-		occurredAt = instance.EnteredStageAt
-	}
-	cause := workflowTimerCause{
-		Kind:       workflowTimerCauseInitial,
-		EventType:  "state:" + strings.TrimSpace(stage),
-		OccurredAt: occurredAt,
-		ToState:    strings.TrimSpace(stage),
-	}
-	cause = cause.normalized()
-	if err := cause.validateForActivation(); err != nil {
-		return workflowTimerCause{}, err
-	}
-	return cause, nil
-}
-
 func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context, evt events.Event) (bool, bool, error) {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() || pc.workflowTimers == nil {
 		return false, false, nil
@@ -115,22 +91,7 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 		if !applied || nextStage == "" {
 			return nil
 		}
-		cause := workflowTimerCause{
-			Kind:         workflowTimerCauseTransition,
-			EventID:      evt.ID(),
-			EventType:    strings.TrimSpace(string(evt.Type())),
-			OccurredAt:   evt.CreatedAt(),
-			TransitionID: workflowTransitionIdentity(pc.WorkflowDefinition(), currentStage, nextStage, string(evt.Type())),
-			FromState:    currentStage,
-			ToState:      nextStage,
-		}
-		if err := pc.workflowTimers.Reconcile(txctx, entityID, currentStage, nextStage, cause); err != nil {
-			return err
-		}
-		if err := pc.applyWorkflowJoinIntents(txctx, entityID, currentStage, nextStage); err != nil {
-			return err
-		}
-		if err := pc.applyWorkflowGateIntents(txctx, entityID, currentStage, nextStage, string(evt.Type())); err != nil {
+		if err := pc.applyAcceptedWorkflowEvent(txctx, entityID, evt, currentStage, nextStage); err != nil {
 			return err
 		}
 		return pc.maybeDeactivateTerminalFlowInstance(txctx, entityID, nextStage)

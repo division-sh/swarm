@@ -29,20 +29,20 @@ func TestUpdateEntityState_LogsMutationRowForStateTransition(t *testing.T) {
 			},
 		},
 	}
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "mutation-flow",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "queued",
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	transitionCtx := testPersistedWorkflowStateTransitionContext(t, pc.workflowStore, ctx, entityID, "flow.transitioned")
-	if err := pc.updateEntityState(transitionCtx, entityID, "done", "flow.transitioned"); err != nil {
-		t.Fatalf("updateEntityState: %v", err)
+	if err := pc.persistWorkflowStateForTest(transitionCtx, entityID, "done", "flow.transitioned"); err != nil {
+		t.Fatalf("persistWorkflowStateForTest: %v", err)
 	}
 
 	var (
@@ -88,7 +88,7 @@ func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLo
 	store := NewWorkflowInstanceStore(db)
 	entityID := uuid.NewString()
 
-	if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "mutation-flow",
@@ -104,11 +104,11 @@ func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLo
 		StateBuckets: map[string]any{
 			"evidence": map[string]any{"score": 1},
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "mutation-flow",
@@ -125,7 +125,7 @@ func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLo
 			"evidence": map[string]any{"score": 2},
 			"notes":    map[string]any{"count": 1},
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("update workflow instance: %v", err)
 	}
 
@@ -154,7 +154,7 @@ func TestWorkflowInstanceStore_ReplaysContainedStateMapListProjection(t *testing
 	store := NewWorkflowInstanceStore(db)
 	entityID := uuid.NewString()
 
-	if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "contained-state-flow",
@@ -169,7 +169,7 @@ func TestWorkflowInstanceStore_ReplaysContainedStateMapListProjection(t *testing
 			},
 			"tags": []any{"new"},
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
@@ -181,7 +181,7 @@ func TestWorkflowInstanceStore_ReplaysContainedStateMapListProjection(t *testing
 			},
 		},
 	}
-	if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "contained-state-flow",
@@ -191,7 +191,7 @@ func TestWorkflowInstanceStore_ReplaysContainedStateMapListProjection(t *testing
 			"verticals": contained,
 			"tags":      []any{"new", "vip"},
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("update workflow instance: %v", err)
 	}
 
@@ -226,8 +226,8 @@ func TestApplyWorkflowGateMutation_LogsMutationRow(t *testing.T) {
 	pc := testMutationLoggingCoordinator(db)
 	seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 
-	if err := pc.applyWorkflowGateMutation(testPipelineCoordinatorRunContext(t, pc), entityID, "workflow.ready", "g_ready", false); err != nil {
-		t.Fatalf("applyWorkflowGateMutation: %v", err)
+	if err := pc.applyWorkflowGateForTest(testPipelineCoordinatorRunContext(t, pc), entityID, "workflow.ready", "g_ready", false); err != nil {
+		t.Fatalf("applyWorkflowGateForTest: %v", err)
 	}
 
 	fields := mutationFieldsForEntity(t, db, entityID)
@@ -294,9 +294,9 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 
 		ctx := testPipelineCoordinatorRunContext(t, pc)
 		transitionCtx := testPersistedWorkflowStateTransitionContext(t, pc.workflowStore, ctx, entityID, "flow.transitioned")
-		err := pc.updateEntityState(transitionCtx, entityID, "done", "flow.transitioned")
+		err := pc.persistWorkflowStateForTest(transitionCtx, entityID, "done", "flow.transitioned")
 		if err == nil || !strings.Contains(err.Error(), "entity_mutations") {
-			t.Fatalf("updateEntityState err = %v, want entity_mutations failure", err)
+			t.Fatalf("persistWorkflowStateForTest err = %v, want entity_mutations failure", err)
 		}
 		assertCurrentState(t, db, entityID, "queued")
 	})
@@ -308,9 +308,9 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 		seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 		dropEntityMutationsTable(t, db)
 
-		err := pc.applyWorkflowGateMutation(testPipelineCoordinatorRunContext(t, pc), entityID, "workflow.ready", "g_ready", false)
+		err := pc.applyWorkflowGateForTest(testPipelineCoordinatorRunContext(t, pc), entityID, "workflow.ready", "g_ready", false)
 		if err == nil || !strings.Contains(err.Error(), "entity_mutations") {
-			t.Fatalf("applyWorkflowGateMutation err = %v, want entity_mutations failure", err)
+			t.Fatalf("applyWorkflowGateForTest err = %v, want entity_mutations failure", err)
 		}
 		assertEntityGates(t, db, entityID, map[string]any{})
 	})
@@ -346,13 +346,13 @@ func testMutationLoggingCoordinator(db *sql.DB) *PipelineCoordinator {
 
 func seedMutationLoggingInstance(t *testing.T, store *WorkflowInstanceStore, entityID string) {
 	t.Helper()
-	if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "mutation-flow",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "queued",
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 }

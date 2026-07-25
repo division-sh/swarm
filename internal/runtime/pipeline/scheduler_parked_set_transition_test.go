@@ -8,9 +8,132 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/google/uuid"
 )
+
+func TestWorkflowTimerWakeupReplacementUsesOneCanonicalSchedulerProjection(t *testing.T) {
+	runtimeOwner := pipelineTestWorkOwner(t)
+	predecessor := newSchedulerTestStanding(t, runtimeOwner, "workflow-timer-source", 1)
+	successor := newSchedulerTestStanding(t, runtimeOwner, "workflow-timer-target", 2)
+	source := NewSchedulerWithWorkOwner(runtimeOwner)
+	target := NewSchedulerWithWorkOwner(runtimeOwner)
+	t.Cleanup(func() {
+		source.Stop()
+		target.Stop()
+		_ = source.Wait(context.Background())
+		_ = target.Wait(context.Background())
+	})
+
+	dueAt := canonicalWorkflowTimerTime(time.Now().Add(100 * time.Millisecond))
+	ref := timeridentity.WorkflowTimerActivationRef{
+		ActivationID: timeridentity.WorkflowTimerActivationID("workflow-timer-replacement"),
+		Declaration:  "review.expiry",
+	}
+	wakeup := WorkflowTimerWakeup{
+		family: workflowTimerActivationWakeup,
+		occurrence: timeridentity.WorkflowTimerOccurrenceRef{
+			Activation: ref,
+			DueAt:      dueAt,
+		},
+		dueAt: dueAt,
+	}
+	var active, maximum, calls atomic.Int32
+	started := make(chan struct{}, 2)
+	releaseIncumbent := make(chan struct{})
+	callback := func(context.Context, WorkflowTimerWakeup) {
+		current := active.Add(1)
+		for {
+			observed := maximum.Load()
+			if current <= observed || maximum.CompareAndSwap(observed, current) {
+				break
+			}
+		}
+		call := calls.Add(1)
+		started <- struct{}{}
+		if call == 1 {
+			<-releaseIncumbent
+		}
+		active.Add(-1)
+	}
+
+	if err := source.registerWorkflowTimerWakeup(worklifetime.WithOccurrence(context.Background(), predecessor), wakeup, callback); err != nil {
+		t.Fatalf("register predecessor workflow wakeup: %v", err)
+	}
+	parked, err := source.ParkOccurrence(context.Background(), predecessor)
+	if err != nil {
+		t.Fatalf("park predecessor workflow wakeup: %v", err)
+	}
+	if err := target.registerWorkflowTimerWakeup(context.Background(), wakeup, callback); err != nil {
+		t.Fatalf("register runtime-owned candidate wakeup: %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("runtime-owned candidate wakeup did not start")
+	}
+
+	type preparedResult struct {
+		transition *PreparedParkedSetRebind
+		err        error
+	}
+	prepared := make(chan preparedResult, 1)
+	go func() {
+		transition, prepareErr := PrepareParkedSetRebind(context.Background(), target, []ParkedRebind{{
+			Parked: parked,
+			Owner:  successor,
+		}})
+		prepared <- preparedResult{transition: transition, err: prepareErr}
+	}()
+	waitForWorkflowTimerReservation(t, target, ref)
+	if err := target.registerWorkflowTimerWakeup(worklifetime.WithOccurrence(context.Background(), successor), wakeup, callback); err == nil {
+		t.Fatal("same-key workflow wakeup registration bypassed replacement reservation")
+	}
+	if err := target.cancelWorkflowTimerWakeup(ref); err == nil {
+		t.Fatal("same-key workflow wakeup cancellation bypassed replacement reservation")
+	}
+	select {
+	case <-started:
+		t.Fatal("rebound workflow wakeup overlapped the runtime-owned incumbent")
+	default:
+	}
+
+	close(releaseIncumbent)
+	result := <-prepared
+	if result.err != nil {
+		t.Fatalf("prepare workflow wakeup rebind: %v", result.err)
+	}
+	if err := result.transition.CommitDormant(); err != nil {
+		t.Fatalf("commit dormant workflow wakeup: %v", err)
+	}
+	select {
+	case <-started:
+		t.Fatal("rebound workflow wakeup started before transition activation")
+	default:
+	}
+	target.mu.Lock()
+	task := target.tasks[workflowTimerTaskFamily+"|"+ref.ActivationID]
+	taskCount := len(target.tasks)
+	target.mu.Unlock()
+	if taskCount != 1 || task == nil || task.projection.kind != scheduledProjectionWorkflowTimer || task.standingOwner != successor {
+		t.Fatalf("dormant workflow wakeup tasks=%d task=%#v, want one successor-owned typed projection", taskCount, task)
+	}
+	if err := result.transition.Activate(); err != nil {
+		t.Fatalf("activate rebound workflow wakeup: %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("rebound workflow wakeup did not start after activation")
+	}
+	if got := maximum.Load(); got != 1 {
+		t.Fatalf("maximum concurrent workflow wakeups = %d, want 1", got)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("workflow wakeup callback calls = %d, want incumbent plus rebound", got)
+	}
+}
 
 func TestParkedSetTransitionLinearizesExactTargetIncumbents(t *testing.T) {
 	for _, mode := range []string{"once", "cron"} {
@@ -368,4 +491,20 @@ func waitForScheduleReservation(t *testing.T, scheduler *Scheduler, schedule Sch
 		runtime.Gosched()
 	}
 	t.Fatal("schedule key was not reserved")
+}
+
+func waitForWorkflowTimerReservation(t *testing.T, scheduler *Scheduler, ref timeridentity.WorkflowTimerActivationRef) {
+	t.Helper()
+	key := workflowTimerTaskFamily + "|" + ref.Normalize().ActivationID
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		scheduler.mu.Lock()
+		_, reserved := scheduler.reservations[key]
+		scheduler.mu.Unlock()
+		if reserved {
+			return
+		}
+		runtime.Gosched()
+	}
+	t.Fatal("workflow timer key was not reserved")
 }

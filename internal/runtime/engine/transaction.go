@@ -10,7 +10,6 @@ import (
 
 type PersistedEffects struct {
 	StateMutation StateMutation
-	TimerIntents  []TimerIntent
 	EmitIntents   []EmitIntent
 }
 

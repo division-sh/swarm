@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -523,16 +524,12 @@ func (rt *Runtime) ensureStandingTargets(ctx context.Context, serviceID string) 
 					"bundle_hash": fact.BundleHash(),
 					"package_key": declaration.PackageKey,
 				},
+				OccurredAt: time.Now().UTC(),
 			})
 			if err != nil {
 				return err
 			}
 			created = wasCreated
-			if created {
-				if err := rt.Pipeline.ArmFlowInstanceInitialStageLifecycle(txctx, instance.EntityID); err != nil {
-					return fmt.Errorf("arm initial stage lifecycle: %w", err)
-				}
-			}
 			publicationSequence, err = rt.Stores.PipelineStore.PublishStandingService(txctx, reconciliation.ServiceID, reconciliation.RunID, reconciliation.Generation)
 			return err
 		})

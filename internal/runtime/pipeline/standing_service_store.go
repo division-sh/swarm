@@ -13,6 +13,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
@@ -540,7 +541,7 @@ func (s *WorkflowInstanceStore) reconcileStandingServiceTx(ctx context.Context, 
 		if current.RunControlReason != standingRestartAbandonReason {
 			return StandingServiceReconciliation{}, standingResetRequiredError(current, "cancelled standing generation is not owned by restart abandonment")
 		}
-		if live, err := s.standingRunHasLiveWorkTx(ctx, tx, current.RunID); err != nil {
+		if live, err := s.standingRunHasLiveWorkTx(ctx, tx, current.RunID, time.Now().UTC()); err != nil {
 			return StandingServiceReconciliation{}, err
 		} else if live {
 			return StandingServiceReconciliation{}, standingResetRequiredError(current, "restart-abandoned generation still owns live work")
@@ -993,7 +994,7 @@ func (s *WorkflowInstanceStore) orphanStandingServiceTx(ctx context.Context, tx 
 	return result, nil
 }
 
-func (s *WorkflowInstanceStore) standingRunHasLiveWorkTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
+func (s *WorkflowInstanceStore) standingRunHasLiveWorkTx(ctx context.Context, tx *sql.Tx, runID string, observedAt time.Time) (bool, error) {
 	if s.deliveryStore == nil {
 		return false, fmt.Errorf("inspect standing run live work: delivery lifecycle store is required")
 	}
@@ -1014,27 +1015,32 @@ func (s *WorkflowInstanceStore) standingRunHasLiveWorkTx(ctx context.Context, tx
 	if pipelineSummary.HasOpenWork() {
 		return true, nil
 	}
-	query := `
-		SELECT EXISTS (
-			SELECT 1 FROM agent_sessions WHERE run_id = ? AND status IN ('active', 'suspended')
-			UNION ALL SELECT 1 FROM timers WHERE run_id = ? AND status = 'active'
-		)
-	`
-	args := []any{runID, runID}
+	query := `SELECT EXISTS (SELECT 1 FROM agent_sessions WHERE run_id = ? AND status IN ('active', 'suspended'))`
+	args := []any{runID}
 	if !s.isSQLite() {
-		query = `
-			SELECT EXISTS (
-				SELECT 1 FROM agent_sessions WHERE run_id = $1::uuid AND status IN ('active', 'suspended')
-				UNION ALL SELECT 1 FROM timers WHERE run_id = $1::uuid AND status = 'active'
-			)
-		`
+		query = `SELECT EXISTS (SELECT 1 FROM agent_sessions WHERE run_id = $1::uuid AND status IN ('active', 'suspended'))`
 		args = []any{runID}
 	}
 	var live bool
 	if err := tx.QueryRowContext(ctx, query, args...).Scan(&live); err != nil {
 		return false, fmt.Errorf("inspect standing run live work: %w", err)
 	}
-	return live, nil
+	if live {
+		return true, nil
+	}
+	scope, err := runtimetimerobligation.Run(runID)
+	if err != nil {
+		return false, err
+	}
+	snapshot, err := s.readTimerObligations(WithPipelineSQLTxContext(ctx, tx), scope, observedAt)
+	if err != nil {
+		return false, fmt.Errorf("inspect standing run timer work: %w", err)
+	}
+	run, ok := snapshot.Run(runID)
+	if !ok {
+		return false, fmt.Errorf("inspect standing run timer work: snapshot omitted requested run")
+	}
+	return run.Totals().ActiveCount > 0, nil
 }
 
 func (s *WorkflowInstanceStore) quiesceStandingRunTx(ctx context.Context, tx *sql.Tx, runID, bundleHash, reason, sessionReason string, now time.Time) error {

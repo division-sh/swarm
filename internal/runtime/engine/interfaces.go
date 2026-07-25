@@ -4,11 +4,13 @@ import (
 	"context"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
 
 type emitSurfaceContextKey struct{}
@@ -73,8 +75,9 @@ type OutboxWriter interface {
 	WriteOutbox(ctx context.Context, intents []EmitIntent) error
 }
 
-type TimerApplier interface {
-	ApplyTimerIntents(ctx context.Context, entityID identity.EntityID, intents []TimerIntent) error
+type WorkflowLifecycleEffectOwner interface {
+	AcceptedEventEffect(entityID identity.EntityID, event events.Event, fromState, toState string) (runtimeworkflowlifecycle.Effect, error)
+	ApplyWorkflowLifecycleEffects(ctx context.Context, effects []runtimeworkflowlifecycle.Effect) error
 }
 
 type PostCommitDispatcher interface {
@@ -126,7 +129,7 @@ type RuntimeDependencies struct {
 	TxRunner            TransactionRunner
 	Locker              EntityLocker
 	Outbox              OutboxWriter
-	TimerApplier        TimerApplier
+	WorkflowLifecycle   WorkflowLifecycleEffectOwner
 	Dispatcher          PostCommitDispatcher
 	ActivityIntents     ActivityIntentWriter
 	ActivityDispatcher  ActivityDispatcher

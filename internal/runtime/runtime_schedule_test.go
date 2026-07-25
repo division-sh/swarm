@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"sort"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 )
 
 func TestScheduleEventPayloadInjectsEntityID(t *testing.T) {
@@ -126,12 +128,13 @@ func TestScheduledEventUsesTypedScheduleEnvelope(t *testing.T) {
 }
 
 type recordingRuntimeScheduleStore struct {
-	schedules  []runtimepipeline.Schedule
-	active     []runtimepipeline.Schedule
-	claims     []recordedScheduleClaim
-	firedExact atomic.Int32
-	firedOwned atomic.Int32
-	fired      chan runtimepipeline.Schedule
+	schedules   []runtimepipeline.Schedule
+	active      []runtimepipeline.Schedule
+	obligations *runtimetimerobligation.Snapshot
+	claims      []recordedScheduleClaim
+	firedExact  atomic.Int32
+	firedOwned  atomic.Int32
+	fired       chan runtimepipeline.Schedule
 }
 
 type recordedScheduleClaim struct {
@@ -154,6 +157,65 @@ func (*recordingRuntimeScheduleStore) CancelScheduleExactTerminal(context.Contex
 
 func (s *recordingRuntimeScheduleStore) LoadActiveSchedules(context.Context) ([]runtimepipeline.Schedule, error) {
 	return append([]runtimepipeline.Schedule(nil), s.active...), nil
+}
+
+func (s *recordingRuntimeScheduleStore) ReadTimerObligations(_ context.Context, scope runtimetimerobligation.Scope, observedAt time.Time) (runtimetimerobligation.Snapshot, error) {
+	observedAt = observedAt.UTC()
+	if s.obligations != nil {
+		snapshot := *s.obligations
+		snapshot.ObservedAt = observedAt
+		return snapshot, nil
+	}
+	families := func() []runtimetimerobligation.FamilyObligation {
+		return []runtimetimerobligation.FamilyObligation{
+			{Family: runtimetimerobligation.FamilyTimer},
+			{Family: runtimetimerobligation.FamilyScheduledTask},
+			{Family: runtimetimerobligation.FamilyDeadline},
+			{Family: runtimetimerobligation.FamilyGlobalRecurring},
+			{Family: runtimetimerobligation.FamilyWorkflowTimer},
+		}
+	}
+	global := families()
+	runs := map[string][]runtimetimerobligation.FamilyObligation{}
+	for _, schedule := range s.active {
+		runID := schedule.EffectiveRunID()
+		if scope.RunID() != "" && runID != scope.RunID() {
+			continue
+		}
+		target := global
+		if runID != "" {
+			if runs[runID] == nil {
+				runs[runID] = families()
+			}
+			target = runs[runID]
+		}
+		target[0].ActiveCount++
+		if !schedule.At.UTC().After(observedAt) {
+			target[0].DueCount++
+		}
+		target[0].RecoverableCount++
+		if runID == "" {
+			global = target
+		} else {
+			runs[runID] = target
+		}
+	}
+	runIDs := make([]string, 0, len(runs))
+	for runID := range runs {
+		runIDs = append(runIDs, runID)
+	}
+	sort.Strings(runIDs)
+	snapshot := runtimetimerobligation.Snapshot{
+		ObservedAt:     observedAt,
+		GlobalFamilies: global,
+		Runs:           make([]runtimetimerobligation.RunObligations, 0, len(runIDs)),
+	}
+	for _, runID := range runIDs {
+		snapshot.Runs = append(snapshot.Runs, runtimetimerobligation.RunObligations{
+			RunID: runID, Families: runs[runID],
+		})
+	}
+	return snapshot, nil
 }
 
 func (s *recordingRuntimeScheduleStore) ClaimSchedule(context.Context, runtimepipeline.Schedule) (bool, error) {

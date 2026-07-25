@@ -185,22 +185,25 @@ func selectedContractAgentRuntimeUnsupportedError(agents []string, reason string
 	)
 }
 
-func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedContractForkEventsRequest, bus *runtimebus.EventBus) (*selectedContractAgentRuntime, managedexecution.Admission, error) {
+func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedContractForkEventsRequest, bus *runtimebus.EventBus, workflowStore *runtimepipeline.WorkflowInstanceStore) (*selectedContractAgentRuntime, managedexecution.Admission, error) {
 	admission, authority, err := selectedContractManagedExecutionAuthority(ctx)
 	if err != nil {
 		return nil, managedexecution.Admission{}, err
+	}
+	if workflowStore == nil {
+		return nil, managedexecution.Admission{}, fmt.Errorf("selected-contract workflow lifecycle store is required")
 	}
 	if len(req.AgentRuntime.Records) == 0 {
 		manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 			BaseContext:       context.WithoutCancel(ctx),
 			SemanticSource:    req.LoadedSource.Source,
-			WorkflowInstances: runtimepipeline.NewWorkflowInstanceStore(req.Store.DB),
+			WorkflowInstances: workflowStore,
 			DeliveryStore:     req.Store,
 			WorkOwner:         req.AgentRuntime.Options.AgentManagerOptions.WorkOwner,
 		}, req.Store)
 		return &selectedContractAgentRuntime{manager: manager}, admission, nil
 	}
-	builder, err := buildSelectedContractAgentRuntimeFactory(req, bus)
+	builder, err := buildSelectedContractAgentRuntimeFactory(req, bus, workflowStore)
 	if err != nil {
 		return nil, managedexecution.Admission{}, err
 	}
@@ -292,7 +295,10 @@ func selectedContractManagedExecutionAuthority(ctx context.Context) (managedexec
 	return admission, authority, nil
 }
 
-func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEventsRequest, bus *runtimebus.EventBus) (selectedContractAgentRuntimeFactory, error) {
+func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEventsRequest, bus *runtimebus.EventBus, workflowStore *runtimepipeline.WorkflowInstanceStore) (selectedContractAgentRuntimeFactory, error) {
+	if workflowStore == nil {
+		return selectedContractAgentRuntimeFactory{}, fmt.Errorf("selected-contract workflow lifecycle store is required")
+	}
 	options := req.AgentRuntime.Options
 	source := req.LoadedSource.Source
 	promptResolver, err := selectedContractPromptResolver(source)
@@ -303,9 +309,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	if managerOptions.SemanticSource == nil {
 		managerOptions.SemanticSource = source
 	}
-	if managerOptions.WorkflowInstances == nil {
-		managerOptions.WorkflowInstances = runtimepipeline.NewWorkflowInstanceStore(req.Store.DB)
-	}
+	managerOptions.WorkflowInstances = workflowStore
 	if managerOptions.PromptResolver == nil {
 		managerOptions.PromptResolver = promptResolver
 	}

@@ -963,17 +963,6 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		callbackCtx, cancel := context.WithTimeout(taskCtx, 10*time.Second)
 		defer cancel()
 		callbackCtx = events.WithDeliveryContext(callbackCtx, sc.Context)
-		if rt.Pipeline != nil && rt.Pipeline.IsWorkflowTimerSchedule(sc) {
-			outcome, err := rt.Pipeline.FireWorkflowTimer(callbackCtx, sc)
-			if err != nil && rt.Logger != nil {
-				handleRuntimeLogPersistenceError("scheduler", "workflow_timer_fire_failed", rt.Logger.Error(callbackCtx, "scheduler", "workflow_timer_fire_failed", map[string]any{
-					"timer_id": sc.EffectiveTimerID(),
-					"task_id":  sc.TaskID,
-					"outcome":  outcome,
-				}, err))
-			}
-			return
-		}
 		scheduled, constructErr := scheduledEvent(sc)
 		if constructErr == nil {
 			constructErr = rt.Bus.Publish(callbackCtx, scheduled)
@@ -1403,7 +1392,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	if skipPersistentStartupRecovery {
 		rt.emitBootProgress(6, "recovery_snapshot_inspection", "skipped", "persistent startup recovery disabled")
 	} else {
-		startupRecoverySnapshot, err = rt.inspectStartupRecoverySnapshot(ctx)
+		startupRecoverySnapshot, err = rt.inspectStartupRecoverySnapshot(ctx, bootStartedAt)
 		if err != nil {
 			rt.emitBootProgress(6, "recovery_snapshot_inspection", "FAILED", err.Error())
 		} else {
@@ -1458,12 +1447,12 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	if skipPersistentStartupRecovery {
 		rt.emitBootProgress(10, "schedule_restoration", "skipped", "persistent startup recovery disabled")
 	} else if rt.Scheduler != nil && rt.Stores.ScheduleStore != nil {
+		startupRecoveryDecision.ScheduleRestoreAttempted = true
 		schedules, err := rt.Stores.ScheduleStore.LoadActiveSchedules(ctx)
 		if err != nil {
 			rt.emitBootProgress(10, "schedule_restoration", "FAILED", err.Error())
 			return fmt.Errorf("load schedules failed: %w", err)
 		}
-		startupRecoveryDecision.ScheduleRestoreAttempted = len(schedules) > 0
 		results := restoreStartupTimerSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Logger, schedules)
 		timerReplayCount, timerSkipCount, timerDropCount, _ := summarizeStartupTimerRecovery(results)
 		startupRecoveryDecision.ScheduleReplayCount = timerReplayCount
@@ -2116,7 +2105,6 @@ func normalizeScheduleIdentity(sc *runtimepipeline.Schedule) {
 	sc.NormalizeRunID()
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
-	sc.NormalizeTimerID()
 }
 
 func bootWorkflowTimerSchedule(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract, now time.Time) (runtimepipeline.Schedule, bool) {

@@ -395,7 +395,7 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 		WorkOwner:         workOwner,
 	}, pg)
 	t.Cleanup(func() { _ = manager.Shutdown() })
-	sourcePipeline := newSelectedContractPipeline(sourceBus, pg, loaded, SelectedContractAgentRuntimeOptions{
+	_ = newSelectedContractPipeline(sourceBus, pg, loaded, SelectedContractAgentRuntimeOptions{
 		AgentManagerOptions: runtimemanager.AgentManagerOptions{WorkOwner: workOwner},
 	}, workflowStore, manager.ActivateFlowInstance)
 
@@ -565,13 +565,123 @@ func requireSyntheticProjectionRoute(t *testing.T, pg *store.PostgresStore, even
 	if err != nil {
 		t.Fatalf("ListEventDeliveryRoutes(%s): %v", eventID, err)
 	}
+	return requireSyntheticProjectionRouteFromRoutes(t, routes, subscriberID)
+}
+
+func requireSyntheticProjectionRouteFromRoutes(t *testing.T, routes []events.DeliveryRoute, subscriberID string) events.DeliveryRoute {
+	t.Helper()
 	for _, route := range routes {
 		if route.SubscriberType == "node" && route.SubscriberID == subscriberID && !route.PayloadProjection.Empty() {
 			return route
 		}
 	}
-	t.Fatalf("delivery routes for %s = %#v, want projected node %s", eventID, routes, subscriberID)
+	t.Fatalf("delivery routes = %#v, want projected node %s", routes, subscriberID)
 	return events.DeliveryRoute{}
+}
+
+func requireFreshSyntheticProjectionControl(t *testing.T, loaded LoadedSelectedContractSource) events.DeliveryRoute {
+	t.Helper()
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	ctx := runForkTestContext(t)
+	scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, loaded.BundleHash)
+	if err != nil {
+		t.Fatalf("resolve control bundle scope: %v", err)
+	}
+	ctx = runtimeauthoractivity.WithScope(ctx, scope)
+	descriptors, err := swaruntime.AuthorActivityEventDescriptors(loaded.Source)
+	if err != nil {
+		t.Fatalf("project control source descriptors: %v", err)
+	}
+	lease, err := pg.RegisterAuthorActivityEventCatalog(scope, descriptors)
+	if err != nil {
+		t.Fatalf("register control source descriptors: %v", err)
+	}
+	t.Cleanup(lease.Release)
+
+	runID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES ($1::uuid, 'running', $2, $3, now())
+	`, runID, loaded.BundleHash, storerunlifecycle.BundleSourceEphemeral); err != nil {
+		t.Fatalf("seed control run: %v", err)
+	}
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	workOwner := testGatewayWorkOwner(t)
+	var manager *runtimemanager.AgentManager
+	var pipeline *runtimepipeline.PipelineCoordinator
+	controlBus, err := bus.NewEventBusWithOptions(pg, bus.EventBusOptions{
+		WorkOwner:           workOwner,
+		PipelineObligations: pg.PipelineObligations(),
+		ContractBundle:      loaded.Source,
+		InterceptorProvider: func() []bus.EventInterceptor {
+			if pipeline == nil {
+				return nil
+			}
+			return []bus.EventInterceptor{pipeline}
+		},
+		TemplateInstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
+			if manager == nil {
+				return errors.New("control lifecycle manager is not initialized")
+			}
+			return manager.ActivateFlowInstance(ctx, req)
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions(control): %v", err)
+	}
+	manager = runtimemanager.NewAgentManagerWithOptions(controlBus, nil, runtimemanager.AgentManagerOptions{
+		SemanticSource:    loaded.Source,
+		WorkflowInstances: workflowStore,
+		WorkOwner:         workOwner,
+	}, pg)
+	t.Cleanup(func() { _ = manager.Shutdown() })
+	pipeline = newSelectedContractPipeline(controlBus, pg, loaded, SelectedContractAgentRuntimeOptions{
+		AgentManagerOptions: runtimemanager.AgentManagerOptions{WorkOwner: workOwner},
+	}, workflowStore, manager.ActivateFlowInstance)
+
+	controlEvent := eventtest.RunCreatingRootIngress(
+		uuid.NewString(),
+		events.EventType(loaded.Source.ResolveFlowEventReference("producer", "validation.triggered")),
+		runID,
+		"",
+		json.RawMessage(`{"candidate":"candidate-1"}`),
+		0,
+		runID,
+		"",
+		events.EventEnvelope{},
+		time.Now().UTC(),
+	)
+	controlCtx := runtimecorrelation.WithRunID(ctx, runID)
+	preflight, err := controlBus.CheckPublishRecipientPlan(controlCtx, controlEvent)
+	if err != nil {
+		t.Fatalf("plan control create event: %v", err)
+	}
+	if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) == 0 {
+		t.Fatalf("control root preflight = failure:%s routes:%#v", preflight.TargetFailure, preflight.DeliveryRoutes)
+	}
+	commitRunForkTestEvent(t, controlCtx, pg, controlEvent, preflight.DeliveryRoutes)
+	if result, err := controlBus.ReleaseRunQueue(controlCtx, runID, 10); err != nil {
+		t.Fatalf("execute control delivery: %v", err)
+	} else if result.Settled != 1 {
+		t.Fatalf("executed control pipeline obligations = %#v, want one settled", result)
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := controlBus.WaitForQuiescence(waitCtx); err != nil {
+		t.Fatalf("wait for control delivery: %v", err)
+	}
+	var requestedEventID string
+	if err := db.QueryRowContext(ctx, `
+		SELECT event_id::text
+		FROM events
+		WHERE run_id = $1::uuid
+		  AND event_name = 'producer/validation.requested'
+	`, runID).Scan(&requestedEventID); err != nil {
+		t.Fatalf("load control request event: %v", err)
+	}
+	return requireSyntheticProjectionRoute(t, pg, requestedEventID, "validator-node")
 }
 
 func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIdentity(t *testing.T) {
@@ -2173,7 +2283,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 				AgentManagerOptions: runtimemanager.AgentManagerOptions{WorkOwner: owner},
 			},
 		},
-	}, eventBus)
+	}, eventBus, runtimepipeline.NewWorkflowInstanceStore(nil))
 	if err == nil || !strings.Contains(err.Error(), "missing required system_prompt") {
 		t.Fatalf("startSelectedContractAgentRuntime error = %v, want registration failure", err)
 	}

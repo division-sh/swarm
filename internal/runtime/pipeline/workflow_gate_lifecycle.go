@@ -32,7 +32,7 @@ type workflowGateIntent struct {
 	card       decisioncard.Card
 }
 
-func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, entityID, currentStage, nextStage, sourceEvent string) error {
+func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, entityID, currentStage, nextStage, sourceEvent string, occurredAt time.Time) error {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() || pc.SemanticSource() == nil {
 		return nil
 	}
@@ -44,13 +44,16 @@ func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, ent
 	}
 	if _, ok := PipelineSQLTxFromContext(ctx); !ok {
 		return pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
-			return pc.applyWorkflowGateIntents(txctx, entityID, currentStage, nextStage, sourceEvent)
+			return pc.applyWorkflowGateIntents(txctx, entityID, currentStage, nextStage, sourceEvent, occurredAt)
 		})
 	}
 
 	var create *workflowGateIntent
 	superseded := []gateruntime.Activation{}
-	now := time.Now().UTC()
+	now := occurredAt.UTC()
+	if now.IsZero() {
+		return fmt.Errorf("workflow gate lifecycle requires an exact occurrence time")
+	}
 	err := pc.workflowStore.MutateE(ctx, entityID, func(instance *WorkflowInstance) error {
 		carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 		if err != nil {

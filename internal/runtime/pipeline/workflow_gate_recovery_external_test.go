@@ -364,8 +364,10 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			runID, entityID := uuid.NewString(), uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
 			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
+			enteredAt := time.Now().UTC()
 			if err := selected.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
+				EnteredStageAt: enteredAt, CreatedAt: enteredAt,
 				Metadata: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": "root", "instance_id": entityID},
 			}); err != nil {
 				t.Fatal(err)
@@ -770,8 +772,10 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			runID, entityID := uuid.NewString(), uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
 			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
+			enteredAt := time.Now().UTC()
 			if err := selected.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
+				EnteredStageAt: enteredAt, CreatedAt: enteredAt,
 				Metadata: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": "root", "instance_id": entityID},
 			}); err != nil {
 				t.Fatal(err)
@@ -1061,21 +1065,16 @@ func testDecisionRouteSettlementRetry(t *testing.T, selected gateRecoveryStoreCa
 	if err != nil {
 		t.Fatal(err)
 	}
-	setupCoordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(setupBus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
+	runtimepipeline.NewPipelineCoordinatorWithOptions(setupBus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
 		Module: gateRecoveryModule{source: semanticview.Wrap(bundle)}, WorkflowStore: selected.workflowStore,
 		DecisionCards: selected.cards, BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle),
 	})
 	at := time.Now().UTC().Add(-time.Minute)
-	if err := selected.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
+	if err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID: "launch/settlement-" + uuid.NewString(), StorageRef: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: at,
 		Metadata: map[string]any{"entity_id": entityID, "run_id": runID},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := selected.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
-		return setupCoordinator.ArmFlowInstanceInitialStageLifecycle(txctx, entityID)
-	}); err != nil {
+	}, at); err != nil {
 		t.Fatal(err)
 	}
 	items, _, err := selected.cards.ListDecisionCards(ctx, decisioncard.ListOptions{RunID: runID, Limit: 10})
@@ -1218,20 +1217,15 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(setupBus, tc.db, runtimepipeline.PipelineCoordinatorOptions{
+	runtimepipeline.NewPipelineCoordinatorWithOptions(setupBus, tc.db, runtimepipeline.PipelineCoordinatorOptions{
 		Module: gateRecoveryModule{source: semanticview.Wrap(bundle)}, WorkflowStore: tc.workflowStore,
 		DecisionCards: tc.cards, BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle),
 	})
-	if err := tc.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
+	if err := tc.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID: "launch/foreground-" + uuid.NewString(), StorageRef: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: at,
 		Metadata: map[string]any{"entity_id": entityID, "run_id": runID},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := tc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
-		return coordinator.ArmFlowInstanceInitialStageLifecycle(txctx, entityID)
-	}); err != nil {
+	}, at); err != nil {
 		t.Fatal(err)
 	}
 	items, _, err := tc.cards.ListDecisionCards(ctx, decisioncard.ListOptions{RunID: runID, Limit: 10})
@@ -1363,16 +1357,11 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 	}
 	matching := newCoordinator(gateRecoveryBundle)
 	enteredAt := time.Now().UTC().Add(-25 * time.Hour)
-	if err := tc.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
+	if err := tc.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID: "launch/review-terminal", StorageRef: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: enteredAt,
 		Metadata: map[string]any{"entity_id": entityID, "run_id": runID},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := tc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
-		return matching.ArmFlowInstanceInitialStageLifecycle(txctx, entityID)
-	}); err != nil {
+	}, enteredAt); err != nil {
 		t.Fatal(err)
 	}
 	items, _, err := tc.cards.ListDecisionCards(ctx, decisioncard.ListOptions{RunID: runID, Limit: 10})
@@ -1449,17 +1438,12 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	matching := newCoordinator(gateRecoveryBundle)
 
 	scenarioAt := time.Now().UTC().Add(-25 * time.Hour)
-	if err := tc.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
+	if err := tc.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID: "launch/review-1", StorageRef: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: scenarioAt,
 		Metadata: map[string]any{"entity_id": entityID, "run_id": runID},
-	}); err != nil {
-		t.Fatalf("Upsert workflow instance: %v", err)
-	}
-	if err := tc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
-		return matching.ArmFlowInstanceInitialStageLifecycle(txctx, entityID)
-	}); err != nil {
-		t.Fatalf("arm initial gate: %v", err)
+	}, scenarioAt); err != nil {
+		t.Fatalf("materialize workflow instance: %v", err)
 	}
 	items, _, err := tc.cards.ListDecisionCards(ctx, decisioncard.ListOptions{RunID: runID, Limit: 10})
 	if err != nil || len(items) != 1 {

@@ -218,11 +218,11 @@ func seedLoopActivityInstance(t *testing.T, store *WorkflowInstanceStore, ctx co
 		t.Fatal(err)
 	}
 	carrier := runtimeengine.NewStateCarrier(map[string]any{}, nil, buckets)
-	if err := store.Upsert(ctx, WorkflowInstance{
+	if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "validation", WorkflowVersion: "1.0.0",
 		CurrentState: stage, EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID},
 		StateBuckets: carrier.PersistedStateBuckets(),
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	return activation, entityID

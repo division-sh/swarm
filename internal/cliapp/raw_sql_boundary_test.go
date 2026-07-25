@@ -244,11 +244,6 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork",
 			Reason:         "selected-contract run.fork execution constructs a fork-local runtime pipeline from the Postgres store DB; this is an explicit optional product split, not backend-neutral selected capability authority",
 		},
-		"internal/runtime/runforkexecution/agent_runtime_materialization.go": {
-			Classification: rawSQLOptionalProductBoundary,
-			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork",
-			Reason:         "selected-contract fork agent runtime binds the Postgres-backed workflow instance owner used by fork-local lifecycle activation; this remains inside the explicit optional run.fork product seam",
-		},
 		"internal/runtime/runforkexecution/runtime_container.go": {
 			Classification: rawSQLOptionalProductBoundary,
 			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork",
@@ -290,10 +285,11 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1783,
 			Reason:         "workflow instance SQLite implementation is the explicit backend-local pipeline instance SQL owner",
 		},
-		"internal/runtime/pipeline/workflow_join_lifecycle.go": {
+		"internal/runtime/pipeline/workflow_lifecycle_effect.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1848,
-			Reason:         "join stage arm, expected-zero intent, and timeout lifecycle consume the selected workflow instance RunPipelineMutation owner as one unit of work",
+			Issue:          2113,
+			SpecRef:        "platform-spec.yaml#engine.timer_model",
+			Reason:         "the closed workflow lifecycle effect applier requires the selected mutation context so timer, join, and gate reactions commit with the accepted event",
 		},
 		"internal/runtime/pipeline/workflow_gate_decision.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
@@ -315,11 +311,6 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1783,
 			Reason:         "workflow node construction carries pipeline SQL dependency to explicit node/unit-of-work owners",
 		},
-		"internal/runtime/pipeline/workflow_state_persistence.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1848,
-			Reason:         "workflow state, timer, and join lifecycle persistence share the selected workflow instance RunPipelineMutation owner",
-		},
 		"internal/runtime/pipeline/workflow_timer_lifecycle.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1846,
@@ -336,6 +327,12 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          2094,
 			SpecRef:        "platform-spec.yaml#engine.timer_model",
 			Reason:         "the typed workflow-timer store implements exact selected SQLite/PostgreSQL row transitions inside the existing pipeline mutation boundary",
+		},
+		"internal/runtime/timerobligation/reader.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2113,
+			SpecRef:        "platform-spec.yaml#engine.timer_model",
+			Reason:         "the private backend-neutral timer-obligation adapter owns the single observation-time active, due, and recoverable projection",
 		},
 		"internal/runtime/pipeline/workflow_transitions.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,

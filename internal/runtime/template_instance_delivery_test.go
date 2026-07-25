@@ -351,6 +351,13 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
+		Module:              newRuntimeTestWorkflowModule(t, source),
+		WorkflowStore:       workflowStore,
+		DeliveryStore:       pg,
+		PipelineObligations: pg.PipelineObligations(),
+	})
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
@@ -873,8 +880,15 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 					workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, eventStore)
 				}
 				var manager *runtimemanager.AgentManager
+				var coordinator *runtimepipeline.PipelineCoordinator
 				bus, err := newScopedTestEventBus(t, eventStore, runtimebus.EventBusOptions{
 					ContractBundle: source, ProviderOutputVerifier: source.(runtimebus.ProviderOutputAuthorizationVerifier),
+					InterceptorProvider: func() []runtimebus.EventInterceptor {
+						if coordinator == nil {
+							return nil
+						}
+						return []runtimebus.EventInterceptor{coordinator}
+					},
 					TemplateInstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 						if manager == nil {
 							return errors.New("agent manager is required")
@@ -885,8 +899,14 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 				if err != nil {
 					t.Fatalf("NewEventBusWithOptions: %v", err)
 				}
+				workOwner := runtimeTestEventBusWorkOwner(t, bus)
+				coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+					WorkOwner:     workOwner,
+					Module:        newRuntimeTestWorkflowModule(t, source),
+					WorkflowStore: workflowStore,
+				})
 				manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
-					WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
+					WorkOwner:         workOwner,
 					WorkflowInstances: workflowStore,
 				}))
 

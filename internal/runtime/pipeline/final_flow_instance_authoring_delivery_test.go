@@ -26,7 +26,7 @@ func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInput
 	instanceID := "ti-account-42"
 	flowInstance := finalflowinstanceauthoring.TemplateFlowID + "/" + instanceID
 	entityID := FlowInstanceEntityID(flowInstance)
-	if err := workflowStore.Create(ctx, WorkflowInstance{
+	if err := workflowStore.Create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      instanceID,
 		StorageRef:      flowInstance,
 		WorkflowName:    finalflowinstanceauthoring.TemplateFlowID,
@@ -38,7 +38,7 @@ func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInput
 			"instance_id": instanceID,
 			"account_id":  "acct-42",
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed account_case workflow instance: %v", err)
 	}
 

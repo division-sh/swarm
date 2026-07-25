@@ -291,6 +291,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 const artifactActionResultEntityID = "22222222-2222-4222-8222-222222222222"
 
 func artifactActionResultWorkflowInstance() runtimepipeline.WorkflowInstance {
+	enteredAt := time.Now().UTC()
 	fields := map[string]any{
 		"repo_id":          "11111111-1111-1111-1111-111111111111",
 		"namespace":        "tenant-alpha",
@@ -305,6 +306,8 @@ func artifactActionResultWorkflowInstance() runtimepipeline.WorkflowInstance {
 		WorkflowName:    "repo-scaffold",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
+		EnteredStageAt:  enteredAt,
+		CreatedAt:       enteredAt,
 		Metadata:        fields,
 	}
 }

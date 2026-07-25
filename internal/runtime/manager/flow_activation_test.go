@@ -20,9 +20,11 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -44,6 +46,42 @@ type flowActivationTestBus struct {
 	unsubscribed       []string
 	removeErr          error
 	routeStore         flowActivationRouteStore
+}
+
+type flowActivationWorkflowModule struct {
+	source  semanticview.Source
+	guards  runtimepipeline.GuardRegistry
+	actions runtimepipeline.ActionRegistry
+}
+
+func newFlowActivationWorkflowModule(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) runtimepipeline.WorkflowModule {
+	t.Helper()
+	source := semanticview.Wrap(bundle)
+	return flowActivationWorkflowModule{
+		source:  source,
+		guards:  runtimepipeline.NewContractGuardRegistry(source),
+		actions: runtimepipeline.NewContractActionRegistry(source),
+	}
+}
+
+func (m flowActivationWorkflowModule) SemanticSource() semanticview.Source {
+	return m.source
+}
+
+func (m flowActivationWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
+	return nil
+}
+
+func (m flowActivationWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
+	return nil
+}
+
+func (m flowActivationWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry {
+	return m.guards
+}
+
+func (m flowActivationWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry {
+	return m.actions
 }
 
 type flowActivationTestRouteStore struct {
@@ -119,6 +157,12 @@ func (s *flowActivationTestInstanceStore) Create(_ context.Context, instance run
 	s.creates = append(s.creates, instance)
 	s.storeInstance(instance)
 	return nil
+}
+
+func (s *flowActivationTestInstanceStore) MaterializeInitialEntry(_ context.Context, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) error {
+	instance.CreatedAt = occurredAt.UTC()
+	instance.EnteredStageAt = occurredAt.UTC()
+	return s.Create(context.Background(), instance)
 }
 
 func (s *flowActivationTestInstanceStore) storeInstance(instance runtimepipeline.WorkflowInstance) {
@@ -203,6 +247,61 @@ func (b *flowActivationTestBus) Publish(ctx context.Context, evt events.Event) e
 	b.published = append(b.published, evt)
 	b.publishedContexts = append(b.publishedContexts, events.DeliveryContextFromContext(ctx))
 	return nil
+}
+
+func (*flowActivationTestBus) ResolveSubscribedRecipients(string) []string { return nil }
+func (*flowActivationTestBus) EngineOutbox() runtimeengine.OutboxWriter    { return nil }
+func (*flowActivationTestBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
+	return nil
+}
+func (*flowActivationTestBus) PipelineObligationOwner() runtimepipelineobligation.Store {
+	return unavailableFlowActivationPipelineObligations{}
+}
+
+type unavailableFlowActivationPipelineObligations struct{}
+
+func (unavailableFlowActivationPipelineObligations) ClaimPublication(context.Context, string) (runtimepipelineobligation.Claim, error) {
+	return runtimepipelineobligation.Claim{}, errors.New("flow activation fixture has no pipeline obligations")
+}
+
+func (unavailableFlowActivationPipelineObligations) ClaimEvent(context.Context, string, runtimepipelineobligation.Purpose) (runtimepipelineobligation.ClaimedWork, error) {
+	return runtimepipelineobligation.ClaimedWork{}, errors.New("flow activation fixture has no pipeline obligations")
+}
+
+func (unavailableFlowActivationPipelineObligations) OpenScan(context.Context, runtimepipelineobligation.ScanRequest) (runtimepipelineobligation.Scan, error) {
+	return runtimepipelineobligation.Scan{}, errors.New("flow activation fixture has no pipeline obligations")
+}
+
+func (unavailableFlowActivationPipelineObligations) ClaimBatch(context.Context, runtimepipelineobligation.Scan, int) (runtimepipelineobligation.ScanBatch, error) {
+	return runtimepipelineobligation.ScanBatch{}, errors.New("flow activation fixture has no pipeline obligations")
+}
+
+func (unavailableFlowActivationPipelineObligations) CloseScan(context.Context, runtimepipelineobligation.Scan) error {
+	return errors.New("flow activation fixture has no pipeline obligations")
+}
+
+func (unavailableFlowActivationPipelineObligations) MarkDecisionProcessed(context.Context, runtimepipelineobligation.Claim) error {
+	return errors.New("flow activation fixture has no pipeline obligations")
+}
+
+func (unavailableFlowActivationPipelineObligations) Settle(context.Context, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) error {
+	return errors.New("flow activation fixture has no pipeline obligations")
+}
+
+func (unavailableFlowActivationPipelineObligations) Release(context.Context, runtimepipelineobligation.Claim) error {
+	return errors.New("flow activation fixture has no pipeline obligations")
+}
+
+func (unavailableFlowActivationPipelineObligations) GlobalWorkPresence(context.Context) (runtimepipelineobligation.GlobalWorkPresence, error) {
+	return runtimepipelineobligation.GlobalWorkPresence{}, errors.New("flow activation fixture has no pipeline obligations")
+}
+
+func (unavailableFlowActivationPipelineObligations) SummarizeRun(context.Context, string) (runtimepipelineobligation.RunSummary, error) {
+	return runtimepipelineobligation.RunSummary{}, errors.New("flow activation fixture has no pipeline obligations")
+}
+
+func (unavailableFlowActivationPipelineObligations) TerminalizeRun(context.Context, string, runtimepipelineobligation.Disposition, time.Time) (int, error) {
+	return 0, errors.New("flow activation fixture has no pipeline obligations")
 }
 
 func (*flowActivationTestBus) PublishDirect(context.Context, events.Event, []string) error {
@@ -1408,8 +1507,13 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 	routeStore := &flowActivationTestRouteStore{}
 	bus := &flowActivationTestBus{routeStore: routeStore}
 	store := runtimepipeline.NewWorkflowInstanceStore(db)
-	am := newFlowActivationManager(t, bus, store)
 	bundle := testFlowBundle("")
+	runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module:        newFlowActivationWorkflowModule(t, bundle),
+		WorkflowStore: store,
+		WorkOwner:     newTestManagerWorkOwner(t),
+	})
+	am := newFlowActivationManager(t, bus, store)
 	const subjectID = "11111111-1111-1111-1111-111111111111"
 	req := testActivationRequest(bundle, "review", "inst-1", subjectID, "review/inst-1")
 	req.TriggerEvent = testFlowActivationTriggerEvent(req.TriggerEvent.ID(), runID)
@@ -1504,8 +1608,13 @@ func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t
 	bus := &flowActivationTestBus{routeStore: routeStore}
 	managerStore := &flowActivationTestStore{}
 	store := runtimepipeline.NewWorkflowInstanceStore(db)
-	am := newFlowActivationManager(t, bus, store, managerStore)
 	bundle := testFlowBundle("")
+	runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module:        newFlowActivationWorkflowModule(t, bundle),
+		WorkflowStore: store,
+		WorkOwner:     newTestManagerWorkOwner(t),
+	})
+	am := newFlowActivationManager(t, bus, store, managerStore)
 	const subjectID = "22222222-2222-2222-2222-222222222222"
 	req := testActivationRequest(bundle, "review", "inst-1", subjectID, "review/inst-1")
 	req.TriggerEvent = testFlowActivationTriggerEvent(req.TriggerEvent.ID(), runID)
