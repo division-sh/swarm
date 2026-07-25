@@ -30810,8 +30810,10 @@ durable_pipeline_processing_obligation_authority:
       reuses its already-retained claim connection. Every operation on one PostgreSQL claim is serialized by its opaque
       selected-store claim state, including selected-fork commit, settlement, release, and cursor abandonment, so the retained
       session cannot run overlapping transactions or unlock while an accepted operation is active. Current claims therefore
-      cannot exhaust the persistence pool before or after their transaction begins. SQLite
-      mutation serialization fences each database mutation edge. Opaque capability identity rejects foreign, stale,
+      cannot exhaust the persistence pool before or after their transaction begins. SQLite settlement,
+      decision-route processed acknowledgement, explicit release, and cursor abandonment take the same per-claim operation
+      lock across current-claim revalidation, durable commit, and claim retirement. SQLite release cannot return while an
+      accepted claim mutation remains in flight, and a mutation cannot commit after release has consumed the claim. Opaque capability identity rejects foreign, stale,
       released, duplicate, and wrong-purpose mutation. Settlement does not accept a caller-selected event ID, so redirecting
       a capability to another obligation is structurally unrepresentable. PostgreSQL claim registration and parent
       terminalization share one registry/advisory-lock order after connection reservation: a parent either observes the
@@ -30826,8 +30828,10 @@ durable_pipeline_processing_obligation_authority:
       Cursor cancellation or abandonment also releases every claim issued by that cursor. Release and failed settlement
       preserve later reclaimability; a released claim cannot settle. PostgreSQL unlock executes only through the exact
       retained session and scans pg_advisory_unlock's boolean result, which must be true. A failed or false unlock keeps the
-      claim, scan membership, session, and private capacity current for explicit retry. Registry and capacity retirement
-      occur only after verified unlock and session teardown, never before. Synchronous reservation, hydration, scan close,
+      claim, scan membership, session, and private capacity current for explicit retry. Once verified unlock succeeds,
+      cross-process exclusion is gone: registry claim and private capacity retire even if session close fails, the unlocked
+      session is force-discarded, and the cleanup error is returned. A post-unlock cleanup error can never leave a locally
+      current capability that another process can duplicate. Synchronous reservation, hydration, scan close,
       startup ownership, destructive-reset, and bundle-delete release failures are returned or joined with the primary
       failure; asynchronous publication cleanup retains retryable claim ownership and records an explicit runtime failure.
   disposition_contract:
@@ -30899,7 +30903,7 @@ durable_pipeline_processing_obligation_authority:
     PPO-CLM-001: Exclusion precedes final eligibility recheck and only one current claim exists per event across every process sharing a selected PostgreSQL store or within the selected SQLite runtime; PostgreSQL retains one exact private session authority for lock acquisition, mutation, and checked unlock until the claim is consumed.
     PPO-PUB-001: Foreground publication, executable event commit, and every recovery surface share the exact current event-identity exclusion; only closed diagnostic-direct named commits are claim-free.
     PPO-SET-001: Acknowledgement and decision-route disposition require the current claim and commit atomically.
-    PPO-REL-001: Cancellation, cursor abandonment, non-durable retry release, failed settlement, explicit release, and restart preserve reclaimability without stranded ownership or blocking later sweep candidates; PostgreSQL owner and capacity retirement require a true exact-session unlock, and failed teardown remains retryable; startup, ingress resume, and run continue stop normally only on explicit exhaustion or blockage.
+    PPO-REL-001: Cancellation, cursor abandonment, non-durable retry release, failed settlement, explicit release, and restart preserve reclaimability without stranded ownership or blocking later sweep candidates; SQLite mutation and retirement serialize through one per-claim operation lock; PostgreSQL failed or false unlock remains retryable, while verified unlock terminally retires registry ownership and capacity even when subsequent session cleanup fails; startup, ingress resume, and run continue stop normally only on explicit exhaustion or blockage.
     PPO-SCP-001: Committed scope is exact persisted truth; missing or invalid scope returns typed claim-bound quarantine work to the consumer, and no store-side settlement, delivery marker, current-route inference, fallback, or repair exists.
     PPO-CUR-001: Cursor continuation is monotonic across fixed global/run phases, records mutable decision-route progress only as a private monotonic set of immutable insertion sequences so each route is examined at most once per pass while attempt/retry priority remains intact, captures one selected-store-generated immutable insertion-sequence high-water boundary per phase plus an exact PostgreSQL visibility snapshot, tests mutable rows through immutable insertion transaction identity rather than current tuple versions, advances before release, remembers local blockage until bounded-pass exhaustion, reaches every consumer as one typed SweepResult, survives periodic tick boundaries, excludes transactions committed after phase entry regardless of sequence allocation order, and cannot be reset, extended, or positioned by a caller.
     PPO-DSP-001: Dispatch consumes the process-local owner and cannot outlive runtime retirement or selected-store release.

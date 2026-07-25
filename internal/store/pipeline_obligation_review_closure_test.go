@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -530,6 +531,115 @@ func TestPipelineScanExaminesDeferredDecisionRouteOncePerPassOnSQLiteAndPostgres
 				t.Fatalf("CloseScan fresh: %v", err)
 			}
 		})
+	}
+}
+
+func TestSQLitePipelineClaimMutationSerializesWithReleaseAndCloseScan(t *testing.T) {
+	for _, mutation := range []string{"settle", "mark_decision_processed"} {
+		for _, retirement := range []string{"release", "close_scan"} {
+			t.Run(mutation+"/"+retirement, func(t *testing.T) {
+				fixture := openSQLiteAuthorActivityReceiptFixture(t)
+				selected := fixture.store.(*SQLiteRuntimeStore)
+				owner := selected.PipelineObligations()
+				ctx := testAuthorActivityContext()
+				runID := uuid.NewString()
+				at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+				eventID := commitPipelineParityEvent(t, ctx, selected, runID, at)
+				insertProducerIdentityDecisionObligation(t, fixture, ctx, eventID, runID, at)
+
+				scan, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID))
+				if err != nil {
+					t.Fatalf("OpenScan: %v", err)
+				}
+				batch, err := owner.ClaimBatch(ctx, scan, 1)
+				if err != nil || len(batch.Work) != 1 {
+					t.Fatalf("ClaimBatch: %#v err=%v", batch, err)
+				}
+				claim := batch.Work[0].Claim
+				state, err := selected.sqlitePipelineClaimState(claim)
+				if err != nil {
+					t.Fatalf("sqlitePipelineClaimState: %v", err)
+				}
+
+				mutationLocked := make(chan struct{})
+				allowMutation := make(chan struct{})
+				retirementAttempted := make(chan struct{})
+				var lockAttempts atomic.Int32
+				var blockMutation sync.Once
+				state.testBeforeSQLiteOperationLock = func() {
+					if lockAttempts.Add(1) == 2 {
+						close(retirementAttempted)
+					}
+				}
+				state.testAfterSQLiteOperationLock = func() {
+					blockMutation.Do(func() {
+						close(mutationLocked)
+						<-allowMutation
+					})
+				}
+
+				mutationDone := make(chan error, 1)
+				go func() {
+					switch mutation {
+					case "settle":
+						mutationDone <- owner.Settle(ctx, claim, runtimepipelineobligation.Acknowledged("serialized_settlement"))
+					case "mark_decision_processed":
+						mutationDone <- owner.MarkDecisionProcessed(ctx, claim)
+					default:
+						mutationDone <- fmt.Errorf("unknown mutation %q", mutation)
+					}
+				}()
+				<-mutationLocked
+
+				retirementDone := make(chan error, 1)
+				go func() {
+					switch retirement {
+					case "release":
+						retirementDone <- owner.Release(ctx, claim)
+					case "close_scan":
+						retirementDone <- owner.CloseScan(ctx, scan)
+					default:
+						retirementDone <- fmt.Errorf("unknown retirement %q", retirement)
+					}
+				}()
+				select {
+				case <-retirementAttempted:
+				case <-time.After(2 * time.Second):
+					t.Fatal("retirement did not reach the claim operation lock")
+				}
+				select {
+				case err := <-retirementDone:
+					t.Fatalf("retirement completed before mutation commit: %v", err)
+				default:
+				}
+
+				close(allowMutation)
+				if err := <-mutationDone; err != nil {
+					t.Fatalf("%s: %v", mutation, err)
+				}
+				retirementErr := <-retirementDone
+				if mutation == "settle" && retirement == "release" {
+					if !errors.Is(retirementErr, runtimepipelineobligation.ErrStaleClaim) {
+						t.Fatalf("release after settlement error = %v, want ErrStaleClaim", retirementErr)
+					}
+				} else if retirementErr != nil {
+					t.Fatalf("%s: %v", retirement, retirementErr)
+				}
+				if _, err := selected.sqlitePipelineClaimState(claim); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
+					t.Fatalf("claim after serialized retirement = %v, want ErrStaleClaim", err)
+				}
+				count, outcome, _ := readExactPipelineReceipt(t, ctx, fixture, eventID)
+				if count != 1 || outcome != "success" {
+					t.Fatalf("pipeline receipt = count:%d outcome:%q, want committed success", count, outcome)
+				}
+				if retirement == "release" {
+					if err := owner.CloseScan(ctx, scan); err != nil {
+						t.Fatalf("CloseScan cleanup: %v", err)
+					}
+				}
+			})
+		}
 	}
 }
 

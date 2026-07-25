@@ -146,6 +146,41 @@ func TestPostgresPipelineClaimReleaseFailurePreservesOwnerAndCapacityForRetry(t 
 	}
 }
 
+func TestPostgresPipelineClaimRetiresAfterUnlockedSessionCloseFailure(t *testing.T) {
+	dsn, db, _ := testutil.StartPostgres(t)
+	selected := newTestPostgresStore(t, db)
+	db.SetMaxOpenConns(2)
+	db.SetMaxIdleConns(2)
+	ctx := testAuthorActivityContext()
+	eventID := uuid.NewString()
+	claim, err := selected.PipelineObligations().ClaimPublication(ctx, eventID)
+	if err != nil {
+		t.Fatalf("claim publication: %v", err)
+	}
+	state, err := selected.postgresPipelineClaimState(claim)
+	if err != nil {
+		t.Fatalf("load claim state: %v", err)
+	}
+	state.postgresLease.releaseSession = func() error {
+		return errors.New("injected session close failure")
+	}
+
+	if err := selected.PipelineObligations().Release(ctx, claim); err == nil ||
+		!strings.Contains(err.Error(), "injected session close failure") {
+		t.Fatalf("release error = %v, want session-close failure", err)
+	}
+	if _, err := selected.postgresPipelineClaimState(claim); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
+		t.Fatalf("claim after successful unlock and failed session close = %v, want ErrStaleClaim", err)
+	}
+	if state.postgresLease != nil {
+		t.Fatal("retired claim retained its PostgreSQL lease")
+	}
+	if got := db.Stats().MaxOpenConnections; got != 2 {
+		t.Fatalf("capacity after terminal release failure = %d, want 2", got)
+	}
+	assertIndependentAdvisoryLockAvailable(t, dsn, replayClaimLockKey(eventID))
+}
+
 func TestPostgresPipelineScanCloseFailurePreservesRetryableCursorAndClaim(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	selected := newTestPostgresStore(t, db)
