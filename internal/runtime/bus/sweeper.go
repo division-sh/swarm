@@ -35,7 +35,6 @@ type OutboxSweeperConfig struct {
 type pipelineSweepScan struct {
 	cursor         runtimepipelineobligation.Scan
 	locallyBlocked bool
-	closePending   bool
 }
 
 func DefaultOutboxSweeperConfig() OutboxSweeperConfig {
@@ -170,12 +169,6 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 		eb.pipelineScans = map[runtimepipelineobligation.ScanRequest]*pipelineSweepScan{}
 	}
 	state := eb.pipelineScans[request]
-	if state != nil && state.closePending {
-		if closeErr := eb.closePipelineScanLocked(context.WithoutCancel(ctx), request); closeErr != nil {
-			return result, closeErr
-		}
-		state = nil
-	}
 	if state == nil {
 		cursor, openErr := eb.pipelineObligations.OpenScan(ctx, request)
 		if openErr != nil {
@@ -184,16 +177,6 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 		state = &pipelineSweepScan{cursor: cursor}
 		eb.pipelineScans[request] = state
 	}
-	retryClaims := make([]runtimepipelineobligation.Claim, 0, limit)
-	defer func() {
-		releaseCtx := context.WithoutCancel(ctx)
-		for _, claim := range retryClaims {
-			releaseErr := eb.pipelineObligations.Release(releaseCtx, claim)
-			if !errors.Is(releaseErr, runtimepipelineobligation.ErrStaleClaim) {
-				err = errors.Join(err, releaseErr)
-			}
-		}
-	}()
 	for result.Examined < limit {
 		batch, batchErr := eb.pipelineObligations.ClaimBatch(ctx, state.cursor, limit-result.Examined)
 		if batchErr != nil {
@@ -227,7 +210,6 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 			}
 			if retry {
 				state.locallyBlocked = true
-				retryClaims = append(retryClaims, work.Claim)
 			}
 			if settled {
 				result.Settled++
@@ -259,14 +241,10 @@ func (eb *EventBus) closePipelineScanLocked(ctx context.Context, request runtime
 	if state == nil {
 		return nil
 	}
-	state.closePending = true
+	delete(eb.pipelineScans, request)
 	err := eb.pipelineObligations.CloseScan(ctx, state.cursor)
 	if errors.Is(err, runtimepipelineobligation.ErrStaleScan) {
-		delete(eb.pipelineScans, request)
 		return nil
-	}
-	if err == nil {
-		delete(eb.pipelineScans, request)
 	}
 	return err
 }
@@ -287,7 +265,7 @@ func (eb *EventBus) closeAllPipelineScans(ctx context.Context) error {
 func (eb *EventBus) processClaimedPipelineWork(ctx context.Context, work runtimepipelineobligation.ClaimedWork) (settled bool, retry bool, err error) {
 	claimOpen := true
 	defer func() {
-		if claimOpen && !retry {
+		if claimOpen {
 			err = errors.Join(err, eb.pipelineObligations.Release(context.WithoutCancel(ctx), work.Claim))
 		}
 	}()

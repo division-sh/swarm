@@ -1,0 +1,313 @@
+package bus
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/google/uuid"
+)
+
+type terminalReleasePipelineOwner struct {
+	runtimepipelineobligation.Store
+
+	mu           sync.Mutex
+	issuer       *runtimepipelineobligation.ClaimIssuer
+	current      map[string]runtimepipelineobligation.Claim
+	releaseCalls map[string]int
+	releaseError map[string]func(int) error
+}
+
+func newTerminalReleasePipelineOwner() *terminalReleasePipelineOwner {
+	return &terminalReleasePipelineOwner{
+		issuer:       runtimepipelineobligation.NewClaimIssuer(),
+		current:      map[string]runtimepipelineobligation.Claim{},
+		releaseCalls: map[string]int{},
+		releaseError: map[string]func(int) error{},
+	}
+}
+
+func (o *terminalReleasePipelineOwner) ClaimPublication(_ context.Context, eventID string) (runtimepipelineobligation.Claim, error) {
+	return o.claim(eventID, runtimepipelineobligation.PurposePublication)
+}
+
+func (o *terminalReleasePipelineOwner) ClaimEvent(_ context.Context, eventID string, purpose runtimepipelineobligation.Purpose) (runtimepipelineobligation.ClaimedWork, error) {
+	claim, err := o.claim(eventID, purpose)
+	if err != nil {
+		return runtimepipelineobligation.ClaimedWork{}, err
+	}
+	return runtimepipelineobligation.ClaimedWork{Claim: claim}, nil
+}
+
+func (o *terminalReleasePipelineOwner) claim(eventID string, purpose runtimepipelineobligation.Purpose) (runtimepipelineobligation.Claim, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	eventID = strings.TrimSpace(eventID)
+	if _, ok := o.current[eventID]; ok {
+		return runtimepipelineobligation.Claim{}, runtimepipelineobligation.ErrBusy
+	}
+	claim, err := o.issuer.Issue(eventID, purpose)
+	if err != nil {
+		return runtimepipelineobligation.Claim{}, err
+	}
+	o.current[eventID] = claim
+	return claim, nil
+}
+
+func (o *terminalReleasePipelineOwner) Release(_ context.Context, claim runtimepipelineobligation.Claim) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	current, ok := o.current[claim.EventID()]
+	if !ok {
+		return runtimepipelineobligation.ErrStaleClaim
+	}
+	currentToken, currentErr := o.issuer.Token(current)
+	claimToken, claimErr := o.issuer.Token(claim)
+	if currentErr != nil || claimErr != nil || currentToken != claimToken {
+		return runtimepipelineobligation.ErrStaleClaim
+	}
+	delete(o.current, claim.EventID())
+	o.releaseCalls[claim.EventID()]++
+	if failure := o.releaseError[claim.EventID()]; failure != nil {
+		return failure(o.releaseCalls[claim.EventID()])
+	}
+	return nil
+}
+
+type terminalReleasePausedGate struct{}
+
+func (terminalReleasePausedGate) QueueableIngressPaused(context.Context) (bool, error) {
+	return true, nil
+}
+
+func TestPipelinePublicationReleaseIsTerminalAndImmediatelyReclaimable(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		failure func(int) error
+	}{
+		{
+			name: "fail once",
+			failure: func(attempt int) error {
+				if attempt == 1 {
+					return errors.New("fail-once publication cleanup")
+				}
+				return nil
+			},
+		},
+		{
+			name: "persistent failure",
+			failure: func(int) error {
+				return errors.New("persistent publication cleanup failure")
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			owner := newTerminalReleasePipelineOwner()
+			eventID := uuid.NewString()
+			owner.releaseError[eventID] = tc.failure
+			bus := &EventBus{pipelineObligations: owner}
+			claim, err := bus.claimPipelinePublication(context.Background(), eventID)
+			if err != nil {
+				t.Fatalf("claim publication: %v", err)
+			}
+			if err := claim.Release(context.Background()); err == nil {
+				t.Fatal("terminal release hid cleanup evidence")
+			}
+			if err := claim.Release(context.Background()); err != nil {
+				t.Fatalf("repeated wrapper release = %v, want local terminal no-op", err)
+			}
+			if got := owner.releaseCalls[eventID]; got != 1 {
+				t.Fatalf("store release calls = %d, want one terminal attempt", got)
+			}
+
+			reclaimed, err := bus.claimPipelinePublication(context.Background(), eventID)
+			if err != nil {
+				t.Fatalf("reclaim after terminal cleanup failure: %v", err)
+			}
+			delete(owner.releaseError, eventID)
+			if err := reclaimed.Release(context.Background()); err != nil {
+				t.Fatalf("release reclaimed publication: %v", err)
+			}
+		})
+	}
+}
+
+func TestPipelineOneShotTerminalSinksPropagateOrRecordCleanupEvidence(t *testing.T) {
+	for _, sink := range []string{"selected_fork_abandon", "rollback_cleanup", "direct_recovery"} {
+		for _, failureMode := range []string{"fail_once", "persistent_failure"} {
+			t.Run(sink+"/"+failureMode, func(t *testing.T) {
+				owner := newTerminalReleasePipelineOwner()
+				eventID := uuid.NewString()
+				owner.releaseError[eventID] = func(attempt int) error {
+					if failureMode == "fail_once" && attempt > 1 {
+						return nil
+					}
+					return errors.New(failureMode + " one-shot cleanup failure")
+				}
+				bus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{PipelineObligations: owner})
+				if err != nil {
+					t.Fatalf("NewEventBus: %v", err)
+				}
+
+				switch sink {
+				case "selected_fork_abandon":
+					claim, err := bus.claimPipelinePublication(context.Background(), eventID)
+					if err != nil {
+						t.Fatalf("claim selected-fork publication: %v", err)
+					}
+					err = bus.AbandonPreparedPublish(context.Background(), PreparedPublish{publicationClaim: claim})
+					if err == nil || !strings.Contains(err.Error(), failureMode+" one-shot cleanup failure") {
+						t.Fatalf("abandon cleanup error = %v, want propagated evidence", err)
+					}
+				case "rollback_cleanup":
+					claim, err := bus.claimPipelinePublication(context.Background(), eventID)
+					if err != nil {
+						t.Fatalf("claim rollback publication: %v", err)
+					}
+					claim.releaseAndLog(context.Background())
+				case "direct_recovery":
+					event := eventtest.RuntimeControl(eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now())
+					bus.SetRuntimeIngressDispatchGate(terminalReleasePausedGate{})
+					err := (engineDispatcher{bus: bus}).dispatchAndRecord(
+						context.Background(),
+						runtimeengine.EmitIntent{Event: event},
+						nil,
+					)
+					if err == nil || !strings.Contains(err.Error(), failureMode+" one-shot cleanup failure") {
+						t.Fatalf("direct recovery cleanup error = %v with %d release call(s), want propagated evidence", err, owner.releaseCalls[eventID])
+					}
+				}
+
+				if got := owner.releaseCalls[eventID]; got != 1 {
+					t.Fatalf("%s release calls = %d, want one terminal attempt", sink, got)
+				}
+				reclaimed, err := bus.claimPipelinePublication(context.Background(), eventID)
+				if err != nil {
+					t.Fatalf("reclaim after %s cleanup failure: %v", sink, err)
+				}
+				delete(owner.releaseError, eventID)
+				if err := reclaimed.Release(context.Background()); err != nil {
+					t.Fatalf("release reclaimed %s publication: %v", sink, err)
+				}
+			})
+		}
+	}
+}
+
+func TestEventBusResetPreservesPendingOperationUntilPriorRetirementSucceeds(t *testing.T) {
+	store := newExactHandoffProofStore(t, true)
+	owner := newTerminalReleasePipelineOwner()
+	bus, err := newScopedTestEventBus(store, EventBusOptions{PipelineObligations: owner})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	token := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 1}
+	bus.ReplaceAgentRoute(token, testAgentSubscriptionAdmission(t, token.AgentID, events.EventType("test.work")))
+	eventID, runID := uuid.NewString(), uuid.NewString()
+	event := eventtest.RuntimeControl(eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now())
+	store.seed(t, eventID, runID, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: token.AgentID})
+	if err := bus.deliverToAgents(context.Background(), event, []string{token.AgentID}); err != nil {
+		t.Fatalf("queue buffered delivery: %v", err)
+	}
+	claim, err := bus.claimPipelinePublication(context.Background(), eventID)
+	if err != nil {
+		t.Fatalf("claim pending publication: %v", err)
+	}
+	bus.stagePendingOutboxOperation(
+		context.Background(),
+		runtimeengine.EmitIntent{Event: event},
+		EventAppendInserted,
+		claim,
+	)
+
+	if err := bus.ResetInMemoryState(); err == nil {
+		t.Fatal("first reset unexpectedly hid route handoff failure")
+	}
+	if got := owner.releaseCalls[eventID]; got != 0 {
+		t.Fatalf("pending release calls after prior retirement failure = %d, want 0", got)
+	}
+	bus.mu.RLock()
+	pending := len(bus.pendingOutboxByID[eventID])
+	bus.mu.RUnlock()
+	if pending != 1 {
+		t.Fatalf("pending operations after prior retirement failure = %d, want exact operation retained", pending)
+	}
+
+	if err := bus.ResetInMemoryState(); err != nil {
+		t.Fatalf("retry reset after handoff proof recovery: %v", err)
+	}
+	if got := owner.releaseCalls[eventID]; got != 1 {
+		t.Fatalf("pending release calls after successful prior retirement = %d, want 1", got)
+	}
+	bus.mu.RLock()
+	pending = len(bus.pendingOutboxByID[eventID])
+	bus.mu.RUnlock()
+	if pending != 0 {
+		t.Fatalf("pending operations after terminal release = %d, want 0", pending)
+	}
+}
+
+func TestEventBusResetAttemptsEveryTerminalPendingReleaseAndAggregatesEvidence(t *testing.T) {
+	owner := newTerminalReleasePipelineOwner()
+	bus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{PipelineObligations: owner})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	eventIDs := []string{uuid.NewString(), uuid.NewString()}
+	owner.releaseError[eventIDs[0]] = func(attempt int) error {
+		if attempt == 1 {
+			return errors.New("fail-once reset cleanup")
+		}
+		return nil
+	}
+	owner.releaseError[eventIDs[1]] = func(int) error {
+		return errors.New("persistent reset cleanup failure")
+	}
+	for _, eventID := range eventIDs {
+		event := eventtest.RuntimeControl(eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now())
+		claim, err := bus.claimPipelinePublication(context.Background(), eventID)
+		if err != nil {
+			t.Fatalf("claim pending publication %s: %v", eventID, err)
+		}
+		bus.stagePendingOutboxOperation(
+			context.Background(),
+			runtimeengine.EmitIntent{Event: event},
+			EventAppendInserted,
+			claim,
+		)
+	}
+
+	resetErr := bus.ResetInMemoryState()
+	if resetErr == nil ||
+		!strings.Contains(resetErr.Error(), "fail-once reset cleanup") ||
+		!strings.Contains(resetErr.Error(), "persistent reset cleanup failure") {
+		t.Fatalf("reset cleanup error = %v, want all terminal evidence", resetErr)
+	}
+	for _, eventID := range eventIDs {
+		if got := owner.releaseCalls[eventID]; got != 1 {
+			t.Fatalf("release calls for %s = %d, want one terminal attempt", eventID, got)
+		}
+		bus.mu.RLock()
+		pending := len(bus.pendingOutboxByID[eventID])
+		bus.mu.RUnlock()
+		if pending != 0 {
+			t.Fatalf("pending operations for %s = %d, want cleared terminal owner", eventID, pending)
+		}
+		reclaimed, err := bus.claimPipelinePublication(context.Background(), eventID)
+		if err != nil {
+			t.Fatalf("reclaim %s after reset cleanup failure: %v", eventID, err)
+		}
+		delete(owner.releaseError, eventID)
+		if err := reclaimed.Release(context.Background()); err != nil {
+			t.Fatalf("release reclaimed publication %s: %v", eventID, err)
+		}
+	}
+}

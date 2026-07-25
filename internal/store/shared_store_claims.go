@@ -35,11 +35,12 @@ type sqlAdvisoryLockLease struct {
 type postgresSessionAuthorityContextKey struct{}
 
 type postgresSessionAuthority struct {
-	mu       sync.Mutex
-	conn     *sql.Conn
-	activeTx *sql.Tx
-	refs     int
-	closed   bool
+	mu             sync.Mutex
+	conn           *sql.Conn
+	activeTx       *sql.Tx
+	refs           int
+	closed         bool
+	discardPending bool
 }
 
 func newPostgresSessionAuthority(conn *sql.Conn) *postgresSessionAuthority {
@@ -159,6 +160,9 @@ func (a *postgresSessionAuthority) release() error {
 	if a.activeTx != nil {
 		return errors.New("close PostgreSQL session authority while its transaction is active")
 	}
+	if a.discardPending {
+		return a.forceDiscardLocked()
+	}
 	if a.conn == nil {
 		a.closed = true
 		a.refs = 0
@@ -179,26 +183,28 @@ func (a *postgresSessionAuthority) forceDiscard() error {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.discardPending = true
 	if a.closed || a.conn == nil {
 		return nil
 	}
 	if a.activeTx != nil {
-		return errors.New("discard PostgreSQL session authority while its transaction is active")
+		return nil
 	}
-	if a.refs != 1 {
-		return fmt.Errorf("discard shared PostgreSQL session authority with %d references", a.refs)
-	}
+	return a.forceDiscardLocked()
+}
+
+func (a *postgresSessionAuthority) forceDiscardLocked() error {
 	rawErr := a.conn.Raw(func(any) error { return driver.ErrBadConn })
 	if errors.Is(rawErr, driver.ErrBadConn) {
 		rawErr = nil
 	}
 	closeErr := a.conn.Close()
-	if rawErr != nil || (closeErr != nil && !errors.Is(closeErr, sql.ErrConnDone)) {
-		return errors.Join(rawErr, closeErr)
-	}
 	a.conn = nil
 	a.refs = 0
 	a.closed = true
+	if rawErr != nil || (closeErr != nil && !errors.Is(closeErr, sql.ErrConnDone)) {
+		return errors.Join(rawErr, closeErr)
+	}
 	return nil
 }
 
@@ -232,6 +238,9 @@ func (a *postgresSessionAuthority) endTx(tx *sql.Tx) error {
 		return errors.New("PostgreSQL transaction does not match private session authority")
 	}
 	a.activeTx = nil
+	if a.discardPending {
+		return a.forceDiscardLocked()
+	}
 	return nil
 }
 
@@ -269,21 +278,21 @@ func (l *sqlAdvisoryLockLease) BindContext(ctx context.Context) context.Context 
 }
 
 func (l *sqlAdvisoryLockLease) Release(ctx context.Context) error {
-	_, err := l.releaseWithRetirement(ctx)
-	return err
+	return l.releaseWithRetirement(ctx)
 }
 
-func (l *sqlAdvisoryLockLease) releaseWithRetirement(ctx context.Context) (bool, error) {
+func (l *sqlAdvisoryLockLease) releaseWithRetirement(ctx context.Context) error {
 	if l == nil {
-		return true, nil
+		return nil
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.released {
-		return true, nil
+		return nil
 	}
 	if l.session == nil {
-		return false, errors.New("advisory lock lease has no private session authority")
+		l.retireLocked()
+		return errors.New("advisory lock lease has no private session authority")
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -300,10 +309,16 @@ func (l *sqlAdvisoryLockLease) releaseWithRetirement(ctx context.Context) (bool,
 			err = l.session.queryRowContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, l.lockKey).Scan(&unlocked)
 		}
 		if err != nil {
-			return false, fmt.Errorf("release advisory lock: %w", err)
+			releaseErr := fmt.Errorf("release advisory lock: %w", err)
+			discardErr := l.session.forceDiscard()
+			l.retireLocked()
+			return errors.Join(releaseErr, wrapAdvisoryDiscardError(discardErr))
 		}
 		if !unlocked {
-			return false, errors.New("release advisory lock: PostgreSQL session did not own the lock")
+			releaseErr := errors.New("release advisory lock: PostgreSQL session did not own the lock")
+			discardErr := l.session.forceDiscard()
+			l.retireLocked()
+			return errors.Join(releaseErr, wrapAdvisoryDiscardError(discardErr))
 		}
 		l.unlocked = true
 	}
@@ -312,14 +327,18 @@ func (l *sqlAdvisoryLockLease) releaseWithRetirement(ctx context.Context) (bool,
 			closeErr := fmt.Errorf("close advisory lock session: %w", err)
 			discardErr := l.session.forceDiscard()
 			l.retireLocked()
-			if discardErr != nil {
-				return true, errors.Join(closeErr, fmt.Errorf("discard unlocked advisory lock session: %w", discardErr))
-			}
-			return true, closeErr
+			return errors.Join(closeErr, wrapAdvisoryDiscardError(discardErr))
 		}
 	}
 	l.retireLocked()
-	return true, nil
+	return nil
+}
+
+func wrapAdvisoryDiscardError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("discard advisory lock session: %w", err)
 }
 
 func (l *sqlAdvisoryLockLease) retireLocked() {
@@ -332,33 +351,18 @@ func (l *sqlAdvisoryLockLease) retireLocked() {
 	l.released = true
 }
 
-func (l *sqlAdvisoryLockLease) ReleaseOrDiscard(ctx context.Context) error {
-	releaseErr := l.Release(ctx)
-	if releaseErr == nil || l == nil {
-		return releaseErr
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.released {
-		return releaseErr
-	}
-	if l.session == nil {
-		return errors.Join(releaseErr, errors.New("advisory lock lease has no session to discard"))
-	}
-	if discardErr := l.session.forceDiscard(); discardErr != nil {
-		return errors.Join(releaseErr, fmt.Errorf("discard advisory lock session: %w", discardErr))
-	}
-	if l.releaseCapacity != nil {
-		l.releaseCapacity()
-	}
-	l.releaseCapacity = nil
-	l.releaseSession = nil
-	l.session = nil
-	l.released = true
-	return releaseErr
+func acquireAdvisoryLockLease(ctx context.Context, db *sql.DB, lockKey string) (*sqlAdvisoryLockLease, bool, error) {
+	return acquireAdvisoryLockLeaseWith(ctx, db, lockKey, nil)
 }
 
-func acquireAdvisoryLockLease(ctx context.Context, db *sql.DB, lockKey string) (*sqlAdvisoryLockLease, bool, error) {
+type advisoryLockAcquire func(context.Context, *postgresSessionAuthority, string) (bool, error)
+
+func acquireAdvisoryLockLeaseWith(
+	ctx context.Context,
+	db *sql.DB,
+	lockKey string,
+	acquire advisoryLockAcquire,
+) (*sqlAdvisoryLockLease, bool, error) {
 	if db == nil {
 		return nil, false, nil
 	}
@@ -386,9 +390,15 @@ func acquireAdvisoryLockLease(ctx context.Context, db *sql.DB, lockKey string) (
 		}
 	}
 	var acquired bool
-	if err := authority.queryRowContext(ctx, `SELECT pg_try_advisory_lock(hashtext($1))`, lockKey).Scan(&acquired); err != nil {
+	if acquire != nil {
+		acquired, err = acquire(ctx, authority, lockKey)
+	} else {
+		err = authority.queryRowContext(ctx, `SELECT pg_try_advisory_lock(hashtext($1))`, lockKey).Scan(&acquired)
+	}
+	if err != nil {
 		return nil, false, errors.Join(
 			fmt.Errorf("acquire advisory lock: %w", err),
+			wrapAdvisoryDiscardError(authority.forceDiscard()),
 			releaseSession(),
 		)
 	}

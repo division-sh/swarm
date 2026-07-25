@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -35,22 +36,25 @@ func (eb *EventBus) claimPipelinePublication(ctx context.Context, eventID string
 	return &pipelinePublicationClaim{bus: eb, eventID: eventID, claim: claim}, nil
 }
 
-func (c *pipelinePublicationClaim) Release(ctx context.Context) {
+func (c *pipelinePublicationClaim) Release(ctx context.Context) error {
 	if c == nil || c.bus == nil || c.bus.pipelineObligations == nil {
 		if c != nil && c.bus != nil && c.bus.ephemeral {
 			c.released.CompareAndSwap(false, true)
-			return
+			return nil
 		}
 		panic("pipeline publication claim owner is required")
 	}
 	if !c.released.CompareAndSwap(false, true) {
-		return
+		return nil
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := c.bus.pipelineObligations.Release(context.WithoutCancel(ctx), c.claim); err != nil {
-		c.released.Store(false)
+	return c.bus.pipelineObligations.Release(context.WithoutCancel(ctx), c.claim)
+}
+
+func (c *pipelinePublicationClaim) releaseAndLog(ctx context.Context) {
+	if err := c.Release(ctx); err != nil && c != nil && c.bus != nil {
 		c.bus.logRuntime(context.WithoutCancel(ctx), "error", "Releasing foreground pipeline publication claim failed", "eventbus", "pipeline_publication_claim_release_failed", c.eventID, "", "", "", "", nil, nil, eventBusDependencyFailure(err, "pipeline_publication_claim_release_failed", "release_pipeline_publication_claim"), 0)
 	}
 }
@@ -72,8 +76,11 @@ func (c *pipelinePublicationClaim) Settle(ctx context.Context, disposition runti
 		ctx = context.Background()
 	}
 	if err := c.bus.pipelineObligations.Settle(ctx, c.claim, disposition); err != nil {
-		c.released.Store(false)
-		return err
+		releaseErr := c.bus.pipelineObligations.Release(context.WithoutCancel(ctx), c.claim)
+		if errors.Is(releaseErr, runtimepipelineobligation.ErrStaleClaim) {
+			releaseErr = nil
+		}
+		return errors.Join(err, releaseErr)
 	}
 	return nil
 }

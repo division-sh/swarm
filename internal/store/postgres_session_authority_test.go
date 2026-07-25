@@ -100,49 +100,158 @@ func TestPostgresAdvisoryClaimReleaseIgnoresForeignTransactionAndUnlocksExactSes
 	assertIndependentAdvisoryLockAvailable(t, dsn, replayClaimLockKey(eventID))
 }
 
-func TestPostgresPipelineClaimReleaseFailurePreservesOwnerAndCapacityForRetry(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	selected := newTestPostgresStore(t, db)
-	db.SetMaxOpenConns(2)
-	db.SetMaxIdleConns(2)
-	ctx := testAuthorActivityContext()
-	eventID := uuid.NewString()
-	claim, err := selected.PipelineObligations().ClaimPublication(ctx, eventID)
-	if err != nil {
-		t.Fatalf("claim publication: %v", err)
+func TestPostgresPipelineClaimReleaseFailureIsTerminalAndReclaimable(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		unlock     func(context.Context, *postgresSessionAuthority, string) (bool, error)
+		wantDetail string
+	}{
+		{
+			name: "false result",
+			unlock: func(context.Context, *postgresSessionAuthority, string) (bool, error) {
+				return false, nil
+			},
+			wantDetail: "did not own the lock",
+		},
+		{
+			name: "query error",
+			unlock: func(context.Context, *postgresSessionAuthority, string) (bool, error) {
+				return false, errors.New("persistent injected unlock failure")
+			},
+			wantDetail: "persistent injected unlock failure",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dsn, db, _ := testutil.StartPostgres(t)
+			selected := newTestPostgresStore(t, db)
+			db.SetMaxOpenConns(2)
+			db.SetMaxIdleConns(2)
+			ctx := testAuthorActivityContext()
+			eventID := uuid.NewString()
+			claim, err := selected.PipelineObligations().ClaimPublication(ctx, eventID)
+			if err != nil {
+				t.Fatalf("claim publication: %v", err)
+			}
+			state, err := selected.postgresPipelineClaimState(claim)
+			if err != nil {
+				t.Fatalf("load claim state: %v", err)
+			}
+			var attempts atomic.Int32
+			state.postgresLease.testUnlock = func(ctx context.Context, authority *postgresSessionAuthority, key string) (bool, error) {
+				attempts.Add(1)
+				return tc.unlock(ctx, authority, key)
+			}
+
+			if err := selected.PipelineObligations().Release(ctx, claim); err == nil ||
+				!strings.Contains(err.Error(), tc.wantDetail) {
+				t.Fatalf("release error = %v, want %q", err, tc.wantDetail)
+			}
+			if attempts.Load() != 1 {
+				t.Fatalf("unlock attempts = %d, want one terminal attempt", attempts.Load())
+			}
+			if _, err := selected.postgresPipelineClaimState(claim); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
+				t.Fatalf("claim after terminal release = %v, want ErrStaleClaim", err)
+			}
+			if state.postgresLease != nil {
+				t.Fatal("terminally released claim retained its lease")
+			}
+			if got := db.Stats().MaxOpenConnections; got != 2 {
+				t.Fatalf("capacity after terminal release = %d, want 2", got)
+			}
+			assertIndependentAdvisoryLockAvailable(t, dsn, replayClaimLockKey(eventID))
+
+			reclaimed, err := selected.PipelineObligations().ClaimPublication(ctx, eventID)
+			if err != nil {
+				t.Fatalf("fresh claim after terminal failure: %v", err)
+			}
+			if err := selected.PipelineObligations().Release(ctx, reclaimed); err != nil {
+				t.Fatalf("release fresh claim: %v", err)
+			}
+		})
 	}
-	state, err := selected.postgresPipelineClaimState(claim)
-	if err != nil {
-		t.Fatalf("load claim state: %v", err)
-	}
-	var attempts atomic.Int32
-	state.postgresLease.testUnlock = func(context.Context, *postgresSessionAuthority, string) (bool, error) {
-		if attempts.Add(1) == 1 {
-			return false, nil
+}
+
+func TestPostgresPipelineClaimSetupFailuresTerminallyReleaseAndReclaim(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		claim      func(context.Context, *PostgresStore, string) error
+		wantDetail string
+	}{
+		{
+			name: "issuer rejection",
+			claim: func(ctx context.Context, selected *PostgresStore, eventID string) error {
+				_, err := selected.claimPostgresPipelineEvent(ctx, eventID, runtimepipelineobligation.Purpose(""))
+				return err
+			},
+			wantDetail: "purpose",
+		},
+		{
+			name: "eligibility rejection",
+			claim: func(ctx context.Context, selected *PostgresStore, eventID string) error {
+				_, err := selected.PipelineObligations().ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
+				return err
+			},
+			wantDetail: runtimepipelineobligation.ErrIneligible.Error(),
+		},
+		{
+			name: "hydration failure",
+			claim: func(ctx context.Context, selected *PostgresStore, eventID string) error {
+				_, err := selected.PipelineObligations().ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposePublication)
+				return err
+			},
+			wantDetail: "event record missing",
+		},
+	} {
+		for _, failureMode := range []string{"fail_once", "persistent_failure"} {
+			t.Run(tc.name+"/"+failureMode, func(t *testing.T) {
+				dsn, db, _ := testutil.StartPostgres(t)
+				selected := newTestPostgresStore(t, db)
+				db.SetMaxOpenConns(2)
+				db.SetMaxIdleConns(2)
+				ctx := testAuthorActivityContext()
+				eventID := uuid.NewString()
+				registry := selected.postgresPipelineClaims()
+				registry.testConfigureClaimLease = func(lease *sqlAdvisoryLockLease) {
+					var attempts atomic.Int32
+					lease.testUnlock = func(context.Context, *postgresSessionAuthority, string) (bool, error) {
+						attempt := attempts.Add(1)
+						if failureMode == "fail_once" && attempt > 1 {
+							return true, nil
+						}
+						return false, errors.New(failureMode + " setup cleanup failure")
+					}
+				}
+				t.Cleanup(func() { registry.testConfigureClaimLease = nil })
+
+				err := tc.claim(ctx, selected, eventID)
+				if err == nil ||
+					!strings.Contains(err.Error(), tc.wantDetail) ||
+					!strings.Contains(err.Error(), failureMode+" setup cleanup failure") {
+					t.Fatalf("claim setup error = %v, want primary %q plus terminal cleanup evidence", err, tc.wantDetail)
+				}
+				registry.mu.Lock()
+				for _, state := range registry.claims {
+					if state != nil && state.claim.EventID() == eventID {
+						registry.mu.Unlock()
+						t.Fatal("failed claim setup retained a registry claim")
+					}
+				}
+				registry.mu.Unlock()
+				if got := db.Stats().MaxOpenConnections; got != 2 {
+					t.Fatalf("capacity after failed claim setup = %d, want 2", got)
+				}
+				assertIndependentAdvisoryLockAvailable(t, dsn, replayClaimLockKey(eventID))
+
+				registry.testConfigureClaimLease = nil
+				reclaimed, err := selected.PipelineObligations().ClaimPublication(ctx, eventID)
+				if err != nil {
+					t.Fatalf("fresh claim after setup failure: %v", err)
+				}
+				if err := selected.PipelineObligations().Release(ctx, reclaimed); err != nil {
+					t.Fatalf("release fresh claim: %v", err)
+				}
+			})
 		}
-		return true, errors.New("unexpected second test hook call")
-	}
-
-	if err := selected.PipelineObligations().Release(ctx, claim); err == nil ||
-		!strings.Contains(err.Error(), "did not own the lock") {
-		t.Fatalf("first release error = %v, want checked false-unlock failure", err)
-	}
-	if _, err := selected.postgresPipelineClaimState(claim); err != nil {
-		t.Fatalf("claim retired after failed release: %v", err)
-	}
-	if got := db.Stats().MaxOpenConnections; got != 3 {
-		t.Fatalf("capacity after failed release = %d, want 3", got)
-	}
-
-	state.postgresLease.testUnlock = nil
-	if err := selected.PipelineObligations().Release(ctx, claim); err != nil {
-		t.Fatalf("retry release: %v", err)
-	}
-	if _, err := selected.postgresPipelineClaimState(claim); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
-		t.Fatalf("claim after successful retry = %v, want ErrStaleClaim", err)
-	}
-	if got := db.Stats().MaxOpenConnections; got != 2 {
-		t.Fatalf("capacity after successful retry = %d, want 2", got)
 	}
 }
 
@@ -181,55 +290,80 @@ func TestPostgresPipelineClaimRetiresAfterUnlockedSessionCloseFailure(t *testing
 	assertIndependentAdvisoryLockAvailable(t, dsn, replayClaimLockKey(eventID))
 }
 
-func TestPostgresPipelineScanCloseFailurePreservesRetryableCursorAndClaim(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	selected := newTestPostgresStore(t, db)
-	fixture := authorActivityReceiptFixture{
-		store:   selected,
-		db:      db,
-		dialect: runtimeauthoractivity.DialectPostgres,
-	}
-	ctx := testAuthorActivityContext()
-	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
-	eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
+func TestPostgresPipelineScanCloseFailureIsTerminalAndReclaimable(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		unlock func(context.Context, *postgresSessionAuthority, string) (bool, error)
+	}{
+		{
+			name: "fail once",
+			unlock: func(context.Context, *postgresSessionAuthority, string) (bool, error) {
+				return false, nil
+			},
+		},
+		{
+			name: "persistent failure",
+			unlock: func(context.Context, *postgresSessionAuthority, string) (bool, error) {
+				return false, errors.New("persistent injected scan release failure")
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, db, _ := testutil.StartPostgres(t)
+			selected := newTestPostgresStore(t, db)
+			fixture := authorActivityReceiptFixture{
+				store:   selected,
+				db:      db,
+				dialect: runtimeauthoractivity.DialectPostgres,
+			}
+			ctx := testAuthorActivityContext()
+			runID := uuid.NewString()
+			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
 
-	owner := selected.PipelineObligations()
-	scan, err := owner.OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest())
-	if err != nil {
-		t.Fatalf("open scan: %v", err)
-	}
-	batch, err := owner.ClaimBatch(ctx, scan, 1)
-	if err != nil {
-		t.Fatalf("claim batch: %v", err)
-	}
-	if len(batch.Work) != 1 || batch.Work[0].Claim.EventID() != eventID {
-		t.Fatalf("claimed work = %#v, want event %s", batch.Work, eventID)
-	}
-	claim := batch.Work[0].Claim
-	claimState, err := selected.postgresPipelineClaimState(claim)
-	if err != nil {
-		t.Fatalf("load claimed state: %v", err)
-	}
-	claimState.postgresLease.testUnlock = func(context.Context, *postgresSessionAuthority, string) (bool, error) {
-		return false, nil
-	}
-	if err := owner.CloseScan(ctx, scan); err == nil {
-		t.Fatal("close scan unexpectedly succeeded after unlock failure")
-	}
-	if _, err := selected.postgresPipelineScanState(scan); err != nil {
-		t.Fatalf("scan retired after failed close: %v", err)
-	}
-	if _, err := selected.postgresPipelineClaimState(claim); err != nil {
-		t.Fatalf("claim retired after failed close: %v", err)
-	}
+			owner := selected.PipelineObligations()
+			scan, err := owner.OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest())
+			if err != nil {
+				t.Fatalf("open scan: %v", err)
+			}
+			batch, err := owner.ClaimBatch(ctx, scan, 1)
+			if err != nil {
+				t.Fatalf("claim batch: %v", err)
+			}
+			if len(batch.Work) != 1 || batch.Work[0].Claim.EventID() != eventID {
+				t.Fatalf("claimed work = %#v, want event %s", batch.Work, eventID)
+			}
+			claim := batch.Work[0].Claim
+			claimState, err := selected.postgresPipelineClaimState(claim)
+			if err != nil {
+				t.Fatalf("load claimed state: %v", err)
+			}
+			claimState.postgresLease.testUnlock = tc.unlock
+			if err := owner.CloseScan(ctx, scan); err == nil {
+				t.Fatal("close scan unexpectedly hid terminal cleanup evidence")
+			}
+			if _, err := selected.postgresPipelineScanState(scan); !errors.Is(err, runtimepipelineobligation.ErrStaleScan) {
+				t.Fatalf("scan after failed close = %v, want ErrStaleScan", err)
+			}
+			if _, err := selected.postgresPipelineClaimState(claim); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
+				t.Fatalf("claim after failed close = %v, want ErrStaleClaim", err)
+			}
 
-	claimState.postgresLease.testUnlock = nil
-	if err := owner.CloseScan(ctx, scan); err != nil {
-		t.Fatalf("retry close scan: %v", err)
-	}
-	if _, err := selected.postgresPipelineScanState(scan); !errors.Is(err, runtimepipelineobligation.ErrStaleScan) {
-		t.Fatalf("scan after successful close = %v, want ErrStaleScan", err)
+			fresh, err := owner.OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest())
+			if err != nil {
+				t.Fatalf("open fresh scan: %v", err)
+			}
+			reclaimed, err := owner.ClaimBatch(ctx, fresh, 1)
+			if err != nil {
+				t.Fatalf("claim fresh batch: %v", err)
+			}
+			if len(reclaimed.Work) != 1 || reclaimed.Work[0].Claim.EventID() != eventID {
+				t.Fatalf("fresh claimed work = %#v, want event %s", reclaimed.Work, eventID)
+			}
+			if err := owner.CloseScan(ctx, fresh); err != nil {
+				t.Fatalf("close fresh scan: %v", err)
+			}
+		})
 	}
 }
 
@@ -353,9 +487,40 @@ func TestPostgresTerminalAdvisoryReleaseFailureDiscardsExactSession(t *testing.T
 	lease.testUnlock = func(context.Context, *postgresSessionAuthority, string) (bool, error) {
 		return false, nil
 	}
-	if err := lease.ReleaseOrDiscard(ctx); err == nil ||
+	if err := lease.Release(ctx); err == nil ||
 		!strings.Contains(err.Error(), "did not own the lock") {
 		t.Fatalf("terminal release error = %v, want checked false-unlock evidence", err)
+	}
+	assertIndependentAdvisoryLockAvailable(t, dsn, lockKey)
+}
+
+func TestPostgresAmbiguousAdvisoryAcquireDiscardsBorrowedSessionAfterTransaction(t *testing.T) {
+	dsn, db, _ := testutil.StartPostgres(t)
+	selected := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
+	lockKey := "test:ambiguous-advisory-acquire:" + uuid.NewString()
+	injected := errors.New("injected result scan failure after server acquisition")
+
+	err := selected.runPostgresRuntimeMutation(ctx, func(txctx context.Context, _ *sql.Tx) error {
+		_, _, acquireErr := acquireAdvisoryLockLeaseWith(
+			txctx,
+			db,
+			lockKey,
+			func(ctx context.Context, authority *postgresSessionAuthority, key string) (bool, error) {
+				var acquired bool
+				if err := authority.queryRowContext(ctx, `SELECT pg_try_advisory_lock(hashtext($1))`, key).Scan(&acquired); err != nil {
+					return false, err
+				}
+				if !acquired {
+					return false, errors.New("test advisory lock was unexpectedly busy")
+				}
+				return false, injected
+			},
+		)
+		return acquireErr
+	})
+	if !errors.Is(err, injected) {
+		t.Fatalf("ambiguous acquire error = %v, want injected scan failure", err)
 	}
 	assertIndependentAdvisoryLockAvailable(t, dsn, lockKey)
 }

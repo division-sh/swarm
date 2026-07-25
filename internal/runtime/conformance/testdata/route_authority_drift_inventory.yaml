@@ -1086,6 +1086,7 @@ seam_families:
     classification: valid_consumer
     paths:
       - internal/runtime/bus/bustest/routes.go
+      - internal/runtime/bus/pipeline_terminal_release_test.go
       - internal/runtime/bus/test_routes_test.go
     search_dimensions: [live_agent_subscription_route_authority]
     notes: >

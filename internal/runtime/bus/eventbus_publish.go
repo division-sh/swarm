@@ -282,7 +282,7 @@ func (p eventBusCommitPublishPlan) PrepareCommitPublish(ctx context.Context) (Pr
 	prepare := func(scope runtimepipelineobligation.CommittedScope, planRoutes func(context.Context, events.Event) (RoutePlan, error)) (PreparedPublish, error) {
 		prepared, err := p.bus.prepareAdmittedPublishInMutation(ctx, p.admitted, claim, scope, planRoutes)
 		if err != nil {
-			claim.Release(ctx)
+			err = errors.Join(err, claim.Release(ctx))
 		}
 		return prepared, err
 	}
@@ -385,8 +385,8 @@ func (p PreparedPublish) WithCommitOutcome(outcome EventAppendOutcome) (Prepared
 
 // AbandonPreparedPublish releases preparation-only process state when the
 // named durable operation does not commit or dispatch the prepared event.
-func (eb *EventBus) AbandonPreparedPublish(ctx context.Context, prepared PreparedPublish) {
-	prepared.publicationClaim.Release(ctx)
+func (eb *EventBus) AbandonPreparedPublish(ctx context.Context, prepared PreparedPublish) error {
+	return prepared.publicationClaim.Release(ctx)
 }
 
 // PrepareSelectedForkPublish performs canonical admission and route planning
@@ -432,8 +432,7 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 	}
 	plan, err := eb.planSubscribedPublish(preparedCtx, evt)
 	if err != nil {
-		publicationClaim.Release(preparedCtx)
-		return PreparedPublish{}, err
+		return PreparedPublish{}, errors.Join(err, publicationClaim.Release(preparedCtx))
 	}
 	prepared := PreparedPublish{
 		Event: evt, admitted: admitted, plan: plan,
@@ -444,8 +443,7 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 		return prepared, nil
 	}
 	if reason, err := eb.dispatchQueueReason(preparedCtx, evt); err != nil {
-		publicationClaim.Release(preparedCtx)
-		return PreparedPublish{}, err
+		return PreparedPublish{}, errors.Join(err, publicationClaim.Release(preparedCtx))
 	} else if reason != "" {
 		prepared.dispatchQueued = true
 		prepared.queueReason = reason
@@ -525,9 +523,11 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 		return PreparedPublish{}, errors.New("typed CommitPublish transaction context is required")
 	}
 	txctx := WithCommitPublishTransaction(ctx, transaction)
-	if publicationClaim != nil && publicationClaim.durable() && !runtimepipeline.QueuePipelineRollbackAction(txctx, func(actionCtx context.Context) { publicationClaim.Release(actionCtx) }) {
-		publicationClaim.Release(txctx)
-		return PreparedPublish{}, errors.New("event mutation rollback actions are required for pipeline publication claim")
+	if publicationClaim != nil && publicationClaim.durable() && !runtimepipeline.QueuePipelineRollbackAction(txctx, func(actionCtx context.Context) { publicationClaim.releaseAndLog(actionCtx) }) {
+		return PreparedPublish{}, errors.Join(
+			errors.New("event mutation rollback actions are required for pipeline publication claim"),
+			publicationClaim.Release(txctx),
+		)
 	}
 	txctx, err := eb.withTransactionRouteOverlay(txctx)
 	if err != nil {
@@ -699,14 +699,16 @@ func (eb *EventBus) dispatchPreparedPublish(ctx context.Context, prepared Prepar
 	return eb.dispatchPreparedPublishWithCompletion(ctx, prepared, nil)
 }
 
-func (eb *EventBus) dispatchPreparedPublishWithCompletion(ctx context.Context, prepared PreparedPublish, completion func() error) error {
+func (eb *EventBus) dispatchPreparedPublishWithCompletion(ctx context.Context, prepared PreparedPublish, completion func() error) (err error) {
 	if strings.TrimSpace(prepared.Event.ID()) == "" {
 		return errors.New("prepared event is required")
 	}
 	if prepared.dispatchContext != nil {
 		ctx = WithoutCommitPublishTransaction(runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(prepared.dispatchContext))))
 	}
-	defer prepared.publicationClaim.Release(ctx)
+	defer func() {
+		err = errors.Join(err, prepared.publicationClaim.Release(ctx))
+	}()
 	dispatchErr := eb.dispatchPreparedPublishBody(ctx, prepared)
 	if completion == nil {
 		return dispatchErr
@@ -772,8 +774,9 @@ func (eb *EventBus) dispatchCommittedPublishAsync(ctx context.Context, evt event
 	go func() {
 		defer func() { _ = lease.Done() }()
 		dispatchCtx = bindWorkContext(dispatchCtx, lease, owner)
-		defer publicationClaim.Release(dispatchCtx)
-		if err := eb.completeCommittedPublishDispatch(dispatchCtx, evt, inboundPlan, publicationClaim); err != nil {
+		err := eb.completeCommittedPublishDispatch(dispatchCtx, evt, inboundPlan, publicationClaim)
+		err = errors.Join(err, publicationClaim.Release(dispatchCtx))
+		if err != nil {
 			eb.reportLocalDispatchFailure("async_committed_dispatch_failed", evt, err)
 		}
 	}()
