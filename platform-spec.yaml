@@ -30763,7 +30763,11 @@ durable_pipeline_processing_obligation_authority:
       obligation for that run remains pending. Callers cannot supply a keyset,
       reset a phase, assemble query families, or durably persist a cursor. Every batch limit bounds candidate rows examined,
       including busy and newly ineligible rows, rather than settlements or returned work. Position advances before a claim
-      may be retained or released. On first entry to each fixed phase, the selected store captures that phase's exact
+      may be retained or released. Decision-route continuation owns a monotonic private set of examined immutable
+      insertion_sequence identities while selection retains attempt_count/next_attempt_at priority. Mutable retry state,
+      status, and tuple version affect current eligibility but can neither move a previously examined route behind its own
+      cursor nor make it executable twice in one pass. On first entry to each fixed phase, the selected store captures that
+      phase's exact
       store-generated insertion-sequence high-water mark; PostgreSQL also captures an exact visibility snapshot for that
       phase and tests mutable route rows through their immutable insertion transaction identity rather than their current
       tuple version, while SQLite write serialization makes its non-reusable sequence ceiling the visibility boundary. The
@@ -30897,7 +30901,7 @@ durable_pipeline_processing_obligation_authority:
     PPO-SET-001: Acknowledgement and decision-route disposition require the current claim and commit atomically.
     PPO-REL-001: Cancellation, cursor abandonment, non-durable retry release, failed settlement, explicit release, and restart preserve reclaimability without stranded ownership or blocking later sweep candidates; PostgreSQL owner and capacity retirement require a true exact-session unlock, and failed teardown remains retryable; startup, ingress resume, and run continue stop normally only on explicit exhaustion or blockage.
     PPO-SCP-001: Committed scope is exact persisted truth; missing or invalid scope returns typed claim-bound quarantine work to the consumer, and no store-side settlement, delivery marker, current-route inference, fallback, or repair exists.
-    PPO-CUR-001: Cursor continuation is monotonic across fixed global/run phases, captures one selected-store-generated immutable insertion-sequence high-water boundary per phase plus an exact PostgreSQL visibility snapshot, tests mutable rows through immutable insertion transaction identity rather than current tuple versions, advances before release, remembers local blockage until bounded-pass exhaustion, reaches every consumer as one typed SweepResult, survives periodic tick boundaries, excludes transactions committed after phase entry regardless of sequence allocation order, and cannot be reset, extended, or positioned by a caller.
+    PPO-CUR-001: Cursor continuation is monotonic across fixed global/run phases, records mutable decision-route progress only as a private monotonic set of immutable insertion sequences so each route is examined at most once per pass while attempt/retry priority remains intact, captures one selected-store-generated immutable insertion-sequence high-water boundary per phase plus an exact PostgreSQL visibility snapshot, tests mutable rows through immutable insertion transaction identity rather than current tuple versions, advances before release, remembers local blockage until bounded-pass exhaustion, reaches every consumer as one typed SweepResult, survives periodic tick boundaries, excludes transactions committed after phase entry regardless of sequence allocation order, and cannot be reset, extended, or positioned by a caller.
     PPO-DSP-001: Dispatch consumes the process-local owner and cannot outlive runtime retirement or selected-store release.
     PPO-DCR-001: Decision-route defer, quarantine, processed acknowledgement, convergence retry, completion, and inactive-parent supersession are age-independent and ordered.
     PPO-GLO-001: Global durable-work presence is one typed age-independent projection.
