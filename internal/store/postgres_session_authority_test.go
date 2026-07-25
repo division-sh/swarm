@@ -10,6 +10,7 @@ import (
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -62,7 +63,11 @@ func TestPostgresDetachedWorkContextCannotReviveClosedSessionAuthority(t *testin
 		t.Fatalf("open session connection: %v", err)
 	}
 	session := newPostgresSessionAuthority(conn)
-	detached := runtimepipeline.WithoutPipelineSQLConnContext(session.bindContext(ctx))
+	bound, err := session.bindContext(ctx)
+	if err != nil {
+		t.Fatalf("bind session context: %v", err)
+	}
+	detached := runtimepipeline.WithoutPipelineSQLConnContext(bound)
 	if err := session.release(); err != nil {
 		t.Fatalf("close parent session: %v", err)
 	}
@@ -504,6 +509,173 @@ func TestPostgresSharedClaimSessionSerializesSiblingTransactionsAndRelease(t *te
 	}
 	if err := selected.PipelineObligations().Release(ctx, claims[1]); err != nil {
 		t.Fatalf("release final sibling: %v", err)
+	}
+}
+
+func TestPostgresSessionDiscardTerminalizesSiblingPipelineClaims(t *testing.T) {
+	dsn, db, _ := testutil.StartPostgres(t)
+	selected := newTestPostgresStore(t, db)
+	db.SetMaxOpenConns(2)
+	db.SetMaxIdleConns(2)
+	ctx := testAuthorActivityContext()
+	runID := uuid.NewString()
+	seedAuthorActivityReceiptRun(t, authorActivityReceiptFixture{
+		store:   selected,
+		db:      db,
+		dialect: runtimeauthoractivity.DialectPostgres,
+	}, ctx, runID)
+	eventIDs := []string{
+		commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-2*time.Minute)),
+		commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute)),
+	}
+	claims := make([]runtimepipelineobligation.Claim, 0, len(eventIDs))
+	if err := selected.runPostgresRuntimeMutation(ctx, func(txctx context.Context, _ *sql.Tx) error {
+		for _, eventID := range eventIDs {
+			claim, err := selected.PipelineObligations().ClaimPublication(txctx, eventID)
+			if err != nil {
+				return err
+			}
+			claims = append(claims, claim)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("claim sibling publications: %v", err)
+	}
+	states := make([]*pipelineClaimState, 0, len(claims))
+	leases := make([]*sqlAdvisoryLockLease, 0, len(claims))
+	for _, claim := range claims {
+		state, err := selected.postgresPipelineClaimState(claim)
+		if err != nil {
+			t.Fatalf("load sibling claim: %v", err)
+		}
+		states = append(states, state)
+		leases = append(leases, state.postgresLease)
+	}
+	if states[0].postgresLease.session != states[1].postgresLease.session {
+		t.Fatal("sibling claims did not retain one physical session")
+	}
+
+	scan, err := selected.PipelineObligations().OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest())
+	if err != nil {
+		t.Fatalf("open scan: %v", err)
+	}
+	for _, claim := range claims {
+		if err := selected.associatePostgresPipelineClaim(scan, claim); err != nil {
+			t.Fatalf("associate sibling claim with scan: %v", err)
+		}
+	}
+	states[0].postgresLease.testUnlock = func(context.Context, *postgresSessionAuthority, string) (bool, error) {
+		return false, nil
+	}
+	if err := selected.PipelineObligations().Release(ctx, claims[0]); err == nil ||
+		!strings.Contains(err.Error(), "did not own the lock") {
+		t.Fatalf("poisoning release error = %v, want false-unlock evidence", err)
+	}
+
+	for index, claim := range claims {
+		if _, err := selected.postgresPipelineClaimState(claim); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
+			t.Fatalf("sibling claim %d after shared-session discard = %v, want ErrStaleClaim", index, err)
+		}
+		if !leases[index].released {
+			t.Fatalf("sibling lease %d remained current after shared-session discard", index)
+		}
+		assertIndependentAdvisoryLockAvailable(t, dsn, replayClaimLockKey(eventIDs[index]))
+	}
+	scanState, err := selected.postgresPipelineScanState(scan)
+	if err != nil {
+		t.Fatalf("load retained scan: %v", err)
+	}
+	if got := len(scanState.openClaims); got != 0 {
+		t.Fatalf("scan memberships after session discard = %d, want 0", got)
+	}
+	if got := db.Stats().MaxOpenConnections; got != 2 {
+		t.Fatalf("capacity after session discard = %d, want 2", got)
+	}
+
+	if _, err := selected.CommitSelectedForkEvent(ctx, CommitSelectedForkEventRequest{
+		Commit: runtimebus.CommitPublishRequest{PipelineClaim: claims[1]},
+	}); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
+		t.Fatalf("selected-fork commit with discarded-session claim = %v, want ErrStaleClaim", err)
+	}
+	if err := selected.runPostgresRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return selected.terminalizePipelineObligationTx(
+			txctx,
+			tx,
+			eventIDs[1],
+			runtimepipelineobligation.DeadLetter("session_discarded", nil),
+			time.Now().UTC(),
+		)
+	}); err != nil {
+		t.Fatalf("parent terminalization after group retirement: %v", err)
+	}
+
+	for _, eventID := range eventIDs {
+		reclaimed, err := selected.PipelineObligations().ClaimPublication(ctx, eventID)
+		if err != nil {
+			t.Fatalf("local reclaim %s after session discard: %v", eventID, err)
+		}
+		if err := selected.PipelineObligations().Release(ctx, reclaimed); err != nil {
+			t.Fatalf("release reclaimed publication %s: %v", eventID, err)
+		}
+	}
+	if err := selected.PipelineObligations().CloseScan(ctx, scan); err != nil {
+		t.Fatalf("close scan after group retirement: %v", err)
+	}
+}
+
+func TestPostgresAmbiguousBorrowedAcquireTerminalizesEverySiblingClaim(t *testing.T) {
+	dsn, db, _ := testutil.StartPostgres(t)
+	selected := newTestPostgresStore(t, db)
+	db.SetMaxOpenConns(2)
+	db.SetMaxIdleConns(2)
+	ctx := testAuthorActivityContext()
+	eventIDs := []string{uuid.NewString(), uuid.NewString()}
+	claims := make([]runtimepipelineobligation.Claim, 0, len(eventIDs))
+	injected := errors.New("injected ambiguous sibling acquire")
+
+	err := selected.runPostgresRuntimeMutation(ctx, func(txctx context.Context, _ *sql.Tx) error {
+		for _, eventID := range eventIDs {
+			claim, err := selected.PipelineObligations().ClaimPublication(txctx, eventID)
+			if err != nil {
+				return err
+			}
+			claims = append(claims, claim)
+		}
+		_, _, err := acquireAdvisoryLockLeaseWith(
+			txctx,
+			db,
+			"test:ambiguous-sibling-acquire:"+uuid.NewString(),
+			func(ctx context.Context, authority *postgresSessionAuthority, key string) (bool, error) {
+				var acquired bool
+				if err := authority.queryRowContext(ctx, `SELECT pg_try_advisory_lock(hashtext($1))`, key).Scan(&acquired); err != nil {
+					return false, err
+				}
+				if !acquired {
+					return false, errors.New("test advisory lock was unexpectedly busy")
+				}
+				return false, injected
+			},
+		)
+		return err
+	})
+	if !errors.Is(err, injected) {
+		t.Fatalf("ambiguous acquire error = %v, want injected failure", err)
+	}
+	for index, claim := range claims {
+		if _, err := selected.postgresPipelineClaimState(claim); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
+			t.Fatalf("sibling claim %d after ambiguous acquire = %v, want ErrStaleClaim", index, err)
+		}
+		assertIndependentAdvisoryLockAvailable(t, dsn, replayClaimLockKey(eventIDs[index]))
+		reclaimed, err := selected.PipelineObligations().ClaimPublication(ctx, eventIDs[index])
+		if err != nil {
+			t.Fatalf("local reclaim %d after ambiguous acquire: %v", index, err)
+		}
+		if err := selected.PipelineObligations().Release(ctx, reclaimed); err != nil {
+			t.Fatalf("release reclaimed sibling %d: %v", index, err)
+		}
+	}
+	if got := db.Stats().MaxOpenConnections; got != 2 {
+		t.Fatalf("capacity after ambiguous acquire = %d, want 2", got)
 	}
 }
 

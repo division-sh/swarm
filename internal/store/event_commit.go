@@ -177,7 +177,11 @@ func (s *PostgresStore) CommitSelectedForkEvent(ctx context.Context, req CommitS
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	defer state.operationMu.Unlock()
-	return commitSelectedForkEvent(state.postgresLease.BindContext(ctx), s, s.runEventTransaction, insertPostgresSelectedForkExecutionLineageTx, req)
+	claimCtx, err := state.postgresLease.BindContext(ctx)
+	if err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, runtimepipelineobligation.ErrStaleClaim
+	}
+	return commitSelectedForkEvent(claimCtx, s, s.runEventTransaction, insertPostgresSelectedForkExecutionLineageTx, req)
 }
 
 func (s *SQLiteRuntimeStore) CommitSelectedForkEvent(ctx context.Context, req CommitSelectedForkEventRequest) (runtimebus.EventAppendOutcome, error) {
