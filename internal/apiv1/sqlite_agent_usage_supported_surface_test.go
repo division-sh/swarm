@@ -85,7 +85,7 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	evt := eventtest.RunCreatingRootIngress(

@@ -1354,7 +1354,7 @@ func commitReadinessHandoffAuthorActivity(sqlitePath string, rt *runtimepkg.Runt
 		return err
 	}
 	defer selected.Close()
-	scope := runtimeauthoractivity.BundleScope(rt.Options.RuntimeInstanceID, rt.Options.BundleSourceFact.BundleHash)
+	scope := runtimeauthoractivity.BundleScope(rt.Options.RuntimeInstanceID, rt.Options.BundleSourceFact.BundleHash())
 	ctx := runtimeauthoractivity.WithScope(context.Background(), scope)
 	tx, err := selected.DB.BeginTx(ctx, nil)
 	if err != nil {

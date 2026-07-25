@@ -20,7 +20,7 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
-func newRuntimeEventBus(store runtimebus.EventStore, pipelineObligations runtimepipelineobligation.Store, logger *RuntimeLogger, source semanticview.Source, bundleFingerprint string, bundleSourceFact runtimecorrelation.BundleSourceFact, runtimeInstanceID string, workOwner *worklifetime.RuntimeOccurrence, interceptorProvider func() []runtimebus.EventInterceptor, payloadValidator runtimebus.PayloadValidator, templateInstanceActivator runtimepipeline.FlowInstanceActivator, providerOutputVerifier runtimebus.ProviderOutputAuthorizationVerifier, testLifecycleProbe runtimelifecycleprobe.Observer) (*runtimebus.EventBus, error) {
+func newRuntimeEventBus(store runtimebus.EventStore, pipelineObligations runtimepipelineobligation.Store, logger *RuntimeLogger, source semanticview.Source, bundleSourceFact runtimecorrelation.BundleSourceFact, runtimeInstanceID string, workOwner *worklifetime.RuntimeOccurrence, interceptorProvider func() []runtimebus.EventInterceptor, payloadValidator runtimebus.PayloadValidator, templateInstanceActivator runtimepipeline.FlowInstanceActivator, providerOutputVerifier runtimebus.ProviderOutputAuthorizationVerifier, testLifecycleProbe runtimelifecycleprobe.Observer) (*runtimebus.EventBus, error) {
 	var hook runtimebus.LoggerHook
 	if logger != nil {
 		hook = runtimeLoggerHook{logger: logger}
@@ -31,7 +31,6 @@ func newRuntimeEventBus(store runtimebus.EventStore, pipelineObligations runtime
 		ContractBundle:            source,
 		TemplateInstanceActivator: templateInstanceActivator,
 		PayloadValidator:          payloadValidator,
-		BundleFingerprint:         bundleFingerprint,
 		BundleSourceFact:          bundleSourceFact,
 		RuntimeInstanceID:         strings.TrimSpace(runtimeInstanceID),
 		WorkOwner:                 workOwner,

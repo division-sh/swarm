@@ -21,11 +21,11 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if report.MethodCount != 64 {
 		t.Fatalf("method count = %d, want 64", report.MethodCount)
 	}
-	if report.SchemaCount != 136 {
-		t.Fatalf("schema count = %d, want 136", report.SchemaCount)
+	if report.SchemaCount != 135 {
+		t.Fatalf("schema count = %d, want 135", report.SchemaCount)
 	}
-	if report.ErrorCodeCount != 47 {
-		t.Fatalf("error code count = %d, want 47", report.ErrorCodeCount)
+	if report.ErrorCodeCount != 46 {
+		t.Fatalf("error code count = %d, want 46", report.ErrorCodeCount)
 	}
 	if report.MutatingMethodCount != 28 {
 		t.Fatalf("mutating method count = %d, want 28", report.MutatingMethodCount)
@@ -97,11 +97,11 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if len(doc.Methods) != 64 {
 		t.Fatalf("generated OpenRPC methods = %d, want 64", len(doc.Methods))
 	}
-	if len(doc.Components.Schemas) != 136 {
-		t.Fatalf("generated OpenRPC schemas = %d, want 136", len(doc.Components.Schemas))
+	if len(doc.Components.Schemas) != 135 {
+		t.Fatalf("generated OpenRPC schemas = %d, want 135", len(doc.Components.Schemas))
 	}
-	if len(doc.Components.Errors) != 47 {
-		t.Fatalf("generated OpenRPC errors = %d, want 47", len(doc.Components.Errors))
+	if len(doc.Components.Errors) != 46 {
+		t.Fatalf("generated OpenRPC errors = %d, want 46", len(doc.Components.Errors))
 	}
 	assertGeneratedMethodsOmitExamplesUnderPolicy(t, api, artifact)
 	assertGeneratedMethodsOmitRPCDiscoverUnderPolicy(t, api, doc)
@@ -286,17 +286,12 @@ func TestGeneratedOpenRPCBundleIdentityDescriptionsPreserveConstraints(t *testin
 			params[param.Name] = param
 		}
 		assertOpenRPCParamDescriptionContains(t, methodName, params, "bundle_hash",
-			"#1001",
 			"bundle-v1:sha256:<64 lowercase hex>",
-			"cannot be combined with legacy bundle_ref",
 			"UNSUPPORTED_BUNDLE_HASH",
 		)
-		assertOpenRPCParamDescriptionContains(t, methodName, params, "bundle_ref",
-			"#1001",
-			"bundle_ref.fingerprint",
-			"not authoritative for create-new-work scope or routing",
-			"cannot be combined with bundle_hash",
-		)
+		if _, ok := params["bundle_ref"]; ok {
+			t.Fatalf("generated OpenRPC %s still publishes retired bundle_ref", methodName)
+		}
 	}
 	runFork, ok := methods["run.fork"]
 	if !ok {
@@ -350,9 +345,9 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	assertScalarContains(t, mustMappingValue(t, yamlPolicy, "tags"), "quoted explicit non-string scalar tags fail closed")
 	assertScalarContains(t, mustMappingValue(t, yamlPolicy, "json_emission"), "including `+` on positive exponents")
 	assertScalarContains(t, mustMappingValue(t, mustMappingValue(t, contentPolicies, "prompt_text"), "canonicalization"), "normalize CRLF and CR to LF")
-	renamePolicy := mustMappingValue(t, identity, "rename_policy")
-	assertScalarValue(t, mustMappingValue(t, renamePolicy, "bundle_hash"), "promoted_name")
-	assertScalarContains(t, mustMappingValue(t, renamePolicy, "dual_accept_transition"), "#1001")
+	namingPolicy := mustMappingValue(t, identity, "naming_policy")
+	assertScalarValue(t, mustMappingValue(t, namingPolicy, "bundle_hash"), "sole_public_runtime_and_persisted_name")
+	assertScalarValue(t, mustMappingValue(t, namingPolicy, "retired_transition_names"), "absent_from_supported_surfaces")
 
 	persistence := mustMappingValue(t, multi, "persistence_model")
 	assertScalarContains(t, mustMappingValue(t, persistence, "live_schema_boundary"), "#1013 promotes the bundles table")
@@ -377,7 +372,9 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	runsDDL := mustMappingValue(t, mustMappingValue(t, platformTables, "runs"), "ddl")
 	assertScalarContains(t, runsDDL, "bundle_hash")
 	assertScalarContains(t, runsDDL, "bundle_source")
-	assertScalarContains(t, runsDDL, "bundle_fingerprint TEXT")
+	if strings.Contains(scalarValue(runsDDL), "bundle_fingerprint") {
+		t.Fatal("runs DDL still publishes retired bundle_fingerprint")
+	}
 
 	cliSurface := mustMappingValue(t, multi, "cli_surface")
 	runFork := mustMappingValue(t, cliSurface, "run_fork")
@@ -413,7 +410,7 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	if len(order.Content) != 3 {
 		t.Fatalf("phase_5_atomicity transaction_order has %d items, want 3", len(order.Content))
 	}
-	if got := scalarValue(order.Content[0]); got != "lock_runs_table_against_new_persisted_bundle_references" {
+	if got := scalarValue(order.Content[0]); got != "lock_runs_table_against_new_persisted_bundle_rows" {
 		t.Fatalf("phase_5_atomicity transaction_order[0] = %q, want run-creation lock first", got)
 	}
 	if got := scalarValue(order.Content[1]); got != "update_eligible_runs_bundle_source_to_deleted" {
@@ -469,7 +466,6 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 		"db_loaded_same_bundle_source":        "#1024",
 		"run_fork_cli_consumer":               "#1023",
 		"multi_bundle_cli_inventory":          "#1023",
-		"bundle_hash_dual_accept_migration":   "#1001",
 	} {
 		assertScalarValue(t, mustMappingValue(t, mustMappingValue(t, splits, split), "tracker"), tracker)
 	}

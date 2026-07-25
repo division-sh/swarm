@@ -32,8 +32,8 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationRetriesBusyAndFlushesPostCommitOnc
 		}
 	})
 	if _, err := lockTx.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES (?, 'running', ?)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, uuid.NewString(), time.Now().UTC()); err != nil {
 		t.Fatalf("hold sqlite write lock: %v", err)
 	}
@@ -55,8 +55,8 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationRetriesBusyAndFlushesPostCommitOnc
 				return errors.New("queue pipeline post-commit action")
 			}
 			_, err := tx.ExecContext(txctx, `
-				INSERT INTO runs (run_id, status, started_at)
-				VALUES (?, 'running', ?)
+				INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+				VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 			`, uuid.NewString(), time.Now().UTC())
 			if sqliteRuntimeMutationBusyError(err) {
 				closeBusy.Do(func() { close(busySeen) })
@@ -101,8 +101,8 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationStopsRetryOnContextDeadline(t *tes
 	}
 	t.Cleanup(func() { _ = lockTx.Rollback() })
 	if _, err := lockTx.ExecContext(baseCtx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES (?, 'running', ?)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, uuid.NewString(), time.Now().UTC()); err != nil {
 		t.Fatalf("hold sqlite write lock: %v", err)
 	}
@@ -113,8 +113,8 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationStopsRetryOnContextDeadline(t *tes
 	err = store.RunRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		atomic.AddInt32(&attempts, 1)
 		_, err := tx.ExecContext(txctx, `
-			INSERT INTO runs (run_id, status, started_at)
-			VALUES (?, 'running', ?)
+			INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+			VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 		`, uuid.NewString(), time.Now().UTC())
 		return err
 	})
@@ -136,8 +136,8 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationContextDeadlineCapsDriverBusyTimeo
 	}
 	t.Cleanup(func() { _ = lockTx.Rollback() })
 	if _, err := lockTx.ExecContext(baseCtx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES (?, 'running', ?)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, uuid.NewString(), time.Now().UTC()); err != nil {
 		t.Fatalf("hold sqlite write lock: %v", err)
 	}
@@ -147,8 +147,8 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationContextDeadlineCapsDriverBusyTimeo
 	start := time.Now()
 	err = store.RunRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(txctx, `
-			INSERT INTO runs (run_id, status, started_at)
-			VALUES (?, 'running', ?)
+			INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+			VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 		`, uuid.NewString(), time.Now().UTC())
 		return err
 	})
@@ -197,8 +197,8 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationPostCommitCanReenterRuntimeMutatio
 	go func() {
 		done <- store.RunRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
 			if _, err := tx.ExecContext(txctx, `
-				INSERT INTO runs (run_id, status, started_at)
-				VALUES (?, 'running', ?)
+				INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+				VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 			`, uuid.NewString(), time.Now().UTC()); err != nil {
 				return err
 			}
@@ -206,8 +206,8 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationPostCommitCanReenterRuntimeMutatio
 				innerCtx := runtimepipeline.WithoutPipelineSQLTxContext(ctx)
 				innerDone <- store.RunRuntimeMutation(innerCtx, func(innerTxCtx context.Context, innerTx *sql.Tx) error {
 					_, err := innerTx.ExecContext(innerTxCtx, `
-						INSERT INTO runs (run_id, status, started_at)
-						VALUES (?, 'running', ?)
+						INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+						VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 					`, uuid.NewString(), time.Now().UTC())
 					return err
 				})

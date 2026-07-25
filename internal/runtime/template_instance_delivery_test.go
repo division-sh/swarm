@@ -848,7 +848,7 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 				sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithBundleSourceFact(ctx, providerRollbackBundleSourceFact())
-				if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, templateInstanceDeliveryRunID); err != nil {
+				if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, templateInstanceDeliveryRunID); err != nil {
 					t.Fatalf("seed SQLite rollback run: %v", err)
 				}
 				return ctx, sqliteStore.DB, &providerRollbackSQLiteStore{
@@ -1151,11 +1151,11 @@ func providerRollbackAuthorization() runtimeprovideroutput.Authorization {
 }
 
 func providerRollbackBundleSourceFact() runtimecorrelation.BundleSourceFact {
-	return runtimecorrelation.BundleSourceFact{
-		BundleHash:        "bundle-v1:sha256:" + strings.Repeat("a", 64),
-		BundleSource:      "ephemeral",
-		BundleFingerprint: "sha256:" + strings.Repeat("a", 64),
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(authorActivityTestBundleSourceFact.BundleHash())
+	if err != nil {
+		panic(err)
 	}
+	return fact
 }
 
 func providerRollbackStandingCandidate(ctx context.Context) runtimepipeline.StandingServiceCandidate {
@@ -1314,8 +1314,8 @@ func seedRuntimeTestRun(t *testing.T, db *sql.DB) context.Context {
 	t.Helper()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES ($1::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 		ON CONFLICT (run_id) DO NOTHING
 	`, templateInstanceDeliveryRunID); err != nil {
 		t.Fatalf("seed runtime test run: %v", err)

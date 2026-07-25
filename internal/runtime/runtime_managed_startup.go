@@ -92,7 +92,7 @@ func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimes
 		authority.Generation,
 		"",
 		actorFingerprint,
-		coalesceRuntimeIdentity(rt.Options.BundleFingerprint),
+		rt.Options.BundleSourceFact.BundleHash(),
 		authority.ProbeSurfaceIDs,
 	)
 	if err != nil {

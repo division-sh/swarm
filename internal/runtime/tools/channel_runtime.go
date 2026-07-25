@@ -77,11 +77,7 @@ func (e *Executor) execChannelOperation(ctx context.Context, actor models.AgentC
 	if !ok {
 		return nil, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "channel_bundle_identity_required", "channel-runtime", "build_activity", map[string]any{"tool": strings.TrimSpace(toolID)})
 	}
-	bundleFact = bundleFact.Normalized()
-	bundleHash := bundleFact.BundleHash
-	if bundleHash == "" {
-		bundleHash = bundleFact.BundleFingerprint
-	}
+	bundleHash := bundleFact.BundleHash()
 	workflowVersion := ""
 	if e.workflowSource != nil {
 		workflowVersion = strings.TrimSpace(e.workflowSource.WorkflowVersion())

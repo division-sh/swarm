@@ -474,7 +474,7 @@ func (rt *Runtime) ensureStandingTargets(ctx context.Context, serviceID string) 
 	if rt.Stores.PipelineStore == nil || rt.Manager == nil || rt.Pipeline == nil {
 		return nil, nil, fmt.Errorf("standing activation requires pipeline store, pipeline, and agent manager")
 	}
-	fact := rt.Options.BundleSourceFact.Normalized()
+	fact := rt.Options.BundleSourceFact
 	source := rt.Options.WorkflowModule.SemanticSource()
 	targets := make([]StandingTarget, 0)
 	activations := make([]StandingActivation, 0, len(plans))
@@ -520,7 +520,7 @@ func (rt *Runtime) ensureStandingTargets(ctx context.Context, serviceID string) 
 				Config:         map[string]any{},
 				Metadata: map[string]any{
 					"activation":  runtimecontracts.ProjectFlowActivationStanding,
-					"bundle_hash": fact.BundleHash,
+					"bundle_hash": fact.BundleHash(),
 					"package_key": declaration.PackageKey,
 				},
 			})
@@ -541,14 +541,14 @@ func (rt *Runtime) ensureStandingTargets(ctx context.Context, serviceID string) 
 		}
 		if reconciliation.EffectiveState != "active" {
 			activations = append(activations, StandingActivation{
-				BundleHash: fact.BundleHash, ServiceID: reconciliation.ServiceID, PackageKey: declaration.PackageKey,
+				BundleHash: fact.BundleHash(), ServiceID: reconciliation.ServiceID, PackageKey: declaration.PackageKey,
 				FlowID: declaration.FlowID, RunID: reconciliation.RunID, Generation: reconciliation.Generation,
 				PublicationSequence: reconciliation.PublicationSequence, InstanceID: instance.InstanceID,
 				FlowInstance: instance.InstancePath, EntityID: instance.EntityID,
 				EffectiveState: reconciliation.EffectiveState, Created: false,
 			})
 			for _, target := range plan.targets {
-				target.BundleHash = fact.BundleHash
+				target.BundleHash = fact.BundleHash()
 				target.RunID = reconciliation.RunID
 				target.Generation = reconciliation.Generation
 				target.PublicationSequence = reconciliation.PublicationSequence
@@ -557,13 +557,13 @@ func (rt *Runtime) ensureStandingTargets(ctx context.Context, serviceID string) 
 			continue
 		}
 		activations = append(activations, StandingActivation{
-			BundleHash: fact.BundleHash, ServiceID: plan.serviceID, PackageKey: declaration.PackageKey, FlowID: declaration.FlowID,
+			BundleHash: fact.BundleHash(), ServiceID: plan.serviceID, PackageKey: declaration.PackageKey, FlowID: declaration.FlowID,
 			RunID: reconciliation.RunID, Generation: reconciliation.Generation, PublicationSequence: publicationSequence, InstanceID: instance.InstanceID,
 			FlowInstance: instance.InstancePath, EntityID: instance.EntityID,
 			EffectiveState: reconciliation.EffectiveState, Created: created,
 		})
 		for _, target := range plan.targets {
-			target.BundleHash = fact.BundleHash
+			target.BundleHash = fact.BundleHash()
 			target.RunID = reconciliation.RunID
 			target.Generation = reconciliation.Generation
 			target.PublicationSequence = publicationSequence
@@ -577,7 +577,7 @@ func (rt *Runtime) restoreAdoptedStandingWorkflowTimers(ctx context.Context, act
 	if rt == nil || rt.Pipeline == nil {
 		return nil
 	}
-	fact := rt.Options.BundleSourceFact.Normalized()
+	fact := rt.Options.BundleSourceFact
 	restored := make(map[string]struct{}, len(activations))
 	for _, activation := range activations {
 		runID := strings.TrimSpace(activation.RunID)
@@ -617,7 +617,7 @@ func (rt *Runtime) PlanStandingServiceCandidates() ([]runtimepipeline.StandingSe
 	if err != nil {
 		return nil, err
 	}
-	fact := rt.Options.BundleSourceFact.Normalized()
+	fact := rt.Options.BundleSourceFact
 	out := make([]runtimepipeline.StandingServiceCandidate, 0, len(plans))
 	for _, plan := range plans {
 		out = append(out, runtimepipeline.StandingServiceCandidate{
@@ -640,9 +640,9 @@ func (rt *Runtime) standingTargetPlans() ([]standingTargetPlan, error) {
 	if len(declarations) == 0 {
 		return nil, nil
 	}
-	fact := rt.Options.BundleSourceFact.Normalized()
-	if err := runtimecontracts.ValidateBundleHash(fact.BundleHash); err != nil {
-		return nil, fmt.Errorf("standing target bundle_hash: %w", err)
+	fact := rt.Options.BundleSourceFact
+	if err := fact.Validate(); err != nil {
+		return nil, fmt.Errorf("standing target bundle source fact: %w", err)
 	}
 	plans := make([]standingTargetPlan, 0, len(declarations))
 	for _, declaration := range declarations {
@@ -653,7 +653,7 @@ func (rt *Runtime) standingTargetPlans() ([]standingTargetPlan, error) {
 		plan := standingTargetPlan{declaration: declaration, serviceID: serviceID, generation: generation, runID: runID, instance: instance}
 		for _, binding := range declaration.Ingress {
 			plan.targets = append(plan.targets, StandingTarget{
-				BundleHash: fact.BundleHash, ServiceID: serviceID, PackageKey: declaration.PackageKey, SourcePath: declaration.SourcePath,
+				BundleHash: fact.BundleHash(), ServiceID: serviceID, PackageKey: declaration.PackageKey, SourcePath: declaration.SourcePath,
 				FlowID: declaration.FlowID, FlowPath: declaration.FlowPath, Alias: declaration.Alias,
 				Provider: binding.Provider, RunID: runID, Generation: generation, PublicationSequence: 1,
 				InstanceID: instance.InstanceID, FlowInstance: instance.InstancePath,

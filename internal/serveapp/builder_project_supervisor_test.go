@@ -42,7 +42,6 @@ import (
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -219,7 +218,9 @@ func TestRuntimeProjectSupervisorReloadRecompilesAndInstallsChannelPlans(t *test
 
 func TestRuntimeProjectSupervisorReplaceCurrentRuntime_ClearsReadinessBeforeShutdown(t *testing.T) {
 	oldRT := &runtimepkg.Runtime{}
-	newRT := &runtimepkg.Runtime{}
+	newRT := &runtimepkg.Runtime{Options: runtimepkg.RuntimeOptions{
+		BundleSourceFact: mustServeTestEphemeralBundleSourceFact(runtimeContextTestHash("1")),
+	}}
 	var ready atomic.Bool
 	ready.Store(true)
 
@@ -298,7 +299,9 @@ func TestRuntimeProjectSupervisorReplaceCurrentRuntime_ClearsReadinessBeforeShut
 
 func TestRuntimeProjectSupervisorReplaceCurrentRuntime_WaitsForRuntimeStartBeforeReady(t *testing.T) {
 	oldRT := &runtimepkg.Runtime{}
-	newRT := &runtimepkg.Runtime{}
+	newRT := &runtimepkg.Runtime{Options: runtimepkg.RuntimeOptions{
+		BundleSourceFact: mustServeTestEphemeralBundleSourceFact(runtimeContextTestHash("2")),
+	}}
 	var ready atomic.Bool
 	ready.Store(true)
 	started := make(chan struct{})
@@ -431,7 +434,7 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 			t.Fatalf("CompileAdmission(%s): %v", alias, err)
 		}
 		return runtimepkg.BundleContext{
-			BundleHash: hash, Source: source, Runtime: &runtimepkg.Runtime{Bus: bus, InboundGateway: gateway}, WorkOwner: workOwner,
+			BundleSourceFact: mustServeTestEphemeralBundleSourceFact(hash), Source: source, Runtime: &runtimepkg.Runtime{Bus: bus, InboundGateway: gateway}, WorkOwner: workOwner,
 			StandingTargets: []runtimepkg.StandingTarget{{
 				BundleHash: hash, ServiceID: "service-" + alias, FlowID: "telegram-chat", Alias: alias, Provider: "telegram",
 				RunID: runID, FlowInstance: "telegram-chat/" + strings.TrimPrefix(alias, "chat-"),
@@ -493,14 +496,14 @@ func TestRuntimeProjectSupervisorFailedSameHashReplacementRestoresOldContext(t *
 	newWorkOwner := newSupervisorTestRuntimeOccurrence(t, hash)
 	restoredWorkOwner := newSupervisorTestRuntimeOccurrence(t, hash)
 	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
-		BundleHash: hash, Source: source, Runtime: oldRT, WorkOwner: oldWorkOwner,
+		BundleSourceFact: mustServeTestPersistedBundleSourceFact(hash), Source: source, Runtime: oldRT, WorkOwner: oldWorkOwner,
 	})
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
 	var ready atomic.Bool
 	ready.Store(true)
-	fact := runtimecorrelation.BundleSourceFact{BundleHash: hash, BundleSource: storerunlifecycle.BundleSourcePersisted}
+	fact := mustServeTestPersistedBundleSourceFact(hash)
 	newRT.Options = runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: source}, BundleSourceFact: fact}
 	restoredRT.Options = runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: source}, BundleSourceFact: fact}
 	supervisor := &runtimeProjectSupervisor{
@@ -550,13 +553,13 @@ func TestRuntimeProjectSupervisorChangedNonStandingBundleReplacesManagerContext(
 	newHash := "bundle-v1:sha256:" + strings.Repeat("2", 64)
 	oldWorkOwner := newSupervisorTestRuntimeOccurrence(t, oldHash)
 	newWorkOwner := newSupervisorTestRuntimeOccurrence(t, newHash)
-	oldFact := runtimecorrelation.BundleSourceFact{BundleHash: oldHash, BundleSource: storerunlifecycle.BundleSourcePersisted}
-	newFact := runtimecorrelation.BundleSourceFact{BundleHash: newHash, BundleSource: storerunlifecycle.BundleSourcePersisted}
+	oldFact := mustServeTestPersistedBundleSourceFact(oldHash)
+	newFact := mustServeTestPersistedBundleSourceFact(newHash)
 	newIdentity := runtimecontracts.BundleIdentity{BundleHash: newHash}
 	oldRT.Options = runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: oldSource}, BundleSourceFact: oldFact}
 	newRT.Options = runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: newSource}, BundleSourceFact: newFact}
 	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
-		BundleHash: oldHash, BundleSourceFact: oldFact, Source: oldSource, Runtime: oldRT, WorkOwner: oldWorkOwner,
+		BundleSourceFact: oldFact, Source: oldSource, Runtime: oldRT, WorkOwner: oldWorkOwner,
 	})
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
@@ -615,12 +618,12 @@ func TestRuntimeProjectSupervisorReplacementPublishesDowntimeAcrossPublicSurface
 		t.Fatalf("NewEventBus(new): %v", err)
 	}
 	hash := runtimeContextTestHash("d")
-	fact := runtimecorrelation.BundleSourceFact{BundleHash: hash, BundleSource: storerunlifecycle.BundleSourceEphemeral}
+	fact := mustServeTestEphemeralBundleSourceFact(hash)
 	oldRT := &runtimepkg.Runtime{Bus: oldBus, Options: runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: source}, BundleSourceFact: fact}}
 	newRT := &runtimepkg.Runtime{Bus: newBus, Options: runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: source}, BundleSourceFact: fact}}
 	oldWorkOwner := newSupervisorTestRuntimeOccurrence(t, hash)
 	newWorkOwner := newSupervisorTestRuntimeOccurrence(t, hash)
-	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{BundleHash: hash, BundleSourceFact: fact, Source: source, Runtime: oldRT, WorkOwner: oldWorkOwner})
+	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{BundleSourceFact: fact, Source: source, Runtime: oldRT, WorkOwner: oldWorkOwner})
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
@@ -767,10 +770,7 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 								ProviderTriggerCatalog:           providerRegistry,
 								ProcessWorkOwner:                 processWorkOwner,
 								RuntimeInstanceID:                runtimeInstanceID,
-								BundleSourceFact: runtimecorrelation.BundleSourceFact{
-									BundleHash:   hash,
-									BundleSource: storerunlifecycle.BundleSourceEphemeral,
-								},
+								BundleSourceFact:                 mustServeTestEphemeralBundleSourceFact(hash),
 							},
 						})
 						if err != nil {
@@ -797,10 +797,10 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 						t.Fatalf("ordinary competing start error = %v, want exclusive ownership denial", err)
 					}
 
-					oldFact := runtimecorrelation.BundleSourceFact{BundleHash: oldHash, BundleSource: storerunlifecycle.BundleSourceEphemeral}
-					newFact := runtimecorrelation.BundleSourceFact{BundleHash: newHash, BundleSource: storerunlifecycle.BundleSourceEphemeral}
+					oldFact := mustServeTestEphemeralBundleSourceFact(oldHash)
+					newFact := mustServeTestEphemeralBundleSourceFact(newHash)
 					manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
-						BundleHash: oldHash, BundleSourceFact: oldFact, Source: source, Runtime: predecessor, WorkOwner: predecessor.WorkOccurrence(),
+						BundleSourceFact: oldFact, Source: source, Runtime: predecessor, WorkOwner: predecessor.WorkOccurrence(),
 					})
 					if err != nil {
 						t.Fatalf("NewRuntimeContextManager: %v", err)
@@ -884,9 +884,9 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					}); err != nil {
 						t.Fatalf("register pending rollback schedule: %v", err)
 					}
-					rollbackFact := runtimecorrelation.BundleSourceFact{BundleHash: newHash, BundleSource: storerunlifecycle.BundleSourceEphemeral}
+					rollbackFact := mustServeTestEphemeralBundleSourceFact(newHash)
 					rollbackManager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
-						BundleHash: newHash, BundleSourceFact: rollbackFact, Source: source, Runtime: rollbackPredecessor, WorkOwner: rollbackPredecessor.WorkOccurrence(),
+						BundleSourceFact: rollbackFact, Source: source, Runtime: rollbackPredecessor, WorkOwner: rollbackPredecessor.WorkOccurrence(),
 					})
 					if err != nil {
 						t.Fatalf("NewRuntimeContextManager rollback: %v", err)
@@ -1012,9 +1012,7 @@ func TestStandingReplacementAdoptionRestoresWorkflowTimersOnBothStores(t *testin
 			if err != nil {
 				t.Fatalf("BundleHash: %v", err)
 			}
-			fact := runtimecorrelation.BundleSourceFact{
-				BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral,
-			}
+			fact := mustServeTestEphemeralBundleSourceFact(bundleHash)
 			credentials, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 			if err != nil {
 				t.Fatalf("NewFileStore: %v", err)
@@ -1233,9 +1231,7 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 								Credentials: credentials, ProviderCredentials: credentials,
 								ProviderTriggerCatalog: catalog, ProcessWorkOwner: processWorkOwner,
 								RuntimeInstanceID: "11111111-1111-1111-1111-111111111111",
-								BundleSourceFact: runtimecorrelation.BundleSourceFact{
-									BundleHash: hash, BundleSource: storerunlifecycle.BundleSourceEphemeral,
-								},
+								BundleSourceFact:  mustServeTestEphemeralBundleSourceFact(hash),
 							},
 						})
 						if err != nil {
@@ -1256,16 +1252,16 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 					if len(targets) != 1 || len(activations) != 1 || !activations[0].Created {
 						t.Fatalf("predecessor standing targets/activations = %#v/%#v", targets, activations)
 					}
-					oldFact := runtimecorrelation.BundleSourceFact{BundleHash: oldHash, BundleSource: storerunlifecycle.BundleSourceEphemeral}
+					oldFact := mustServeTestEphemeralBundleSourceFact(oldHash)
 					manager, err = runtimepkg.NewRuntimeContextManagerWithAdmission(nil, admissionState, runtimepkg.BundleContext{
-						BundleHash: oldHash, BundleSourceFact: oldFact, Source: oldSource,
+						BundleSourceFact: oldFact, Source: oldSource,
 						Runtime: predecessor, WorkOwner: predecessor.WorkOccurrence(), StandingTargets: targets,
 					})
 					if err != nil {
 						t.Fatalf("NewRuntimeContextManagerWithAdmission: %v", err)
 					}
 					candidate := newRuntime(newHash, candidateModule)
-					newFact := runtimecorrelation.BundleSourceFact{BundleHash: newHash, BundleSource: storerunlifecycle.BundleSourceEphemeral}
+					newFact := mustServeTestEphemeralBundleSourceFact(newHash)
 					supervisor := &runtimeProjectSupervisor{
 						ready: new(atomic.Bool), currentRoot: contractsRoot, currentSource: oldSource, currentBundle: bundle,
 						currentRT: predecessor, currentBundleSourceFact: oldFact, runtimeContexts: manager,
@@ -1345,7 +1341,7 @@ func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *tes
 			providerRegistry := testProviderTriggerCatalog(t)
 			hash := runtimeContextTestHash("f")
 			runtimeInstanceID := "11111111-1111-1111-1111-111111111111"
-			fact := runtimecorrelation.BundleSourceFact{BundleHash: hash, BundleSource: storerunlifecycle.BundleSourceEphemeral}
+			fact := mustServeTestEphemeralBundleSourceFact(hash)
 			newRuntime := func() *runtimepkg.Runtime {
 				rt, err := runtimepkg.NewRuntime(context.Background(), runtimepkg.RuntimeDeps{
 					Config: &config.Config{}, Stores: stores.runtimeStores(),
@@ -1365,7 +1361,7 @@ func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *tes
 			if err := predecessor.Start(context.Background()); err != nil {
 				t.Fatalf("start predecessor: %v", err)
 			}
-			manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{BundleHash: hash, BundleSourceFact: fact, Source: source, Runtime: predecessor, WorkOwner: predecessor.WorkOccurrence()})
+			manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{BundleSourceFact: fact, Source: source, Runtime: predecessor, WorkOwner: predecessor.WorkOccurrence()})
 			if err != nil {
 				t.Fatalf("NewRuntimeContextManager: %v", err)
 			}
@@ -1601,9 +1597,9 @@ func TestRuntimeProjectSupervisorManagerBackedClosePropagatesShutdownOptions(t *
 	rt := &runtimepkg.Runtime{Bus: bus}
 	hash := "bundle-v1:sha256:" + strings.Repeat("9", 64)
 	workOwner := newSupervisorTestRuntimeOccurrence(t, hash)
-	fact := runtimecorrelation.BundleSourceFact{BundleHash: hash, BundleSource: storerunlifecycle.BundleSourcePersisted}
+	fact := mustServeTestPersistedBundleSourceFact(hash)
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
-	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{BundleHash: hash, BundleSourceFact: fact, Source: source, Runtime: rt, WorkOwner: workOwner})
+	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{BundleSourceFact: fact, Source: source, Runtime: rt, WorkOwner: workOwner})
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
@@ -1815,8 +1811,8 @@ func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *
 			providerRegistry := testProviderTriggerCatalog(t)
 			runtimeInstanceID := "11111111-1111-4111-8111-111111111111"
 			facts := []runtimecorrelation.BundleSourceFact{
-				{BundleHash: runtimeContextTestHash("c"), BundleSource: storerunlifecycle.BundleSourceEphemeral},
-				{BundleHash: runtimeContextTestHash("d"), BundleSource: storerunlifecycle.BundleSourceEphemeral},
+				mustServeTestEphemeralBundleSourceFact(runtimeContextTestHash("c")),
+				mustServeTestEphemeralBundleSourceFact(runtimeContextTestHash("d")),
 			}
 			contexts := make([]serveRuntimeBundleContext, 0, len(facts))
 			for _, fact := range facts {
@@ -1835,7 +1831,7 @@ func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *
 					},
 				})
 				if err != nil {
-					t.Fatalf("NewRuntime(%s): %v", fact.BundleHash, err)
+					t.Fatalf("NewRuntime(%s): %v", fact.BundleHash(), err)
 				}
 				t.Cleanup(func() { _ = rt.Shutdown() })
 				contexts = append(contexts, serveRuntimeBundleContext{runtime: rt, bundleSourceFact: fact})
@@ -1852,12 +1848,12 @@ func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *
 				t.Fatalf("selected %s event store lacks author activity catalog registry", backend.name)
 			}
 			for _, fact := range facts {
-				scope := runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash)
+				scope := runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash())
 				lease, err := registrar.RegisterAuthorActivityEventCatalog(scope, []runtimeauthoractivity.EventDescriptor{{
 					EventType: "rollback.probe", Disposition: runtimeauthoractivity.StoryDifferent,
 				}})
 				if err != nil {
-					t.Fatalf("prepared catalog for %s remained leased after startup rollback: %v", fact.BundleHash, err)
+					t.Fatalf("prepared catalog for %s remained leased after startup rollback: %v", fact.BundleHash(), err)
 				}
 				lease.Release()
 			}
@@ -2225,22 +2221,16 @@ func TestRuntimeProjectSupervisorLoadProject_PropagatesRuntimeStartFailure(t *te
 	}
 }
 
-func TestRuntimeProjectSupervisorLoadProject_PassesBundleFingerprintToRuntime(t *testing.T) {
+func TestRuntimeProjectSupervisorLoadProjectPassesBundleSourceFactToRuntime(t *testing.T) {
 	projectRoot := writeProjectRoot(t)
 	expectedBundle := testBuilderSupervisorBundle(t)
-	expectedIdentity, err := runtimecontracts.BootBundleIdentity(expectedBundle)
-	if err != nil {
-		t.Fatalf("BootBundleIdentity: %v", err)
-	}
 	expectedHash, err := runtimecontracts.BundleHash(expectedBundle)
 	if err != nil {
 		t.Fatalf("BundleHash: %v", err)
 	}
 
-	var gotFingerprint string
 	var gotSourceFact runtimecorrelation.BundleSourceFact
 	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
-		gotFingerprint = deps.Options.BundleFingerprint
 		gotSourceFact = deps.Options.BundleSourceFact
 		return &runtimepkg.Runtime{}, nil
 	})
@@ -2254,11 +2244,8 @@ func TestRuntimeProjectSupervisorLoadProject_PassesBundleFingerprintToRuntime(t 
 	if !status.Loaded {
 		t.Fatalf("status.Loaded = false, want true")
 	}
-	if gotFingerprint != expectedIdentity.Fingerprint {
-		t.Fatalf("BundleFingerprint = %q, want %q", gotFingerprint, expectedIdentity.Fingerprint)
-	}
-	if gotSourceFact.BundleHash != expectedHash || gotSourceFact.BundleSource != storerunlifecycle.BundleSourceEphemeral || gotSourceFact.BundleFingerprint != expectedIdentity.Fingerprint {
-		t.Fatalf("BundleSourceFact = %#v, want hash=%q source=%q fingerprint=%q", gotSourceFact, expectedHash, storerunlifecycle.BundleSourceEphemeral, expectedIdentity.Fingerprint)
+	if gotSourceFact.BundleHash() != expectedHash || !gotSourceFact.IsEphemeral() {
+		t.Fatalf("BundleSourceFact = %#v, want hash=%q ephemeral source", gotSourceFact, expectedHash)
 	}
 }
 
@@ -2314,10 +2301,10 @@ func TestDashboardDynamicAgentControl_DeniesWhenRuntimeShutdownAdmissionClosed(t
 	}
 
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
-	fact := runtimecorrelation.BundleSourceFact{BundleHash: hash, BundleSource: storerunlifecycle.BundleSourceEphemeral}
+	fact := mustServeTestEphemeralBundleSourceFact(hash)
 	rt := &runtimepkg.Runtime{Bus: bus, Manager: manager}
 	contexts, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
-		BundleHash: hash, BundleSourceFact: fact, Source: source, Runtime: rt, WorkOwner: workOwner,
+		BundleSourceFact: fact, Source: source, Runtime: rt, WorkOwner: workOwner,
 	})
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)

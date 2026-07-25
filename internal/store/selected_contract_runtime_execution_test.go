@@ -598,16 +598,16 @@ func TestSelectedForkDiscardRejectsLiveDependentForkPostgres(t *testing.T) {
 	dependentRunID := uuid.NewString()
 	forkEventID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id,status,started_at) VALUES
-			($1::uuid,'running',$3),
-			($2::uuid,'paused',$3)
+		INSERT INTO runs (run_id,status,started_at, bundle_hash, bundle_source) VALUES
+			($1::uuid,'running',$3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),
+			($2::uuid,'paused',$3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, sourceRunID, forkRunID, now); err != nil {
 		t.Fatalf("seed selected fork lineage: %v", err)
 	}
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, forkEventID, forkRunID, "fork.dependency", events.EventProducerPlatform, "selected-discard", "", "", now)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id,status,started_at,forked_from_run_id,forked_from_event_id)
-		VALUES ($1::uuid,'paused',$4,$2::uuid,$3::uuid)
+		INSERT INTO runs (run_id,status,started_at,forked_from_run_id,forked_from_event_id, bundle_hash, bundle_source)
+		VALUES ($1::uuid,'paused',$4,$2::uuid,$3::uuid, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, dependentRunID, forkRunID, forkEventID, now); err != nil {
 		t.Fatalf("seed dependent fork: %v", err)
 	}
@@ -707,11 +707,11 @@ func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorit
 	}
 	registerTestAuthorActivityCatalog(t, registrar)
 	if sqlite {
-		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at) VALUES (?,'running',?),(?,'paused',?)`, sourceRun, now, forkRun, now); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at, bundle_hash, bundle_source) VALUES (?,'running',?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),(?,'paused',?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, sourceRun, now, forkRun, now); err != nil {
 			t.Fatalf("seed selected runs: %v", err)
 		}
 	} else {
-		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at) VALUES ($1::uuid,'running',$3),($2::uuid,'paused',$3)`, sourceRun, forkRun, now); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at, bundle_hash, bundle_source) VALUES ($1::uuid,'running',$3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),($2::uuid,'paused',$3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, sourceRun, forkRun, now); err != nil {
 			t.Fatalf("seed selected runs: %v", err)
 		}
 	}

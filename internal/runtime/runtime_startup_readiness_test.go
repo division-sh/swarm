@@ -81,10 +81,11 @@ func newStartupReadinessTestRuntime(t testing.TB, nodes ...runtimepipeline.Backg
 	return &Runtime{
 		Config:         testOperationalRuntimeConfig(),
 		SystemNodes:    nodes,
-		workOccurrence: runtimeTestOccurrence(t, "bundle-v1:sha256:"+strings.Repeat("a", 64)),
+		workOccurrence: runtimeTestOccurrence(t, runtimeTestBundleHash),
 		Options: RuntimeOptions{
 			DisablePersistentStartupRecovery: true,
 			WorkflowModule:                   startupReadinessWorkflowModule{},
+			BundleSourceFact:                 testBundleSourceFact(t, runtimeTestBundleHash),
 		},
 	}
 }

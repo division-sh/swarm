@@ -26,7 +26,7 @@ func TestHandlerWebSocketHealthSubscribeAndUnsubscribe(t *testing.T) {
 		Bundle: runtimecontracts.BundleIdentity{
 			WorkflowName:    "review",
 			WorkflowVersion: "1.2.3",
-			Fingerprint:     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			BundleHash:      "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 	}
 	handler := testHandler(t, Options{

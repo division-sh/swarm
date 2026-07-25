@@ -5,19 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/store"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 const runStartIDempotencyTTL = 24 * time.Hour
-
-var sha256FingerprintPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
-var bundleHashPattern = regexp.MustCompile(`^bundle-v1:sha256:[a-f0-9]{64}$`)
 
 type runStartResult struct {
 	RunID  string `json:"run_id"`
@@ -25,8 +22,7 @@ type runStartResult struct {
 }
 
 type bundleIdentityParam struct {
-	BundleHash        string
-	LegacyFingerprint string
+	BundleHash string
 }
 
 func OperatorRunStartHandlers(opts OperatorReadOptions) map[string]MethodHandler {
@@ -53,7 +49,7 @@ func runStartConfigured(opts OperatorReadOptions) bool {
 	}
 	return opts.Source != nil &&
 		opts.Events != nil &&
-		strings.TrimSpace(opts.Bundle.Fingerprint) != ""
+		strings.TrimSpace(opts.Bundle.BundleHash) != ""
 }
 
 func executeRunStart(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
@@ -85,55 +81,18 @@ func bundleIdentityInputParam(params map[string]any) (bundleIdentityParam, error
 		return bundleIdentityParam{}, nil
 	}
 	rawHash, hashSet := params["bundle_hash"]
-	rawRef, refSet := params["bundle_ref"]
-	if hashSet && refSet {
-		return bundleIdentityParam{}, NewApplicationError(UnsupportedBundleHashCode, false, map[string]any{"reason": "bundle_hash cannot be combined with legacy bundle_ref"})
-	}
 	if hashSet {
 		hash, ok := rawHash.(string)
 		hash = strings.TrimSpace(hash)
 		if !ok || hash == "" {
 			return bundleIdentityParam{}, NewApplicationError(UnsupportedBundleHashCode, false, map[string]any{"reason": "bundle_hash must be bundle-v1:sha256:<64 lowercase hex>"})
 		}
-		if !bundleHashPattern.MatchString(hash) {
+		if err := runtimecontracts.ValidateBundleHash(hash); err != nil {
 			return bundleIdentityParam{}, NewApplicationError(UnsupportedBundleHashCode, false, map[string]any{"reason": "bundle_hash must be bundle-v1:sha256:<64 lowercase hex>"})
 		}
 		return bundleIdentityParam{BundleHash: hash}, nil
 	}
-	fingerprint, err := legacyBundleFingerprintParam(rawRef, refSet)
-	if err != nil {
-		return bundleIdentityParam{}, err
-	}
-	return bundleIdentityParam{LegacyFingerprint: fingerprint}, nil
-}
-
-func legacyBundleFingerprintParam(raw any, ok bool) (string, error) {
-	if !ok || isEmptyParam(raw) {
-		return "", nil
-	}
-	ref, ok := raw.(map[string]any)
-	if !ok {
-		return "", NewApplicationError(UnsupportedBundleRefCode, false, map[string]any{"reason": "bundle_ref must be an object"})
-	}
-	if len(ref) != 1 {
-		return "", NewApplicationError(UnsupportedBundleRefCode, false, map[string]any{"reason": "bundle_ref supports fingerprint only"})
-	}
-	rawFingerprint, ok := ref["fingerprint"].(string)
-	fingerprint := strings.TrimSpace(rawFingerprint)
-	if !ok || fingerprint == "" {
-		return "", NewApplicationError(UnsupportedBundleRefCode, false, map[string]any{"reason": "bundle_ref.fingerprint is required"})
-	}
-	if !sha256FingerprintPattern.MatchString(fingerprint) {
-		return "", NewApplicationError(UnsupportedBundleRefCode, false, map[string]any{"reason": "bundle_ref.fingerprint must be sha256:<64 lowercase hex>"})
-	}
-	return fingerprint, nil
-}
-
-func (p bundleIdentityParam) mismatchDetails(bootFingerprint string) map[string]any {
-	return map[string]any{
-		"boot_fingerprint":     strings.TrimSpace(bootFingerprint),
-		"provided_fingerprint": p.LegacyFingerprint,
-	}
+	return bundleIdentityParam{}, nil
 }
 
 func runStartIdempotencyError(err error) error {

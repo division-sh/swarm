@@ -17,7 +17,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const bundleDeleteTestHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const bundleDeleteTestHash = "bundle-v1:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 const bundleDeleteOtherHash = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
@@ -30,7 +30,7 @@ func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
 	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
-	ctx := testAuthorActivityContext()
+	ctx := withStoreTestPersistedBundleSource(testAuthorActivityContextForBundle(bundleDeleteTestHash), bundleDeleteTestHash)
 	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
 	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source) VALUES ('agent-a', 'bundle-delete', 'operator', 'regular', TRUE, 'authored')`); err != nil {
 		t.Fatalf("seed agent: %v", err)
@@ -74,11 +74,15 @@ func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
 			len(plan.ActiveRuns), len(plan.NonActiveRuns), len(plan.AffectedRuns), len(plan.ActiveDeliveries), len(plan.ActiveSessions), len(plan.ActiveTimers))
 	}
 
+	targets, err := bundledelete.ActiveRunTargets(plan)
+	if err != nil {
+		t.Fatalf("ActiveRunTargets: %v", err)
+	}
 	cleanupResult, err := pg.ApplyBundleForceDeletePreservationCleanup(ctx, preservationcleanup.Request{
 		OperationName: preservationcleanup.BundleForceDeleteOperationName,
 		RequestedAt:   now,
 		ControlledBy:  preservationcleanup.BundleForceDeleteControlledBy,
-		Targets:       bundledelete.ActiveRunTargets(plan),
+		Targets:       targets,
 	})
 	if err != nil {
 		t.Fatalf("ApplyBundleForceDeletePreservationCleanup: %v", err)
@@ -121,7 +125,7 @@ func TestPostgresStore_BundleDeleteFinalMutationFailsBeforeDeletingWithActiveRun
 	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
-	ctx := testAuthorActivityContext()
+	ctx := withStoreTestPersistedBundleSource(testAuthorActivityContextForBundle(bundleDeleteTestHash), bundleDeleteTestHash)
 	runID := uuid.NewString()
 	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteTestHash)
 	seedBundleDeleteRun(t, ctx, pg, runID, "running", bundleDeleteTestHash)
@@ -148,7 +152,7 @@ func TestPostgresStore_BundleDeleteFinalMutationMarksOnlyNonActivePersistedRunsD
 	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
-	ctx := testAuthorActivityContext()
+	ctx := withStoreTestPersistedBundleSource(testAuthorActivityContextForBundle(bundleDeleteTestHash), bundleDeleteTestHash)
 	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteTestHash)
 
 	persisted := map[string]string{
@@ -162,10 +166,8 @@ func TestPostgresStore_BundleDeleteFinalMutationMarksOnlyNonActivePersistedRunsD
 	}
 	ephemeralRunID := uuid.NewString()
 	deletedRunID := uuid.NewString()
-	legacyRunID := uuid.NewString()
 	seedBundleDeleteRunWithSource(t, ctx, pg, ephemeralRunID, "completed", bundleDeleteTestHash, storerunlifecycle.BundleSourceEphemeral)
 	seedBundleDeleteRunWithSource(t, ctx, pg, deletedRunID, "completed", bundleDeleteTestHash, storerunlifecycle.BundleSourceDeleted)
-	seedBundleDeleteRunWithSource(t, ctx, pg, legacyRunID, "completed", bundleDeleteTestHash, storerunlifecycle.BundleSourceLegacy)
 
 	final, err := pg.ApplyBundleDeleteFinalMutation(ctx, bundledelete.FinalMutationRequest{
 		OperationName: bundledelete.DefaultOperationName,
@@ -175,15 +177,15 @@ func TestPostgresStore_BundleDeleteFinalMutationMarksOnlyNonActivePersistedRunsD
 	if err != nil {
 		t.Fatalf("ApplyBundleDeleteFinalMutation: %v", err)
 	}
-	if !final.Deleted || final.BundleRowsDeleted != 1 || final.RunsMarkedDeleted != len(persisted) {
-		t.Fatalf("final mutation = %#v, want deleted row and %d persisted run updates", final, len(persisted))
+	wantDeletedRuns := len(persisted) + 1 // The forked fixture owns a completed continuation run.
+	if !final.Deleted || final.BundleRowsDeleted != 1 || final.RunsMarkedDeleted != wantDeletedRuns {
+		t.Fatalf("final mutation = %#v, want deleted row and %d persisted run updates", final, wantDeletedRuns)
 	}
 	for runID, status := range persisted {
 		assertBundleDeleteRunBundle(t, ctx, pg, runID, status, storerunlifecycle.BundleSourceDeleted, bundleDeleteTestHash)
 	}
 	assertBundleDeleteRunBundle(t, ctx, pg, ephemeralRunID, "completed", storerunlifecycle.BundleSourceEphemeral, bundleDeleteTestHash)
 	assertBundleDeleteRunBundle(t, ctx, pg, deletedRunID, "completed", storerunlifecycle.BundleSourceDeleted, bundleDeleteTestHash)
-	assertBundleDeleteRunBundle(t, ctx, pg, legacyRunID, "completed", storerunlifecycle.BundleSourceLegacy, bundleDeleteTestHash)
 	assertBundleRowAbsent(t, ctx, pg, bundleDeleteTestHash)
 }
 
@@ -197,7 +199,7 @@ func TestPostgresStore_BundleDeleteFinalMutationSerializesConcurrentRunCreation(
 	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
-	ctx := testAuthorActivityContext()
+	ctx := withStoreTestPersistedBundleSource(testAuthorActivityContextForBundle(bundleDeleteTestHash), bundleDeleteTestHash)
 	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteTestHash)
 
 	runCreationTx, err := pg.DB.BeginTx(ctx, nil)
@@ -229,9 +231,9 @@ func TestPostgresStore_BundleDeleteFinalMutationSerializesConcurrentRunCreation(
 
 	runID := uuid.NewString()
 	if _, err := runCreationTx.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
-		VALUES ($1::uuid, 'running', $2, $3, $4, now())
-	`, runID, bundleDeleteTestHash, storerunlifecycle.BundleSourcePersisted, testBootBundleFingerprint); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES ($1::uuid, 'running', $2, $3, now())
+	`, runID, bundleDeleteTestHash, storerunlifecycle.BundleSourcePersisted); err != nil {
 		t.Fatalf("insert concurrent run: %v", err)
 	}
 	if err := runCreationTx.Commit(); err != nil {
@@ -260,7 +262,7 @@ func TestPostgresStore_BundleDeleteFinalMutationBlocksPostDeletePersistedSourceR
 	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
-	ctx := testAuthorActivityContext()
+	ctx := withStoreTestPersistedBundleSource(testAuthorActivityContextForBundle(bundleDeleteTestHash), bundleDeleteTestHash)
 	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteTestHash)
 	final, err := pg.ApplyBundleDeleteFinalMutation(ctx, bundledelete.FinalMutationRequest{
 		OperationName: bundledelete.DefaultOperationName,
@@ -276,11 +278,10 @@ func TestPostgresStore_BundleDeleteFinalMutationBlocksPostDeletePersistedSourceR
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	publishCtx := runtimecorrelation.WithBundleSourceFact(ctx, runtimecorrelation.BundleSourceFact{
-		BundleHash:        bundleDeleteTestHash,
-		BundleSource:      storerunlifecycle.BundleSourcePersisted,
-		BundleFingerprint: testBootBundleFingerprint,
-	})
+	publishCtx := runtimecorrelation.WithBundleSourceFact(
+		ctx,
+		mustStoreTestPersistedBundleSourceFact(bundleDeleteTestHash),
+	)
 	err = commitSemanticEventFixture(publishCtx, pg, eventtest.RunCreatingRootIngress(eventID,
 
 		"scan.requested",
@@ -327,23 +328,23 @@ func seedBundleDeleteRunWithSource(t *testing.T, ctx context.Context, pg *Postgr
 	if status == "forked" {
 		continuedAsRunID := uuid.NewString()
 		if _, err := pg.DB.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, started_at, ended_at)
-			VALUES ($1::uuid, 'completed', now(), now())
-		`, continuedAsRunID); err != nil {
+			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at, ended_at)
+			VALUES ($1::uuid, 'completed', $2, $3, now(), now())
+		`, continuedAsRunID, bundleHash, bundleSource); err != nil {
 			t.Fatalf("seed bundle delete continuation run %s: %v", continuedAsRunID, err)
 		}
 		if _, err := pg.DB.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at, ended_at, continued_as_run_id)
-			VALUES ($1::uuid, $2, $3, $4, $5, now(), now(), $6::uuid)
-		`, runID, status, bundleHash, bundleSource, testBootBundleFingerprint, continuedAsRunID); err != nil {
+			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at, ended_at, continued_as_run_id)
+			VALUES ($1::uuid, $2, $3, $4, now(), now(), $5::uuid)
+		`, runID, status, bundleHash, bundleSource, continuedAsRunID); err != nil {
 			t.Fatalf("seed bundle delete run %s: %v", runID, err)
 		}
 		return
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
-		VALUES ($1::uuid, $2, $3, $4, $5, now())
-	`, runID, status, bundleHash, bundleSource, testBootBundleFingerprint); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES ($1::uuid, $2, $3, $4, now())
+	`, runID, status, bundleHash, bundleSource); err != nil {
 		t.Fatalf("seed bundle delete run %s: %v", runID, err)
 	}
 }

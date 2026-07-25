@@ -10,10 +10,10 @@ import (
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/runbundle"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 type SelectedContractActivationStore interface {
@@ -79,23 +79,29 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if expectedBundleHash == "" {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("%s: selected-contract fork run %s has no persisted bundle_hash", runbundle.CodeBundleDataIntegrityError, forkRunID)
 	}
-	expectedBundleSource, err := storerunlifecycle.CanonicalBundleSource(forkBundleIdentity.BundleSource)
-	if err != nil {
-		return SelectedContractActivationGateResult{}, fmt.Errorf("%s: selected-contract fork run %s has invalid bundle_source: %w", runbundle.CodeBundleDataIntegrityError, forkRunID, err)
-	}
+	expectedBundleSource := forkBundleIdentity.BundleSource
 	if forkBundleIdentity.DataIntegrityError() {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("%s: %s", runbundle.CodeBundleDataIntegrityError, forkBundleIdentity.DetailString())
 	}
-	if expectedBundleSource != storerunlifecycle.BundleSourceEphemeral && expectedBundleSource != storerunlifecycle.BundleSourcePersisted {
+	if !expectedBundleSource.IsEphemeral() && !expectedBundleSource.IsPersisted() {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("%s: selected-contract fork run %s has unavailable bundle_source %s", runbundle.CodeBundleUnavailable, forkRunID, expectedBundleSource)
 	}
+	var expectedSourceFact runtimecorrelation.BundleSourceFact
+	if expectedBundleSource.IsPersisted() {
+		expectedSourceFact, err = runtimecorrelation.NewPersistedBundleSourceFact(expectedBundleHash)
+	} else {
+		expectedSourceFact, err = runtimecorrelation.NewEphemeralBundleSourceFact(expectedBundleHash)
+	}
+	if err != nil {
+		return SelectedContractActivationGateResult{}, fmt.Errorf("%s: selected-contract fork run %s has invalid bundle source fact: %w", runbundle.CodeBundleDataIntegrityError, forkRunID, err)
+	}
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, expectedSourceFact)
 
 	loadedSource, err := loadRunForkSelectedContractSource(ctx, req.SourceLoader, SelectedContractSourceLoadRequest{
-		SourceRunID:          binding.SourceRunID,
-		BundleHash:           expectedBundleHash,
-		ExpectedBundleHash:   expectedBundleHash,
-		ExpectedBundleSource: expectedBundleSource,
-		Selection:            binding.ContractSelection,
+		SourceRunID:      binding.SourceRunID,
+		BundleHash:       expectedBundleHash,
+		BundleSourceFact: expectedSourceFact,
+		Selection:        binding.ContractSelection,
 	})
 	if err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("load selected semantic source for activation gate: %w", err)
@@ -103,10 +109,10 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	defer cleanupLoadedSelectedContractSource(loadedSource)
 	pgStore, _ := req.Store.(*store.PostgresStore)
 	if pgStore != nil {
-		if strings.TrimSpace(loadedSource.BundleHash) == "" || strings.TrimSpace(loadedSource.BundleSource) == "" {
+		if err := loadedSource.BundleSourceFact.Validate(); err != nil {
 			return SelectedContractActivationGateResult{}, fmt.Errorf("selected-contract activation source loader returned incomplete bundle identity")
 		}
-		scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, loadedSource.BundleHash)
+		scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, loadedSource.BundleSourceFact.BundleHash())
 		if err != nil {
 			return SelectedContractActivationGateResult{}, fmt.Errorf("resolve selected-contract activation author activity scope: %w", err)
 		}
@@ -167,8 +173,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	admission, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         forkRunID,
 		SourceRunID:       binding.SourceRunID,
-		BundleHash:        expectedBundleHash,
-		BundleSource:      expectedBundleSource,
+		BundleSourceFact:  expectedSourceFact,
 		BindingReader:     req.Store,
 		SourceLoader:      req.SourceLoader,
 		FrontierAdmission: frontier,

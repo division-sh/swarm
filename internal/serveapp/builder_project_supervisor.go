@@ -78,7 +78,7 @@ func (s *runtimeProjectSupervisor) SetRuntimeContextManager(manager *runtime.Run
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.runtimeContexts = manager
-	s.currentBundleSourceFact = fact.Normalized()
+	s.currentBundleSourceFact = fact
 	s.currentBundleIdentity = identity
 }
 
@@ -208,7 +208,7 @@ func (s *runtimeProjectSupervisor) acquireCurrentRuntime(ctx context.Context) (*
 		return nil, fmt.Errorf("runtime context manager unavailable")
 	}
 	s.mu.RLock()
-	bundleHash := strings.TrimSpace(s.currentBundleSourceFact.BundleHash)
+	bundleHash := s.currentBundleSourceFact.BundleHash()
 	s.mu.RUnlock()
 	use, lookup, err := s.runtimeContexts.AcquireBundleHash(ctx, bundleHash)
 	if err != nil {
@@ -265,7 +265,7 @@ func (s *runtimeProjectSupervisor) CloseProjectWithShutdownOptions(ctx context.C
 	}
 	s.mu.RLock()
 	manager := s.runtimeContexts
-	bundleHash := strings.TrimSpace(s.currentBundleSourceFact.BundleHash)
+	bundleHash := s.currentBundleSourceFact.BundleHash()
 	s.mu.RUnlock()
 	if manager != nil && bundleHash != "" {
 		result := manager.DeactivateBundleHashWithOptions(bundleHash, runtime.RuntimeContextCauseUnloaded, opts)
@@ -335,7 +335,7 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("derive project bundle identity: %w", err)
 	}
-	bundleSourceFact, err := prepareServeBundleSource(ctx, s.stores, bundle, bundleIdentity.Fingerprint, s.dev)
+	bundleSourceFact, err := prepareServeBundleSource(ctx, s.stores, bundle, s.dev)
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("prepare project bundle source: %w", err)
 	}
@@ -374,7 +374,6 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 			ProcessWorkOwner:        s.processWorkOwner,
 			WorkflowModule:          module,
 			WorkspaceLifecycle:      workspaces,
-			BundleFingerprint:       bundleIdentity.Fingerprint,
 			BundleSourceFact:        bundleSourceFact,
 			RuntimeInstanceID:       s.runtimeInstanceID,
 			Credentials:             s.credentials,
@@ -478,7 +477,7 @@ func (s *runtimeProjectSupervisor) completePendingReplacement() error {
 	s.currentSource = pending.source
 	s.currentBundle = pending.bundle
 	s.currentRT = pending.runtime
-	s.currentBundleSourceFact = pending.fact.Normalized()
+	s.currentBundleSourceFact = pending.fact
 	s.currentBundleIdentity = pending.identity
 	if pending.admission != nil {
 		s.providerTriggers = pending.admission.catalog
@@ -504,23 +503,23 @@ func (s *runtimeProjectSupervisor) compileProcessAdmissionCandidate(ctx context.
 	}
 	s.mu.RLock()
 	manager := s.runtimeContexts
-	currentHash := strings.TrimSpace(s.currentBundleSourceFact.BundleHash)
+	currentHash := s.currentBundleSourceFact.BundleHash()
 	s.mu.RUnlock()
 	if manager == nil {
 		return candidate, nil
 	}
 	for _, loaded := range manager.LoadedContexts() {
-		if loaded.BundleHash == currentHash {
+		if loaded.BundleHash() == currentHash {
 			continue
 		}
 		if err := s.validateSource(ctx, loaded.Source, catalog); err != nil {
-			return processAdmissionCandidate{}, fmt.Errorf("candidate provider-trigger catalog rejected loaded runtime context %s: %w", loaded.BundleHash, err)
+			return processAdmissionCandidate{}, fmt.Errorf("candidate provider-trigger catalog rejected loaded runtime context %s: %w", loaded.BundleHash(), err)
 		}
 		targets, err := runtime.RecompileStandingTargetAdmissions(loaded.Source, catalog, loaded.StandingTargets)
 		if err != nil {
-			return processAdmissionCandidate{}, fmt.Errorf("candidate provider-trigger catalog cannot recompile loaded runtime context %s: %w", loaded.BundleHash, err)
+			return processAdmissionCandidate{}, fmt.Errorf("candidate provider-trigger catalog cannot recompile loaded runtime context %s: %w", loaded.BundleHash(), err)
 		}
-		candidate.survivingTargets[loaded.BundleHash] = targets
+		candidate.survivingTargets[loaded.BundleHash()] = targets
 	}
 	return candidate, nil
 }
@@ -541,8 +540,8 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntime(
 	fact := runtimecorrelation.BundleSourceFact{}
 	identity := runtimecontracts.BundleIdentity{}
 	if newRT != nil {
-		fact = newRT.Options.BundleSourceFact.Normalized()
-		identity.BundleHash = fact.BundleHash
+		fact = newRT.Options.BundleSourceFact
+		identity.BundleHash = fact.BundleHash()
 	}
 	return s.replaceCurrentRuntimeWithSource(ctx, resolvedRoot, source, bundle, fact, identity, newRT, newRT.WorkOccurrence())
 }
@@ -573,20 +572,22 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 ) (builderpkg.ProjectStatus, error) {
 	s.mu.RLock()
 	manager := s.runtimeContexts
-	oldHash := strings.TrimSpace(s.currentBundleSourceFact.BundleHash)
+	oldHash := s.currentBundleSourceFact.BundleHash()
 	pending := s.pendingReplacement
 	s.mu.RUnlock()
 	if pending != nil {
 		return s.CurrentProject(), errors.New("runtime replacement transition is already pending")
 	}
-	newHash := strings.TrimSpace(fact.BundleHash)
+	if err := fact.Validate(); err != nil {
+		return builderpkg.ProjectStatus{}, fmt.Errorf("runtime replacement bundle source fact: %w", err)
+	}
 	if manager != nil && oldHash != "" {
 		plannedTargets, err := newRT.PlanStandingTargets()
 		if err != nil {
 			return builderpkg.ProjectStatus{}, err
 		}
 		contextDef := runtime.BundleContext{
-			BundleHash: newHash, BundleSourceFact: fact, BundleIdentity: identity, Source: source,
+			BundleSourceFact: fact, BundleIdentity: identity, Source: source,
 			ContractsRoot: resolvedRoot, PlatformSpecPath: s.platformSpecPath, Runtime: newRT, WorkOwner: workOwner, StandingTargets: plannedTargets,
 		}
 		if err := manager.ValidateReplacement(oldHash, contextDef); err != nil {
@@ -709,7 +710,7 @@ func (s *runtimeProjectSupervisor) swapCurrentRuntime(resolvedRoot string, sourc
 	defer s.mu.Unlock()
 	old := s.currentRT
 	s.currentRoot, s.currentSource, s.currentBundle, s.currentRT = strings.TrimSpace(resolvedRoot), source, bundle, newRT
-	s.currentBundleSourceFact, s.currentBundleIdentity = fact.Normalized(), identity
+	s.currentBundleSourceFact, s.currentBundleIdentity = fact, identity
 	if s.ready != nil {
 		s.ready.Store(true)
 	}
@@ -746,7 +747,7 @@ func (s *runtimeProjectSupervisor) attachCurrentRuntime(
 	s.currentSource = source
 	s.currentBundle = bundle
 	s.currentRT = newRT
-	s.currentBundleSourceFact = fact.Normalized()
+	s.currentBundleSourceFact = fact
 	s.currentBundleIdentity = identity
 	if s.ready != nil {
 		s.ready.Store(true)
@@ -837,7 +838,7 @@ func (s *runtimeProjectSupervisor) restoreQuiescedPredecessor(ctx context.Contex
 	predecessorContext.Runtime = restored
 	predecessorContext.WorkOwner = restoredWorkOwner
 	predecessorContext.StandingTargets = targets
-	publication, err = manager.PrepareRestoredBundleHashReplacementPublication(predecessorContext.BundleHash, predecessorContext)
+	publication, err = manager.PrepareRestoredBundleHashReplacementPublication(predecessorContext.BundleHash(), predecessorContext)
 	if err != nil {
 		_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), restored, s.replacementShutdown)
 		return fmt.Errorf("prepare predecessor runtime context restoration: %w", err)

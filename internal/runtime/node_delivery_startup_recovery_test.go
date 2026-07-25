@@ -91,7 +91,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			setup: func(t *testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore, *runtimepipeline.WorkflowInstanceStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
-				if _, err := selected.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, templateInstanceDeliveryRunID); err != nil {
+				if _, err := selected.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, templateInstanceDeliveryRunID); err != nil {
 					t.Fatalf("seed SQLite startup-order run: %v", err)
 				}
 				workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(selected.DB, selected)
@@ -147,7 +147,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				Options: swarmruntime.RuntimeOptions{
 					SelfCheck: false, WorkflowModule: module, LLMRuntime: startupRecoveryOrderLLM{},
 					RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleSourceFact: authorActivityTestBundleSourceFact,
-					BundleFingerprint: authorActivityTestBundleSourceFact.BundleFingerprint, ProcessWorkOwner: processOwner,
+					ProcessWorkOwner: processOwner,
 					TestWorkflowNodeHandlerStartHook: func(context.Context, string, events.Event) error {
 						if !hydrated.Load() {
 							return errors.New("workflow-node recovery started before persisted agent hydration")
@@ -225,7 +225,7 @@ func TestPipelineCoordinatorRecoverNodeDeliveriesUsesCanonicalSelectedStoreOwner
 			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
-				if _, err := selected.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, templateInstanceDeliveryRunID); err != nil {
+				if _, err := selected.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, templateInstanceDeliveryRunID); err != nil {
 					t.Fatalf("seed SQLite recovery run: %v", err)
 				}
 				return ctx, selected.DB, selected
@@ -306,7 +306,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
-				if _, err := selected.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, templateInstanceDeliveryRunID); err != nil {
+				if _, err := selected.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, templateInstanceDeliveryRunID); err != nil {
 					t.Fatalf("seed SQLite recovery run: %v", err)
 				}
 				return ctx, selected.DB, selected
@@ -435,7 +435,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
-				if _, err := selected.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, templateInstanceDeliveryRunID); err != nil {
+				if _, err := selected.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, templateInstanceDeliveryRunID); err != nil {
 					t.Fatalf("seed SQLite standing recovery run: %v", err)
 				}
 				return ctx, selected.DB, selected

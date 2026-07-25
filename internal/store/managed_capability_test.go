@@ -58,7 +58,7 @@ func managedExecutionStoreTestContext(t testing.TB, ctx context.Context) context
 		1,
 		"",
 		"store-test-actors",
-		"store-test-bundle",
+		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		nil,
 	)
 	if err != nil {
@@ -107,7 +107,7 @@ func managedSelectedExecutionStoreTestContext(t testing.TB, ctx context.Context,
 		authority.SelectedFork.Generation,
 		authority.SelectedFork.ForkRunID,
 		"store-test-selected-actors",
-		"store-test-selected-bundle",
+		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		nil,
 	)
 	if err != nil {
@@ -160,7 +160,7 @@ func withManagedCompletionTestSurface(t testing.TB, ctx context.Context, authori
 		generation,
 		runID,
 		"store-test-completion-actors",
-		"store-test-completion-bundle",
+		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		nil,
 	)
 	if err != nil {

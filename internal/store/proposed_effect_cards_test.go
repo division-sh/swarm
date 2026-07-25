@@ -539,7 +539,7 @@ func newProposedEffectTestCard(t *testing.T, runID string, now time.Time, genera
 	continuation := decisioncard.ProposedEffectContinuation{
 		CardID: decisioncard.ProposedEffectCardID(requestID, "support_reply"), RunID: runID,
 		RequestEventID: requestID, ActivityID: "send_support_reply", Tool: "telegram.send_message", Input: input,
-		BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), WorkflowVersion: "1",
+		BundleHash: authorActivityTestBundleHash, WorkflowVersion: "1",
 		EffectClass:  runtimecontracts.ActivityEffectClassNonIdempotentWrite,
 		SuccessEvent: "support_reply.succeeded", FailureEvent: "support_reply.failed",
 		RevisionEvent: "support_reply.revision_requested", RejectedEvent: "support_reply.rejected",
@@ -575,7 +575,7 @@ func newProposedEffectTestCard(t *testing.T, runID string, now time.Time, genera
 		CardID: continuation.CardID, RunID: runID, Anchor: anchor, Snapshot: snapshot,
 		ExecutionMode:     "live",
 		EffectContentHash: continuation.EffectContentHash,
-		BundleHash:        "bundle-v1:sha256:" + strings.Repeat("a", 64), WorkflowVersion: "1",
+		BundleHash:        authorActivityTestBundleHash, WorkflowVersion: "1",
 		CreatedAt: now,
 	})
 	if err != nil {

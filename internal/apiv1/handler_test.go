@@ -549,7 +549,7 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "review",
 				WorkflowVersion: "1.2.3",
-				Fingerprint:     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				BundleHash:      "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			},
 			RuntimeIdentity: RuntimeIdentityResult{
 				RuntimeInstanceID:   "runtime-instance-1",
@@ -577,7 +577,7 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 		t.Fatalf("health.check result = %#v", healthResult)
 	}
 	bundle := asMap(t, healthResult["bundle"])
-	if bundle["fingerprint"] != "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+	if bundle["bundle_hash"] != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 		t.Fatalf("bundle identity = %#v", bundle)
 	}
 	if raw, _ := json.Marshal(healthResult); strings.Contains(string(raw), "/") {
@@ -592,8 +592,8 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 	if identityResult["runtime_instance_id"] != "runtime-instance-1" || identityResult["api_version"] != "v1" {
 		t.Fatalf("runtime.identity result = %#v", identityResult)
 	}
-	if identityResult["runtime_instance_id"] == bundle["fingerprint"] {
-		t.Fatalf("runtime.identity reused bundle fingerprint: %#v", identityResult)
+	if identityResult["runtime_instance_id"] == bundle["bundle_hash"] {
+		t.Fatalf("runtime.identity reused bundle hash: %#v", identityResult)
 	}
 
 	get := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"get","method":"run.get","params":{"run_id":"run-1"}}`)
@@ -645,7 +645,7 @@ func TestOperatorReadHandlersRunNotFoundAndRunStartStaysUnavailable(t *testing.T
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "review",
 				WorkflowVersion: "1.2.3",
-				Fingerprint:     "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				BundleHash:      "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 			},
 		}),
 	})
@@ -680,7 +680,7 @@ func TestOperatorReadHandlersRunListRejectsInvalidFilters(t *testing.T) {
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "review",
 				WorkflowVersion: "1.2.3",
-				Fingerprint:     "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+				BundleHash:      "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
 			},
 		}),
 	})
@@ -872,7 +872,7 @@ func TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempote
 	}
 	result := asMap(t, first.Result)
 	bundleHash, ok := result["bundle_hash"].(string)
-	if !ok || !bundleHashPattern.MatchString(bundleHash) {
+	if !ok || runtimecontracts.ValidateBundleHash(bundleHash) != nil {
 		t.Fatalf("bundle.register bundle_hash = %#v", result["bundle_hash"])
 	}
 	if result["registered"] != true || result["has_data"] != false || result["data_size_bytes"] != float64(0) {

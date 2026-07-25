@@ -166,7 +166,7 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 		coordinator *runtimepipeline.PipelineCoordinator
 		manager     *runtimemanager.AgentManager
 	)
-	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash)
+	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
 	eventBus, err := newScopedTestEventBus(t, backend, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		WorkOwner:      workOwner,
@@ -221,9 +221,9 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 
 func seedFanInBarrierRun(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, db *sql.DB, runID string) {
 	t.Helper()
-	query := `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`
+	query := `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
 	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `INSERT INTO runs (run_id, status) VALUES (?, 'running')`
+		query = `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
 	}
 	if _, err := db.ExecContext(ctx, query, runID); err != nil {
 		t.Fatalf("seed fan-in barrier run: %v", err)

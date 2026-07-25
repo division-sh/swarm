@@ -313,9 +313,9 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 func seedRunControlTestRun(t *testing.T, ctx context.Context, db *sql.DB, runID string) {
 	t.Helper()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint)
-		VALUES ($1::uuid, 'running', $2, $3, $4)
-	`, runID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, $3)
+	`, runID, authorActivityTestBundleHash, authorActivityTestBundleSource); err != nil {
 		t.Fatalf("seed run %s: %v", runID, err)
 	}
 }

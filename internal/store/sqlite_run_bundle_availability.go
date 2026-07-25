@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	"github.com/division-sh/swarm/internal/store/runbundle"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -24,21 +24,20 @@ func (s *SQLiteRuntimeStore) LoadRunBundleAvailability(ctx context.Context, runI
 		return runbundle.Availability{}, ErrRunNotFound
 	}
 	var availability runbundle.Availability
+	var rawSource string
 	err := s.DB.QueryRowContext(ctx, `
 		SELECT
 			run_id,
 			COALESCE(status, ''),
 			COALESCE(bundle_hash, ''),
-			COALESCE(bundle_source, ''),
-			COALESCE(bundle_fingerprint, '')
+			COALESCE(bundle_source, '')
 		FROM runs
 		WHERE run_id = ?
 	`, runID).Scan(
 		&availability.RunID,
 		&availability.Status,
 		&availability.BundleHash,
-		&availability.BundleSource,
-		&availability.BundleFingerprint,
+		&rawSource,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runbundle.Availability{}, ErrRunNotFound
@@ -46,26 +45,24 @@ func (s *SQLiteRuntimeStore) LoadRunBundleAvailability(ctx context.Context, runI
 	if err != nil {
 		return runbundle.Availability{}, fmt.Errorf("load sqlite run bundle availability: %w", err)
 	}
+	source, err := runbundle.DecodeAvailabilitySource(rawSource)
+	if err != nil {
+		return runbundle.Availability{}, err
+	}
+	availability.BundleSource = source
 	return s.classifySQLiteRunBundleAvailability(ctx, availability)
 }
 
 func (s *SQLiteRuntimeStore) classifySQLiteRunBundleAvailability(ctx context.Context, availability runbundle.Availability) (runbundle.Availability, error) {
-	source, err := storerunlifecycle.CanonicalBundleSource(availability.BundleSource)
-	if err != nil {
-		return runbundle.Availability{}, err
-	}
 	availability.RunID = strings.TrimSpace(availability.RunID)
 	availability.Status = strings.TrimSpace(availability.Status)
-	availability.BundleHash = strings.TrimSpace(availability.BundleHash)
-	availability.BundleSource = source
-	availability.BundleFingerprint = strings.TrimSpace(availability.BundleFingerprint)
-	switch source {
-	case storerunlifecycle.BundleSourcePersisted:
-		if availability.BundleHash == "" {
-			availability.ErrorCode = runbundle.CodeBundleDataIntegrityError
-			availability.Cause = "persisted_missing_hash"
-			return availability, nil
-		}
+	if err := runtimebundleidentity.ValidateCanonicalHash(availability.BundleHash); err != nil {
+		availability.ErrorCode = runbundle.CodeBundleDataIntegrityError
+		availability.Cause = "invalid_bundle_hash"
+		return availability, nil
+	}
+	switch availability.BundleSource {
+	case runbundle.AvailabilitySourcePersisted:
 		exists, err := s.sqliteBundleRowExists(ctx, availability.BundleHash)
 		if err != nil {
 			return runbundle.Availability{}, err
@@ -75,11 +72,11 @@ func (s *SQLiteRuntimeStore) classifySQLiteRunBundleAvailability(ctx context.Con
 			availability.ErrorCode = runbundle.CodeBundleDataIntegrityError
 			availability.Cause = "persisted_missing_bundle_row"
 		}
-	case storerunlifecycle.BundleSourceEphemeral, storerunlifecycle.BundleSourceDeleted, storerunlifecycle.BundleSourceLegacy:
+	case runbundle.AvailabilitySourceEphemeral, runbundle.AvailabilitySourceDeleted:
 		availability.ErrorCode = runbundle.CodeBundleUnavailable
-		availability.Cause = source
+		availability.Cause = availability.BundleSource.String()
 	default:
-		return runbundle.Availability{}, fmt.Errorf("unsupported bundle source %q", source)
+		return runbundle.Availability{}, fmt.Errorf("unsupported bundle source %q", availability.BundleSource.String())
 	}
 	return availability, nil
 }

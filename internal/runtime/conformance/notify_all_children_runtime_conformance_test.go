@@ -231,7 +231,7 @@ func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, d
 	t.Helper()
 	var coordinator *runtimepipeline.PipelineCoordinator
 	var manager *runtimemanager.AgentManager
-	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash)
+	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
 	eventBus, err := newScopedTestEventBus(t, backend, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		WorkOwner:      workOwner,

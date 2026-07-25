@@ -1090,8 +1090,8 @@ func seedPostgresInboundGatewayRuntime(
 ) {
 	t.Helper()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES ($1::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 		ON CONFLICT (run_id) DO NOTHING
 	`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -1162,8 +1162,8 @@ func seedSQLiteInboundGatewayRuntime(
 	t.Helper()
 	now := time.Now().UTC()
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES (?, 'running', ?)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, now); err != nil {
 		t.Fatalf("seed sqlite run: %v", err)
 	}

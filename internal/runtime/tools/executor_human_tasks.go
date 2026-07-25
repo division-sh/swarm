@@ -97,10 +97,7 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 	if !ok {
 		return nil, errors.New("human_task_request requires pinned bundle identity")
 	}
-	bundleHash := strings.TrimSpace(bundleFact.BundleHash)
-	if bundleHash == "" {
-		bundleHash = strings.TrimSpace(bundleFact.BundleFingerprint)
-	}
+	bundleHash := strings.TrimSpace(bundleFact.BundleHash())
 	if bundleHash == "" {
 		return nil, errors.New("human_task_request requires pinned bundle hash")
 	}

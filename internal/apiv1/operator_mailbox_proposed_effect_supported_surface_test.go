@@ -170,9 +170,8 @@ func newProposedEffectMailboxHandler(
 	t.Helper()
 	var coordinator *runtimepipeline.PipelineCoordinator
 	bus, err := newScopedAPITestEventBus(t, persistence.(runtimebus.EventStore), runtimebus.EventBusOptions{
-		ContractBundle:    source,
-		BundleFingerprint: fact.BundleFingerprint,
-		BundleSourceFact:  fact,
+		ContractBundle:   source,
+		BundleSourceFact: fact,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if coordinator == nil {
 				return nil
@@ -193,8 +192,8 @@ func newProposedEffectMailboxHandler(
 	}
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 		Module: newRunCompletionSystemNodeModule(t, source), WorkflowStore: workflowStore,
-		DecisionCards: cards,
-		BundleHash:    fact.BundleHash,
+		DecisionCards:    cards,
+		BundleSourceFact: fact,
 	})
 	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: "workflow-runtime"})
 	runtimebustest.Subscribe(t, bus, "workflow-runtime", events.EventType("mailbox.card_decided"), events.EventType("platform.activity_requested"))
@@ -223,7 +222,7 @@ func newProposedEffectMailboxHandler(
 			RunBundleContext: runBundleContext, Mailbox: mailbox, DecisionCards: cards, DecisionAuthority: workflowStore,
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
-				Fingerprint: fact.BundleFingerprint, BundleHash: fact.BundleHash,
+				BundleHash: fact.BundleHash(),
 			},
 		}),
 	})
@@ -246,7 +245,7 @@ func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecor
 	continuation := decisioncard.ProposedEffectContinuation{
 		CardID: decisioncard.ProposedEffectCardID(requestEventID, "support_reply"), RunID: runID,
 		RequestEventID: requestEventID, ActivityID: "send_support_reply", Tool: "provider_write",
-		BundleHash: fact.BundleHash, WorkflowVersion: workflowVersion, Input: input,
+		BundleHash: fact.BundleHash(), WorkflowVersion: workflowVersion, Input: input,
 		EffectClass:  runtimecontracts.ActivityEffectClassNonIdempotentWrite,
 		SuccessEvent: "send_support_reply.succeeded", FailureEvent: "send_support_reply.failed",
 		RevisionEvent: "send_support_reply.revision_requested", RejectedEvent: "send_support_reply.rejected",
@@ -281,7 +280,7 @@ func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecor
 	card, err := decisioncard.New(decisioncard.Card{
 		CardID: continuation.CardID, RunID: runID, Anchor: anchor, Snapshot: snapshot,
 		ExecutionMode:     "live",
-		EffectContentHash: continuation.EffectContentHash, BundleHash: fact.BundleHash,
+		EffectContentHash: continuation.EffectContentHash, BundleHash: fact.BundleHash(),
 		WorkflowVersion: workflowVersion, CreatedAt: now,
 	})
 	if err != nil {
@@ -292,9 +291,9 @@ func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecor
 
 func insertProposedEffectAPIRun(t *testing.T, db *sql.DB, backend, runID string) {
 	t.Helper()
-	query := `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`
+	query := `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
 	if backend == "postgres" {
-		query = `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`
+		query = `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
 	}
 	if _, err := db.ExecContext(context.Background(), query, runID, time.Now().UTC()); err != nil {
 		t.Fatal(err)

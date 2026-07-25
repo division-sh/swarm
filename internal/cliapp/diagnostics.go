@@ -140,8 +140,7 @@ type diagnosticHealthCheckResult struct {
 type diagnosticBundleIdentity struct {
 	WorkflowName    *string `json:"workflow_name"`
 	WorkflowVersion *string `json:"workflow_version"`
-	Fingerprint     string  `json:"fingerprint"`
-	BundleHash      string  `json:"bundle_hash,omitempty"`
+	BundleHash      string  `json:"bundle_hash"`
 }
 
 type diagnosticRunHeader struct {
@@ -1299,10 +1298,7 @@ func validateDiagnosticHealthCheck(result diagnosticHealthCheckResult) error {
 	if result.RuntimeOK == nil {
 		return fmt.Errorf("malformed health.check result: runtime_ok is required")
 	}
-	if strings.TrimSpace(result.Bundle.Fingerprint) == "" {
-		return fmt.Errorf("malformed health.check result: bundle.fingerprint is required")
-	}
-	if hash := strings.TrimSpace(result.Bundle.BundleHash); hash != "" && !cliBundleHashPattern.MatchString(hash) {
+	if hash := strings.TrimSpace(result.Bundle.BundleHash); !cliBundleHashPattern.MatchString(hash) {
 		return fmt.Errorf("malformed health.check result: bundle.bundle_hash must be bundle-v1:sha256:<64 lowercase hex>")
 	}
 	if result.Bundle.WorkflowName == nil {
@@ -1788,14 +1784,11 @@ func writeDiagnosticHealth(out io.Writer, result diagnosticHealthCheckResult) {
 		return
 	}
 	fmt.Fprintf(out, "alive=%t ready=%t db_ok=%t runtime_ok=%t\n", BoolPointerValue(result.Alive), BoolPointerValue(result.Ready), BoolPointerValue(result.DBOK), BoolPointerValue(result.RuntimeOK))
-	fmt.Fprintf(out, "bundle fingerprint=%s workflow_name=%s workflow_version=%s\n",
-		result.Bundle.Fingerprint,
+	fmt.Fprintf(out, "bundle_hash=%s workflow_name=%s workflow_version=%s\n",
+		result.Bundle.BundleHash,
 		emptyDash(stringPointerValue(result.Bundle.WorkflowName)),
 		emptyDash(stringPointerValue(result.Bundle.WorkflowVersion)),
 	)
-	if hash := strings.TrimSpace(result.Bundle.BundleHash); hash != "" {
-		fmt.Fprintf(out, "bundle_hash=%s\n", hash)
-	}
 }
 
 func IntPointerValue(value *int) int {

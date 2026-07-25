@@ -178,7 +178,6 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 			return runtimerunquiescence.Result{}, err
 		}
 		opts := runLifecycleOptions()
-		opts.BundleHash = run.BundleHash
 		if _, err := storerunlifecycle.MarkTerminal(ctx, tx, run.RunID, "cancelled", nil, now, opts); err != nil {
 			return runtimerunquiescence.Result{}, fmt.Errorf("mark active run quiescence run terminal: %w", err)
 		}

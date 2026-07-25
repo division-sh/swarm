@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/runbundle"
@@ -74,7 +75,7 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 	result, err := e.ExecuteSelectedContractRunFork(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
 		SourceRunID:         strings.TrimSpace(req.SourceRunID),
 		At:                  strings.TrimSpace(req.ForkEventID),
-		BundleHash:          strings.TrimSpace(req.BundleHash),
+		ExpectedBundleHash:  strings.TrimSpace(req.BundleHash),
 		ConfirmSourceFreeze: req.ConfirmSourceFreeze,
 		SourceLoader:        e.SourceLoader,
 		ContractSelection:   selection,
@@ -127,7 +128,10 @@ func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, 
 	if availability.DataIntegrityError() {
 		return nil, NewApplicationError(BundleDataIntegrityErrorCode, false, runForkAvailabilityDetails(availability))
 	}
-	if !availability.Available() {
+	loadedEphemeralCandidate := runtimeContextManager(opts) != nil &&
+		availability.BundleSource.IsEphemeral() &&
+		strings.TrimSpace(availability.BundleHash) != ""
+	if !availability.Available() && !loadedEphemeralCandidate {
 		return nil, NewApplicationError(BundleUnavailableCode, false, runForkAvailabilityDetails(availability))
 	}
 	if activeRunStatus(availability.Status) && !params.ConfirmSourceFreeze {
@@ -254,8 +258,10 @@ func runForkParamsFromRequest(params map[string]any) (runForkParams, error) {
 	if err != nil {
 		return runForkParams{}, err
 	}
-	if bundleHash != "" && !bundleHashPattern.MatchString(bundleHash) {
-		return runForkParams{}, NewInvalidParamsError(map[string]any{"field": "bundle_hash", "reason": "must be bundle-v1:sha256:<64 lowercase hex>"})
+	if bundleHash != "" {
+		if err := runtimecontracts.ValidateBundleHash(bundleHash); err != nil {
+			return runForkParams{}, NewInvalidParamsError(map[string]any{"field": "bundle_hash", "reason": "must be bundle-v1:sha256:<64 lowercase hex>"})
+		}
 	}
 	confirmSourceFreeze, err := optionalBoolParam(params, "confirm_source_freeze", false)
 	if err != nil {
@@ -304,11 +310,10 @@ func optionalUUIDParam(params map[string]any, name string) (string, bool, error)
 func runForkAvailabilityDetails(availability runbundle.Availability) map[string]any {
 	details := map[string]any{"run_id": strings.TrimSpace(availability.RunID)}
 	for key, value := range map[string]string{
-		"status":                    availability.Status,
-		"bundle_hash":               availability.BundleHash,
-		"bundle_source":             availability.BundleSource,
-		"legacy_bundle_fingerprint": availability.BundleFingerprint,
-		"cause":                     availability.Cause,
+		"status":        availability.Status,
+		"bundle_hash":   availability.BundleHash,
+		"bundle_source": availability.BundleSource.String(),
+		"cause":         availability.Cause,
 	} {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
 			details[key] = trimmed
@@ -320,6 +325,10 @@ func runForkAvailabilityDetails(availability runbundle.Availability) map[string]
 func runForkError(sourceRunID, forkEventID string, err error) error {
 	if err == nil {
 		return nil
+	}
+	var applicationErr *ApplicationError
+	if errors.As(err, &applicationErr) {
+		return applicationErr
 	}
 	var conflict *store.APIIdempotencyConflictError
 	if errors.As(err, &conflict) {

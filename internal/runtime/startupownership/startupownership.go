@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	"github.com/google/uuid"
 )
 
@@ -25,30 +26,30 @@ const (
 )
 
 type AcquireRequest struct {
-	OwnerID           string
-	BootID            string
-	BundleFingerprint string
+	OwnerID    string
+	BootID     string
+	BundleHash string
 }
 
 type Authority struct {
-	AuthorityID        string    `json:"authority_id"`
-	LeaseAuthorityID   string    `json:"lease_authority_id"`
-	TransitionOrdinal  uint64    `json:"transition_ordinal"`
-	Generation         uint64    `json:"generation"`
-	StateVersion       uint64    `json:"state_version"`
-	State              State     `json:"state"`
-	OwnerID            string    `json:"owner_id"`
-	BootID             string    `json:"boot_id"`
-	BundleFingerprint  string    `json:"bundle_fingerprint"`
-	Backend            string    `json:"backend"`
-	HandoffID          string    `json:"handoff_id,omitempty"`
-	PredecessorOwnerID string    `json:"predecessor_owner_id,omitempty"`
-	PredecessorBootID  string    `json:"predecessor_boot_id,omitempty"`
-	PredecessorBundle  string    `json:"predecessor_bundle_fingerprint,omitempty"`
-	CandidateOwnerID   string    `json:"candidate_owner_id,omitempty"`
-	CandidateBootID    string    `json:"candidate_boot_id,omitempty"`
-	ProbeSurfaceIDs    []string  `json:"probe_surface_ids,omitempty"`
-	RecordedAt         time.Time `json:"recorded_at"`
+	AuthorityID           string    `json:"authority_id"`
+	LeaseAuthorityID      string    `json:"lease_authority_id"`
+	TransitionOrdinal     uint64    `json:"transition_ordinal"`
+	Generation            uint64    `json:"generation"`
+	StateVersion          uint64    `json:"state_version"`
+	State                 State     `json:"state"`
+	OwnerID               string    `json:"owner_id"`
+	BootID                string    `json:"boot_id"`
+	BundleHash            string    `json:"bundle_hash"`
+	Backend               string    `json:"backend"`
+	HandoffID             string    `json:"handoff_id,omitempty"`
+	PredecessorOwnerID    string    `json:"predecessor_owner_id,omitempty"`
+	PredecessorBootID     string    `json:"predecessor_boot_id,omitempty"`
+	PredecessorBundleHash string    `json:"predecessor_bundle_hash,omitempty"`
+	CandidateOwnerID      string    `json:"candidate_owner_id,omitempty"`
+	CandidateBootID       string    `json:"candidate_boot_id,omitempty"`
+	ProbeSurfaceIDs       []string  `json:"probe_surface_ids,omitempty"`
+	RecordedAt            time.Time `json:"recorded_at"`
 }
 
 func (a Authority) Validate() error {
@@ -61,8 +62,11 @@ func (a Authority) Validate() error {
 	if _, err := uuid.Parse(strings.TrimSpace(a.BootID)); err != nil {
 		return fmt.Errorf("startup boot id is invalid: %w", err)
 	}
-	if a.TransitionOrdinal == 0 || a.Generation == 0 || a.StateVersion == 0 || strings.TrimSpace(a.OwnerID) == "" || strings.TrimSpace(a.BundleFingerprint) == "" || strings.TrimSpace(a.Backend) == "" || a.RecordedAt.IsZero() {
+	if a.TransitionOrdinal == 0 || a.Generation == 0 || a.StateVersion == 0 || strings.TrimSpace(a.OwnerID) == "" || strings.TrimSpace(a.BundleHash) == "" || strings.TrimSpace(a.Backend) == "" || a.RecordedAt.IsZero() {
 		return fmt.Errorf("startup authority identity is incomplete")
+	}
+	if err := runtimebundleidentity.ValidateCanonicalHash(a.BundleHash); err != nil {
+		return fmt.Errorf("startup authority bundle_hash is invalid: %w", err)
 	}
 	switch a.State {
 	case StateActive, StatePrepared, StateProbeSettled, StateAdmitted, StateCommitted, StateRolledBack, StateFinalized, StateReleased:
@@ -73,8 +77,11 @@ func (a Authority) Validate() error {
 		if _, err := uuid.Parse(a.HandoffID); err != nil {
 			return fmt.Errorf("startup handoff id is invalid: %w", err)
 		}
-		if strings.TrimSpace(a.PredecessorOwnerID) == "" || strings.TrimSpace(a.PredecessorBootID) == "" || strings.TrimSpace(a.PredecessorBundle) == "" || strings.TrimSpace(a.CandidateOwnerID) == "" || strings.TrimSpace(a.CandidateBootID) == "" {
+		if strings.TrimSpace(a.PredecessorOwnerID) == "" || strings.TrimSpace(a.PredecessorBootID) == "" || strings.TrimSpace(a.PredecessorBundleHash) == "" || strings.TrimSpace(a.CandidateOwnerID) == "" || strings.TrimSpace(a.CandidateBootID) == "" {
 			return fmt.Errorf("startup handoff authority identity is incomplete")
+		}
+		if err := runtimebundleidentity.ValidateCanonicalHash(a.PredecessorBundleHash); err != nil {
+			return fmt.Errorf("startup predecessor bundle_hash is invalid: %w", err)
 		}
 	}
 	return nil
@@ -84,16 +91,16 @@ func NewColdAuthority(req AcquireRequest, backend string) (Authority, error) {
 	authorityID := uuid.NewString()
 	a := Authority{
 		AuthorityID: authorityID, LeaseAuthorityID: authorityID, TransitionOrdinal: 1, Generation: 1, StateVersion: 1, State: StateActive,
-		OwnerID: strings.TrimSpace(req.OwnerID), BootID: strings.TrimSpace(req.BootID), BundleFingerprint: strings.TrimSpace(req.BundleFingerprint),
+		OwnerID: strings.TrimSpace(req.OwnerID), BootID: strings.TrimSpace(req.BootID), BundleHash: req.BundleHash,
 		Backend: strings.TrimSpace(backend), RecordedAt: time.Now().UTC(),
 	}
 	return a, a.Validate()
 }
 
 type HandoffRequest struct {
-	CandidateOwnerID           string
-	CandidateBootID            string
-	CandidateBundleFingerprint string
+	CandidateOwnerID    string
+	CandidateBootID     string
+	CandidateBundleHash string
 }
 
 type Recorder interface {
@@ -160,15 +167,18 @@ func (l *controlledLease) PrepareHandoff(ctx context.Context, req HandoffRequest
 	if (l.authority.State != StateActive && l.authority.State != StateAdmitted && l.authority.State != StateFinalized) || l.handoff != nil {
 		return nil, fmt.Errorf("startup ownership lease cannot prepare another handoff")
 	}
-	if _, err := uuid.Parse(strings.TrimSpace(req.CandidateBootID)); err != nil || strings.TrimSpace(req.CandidateOwnerID) == "" || strings.TrimSpace(req.CandidateBundleFingerprint) == "" {
+	if _, err := uuid.Parse(strings.TrimSpace(req.CandidateBootID)); err != nil || strings.TrimSpace(req.CandidateOwnerID) == "" {
 		return nil, fmt.Errorf("startup ownership handoff candidate identity is invalid")
+	}
+	if err := runtimebundleidentity.ValidateCanonicalHash(req.CandidateBundleHash); err != nil {
+		return nil, fmt.Errorf("startup ownership handoff candidate bundle_hash is invalid: %w", err)
 	}
 	handoffID := uuid.NewString()
 	a := Authority{
 		AuthorityID: handoffID, LeaseAuthorityID: l.authority.LeaseAuthorityID, Generation: l.authority.Generation,
 		TransitionOrdinal: l.authority.TransitionOrdinal + 1, StateVersion: 1, State: StatePrepared, OwnerID: strings.TrimSpace(req.CandidateOwnerID), BootID: strings.TrimSpace(req.CandidateBootID),
-		BundleFingerprint: strings.TrimSpace(req.CandidateBundleFingerprint), Backend: l.authority.Backend, HandoffID: handoffID,
-		PredecessorOwnerID: l.authority.OwnerID, PredecessorBootID: l.authority.BootID, PredecessorBundle: l.authority.BundleFingerprint,
+		BundleHash: req.CandidateBundleHash, Backend: l.authority.Backend, HandoffID: handoffID,
+		PredecessorOwnerID: l.authority.OwnerID, PredecessorBootID: l.authority.BootID, PredecessorBundleHash: l.authority.BundleHash,
 		CandidateOwnerID: strings.TrimSpace(req.CandidateOwnerID), CandidateBootID: strings.TrimSpace(req.CandidateBootID), RecordedAt: nextRecordedAt(l.authority),
 	}
 	if err := l.recordTransition(ctx, &l.authority, a); err != nil {
@@ -314,7 +324,7 @@ func (h *controlledHandoff) Rollback(ctx context.Context) (Authority, error) {
 	restored.HandoffID = ""
 	restored.PredecessorOwnerID = ""
 	restored.PredecessorBootID = ""
-	restored.PredecessorBundle = ""
+	restored.PredecessorBundleHash = ""
 	restored.CandidateOwnerID = ""
 	restored.CandidateBootID = ""
 	restored.ProbeSurfaceIDs = nil
@@ -438,9 +448,9 @@ func ValidateTransitionChain(previous *Authority, next ...Authority) error {
 
 func validateSameAuthorityTransition(previous, next Authority, allowProbeChange bool) error {
 	if next.AuthorityID != previous.AuthorityID || next.Generation != previous.Generation || next.StateVersion != previous.StateVersion+1 ||
-		next.OwnerID != previous.OwnerID || next.BootID != previous.BootID || next.BundleFingerprint != previous.BundleFingerprint ||
+		next.OwnerID != previous.OwnerID || next.BootID != previous.BootID || next.BundleHash != previous.BundleHash ||
 		next.HandoffID != previous.HandoffID || next.PredecessorOwnerID != previous.PredecessorOwnerID || next.PredecessorBootID != previous.PredecessorBootID ||
-		next.PredecessorBundle != previous.PredecessorBundle || next.CandidateOwnerID != previous.CandidateOwnerID || next.CandidateBootID != previous.CandidateBootID {
+		next.PredecessorBundleHash != previous.PredecessorBundleHash || next.CandidateOwnerID != previous.CandidateOwnerID || next.CandidateBootID != previous.CandidateBootID {
 		return fmt.Errorf("startup authority same-coordinate transition changed immutable identity")
 	}
 	if !allowProbeChange && !slices.Equal(next.ProbeSurfaceIDs, previous.ProbeSurfaceIDs) {
@@ -454,7 +464,7 @@ func validateSameAuthorityTransition(previous, next Authority, allowProbeChange 
 
 func validatePreparedTransition(previous, next Authority) error {
 	if next.Generation != previous.Generation || next.StateVersion != 1 || next.AuthorityID == previous.AuthorityID || next.AuthorityID != next.HandoffID ||
-		next.PredecessorOwnerID != previous.OwnerID || next.PredecessorBootID != previous.BootID || next.PredecessorBundle != previous.BundleFingerprint ||
+		next.PredecessorOwnerID != previous.OwnerID || next.PredecessorBootID != previous.BootID || next.PredecessorBundleHash != previous.BundleHash ||
 		next.OwnerID != next.CandidateOwnerID || next.BootID != next.CandidateBootID || len(next.ProbeSurfaceIDs) != 0 {
 		return fmt.Errorf("prepared startup handoff identity is invalid")
 	}
@@ -463,9 +473,9 @@ func validatePreparedTransition(previous, next Authority) error {
 
 func validateCommittedTransition(previous, next Authority) error {
 	if next.AuthorityID == previous.AuthorityID || next.Generation != previous.Generation+1 || next.StateVersion != previous.StateVersion+1 ||
-		next.OwnerID != previous.OwnerID || next.BootID != previous.BootID || next.BundleFingerprint != previous.BundleFingerprint ||
+		next.OwnerID != previous.OwnerID || next.BootID != previous.BootID || next.BundleHash != previous.BundleHash ||
 		next.HandoffID != previous.HandoffID || next.PredecessorOwnerID != previous.PredecessorOwnerID || next.PredecessorBootID != previous.PredecessorBootID ||
-		next.PredecessorBundle != previous.PredecessorBundle || next.CandidateOwnerID != previous.CandidateOwnerID || next.CandidateBootID != previous.CandidateBootID ||
+		next.PredecessorBundleHash != previous.PredecessorBundleHash || next.CandidateOwnerID != previous.CandidateOwnerID || next.CandidateBootID != previous.CandidateBootID ||
 		!slices.Equal(next.ProbeSurfaceIDs, previous.ProbeSurfaceIDs) {
 		return fmt.Errorf("committed startup handoff identity is invalid")
 	}
@@ -489,7 +499,7 @@ func validateRollbackChain(previous, terminal, restored Authority) error {
 	if restored.State != StateActive || restored.LeaseAuthorityID != terminal.LeaseAuthorityID || restored.Backend != terminal.Backend ||
 		restored.TransitionOrdinal != terminal.TransitionOrdinal+1 || restored.Generation != terminal.Generation+1 || restored.StateVersion != terminal.StateVersion+1 ||
 		restored.AuthorityID == terminal.AuthorityID || restored.OwnerID != terminal.PredecessorOwnerID || restored.BootID != terminal.PredecessorBootID ||
-		restored.BundleFingerprint != terminal.PredecessorBundle || restored.HandoffID != "" || len(restored.ProbeSurfaceIDs) != 0 || !restored.RecordedAt.After(terminal.RecordedAt) {
+		restored.BundleHash != terminal.PredecessorBundleHash || restored.HandoffID != "" || len(restored.ProbeSurfaceIDs) != 0 || !restored.RecordedAt.After(terminal.RecordedAt) {
 		return fmt.Errorf("startup authority rollback restoration fact is invalid")
 	}
 	return nil

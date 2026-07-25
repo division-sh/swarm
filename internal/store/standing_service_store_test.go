@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -9,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -32,8 +32,9 @@ func TestSQLiteStandingServiceReconcileCreatesPublishesAndRepairsRestartAbandon(
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: packageKey, FlowID: flowID,
 		InstanceID: instanceID, EntityID: entityID,
-		Source: runtimecorrelation.BundleSourceFact{BundleHash: firstHash, BundleSource: "persisted"},
+		Source: mustStoreTestPersistedBundleSourceFact(firstHash),
 	}
+	seedStoreTestPersistedBundle(t, store.DB, firstHash)
 
 	created, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
@@ -58,7 +59,8 @@ func TestSQLiteStandingServiceReconcileCreatesPublishesAndRepairsRestartAbandon(
 	if _, err := store.DB.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, stopped_at, updated_at) VALUES (?, 'stopped', 'server_restart_abandon', 'swarm.serve.abandon_active_runs', ?, ?)`, created.RunID, time.Now().UTC(), time.Now().UTC()); err != nil {
 		t.Fatalf("seed restart-abandon provenance: %v", err)
 	}
-	candidate.Source.BundleHash = secondHash
+	candidate.Source = mustStoreTestPersistedBundleSourceFact(secondHash)
+	seedStoreTestPersistedBundle(t, store.DB, secondHash)
 	repaired, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
 		t.Fatalf("ReconcileStandingService(repair): %v", err)
@@ -96,8 +98,9 @@ func TestSQLiteStandingServiceReconcileRejectsUnknownTerminalityWithCommand(t *t
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
 		InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
-		Source: runtimecorrelation.BundleSourceFact{BundleHash: "bundle-v1:sha256:" + strings.Repeat("3", 64), BundleSource: "persisted"},
+		Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("3", 64)),
 	}
+	seedStoreTestPersistedBundle(t, store.DB, candidate.Source.BundleHash())
 	created, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
 		t.Fatal(err)
@@ -121,8 +124,9 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
 		InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
-		Source: runtimecorrelation.BundleSourceFact{BundleHash: "bundle-v1:sha256:" + strings.Repeat("4", 64), BundleSource: "persisted"},
+		Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("4", 64)),
 	}
+	seedStoreTestPersistedBundle(t, store.DB, candidate.Source.BundleHash())
 	created, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +139,7 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	agentID := "standing-agent"
 	sessionID := uuid.NewString()
 	timerID := uuid.NewString()
-	fixtureCtx := testAuthorActivityContextForBundle(candidate.Source.BundleHash)
+	fixtureCtx := testAuthorActivityContextForBundle(candidate.Source.BundleHash())
 	workEvent := eventtest.PersistedProjection(
 		eventID, events.EventType("standing.work"), "test", "", json.RawMessage(`{}`), 0,
 		created.RunID, "", events.EventEnvelope{}, time.Now().UTC(),
@@ -242,8 +246,9 @@ func TestSQLiteStandingServiceSetOrphansRemovedDeclaration(t *testing.T) {
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
 		InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
-		Source: runtimecorrelation.BundleSourceFact{BundleHash: "bundle-v1:sha256:" + strings.Repeat("5", 64), BundleSource: "persisted"},
+		Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("5", 64)),
 	}
+	seedStoreTestPersistedBundle(t, store.DB, candidate.Source.BundleHash())
 	created, err := workflowStore.ReconcileStandingServiceSet(ctx, []runtimepipeline.StandingServiceCandidate{candidate})
 	if err != nil || len(created) != 1 {
 		t.Fatalf("create set = %#v, %v", created, err)
@@ -273,7 +278,7 @@ func TestSQLiteStandingServiceReplacementIsScopedAndAtomic(t *testing.T) {
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
 	workflowStore.ConfigureDeliveryLifecycleStore(store)
 	workflowStore.ConfigurePipelineObligationStore(store.PipelineObligations())
-	testStandingServiceReplacementIsScopedAndAtomic(t, workflowStore)
+	testStandingServiceReplacementIsScopedAndAtomic(t, store.DB, workflowStore)
 }
 
 func TestPostgresStandingServiceReplacementIsScopedAndAtomic(t *testing.T) {
@@ -283,22 +288,25 @@ func TestPostgresStandingServiceReplacementIsScopedAndAtomic(t *testing.T) {
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	workflowStore.ConfigureDeliveryLifecycleStore(selected)
 	workflowStore.ConfigurePipelineObligationStore(selected.PipelineObligations())
-	testStandingServiceReplacementIsScopedAndAtomic(t, workflowStore)
+	testStandingServiceReplacementIsScopedAndAtomic(t, db, workflowStore)
 }
 
-func testStandingServiceReplacementIsScopedAndAtomic(t *testing.T, workflowStore *runtimepipeline.WorkflowInstanceStore) {
+func testStandingServiceReplacementIsScopedAndAtomic(t *testing.T, db *sql.DB, workflowStore *runtimepipeline.WorkflowInstanceStore) {
 	t.Helper()
 	ctx := testAuthorActivityRuntimeContext()
 	makeCandidate := func(flowID, hashDigit string) runtimepipeline.StandingServiceCandidate {
 		return runtimepipeline.StandingServiceCandidate{
 			ServiceID: runtimeflowidentity.StandingServiceID("project", flowID), PackageKey: "project", FlowID: flowID,
 			InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
-			Source: runtimecorrelation.BundleSourceFact{BundleHash: "bundle-v1:sha256:" + strings.Repeat(hashDigit, 64), BundleSource: "persisted"},
+			Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat(hashDigit, 64)),
 		}
 	}
 	retained := makeCandidate("retained", "1")
 	removed := makeCandidate("removed", "2")
 	unrelated := makeCandidate("unrelated", "3")
+	for _, candidate := range []runtimepipeline.StandingServiceCandidate{retained, removed, unrelated} {
+		seedStoreTestPersistedBundle(t, db, candidate.Source.BundleHash())
+	}
 	created, err := workflowStore.ReconcileStandingServiceSet(ctx, []runtimepipeline.StandingServiceCandidate{retained, removed, unrelated})
 	if err != nil || len(created) != 3 {
 		t.Fatalf("seed standing services = %#v, %v", created, err)
@@ -309,7 +317,8 @@ func testStandingServiceReplacementIsScopedAndAtomic(t *testing.T, workflowStore
 	}
 
 	revised := retained
-	revised.Source.BundleHash = "bundle-v1:sha256:" + strings.Repeat("4", 64)
+	revised.Source = mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("4", 64))
+	seedStoreTestPersistedBundle(t, db, revised.Source.BundleHash())
 	missing := makeCandidate("missing", "5")
 	if _, err := workflowStore.ReconcileStandingServiceReplacement(ctx, []runtimepipeline.StandingServiceCandidate{missing}, []runtimepipeline.StandingServiceCandidate{revised}); err == nil || !strings.Contains(err.Error(), "is not persisted") {
 		t.Fatalf("replacement with missing predecessor error = %v", err)
@@ -319,12 +328,13 @@ func testStandingServiceReplacementIsScopedAndAtomic(t *testing.T, workflowStore
 		t.Fatal(err)
 	}
 	for _, status := range statuses {
-		if status.ServiceID == retained.ServiceID && status.BundleHash != retained.Source.BundleHash {
+		if status.ServiceID == retained.ServiceID && status.BundleHash != retained.Source.BundleHash() {
 			t.Fatalf("failed replacement leaked retained revision: %#v", status)
 		}
 	}
 
 	added := makeCandidate("added", "6")
+	seedStoreTestPersistedBundle(t, db, added.Source.BundleHash())
 	results, err := workflowStore.ReconcileStandingServiceReplacement(ctx, []runtimepipeline.StandingServiceCandidate{retained, removed}, []runtimepipeline.StandingServiceCandidate{revised, added})
 	if err != nil {
 		t.Fatalf("ReconcileStandingServiceReplacement: %v", err)
@@ -340,7 +350,7 @@ func testStandingServiceReplacementIsScopedAndAtomic(t *testing.T, workflowStore
 	for _, status := range statuses {
 		byID[status.ServiceID] = status
 	}
-	if got := byID[retained.ServiceID]; !got.DeclarationPresent || got.EffectiveState != "active" || got.BundleHash != revised.Source.BundleHash || got.RunID != initialRunID[retained.ServiceID] || got.Transition != "revised" {
+	if got := byID[retained.ServiceID]; !got.DeclarationPresent || got.EffectiveState != "active" || got.BundleHash != revised.Source.BundleHash() || got.RunID != initialRunID[retained.ServiceID] || got.Transition != "revised" {
 		t.Fatalf("retained service = %#v", got)
 	}
 	if got := byID[removed.ServiceID]; got.DeclarationPresent || got.EffectiveState != "orphaned" || got.Transition != "orphaned" {
@@ -349,7 +359,7 @@ func testStandingServiceReplacementIsScopedAndAtomic(t *testing.T, workflowStore
 	if got := byID[added.ServiceID]; !got.DeclarationPresent || got.EffectiveState != "active" || got.Transition != "created" {
 		t.Fatalf("added service = %#v", got)
 	}
-	if got := byID[unrelated.ServiceID]; !got.DeclarationPresent || got.EffectiveState != "active" || got.BundleHash != unrelated.Source.BundleHash || got.RunID != initialRunID[unrelated.ServiceID] {
+	if got := byID[unrelated.ServiceID]; !got.DeclarationPresent || got.EffectiveState != "active" || got.BundleHash != unrelated.Source.BundleHash() || got.RunID != initialRunID[unrelated.ServiceID] {
 		t.Fatalf("unrelated service = %#v", got)
 	}
 }
@@ -366,9 +376,10 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
 		InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
-		Source: runtimecorrelation.BundleSourceFact{BundleHash: "bundle-v1:sha256:" + strings.Repeat("6", 64), BundleSource: "persisted"},
+		Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("6", 64)),
 	}
-	fixtureCtx := testAuthorActivityContextForBundle(candidate.Source.BundleHash)
+	seedStoreTestPersistedBundle(t, db, candidate.Source.BundleHash())
+	fixtureCtx := testAuthorActivityContextForBundle(candidate.Source.BundleHash())
 	created, err := workflowStore.ReconcileStandingServiceSet(ctx, []runtimepipeline.StandingServiceCandidate{candidate})
 	if err != nil || len(created) != 1 {
 		t.Fatalf("ReconcileStandingServiceSet = %#v, %v", created, err)
@@ -462,10 +473,12 @@ func TestSQLiteRunStopRefusesCurrentStandingGenerationWithTeachingCommand(t *tes
 	workflowStore.ConfigureDeliveryLifecycleStore(store)
 	workflowStore.ConfigurePipelineObligationStore(store.PipelineObligations())
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
-	created, err := workflowStore.ReconcileStandingService(ctx, runtimepipeline.StandingServiceCandidate{
+	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress", InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
-		Source: runtimecorrelation.BundleSourceFact{BundleHash: "bundle-v1:sha256:" + strings.Repeat("7", 64), BundleSource: "persisted"},
-	})
+		Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("7", 64)),
+	}
+	seedStoreTestPersistedBundle(t, store.DB, candidate.Source.BundleHash())
+	created, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -588,7 +588,7 @@ func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conver
 		turn2At:    base.Add(-1 * time.Minute),
 	}
 	ctx := testAuthorActivityContext()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, started_at) VALUES ($1::uuid, 'running', $2, $3)`, source.runID, source.bundleHash, base.Add(-3*time.Minute)); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, started_at, bundle_source) VALUES ($1::uuid, 'running', $2, $3, 'ephemeral')`, source.runID, source.bundleHash, base.Add(-3*time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `

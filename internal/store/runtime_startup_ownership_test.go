@@ -14,7 +14,7 @@ import (
 )
 
 func testStartupAcquireRequest(ownerID string) runtimestartupownership.AcquireRequest {
-	return runtimestartupownership.AcquireRequest{OwnerID: ownerID, BootID: uuid.NewString(), BundleFingerprint: "test-bundle"}
+	return runtimestartupownership.AcquireRequest{OwnerID: ownerID, BootID: uuid.NewString(), BundleHash: testCanonicalBundleHash}
 }
 
 type startupAuthorityParityStore interface {
@@ -88,7 +88,8 @@ func TestRuntimeStartupAuthorityTransitionsPersistWithBackendParity(t *testing.T
 				t.Fatalf("AdmitExecution: %v", err)
 			}
 			first, err := lease.PrepareHandoff(ctx, runtimestartupownership.HandoffRequest{
-				CandidateOwnerID: "owner-b", CandidateBootID: uuid.NewString(), CandidateBundleFingerprint: "bundle-b",
+				CandidateOwnerID: "owner-b", CandidateBootID: uuid.NewString(),
+				CandidateBundleHash: "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 			})
 			if err != nil {
 				t.Fatalf("PrepareHandoff first: %v", err)
@@ -108,7 +109,8 @@ func TestRuntimeStartupAuthorityTransitionsPersistWithBackendParity(t *testing.T
 				t.Fatalf("stale transition error = %v, want exact predecessor rejection", err)
 			}
 			second, err := lease.PrepareHandoff(ctx, runtimestartupownership.HandoffRequest{
-				CandidateOwnerID: "owner-c", CandidateBootID: uuid.NewString(), CandidateBundleFingerprint: "bundle-c",
+				CandidateOwnerID: "owner-c", CandidateBootID: uuid.NewString(),
+				CandidateBundleHash: "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
 			})
 			if err != nil {
 				t.Fatalf("PrepareHandoff second: %v", err)

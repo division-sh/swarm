@@ -106,7 +106,7 @@ func TestArmWorkflowJoinPostgresParity(t *testing.T) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 				t.Fatal(err)
 			}
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
@@ -315,7 +315,7 @@ func workflowJoinStoreCases() []workflowJoinStoreCase {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 				t.Fatal(err)
 			}
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
@@ -345,7 +345,7 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 				t.Fatal(err)
 			}
 			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
@@ -442,7 +442,7 @@ func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 				t.Fatal(err)
 			}
 			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
@@ -526,7 +526,7 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 				t.Fatal(err)
 			}
 			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
@@ -617,7 +617,7 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 				t.Fatal(err)
 			}
 			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
@@ -704,7 +704,7 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 				t.Fatal(err)
 			}
 			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)

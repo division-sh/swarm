@@ -10,10 +10,8 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/runbundle"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 const (
@@ -27,7 +25,7 @@ func TestRuntimeContextManagerRegistersAndLooksUpPinnedContexts(t *testing.T) {
 			"run-b": {
 				RunID:            "run-b",
 				BundleHash:       runtimeContextTestHashB,
-				BundleSource:     storerunlifecycle.BundleSourcePersisted,
+				BundleSource:     runbundle.AvailabilitySourcePersisted,
 				BundleRowPresent: true,
 			},
 		},
@@ -46,14 +44,14 @@ func TestRuntimeContextManagerRegistersAndLooksUpPinnedContexts(t *testing.T) {
 		t.Fatalf("BundleHashes = %#v, want %#v", got, want)
 	}
 	primary, ok := manager.Primary()
-	if !ok || primary.BundleHash != runtimeContextTestHashA {
+	if !ok || primary.BundleHash() != runtimeContextTestHashA {
 		t.Fatalf("Primary = %#v/%v, want %s", primary, ok, runtimeContextTestHashA)
 	}
 	contextDef, availabilityResult, loaded, err := manager.LookupRun(testAuthorActivityContext(context.Background()), "run-b")
 	if err != nil {
 		t.Fatalf("LookupRun: %v", err)
 	}
-	if !loaded || contextDef == nil || contextDef.BundleHash != runtimeContextTestHashB {
+	if !loaded || contextDef == nil || contextDef.BundleHash() != runtimeContextTestHashB {
 		t.Fatalf("LookupRun context = %#v loaded=%v, want %s", contextDef, loaded, runtimeContextTestHashB)
 	}
 	if availabilityResult.BundleHash != runtimeContextTestHashB || !availabilityResult.Available() {
@@ -124,7 +122,7 @@ func TestRuntimeContextManagerRejectsDuplicateAgentSlugs(t *testing.T) {
 		`duplicate runtime context agent_id "shared-worker"`,
 		runtimeContextTestHashA,
 		runtimeContextTestHashB,
-		"bundle_source=persisted",
+		"bundle_source=ephemeral",
 		"workflow=review@1.0.0",
 	} {
 		if !strings.Contains(err.Error(), want) {
@@ -206,7 +204,7 @@ func TestRuntimeContextManagerDeactivatesPinnedContextFailClosed(t *testing.T) {
 			"run-b": {
 				RunID:            "run-b",
 				BundleHash:       runtimeContextTestHashB,
-				BundleSource:     storerunlifecycle.BundleSourcePersisted,
+				BundleSource:     runbundle.AvailabilitySourcePersisted,
 				BundleRowPresent: true,
 			},
 		},
@@ -236,7 +234,7 @@ func TestRuntimeContextManagerDeactivatesPinnedContextFailClosed(t *testing.T) {
 		t.Fatalf("LookupBundleHashStatus = %#v, want found unloaded", lookup)
 	}
 	primary, ok := manager.Primary()
-	if !ok || primary.BundleHash != runtimeContextTestHashA {
+	if !ok || primary.BundleHash() != runtimeContextTestHashA {
 		t.Fatalf("Primary after deactivation = %#v/%v, want %s", primary, ok, runtimeContextTestHashA)
 	}
 	runLookup, availabilityResult, err := manager.LookupRunStatus(testAuthorActivityContext(context.Background()), "run-b")
@@ -435,26 +433,19 @@ func testBundleContextWithAgentEntries(t *testing.T, bundleHash, eventName strin
 	source := semanticview.Wrap(bundle)
 	workOwner := runtimeTestOccurrence(t, bundleHash)
 	bus, err := newRuntimeTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{
-		WorkOwner:      workOwner,
-		ContractBundle: source,
-		BundleSourceFact: runtimecorrelation.BundleSourceFact{
-			BundleHash:   bundleHash,
-			BundleSource: storerunlifecycle.BundleSourcePersisted,
-		},
+		WorkOwner:        workOwner,
+		ContractBundle:   source,
+		BundleSourceFact: testBundleSourceFact(t, bundleHash),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	return BundleContext{
-		BundleHash: bundleHash,
-		BundleSourceFact: runtimecorrelation.BundleSourceFact{
-			BundleHash:   bundleHash,
-			BundleSource: storerunlifecycle.BundleSourcePersisted,
-		},
-		BundleIdentity: runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
-		Source:         source,
-		WorkOwner:      workOwner,
-		Runtime:        &Runtime{Bus: bus, workOccurrence: workOwner},
+		BundleSourceFact: testBundleSourceFact(t, bundleHash),
+		BundleIdentity:   runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
+		Source:           source,
+		WorkOwner:        workOwner,
+		Runtime:          &Runtime{Bus: bus, workOccurrence: workOwner},
 	}
 }
 
@@ -467,7 +458,7 @@ func (f fakeRunBundleAvailability) LoadRunBundleAvailability(_ context.Context, 
 	if !ok {
 		return runbundle.Availability{}, runbundle.ErrRunNotFound
 	}
-	if row.ErrorCode == "" && row.BundleSource == storerunlifecycle.BundleSourcePersisted && !row.BundleRowPresent {
+	if row.ErrorCode == "" && row.BundleSource == runbundle.AvailabilitySourcePersisted && !row.BundleRowPresent {
 		return row, errors.New("invalid fake persisted row without bundle")
 	}
 	return row, nil

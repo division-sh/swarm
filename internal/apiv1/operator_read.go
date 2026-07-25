@@ -1712,7 +1712,7 @@ func requiredBundleHashParam(params map[string]any, name string) (string, error)
 	if err != nil {
 		return "", err
 	}
-	if !bundleHashPattern.MatchString(value) {
+	if err := runtimecontracts.ValidateBundleHash(value); err != nil {
 		return "", NewInvalidParamsError(map[string]any{"field": name, "reason": "must be bundle-v1:sha256:<64 lowercase hex>"})
 	}
 	return value, nil
@@ -1726,7 +1726,7 @@ func optionalBundleHashParam(params map[string]any, name string) (string, error)
 	if value == "" {
 		return "", nil
 	}
-	if !bundleHashPattern.MatchString(value) {
+	if err := runtimecontracts.ValidateBundleHash(value); err != nil {
 		return "", NewInvalidParamsError(map[string]any{"field": name, "reason": "must be bundle-v1:sha256:<64 lowercase hex>"})
 	}
 	return value, nil

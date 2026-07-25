@@ -543,15 +543,15 @@ func ensureSemanticFixtureRun(ctx context.Context, tx *sql.Tx, record eventrecor
 	switch selectedStore.(type) {
 	case *store.PostgresStore:
 		_, err := tx.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, started_at)
-			VALUES ($1::uuid, 'running', $2)
+			INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+			VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 			ON CONFLICT (run_id) DO NOTHING
 		`, record.RunID, startedAt)
 		return err
 	case *store.SQLiteRuntimeStore:
 		_, err := tx.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, started_at)
-			VALUES (?, 'running', ?)
+			INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+			VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 			ON CONFLICT (run_id) DO NOTHING
 		`, record.RunID, startedAt)
 		return err

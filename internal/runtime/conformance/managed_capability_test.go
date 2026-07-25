@@ -19,7 +19,7 @@ func managedConformanceExecutionContext(t testing.TB, ctx context.Context, autho
 		1,
 		"",
 		"conformance-actors",
-		"conformance-bundle",
+		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		nil,
 	)
 	if err != nil {

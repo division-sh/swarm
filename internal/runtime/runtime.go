@@ -85,7 +85,6 @@ type RuntimeOptions struct {
 	WorkspaceLifecycle               workspace.Lifecycle
 	EnableToolGateway                bool
 	ToolGatewayBinding               toolgateway.Binding
-	BundleFingerprint                string
 	BundleSourceFact                 runtimecorrelation.BundleSourceFact
 	RuntimeInstanceID                string
 	ProcessWorkOwner                 *worklifetime.Process
@@ -127,7 +126,6 @@ type validatedRuntimeDeps struct {
 	ProviderCredentialResolver llm.ProviderCredentialResolver
 	Authority                  runtimeauthority.Provider
 	EmitRegistry               *runtimetools.EmitRegistry
-	TrimmedBundleFingerprint   string
 	BundleSourceFact           runtimecorrelation.BundleSourceFact
 }
 
@@ -292,9 +290,9 @@ func (rt *Runtime) PrepareInitialStartupOwnership(ctx context.Context) error {
 		rt.bootID = uuid.NewString()
 	}
 	lease, err := rt.Stores.StartupOwnership.AcquireRuntimeStartupOwnership(ctx, runtimestartupownership.AcquireRequest{
-		OwnerID:           rt.ownerID,
-		BootID:            rt.bootID,
-		BundleFingerprint: coalesceRuntimeIdentity(rt.Options.BundleFingerprint),
+		OwnerID:    rt.ownerID,
+		BootID:     rt.bootID,
+		BundleHash: rt.Options.BundleSourceFact.BundleHash(),
 	})
 	if err != nil {
 		return err
@@ -368,7 +366,7 @@ func (rt *Runtime) PrepareStartupOwnershipHandoff(predecessor *Runtime) (*Startu
 	rt.pendingOwnershipOwned = false
 	typed, err := lease.PrepareHandoff(context.Background(), runtimestartupownership.HandoffRequest{
 		CandidateOwnerID: rt.ownerID, CandidateBootID: rt.bootID,
-		CandidateBundleFingerprint: coalesceRuntimeIdentity(rt.Options.BundleFingerprint),
+		CandidateBundleHash: rt.Options.BundleSourceFact.BundleHash(),
 	})
 	if err != nil {
 		predecessor.ownershipHandoffPending = false
@@ -640,6 +638,9 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	if cfg == nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime config is required")
 	}
+	if err := opts.BundleSourceFact.Validate(); err != nil {
+		return validatedRuntimeDeps{}, fmt.Errorf("runtime bundle source fact: %w", err)
+	}
 	if err := cfg.ValidateExtensions(); err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime config validation failed: %w", err)
 	}
@@ -711,8 +712,7 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 		ProviderCredentialResolver: providerCredentialResolver,
 		Authority:                  authorityProvider,
 		EmitRegistry:               emitRegistry,
-		TrimmedBundleFingerprint:   strings.TrimSpace(opts.BundleFingerprint),
-		BundleSourceFact:           opts.BundleSourceFact.Normalized(),
+		BundleSourceFact:           opts.BundleSourceFact,
 	}, nil
 }
 
@@ -890,7 +890,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	}
 	workOccurrence, err := opts.ProcessWorkOwner.NewRuntime(ctx, worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: opts.RuntimeInstanceID,
-		BundleHash:        boot.BundleSourceFact.BundleHash,
+		BundleHash:        boot.BundleSourceFact.BundleHash(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create runtime work occurrence: %w", err)
@@ -926,7 +926,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		Authority:                 boot.Authority,
 		EmitRegistry:              boot.EmitRegistry,
 		authorActivityDescriptors: descriptors,
-		authorActivityScope:       runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, boot.BundleSourceFact.BundleHash),
+		authorActivityScope:       runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, boot.BundleSourceFact.BundleHash()),
 		PromptResolver:            boot.PromptResolver,
 		Credentials:               boot.Credentials,
 		ManagedCredentials:        boot.ManagedCredentials,
@@ -938,7 +938,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	}
 	payloadValidator := boot.payloadValidator(rt.Logger)
 	rt.payloadValidator = payloadValidator
-	bus, err := newRuntimeEventBus(stores.EventStore, stores.PipelineObligations, rt.Logger, source, boot.TrimmedBundleFingerprint, boot.BundleSourceFact, opts.RuntimeInstanceID, workOccurrence, func() []runtimebus.EventInterceptor {
+	bus, err := newRuntimeEventBus(stores.EventStore, stores.PipelineObligations, rt.Logger, source, boot.BundleSourceFact, opts.RuntimeInstanceID, workOccurrence, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
 		}
@@ -1040,7 +1040,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			MockConnectorResponses: boot.MockConnectorResponses,
 			ChannelActivityTools:   channelActivityTools,
 			ArtifactRoot:           artifactRoot,
-			BundleHash:             opts.BundleSourceFact.BundleHash,
+			BundleSourceFact:       opts.BundleSourceFact,
 			DecisionCardCadence: decisioncard.CadencePolicy{
 				FirstReminderDelay: rt.Config.Runtime.DecisionCardFirstReminder,
 				UrgencyDelay:       rt.Config.Runtime.DecisionCardUrgency,
@@ -1333,7 +1333,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	if rt.Stores.StartupOwnership != nil && lease == nil {
 		var err error
 		lease, err = rt.Stores.StartupOwnership.AcquireRuntimeStartupOwnership(ctx, runtimestartupownership.AcquireRequest{
-			OwnerID: rt.ownerID, BootID: rt.bootID, BundleFingerprint: coalesceRuntimeIdentity(rt.Options.BundleFingerprint),
+			OwnerID: rt.ownerID, BootID: rt.bootID, BundleHash: rt.Options.BundleSourceFact.BundleHash(),
 		})
 		if err != nil {
 			rt.emitBootProgress(5, "startup_ownership_lease", "FAILED", err.Error())
@@ -1349,7 +1349,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		rt.emitBootProgress(5, "startup_ownership_lease", "ok", "prepared_owner="+rt.ownerID)
 	} else {
 		authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
-			OwnerID: rt.ownerID, BootID: rt.bootID, BundleFingerprint: coalesceRuntimeIdentity(rt.Options.BundleFingerprint),
+			OwnerID: rt.ownerID, BootID: rt.bootID, BundleHash: rt.Options.BundleSourceFact.BundleHash(),
 		}, "memory")
 		if err != nil {
 			cancelStart()
@@ -1998,7 +1998,7 @@ func (rt *Runtime) publishBootCompleted(ctx context.Context, report bootComplete
 		"boot_started_at":              startedAt.Format(time.RFC3339Nano),
 		"boot_completed_at":            completedAt.Format(time.RFC3339Nano),
 		"duration_ms":                  durationMS,
-		"bundle_fingerprint":           strings.TrimSpace(rt.Options.BundleFingerprint),
+		"bundle_hash":                  rt.Options.BundleSourceFact.BundleHash(),
 		"recovery_decision":            report.RecoveryDecision.bootPayload(),
 		"static_agents_started":        sortedNonEmptyStrings(report.StaticAgentsStarted),
 		"flow_required_agents_started": sortedNonEmptyStrings(report.FlowRequiredAgentsStarted),

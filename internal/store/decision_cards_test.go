@@ -55,7 +55,7 @@ func TestDecisionCardStoreLifecycleParity(t *testing.T) {
 					"accept": {Verdict: "accept", AdvancesTo: "operating"},
 					"revise": {Verdict: "revise", AdvancesTo: "building", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
 				}),
-				BundleHash:      "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				BundleHash:      authorActivityTestBundleHash,
 				WorkflowVersion: "1", EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
 				CreatedAt: now,
 			})
@@ -208,7 +208,7 @@ func TestDecisionCardStoreRejectsStructuralSnapshotDriftAtEveryTypedLevelOnBothS
 						Input:   map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}},
 					},
 				}),
-				BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", WorkflowVersion: "1",
+				BundleHash: authorActivityTestBundleHash, WorkflowVersion: "1",
 				EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
 				CreatedAt:        time.Date(2026, 7, 13, 11, 30, 0, 0, time.UTC),
 			})
@@ -272,7 +272,7 @@ func TestDecisionCardStoreEnforcesSafeNumericSnapshotCarriersOnBothStores(t *tes
 						},
 					},
 				}),
-				BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", WorkflowVersion: "1",
+				BundleHash: authorActivityTestBundleHash, WorkflowVersion: "1",
 				EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
 				Provenance:       admitDecisionCardTestObject(t, map[string]any{"safe_integer": safeInteger, "subnormal": math.SmallestNonzeroFloat64}),
 				CreatedAt:        time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC),
@@ -433,7 +433,7 @@ func TestDecisionCardInvalidFrozenOutcomeNeverCommitsOnBothStores(t *testing.T) 
 						},
 					},
 				}),
-				BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", WorkflowVersion: "1",
+				BundleHash: authorActivityTestBundleHash, WorkflowVersion: "1",
 				EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"}, CreatedAt: now,
 			})
 			if err != nil {
@@ -606,7 +606,7 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 			db, postgres := decisionCardStoreDB(t, cardStore)
 			now := time.Date(2026, 7, 12, 16, 0, 0, 0, time.UTC)
 			entityID := uuid.NewString()
-			activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", testGateRoutes(t), "state:awaiting_review", now)
+			activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", authorActivityTestBundleHash, testGateRoutes(t), "state:awaiting_review", now)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -665,7 +665,7 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 			db, postgres := decisionCardStoreDB(t, cardStore)
 			now := time.Date(2026, 7, 12, 17, 0, 0, 0, time.UTC)
 			entityID := uuid.NewString()
-			activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", testGateRoutes(t), "state:awaiting_review", now)
+			activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", authorActivityTestBundleHash, testGateRoutes(t), "state:awaiting_review", now)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -733,7 +733,7 @@ func TestTerminalDecisionCardSupersessionStateChangeOnlyProducerParity(t *testin
 				db, postgres := decisionCardStoreDB(t, cardStore)
 				now := time.Date(2026, 7, 14, 4, 0, 0, 0, time.UTC)
 				entityID := uuid.NewString()
-				activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", testGateRoutes(t), "state:awaiting_review", now)
+				activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", authorActivityTestBundleHash, testGateRoutes(t), "state:awaiting_review", now)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -773,7 +773,7 @@ func TestNormalRunCompletionDecisionGateAuthorityParity(t *testing.T) {
 				db, postgres := decisionCardStoreDB(t, cardStore)
 				now := time.Date(2026, 7, 14, 16, 0, 0, 0, time.UTC)
 				entityID := uuid.NewString()
-				activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", testGateRoutes(t), "state:awaiting_review", now)
+				activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", authorActivityTestBundleHash, testGateRoutes(t), "state:awaiting_review", now)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1299,7 +1299,7 @@ func newDecisionCardTestCard(t *testing.T, runID string, now time.Time) decision
 			"accept": {Verdict: "accept", AdvancesTo: "operating"},
 			"revise": {Verdict: "revise", AdvancesTo: "building", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
 		}),
-		BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", WorkflowVersion: "1",
+		BundleHash: authorActivityTestBundleHash, WorkflowVersion: "1",
 		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"}, CreatedAt: now,
 	})
 	if err != nil {
@@ -1426,7 +1426,7 @@ func decisionCardTestStore(t *testing.T, backend string) (decisioncard.Store, st
 			t.Fatalf("BootstrapSchema sqlite: %v", err)
 		}
 		registerTestAuthorActivityCatalog(t, store)
-		if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+		if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 			t.Fatalf("insert sqlite run: %v", err)
 		}
 		return store, runID
@@ -1434,7 +1434,7 @@ func decisionCardTestStore(t *testing.T, backend string) (decisioncard.Store, st
 		_, db, _ := testutil.StartPostgres(t)
 		store := newTestPostgresStore(t, db)
 		registerTestAuthorActivityCatalog(t, store)
-		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 			t.Fatalf("insert postgres run: %v", err)
 		}
 		return store, runID

@@ -25,10 +25,10 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 			now := time.Date(2026, 7, 14, 14, 0, 0, 0, time.UTC)
 			runID := uuid.NewString()
 			if backend == "postgres" {
-				if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+				if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 					t.Fatal(err)
 				}
-			} else if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+			} else if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 				t.Fatal(err)
 			}
 			card, continuation := newAPIHumanTaskAckLossCard(t, runID, now)

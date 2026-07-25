@@ -69,7 +69,7 @@ func executeTestSetupEntities(ctx context.Context, req Request, opts OperatorRea
 				"reason": "test.setup_entities requires canonical bundle_hash",
 			})
 		}
-		params := eventPublicationParams{BundleHash: identity.BundleHash, RunID: request.RunID, RunIDProvided: true}
+		params := eventPublicationParams{RunID: request.RunID, RunIDProvided: true}
 		var selectedOpts OperatorReadOptions
 		ctx, selectedOpts, _, err = resolveEventPublicationBundleScope(ctx, opts, params, identity, eventPublicationConfig{})
 		if err != nil {

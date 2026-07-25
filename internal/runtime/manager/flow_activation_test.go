@@ -1394,8 +1394,8 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 	const runID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES ($1::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 		ON CONFLICT (run_id) DO NOTHING
 	`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -1489,8 +1489,8 @@ func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t
 	const runID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES ($1::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 		ON CONFLICT (run_id) DO NOTHING
 	`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)

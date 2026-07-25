@@ -170,10 +170,10 @@ func insertPostgresStandingFixture(t *testing.T, ctx context.Context, db *sql.DB
 		t.Fatalf("seed postgres standing service: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO standing_service_generations (service_id, generation, run_id, created_bundle_hash, created_bundle_source, created_at)
-		VALUES ($1::uuid, 1, $2::uuid, $3, $4, now())
+		INSERT INTO standing_service_generations (service_id, generation, run_id, created_at)
+		VALUES ($1::uuid, 1, $2::uuid, now())
 		ON CONFLICT (service_id, generation) DO NOTHING
-	`, serviceID, runID, bundleHash, bundleSource); err != nil {
+	`, serviceID, runID); err != nil {
 		t.Fatalf("seed postgres standing generation: %v", err)
 	}
 }
@@ -193,10 +193,10 @@ func insertSQLiteStandingFixture(t *testing.T, ctx context.Context, db *sql.DB, 
 		t.Fatalf("seed sqlite standing service: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO standing_service_generations (service_id, generation, run_id, created_bundle_hash, created_bundle_source, created_at)
-		VALUES (?, 1, ?, ?, ?, ?)
+		INSERT INTO standing_service_generations (service_id, generation, run_id, created_at)
+		VALUES (?, 1, ?, ?)
 		ON CONFLICT(service_id, generation) DO NOTHING
-	`, serviceID, runID, bundleHash, bundleSource, now); err != nil {
+	`, serviceID, runID, now); err != nil {
 		t.Fatalf("seed sqlite standing generation: %v", err)
 	}
 }

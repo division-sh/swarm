@@ -242,10 +242,8 @@ var cliIdentifierInputRegistry = []cliIdentifierInputRegistration{
 	{Command: "swarm bundle delete", Selector: "arg:bundle-hash", Family: cliIdentifierFamilyBundle, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 	{Command: "swarm serve", Selector: "flag:bundle-hash", Family: cliIdentifierFamilyBundle, Mode: cliIdentifierModeFullOnly, Safety: "boot"},
 	{Command: "swarm run start", Selector: "flag:bundle-hash", Family: cliIdentifierFamilyBundle, Mode: cliIdentifierModeFullOnly, Safety: "creation"},
-	{Command: "swarm run start", Selector: "flag:bundle-fingerprint", Family: cliIdentifierFamilyBundle, Mode: cliIdentifierModeFullOnly, Safety: "creation"},
 	{Command: "swarm run fork", Selector: "flag:bundle-hash", Family: cliIdentifierFamilyBundle, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 	{Command: "swarm event publish", Selector: "flag:bundle-hash", Family: cliIdentifierFamilyBundle, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
-	{Command: "swarm event publish", Selector: "flag:bundle-fingerprint", Family: cliIdentifierFamilyBundle, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 
 	{Command: "swarm run status", Selector: "arg:run-id", Family: cliIdentifierFamilyRun, Mode: cliIdentifierModeFullOnly},
 	{Command: "swarm run trace", Selector: "arg:run-id", Family: cliIdentifierFamilyRun, Mode: cliIdentifierModeFullOnly},

@@ -432,7 +432,7 @@ func newWebSocketRuntimeProbeHandler(t *testing.T, observability *fakeObservabil
 		Bundle: runtimecontracts.BundleIdentity{
 			WorkflowName:    "review",
 			WorkflowVersion: "1.2.3",
-			Fingerprint:     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			BundleHash:      "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 	}
 	registry := testRegistry(t)

@@ -1297,9 +1297,9 @@ accounts:
 	forkAt := at.Add(30 * time.Second)
 	ctx := unmanagedToolTestContext()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
-		VALUES ($1::uuid, 'running', $2, $3, $4, $5)
-	`, sourceRunID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint, at.Add(-time.Minute)); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES ($1::uuid, 'running', $2, $3, $4)
+	`, sourceRunID, authorActivityTestBundleHash, authorActivityTestBundleSource, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
 	for _, fixture := range []struct {
@@ -1400,9 +1400,9 @@ accounts:
 	forkAt := at.Add(30 * time.Second)
 	ctx := unmanagedToolTestContext()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
-		VALUES ($1::uuid, 'running', $2, $3, $4, $5)
-	`, sourceRunID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint, at.Add(-time.Minute)); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES ($1::uuid, 'running', $2, $3, $4)
+	`, sourceRunID, authorActivityTestBundleHash, authorActivityTestBundleSource, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
 	for _, fixture := range []struct {
@@ -2801,10 +2801,10 @@ const entityToolTestRunID = "11111111-1111-1111-1111-111111111111"
 func ensureEntityToolTestRun(t *testing.T, db *sql.DB) {
 	t.Helper()
 	if _, err := db.ExecContext(unmanagedToolTestContext(), `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint)
-		VALUES ($1::uuid, 'running', $2, $3, $4)
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, $3)
 		ON CONFLICT (run_id) DO NOTHING
-	`, entityToolTestRunID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint); err != nil {
+	`, entityToolTestRunID, authorActivityTestBundleHash, authorActivityTestBundleSource); err != nil {
 		t.Fatalf("seed entity tool test run: %v", err)
 	}
 }

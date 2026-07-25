@@ -74,10 +74,10 @@ func (s *PostgresStore) RecordRuntimeStartupAuthorityTransition(ctx context.Cont
 			if _, err := tx.ExecContext(txctx, `
 				INSERT INTO runtime_startup_authority_facts (
 					fact_id,authority_id,lease_authority_id,transition_ordinal,generation,state_version,state,owner_id,boot_id,
-					bundle_fingerprint,backend,handoff_id,snapshot,created_at
+					bundle_hash,backend,handoff_id,snapshot,created_at
 				) VALUES (gen_random_uuid(),$1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8::uuid,$9,$10,NULLIF($11,'')::uuid,$12::jsonb,$13)
 			`, authority.AuthorityID, authority.LeaseAuthorityID, authority.TransitionOrdinal, authority.Generation, authority.StateVersion, authority.State,
-				authority.OwnerID, authority.BootID, authority.BundleFingerprint, authority.Backend, authority.HandoffID, string(raw), authority.RecordedAt.UTC()); err != nil {
+				authority.OwnerID, authority.BootID, authority.BundleHash, authority.Backend, authority.HandoffID, string(raw), authority.RecordedAt.UTC()); err != nil {
 				return fmt.Errorf("record runtime startup authority: %w", err)
 			}
 		}

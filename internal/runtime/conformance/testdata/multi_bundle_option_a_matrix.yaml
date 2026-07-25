@@ -51,7 +51,6 @@ rows:
       - {kind: spec_ref, path: platform-spec.yaml, ref: resume_and_recovery}
     proof_refs:
       - {kind: go_test, name: TestLoadAvailabilityClassifiesBundleSourceStates}
-      - {kind: go_test, name: TestLoadAvailabilityClassifiesPersistedMissingHashAsDataIntegrity}
       - {kind: go_test, name: TestPostgresStore_RunBundleSourceConsumesCanonicalSourceFact}
 
   - id: serve_contracts_persisted_ingest

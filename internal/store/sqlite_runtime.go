@@ -699,22 +699,13 @@ func sqliteLoadAPIIdempotency(ctx context.Context, q execQueryer, req APIIdempot
 }
 
 func sqliteEnsureActiveRunRow(ctx context.Context, tx *sql.Tx, runID, triggerEventID, triggerEventType string, now time.Time) error {
-	if err := sqliteEnsureRunRow(ctx, tx, runID, triggerEventID, triggerEventType, now); err != nil {
-		return err
+	fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("ensure active sqlite run row: executable bundle source fact is required")
 	}
-	runID = nullUUIDString(runID)
-	if runID == "" {
-		return nil
-	}
-	var status string
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = ?`, runID).Scan(&status); err != nil {
-		return fmt.Errorf("ensure active sqlite run row: %w", err)
-	}
-	status = strings.TrimSpace(status)
-	if status != "running" && status != "paused" {
-		return &storerunlifecycle.RunNotActiveError{RunID: runID, Status: status}
-	}
-	return nil
+	opts := runLifecycleOptions()
+	opts.BundleSourceFact = fact
+	return storerunlifecycle.EnsureActiveSQLite(ctx, tx, runID, triggerEventID, triggerEventType, now, opts)
 }
 
 func sqliteRequireRunRowPresent(ctx context.Context, tx *sql.Tx, runID string) error {
@@ -728,58 +719,6 @@ func sqliteRequireRunRowPresent(ctx context.Context, tx *sql.Tx, runID string) e
 			return &storerunlifecycle.RunNotFoundError{RunID: runID}
 		}
 		return fmt.Errorf("require sqlite run row: %w", err)
-	}
-	return nil
-}
-
-func sqliteEnsureRunRow(ctx context.Context, tx *sql.Tx, runID, triggerEventID, triggerEventType string, now time.Time) error {
-	runID = nullUUIDString(runID)
-	if runID == "" {
-		return nil
-	}
-	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return fmt.Errorf("ensure sqlite run row: %w", err)
-	}
-	if now.IsZero() {
-		now = time.Now().UTC()
-	}
-	bundleHash := ""
-	bundleSource := storerunlifecycle.BundleSourceLegacy
-	bundleFingerprint := runtimecorrelation.BundleFingerprintFromContext(ctx)
-	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
-		fact = fact.Normalized()
-		bundleHash = fact.BundleHash
-		bundleSource = fact.BundleSource
-		bundleFingerprint = fact.BundleFingerprint
-	}
-	if bundleSource == "" {
-		bundleSource = storerunlifecycle.BundleSourceLegacy
-	}
-	occurrenceScope, err := runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
-	if err != nil {
-		return fmt.Errorf("ensure sqlite run row: %w", err)
-	}
-	result, err := tx.ExecContext(ctx, `
-		INSERT OR IGNORE INTO runs (
-			run_id, status, bundle_hash, bundle_source, bundle_fingerprint,
-			trigger_event_id, trigger_event_type, started_at
-		)
-		VALUES (?, 'running', ?, ?, ?, ?, ?, ?)
-	`, runID, sqliteNullString(bundleHash), bundleSource, sqliteNullString(bundleFingerprint), sqliteNullUUID(triggerEventID), sqliteNullString(triggerEventType), now.UTC())
-	if err != nil {
-		return fmt.Errorf("ensure sqlite run row: %w", err)
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("read ensure sqlite run row result: %w", err)
-	}
-	if rows == 1 {
-		return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
-			Kind: runtimeauthoractivity.KindRunLifecycle, Transition: "started",
-			SourceOwner: "runs", SourceIdentity: runID, DedupKey: "run-created:" + runID,
-			OccurredAt: now.UTC(), RunID: runID, Scope: occurrenceScope,
-			Projection: runtimeauthoractivity.Projection{SubjectType: "run", SubjectID: runID, TriggerEventType: strings.TrimSpace(triggerEventType)},
-		})
 	}
 	return nil
 }

@@ -61,13 +61,6 @@ ref_example:
 	if !regexp.MustCompile(`^bundle-v1:sha256:[a-f0-9]{64}$`).MatchString(got) {
 		t.Fatalf("BundleHash = %q, want v1 bundle hash shape", got)
 	}
-	legacy, err := BundleFingerprint(bundle)
-	if err != nil {
-		t.Fatalf("BundleFingerprint: %v", err)
-	}
-	if legacy == got || strings.HasPrefix(legacy, bundleHashV1Prefix) {
-		t.Fatalf("legacy fingerprint must not equal canonical bundle_hash: legacy=%q canonical=%q", legacy, got)
-	}
 }
 
 func TestBundleHashV1EquivalentYAMLAndPromptLineEndings(t *testing.T) {

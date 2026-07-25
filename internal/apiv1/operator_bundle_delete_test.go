@@ -10,12 +10,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -360,11 +358,7 @@ func TestOperatorBundleDeleteBlocksPostDeleteNewWorkFromPersistedRuntimeSource(t
 			ctx := context.Background()
 			seedOperatorBundleDeleteBundle(t, ctx, db, runStartTestBundleHash)
 			source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-			sourceFact := runtimecorrelation.BundleSourceFact{
-				BundleHash:        runStartTestBundleHash,
-				BundleSource:      storerunlifecycle.BundleSourcePersisted,
-				BundleFingerprint: runStartTestFingerprint,
-			}
+			sourceFact := mustAPITestPersistedBundleSourceFact(runStartTestBundleHash)
 			bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 				ContractBundle:   source,
 				BundleSourceFact: sourceFact,
@@ -389,7 +383,7 @@ func TestOperatorBundleDeleteBlocksPostDeleteNewWorkFromPersistedRuntimeSource(t
 					Bundle: runtimecontracts.BundleIdentity{
 						WorkflowName:    "review",
 						WorkflowVersion: "1.0.0",
-						Fingerprint:     runStartTestFingerprint,
+						BundleHash:      runStartTestBundleHash,
 					},
 					BundleDelete: &bundledelete.Coordinator{
 						Planner:            pg,
@@ -412,7 +406,7 @@ func TestOperatorBundleDeleteBlocksPostDeleteNewWorkFromPersistedRuntimeSource(t
 				t.Fatalf("bundle.delete result = %#v, want deleted", result)
 			}
 
-			published := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "publish-after-delete"))
+			published := rpcCall(t, handler, eventPublishBody("", runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "publish-after-delete"))
 			assertBundleUnavailableNewWork(t, published, "event.publish")
 			if count := countEventsByName(t, db, "scan.requested"); count != 0 {
 				t.Fatalf("scan.requested events after event.publish = %d, want 0", count)
@@ -422,7 +416,7 @@ func TestOperatorBundleDeleteBlocksPostDeleteNewWorkFromPersistedRuntimeSource(t
 			}
 
 			runID := uuid.NewString()
-			started := rpcCall(t, handler, runStartBody(runID, runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "start-after-delete"))
+			started := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "start-after-delete"))
 			assertBundleUnavailableNewWork(t, started, "run.start")
 			if count := countRunRowsByID(t, db, runID); count != 0 {
 				t.Fatalf("run rows after run.start = %d, want 0", count)
@@ -470,7 +464,6 @@ func newBundleDeleteRuntimeContextManager(t *testing.T) *swruntime.RuntimeContex
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	manager, err := swruntime.NewRuntimeContextManager(nil, swruntime.BundleContext{
-		BundleHash:       runStartTestBundleHash,
 		BundleSourceFact: runtimeContextTestSourceFact(runStartTestBundleHash),
 		BundleIdentity:   runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
 		Source:           source,

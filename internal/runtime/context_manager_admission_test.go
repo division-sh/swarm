@@ -779,7 +779,7 @@ func TestRuntimeContextManagerRejectsCandidatePackRemovalAcrossContexts(t *testi
 	if got := manager.LookupIngress("chat", "telegram"); !got.Loaded() || got.Target.AdmissionPlan.GenerationID() != oldCatalog.GenerationID() {
 		t.Fatalf("pack removal changed survivor: %#v", got)
 	}
-	if _, ok := manager.LookupBundleHash(candidatePrimary.BundleHash); !ok {
+	if _, ok := manager.LookupBundleHash(candidatePrimary.BundleHash()); !ok {
 		t.Fatal("pack removal failure withdrew unchanged primary context")
 	}
 }
@@ -806,7 +806,7 @@ func TestRuntimeContextManagerRejectsTwoContextIngressCollisionWithoutMutation(t
 	}
 	for alias, hash := range map[string]string{"primary": runtimeContextTestHashA, "survivor": runtimeContextTestHashB} {
 		lookup := manager.LookupIngress(alias, "acme")
-		if !lookup.Loaded() || lookup.Context.BundleHash != hash || lookup.Target.AdmissionPlan.GenerationID() != oldCatalog.GenerationID() {
+		if !lookup.Loaded() || lookup.Context.BundleHash() != hash || lookup.Target.AdmissionPlan.GenerationID() != oldCatalog.GenerationID() {
 			t.Fatalf("collision changed %s lookup: %#v", alias, lookup)
 		}
 	}

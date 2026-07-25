@@ -17,6 +17,7 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
+	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"golang.org/x/text/unicode/norm"
 )
@@ -26,10 +27,7 @@ const (
 	bundleHashV1Prelude = "swarm-bundle-hash-v1\n"
 )
 
-var (
-	bundleHashV1Pattern   = regexp.MustCompile(`^bundle-v1:sha256:[0-9a-f]{64}$`)
-	yamlJSONNumberPattern = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)
-)
+var yamlJSONNumberPattern = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)
 
 type bundleHashContentPolicy int
 
@@ -50,9 +48,7 @@ type canonicalJSONNumber float64
 // BundleHash is the canonical v1 bundle identity owner.
 //
 // It implements platform-spec.yaml#multi_bundle_persistence.bundle_identity.canonicalization_v1
-// and emits bundle-v1:sha256:<hex>. Legacy BundleFingerprint output is not
-// a canonical bundle_hash and remains only for the currently split
-// health/runtime transition paths.
+// and emits bundle-v1:sha256:<hex>.
 func BundleHash(bundle *WorkflowContractBundle) (string, error) {
 	entries, err := bundleHashEntries(bundle)
 	if err != nil {
@@ -84,17 +80,11 @@ func BundleHash(bundle *WorkflowContractBundle) (string, error) {
 }
 
 func IsBundleHash(value string) bool {
-	return bundleHashV1Pattern.MatchString(strings.TrimSpace(value))
+	return runtimebundleidentity.IsCanonicalHash(value)
 }
 
 func ValidateBundleHash(value string) error {
-	if strings.TrimSpace(value) == "" {
-		return fmt.Errorf("bundle_hash must be non-empty")
-	}
-	if !IsBundleHash(value) {
-		return fmt.Errorf("bundle_hash must be bundle-v1:sha256:<64 lowercase hex>")
-	}
-	return nil
+	return runtimebundleidentity.ValidateCanonicalHash(value)
 }
 
 func bundleHashEntries(bundle *WorkflowContractBundle) ([]bundleHashEntry, error) {

@@ -70,7 +70,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsForkLocalEvidence(t
 	forkRunID := uuid.NewString()
 	eventID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running'), ($2::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'), ($2::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, sourceRunID, forkRunID); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsBundleHashSelection
 	forkRunID := uuid.NewString()
 	eventID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running'), ($2::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'), ($2::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, sourceRunID, forkRunID); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJS
 	forkRunID := uuid.NewString()
 	eventID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running'), ($2::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'), ($2::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, sourceRunID, forkRunID); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBu
 	forkRunID := uuid.NewString()
 	eventID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running'), ($2::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'), ($2::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, sourceRunID, forkRunID); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRejectsJSONBTamperDuringManag
 	forkRunID := uuid.NewString()
 	eventID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running'), ($2::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'), ($2::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, sourceRunID, forkRunID); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}

@@ -3369,17 +3369,9 @@
         {
           "name": "bundle_hash",
           "required": false,
-          "description": "Canonical #1001 bundle identity scope. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e. Required when run_id is omitted. When run_id identifies an existing run, optional bundle_hash must match that run's canonical runs.bundle_hash or the method fails closed with BUNDLE_MISMATCH. In DB-loaded RuntimeContextManager mode, the resolved hash must select a loaded BundleContext or the method fails closed with BUNDLE_UNAVAILABLE. cannot be combined with legacy bundle_ref; malformed or combined inputs fail closed with UNSUPPORTED_BUNDLE_HASH.",
+          "description": "Canonical bundle identity scope. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e. Required when run_id is omitted. When run_id identifies an existing run, optional bundle_hash must match that run's canonical runs.bundle_hash or the method fails closed with BUNDLE_MISMATCH. In DB-loaded RuntimeContextManager mode, the resolved hash must select a loaded BundleContext or the method fails closed with BUNDLE_UNAVAILABLE. Malformed inputs fail closed with UNSUPPORTED_BUNDLE_HASH.",
           "schema": {
             "$ref": "#/components/schemas/BundleHash"
-          }
-        },
-        {
-          "name": "bundle_ref",
-          "required": false,
-          "description": "Deprecated transition alias during #1001. Carries bundle_ref.fingerprint only, is not authoritative for create-new-work scope or routing, and cannot be combined with bundle_hash.",
-          "schema": {
-            "$ref": "#/components/schemas/BundleRef"
           }
         },
         {
@@ -3463,14 +3455,8 @@
               "details": {
                 "additionalProperties": false,
                 "properties": {
-                  "boot_fingerprint": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
                   "bundle_source": {
                     "type": "string"
-                  },
-                  "provided_fingerprint": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
                   },
                   "requested_hash": {
                     "$ref": "#/components/schemas/BundleHash"
@@ -3570,9 +3556,6 @@
                   "cause": {
                     "type": "string"
                   },
-                  "legacy_bundle_fingerprint": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
                   "run_id": {
                     "$ref": "#/components/schemas/OpaqueId"
                   },
@@ -3620,9 +3603,6 @@
                   "cause": {
                     "type": "string"
                   },
-                  "legacy_bundle_fingerprint": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
                   "run_id": {
                     "$ref": "#/components/schemas/OpaqueId"
                   },
@@ -3653,41 +3633,6 @@
             "properties": {
               "code": {
                 "const": "UNSUPPORTED_BUNDLE_HASH",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32046,
-          "message": "Application error: UNSUPPORTED_BUNDLE_REF",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "UNSUPPORTED_BUNDLE_REF",
                 "type": "string"
               },
               "correlation_id": {
@@ -6133,7 +6078,7 @@
     },
     {
       "name": "run.fork",
-      "description": "Public selected-contract run fork mutation.\n\nCreates and executes a selected-contract fork from a source run. The method consumes source bundle availability from runs.bundle_source / runs.bundle_hash and bundle-row presence before any fork mutation. Source runs whose canonical bundle bytes are unavailable fail closed with BUNDLE_UNAVAILABLE; persisted source rows with missing bundle data fail with BUNDLE_DATA_INTEGRITY_ERROR. The selected-contract execution path consumes the existing store/runtime run_fork selected_contracts owners and must not infer source identity from legacy bundle_fingerprint, bundle_ref, null-collapse, or local filesystem heuristics.\n\nIf bundle_hash is omitted, the source run's canonical bundle_hash is used. If bundle_hash is supplied and equals the source run bundle_hash, the same-bundle selected_contracts fork may proceed. Disk-loaded source execution uses the existing runtime selected-contract source loader. DB-loaded same-bundle source execution must load source bytes from the persisted bundle catalog runtime source owner, verify the reconstructed bundle_hash, and stamp fork-created runs with bundle_source=persisted plus that canonical bundle_hash.\n\nIf bundle_hash differs from the source run bundle_hash, the target hash selects an already loaded/boot-pinned RuntimeContextManager BundleContext under current Option A. The method must persist selected-contract ownership as mode=bundle_hash with that target bundle_hash, recover routes against the same target identity, execute against the target BundleContext runtime/source, and stamp fork-created runs with bundle_source=persisted plus the target canonical bundle_hash. Valid target hashes that are not loaded by this process, have been unloaded or deactivated, are missing/deleted from the catalog, or otherwise lack supported persisted bytes fail closed with BUNDLE_UNAVAILABLE. Corrupt or hash-mismatched persisted target bytes fail with BUNDLE_DATA_INTEGRITY_ERROR. run.fork MUST NOT perform Dynamic Load, bundle.register runtime start, catalog-only runtime load, ambient CLI bundle selection, or Option B artifact capture. The `swarm run fork` CLI consumes this method and must not call runtime/store helpers directly.\n",
+      "description": "Public selected-contract run fork mutation.\n\nCreates and executes a selected-contract fork from a source run. The method consumes source bundle availability from runs.bundle_source / runs.bundle_hash and bundle-row presence before any fork mutation. Source runs whose canonical bundle bytes are unavailable fail closed with BUNDLE_UNAVAILABLE; persisted source rows with missing bundle data fail with BUNDLE_DATA_INTEGRITY_ERROR. The selected-contract execution path consumes the existing store/runtime run_fork selected_contracts owners and must not infer source identity from nullable identity, compatibility aliases, or local filesystem heuristics.\n\nIf bundle_hash is omitted, the source run's canonical bundle_hash is used. If bundle_hash is supplied and equals the source run bundle_hash, the same-bundle selected_contracts fork may proceed. Disk-loaded source execution uses the existing runtime selected-contract source loader. DB-loaded same-bundle source execution must load source bytes from the persisted bundle catalog runtime source owner, verify the reconstructed bundle_hash, and stamp fork-created runs with bundle_source=persisted plus that canonical bundle_hash.\n\nIf bundle_hash differs from the source run bundle_hash, the target hash selects an already loaded/boot-pinned RuntimeContextManager BundleContext under current Option A. The method must persist selected-contract ownership as mode=bundle_hash with that target bundle_hash, recover routes against the same target identity, execute against the target BundleContext runtime/source, and stamp fork-created runs with bundle_source=persisted plus the target canonical bundle_hash. Valid target hashes that are not loaded by this process, have been unloaded or deactivated, are missing/deleted from the catalog, or otherwise lack supported persisted bytes fail closed with BUNDLE_UNAVAILABLE. Corrupt or hash-mismatched persisted target bytes fail with BUNDLE_DATA_INTEGRITY_ERROR. run.fork MUST NOT perform Dynamic Load, bundle.register runtime start, catalog-only runtime load, ambient CLI bundle selection, or Option B artifact capture. The `swarm run fork` CLI consumes this method and must not call runtime/store helpers directly.\n",
       "params": [
         {
           "name": "source_run_id",
@@ -6212,9 +6157,6 @@
                   "cause": {
                     "type": "string"
                   },
-                  "legacy_bundle_fingerprint": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
                   "run_id": {
                     "$ref": "#/components/schemas/OpaqueId"
                   },
@@ -6261,9 +6203,6 @@
                   },
                   "cause": {
                     "type": "string"
-                  },
-                  "legacy_bundle_fingerprint": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
                   },
                   "run_id": {
                     "$ref": "#/components/schemas/OpaqueId"
@@ -6495,7 +6434,7 @@
     },
     {
       "name": "run.list",
-      "description": "List runs with optional filters. Cursor-paginated. The optional bundle_hash filter is a canonical persisted run-bundle selector over runs.bundle_hash; callers must not use legacy bundle fingerprints for this field.",
+      "description": "List runs with optional filters. Cursor-paginated. The optional bundle_hash filter is a canonical persisted run-bundle selector over runs.bundle_hash; no alternate identity field is accepted.",
       "params": [
         {
           "name": "bundle_hash",
@@ -6776,22 +6715,14 @@
     {
       "name": "run.start",
       "deprecated": true,
-      "description": "Deprecated wrapper over event.publish retained for older Builder/API callers. New clients should call event.publish directly.\nStart a run by injecting an event into the runtime bus. Create-new-work admission follows event.publish bundle_hash semantics: if no existing run row provides bundle context, bundle_hash is required. If run_id is supplied but no run row exists, the call is still create-new-work and run_id alone is not bundle scope. If caller bundle_hash and existing run context disagree, the method fails closed with BUNDLE_MISMATCH. In DB-loaded RuntimeContextManager mode, the resolved bundle_hash must select a loaded BundleContext or the method fails closed with BUNDLE_UNAVAILABLE. Legacy bundle_ref.fingerprint is deprecated transition input only and cannot be combined with bundle_hash.\n",
+      "description": "Deprecated wrapper over event.publish retained for older Builder/API callers. New clients should call event.publish directly.\nStart a run by injecting an event into the runtime bus. Create-new-work admission follows event.publish bundle_hash semantics: if no existing run row provides bundle context, bundle_hash is required. If run_id is supplied but no run row exists, the call is still create-new-work and run_id alone is not bundle scope. If caller bundle_hash and existing run context disagree, the method fails closed with BUNDLE_MISMATCH. In DB-loaded RuntimeContextManager mode, the resolved bundle_hash must select a loaded BundleContext or the method fails closed with BUNDLE_UNAVAILABLE. No alternate bundle identity input is accepted.\n",
       "params": [
         {
           "name": "bundle_hash",
           "required": false,
-          "description": "Canonical #1001 bundle identity scope. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e. Required when no existing run row supplies bundle context. When run_id identifies an existing run, optional bundle_hash must match that run's canonical runs.bundle_hash or the method fails closed with BUNDLE_MISMATCH. In DB-loaded RuntimeContextManager mode, the resolved hash must select a loaded BundleContext or the method fails closed with BUNDLE_UNAVAILABLE; cannot be combined with legacy bundle_ref; malformed or combined inputs fail closed with UNSUPPORTED_BUNDLE_HASH.",
+          "description": "Canonical bundle identity scope. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e. Required when no existing run row supplies bundle context. When run_id identifies an existing run, optional bundle_hash must match that run's canonical runs.bundle_hash or the method fails closed with BUNDLE_MISMATCH. In DB-loaded RuntimeContextManager mode, the resolved hash must select a loaded BundleContext or the method fails closed with BUNDLE_UNAVAILABLE. Malformed inputs fail closed with UNSUPPORTED_BUNDLE_HASH.",
           "schema": {
             "$ref": "#/components/schemas/BundleHash"
-          }
-        },
-        {
-          "name": "bundle_ref",
-          "required": false,
-          "description": "Deprecated transition alias during #1001. Carries bundle_ref.fingerprint only, is not authoritative for create-new-work scope or routing, and cannot be combined with bundle_hash.",
-          "schema": {
-            "$ref": "#/components/schemas/BundleRef"
           }
         },
         {
@@ -6862,14 +6793,8 @@
               "details": {
                 "additionalProperties": false,
                 "properties": {
-                  "boot_fingerprint": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
                   "bundle_source": {
                     "type": "string"
-                  },
-                  "provided_fingerprint": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
                   },
                   "requested_hash": {
                     "$ref": "#/components/schemas/BundleHash"
@@ -6969,9 +6894,6 @@
                   "cause": {
                     "type": "string"
                   },
-                  "legacy_bundle_fingerprint": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
                   "run_id": {
                     "$ref": "#/components/schemas/OpaqueId"
                   },
@@ -7019,9 +6941,6 @@
                   "cause": {
                     "type": "string"
                   },
-                  "legacy_bundle_fingerprint": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
                   "run_id": {
                     "$ref": "#/components/schemas/OpaqueId"
                   },
@@ -7052,41 +6971,6 @@
             "properties": {
               "code": {
                 "const": "UNSUPPORTED_BUNDLE_HASH",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32046,
-          "message": "Application error: UNSUPPORTED_BUNDLE_REF",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "UNSUPPORTED_BUNDLE_REF",
                 "type": "string"
               },
               "correlation_id": {
@@ -8783,7 +8667,7 @@
         {
           "name": "bundle_hash",
           "required": true,
-          "description": "Canonical bundle identity for the loaded contract package. Legacy bundle_ref/fingerprint inputs are not accepted.",
+          "description": "Canonical bundle identity for the loaded contract package. No alternate bundle identity input is accepted.",
           "schema": {
             "$ref": "#/components/schemas/BundleHash"
           }
@@ -8878,14 +8762,8 @@
               "details": {
                 "additionalProperties": false,
                 "properties": {
-                  "boot_fingerprint": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
                   "bundle_source": {
                     "type": "string"
-                  },
-                  "provided_fingerprint": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
                   },
                   "requested_hash": {
                     "$ref": "#/components/schemas/BundleHash"
@@ -8940,9 +8818,6 @@
                   "cause": {
                     "type": "string"
                   },
-                  "legacy_bundle_fingerprint": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
                   "run_id": {
                     "$ref": "#/components/schemas/OpaqueId"
                   },
@@ -8989,9 +8864,6 @@
                   },
                   "cause": {
                     "type": "string"
-                  },
-                  "legacy_bundle_fingerprint": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
                   },
                   "run_id": {
                     "$ref": "#/components/schemas/OpaqueId"
@@ -10144,19 +10016,16 @@
         "type": "object"
       },
       "BundleHash": {
-        "description": "Canonical v1 bundle identity. Public input surfaces use this shape for bundle_hash; legacy sha256:\u003chex\u003e fingerprints are not accepted under the bundle_hash name.",
+        "description": "Canonical v1 bundle identity used by every public, runtime, and persisted bundle-identity surface.",
         "pattern": "^bundle-v1:sha256:[a-f0-9]{64}$",
         "type": "string"
       },
       "BundleIdentity": {
         "additionalProperties": false,
-        "description": "Server bundle identity returned by health.check. bundle_hash is the active canonical v1 bundle identity when the runtime has a promoted source fact and is the value clients use for create-new-work bundle scope. fingerprint is legacy boot/runtime identity metadata retained for health/check compatibility; workflow_name and workflow_version are human-friendly labels. Server-local filesystem paths are intentionally NOT exposed — they leak deployment internals and aren't meaningful to external Phase-2 consumers.\n",
+        "description": "Server bundle identity returned by health.check. bundle_hash is the active canonical v1 bundle identity and the value clients use for create-new-work bundle scope; workflow_name and workflow_version are human-friendly labels. Server-local filesystem paths are intentionally not exposed.\n",
         "properties": {
           "bundle_hash": {
             "$ref": "#/components/schemas/BundleHash"
-          },
-          "fingerprint": {
-            "$ref": "#/components/schemas/Sha256Fingerprint"
           },
           "workflow_name": {
             "type": "string"
@@ -10166,9 +10035,9 @@
           }
         },
         "required": [
+          "bundle_hash",
           "workflow_name",
-          "workflow_version",
-          "fingerprint"
+          "workflow_version"
         ],
         "type": "object"
       },
@@ -10187,19 +10056,6 @@
         },
         "required": [
           "bundles"
-        ],
-        "type": "object"
-      },
-      "BundleRef": {
-        "additionalProperties": false,
-        "description": "Deprecated legacy bundle reference accepted during the #1001 dual-accept transition. New callers use bundle_hash with BundleHash shape once canonical source facts are available. BundleRef carries the legacy sha256 fingerprint only and cannot be combined with bundle_hash; doing so fails closed with UNSUPPORTED_BUNDLE_HASH before runtime/store mutation.\n",
-        "properties": {
-          "fingerprint": {
-            "$ref": "#/components/schemas/Sha256Fingerprint"
-          }
-        },
-        "required": [
-          "fingerprint"
         ],
         "type": "object"
       },
@@ -13216,7 +13072,7 @@
         "type": "object"
       },
       "Sha256Fingerprint": {
-        "description": "Content-hash fingerprint of a bundle. Stable across paths/worktrees where content is identical.",
+        "description": "Generic SHA-256 digest used by non-bundle integrity and idempotency contracts.",
         "pattern": "^sha256:[a-f0-9]{64}$",
         "type": "string"
       },
@@ -13915,9 +13771,6 @@
                 "cause": {
                   "type": "string"
                 },
-                "legacy_bundle_fingerprint": {
-                  "$ref": "#/components/schemas/Sha256Fingerprint"
-                },
                 "run_id": {
                   "$ref": "#/components/schemas/OpaqueId"
                 },
@@ -14047,14 +13900,8 @@
             "details": {
               "additionalProperties": false,
               "properties": {
-                "boot_fingerprint": {
-                  "$ref": "#/components/schemas/Sha256Fingerprint"
-                },
                 "bundle_source": {
                   "type": "string"
-                },
-                "provided_fingerprint": {
-                  "$ref": "#/components/schemas/Sha256Fingerprint"
                 },
                 "requested_hash": {
                   "$ref": "#/components/schemas/BundleHash"
@@ -14229,9 +14076,6 @@
                 },
                 "cause": {
                   "type": "string"
-                },
-                "legacy_bundle_fingerprint": {
-                  "$ref": "#/components/schemas/Sha256Fingerprint"
                 },
                 "run_id": {
                   "$ref": "#/components/schemas/OpaqueId"
@@ -15572,41 +15416,6 @@
                   "type": "string"
                 },
                 "unsupported_reason": {
-                  "type": "string"
-                }
-              },
-              "type": "object"
-            },
-            "retryable": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "code",
-            "details",
-            "retryable",
-            "correlation_id"
-          ],
-          "type": "object"
-        }
-      },
-      "UNSUPPORTED_BUNDLE_REF": {
-        "code": -32046,
-        "message": "Application error: UNSUPPORTED_BUNDLE_REF",
-        "data": {
-          "additionalProperties": false,
-          "properties": {
-            "code": {
-              "const": "UNSUPPORTED_BUNDLE_REF",
-              "type": "string"
-            },
-            "correlation_id": {
-              "type": "string"
-            },
-            "details": {
-              "additionalProperties": false,
-              "properties": {
-                "reason": {
                   "type": "string"
                 }
               },

@@ -235,7 +235,7 @@ func testSetupHandler(t *testing.T, pg *store.PostgresStore, source semanticview
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "review",
 				WorkflowVersion: "1.0.0",
-				Fingerprint:     runStartTestFingerprint,
+				BundleHash:      runStartTestBundleHash,
 			},
 		}),
 	})
@@ -282,19 +282,19 @@ func validTestSetupEntity(entityID, currentState, note string, reviewReady bool)
 
 func assertTestSetupPersistence(t *testing.T, db *sql.DB, runID, entityID, currentState, note string, reviewReady bool) {
 	t.Helper()
-	var runStatus, triggerType, bundleHash, bundleSource, legacyFingerprint string
+	var runStatus, triggerType, bundleHash, bundleSource string
 	if err := db.QueryRow(`
-		SELECT status, trigger_event_type, COALESCE(bundle_hash, ''), bundle_source, COALESCE(bundle_fingerprint, '')
+		SELECT status, trigger_event_type, bundle_hash, bundle_source
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, runID).Scan(&runStatus, &triggerType, &bundleHash, &bundleSource, &legacyFingerprint); err != nil {
+	`, runID).Scan(&runStatus, &triggerType, &bundleHash, &bundleSource); err != nil {
 		t.Fatalf("load setup run row: %v", err)
 	}
 	if runStatus != "running" || triggerType != "test.setup_entities" {
 		t.Fatalf("setup run row status=%q trigger=%q, want running/test.setup_entities", runStatus, triggerType)
 	}
-	if bundleHash != runStartTestBundleHash || bundleSource != storerunlifecycle.BundleSourceEphemeral || legacyFingerprint != runStartTestFingerprint {
-		t.Fatalf("setup run row bundle identity = hash:%q source:%q fingerprint:%q", bundleHash, bundleSource, legacyFingerprint)
+	if bundleHash != runStartTestBundleHash || bundleSource != storerunlifecycle.BundleSourceEphemeral {
+		t.Fatalf("setup run row bundle identity = hash:%q source:%q", bundleHash, bundleSource)
 	}
 
 	var flowInstance, entityType, gotState, gotNote, gateJSON string

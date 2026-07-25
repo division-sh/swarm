@@ -251,8 +251,8 @@ func sqliteExactOnceRunContext(t *testing.T, db *sql.DB) context.Context {
 	t.Helper()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), testPipelineRunID)
 	if _, err := db.ExecContext(ctx, `
-		INSERT OR IGNORE INTO runs (run_id, status, started_at)
-		VALUES (?, 'running', ?)
+		INSERT OR IGNORE INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, testPipelineRunID, time.Now().UTC()); err != nil {
 		t.Fatalf("seed sqlite run: %v", err)
 	}

@@ -2,22 +2,100 @@ package correlation
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 )
 
 type inboundEventContextKey struct{}
 type runIDContextKey struct{}
 type handlerIDContextKey struct{}
 type runtimeLineageContextKey struct{}
-type bundleFingerprintContextKey struct{}
 type bundleSourceFactContextKey struct{}
 
 type BundleSourceFact struct {
-	BundleHash        string
-	BundleSource      string
-	BundleFingerprint string
+	bundleHash string
+	source     executableBundleSource
+}
+
+type executableBundleSource uint8
+
+const (
+	executableBundleSourcePersisted executableBundleSource = iota + 1
+	executableBundleSourceEphemeral
+)
+
+func NewPersistedBundleSourceFact(bundleHash string) (BundleSourceFact, error) {
+	return newBundleSourceFact(bundleHash, executableBundleSourcePersisted)
+}
+
+func NewEphemeralBundleSourceFact(bundleHash string) (BundleSourceFact, error) {
+	return newBundleSourceFact(bundleHash, executableBundleSourceEphemeral)
+}
+
+func DecodeBundleSourceFact(bundleHash, bundleSource string) (BundleSourceFact, error) {
+	if bundleSource != strings.TrimSpace(bundleSource) {
+		return BundleSourceFact{}, fmt.Errorf("bundle_source must not contain surrounding whitespace")
+	}
+	switch bundleSource {
+	case "persisted":
+		return NewPersistedBundleSourceFact(bundleHash)
+	case "ephemeral":
+		return NewEphemeralBundleSourceFact(bundleHash)
+	default:
+		return BundleSourceFact{}, fmt.Errorf("bundle_source must be persisted or ephemeral")
+	}
+}
+
+func newBundleSourceFact(bundleHash string, source executableBundleSource) (BundleSourceFact, error) {
+	if bundleHash != strings.TrimSpace(bundleHash) {
+		return BundleSourceFact{}, fmt.Errorf("bundle_hash must not contain surrounding whitespace")
+	}
+	if err := runtimebundleidentity.ValidateCanonicalHash(bundleHash); err != nil {
+		return BundleSourceFact{}, err
+	}
+	switch source {
+	case executableBundleSourcePersisted, executableBundleSourceEphemeral:
+	default:
+		return BundleSourceFact{}, fmt.Errorf("bundle source provenance is invalid")
+	}
+	return BundleSourceFact{bundleHash: bundleHash, source: source}, nil
+}
+
+func (f BundleSourceFact) Validate() error {
+	if f.bundleHash == "" || f.source == 0 {
+		return fmt.Errorf("bundle source fact is required")
+	}
+	_, err := newBundleSourceFact(f.bundleHash, f.source)
+	return err
+}
+
+func (f BundleSourceFact) BundleHash() string {
+	return f.bundleHash
+}
+
+func (f BundleSourceFact) IsPersisted() bool {
+	return f.source == executableBundleSourcePersisted
+}
+
+func (f BundleSourceFact) IsEphemeral() bool {
+	return f.source == executableBundleSourceEphemeral
+}
+
+func (f BundleSourceFact) StorageValues() (bundleHash, bundleSource string) {
+	if f.Validate() != nil {
+		return "", ""
+	}
+	switch f.source {
+	case executableBundleSourcePersisted:
+		return f.bundleHash, "persisted"
+	case executableBundleSourceEphemeral:
+		return f.bundleHash, "ephemeral"
+	default:
+		return "", ""
+	}
 }
 
 type runtimeInstanceIDContextKey struct{}
@@ -40,18 +118,6 @@ func RuntimeInstanceIDFromContext(ctx context.Context) (string, bool) {
 	runtimeInstanceID, ok := ctx.Value(runtimeInstanceIDContextKey{}).(string)
 	runtimeInstanceID = strings.TrimSpace(runtimeInstanceID)
 	return runtimeInstanceID, ok && runtimeInstanceID != ""
-}
-
-func (f BundleSourceFact) Normalized() BundleSourceFact {
-	f.BundleHash = strings.TrimSpace(f.BundleHash)
-	f.BundleSource = strings.TrimSpace(f.BundleSource)
-	f.BundleFingerprint = strings.TrimSpace(f.BundleFingerprint)
-	return f
-}
-
-func (f BundleSourceFact) Empty() bool {
-	f = f.Normalized()
-	return f.BundleHash == "" && f.BundleSource == "" && f.BundleFingerprint == ""
 }
 
 type RuntimeLineageRowCategory string
@@ -250,38 +316,14 @@ func HandlerIDFromContext(ctx context.Context) string {
 	return strings.TrimSpace(handlerID)
 }
 
-func WithBundleFingerprint(ctx context.Context, fingerprint string) context.Context {
-	if ctx == nil {
-		return nil
-	}
-	fingerprint = strings.TrimSpace(fingerprint)
-	if fingerprint == "" {
-		return ctx
-	}
-	return context.WithValue(ctx, bundleFingerprintContextKey{}, fingerprint)
-}
-
-func BundleFingerprintFromContext(ctx context.Context) string {
-	if ctx == nil {
-		return ""
-	}
-	fingerprint, _ := ctx.Value(bundleFingerprintContextKey{}).(string)
-	return strings.TrimSpace(fingerprint)
-}
-
 func WithBundleSourceFact(ctx context.Context, fact BundleSourceFact) context.Context {
 	if ctx == nil {
 		return nil
 	}
-	fact = fact.Normalized()
-	if fact.Empty() {
+	if fact.Validate() != nil {
 		return ctx
 	}
-	ctx = context.WithValue(ctx, bundleSourceFactContextKey{}, fact)
-	if fact.BundleFingerprint != "" {
-		ctx = WithBundleFingerprint(ctx, fact.BundleFingerprint)
-	}
-	return ctx
+	return context.WithValue(ctx, bundleSourceFactContextKey{}, fact)
 }
 
 func BundleSourceFactFromContext(ctx context.Context) (BundleSourceFact, bool) {
@@ -292,8 +334,7 @@ func BundleSourceFactFromContext(ctx context.Context) (BundleSourceFact, bool) {
 	if !ok {
 		return BundleSourceFact{}, false
 	}
-	fact = fact.Normalized()
-	if fact.Empty() {
+	if fact.Validate() != nil {
 		return BundleSourceFact{}, false
 	}
 	return fact, true

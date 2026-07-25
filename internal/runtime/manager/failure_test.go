@@ -548,7 +548,7 @@ func TestProcessEventSelectedForkTerminalizesRetryableFailureBeforeRuntimeRetire
 		1,
 		forkRunID,
 		"selected-retry-actors",
-		"selected-retry-bundle",
+		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		nil,
 	)
 	if err != nil {

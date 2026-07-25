@@ -115,11 +115,15 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out Result, ret
 		return Result{}, err
 	}
 
+	targets, err := ActiveRunTargets(result.Plan)
+	if err != nil {
+		return Result{}, err
+	}
 	cleanup, err := c.Cleaner.ApplyBundleForceDeletePreservationCleanup(ctx, preservationcleanup.Request{
 		OperationName: preservationcleanup.BundleForceDeleteOperationName,
 		RequestedAt:   req.RequestedAt,
 		ControlledBy:  preservationcleanup.BundleForceDeleteControlledBy,
-		Targets:       ActiveRunTargets(result.Plan),
+		Targets:       targets,
 	})
 	if err != nil {
 		return result.withPartialFailure("preservation_cleanup", err), nil

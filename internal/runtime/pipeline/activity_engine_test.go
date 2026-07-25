@@ -1473,7 +1473,7 @@ func TestLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatch(t *t
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatal(err)
 	}
 	runner := &activityCommitAckLossRunner{db: db}
@@ -1992,12 +1992,12 @@ func newSQLiteActivityJournalStore(t *testing.T, ctx context.Context) (*sql.DB, 
 func seedActivityRun(t *testing.T, db *sql.DB, sqlite bool, runID string) {
 	t.Helper()
 	if sqlite {
-		if _, err := db.Exec(`INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+		if _, err := db.Exec(`INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'ephemeral')`, runID, pipelineTestBundleHash); err != nil {
 			t.Fatalf("seed sqlite run: %v", err)
 		}
 		return
 	}
-	if _, err := db.Exec(`INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := db.Exec(`INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'ephemeral')`, runID, pipelineTestBundleHash); err != nil {
 		t.Fatalf("seed postgres run: %v", err)
 	}
 }
@@ -2007,7 +2007,9 @@ func createActivityJournalSQLiteSchema(t *testing.T, ctx context.Context, db *sq
 	for _, stmt := range []string{
 		`CREATE TABLE runs (
 			run_id TEXT PRIMARY KEY,
-			status TEXT NOT NULL DEFAULT 'running'
+			status TEXT NOT NULL DEFAULT 'running',
+			bundle_hash TEXT NOT NULL,
+			bundle_source TEXT NOT NULL
 		)`,
 		`CREATE TABLE activity_attempts (
 			request_event_id TEXT PRIMARY KEY,

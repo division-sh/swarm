@@ -34,8 +34,8 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 	targetRoute := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/inst-9", EntityID: targetEntityID}
 
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			runID := uuid.NewString()
 			eventID := uuid.NewString()
 			at := time.Now().UTC()
-			if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, at.Add(-time.Minute)); err != nil {
+			if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, at.Add(-time.Minute)); err != nil {
 				t.Fatalf("seed run: %v", err)
 			}
 			if !tc.explicitSelector {

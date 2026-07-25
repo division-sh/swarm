@@ -23,8 +23,8 @@ func TestRunForkPlanner_ResolvesCommitOrderedEventRevisionsAndRejectsTimestampSe
 	secondEventID := "00000000-0000-0000-0000-000000000002"
 	at := time.Unix(1700000000, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -71,8 +71,8 @@ func TestRunForkPlanner_FailsClosedForOpenReplyContextAtForkPoint(t *testing.T) 
 	requestEventID := uuid.NewString()
 	at := time.Unix(1700000050, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -116,8 +116,8 @@ func TestRunForkPlanner_ReconstructsEntityStateAtForkPointFromMutations(t *testi
 	secondEventID := uuid.NewString()
 	at := time.Unix(1700000100, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -181,8 +181,8 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	eventID := uuid.NewString()
 	at := time.Unix(1700000200, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -278,8 +278,8 @@ func TestRunForkPlanner_PendingUnstartedDeliveryIsDeliveryEventReplayReady(t *te
 	eventID := uuid.NewString()
 	at := time.Unix(1700000250, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -320,8 +320,8 @@ func TestRunForkPlanner_NodePendingDeliveryRemainsBlocked(t *testing.T) {
 	eventID := uuid.NewString()
 	at := time.Unix(1700000260, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -390,8 +390,8 @@ func TestRunForkPlanner_NonAgentDeliveryStatesRemainNamedBlockers(t *testing.T) 
 			eventID := uuid.NewString()
 			at := time.Unix(1700000265, 0).UTC()
 			if _, err := db.ExecContext(ctx, `
-				INSERT INTO runs (run_id, status, started_at)
-				VALUES ($1::uuid, 'running', $2)
+				INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+				VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 			`, runID, at.Add(-time.Minute)); err != nil {
 				t.Fatalf("seed run: %v", err)
 			}
@@ -431,8 +431,8 @@ func TestRunForkPlanner_CommittedReplayScopeDoesNotMasqueradeAsExecutableDeliver
 	eventID := uuid.NewString()
 	at := time.Unix(1700000266, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -466,8 +466,8 @@ func TestRunForkPlanner_SystemDeliveryRowsAreNotCanonicalEventDeliveries(t *test
 	eventID := uuid.NewString()
 	at := time.Unix(1700000267, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -491,8 +491,8 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 	eventID := uuid.NewString()
 	at := time.Unix(1700000210, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -604,8 +604,8 @@ func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
 	eventID := uuid.NewString()
 	at := time.Unix(1700000220, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -664,8 +664,8 @@ func TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery(t *testing.T) {
 	eventID := uuid.NewString()
 	at := time.Unix(1700000250, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -725,8 +725,8 @@ func TestRunForkPlanner_DeadLetterClassificationUsesExactSiblingDeliveryID(t *te
 	eventID := uuid.NewString()
 	at := time.Unix(1700000255, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -771,8 +771,8 @@ func TestRunForkPlanner_DoesNotReportPostForkCompletionAsCompletedAtFork(t *test
 	eventID := uuid.NewString()
 	at := time.Unix(1700000260, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -840,8 +840,8 @@ func TestRunForkPlanner_SuppressesPostForkTerminalMetadata(t *testing.T) {
 	eventID := uuid.NewString()
 	at := time.Unix(1700000270, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -905,8 +905,8 @@ func TestRunForkPlanner_AccountsForPlatformReceiptAndExactDeliveryOutcomes(t *te
 	eventID := uuid.NewString()
 	at := time.Unix(1700000280, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -975,8 +975,8 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 	turnID := uuid.NewString()
 	at := time.Unix(1700000290, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -1037,8 +1037,8 @@ func TestRunForkPlanner_ActiveConversationAuditRemainsPolicyBlocker(t *testing.T
 	auditSessionID := uuid.NewString()
 	at := time.Unix(1700000295, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -1078,8 +1078,8 @@ func TestRunForkPlanner_TerminatedSessionBeforeForkIsLineageOnly(t *testing.T) {
 	sessionID := uuid.NewString()
 	at := time.Unix(1700000297, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -1125,8 +1125,8 @@ func TestRunForkPlanner_TerminatedAuditStillBlocksWithoutAtForkTerminationProof(
 	auditSessionID := uuid.NewString()
 	at := time.Unix(1700000298, 0).UTC()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}

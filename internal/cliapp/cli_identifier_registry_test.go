@@ -455,7 +455,6 @@ func TestCLIIdentifierGateFoundSurfacesRemainFullOnly(t *testing.T) {
 	}{
 		{command: "swarm serve", selector: "flag:bundle-hash"},
 		{command: "swarm event publish", selector: "flag:bundle-hash"},
-		{command: "swarm event publish", selector: "flag:bundle-fingerprint"},
 		{command: "swarm event publish", selector: "flag:run-id"},
 		{command: "swarm event publish", selector: "flag:source-event-id"},
 		{command: "swarm event publish", selector: "flag:target-entity-id"},

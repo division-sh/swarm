@@ -181,10 +181,10 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 	t.Cleanup(cancel)
 	processOwner := worklifetime.NewProcess()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint)
-		VALUES ($1::uuid, 'running', $2, $3, $4)
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, $3)
 		ON CONFLICT (run_id) DO NOTHING
-	`, catalogRuntimeRunID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint); err != nil {
+	`, catalogRuntimeRunID, authorActivityTestBundleSourceFact.BundleHash(), "ephemeral"); err != nil {
 		t.Fatalf("seed catalog runtime run: %v", err)
 	}
 

@@ -18,11 +18,17 @@ import (
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
+const authorActivityTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+const authorActivityTestBundleSource = "ephemeral"
 
-var authorActivityTestBundleSourceFact = runtimecorrelation.BundleSourceFact{
-	BundleHash:        "bundle-v1:sha256:" + strings.Repeat("a", 64),
-	BundleSource:      "ephemeral",
-	BundleFingerprint: "sha256:" + strings.Repeat("a", 64),
+var authorActivityTestBundleSourceFact = mustAuthorActivityTestBundleSourceFact()
+
+func mustAuthorActivityTestBundleSourceFact() runtimecorrelation.BundleSourceFact {
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(authorActivityTestBundleHash)
+	if err != nil {
+		panic(err)
+	}
+	return fact
 }
 
 var authorActivityTestDifferentEventTypes = strings.Fields(`
@@ -68,14 +74,14 @@ func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.Ev
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
-	if strings.TrimSpace(opts.BundleSourceFact.BundleHash) == "" {
+	if opts.BundleSourceFact.Validate() != nil {
 		opts.BundleSourceFact = authorActivityTestBundleSourceFact
 	}
 	if opts.WorkOwner == nil {
 		processOwner := worklifetime.NewProcess()
 		owner, err := processOwner.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 			RuntimeInstanceID: opts.RuntimeInstanceID,
-			BundleHash:        opts.BundleSourceFact.BundleHash,
+			BundleHash:        opts.BundleSourceFact.BundleHash(),
 		})
 		if err != nil {
 			return nil, err
@@ -85,7 +91,7 @@ func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.Ev
 	if registrar, ok := store.(authorActivityTestCatalogRegistrar); ok {
 		descriptors := authorActivityTestEventDescriptors(opts.ContractBundle)
 		lease, err := registrar.RegisterAuthorActivityEventCatalog(
-			runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, opts.BundleSourceFact.BundleHash), descriptors,
+			runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, opts.BundleSourceFact.BundleHash()), descriptors,
 		)
 		if err != nil {
 			return nil, err
@@ -105,7 +111,7 @@ func testAuthorActivityContext(ctx context.Context) context.Context {
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, authorActivityTestBundleSourceFact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
-		authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash,
+		authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash(),
 	))
 }
 

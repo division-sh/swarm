@@ -73,7 +73,6 @@ type EventBus struct {
 	recipientPlanGuard          PublishRecipientPlanGuard
 	runtimeIngressDispatchGate  RuntimeIngressDispatchGate
 	runDispatchGate             RunDispatchGate
-	bundleFingerprint           string
 	bundleSourceFact            runtimecorrelation.BundleSourceFact
 	runtimeInstanceID           string
 	testLifecycleProbe          runtimelifecycleprobe.Observer
@@ -175,7 +174,6 @@ type EventBusOptions struct {
 	RecipientPlanGuard          PublishRecipientPlanGuard
 	RuntimeIngressDispatchGate  RuntimeIngressDispatchGate
 	RunDispatchGate             RunDispatchGate
-	BundleFingerprint           string
 	BundleSourceFact            runtimecorrelation.BundleSourceFact
 	RuntimeInstanceID           string
 	TestLifecycleProbe          runtimelifecycleprobe.Observer
@@ -283,8 +281,7 @@ func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		recipientPlanGuard:          opts.RecipientPlanGuard,
 		runtimeIngressDispatchGate:  opts.RuntimeIngressDispatchGate,
 		runDispatchGate:             opts.RunDispatchGate,
-		bundleFingerprint:           strings.TrimSpace(opts.BundleFingerprint),
-		bundleSourceFact:            opts.BundleSourceFact.Normalized(),
+		bundleSourceFact:            opts.BundleSourceFact,
 		runtimeInstanceID:           strings.TrimSpace(opts.RuntimeInstanceID),
 		testLifecycleProbe:          opts.TestLifecycleProbe,
 		providerOutputVerifier:      opts.ProviderOutputVerifier,

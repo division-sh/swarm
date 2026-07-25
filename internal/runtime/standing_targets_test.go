@@ -198,10 +198,10 @@ func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *test
 		t.Fatal(err)
 	}
 	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, ProcessAdmissionState{GenerationID: catalog.GenerationID(), InstalledSubjects: installed}, BundleContext{
-		BundleHash: hash,
-		Source:     source,
-		Runtime:    &Runtime{Bus: bus, workOccurrence: workOwner},
-		WorkOwner:  workOwner,
+		BundleSourceFact: testBundleSourceFact(t, hash),
+		Source:           source,
+		Runtime:          &Runtime{Bus: bus, workOccurrence: workOwner},
+		WorkOwner:        workOwner,
 		StandingTargets: []StandingTarget{{
 			BundleHash: hash, ServiceID: "service-chat", FlowID: "coordinator", Alias: "chat", Provider: "telegram",
 			RunID: "run", Generation: 1, FlowInstance: "coordinator/a", EntityID: "entity", SigningSecret: "webhook_signing.telegram",
@@ -241,7 +241,7 @@ func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneratio
 		FlowInstance: "coordinator/a", EntityID: "entity", SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 	}
 	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, ProcessAdmissionState{GenerationID: catalog.GenerationID(), InstalledSubjects: installed}, BundleContext{
-		BundleHash: hash, Source: source, Runtime: &Runtime{Bus: bus, workOccurrence: workOwner}, WorkOwner: workOwner, StandingTargets: []StandingTarget{target},
+		BundleSourceFact: testBundleSourceFact(t, hash), Source: source, Runtime: &Runtime{Bus: bus, workOccurrence: workOwner}, WorkOwner: workOwner, StandingTargets: []StandingTarget{target},
 	})
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
@@ -306,7 +306,7 @@ func TestRuntimeContextManagerDoesNotCreateProcessOccurrenceForSuspendedStartupT
 		t.Fatalf("SuppressStandingServiceTargets: %v", err)
 	}
 	if err := manager.Register(BundleContext{
-		BundleHash: hash, Source: source, Runtime: &Runtime{Bus: bus, workOccurrence: workOwner}, WorkOwner: workOwner, StandingTargets: []StandingTarget{target},
+		BundleSourceFact: testBundleSourceFact(t, hash), Source: source, Runtime: &Runtime{Bus: bus, workOccurrence: workOwner}, WorkOwner: workOwner, StandingTargets: []StandingTarget{target},
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}

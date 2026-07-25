@@ -41,8 +41,7 @@ func (s *PostgresStore) PlanBundleDelete(ctx context.Context, req bundledelete.R
 			run_id::text,
 			COALESCE(status, ''),
 			COALESCE(bundle_hash, ''),
-			COALESCE(bundle_source, ''),
-			COALESCE(bundle_fingerprint, '')
+			COALESCE(bundle_source, '')
 		FROM runs
 		WHERE bundle_hash = $1
 		  AND bundle_source = $2
@@ -55,7 +54,7 @@ func (s *PostgresStore) PlanBundleDelete(ctx context.Context, req bundledelete.R
 	activeRunIDs := []string{}
 	for rows.Next() {
 		var run bundledelete.RunRef
-		if err := rows.Scan(&run.RunID, &run.Status, &run.BundleHash, &run.BundleSource, &run.BundleFingerprint); err != nil {
+		if err := rows.Scan(&run.RunID, &run.Status, &run.BundleHash, &run.BundleSource); err != nil {
 			return bundledelete.Plan{}, fmt.Errorf("scan bundle delete run: %w", err)
 		}
 		normalizeBundleDeleteRunRef(&run)
@@ -148,7 +147,7 @@ func (s *PostgresStore) ApplyBundleDeleteFinalMutation(ctx context.Context, req 
 		RemainingActiveRuns:  len(activeRemainingRuns),
 		SourceAuthorityOwner: "store.ApplyBundleDeleteFinalMutation",
 		TransactionOrderProof: []string{
-			"lock_runs_table_against_new_persisted_bundle_references",
+			"lock_runs_table_against_new_persisted_bundle_rows",
 			"update_eligible_runs_bundle_source_to_deleted",
 			"delete_matching_bundles_row",
 		},
@@ -300,8 +299,7 @@ func lockBundleDeleteReferencingRunsTx(ctx context.Context, tx *sql.Tx, bundleHa
 			run_id::text,
 			COALESCE(status, ''),
 			COALESCE(bundle_hash, ''),
-			COALESCE(bundle_source, ''),
-			COALESCE(bundle_fingerprint, '')
+			COALESCE(bundle_source, '')
 		FROM runs
 		WHERE bundle_hash = $1
 		  AND bundle_source = $2
@@ -315,7 +313,7 @@ func lockBundleDeleteReferencingRunsTx(ctx context.Context, tx *sql.Tx, bundleHa
 	active := []bundledelete.RunRef{}
 	for rows.Next() {
 		var run bundledelete.RunRef
-		if err := rows.Scan(&run.RunID, &run.Status, &run.BundleHash, &run.BundleSource, &run.BundleFingerprint); err != nil {
+		if err := rows.Scan(&run.RunID, &run.Status, &run.BundleHash, &run.BundleSource); err != nil {
 			return nil, fmt.Errorf("scan bundle delete referencing run: %w", err)
 		}
 		normalizeBundleDeleteRunRef(&run)
@@ -334,7 +332,6 @@ func normalizeBundleDeleteRunRef(run *bundledelete.RunRef) {
 	run.Status = strings.TrimSpace(run.Status)
 	run.BundleHash = strings.TrimSpace(run.BundleHash)
 	run.BundleSource = strings.TrimSpace(run.BundleSource)
-	run.BundleFingerprint = strings.TrimSpace(run.BundleFingerprint)
 }
 
 func normalizeBundleDeleteDeliveryRef(delivery *bundledelete.DeliveryRef) {

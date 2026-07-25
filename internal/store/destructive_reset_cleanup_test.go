@@ -463,7 +463,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DoesNotDeleteRunsCreatedAfte
 	}
 	lateRun := uuid.NewString()
 	lateEvent := uuid.NewString()
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, lateRun); err != nil {
+	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, lateRun); err != nil {
 		t.Fatalf("seed late run: %v", err)
 	}
 	lateSemanticEvent := eventtest.PersistedProjectionForProducer(
@@ -580,10 +580,10 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source) VALUES ('agent-a', 'cleanup', 'operator', 'regular', TRUE, 'authored')`); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'completed')`, preservedRunID); err != nil {
+	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'completed', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, preservedRunID); err != nil {
 		t.Fatalf("seed preserved run: %v", err)
 	}
 	cleanupSemanticEvent := eventtest.PersistedProjectionForProducer(
@@ -609,8 +609,8 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		t.Fatalf("seed preserved predecessor session: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, forked_from_run_id, forked_from_event_id)
-		VALUES ($1::uuid, 'running', $2::uuid, $3::uuid)
+		INSERT INTO runs (run_id, status, forked_from_run_id, forked_from_event_id, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2::uuid, $3::uuid, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, lateRunID, runID, eventID); err != nil {
 		t.Fatalf("seed preserved late fork run: %v", err)
 	}
@@ -753,10 +753,10 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 	preservedSourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status) VALUES
-			($1::uuid, 'running'),
-			($2::uuid, 'running'),
-			($3::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES
+			($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),
+			($2::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),
+			($3::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, cleanupRunID, preservedSourceRunID, preservedForkRunID); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
@@ -877,7 +877,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RollsBackOnUnknownForeignKey
 	t.Cleanup(func() { _ = pg.DB.Close() })
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
@@ -1133,9 +1133,9 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		t.Fatalf("create generated node fixture: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, trigger_event_id, trigger_event_type) VALUES
-			($1::uuid, 'running', $3::uuid, 'source.event'),
-			($2::uuid, 'running', $4::uuid, 'source.event')
+		INSERT INTO runs (run_id, status, trigger_event_id, trigger_event_type, bundle_hash, bundle_source) VALUES
+			($1::uuid, 'running', $3::uuid, 'source.event', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),
+			($2::uuid, 'running', $4::uuid, 'source.event', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runA, runB, sourceEvent, forkEvent); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}

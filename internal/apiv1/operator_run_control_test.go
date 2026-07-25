@@ -38,9 +38,9 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 	ctx := context.Background()
 	runID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint)
-		VALUES ($1::uuid, 'running', $2, $3, $4)
-	`, runID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, $3)
+	`, runID, authorActivityTestBundleSourceFact.BundleHash(), "ephemeral"); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -140,9 +140,9 @@ func TestOperatorRunControlHandlersTypedResourceErrors(t *testing.T) {
 
 	materializedLikePausedRunID := uuid.NewString()
 	if _, err := db.ExecContext(context.Background(), `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint)
-		VALUES ($1::uuid, 'paused', $2, $3, $4)
-	`, materializedLikePausedRunID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint); err != nil {
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'paused', $2, $3)
+	`, materializedLikePausedRunID, authorActivityTestBundleSourceFact.BundleHash(), "ephemeral"); err != nil {
 		t.Fatalf("seed paused run without control owner: %v", err)
 	}
 	resp := rpcCall(t, handler, runControlBody("run.continue", materializedLikePausedRunID, ""))

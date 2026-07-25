@@ -116,7 +116,7 @@ func TestSQLiteRuntimeStoreMarkRunTerminalPreservesFailureAndRejectsConflict(t *
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, time.Now().UTC()); err != nil {
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, time.Now().UTC()); err != nil {
 		t.Fatalf("seed sqlite run: %v", err)
 	}
 	failure := testFailureEnvelope(runtimefailures.ClassInternalFailure, "run_quiescence_failed", nil)
@@ -148,8 +148,8 @@ func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 	eventEntityB := uuid.NewString()
 	currentEntity := uuid.NewString()
 	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, event_count, entity_count, started_at)
-		VALUES (?, 'running', 99, 9, ?)
+		INSERT INTO runs (run_id, status, event_count, entity_count, started_at, bundle_hash, bundle_source)
+		VALUES (?, 'running', 99, 9, ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID, now); err != nil {
 		t.Fatalf("seed sqlite run: %v", err)
 	}

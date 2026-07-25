@@ -424,6 +424,18 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 	if opts.DecisionAuthority == nil || opts.Idempotency == nil {
 		return nil, fmt.Errorf("decision card workflow mutation and idempotency owners are required")
 	}
+	card, err := opts.DecisionCards.GetDecisionCard(ctx, cardID)
+	if err != nil && !errors.Is(err, decisioncard.ErrNotFound) {
+		return nil, decisionCardAPIError(cardID, err)
+	}
+	if err == nil && runtimeContextManager(opts) != nil {
+		ctx, opts, _, err = runtimeBundleContextByHash(ctx, opts, card.BundleHash, card.RunID)
+		if err != nil {
+			return nil, err
+		}
+	} else if provider, ok := opts.Events.(runtimeBundleSourceFactProvider); ok {
+		ctx = provider.WithBundleSourceFact(ctx)
+	}
 	idempotencyKey := strings.TrimSpace(stringParam(req.Params, "idempotency_key"))
 	result := semanticvalue.EmptyObject()
 	var replayed bool
@@ -431,7 +443,7 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 	if opts.Now != nil {
 		now = opts.Now().UTC()
 	}
-	err := opts.DecisionAuthority.RunPipelineMutation(ctx, func(txctx context.Context) error {
+	err = opts.DecisionAuthority.RunPipelineMutation(ctx, func(txctx context.Context) error {
 		completion, wasReplay, err := opts.Idempotency.WithAPIIdempotency(txctx, store.APIIdempotencyRequest{
 			Method: req.Method, ActorTokenID: req.ActorTokenID, IdempotencyKey: idempotencyKey,
 			RequestHash: req.RequestHash, ResourceID: cardID, TTL: 24 * time.Hour, Now: now,

@@ -30,10 +30,10 @@ func seedPipelineEventRecordForDialect(t testing.TB, ctx context.Context, db *sq
 		)
 		switch dialect {
 		case runtimeauthoractivity.DialectPostgres:
-			query = `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running') ON CONFLICT (run_id) DO NOTHING`
+			query = `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral') ON CONFLICT (run_id) DO NOTHING`
 			args = []any{runID}
 		case runtimeauthoractivity.DialectSQLite:
-			query = `INSERT INTO runs (run_id, status) VALUES (?, 'running') ON CONFLICT (run_id) DO NOTHING`
+			query = `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral') ON CONFLICT (run_id) DO NOTHING`
 			args = []any{runID}
 		default:
 			t.Fatalf("seed canonical pipeline event %s: unsupported dialect %q", event.ID(), dialect)
@@ -54,8 +54,8 @@ func testPipelineRunContext(t *testing.T, db *sql.DB) context.Context {
 	}
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), testPipelineRunID)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES ($1::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 		ON CONFLICT (run_id) DO NOTHING
 	`, testPipelineRunID); err != nil {
 		t.Fatalf("seed pipeline test run: %v", err)
@@ -134,8 +134,8 @@ func seedPipelineNodeDeliveryAuthority(t *testing.T, db *sql.DB, evt events.Even
 	}
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES ($1::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 		ON CONFLICT (run_id) DO NOTHING
 	`, runID); err != nil {
 		t.Fatalf("seed pipeline node delivery authority run: %v", err)

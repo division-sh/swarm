@@ -80,12 +80,11 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 
 			runID := uuid.NewString()
 			runtimeInstanceID := uuid.NewString()
-			sourceFact := runtimecorrelation.BundleSourceFact{
-				BundleHash:        "bundle-v1:sha256:" + strings.Repeat("c", 64),
-				BundleSource:      "ephemeral",
-				BundleFingerprint: "sha256:" + strings.Repeat("c", 64),
+			sourceFact, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("c", 64))
+			if err != nil {
+				t.Fatalf("NewEphemeralBundleSourceFact: %v", err)
 			}
-			scope := runtimeauthoractivity.BundleScope(runtimeInstanceID, sourceFact.BundleHash)
+			scope := runtimeauthoractivity.BundleScope(runtimeInstanceID, sourceFact.BundleHash())
 			actor := models.AgentConfig{
 				ExecutionMode: "live",
 				ID:            "story-writer",
@@ -212,7 +211,7 @@ func gatewayStoryCapabilitySurface(t *testing.T, gateway *runtimemcp.Gateway, ac
 		uint64(token.Generation),
 		"",
 		"gateway-story-actors",
-		"gateway-story-bundle",
+		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		[]string{surface.ID},
 	)
 	if err != nil {
@@ -293,11 +292,12 @@ func writeGatewayStoryFixture(t *testing.T, path, contents string) {
 func seedGatewayStoryRuntime(t *testing.T, selected gatewayStorySelectedStore, runID, agentID string, source runtimecorrelation.BundleSourceFact) {
 	t.Helper()
 	now := time.Now().UTC()
+	bundleHash, bundleSource := source.StorageValues()
 	if selected.postgres {
 		if _, err := selected.db.ExecContext(context.Background(), `
-			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
-			VALUES ($1::uuid, 'running', $2, $3, $4, $5)
-		`, runID, source.BundleHash, source.BundleSource, source.BundleFingerprint, now); err != nil {
+			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+			VALUES ($1::uuid, 'running', $2, $3, $4)
+		`, runID, bundleHash, bundleSource, now); err != nil {
 			t.Fatalf("seed selected-store run: %v", err)
 		}
 		if _, err := selected.db.ExecContext(context.Background(), `
@@ -309,9 +309,9 @@ func seedGatewayStoryRuntime(t *testing.T, selected gatewayStorySelectedStore, r
 		return
 	}
 	if _, err := selected.db.ExecContext(context.Background(), `
-			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
-			VALUES (?, 'running', ?, ?, ?, ?)
-		`, runID, source.BundleHash, source.BundleSource, source.BundleFingerprint, now); err != nil {
+			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+			VALUES (?, 'running', ?, ?, ?)
+		`, runID, bundleHash, bundleSource, now); err != nil {
 		t.Fatalf("seed selected-store run: %v", err)
 	}
 	if _, err := selected.db.ExecContext(context.Background(), `

@@ -16,11 +16,10 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
-const authorActivityTestBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const authorActivityTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
 type storeTestWorkFixture struct {
 	process *worklifetime.Process
@@ -109,18 +108,45 @@ func testAuthorActivityRuntimeContext() context.Context {
 }
 
 func testAuthorActivityContextForBundle(bundleHash string) context.Context {
-	return runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(
+	ctx := runtimecorrelation.WithBundleSourceFact(
+		context.Background(),
+		mustStoreTestEphemeralBundleSourceFact(bundleHash),
+	)
+	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
 		bundleHash,
 	))
 }
 
 func testAuthorActivityBundleSourceContext() context.Context {
-	ctx := runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(), runtimecorrelation.BundleSourceFact{
-		BundleHash:   authorActivityTestBundleHash,
-		BundleSource: storerunlifecycle.BundleSourceEphemeral,
-	})
-	return ctx
+	return testAuthorActivityContext()
+}
+
+func mustStoreTestPersistedBundleSourceFact(bundleHash string) runtimecorrelation.BundleSourceFact {
+	fact, err := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
+	if err != nil {
+		panic(err)
+	}
+	return fact
+}
+
+func mustStoreTestEphemeralBundleSourceFact(bundleHash string) runtimecorrelation.BundleSourceFact {
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+	if err != nil {
+		panic(err)
+	}
+	return fact
+}
+
+func seedStoreTestPersistedBundle(t *testing.T, db *sql.DB, bundleHash string) {
+	t.Helper()
+	if _, err := db.ExecContext(testAuthorActivityContextForBundle(bundleHash), `
+		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
+		VALUES ($1, 'name: test', '{}')
+		ON CONFLICT (bundle_hash) DO NOTHING
+	`, bundleHash); err != nil {
+		t.Fatalf("seed persisted bundle %s: %v", bundleHash, err)
+	}
 }
 
 type testAuthorActivityCatalogRegistrar interface {

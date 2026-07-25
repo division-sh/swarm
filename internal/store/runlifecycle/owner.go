@@ -10,6 +10,7 @@ import (
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -43,20 +44,13 @@ type EnsureActiveOptions struct {
 	HasEntityStateCountSrc  bool
 	RequireEntityStateCount bool
 	HasTerminalCols         bool
-	HasBundleHashCol        bool
-	HasBundleSourceCol      bool
-	HasBundleFingerprintCol bool
-	BundleHash              string
-	BundleSource            string
-	BundleFingerprint       string
+	BundleSourceFact        runtimecorrelation.BundleSourceFact
 }
 
 const (
 	BundleSourcePersisted = "persisted"
 	BundleSourceEphemeral = "ephemeral"
 	BundleSourceDeleted   = "deleted"
-	BundleSourceLegacy    = "legacy"
-	defaultBundleSource   = BundleSourceLegacy
 )
 
 var ErrPersistedBundleUnavailable = errors.New("persisted bundle source unavailable")
@@ -136,25 +130,97 @@ func CanonicalTerminalStatus(raw string) (string, error) {
 	}
 }
 
-func CanonicalBundleSource(raw string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "":
-		return defaultBundleSource, nil
-	case BundleSourcePersisted:
-		return BundleSourcePersisted, nil
-	case BundleSourceEphemeral:
-		return BundleSourceEphemeral, nil
-	case BundleSourceDeleted:
-		return BundleSourceDeleted, nil
-	case BundleSourceLegacy:
-		return BundleSourceLegacy, nil
-	default:
-		return "", fmt.Errorf("unsupported bundle source %q", raw)
-	}
-}
-
 func EnsureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEventType string, opts EnsureActiveOptions) error {
 	return ensureActive(ctx, db, runID, triggerEventID, triggerEventType, opts, true)
+}
+
+func EnsureActiveSQLite(ctx context.Context, db DBTX, runID, triggerEventID, triggerEventType string, startedAt time.Time, opts EnsureActiveOptions) error {
+	if db == nil {
+		return fmt.Errorf("ensure sqlite run row: database is required")
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("ensure sqlite run row: run_id is required")
+	}
+	if err := runtimeauthoractivity.Require(ctx); err != nil {
+		return fmt.Errorf("ensure sqlite run row: %w", err)
+	}
+	if err := opts.BundleSourceFact.Validate(); err != nil {
+		return fmt.Errorf("ensure sqlite run row: %w", err)
+	}
+	if startedAt.IsZero() {
+		startedAt = time.Now().UTC()
+	}
+	bundleHash, bundleSource := opts.BundleSourceFact.StorageValues()
+	if opts.BundleSourceFact.IsPersisted() {
+		exists, err := persistedBundleRowExistsForDialect(ctx, db, DialectSQLite, bundleHash)
+		if err != nil {
+			return fmt.Errorf("ensure sqlite run row: validate persisted bundle source: %w", err)
+		}
+		if !exists {
+			return &PersistedBundleUnavailableError{
+				BundleHash:   bundleHash,
+				BundleSource: bundleSource,
+				Cause:        "persisted_missing_bundle_row",
+			}
+		}
+	}
+	var existed bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = ?)`, runID).Scan(&existed); err != nil {
+		return fmt.Errorf("ensure sqlite run row: inspect existing run: %w", err)
+	}
+	result, err := db.ExecContext(ctx, `
+		INSERT INTO runs (
+			run_id, status, bundle_hash, bundle_source,
+			trigger_event_id, trigger_event_type, started_at
+		)
+		VALUES (?, 'running', ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?)
+		ON CONFLICT (run_id) DO UPDATE SET
+			trigger_event_id = COALESCE(runs.trigger_event_id, NULLIF(excluded.trigger_event_id, '')),
+			trigger_event_type = COALESCE(NULLIF(runs.trigger_event_type, ''), NULLIF(excluded.trigger_event_type, ''))
+		WHERE runs.status IN ('running', 'paused')
+		  AND runs.bundle_hash = excluded.bundle_hash
+		  AND runs.bundle_source = excluded.bundle_source
+	`, runID, bundleHash, bundleSource, strings.TrimSpace(triggerEventID), strings.TrimSpace(triggerEventType), startedAt.UTC())
+	if err != nil {
+		return fmt.Errorf("ensure sqlite run row: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("ensure sqlite run row: read affected rows: %w", err)
+	}
+	if rows == 0 {
+		var status, storedHash, storedSource string
+		if err := db.QueryRowContext(ctx, `
+			SELECT COALESCE(status, ''), COALESCE(bundle_hash, ''), COALESCE(bundle_source, '')
+			FROM runs
+			WHERE run_id = ?
+		`, runID).Scan(&status, &storedHash, &storedSource); err != nil {
+			return fmt.Errorf("ensure sqlite run row: load rejected run: %w", err)
+		}
+		if storedHash != bundleHash || storedSource != bundleSource {
+			return fmt.Errorf(
+				"ensure sqlite run row: bundle identity conflict for run_id=%s: stored bundle_hash=%s bundle_source=%s, requested bundle_hash=%s bundle_source=%s",
+				runID, storedHash, storedSource, bundleHash, bundleSource,
+			)
+		}
+		return &RunNotActiveError{RunID: runID, Status: status}
+	}
+	if existed {
+		return nil
+	}
+	scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
+	if err != nil {
+		return fmt.Errorf("ensure sqlite run row: %w", err)
+	}
+	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+		Kind: runtimeauthoractivity.KindRunLifecycle, Transition: "started",
+		SourceOwner: "runs", SourceIdentity: runID, DedupKey: "run-created:" + runID,
+		OccurredAt: startedAt.UTC(), RunID: runID, Scope: scope,
+		Projection: runtimeauthoractivity.Projection{
+			SubjectType: "run", SubjectID: runID, TriggerEventType: strings.TrimSpace(triggerEventType),
+		},
+	})
 }
 
 // RequirePresent locks an existing lifecycle row without requiring an active
@@ -182,33 +248,237 @@ func RequirePresent(ctx context.Context, db DBTX, runID string) error {
 // RequireActive locks an existing lifecycle row and refuses every status
 // except running or paused. It never creates or reopens a run.
 func RequireActive(ctx context.Context, db DBTX, runID string, dialect Dialect) error {
+	_, err := RequireActiveSource(ctx, db, runID, dialect)
+	return err
+}
+
+func RequireActiveSource(ctx context.Context, db DBTX, runID string, dialect Dialect) (runtimecorrelation.BundleSourceFact, error) {
 	if db == nil {
-		return fmt.Errorf("require active run: database is required")
+		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("require active run: database is required")
 	}
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
-		return fmt.Errorf("require active run: run_id is required")
+		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("require active run: run_id is required")
 	}
 	var query string
 	switch dialect {
 	case DialectPostgres:
-		query = `SELECT COALESCE(status, '') FROM runs WHERE run_id = $1::uuid FOR UPDATE`
+		query = `SELECT COALESCE(status, ''), COALESCE(bundle_hash, ''), COALESCE(bundle_source, '') FROM runs WHERE run_id = $1::uuid FOR UPDATE`
 	case DialectSQLite:
-		query = `SELECT COALESCE(status, '') FROM runs WHERE run_id = ?`
+		query = `SELECT COALESCE(status, ''), COALESCE(bundle_hash, ''), COALESCE(bundle_source, '') FROM runs WHERE run_id = ?`
 	default:
-		return fmt.Errorf("require active run: unsupported dialect %q", dialect)
+		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("require active run: unsupported dialect %q", dialect)
 	}
-	var status string
-	err := db.QueryRowContext(ctx, query, runID).Scan(&status)
+	var status, bundleHash, bundleSource string
+	err := db.QueryRowContext(ctx, query, runID).Scan(&status, &bundleHash, &bundleSource)
 	if errors.Is(err, sql.ErrNoRows) {
-		return &RunNotFoundError{RunID: runID}
+		return runtimecorrelation.BundleSourceFact{}, &RunNotFoundError{RunID: runID}
 	}
 	if err != nil {
-		return fmt.Errorf("require active run: %w", err)
+		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("require active run: %w", err)
 	}
 	status = strings.ToLower(strings.TrimSpace(status))
 	if status != "running" && status != "paused" {
-		return &RunNotActiveError{RunID: runID, Status: status}
+		return runtimecorrelation.BundleSourceFact{}, &RunNotActiveError{RunID: runID, Status: status}
+	}
+	fact, err := runtimecorrelation.DecodeBundleSourceFact(bundleHash, bundleSource)
+	if err != nil {
+		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("require active run %s bundle identity: %w", runID, err)
+	}
+	if fact.IsPersisted() {
+		exists, err := persistedBundleRowExistsForDialect(ctx, db, dialect, fact.BundleHash())
+		if err != nil {
+			return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("require active run %s persisted bundle: %w", runID, err)
+		}
+		if !exists {
+			return runtimecorrelation.BundleSourceFact{}, &PersistedBundleUnavailableError{
+				BundleHash:   fact.BundleHash(),
+				BundleSource: BundleSourcePersisted,
+				Cause:        "persisted_missing_bundle_row",
+			}
+		}
+	}
+	return fact, nil
+}
+
+func RequirePresentSource(ctx context.Context, db DBTX, runID string, dialect Dialect) (runtimecorrelation.BundleSourceFact, error) {
+	if db == nil {
+		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("require run source: database is required")
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("require run source: run_id is required")
+	}
+	var query string
+	switch dialect {
+	case DialectPostgres:
+		query = `SELECT COALESCE(bundle_hash, ''), COALESCE(bundle_source, '') FROM runs WHERE run_id = $1::uuid FOR UPDATE`
+	case DialectSQLite:
+		query = `SELECT COALESCE(bundle_hash, ''), COALESCE(bundle_source, '') FROM runs WHERE run_id = ?`
+	default:
+		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("require run source: unsupported dialect %q", dialect)
+	}
+	var bundleHash, bundleSource string
+	err := db.QueryRowContext(ctx, query, runID).Scan(&bundleHash, &bundleSource)
+	if errors.Is(err, sql.ErrNoRows) {
+		return runtimecorrelation.BundleSourceFact{}, &RunNotFoundError{RunID: runID}
+	}
+	if err != nil {
+		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("require run source: %w", err)
+	}
+	fact, err := runtimecorrelation.DecodeBundleSourceFact(bundleHash, bundleSource)
+	if err != nil {
+		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("require run %s bundle identity: %w", runID, err)
+	}
+	if fact.IsPersisted() {
+		exists, err := persistedBundleRowExistsForDialect(ctx, db, dialect, fact.BundleHash())
+		if err != nil {
+			return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("require run %s persisted bundle: %w", runID, err)
+		}
+		if !exists {
+			return runtimecorrelation.BundleSourceFact{}, &PersistedBundleUnavailableError{
+				BundleHash:   fact.BundleHash(),
+				BundleSource: BundleSourcePersisted,
+				Cause:        "persisted_missing_bundle_row",
+			}
+		}
+	}
+	return fact, nil
+}
+
+func CreateActive(
+	ctx context.Context,
+	db DBTX,
+	dialect Dialect,
+	runID string,
+	fact runtimecorrelation.BundleSourceFact,
+	startedAt time.Time,
+) error {
+	if db == nil {
+		return fmt.Errorf("create active run: database is required")
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("create active run: run_id is required")
+	}
+	if err := fact.Validate(); err != nil {
+		return fmt.Errorf("create active run: %w", err)
+	}
+	if err := runtimeauthoractivity.Require(ctx); err != nil {
+		return fmt.Errorf("create active run: %w", err)
+	}
+	if startedAt.IsZero() {
+		startedAt = time.Now().UTC()
+	}
+	if fact.IsPersisted() {
+		if dialect == DialectPostgres {
+			if err := lockRunCreation(ctx, db); err != nil {
+				return err
+			}
+		}
+		exists, err := persistedBundleRowExistsForDialect(ctx, db, dialect, fact.BundleHash())
+		if err != nil {
+			return fmt.Errorf("create active run: validate persisted bundle source: %w", err)
+		}
+		if !exists {
+			return &PersistedBundleUnavailableError{
+				BundleHash:   fact.BundleHash(),
+				BundleSource: BundleSourcePersisted,
+				Cause:        "persisted_missing_bundle_row",
+			}
+		}
+	}
+	bundleHash, bundleSource := fact.StorageValues()
+	var err error
+	switch dialect {
+	case DialectPostgres:
+		_, err = db.ExecContext(ctx, `
+			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+			VALUES ($1::uuid, 'running', $2, $3, $4)
+		`, runID, bundleHash, bundleSource, startedAt.UTC())
+	case DialectSQLite:
+		_, err = db.ExecContext(ctx, `
+			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+			VALUES (?, 'running', ?, ?, ?)
+		`, runID, bundleHash, bundleSource, startedAt.UTC())
+	default:
+		return fmt.Errorf("create active run: unsupported dialect %q", dialect)
+	}
+	if err != nil {
+		return fmt.Errorf("create active run: %w", err)
+	}
+	scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
+	if err != nil {
+		return fmt.Errorf("create active run: %w", err)
+	}
+	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+		Kind: runtimeauthoractivity.KindRunLifecycle, Transition: "started",
+		SourceOwner: "runs", SourceIdentity: runID, DedupKey: "run-created:" + runID,
+		OccurredAt: startedAt.UTC(), RunID: runID, Scope: scope,
+		Projection: runtimeauthoractivity.Projection{SubjectType: "run", SubjectID: runID},
+	})
+}
+
+func ReviseBundleIdentity(
+	ctx context.Context,
+	db DBTX,
+	dialect Dialect,
+	runID string,
+	fact runtimecorrelation.BundleSourceFact,
+) error {
+	if db == nil {
+		return fmt.Errorf("revise run bundle identity: database is required")
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("revise run bundle identity: run_id is required")
+	}
+	if err := fact.Validate(); err != nil {
+		return fmt.Errorf("revise run bundle identity: %w", err)
+	}
+	if fact.IsPersisted() {
+		exists, err := persistedBundleRowExistsForDialect(ctx, db, dialect, fact.BundleHash())
+		if err != nil {
+			return fmt.Errorf("revise run bundle identity: validate persisted bundle source: %w", err)
+		}
+		if !exists {
+			return &PersistedBundleUnavailableError{
+				BundleHash:   fact.BundleHash(),
+				BundleSource: BundleSourcePersisted,
+				Cause:        "persisted_missing_bundle_row",
+			}
+		}
+	}
+	bundleHash, bundleSource := fact.StorageValues()
+	var (
+		result sql.Result
+		err    error
+	)
+	switch dialect {
+	case DialectPostgres:
+		result, err = db.ExecContext(ctx, `
+			UPDATE runs
+			SET bundle_hash = $2, bundle_source = $3
+			WHERE run_id = $1::uuid AND status IN ('running', 'paused')
+		`, runID, bundleHash, bundleSource)
+	case DialectSQLite:
+		result, err = db.ExecContext(ctx, `
+			UPDATE runs
+			SET bundle_hash = ?, bundle_source = ?
+			WHERE run_id = ? AND status IN ('running', 'paused')
+		`, bundleHash, bundleSource, runID)
+	default:
+		return fmt.Errorf("revise run bundle identity: unsupported dialect %q", dialect)
+	}
+	if err != nil {
+		return fmt.Errorf("revise run bundle identity: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("revise run bundle identity: read affected rows: %w", err)
+	}
+	if rows != 1 {
+		return RequireActive(ctx, db, runID, dialect)
 	}
 	return nil
 }
@@ -226,19 +496,11 @@ func ensureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 	}
 	triggerEventID = strings.TrimSpace(triggerEventID)
 	triggerEventType = strings.TrimSpace(triggerEventType)
-	bundleHash := strings.TrimSpace(opts.BundleHash)
-	bundleFingerprint := strings.TrimSpace(opts.BundleFingerprint)
-	bundleSource, err := CanonicalBundleSource(opts.BundleSource)
-	if err != nil {
-		return err
+	if err := opts.BundleSourceFact.Validate(); err != nil {
+		return fmt.Errorf("ensure run row: %w", err)
 	}
-	if bundleSource == BundleSourceLegacy && bundleHash != "" {
-		return fmt.Errorf("ensure run row: legacy bundle_source cannot carry canonical bundle_hash")
-	}
-	if bundleSource != BundleSourceLegacy && bundleHash == "" {
-		return fmt.Errorf("ensure run row: bundle_hash is required for bundle_source=%s", bundleSource)
-	}
-	if bundleSource == BundleSourcePersisted {
+	bundleHash, bundleSource := opts.BundleSourceFact.StorageValues()
+	if opts.BundleSourceFact.IsPersisted() {
 		if allowTransactionWrap {
 			if sqlDB, ok := db.(*sql.DB); ok {
 				tx, err := sqlDB.BeginTx(ctx, nil)
@@ -288,15 +550,8 @@ func ensureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 		addParam("trigger_event_id", "NULLIF($%d,'')::uuid", triggerEventID)
 		addParam("trigger_event_type", "NULLIF($%d,'')", triggerEventType)
 	}
-	if opts.HasBundleHashCol {
-		addParam("bundle_hash", "NULLIF($%d,'')", bundleHash)
-	}
-	if opts.HasBundleSourceCol {
-		addParam("bundle_source", "$%d", bundleSource)
-	}
-	if opts.HasBundleFingerprintCol {
-		addParam("bundle_fingerprint", "NULLIF($%d,'')", bundleFingerprint)
-	}
+	addParam("bundle_hash", "$%d", bundleHash)
+	addParam("bundle_source", "$%d", bundleSource)
 	if opts.HasStartedAtCol {
 		insertCols = append(insertCols, "started_at")
 		insertVals = append(insertVals, "now()")
@@ -311,18 +566,6 @@ func ensureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 			failure = runs.failure,
 			ended_at = runs.ended_at`
 	}
-	if opts.HasBundleHashCol {
-		query += `,
-			bundle_hash = COALESCE(runs.bundle_hash, EXCLUDED.bundle_hash)`
-	}
-	if opts.HasBundleSourceCol {
-		query += `,
-			bundle_source = COALESCE(runs.bundle_source, EXCLUDED.bundle_source)`
-	}
-	if opts.HasBundleFingerprintCol {
-		query += `,
-			bundle_fingerprint = COALESCE(runs.bundle_fingerprint, EXCLUDED.bundle_fingerprint)`
-	}
 	if opts.HasTriggerCols {
 		query += `,
 			trigger_event_id = COALESCE(runs.trigger_event_id, NULLIF($2,'')::uuid),
@@ -334,13 +577,16 @@ func ensureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 	}
 	var occurrenceScope runtimeauthoractivity.Scope
 	if !existed {
+		var err error
 		occurrenceScope, err = runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
 		if err != nil {
 			return fmt.Errorf("ensure run row: %w", err)
 		}
 	}
 	query += `
-		WHERE runs.status IN ('running', 'paused')`
+		WHERE runs.status IN ('running', 'paused')
+		  AND runs.bundle_hash = EXCLUDED.bundle_hash
+		  AND runs.bundle_source = EXCLUDED.bundle_source`
 	result, err := db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("ensure run row: %w", err)
@@ -350,9 +596,19 @@ func ensureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 		return fmt.Errorf("ensure run row: read affected rows: %w", err)
 	}
 	if rows == 0 {
-		var status string
-		if err := db.QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = $1::uuid`, runID).Scan(&status); err != nil {
+		var status, storedHash, storedSource string
+		if err := db.QueryRowContext(ctx, `
+			SELECT COALESCE(status, ''), COALESCE(bundle_hash, ''), COALESCE(bundle_source, '')
+			FROM runs
+			WHERE run_id = $1::uuid
+		`, runID).Scan(&status, &storedHash, &storedSource); err != nil {
 			return fmt.Errorf("ensure run row: load inactive status: %w", err)
+		}
+		if storedHash != bundleHash || storedSource != bundleSource {
+			return fmt.Errorf(
+				"ensure run row: bundle identity conflict for run_id=%s: stored bundle_hash=%s bundle_source=%s, requested bundle_hash=%s bundle_source=%s",
+				runID, storedHash, storedSource, bundleHash, bundleSource,
+			)
 		}
 		return &RunNotActiveError{RunID: runID, Status: status}
 	}
@@ -378,18 +634,25 @@ func lockRunCreation(ctx context.Context, db DBTX) error {
 }
 
 func persistedBundleRowExists(ctx context.Context, db DBTX, bundleHash string) (bool, error) {
+	return persistedBundleRowExistsForDialect(ctx, db, DialectPostgres, bundleHash)
+}
+
+func persistedBundleRowExistsForDialect(ctx context.Context, db DBTX, dialect Dialect, bundleHash string) (bool, error) {
 	bundleHash = strings.TrimSpace(bundleHash)
 	if bundleHash == "" {
 		return false, nil
 	}
+	var query string
+	switch dialect {
+	case DialectPostgres:
+		query = `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = $1)`
+	case DialectSQLite:
+		query = `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = ?)`
+	default:
+		return false, fmt.Errorf("unsupported bundle lookup dialect %q", dialect)
+	}
 	var exists bool
-	if err := db.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM bundles
-			WHERE bundle_hash = $1
-		)
-	`, bundleHash).Scan(&exists); err != nil {
+	if err := db.QueryRowContext(ctx, query, bundleHash).Scan(&exists); err != nil {
 		return false, err
 	}
 	return exists, nil
@@ -456,13 +719,8 @@ func LoadSnapshot(ctx context.Context, db DBTX, runID string, opts EnsureActiveO
 		SELECT
 			run_id::text,
 			COALESCE(status, ''), `
-		if opts.HasBundleHashCol {
-			query += `
+		query += `
 			COALESCE(bundle_hash, ''),`
-		} else {
-			query += `
-			'',`
-		}
 		if opts.HasCounterCols {
 			query += `
 			COALESCE(event_count, 0),`
@@ -641,8 +899,8 @@ func MarkTerminal(ctx context.Context, db DBTX, runID, status string, failure *r
 }
 
 func runBundleScope(ctx context.Context, db DBTX, runID string, opts EnsureActiveOptions) (runtimeauthoractivity.Scope, error) {
-	bundleHash := strings.TrimSpace(opts.BundleHash)
-	if bundleHash == "" && opts.HasBundleHashCol {
+	bundleHash := opts.BundleSourceFact.BundleHash()
+	if bundleHash == "" {
 		if err := db.QueryRowContext(ctx, `SELECT COALESCE(bundle_hash, '') FROM runs WHERE run_id = $1::uuid`, runID).Scan(&bundleHash); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return runtimeauthoractivity.Scope{}, fmt.Errorf("run %s not found", runID)

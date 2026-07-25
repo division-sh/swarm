@@ -111,7 +111,7 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 	seedConformanceAgent(t, ctx, pg, "agent-1")
 
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	sessionID := uuid.NewString()
@@ -184,7 +184,7 @@ func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *
 	ctx = runtimeeffects.WithLifecycleToken(ctx, lifecycleToken)
 
 	identity := agentmemory.Identity{RunID: uuid.NewString(), AgentID: "agent-1", FlowInstance: "support/inst-1"}
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id) VALUES ($1::uuid)`, identity.RunID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, bundle_hash, bundle_source) VALUES ($1::uuid, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, identity.RunID); err != nil {
 		t.Fatalf("seed memory run: %v", err)
 	}
 	sessionID := acquireLiveConversationSession(t, ctx, db, identity)
@@ -256,7 +256,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	lifecycleToken := seedConformanceRunningAgent(t, ctx, pg, "agent-1")
 
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -312,7 +312,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	if err != nil {
 		t.Fatalf("Build LLM runtime: %v", err)
 	}
-	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash)
+	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
 
 	claims := map[string]runtimedelivery.Claim{}
 	newTurnContext := func(evt events.Event) context.Context {
@@ -440,7 +440,7 @@ func TestCLISessionFailureDoesNotRotateFromStderrProse(t *testing.T) {
 	lifecycleToken := seedConformanceRunningAgent(t, ctx, pg, "agent-1")
 
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -512,7 +512,7 @@ printf '{"result":"ok"}'
 	if err != nil {
 		t.Fatalf("Build LLM runtime: %v", err)
 	}
-	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash)
+	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
 
 	var deliveryClaim runtimedelivery.Claim
 	newTurnContext := func(evt events.Event) context.Context {
@@ -606,7 +606,7 @@ func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testi
 	requireCanonicalConversationSurface(t, ctx, pg)
 	seedConformanceAgent(t, ctx, pg, "agent-1")
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id) VALUES ($1::uuid)`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, bundle_hash, bundle_source) VALUES ($1::uuid, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 
@@ -1361,7 +1361,7 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	seedConformanceAgent(t, ctx, pg, "agent-1")
 
 	logger := runtimepkg.NewRuntimeLogger(pg)
-	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash)
+	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		Logger:    conformanceRuntimeLoggerHook{logger: logger},
 		WorkOwner: workOwner,
@@ -1373,7 +1373,7 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	registry := runtimesessions.Registry(pg)
 	leaseCtx := runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
 	identity := agentmemory.Identity{RunID: uuid.NewString(), AgentID: "agent-1", FlowInstance: "support/inst-1"}
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id) VALUES ($1::uuid)`, identity.RunID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, bundle_hash, bundle_source) VALUES ($1::uuid, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, identity.RunID); err != nil {
 		t.Fatalf("seed memory run: %v", err)
 	}
 	lease, err := registry.Acquire(leaseCtx, identity, "conformance")
@@ -1498,7 +1498,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		}},
 	}
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed manager replay run: %v", err)
 	}
 	eventIDs := map[string]string{
@@ -1651,7 +1651,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	replayDeliveries := runtimebustest.Subscribe(t, bus, replayRecipient)
 
 	replayRunID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, replayRunID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, replayRunID); err != nil {
 		t.Fatalf("seed replay run: %v", err)
 	}
 	replayParentID := uuid.NewString()
@@ -1668,7 +1668,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	acknowledgeConformancePipelineEvent(t, ctx, pg.PipelineObligations(), replayParentID)
 
 	skipRunID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, skipRunID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, skipRunID); err != nil {
 		t.Fatalf("seed skipped replay run: %v", err)
 	}
 	skipParentID := uuid.NewString()
@@ -1684,7 +1684,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 
 	droppedEventID := uuid.NewString()
 	droppedRunID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, droppedRunID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, droppedRunID); err != nil {
 		t.Fatalf("seed dropped replay run: %v", err)
 	}
 	storetest.CommitSemanticEvent(t, ctx, pg, eventtest.RuntimeDiagnostic(
@@ -1779,7 +1779,7 @@ func TestCanonicalRuntimeLogTurnBlockSurface_IsOmittedFromPublicConversationProj
 	seedConformanceAgent(t, ctx, pg, "agent-1")
 
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	sessionID := uuid.NewString()
@@ -1844,8 +1844,8 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES ($1::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -1941,7 +1941,7 @@ func TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField(t *test
 	requireMutationSurface(t, db)
 
 	entityID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id) VALUES ($1::uuid)`, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, bundle_hash, bundle_source) VALUES ($1::uuid, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -2203,8 +2203,8 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 	_, db, _ := testutil.StartPostgres(t)
 	runID := uuid.NewString()
 	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `
-		INSERT INTO runs (run_id, status)
-		VALUES ($1::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
 	`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}

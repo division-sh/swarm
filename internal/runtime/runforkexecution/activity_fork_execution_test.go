@@ -283,7 +283,7 @@ func selectedContractActivityLoadedSource(source semanticview.Source, selection 
 		Policies: map[string]runtimepipeline.WorkflowEventPolicy{"platform.activity_requested": {Consume: true, RequireEntity: true}},
 	}}
 	return LoadedSelectedContractSource{
-		Selection: selection, Source: source, BundleHash: runForkTestBundleHash, BundleSource: "ephemeral",
+		Selection: selection, Source: source, BundleSourceFact: testEphemeralBundleSourceFact(runForkTestBundleHash),
 		Module: selectedContractWorkflowModule{
 			source: source, workflow: workflow, nodes: nodes,
 			guardRegistry: runtimepipeline.NewContractGuardRegistry(source), actionRegistry: runtimepipeline.NewContractActionRegistry(source),

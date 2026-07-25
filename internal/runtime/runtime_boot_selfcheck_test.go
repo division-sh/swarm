@@ -145,12 +145,12 @@ func TestRuntimeStart_PlatformBootPayloadCarriesBootDecisionSummary(t *testing.T
 	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		EventStore: store,
 	}, Options: RuntimeOptions{
-		SelfCheck:         true,
-		WorkflowModule:    module,
-		LLMRuntime:        noopLLMRuntime{},
-		BundleFingerprint: "sha256:boot-test",
-		BootStartedAt:     time.Now().UTC().Add(-1500 * time.Millisecond),
-		SystemContainers:  []string{"swarm-system", "swarm-scaffold"},
+		SelfCheck:        true,
+		WorkflowModule:   module,
+		LLMRuntime:       noopLLMRuntime{},
+		BundleSourceFact: testBundleSourceFact(t, runtimeContextTestHashA),
+		BootStartedAt:    time.Now().UTC().Add(-1500 * time.Millisecond),
+		SystemContainers: []string{"swarm-system", "swarm-scaffold"},
 		BootProgress: func(evt BootProgressEvent) {
 			progress = append(progress, evt)
 		},
@@ -186,7 +186,7 @@ func TestRuntimeStart_PlatformBootPayloadCarriesBootDecisionSummary(t *testing.T
 		"boot_started_at",
 		"boot_completed_at",
 		"duration_ms",
-		"bundle_fingerprint",
+		"bundle_hash",
 		"recovery_decision",
 		"static_agents_started",
 		"flow_required_agents_started",
@@ -198,8 +198,8 @@ func TestRuntimeStart_PlatformBootPayloadCarriesBootDecisionSummary(t *testing.T
 			t.Fatalf("platform.boot payload missing %q: %#v", key, payload)
 		}
 	}
-	if got := payload["bundle_fingerprint"]; got != "sha256:boot-test" {
-		t.Fatalf("bundle_fingerprint = %#v", got)
+	if got := payload["bundle_hash"]; got != runtimeContextTestHashA {
+		t.Fatalf("bundle_hash = %#v", got)
 	}
 	recovery, ok := payload["recovery_decision"].(map[string]any)
 	if !ok {

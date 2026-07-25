@@ -130,20 +130,13 @@ func Insert(ctx context.Context, db DBTX, rec Record) error {
 func requireBundleSourceAvailable(ctx context.Context, db DBTX) error {
 	fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
 	if !ok {
-		return nil
+		return fmt.Errorf("mutation log bundle source fact is required")
 	}
-	bundleSource, err := storerunlifecycle.CanonicalBundleSource(fact.BundleSource)
-	if err != nil {
+	if err := fact.Validate(); err != nil {
 		return err
 	}
-	bundleHash := strings.TrimSpace(fact.BundleHash)
-	if bundleSource == storerunlifecycle.BundleSourceLegacy && bundleHash != "" {
-		return fmt.Errorf("mutation log bundle source: legacy bundle_source cannot carry canonical bundle_hash")
-	}
-	if bundleSource != storerunlifecycle.BundleSourceLegacy && bundleHash == "" {
-		return fmt.Errorf("mutation log bundle source: bundle_hash is required for bundle_source=%s", bundleSource)
-	}
-	if bundleSource != storerunlifecycle.BundleSourcePersisted {
+	bundleHash, bundleSource := fact.StorageValues()
+	if !fact.IsPersisted() {
 		return nil
 	}
 	var exists bool

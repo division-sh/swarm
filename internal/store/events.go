@@ -533,12 +533,9 @@ func (s *PostgresStore) ensureRunRow(ctx context.Context, tx *sql.Tx, runID, tri
 	}
 	opts := runLifecycleOptions()
 	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
-		opts.BundleHash = fact.BundleHash
-		opts.BundleSource = fact.BundleSource
-		opts.BundleFingerprint = fact.BundleFingerprint
+		opts.BundleSourceFact = fact
 	} else {
-		opts.BundleSource = storerunlifecycle.BundleSourceLegacy
-		opts.BundleFingerprint = runtimecorrelation.BundleFingerprintFromContext(ctx)
+		return fmt.Errorf("ensure run row: executable bundle source fact is required")
 	}
 	return storerunlifecycle.EnsureActive(ctx, chooseExecQueryer(s.DB, tx), runID, triggerEventID, triggerEventType, opts)
 }
@@ -644,9 +641,6 @@ func runLifecycleOptions() storerunlifecycle.EnsureActiveOptions {
 		HasEntityStateCountSrc:  true,
 		RequireEntityStateCount: true,
 		HasTerminalCols:         true,
-		HasBundleHashCol:        true,
-		HasBundleSourceCol:      true,
-		HasBundleFingerprintCol: true,
 	}
 }
 

@@ -264,9 +264,7 @@ func TestHumanTaskRequestCreatesTypedCardAndContinuationOnBothStores(t *testing.
 			}
 			ctx, replyContextID, sourceEventID := seedReplyToolContext(t, tc.store)
 			ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "provider-turn/tool-call-1")
-			ctx = runtimecorrelation.WithBundleSourceFact(ctx, runtimecorrelation.BundleSourceFact{
-				BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-			})
+			ctx = runtimecorrelation.WithBundleSourceFact(ctx, authorActivityTestBundleSourceFact)
 			ctx = runtimetools.WithActor(ctx, requester)
 			input := map[string]any{
 				"scope": "flow", "category": "review", "description": "Review provider response",
@@ -317,9 +315,7 @@ func TestHumanTaskRequestCreatesTypedCardAndContinuationOnBothStores(t *testing.
 
 			forkCtx, _, _ := seedReplyToolContext(t, tc.store)
 			forkCtx = runtimeeffects.WithLogicalOperationIdentity(forkCtx, "provider-turn/tool-call-1")
-			forkCtx = runtimecorrelation.WithBundleSourceFact(forkCtx, runtimecorrelation.BundleSourceFact{
-				BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-			})
+			forkCtx = runtimecorrelation.WithBundleSourceFact(forkCtx, authorActivityTestBundleSourceFact)
 			forkCtx = runtimetools.WithActor(forkCtx, requester)
 			forked, err := exec.Execute(forkCtx, "human_task_request", input)
 			if err != nil {
@@ -341,11 +337,11 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 	now := time.Now().UTC().Truncate(time.Microsecond).Add(789 * time.Nanosecond)
 	switch typed := persistence.(type) {
 	case *store.PostgresStore:
-		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at) VALUES ($1::uuid, 'running', $2, $3, $4, $5)`, runID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint, now); err != nil {
+		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES ($1::uuid, 'running', $2, $3, $4)`, runID, authorActivityTestBundleHash, authorActivityTestBundleSource, now); err != nil {
 			t.Fatalf("seed postgres reply tool run: %v", err)
 		}
 	case *store.SQLiteRuntimeStore:
-		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at) VALUES (?, 'running', ?, ?, ?, ?)`, runID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint, now); err != nil {
+		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES (?, 'running', ?, ?, ?)`, runID, authorActivityTestBundleHash, authorActivityTestBundleSource, now); err != nil {
 			t.Fatalf("seed sqlite reply tool run: %v", err)
 		}
 	default:
@@ -434,10 +430,10 @@ func newSQLiteRuntimeToolStoreForTest(t *testing.T) *store.SQLiteRuntimeStore {
 func ensureSQLiteEntityToolTestRun(t *testing.T, sqliteStore *store.SQLiteRuntimeStore) {
 	t.Helper()
 	if _, err := sqliteStore.DB.ExecContext(unmanagedToolTestContext(), `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
-		VALUES (?, 'running', ?, ?, ?, ?)
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES (?, 'running', ?, ?, ?)
 		ON CONFLICT(run_id) DO NOTHING
-	`, entityToolTestRunID, authorActivityTestBundleSourceFact.BundleHash, authorActivityTestBundleSourceFact.BundleSource, authorActivityTestBundleSourceFact.BundleFingerprint, time.Now().UTC()); err != nil {
+	`, entityToolTestRunID, authorActivityTestBundleHash, authorActivityTestBundleSource, time.Now().UTC()); err != nil {
 		t.Fatalf("seed sqlite entity tool test run: %v", err)
 	}
 }

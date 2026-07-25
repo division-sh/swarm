@@ -144,7 +144,7 @@ func TestSQLiteRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 	businessEvent := "00000000-0000-0000-0000-000000001817"
 	runtimeLogEvent := "00000000-0000-0000-0000-000000001818"
 	base := time.Unix(1700000600, 0).UTC()
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, base); err != nil {
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if err := commitSemanticEventFixture(ctx, sqliteStore, eventtest.PersistedProjection(
@@ -186,7 +186,7 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 	turnID := "00000000-0000-0000-0000-000000001434"
 	agentID := "agent-task"
 
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, base.Add(-time.Minute)); err != nil {
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if err := commitSemanticEventFixture(ctx, sqliteStore, eventtest.PersistedProjection(
@@ -276,7 +276,7 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 		tieTurnBID:        "00000000-0000-0000-0000-000000000203",
 		base:              base,
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, fixture.runID, base.Add(-time.Minute)); err != nil {
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, fixture.runID, base.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	eventRows := []struct {

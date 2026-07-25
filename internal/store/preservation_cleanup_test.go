@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
+	"github.com/division-sh/swarm/internal/store/runbundle"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -25,7 +26,7 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
-	ctx := testAuthorActivityContext()
+	ctx := testAuthorActivityContextForBundle(testCanonicalBundleHash)
 	now := time.Date(2026, 5, 27, 9, 30, 0, 0, time.UTC)
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source)
@@ -44,22 +45,21 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 		timerID     string
 	}
 	seeded := map[string]seededRun{}
-	for _, source := range []string{
-		storerunlifecycle.BundleSourceEphemeral,
-		storerunlifecycle.BundleSourceDeleted,
-		storerunlifecycle.BundleSourceLegacy,
+	for _, source := range []runbundle.AvailabilitySource{
+		runbundle.AvailabilitySourceEphemeral,
+		runbundle.AvailabilitySourceDeleted,
 	} {
 		runID := uuid.NewString()
 		sessionID := uuid.NewString()
 		timerID := uuid.NewString()
 		if _, err := pg.DB.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, bundle_source, bundle_fingerprint, started_at)
+			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
 			VALUES ($1::uuid, 'running', $2, $3, now())
 			ON CONFLICT (run_id) DO UPDATE SET
 				status = 'running',
-				bundle_source = EXCLUDED.bundle_source,
-				bundle_fingerprint = EXCLUDED.bundle_fingerprint
-		`, runID, source, testBootBundleFingerprint); err != nil {
+				bundle_hash = EXCLUDED.bundle_hash,
+				bundle_source = EXCLUDED.bundle_source
+		`, runID, testCanonicalBundleHash, storerunlifecycle.BundleSourceEphemeral); err != nil {
 			t.Fatalf("seed run %s: %v", source, err)
 		}
 		if _, err := pg.DB.ExecContext(ctx, `
@@ -68,11 +68,11 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 		`, sessionID, runID); err != nil {
 			t.Fatalf("seed session %s: %v", source, err)
 		}
-		eventID, activeClaim := seedPreservationClaimedDelivery(t, ctx, pg, runID, "startup."+source+".active")
+		eventID, activeClaim := seedPreservationClaimedDelivery(t, ctx, pg, runID, "startup."+source.String()+".active")
 		if _, err := pg.BindAgentSession(ctx, activeClaim, sessionID); err != nil {
 			t.Fatalf("bind active delivery %s: %v", source, err)
 		}
-		untouchedID, retryClaim := seedPreservationClaimedDelivery(t, ctx, pg, runID, "startup."+source+".retry")
+		untouchedID, retryClaim := seedPreservationClaimedDelivery(t, ctx, pg, runID, "startup."+source.String()+".retry")
 		if snapshot, err := pg.SettleFailure(ctx, retryClaim, runtimedelivery.Settlement{
 			Disposition: runtimedelivery.FailureRetry,
 			Failure:     testRetryableFailure(),
@@ -86,14 +86,19 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 		`, timerID, aggregateWorkflowTimerTaskID(timerID), runID); err != nil {
 			t.Fatalf("seed timer %s: %v", source, err)
 		}
+		if source.IsDeleted() {
+			if _, err := pg.DB.ExecContext(ctx, `UPDATE runs SET bundle_source = $2 WHERE run_id = $1::uuid`, runID, source.String()); err != nil {
+				t.Fatalf("mark run %s deleted: %v", runID, err)
+			}
+		}
 		cause, ok := preservationcleanup.CauseForBundleSource(source)
 		if !ok {
 			t.Fatalf("missing cause for source %s", source)
 		}
-		target := preservationcleanup.RunTarget{RunID: runID, BundleSource: source, BundleFingerprint: testBootBundleFingerprint, ReasonCode: cause}
+		target := preservationcleanup.RunTarget{RunID: runID, BundleSource: source, BundleHash: testCanonicalBundleHash, ReasonCode: cause}
 		targets = append(targets, target)
 		byRun[runID] = target
-		seeded[source] = seededRun{runID: runID, eventID: eventID, untouchedID: untouchedID, sessionID: sessionID, timerID: timerID}
+		seeded[source.String()] = seededRun{runID: runID, eventID: eventID, untouchedID: untouchedID, sessionID: sessionID, timerID: timerID}
 	}
 
 	result, err := pg.ApplyUnavailableBundleStartupPreservationCleanup(ctx, preservationcleanup.Request{
@@ -105,8 +110,8 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 	if err != nil {
 		t.Fatalf("ApplyUnavailableBundleStartupPreservationCleanup: %v", err)
 	}
-	if len(result.Runs) != 3 || len(result.Deliveries) != 6 || len(result.Sessions) != 3 || len(result.Timers) != 3 || result.PipelineReceiptCount != 6 {
-		t.Fatalf("cleanup result = runs:%d deliveries:%d sessions:%d timers:%d pipeline:%d, want 3/6/3/3/6", len(result.Runs), len(result.Deliveries), len(result.Sessions), len(result.Timers), result.PipelineReceiptCount)
+	if len(result.Runs) != 2 || len(result.Deliveries) != 4 || len(result.Sessions) != 2 || len(result.Timers) != 2 || result.PipelineReceiptCount != 4 {
+		t.Fatalf("cleanup result = runs:%d deliveries:%d sessions:%d timers:%d pipeline:%d, want 2/4/2/2/4", len(result.Runs), len(result.Deliveries), len(result.Sessions), len(result.Timers), result.PipelineReceiptCount)
 	}
 
 	for source, item := range seeded {
@@ -125,8 +130,8 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 	if err := pg.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&eventCount); err != nil {
 		t.Fatalf("count events: %v", err)
 	}
-	if eventCount != 6 {
-		t.Fatalf("events count = %d, want 6 preserved rows", eventCount)
+	if eventCount != 4 {
+		t.Fatalf("events count = %d, want 4 preserved rows", eventCount)
 	}
 }
 

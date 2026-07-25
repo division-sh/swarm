@@ -8,7 +8,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
@@ -25,7 +24,7 @@ func TestServeRejectsHarnessInjectionBeforeRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DefaultRuntimeConfig: %v", err)
 	}
-	loaded.bundleSourceFact = runtimecorrelation.BundleSourceFact{BundleHash: loaded.bootIdentity.Fingerprint}
+	loaded.bundleSourceFact = mustServeTestEphemeralBundleSourceFact(loaded.bootIdentity.BundleHash)
 	contextDef, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
 		Ctx: context.Background(), Loaded: loaded, StateStoreSummary: "test stores ready",
 		WorkspaceBackend: cliapp.WorkspaceBackendSelection{Backend: cliapp.WorkspaceBackendNone, NoWorkspace: true, Source: "test"},

@@ -13,6 +13,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -58,7 +59,6 @@ func (c StandingServiceCandidate) Normalized() StandingServiceCandidate {
 	c.FlowID = strings.TrimSpace(c.FlowID)
 	c.InstanceID = strings.TrimSpace(c.InstanceID)
 	c.EntityID = strings.TrimSpace(c.EntityID)
-	c.Source = c.Source.Normalized()
 	return c
 }
 
@@ -67,7 +67,6 @@ func (c StandingServiceCandidate) Validate() error {
 	for field, value := range map[string]string{
 		"service_id": c.ServiceID, "package_key": c.PackageKey, "flow_id": c.FlowID,
 		"instance_id": c.InstanceID, "entity_id": c.EntityID,
-		"bundle_hash": c.Source.BundleHash, "bundle_source": c.Source.BundleSource,
 	} {
 		if value == "" {
 			return fmt.Errorf("standing service %s is required", field)
@@ -81,6 +80,9 @@ func (c StandingServiceCandidate) Validate() error {
 	wantServiceID := runtimeflowidentity.StandingServiceID(c.PackageKey, c.FlowID)
 	if c.ServiceID != wantServiceID {
 		return fmt.Errorf("standing service_id %s does not match package_key/flow_id owner %s", c.ServiceID, wantServiceID)
+	}
+	if err := c.Source.Validate(); err != nil {
+		return fmt.Errorf("standing service bundle source: %w", err)
 	}
 	return nil
 }
@@ -137,6 +139,41 @@ type standingServiceRow struct {
 	RunControlReason   string
 }
 
+func (s *WorkflowInstanceStore) standingDialect() storerunlifecycle.Dialect {
+	if s.isSQLite() {
+		return storerunlifecycle.DialectSQLite
+	}
+	return storerunlifecycle.DialectPostgres
+}
+
+func (s *WorkflowInstanceStore) requireStandingRunSourceTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	current standingServiceRow,
+	requireActive bool,
+) (runtimecorrelation.BundleSourceFact, error) {
+	var (
+		fact runtimecorrelation.BundleSourceFact
+		err  error
+	)
+	if requireActive {
+		fact, err = storerunlifecycle.RequireActiveSource(ctx, tx, current.RunID, s.standingDialect())
+	} else {
+		fact, err = storerunlifecycle.RequirePresentSource(ctx, tx, current.RunID, s.standingDialect())
+	}
+	if err != nil {
+		return runtimecorrelation.BundleSourceFact{}, err
+	}
+	bundleHash, bundleSource := fact.StorageValues()
+	if current.BundleHash != bundleHash || current.BundleSource != bundleSource {
+		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf(
+			"standing service %s provenance conflicts with run %s: standing bundle_hash=%s bundle_source=%s, run bundle_hash=%s bundle_source=%s",
+			current.ServiceID, current.RunID, current.BundleHash, current.BundleSource, bundleHash, bundleSource,
+		)
+	}
+	return fact, nil
+}
+
 func (s *WorkflowInstanceStore) ReconcileStandingService(ctx context.Context, candidate StandingServiceCandidate) (StandingServiceReconciliation, error) {
 	if s == nil || s.db == nil {
 		return StandingServiceReconciliation{}, fmt.Errorf("workflow instance store is required")
@@ -169,8 +206,12 @@ func (s *WorkflowInstanceStore) LoadReconciledStandingService(ctx context.Contex
 		if current.PackageKey != candidate.PackageKey || current.FlowID != candidate.FlowID || current.InstanceID != candidate.InstanceID || current.EntityID != candidate.EntityID {
 			return fmt.Errorf("standing service identity conflict for %s", candidate.ServiceID)
 		}
-		if !current.DeclarationPresent || current.BundleHash != candidate.Source.BundleHash || current.BundleSource != candidate.Source.BundleSource {
+		bundleHash, bundleSource := candidate.Source.StorageValues()
+		if !current.DeclarationPresent || current.BundleHash != bundleHash || current.BundleSource != bundleSource {
 			return nil
+		}
+		if _, err := s.requireStandingRunSourceTx(txctx, tx, current, true); err != nil {
+			return err
 		}
 		transition := "resumed"
 		reason := ""
@@ -333,6 +374,9 @@ func (s *WorkflowInstanceStore) SuspendStandingService(ctx context.Context, oper
 			result.Transition = "suspended"
 			return nil
 		}
+		if _, err := s.requireStandingRunSourceTx(txctx, tx, current, true); err != nil {
+			return err
+		}
 		now := time.Now().UTC()
 		if err := s.quiesceStandingRunTx(txctx, tx, current.RunID, current.BundleHash, "standing_suspended", "cancelled", now); err != nil {
 			return err
@@ -352,7 +396,7 @@ func (s *WorkflowInstanceStore) SuspendStandingService(ctx context.Context, oper
 		result.Transition = "suspended"
 		result.EffectiveState = "suspended"
 		result.Reason = operation.Reason
-		return s.insertStandingJournalTx(txctx, tx, result, current.EffectiveState, current.BundleHash, current.BundleSource, operation.Actor, now)
+		return s.insertStandingJournalTx(txctx, tx, result, current.EffectiveState, operation.Actor, now)
 	})
 	return result, err
 }
@@ -382,6 +426,9 @@ func (s *WorkflowInstanceStore) ResumeStandingService(ctx context.Context, opera
 			result.Transition = "operator_resumed"
 			return nil
 		}
+		if _, err := s.requireStandingRunSourceTx(txctx, tx, current, true); err != nil {
+			return err
+		}
 		now := time.Now().UTC()
 		if err := s.setStandingRunRunningTx(txctx, tx, current.RunID, operation.Reason, operation.Actor, now); err != nil {
 			return err
@@ -398,7 +445,7 @@ func (s *WorkflowInstanceStore) ResumeStandingService(ctx context.Context, opera
 		result.Transition = "operator_resumed"
 		result.EffectiveState = "active"
 		result.Reason = operation.Reason
-		return s.insertStandingJournalTx(txctx, tx, result, current.EffectiveState, current.BundleHash, current.BundleSource, operation.Actor, now)
+		return s.insertStandingJournalTx(txctx, tx, result, current.EffectiveState, operation.Actor, now)
 	})
 	return result, err
 }
@@ -423,6 +470,10 @@ func (s *WorkflowInstanceStore) ResetStandingService(ctx context.Context, operat
 		if !current.DeclarationPresent {
 			return fmt.Errorf("standing service %s is orphaned; restore its declaration before resetting it", operation.ServiceID)
 		}
+		source, err := s.requireStandingRunSourceTx(txctx, tx, current, false)
+		if err != nil {
+			return err
+		}
 		now := time.Now().UTC()
 		if current.RunStatus == "running" || current.RunStatus == "paused" {
 			if err := s.quiesceStandingRunTx(txctx, tx, current.RunID, current.BundleHash, "standing_reset", "cancelled", now); err != nil {
@@ -434,8 +485,7 @@ func (s *WorkflowInstanceStore) ResetStandingService(ctx context.Context, operat
 		}
 		nextGeneration := current.Generation + 1
 		nextRunID := runtimeflowidentity.StandingGenerationRunID(current.ServiceID, nextGeneration)
-		source := runtimecorrelation.BundleSourceFact{BundleHash: current.BundleHash, BundleSource: current.BundleSource}
-		if err := s.insertStandingRunTx(txctx, tx, nextRunID, source, now); err != nil {
+		if err := storerunlifecycle.CreateActive(txctx, tx, s.standingDialect(), nextRunID, source, now); err != nil {
 			return err
 		}
 		effectiveState := "active"
@@ -449,7 +499,7 @@ func (s *WorkflowInstanceStore) ResetStandingService(ctx context.Context, operat
 			if _, err := tx.ExecContext(txctx, `UPDATE standing_service_generations SET retired_at = ?, retired_reason = 'standing_reset', retired_by = ? WHERE service_id = ? AND generation = ? AND retired_at IS NULL`, now, operation.Actor, current.ServiceID, current.Generation); err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(txctx, `INSERT INTO standing_service_generations (service_id, generation, run_id, created_bundle_hash, created_bundle_source, created_at) VALUES (?, ?, ?, ?, ?, ?)`, current.ServiceID, nextGeneration, nextRunID, current.BundleHash, current.BundleSource, now); err != nil {
+			if _, err := tx.ExecContext(txctx, `INSERT INTO standing_service_generations (service_id, generation, run_id, created_at) VALUES (?, ?, ?, ?)`, current.ServiceID, nextGeneration, nextRunID, now); err != nil {
 				return err
 			}
 			_, err = tx.ExecContext(txctx, `UPDATE standing_services SET current_generation = ?, current_run_id = ?, effective_state = ?, publication_state = 'pending', updated_at = ? WHERE service_id = ?`, nextGeneration, nextRunID, effectiveState, now, current.ServiceID)
@@ -457,7 +507,7 @@ func (s *WorkflowInstanceStore) ResetStandingService(ctx context.Context, operat
 			if _, err := tx.ExecContext(txctx, `UPDATE standing_service_generations SET retired_at = $3, retired_reason = 'standing_reset', retired_by = $4 WHERE service_id = $1::uuid AND generation = $2 AND retired_at IS NULL`, current.ServiceID, current.Generation, now, operation.Actor); err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(txctx, `INSERT INTO standing_service_generations (service_id, generation, run_id, created_bundle_hash, created_bundle_source, created_at) VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6)`, current.ServiceID, nextGeneration, nextRunID, current.BundleHash, current.BundleSource, now); err != nil {
+			if _, err := tx.ExecContext(txctx, `INSERT INTO standing_service_generations (service_id, generation, run_id, created_at) VALUES ($1::uuid, $2, $3::uuid, $4)`, current.ServiceID, nextGeneration, nextRunID, now); err != nil {
 				return err
 			}
 			_, err = tx.ExecContext(txctx, `UPDATE standing_services SET current_generation = $2, current_run_id = $3::uuid, effective_state = $4, publication_state = 'pending', updated_at = $5 WHERE service_id = $1::uuid`, current.ServiceID, nextGeneration, nextRunID, effectiveState, now)
@@ -467,7 +517,7 @@ func (s *WorkflowInstanceStore) ResetStandingService(ctx context.Context, operat
 		}
 		candidate := StandingServiceCandidate{ServiceID: current.ServiceID, PackageKey: current.PackageKey, FlowID: current.FlowID, InstanceID: current.InstanceID, EntityID: current.EntityID, Source: source}
 		result = standingResult(candidate, nextRunID, nextGeneration, current.PublicationSequence, "reset", effectiveState, operation.Reason)
-		return s.insertStandingJournalTx(txctx, tx, result, current.EffectiveState, current.BundleHash, current.BundleSource, operation.Actor, now)
+		return s.insertStandingJournalTx(txctx, tx, result, current.EffectiveState, operation.Actor, now)
 	})
 	return result, err
 }
@@ -751,9 +801,10 @@ func (s *WorkflowInstanceStore) createStandingServiceTx(ctx context.Context, tx 
 	generation := int64(1)
 	runID := runtimeflowidentity.StandingGenerationRunID(candidate.ServiceID, generation)
 	now := time.Now().UTC()
-	if err := s.insertStandingRunTx(ctx, tx, runID, candidate.Source, now); err != nil {
+	if err := storerunlifecycle.CreateActive(ctx, tx, s.standingDialect(), runID, candidate.Source, now); err != nil {
 		return StandingServiceReconciliation{}, err
 	}
+	bundleHash, bundleSource := candidate.Source.StorageValues()
 	if s.isSQLite() {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO standing_services (
@@ -763,13 +814,13 @@ func (s *WorkflowInstanceStore) createStandingServiceTx(ctx context.Context, tx 
 				publication_sequence, created_at, updated_at
 			) VALUES (?, ?, ?, ?, ?, TRUE, 'none', 'active', ?, ?, 1, ?, ?, 'pending', 0, ?, ?)
 		`, candidate.ServiceID, candidate.PackageKey, candidate.FlowID, candidate.InstanceID, candidate.EntityID,
-			candidate.Source.BundleHash, candidate.Source.BundleSource, generation, runID, now, now); err != nil {
+			bundleHash, bundleSource, generation, runID, now, now); err != nil {
 			return StandingServiceReconciliation{}, fmt.Errorf("insert standing service: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO standing_service_generations (service_id, generation, run_id, created_bundle_hash, created_bundle_source, created_at)
-			VALUES (?, ?, ?, ?, ?, ?)
-		`, candidate.ServiceID, generation, runID, candidate.Source.BundleHash, candidate.Source.BundleSource, now); err != nil {
+			INSERT INTO standing_service_generations (service_id, generation, run_id, created_at)
+			VALUES (?, ?, ?, ?)
+		`, candidate.ServiceID, generation, runID, now); err != nil {
 			return StandingServiceReconciliation{}, fmt.Errorf("insert standing generation: %w", err)
 		}
 	} else {
@@ -781,26 +832,30 @@ func (s *WorkflowInstanceStore) createStandingServiceTx(ctx context.Context, tx 
 				publication_sequence, created_at, updated_at
 			) VALUES ($1::uuid, $2, $3, $4, $5::uuid, TRUE, 'none', 'active', $6, $7, 1, $8, $9::uuid, 'pending', 0, $10, $10)
 		`, candidate.ServiceID, candidate.PackageKey, candidate.FlowID, candidate.InstanceID, candidate.EntityID,
-			candidate.Source.BundleHash, candidate.Source.BundleSource, generation, runID, now); err != nil {
+			bundleHash, bundleSource, generation, runID, now); err != nil {
 			return StandingServiceReconciliation{}, fmt.Errorf("insert standing service: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO standing_service_generations (service_id, generation, run_id, created_bundle_hash, created_bundle_source, created_at)
-			VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6)
-		`, candidate.ServiceID, generation, runID, candidate.Source.BundleHash, candidate.Source.BundleSource, now); err != nil {
+			INSERT INTO standing_service_generations (service_id, generation, run_id, created_at)
+			VALUES ($1::uuid, $2, $3::uuid, $4)
+		`, candidate.ServiceID, generation, runID, now); err != nil {
 			return StandingServiceReconciliation{}, fmt.Errorf("insert standing generation: %w", err)
 		}
 	}
 	result := standingResult(candidate, runID, generation, 0, "created", "active", "")
-	if err := s.insertStandingJournalTx(ctx, tx, result, "", "", "", "runtime", now); err != nil {
+	if err := s.insertStandingJournalTx(ctx, tx, result, "", "runtime", now); err != nil {
 		return StandingServiceReconciliation{}, err
 	}
 	return result, nil
 }
 
 func (s *WorkflowInstanceStore) resumeStandingServiceTx(ctx context.Context, tx *sql.Tx, current standingServiceRow, candidate StandingServiceCandidate) (StandingServiceReconciliation, error) {
+	if _, err := s.requireStandingRunSourceTx(ctx, tx, current, true); err != nil {
+		return StandingServiceReconciliation{}, err
+	}
+	bundleHash, bundleSource := candidate.Source.StorageValues()
 	transition := "resumed"
-	if current.BundleHash != candidate.Source.BundleHash || current.BundleSource != candidate.Source.BundleSource {
+	if current.BundleHash != bundleHash || current.BundleSource != bundleSource {
 		transition = "revised"
 	}
 	effectiveState := "active"
@@ -810,6 +865,9 @@ func (s *WorkflowInstanceStore) resumeStandingServiceTx(ctx context.Context, tx 
 	revisionSequence := current.RevisionSequence
 	if transition == "revised" {
 		revisionSequence++
+		if err := storerunlifecycle.ReviseBundleIdentity(ctx, tx, s.standingDialect(), current.RunID, candidate.Source); err != nil {
+			return StandingServiceReconciliation{}, err
+		}
 	}
 	now := time.Now().UTC()
 	if effectiveState == "active" {
@@ -820,46 +878,44 @@ func (s *WorkflowInstanceStore) resumeStandingServiceTx(ctx context.Context, tx 
 		return StandingServiceReconciliation{}, err
 	}
 	if s.isSQLite() {
-		if _, err := tx.ExecContext(ctx, `UPDATE runs SET bundle_hash = ?, bundle_source = ?, bundle_fingerprint = NULLIF(?, '') WHERE run_id = ? AND status IN ('running', 'paused')`, candidate.Source.BundleHash, candidate.Source.BundleSource, candidate.Source.BundleFingerprint, current.RunID); err != nil {
-			return StandingServiceReconciliation{}, fmt.Errorf("update standing run revision: %w", err)
-		}
 		_, err := tx.ExecContext(ctx, `
 			UPDATE standing_services
 			SET declaration_present = TRUE, effective_state = ?, current_bundle_hash = ?, current_bundle_source = ?,
 			    revision_sequence = ?, publication_state = 'pending', updated_at = ?
 			WHERE service_id = ?
-		`, effectiveState, candidate.Source.BundleHash, candidate.Source.BundleSource, revisionSequence, now, candidate.ServiceID)
+		`, effectiveState, bundleHash, bundleSource, revisionSequence, now, candidate.ServiceID)
 		if err != nil {
 			return StandingServiceReconciliation{}, err
 		}
 	} else {
-		if _, err := tx.ExecContext(ctx, `UPDATE runs SET bundle_hash = $2, bundle_source = $3, bundle_fingerprint = NULLIF($4, '') WHERE run_id = $1::uuid AND status IN ('running', 'paused')`, current.RunID, candidate.Source.BundleHash, candidate.Source.BundleSource, candidate.Source.BundleFingerprint); err != nil {
-			return StandingServiceReconciliation{}, fmt.Errorf("update standing run revision: %w", err)
-		}
 		_, err := tx.ExecContext(ctx, `
 			UPDATE standing_services
 			SET declaration_present = TRUE, effective_state = $2, current_bundle_hash = $3, current_bundle_source = $4,
 			    revision_sequence = $5, publication_state = 'pending', updated_at = $6
 			WHERE service_id = $1::uuid
-		`, candidate.ServiceID, effectiveState, candidate.Source.BundleHash, candidate.Source.BundleSource, revisionSequence, now)
+		`, candidate.ServiceID, effectiveState, bundleHash, bundleSource, revisionSequence, now)
 		if err != nil {
 			return StandingServiceReconciliation{}, err
 		}
 	}
 	result := standingResult(candidate, current.RunID, current.Generation, current.PublicationSequence, transition, effectiveState, "")
-	if err := s.insertStandingJournalTx(ctx, tx, result, current.EffectiveState, current.BundleHash, current.BundleSource, "runtime", now); err != nil {
+	if err := s.insertStandingJournalTx(ctx, tx, result, current.EffectiveState, "runtime", now); err != nil {
 		return StandingServiceReconciliation{}, err
 	}
 	return result, nil
 }
 
 func (s *WorkflowInstanceStore) repairStandingServiceTx(ctx context.Context, tx *sql.Tx, current standingServiceRow, candidate StandingServiceCandidate) (StandingServiceReconciliation, error) {
+	if _, err := s.requireStandingRunSourceTx(ctx, tx, current, false); err != nil {
+		return StandingServiceReconciliation{}, err
+	}
 	nextGeneration := current.Generation + 1
 	nextRunID := runtimeflowidentity.StandingGenerationRunID(candidate.ServiceID, nextGeneration)
 	now := time.Now().UTC()
-	if err := s.insertStandingRunTx(ctx, tx, nextRunID, candidate.Source, now); err != nil {
+	if err := storerunlifecycle.CreateActive(ctx, tx, s.standingDialect(), nextRunID, candidate.Source, now); err != nil {
 		return StandingServiceReconciliation{}, err
 	}
+	bundleHash, bundleSource := candidate.Source.StorageValues()
 	if err := s.copyStandingEntityStateTx(ctx, tx, current.RunID, nextRunID, candidate.EntityID); err != nil {
 		return StandingServiceReconciliation{}, err
 	}
@@ -867,7 +923,7 @@ func (s *WorkflowInstanceStore) repairStandingServiceTx(ctx context.Context, tx 
 		if _, err := tx.ExecContext(ctx, `UPDATE standing_service_generations SET retired_at = ?, retired_reason = ?, retired_by = 'runtime' WHERE service_id = ? AND generation = ? AND retired_at IS NULL`, now, standingRestartAbandonReason, candidate.ServiceID, current.Generation); err != nil {
 			return StandingServiceReconciliation{}, err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO standing_service_generations (service_id, generation, run_id, created_bundle_hash, created_bundle_source, created_at) VALUES (?, ?, ?, ?, ?, ?)`, candidate.ServiceID, nextGeneration, nextRunID, candidate.Source.BundleHash, candidate.Source.BundleSource, now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO standing_service_generations (service_id, generation, run_id, created_at) VALUES (?, ?, ?, ?)`, candidate.ServiceID, nextGeneration, nextRunID, now); err != nil {
 			return StandingServiceReconciliation{}, err
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -876,14 +932,14 @@ func (s *WorkflowInstanceStore) repairStandingServiceTx(ctx context.Context, tx 
 			    current_bundle_hash = ?, current_bundle_source = ?, revision_sequence = revision_sequence + 1,
 			    current_generation = ?, current_run_id = ?, publication_state = 'pending', updated_at = ?
 			WHERE service_id = ?
-		`, candidate.Source.BundleHash, candidate.Source.BundleSource, nextGeneration, nextRunID, now, candidate.ServiceID); err != nil {
+		`, bundleHash, bundleSource, nextGeneration, nextRunID, now, candidate.ServiceID); err != nil {
 			return StandingServiceReconciliation{}, err
 		}
 	} else {
 		if _, err := tx.ExecContext(ctx, `UPDATE standing_service_generations SET retired_at = $3, retired_reason = $4, retired_by = 'runtime' WHERE service_id = $1::uuid AND generation = $2 AND retired_at IS NULL`, candidate.ServiceID, current.Generation, now, standingRestartAbandonReason); err != nil {
 			return StandingServiceReconciliation{}, err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO standing_service_generations (service_id, generation, run_id, created_bundle_hash, created_bundle_source, created_at) VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6)`, candidate.ServiceID, nextGeneration, nextRunID, candidate.Source.BundleHash, candidate.Source.BundleSource, now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO standing_service_generations (service_id, generation, run_id, created_at) VALUES ($1::uuid, $2, $3::uuid, $4)`, candidate.ServiceID, nextGeneration, nextRunID, now); err != nil {
 			return StandingServiceReconciliation{}, err
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -892,7 +948,7 @@ func (s *WorkflowInstanceStore) repairStandingServiceTx(ctx context.Context, tx 
 			    current_bundle_hash = $2, current_bundle_source = $3, revision_sequence = revision_sequence + 1,
 			    current_generation = $4, current_run_id = $5::uuid, publication_state = 'pending', updated_at = $6
 			WHERE service_id = $1::uuid
-		`, candidate.ServiceID, candidate.Source.BundleHash, candidate.Source.BundleSource, nextGeneration, nextRunID, now); err != nil {
+		`, candidate.ServiceID, bundleHash, bundleSource, nextGeneration, nextRunID, now); err != nil {
 			return StandingServiceReconciliation{}, err
 		}
 	}
@@ -901,7 +957,7 @@ func (s *WorkflowInstanceStore) repairStandingServiceTx(ctx context.Context, tx 
 		effectiveState = "suspended"
 	}
 	result := standingResult(candidate, nextRunID, nextGeneration, current.PublicationSequence, "repaired", effectiveState, standingRestartAbandonReason)
-	if err := s.insertStandingJournalTx(ctx, tx, result, current.EffectiveState, current.BundleHash, current.BundleSource, "runtime", now); err != nil {
+	if err := s.insertStandingJournalTx(ctx, tx, result, current.EffectiveState, "runtime", now); err != nil {
 		return StandingServiceReconciliation{}, err
 	}
 	return result, nil
@@ -931,7 +987,7 @@ func (s *WorkflowInstanceStore) orphanStandingServiceTx(ctx context.Context, tx 
 	result.Transition = "orphaned"
 	result.EffectiveState = "orphaned"
 	result.Reason = "standing_declaration_removed"
-	if err := s.insertStandingJournalTx(ctx, tx, result, current.EffectiveState, current.BundleHash, current.BundleSource, "runtime", now); err != nil {
+	if err := s.insertStandingJournalTx(ctx, tx, result, current.EffectiveState, "runtime", now); err != nil {
 		return StandingServiceReconciliation{}, err
 	}
 	return result, nil
@@ -1076,21 +1132,6 @@ func (s *WorkflowInstanceStore) setStandingRunCancelledTx(ctx context.Context, t
 	return err
 }
 
-func (s *WorkflowInstanceStore) insertStandingRunTx(ctx context.Context, tx *sql.Tx, runID string, source runtimecorrelation.BundleSourceFact, now time.Time) error {
-	if s.isSQLite() {
-		_, err := tx.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at) VALUES (?, 'running', ?, ?, NULLIF(?, ''), ?)`, runID, source.BundleHash, source.BundleSource, source.BundleFingerprint, now)
-		if err != nil {
-			return fmt.Errorf("insert standing run: %w", err)
-		}
-		return nil
-	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at) VALUES ($1::uuid, 'running', $2, $3, NULLIF($4, ''), $5)`, runID, source.BundleHash, source.BundleSource, source.BundleFingerprint, now)
-	if err != nil {
-		return fmt.Errorf("insert standing run: %w", err)
-	}
-	return nil
-}
-
 func (s *WorkflowInstanceStore) copyStandingEntityStateTx(ctx context.Context, tx *sql.Tx, oldRunID, newRunID, entityID string) error {
 	var result sql.Result
 	var err error
@@ -1120,18 +1161,16 @@ func (s *WorkflowInstanceStore) copyStandingEntityStateTx(ctx context.Context, t
 	return nil
 }
 
-func (s *WorkflowInstanceStore) insertStandingJournalTx(ctx context.Context, tx *sql.Tx, result StandingServiceReconciliation, previousState, previousHash, previousSource, actor string, now time.Time) error {
+func (s *WorkflowInstanceStore) insertStandingJournalTx(ctx context.Context, tx *sql.Tx, result StandingServiceReconciliation, previousState, actor string, now time.Time) error {
 	operationID := uuid.NewString()
 	if s.isSQLite() {
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO standing_service_journal (
 				service_id, sequence, operation_id, generation, run_id, transition,
-				previous_effective_state, effective_state, previous_bundle_hash, bundle_hash,
-				previous_bundle_source, bundle_source, actor, reason, poison_provenance, occurred_at
-			) VALUES (?, (SELECT COALESCE(MAX(sequence), 0) + 1 FROM standing_service_journal WHERE service_id = ?), ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?)
+				previous_effective_state, effective_state, actor, reason, poison_provenance, occurred_at
+			) VALUES (?, (SELECT COALESCE(MAX(sequence), 0) + 1 FROM standing_service_journal WHERE service_id = ?), ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?)
 		`, result.ServiceID, result.ServiceID, operationID, result.Generation, result.RunID, result.Transition,
-			previousState, result.EffectiveState, previousHash, result.BundleHash, previousSource, result.BundleSource,
-			actor, result.Reason, result.Reason, now)
+			previousState, result.EffectiveState, actor, result.Reason, result.Reason, now)
 		if err != nil {
 			return fmt.Errorf("insert standing journal: %w", err)
 		}
@@ -1140,12 +1179,10 @@ func (s *WorkflowInstanceStore) insertStandingJournalTx(ctx context.Context, tx 
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO standing_service_journal (
 			service_id, sequence, operation_id, generation, run_id, transition,
-			previous_effective_state, effective_state, previous_bundle_hash, bundle_hash,
-			previous_bundle_source, bundle_source, actor, reason, poison_provenance, occurred_at
-		) VALUES ($1::uuid, (SELECT COALESCE(MAX(sequence), 0) + 1 FROM standing_service_journal WHERE service_id = $1::uuid), $2::uuid, $3, $4::uuid, $5, NULLIF($6, ''), $7, NULLIF($8, ''), $9, NULLIF($10, ''), $11, $12, NULLIF($13, ''), NULLIF($14, ''), $15)
+			previous_effective_state, effective_state, actor, reason, poison_provenance, occurred_at
+		) VALUES ($1::uuid, (SELECT COALESCE(MAX(sequence), 0) + 1 FROM standing_service_journal WHERE service_id = $1::uuid), $2::uuid, $3, $4::uuid, $5, NULLIF($6, ''), $7, $8, NULLIF($9, ''), NULLIF($10, ''), $11)
 	`, result.ServiceID, operationID, result.Generation, result.RunID, result.Transition,
-		previousState, result.EffectiveState, previousHash, result.BundleHash, previousSource, result.BundleSource,
-		actor, result.Reason, result.Reason, now)
+		previousState, result.EffectiveState, actor, result.Reason, result.Reason, now)
 	if err != nil {
 		return fmt.Errorf("insert standing journal: %w", err)
 	}
@@ -1153,12 +1190,13 @@ func (s *WorkflowInstanceStore) insertStandingJournalTx(ctx context.Context, tx 
 }
 
 func standingResult(candidate StandingServiceCandidate, runID string, generation, publicationSequence int64, transition, effectiveState, reason string) StandingServiceReconciliation {
+	bundleHash, bundleSource := candidate.Source.StorageValues()
 	return StandingServiceReconciliation{
 		ServiceID: candidate.ServiceID, PackageKey: candidate.PackageKey, FlowID: candidate.FlowID,
 		InstanceID: candidate.InstanceID, EntityID: candidate.EntityID, RunID: runID,
 		Generation: generation, PublicationSequence: publicationSequence, Transition: transition,
-		EffectiveState: effectiveState, BundleHash: candidate.Source.BundleHash,
-		BundleSource: candidate.Source.BundleSource, Reason: reason,
+		EffectiveState: effectiveState, BundleHash: bundleHash,
+		BundleSource: bundleSource, Reason: reason,
 	}
 }
 

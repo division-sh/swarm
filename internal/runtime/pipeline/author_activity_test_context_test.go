@@ -2,14 +2,16 @@ package pipeline
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 )
+
+const pipelineTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
 type pipelineTestWorkFixture struct {
 	process *worklifetime.Process
@@ -26,7 +28,7 @@ func pipelineTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence {
 	fixture := &pipelineTestWorkFixture{process: worklifetime.NewProcess()}
 	owner, err := fixture.process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: "pipeline-test-runtime",
-		BundleHash:        "pipeline-test-bundle",
+		BundleHash:        pipelineTestBundleHash,
 	})
 	if err != nil {
 		t.Fatalf("create pipeline test work owner: %v", err)
@@ -54,8 +56,21 @@ func pipelineTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence {
 func testAuthorActivityContext(t *testing.T, ctx context.Context) context.Context {
 	t.Helper()
 	ctx = worklifetime.WithOccurrence(ctx, pipelineTestWorkOwner(t))
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(pipelineTestBundleHash)
+	if err != nil {
+		t.Fatalf("create pipeline test bundle source fact: %v", err)
+	}
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		"11111111-1111-1111-1111-111111111111",
-		"bundle-v1:sha256:"+strings.Repeat("a", 64),
+		pipelineTestBundleHash,
 	))
+}
+
+func mustPipelineTestBundleSourceFact(bundleHash string) runtimecorrelation.BundleSourceFact {
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+	if err != nil {
+		panic(err)
+	}
+	return fact
 }

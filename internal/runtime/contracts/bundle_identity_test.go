@@ -3,7 +3,6 @@ package contracts
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"testing"
 )
 
@@ -40,11 +39,11 @@ func TestBootBundleIdentityStableAcrossRootsAndFileOrder(t *testing.T) {
 	if identityA.WorkflowName != "identity-test" || identityA.WorkflowVersion != "1.0.0" {
 		t.Fatalf("identity labels = %#v", identityA)
 	}
-	if identityA.Fingerprint != identityB.Fingerprint {
-		t.Fatalf("fingerprint drifted across equivalent roots:\nA=%s\nB=%s", identityA.Fingerprint, identityB.Fingerprint)
+	if identityA.BundleHash != identityB.BundleHash {
+		t.Fatalf("bundle_hash drifted across equivalent roots:\nA=%s\nB=%s", identityA.BundleHash, identityB.BundleHash)
 	}
-	if !regexp.MustCompile(`^sha256:[a-f0-9]{64}$`).MatchString(identityA.Fingerprint) {
-		t.Fatalf("fingerprint = %q, want sha256-prefixed hex", identityA.Fingerprint)
+	if err := ValidateBundleHash(identityA.BundleHash); err != nil {
+		t.Fatalf("bundle_hash = %q: %v", identityA.BundleHash, err)
 	}
 }
 
@@ -75,8 +74,8 @@ func TestBootBundleIdentityChangesWithLoadedContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BootBundleIdentity B: %v", err)
 	}
-	if identityA.Fingerprint == identityB.Fingerprint {
-		t.Fatalf("fingerprint did not change after loaded content changed: %s", identityA.Fingerprint)
+	if identityA.BundleHash == identityB.BundleHash {
+		t.Fatalf("bundle_hash did not change after loaded content changed: %s", identityA.BundleHash)
 	}
 }
 

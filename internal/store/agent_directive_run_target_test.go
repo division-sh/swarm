@@ -84,7 +84,8 @@ func createDirectiveRunTargetTables(t *testing.T, ctx context.Context, pg *Postg
 			entity_count INTEGER NOT NULL DEFAULT 0,
 			failure JSONB,
 			ended_at TIMESTAMPTZ,
-			bundle_fingerprint TEXT
+			bundle_hash TEXT NOT NULL,
+			bundle_source TEXT NOT NULL
 		);
 		CREATE TABLE agent_sessions (
 			session_id UUID PRIMARY KEY,
@@ -113,7 +114,7 @@ func createDirectiveRunTargetTables(t *testing.T, ctx context.Context, pg *Postg
 
 func insertDirectiveRun(t *testing.T, ctx context.Context, pg *PostgresStore, runID, status string) {
 	t.Helper()
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, $2)`, runID, status); err != nil {
+	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, status); err != nil {
 		t.Fatalf("insert run %s: %v", runID, err)
 	}
 }

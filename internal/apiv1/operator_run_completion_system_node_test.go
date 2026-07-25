@@ -42,13 +42,13 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 
 	module := newRunCompletionSystemNodeModule(t, source)
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:        module,
-		DeliveryStore: pg,
-		BundleHash:    runStartTestBundleHash,
+		Module:           module,
+		DeliveryStore:    pg,
+		BundleSourceFact: runStartTestBundleSourceFact(),
 	})
 
 	runID := "11111111-1111-4111-8111-111111111111"
-	started := rpcCall(t, handler, runStartBody(runID, runStartTestFingerprint, "flow.started", `{"topic":"supported-surfaces"}`, "idem-system-node-run"))
+	started := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "flow.started", `{"topic":"supported-surfaces"}`, "idem-system-node-run"))
 	if started.Error != nil {
 		t.Fatalf("run.start error = %#v", started.Error)
 	}
@@ -80,7 +80,7 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 		t.Fatalf("run.diagnose run.status = %#v, want completed", diagnosisRun["status"])
 	}
 
-	terminalPublish := rpcCall(t, handler, eventPublishBody(runID, runStartTestFingerprint, "flow.started", `{"topic":"after-terminal"}`, "", "idem-after-terminal"))
+	terminalPublish := rpcCall(t, handler, eventPublishBody(runID, runStartTestBundleHash, "flow.started", `{"topic":"after-terminal"}`, "", "idem-after-terminal"))
 	if terminalPublish.Error == nil {
 		t.Fatal("event.publish --run-id terminal error = nil")
 	}

@@ -21,10 +21,18 @@ import (
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
 
-var authorActivityTestBundleSourceFact = runtimecorrelation.BundleSourceFact{
-	BundleHash:        "bundle-v1:sha256:" + strings.Repeat("a", 64),
-	BundleSource:      "ephemeral",
-	BundleFingerprint: "sha256:" + strings.Repeat("a", 64),
+var authorActivityTestBundleSourceFact = mustAuthorActivityTestBundleSourceFact()
+
+func mustAuthorActivityTestBundleSourceFact() runtimecorrelation.BundleSourceFact {
+	return mustAuthorActivityTestBundleSourceFactForHash("bundle-v1:sha256:" + strings.Repeat("e", 64))
+}
+
+func mustAuthorActivityTestBundleSourceFactForHash(bundleHash string) runtimecorrelation.BundleSourceFact {
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+	if err != nil {
+		panic(err)
+	}
+	return fact
 }
 
 type pipelineExternalTestWorkFixture struct {
@@ -42,7 +50,7 @@ func pipelineExternalTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence
 	fixture := &pipelineExternalTestWorkFixture{process: worklifetime.NewProcess()}
 	owner, err := fixture.process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-		BundleHash:        authorActivityTestBundleSourceFact.BundleHash,
+		BundleHash:        authorActivityTestBundleSourceFact.BundleHash(),
 	})
 	if err != nil {
 		t.Fatalf("create pipeline test work owner: %v", err)
@@ -70,9 +78,10 @@ func pipelineExternalTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence
 func testAuthorActivityContext(t *testing.T, ctx context.Context) context.Context {
 	t.Helper()
 	ctx = worklifetime.WithOccurrence(ctx, pipelineExternalTestWorkOwner(t))
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, authorActivityTestBundleSourceFact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
-		authorActivityTestBundleSourceFact.BundleHash,
+		authorActivityTestBundleSourceFact.BundleHash(),
 	))
 }
 
@@ -93,7 +102,7 @@ func registerDifferentTestAuthorActivityEvents(t *testing.T, eventStore any, eve
 		})
 	}
 	lease, err := registrar.RegisterAuthorActivityEventCatalog(
-		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash), descriptors,
+		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash()), descriptors,
 	)
 	if err != nil {
 		t.Fatalf("register test author activity event catalog: %v", err)
@@ -121,7 +130,7 @@ func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts 
 			})
 		}
 		lease, err := registrar.RegisterAuthorActivityEventCatalog(
-			runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash), descriptors,
+			runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash()), descriptors,
 		)
 		if err != nil {
 			return nil, err
@@ -197,7 +206,7 @@ func newRecoveryTestPostgresStore(t *testing.T, db *sql.DB) *store.PostgresStore
 		})
 	}
 	lease, err := pg.RegisterAuthorActivityEventCatalog(
-		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash),
+		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash()),
 		descriptors,
 	)
 	if err != nil {
