@@ -40,8 +40,7 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"go|internal/cliapp/logs.go|subscribeRuntimeLogs|386":                                                                {asyncSiteSynchronousJoin, "the CLI log subscription closes and joins its read loop"},
 	"go|internal/cliapp/run_command.go|startLocalRunServe|438":                                                           {asyncSiteSynchronousJoin, "the local serve command reports terminal completion through a joined result channel"},
 	"go|internal/cliapp/run_command.go|subscribeRunTrace|716":                                                            {asyncSiteSynchronousJoin, "the CLI run trace subscription closes and joins its read loop"},
-	"go|internal/runtime/bus/eventbus_publish.go|EventBus.DispatchPreparedPublishAsync|751":                              {asyncSiteCanonicalOwner, "prepared async dispatch acquires its occurrence lease before launch and settles exactly once"},
-	"go|internal/runtime/bus/eventbus_publish.go|EventBus.dispatchCommittedPublishAsync|774":                             {asyncSiteCanonicalOwner, "committed async dispatch acquires its occurrence lease before launch and settles exactly once"},
+	"go|internal/runtime/bus/eventbus_publish.go|EventBus.DispatchPreparedPublishAsync|777":                              {asyncSiteCanonicalOwner, "prepared async dispatch acquires its occurrence lease before launch and settles exactly once"},
 	"go|internal/runtime/bus/sweeper.go|EventBus.StartOutboxSweeper|79":                                                  {asyncSiteCanonicalOwner, "the outbox sweeper owns a runtime lease and exposes an exact completion channel"},
 	"go|internal/runtime/deliverylifecycle/heartbeat.go|startClaimHeartbeat|80":                                          {asyncSiteCanonicalOwner, "the delivery claim heartbeat acquires its runtime occurrence before launch and exposes an exact stop-and-wait owner"},
 	"go|internal/runtime/llm/cli_runtime_process.go|ClaudeCLIRuntime.runStreamingPrepared|148":                           {asyncSiteSynchronousJoin, "stdout collection is joined before the subprocess call returns"},
@@ -103,6 +102,7 @@ var retiredLifetimeOwners = []string{
 	"runtimeQuiescenceStableChecks",
 	"PendingAgentRouteDeliveries",
 	"PendingAgentDeliveries",
+	"dispatchCommittedPublishAsync",
 }
 
 func TestProductionAsyncWorkUsesCanonicalTypedOwners(t *testing.T) {

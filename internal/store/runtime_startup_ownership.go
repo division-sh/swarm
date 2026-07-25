@@ -33,7 +33,11 @@ func (s *PostgresStore) AcquireRuntimeStartupOwnership(ctx context.Context, req 
 	if err != nil {
 		return nil, errors.Join(err, lease.Release(ctx))
 	}
-	if err := s.RecordRuntimeStartupAuthorityTransition(lease.BindContext(ctx), nil, authority); err != nil {
+	leaseCtx, err := lease.BindContext(ctx)
+	if err != nil {
+		return nil, errors.Join(err, lease.Release(ctx))
+	}
+	if err := s.RecordRuntimeStartupAuthorityTransition(leaseCtx, nil, authority); err != nil {
 		return nil, errors.Join(err, lease.Release(ctx))
 	}
 	ownedRecorder := postgresStartupOwnershipRecorder{store: s, lease: lease}
@@ -94,7 +98,11 @@ func (r postgresStartupOwnershipRecorder) RecordRuntimeStartupAuthorityTransitio
 	if r.store == nil || r.lease == nil {
 		return errors.New("PostgreSQL startup ownership recorder is missing")
 	}
-	return r.store.RecordRuntimeStartupAuthorityTransition(r.lease.BindContext(ctx), previous, next...)
+	leaseCtx, err := r.lease.BindContext(ctx)
+	if err != nil {
+		return err
+	}
+	return r.store.RecordRuntimeStartupAuthorityTransition(leaseCtx, previous, next...)
 }
 
 func validatePersistedStartupAuthorityHead(raw []byte, queryErr error, previous *runtimestartupownership.Authority) error {

@@ -78,7 +78,10 @@ func (s *PostgresStore) runPostgresRuntimeMutation(ctx context.Context, fn func(
 			err = errors.Join(err, session.release())
 		}()
 	}
-	ctx = session.bindContext(ctx)
+	ctx, err = session.bindContext(ctx)
+	if err != nil {
+		return err
+	}
 	tx, err := session.beginTx(ctx)
 	if err != nil {
 		return err

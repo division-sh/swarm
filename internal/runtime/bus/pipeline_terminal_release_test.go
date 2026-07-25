@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -199,6 +200,142 @@ func TestPipelineOneShotTerminalSinksPropagateOrRecordCleanupEvidence(t *testing
 				}
 			})
 		}
+	}
+}
+
+func TestPreparedDispatchAdmissionFailureTerminallyConsumesPublicationClaim(t *testing.T) {
+	dispatches := []struct {
+		name string
+		run  func(*EventBus, context.Context, PreparedPublish) error
+	}{
+		{
+			name: "sync",
+			run: func(bus *EventBus, ctx context.Context, prepared PreparedPublish) error {
+				return bus.DispatchPreparedPublish(ctx, prepared)
+			},
+		},
+		{
+			name: "async",
+			run: func(bus *EventBus, ctx context.Context, prepared PreparedPublish) error {
+				return bus.DispatchPreparedPublishAsync(ctx, prepared)
+			},
+		},
+		{
+			name: "wait",
+			run: func(bus *EventBus, ctx context.Context, prepared PreparedPublish) error {
+				return bus.DispatchPreparedPublishAndWait(ctx, prepared)
+			},
+		},
+	}
+	for _, lifecycle := range []string{"fenced", "retired"} {
+		for _, dispatch := range dispatches {
+			t.Run(lifecycle+"/"+dispatch.name, func(t *testing.T) {
+				process := worklifetime.NewProcess()
+				runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+					RuntimeInstanceID: "prepared-dispatch-" + lifecycle + "-" + dispatch.name,
+					BundleHash:        "prepared-dispatch-bundle",
+				})
+				if err != nil {
+					t.Fatalf("create runtime occurrence: %v", err)
+				}
+				t.Cleanup(func() {
+					if _, err := runtimeOwner.RetireAndWait(context.Background()); err != nil {
+						t.Errorf("retire runtime occurrence: %v", err)
+					}
+					process.Retire()
+					if _, err := process.Join(context.Background()); err != nil {
+						t.Errorf("join process occurrence: %v", err)
+					}
+				})
+
+				owner := newTerminalReleasePipelineOwner()
+				bus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{
+					PipelineObligations: owner,
+					WorkOwner:           runtimeOwner,
+				})
+				if err != nil {
+					t.Fatalf("NewEventBus: %v", err)
+				}
+				eventID := uuid.NewString()
+				claim, err := bus.claimPipelinePublication(context.Background(), eventID)
+				if err != nil {
+					t.Fatalf("claim publication: %v", err)
+				}
+				cleanupFailure := lifecycle + " " + dispatch.name + " cleanup failure"
+				owner.releaseError[eventID] = func(int) error { return errors.New(cleanupFailure) }
+				prepared := PreparedPublish{
+					Event: eventtest.RuntimeControl(
+						eventID,
+						events.EventType("test.prepared.dispatch"),
+						"test",
+						"",
+						[]byte(`{}`),
+						0,
+						uuid.NewString(),
+						"",
+						events.EventEnvelope{},
+						time.Now().UTC(),
+					),
+					publicationClaim: claim,
+				}
+				if lifecycle == "fenced" {
+					if err := runtimeOwner.Fence(); err != nil {
+						t.Fatalf("fence runtime occurrence: %v", err)
+					}
+				} else {
+					runtimeOwner.Retire()
+				}
+
+				err = dispatch.run(bus, context.Background(), prepared)
+				if err == nil || !strings.Contains(err.Error(), cleanupFailure) {
+					t.Fatalf("dispatch error = %v, want admission plus cleanup evidence", err)
+				}
+				if got := owner.releaseCalls[eventID]; got != 1 {
+					t.Fatalf("terminal release calls = %d, want 1", got)
+				}
+				delete(owner.releaseError, eventID)
+				reclaimed, err := bus.claimPipelinePublication(context.Background(), eventID)
+				if err != nil {
+					t.Fatalf("immediate durable reclaim: %v", err)
+				}
+				if err := reclaimed.Release(context.Background()); err != nil {
+					t.Fatalf("release reclaimed publication: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestInvalidPreparedDispatchTerminallyConsumesAttachedPublicationClaim(t *testing.T) {
+	owner := newTerminalReleasePipelineOwner()
+	bus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{PipelineObligations: owner})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	eventID := uuid.NewString()
+	claim, err := bus.claimPipelinePublication(context.Background(), eventID)
+	if err != nil {
+		t.Fatalf("claim publication: %v", err)
+	}
+	cleanupFailure := "invalid prepared cleanup failure"
+	owner.releaseError[eventID] = func(int) error { return errors.New(cleanupFailure) }
+
+	err = bus.DispatchPreparedPublish(context.Background(), PreparedPublish{publicationClaim: claim})
+	if err == nil ||
+		!strings.Contains(err.Error(), "prepared event is required") ||
+		!strings.Contains(err.Error(), cleanupFailure) {
+		t.Fatalf("invalid prepared dispatch error = %v, want validation plus cleanup evidence", err)
+	}
+	if got := owner.releaseCalls[eventID]; got != 1 {
+		t.Fatalf("terminal release calls = %d, want 1", got)
+	}
+	delete(owner.releaseError, eventID)
+	reclaimed, err := bus.claimPipelinePublication(context.Background(), eventID)
+	if err != nil {
+		t.Fatalf("immediate durable reclaim: %v", err)
+	}
+	if err := reclaimed.Release(context.Background()); err != nil {
+		t.Fatalf("release reclaimed publication: %v", err)
 	}
 }
 
