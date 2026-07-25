@@ -409,6 +409,104 @@ func TestPostgresPipelineClaimUsesExactSessionAcrossCommitAndRollback(t *testing
 	}
 }
 
+func TestPostgresSharedClaimSessionSerializesSiblingTransactionsAndRelease(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	selected := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
+	eventIDs := []string{uuid.NewString(), uuid.NewString()}
+	claims := make([]runtimepipelineobligation.Claim, 0, len(eventIDs))
+	if err := selected.runPostgresRuntimeMutation(ctx, func(txctx context.Context, _ *sql.Tx) error {
+		for _, eventID := range eventIDs {
+			claim, err := selected.PipelineObligations().ClaimPublication(txctx, eventID)
+			if err != nil {
+				return err
+			}
+			claims = append(claims, claim)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("claim sibling publications: %v", err)
+	}
+	first, err := selected.postgresPipelineClaimState(claims[0])
+	if err != nil {
+		t.Fatalf("load first claim: %v", err)
+	}
+	second, err := selected.postgresPipelineClaimState(claims[1])
+	if err != nil {
+		t.Fatalf("load second claim: %v", err)
+	}
+	session := first.postgresLease.session
+	if session == nil || second.postgresLease.session != session {
+		t.Fatal("sibling claims did not retain the same transaction-owned session")
+	}
+
+	tx, err := session.beginTx(ctx)
+	if err != nil {
+		t.Fatalf("begin first sibling transaction: %v", err)
+	}
+	secondTx := make(chan *sql.Tx, 1)
+	secondErr := make(chan error, 1)
+	secondStarted := make(chan struct{})
+	go func() {
+		close(secondStarted)
+		tx, err := session.beginTx(ctx)
+		secondTx <- tx
+		secondErr <- err
+	}()
+	<-secondStarted
+	select {
+	case err := <-secondErr:
+		_ = tx.Rollback()
+		_ = session.endTx(tx)
+		t.Fatalf("sibling transaction returned before predecessor unwind: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit first sibling transaction: %v", err)
+	}
+	if err := session.endTx(tx); err != nil {
+		t.Fatalf("end first sibling transaction: %v", err)
+	}
+	nextTx := <-secondTx
+	if err := <-secondErr; err != nil {
+		t.Fatalf("begin second sibling transaction after unwind: %v", err)
+	}
+	if err := nextTx.Rollback(); err != nil {
+		t.Fatalf("rollback second sibling transaction: %v", err)
+	}
+	if err := session.endTx(nextTx); err != nil {
+		t.Fatalf("end second sibling transaction: %v", err)
+	}
+
+	heldTx, err := session.beginTx(ctx)
+	if err != nil {
+		t.Fatalf("begin release predecessor transaction: %v", err)
+	}
+	releaseDone := make(chan error, 1)
+	go func() {
+		releaseDone <- selected.PipelineObligations().Release(ctx, claims[0])
+	}()
+	select {
+	case err := <-releaseDone:
+		_ = heldTx.Rollback()
+		_ = session.endTx(heldTx)
+		t.Fatalf("sibling release returned before transaction unwind: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if err := heldTx.Commit(); err != nil {
+		t.Fatalf("commit release predecessor transaction: %v", err)
+	}
+	if err := session.endTx(heldTx); err != nil {
+		t.Fatalf("end release predecessor transaction: %v", err)
+	}
+	if err := <-releaseDone; err != nil {
+		t.Fatalf("release sibling after transaction unwind: %v", err)
+	}
+	if err := selected.PipelineObligations().Release(ctx, claims[1]); err != nil {
+		t.Fatalf("release final sibling: %v", err)
+	}
+}
+
 func TestPostgresPipelineClaimReleasesRetainedReferenceBeforeTransactionCompletes(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	selected := newTestPostgresStore(t, db)

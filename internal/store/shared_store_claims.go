@@ -35,6 +35,7 @@ type sqlAdvisoryLockLease struct {
 type postgresSessionAuthorityContextKey struct{}
 
 type postgresSessionAuthority struct {
+	operationMu    sync.Mutex
 	mu             sync.Mutex
 	conn           *sql.Conn
 	activeTx       *sql.Tx
@@ -212,16 +213,20 @@ func (a *postgresSessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error)
 	if a == nil {
 		return nil, errors.New("PostgreSQL session authority is missing")
 	}
+	a.operationMu.Lock()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.closed || a.conn == nil {
+		a.operationMu.Unlock()
 		return nil, errors.New("PostgreSQL session authority is closed")
 	}
 	if a.activeTx != nil {
+		a.operationMu.Unlock()
 		return nil, errors.New("PostgreSQL session authority already has an active transaction")
 	}
 	tx, err := a.conn.BeginTx(ctx, nil)
 	if err != nil {
+		a.operationMu.Unlock()
 		return nil, err
 	}
 	a.activeTx = tx
@@ -233,15 +238,41 @@ func (a *postgresSessionAuthority) endTx(tx *sql.Tx) error {
 		return errors.New("PostgreSQL session transaction is missing")
 	}
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if a.activeTx != tx {
+		a.mu.Unlock()
 		return errors.New("PostgreSQL transaction does not match private session authority")
 	}
 	a.activeTx = nil
+	var err error
 	if a.discardPending {
-		return a.forceDiscardLocked()
+		err = a.forceDiscardLocked()
 	}
-	return nil
+	a.mu.Unlock()
+	a.operationMu.Unlock()
+	return err
+}
+
+func (a *postgresSessionAuthority) beginOperation(ctx context.Context) (func(), error) {
+	if a == nil {
+		return nil, errors.New("PostgreSQL session authority is missing")
+	}
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		a.mu.Lock()
+		exact := !a.closed && a.conn != nil && a.activeTx == tx
+		a.mu.Unlock()
+		if exact {
+			return func() {}, nil
+		}
+	}
+	a.operationMu.Lock()
+	a.mu.Lock()
+	if a.closed || a.conn == nil {
+		a.mu.Unlock()
+		a.operationMu.Unlock()
+		return nil, errors.New("PostgreSQL session authority is closed")
+	}
+	a.mu.Unlock()
+	return a.operationMu.Unlock, nil
 }
 
 func (a *postgresSessionAuthority) queryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
@@ -298,25 +329,36 @@ func (l *sqlAdvisoryLockLease) releaseWithRetirement(ctx context.Context) error 
 		ctx = context.Background()
 	}
 	ctx = context.WithoutCancel(ctx)
+	session := l.session
+	endOperation, operationErr := session.beginOperation(ctx)
+	if operationErr != nil {
+		discardErr := session.forceDiscard()
+		l.retireLocked()
+		return errors.Join(
+			fmt.Errorf("release advisory lock: %w", operationErr),
+			wrapAdvisoryDiscardError(discardErr),
+		)
+	}
+	defer endOperation()
 	if !l.unlocked {
 		var (
 			unlocked bool
 			err      error
 		)
 		if l.testUnlock != nil {
-			unlocked, err = l.testUnlock(ctx, l.session, l.lockKey)
+			unlocked, err = l.testUnlock(ctx, session, l.lockKey)
 		} else {
-			err = l.session.queryRowContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, l.lockKey).Scan(&unlocked)
+			err = session.queryRowContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, l.lockKey).Scan(&unlocked)
 		}
 		if err != nil {
 			releaseErr := fmt.Errorf("release advisory lock: %w", err)
-			discardErr := l.session.forceDiscard()
+			discardErr := session.forceDiscard()
 			l.retireLocked()
 			return errors.Join(releaseErr, wrapAdvisoryDiscardError(discardErr))
 		}
 		if !unlocked {
 			releaseErr := errors.New("release advisory lock: PostgreSQL session did not own the lock")
-			discardErr := l.session.forceDiscard()
+			discardErr := session.forceDiscard()
 			l.retireLocked()
 			return errors.Join(releaseErr, wrapAdvisoryDiscardError(discardErr))
 		}
@@ -325,7 +367,7 @@ func (l *sqlAdvisoryLockLease) releaseWithRetirement(ctx context.Context) error 
 	if l.releaseSession != nil {
 		if err := l.releaseSession(); err != nil {
 			closeErr := fmt.Errorf("close advisory lock session: %w", err)
-			discardErr := l.session.forceDiscard()
+			discardErr := session.forceDiscard()
 			l.retireLocked()
 			return errors.Join(closeErr, wrapAdvisoryDiscardError(discardErr))
 		}
