@@ -32,102 +32,6 @@ func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, entityI
 	return state
 }
 
-func (pc *PipelineCoordinator) updateEntityState(ctx context.Context, entityID, nextState, sourceEvent string) error {
-	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
-		return nil
-	}
-	entityID = strings.TrimSpace(entityID)
-	nextState = strings.TrimSpace(string(NormalizeWorkflowStateID(nextState)))
-	sourceEvent = strings.TrimSpace(sourceEvent)
-	if entityID == "" || nextState == "" {
-		return nil
-	}
-	inbound, hasInbound := runtimecorrelation.InboundEventFromContext(ctx)
-	if !hasInbound || strings.TrimSpace(inbound.ID()) == "" || inbound.CreatedAt().IsZero() {
-		return fmt.Errorf("workflow state transition requires exact inbound event identity")
-	}
-	if sourceEvent == "" {
-		sourceEvent = strings.TrimSpace(string(inbound.Type()))
-	}
-	source := pc.SemanticSource()
-	return pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
-		currentState := ""
-		if err := pc.workflowStore.Mutate(txctx, entityID, func(instance *WorkflowInstance) {
-			currentState = strings.TrimSpace(instance.CurrentState)
-			enteredStateAt := time.Now().UTC()
-			if currentState == nextState && !instance.EnteredStageAt.IsZero() {
-				enteredStateAt = instance.EnteredStageAt
-			}
-			if strings.TrimSpace(instance.WorkflowName) == "" {
-				instance.WorkflowName = source.WorkflowName()
-			}
-			if strings.TrimSpace(instance.WorkflowVersion) == "" {
-				instance.WorkflowVersion = source.WorkflowVersion()
-			}
-			metadata := cloneStringAnyMap(instance.Metadata)
-			if sourceEvent != "" {
-				metadata["last_source_event"] = sourceEvent
-			}
-			instance.Metadata = metadata
-			instance.CurrentState = nextState
-			instance.EnteredStageAt = enteredStateAt
-			if currentState != "" && currentState != nextState {
-				instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(pc.WorkflowDefinition(), currentState, nextState, inbound.ID(), sourceEvent, inbound.CreatedAt()))
-			} else if currentState == "" && len(instance.TransitionHistory) == 0 {
-				instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(pc.WorkflowDefinition(), "", nextState, inbound.ID(), sourceEvent, inbound.CreatedAt()))
-			}
-		}); err != nil {
-			return err
-		}
-		pc.notifyTestEntityStateUpdated(entityID, nextState)
-		cause := workflowTimerCause{
-			Kind:         workflowTimerCauseTransition,
-			EventID:      inbound.ID(),
-			EventType:    sourceEvent,
-			OccurredAt:   inbound.CreatedAt(),
-			TransitionID: workflowTransitionIdentity(pc.WorkflowDefinition(), currentState, nextState, sourceEvent),
-			FromState:    currentState,
-			ToState:      nextState,
-		}
-		if err := pc.workflowTimers.Reconcile(txctx, entityID, currentState, nextState, cause); err != nil {
-			return err
-		}
-		if err := pc.applyWorkflowJoinIntents(txctx, entityID, currentState, nextState); err != nil {
-			return err
-		}
-		return pc.applyWorkflowGateIntents(txctx, entityID, currentState, nextState, sourceEvent)
-	})
-}
-
-func (pc *PipelineCoordinator) applyWorkflowGateMutation(ctx context.Context, entityID, _sourceEvent, setGate string, clear bool) error {
-	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
-		return nil
-	}
-	entityID = strings.TrimSpace(entityID)
-	setGate = strings.TrimSpace(setGate)
-	if entityID == "" {
-		return nil
-	}
-	return pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
-		metadata := cloneStringAnyMap(instance.Metadata)
-		gates := payloadMap(metadata["gates"])
-		if clear {
-			for key := range gates {
-				delete(gates, key)
-			}
-		}
-		if setGate != "" {
-			gates[setGate] = true
-		}
-		if len(gates) == 0 {
-			delete(metadata, "gates")
-		} else {
-			metadata["gates"] = gates
-		}
-		instance.Metadata = metadata
-	})
-}
-
 func (pc *PipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entityID string, flowID string, bucketID string, payload map[string]any) error {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
 		return nil
@@ -138,25 +42,35 @@ func (pc *PipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entit
 	if entityID == "" || bucketID == "" {
 		return nil
 	}
-	return pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
+	_, found, err := pc.workflowStore.Load(ctx, entityID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		inbound, ok := runtimecorrelation.InboundEventFromContext(ctx)
+		if !ok || inbound.ID() == "" || inbound.CreatedAt().IsZero() {
+			return fmt.Errorf("record_evidence initial materialization requires exact accepted event identity")
+		}
 		source := pc.SemanticSource()
-		if strings.TrimSpace(instance.WorkflowName) == "" {
-			defaultWorkflowName := flowID
-			if defaultWorkflowName == "" && source != nil {
-				defaultWorkflowName = strings.TrimSpace(source.WorkflowName())
-			}
-			instance.WorkflowName = defaultWorkflowName
+		workflowName := flowID
+		workflowVersion := ""
+		if source != nil {
+			workflowName = firstNonEmptyString(workflowName, source.WorkflowName())
+			workflowVersion = source.WorkflowVersion()
 		}
-		if strings.TrimSpace(instance.WorkflowVersion) == "" && source != nil {
-			instance.WorkflowVersion = strings.TrimSpace(source.WorkflowVersion())
+		initialState := strings.TrimSpace(firstNonEmptyString(workflowInitialStateForFlow(source, flowID), "pending"))
+		if err := pc.workflowStore.MaterializeInitialEntry(ctx, WorkflowInstance{
+			InstanceID:      entityID,
+			WorkflowName:    workflowName,
+			WorkflowVersion: workflowVersion,
+			CurrentState:    initialState,
+			Metadata:        workflowMaterializeEntityMetadata(source, flowID, nil),
+		}, inbound.CreatedAt()); err != nil {
+			return err
 		}
-		if strings.TrimSpace(instance.CurrentState) == "" {
-			instance.CurrentState = strings.TrimSpace(firstNonEmptyString(workflowInitialStateForFlow(source, flowID), "pending"))
-		}
-		if instance.EnteredStageAt.IsZero() {
-			instance.EnteredStageAt = time.Now().UTC()
-		}
-		instance.Metadata = workflowMaterializeEntityMetadata(source, flowID, instance.Metadata)
+	}
+	return pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
+		instance.Metadata = workflowMaterializeEntityMetadata(pc.SemanticSource(), flowID, instance.Metadata)
 		bucket := workflowMutableStateBucket(instance, "evidence")
 		workflowAppendEvidence(bucket, bucketID, payload)
 		workflowSetStateBucket(instance, "evidence", bucket)
@@ -207,9 +121,6 @@ func workflowTransitionRecord(workflow *WorkflowDefinition, fromState, toState, 
 	toState = strings.TrimSpace(string(NormalizeWorkflowStateID(toState)))
 	sourceEventID = strings.TrimSpace(sourceEventID)
 	sourceEventType = strings.TrimSpace(sourceEventType)
-	if firedAt.IsZero() {
-		firedAt = time.Now().UTC()
-	}
 	state := WorkflowState{Stage: NormalizeWorkflowStateID(fromState)}
 	transition, ok := WorkflowStateTransition(workflow, state.Stage, NormalizeWorkflowStateID(toState))
 	record := WorkflowTransitionRecord{

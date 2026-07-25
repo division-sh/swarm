@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -177,7 +176,6 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 	if entityID.IsZero() {
 		return nil
 	}
-	materializedState := false
 	currentState := ""
 	nextState := strings.TrimSpace(mutation.NextState)
 	if r.coordinator.workflowStore != nil && r.coordinator.workflowStore.Enabled() {
@@ -187,6 +185,30 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 		_, hadState, err := r.coordinator.workflowStore.Load(ctx, entityID.String())
 		if err != nil {
 			return err
+		}
+		if !hadState {
+			if mutation.TriggeredAt.IsZero() {
+				return fmt.Errorf("workflow initial materialization requires exact accepted event time")
+			}
+			source := r.coordinator.SemanticSource()
+			flowID := strings.TrimSpace(pipelineFlowScope(ctx))
+			workflowName := flowID
+			workflowVersion := ""
+			if source != nil {
+				workflowName = firstNonEmptyString(workflowName, source.WorkflowName())
+				workflowVersion = source.WorkflowVersion()
+			}
+			initialState := strings.TrimSpace(firstNonEmptyString(workflowInitialStateForFlow(source, flowID), "pending"))
+			if err := r.coordinator.workflowStore.MaterializeInitialEntry(ctx, WorkflowInstance{
+				InstanceID:      entityID.String(),
+				WorkflowName:    workflowName,
+				WorkflowVersion: workflowVersion,
+				CurrentState:    initialState,
+				Metadata:        workflowMaterializeEntityMetadata(source, flowID, mutation.StateCarrier.PersistedMetadata()),
+				StateBuckets:    mutation.StateCarrier.PersistedStateBuckets(),
+			}, mutation.TriggeredAt); err != nil {
+				return err
+			}
 		}
 		allowedFields := workflowEntitySchemaFields(r.coordinator.SemanticSource(), pipelineFlowScope(ctx))
 		if err := r.coordinator.workflowStore.MutateE(ctx, entityID.String(), func(instance *WorkflowInstance) error {
@@ -213,9 +235,6 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 		if err := r.coordinator.reconcileSupersededLoopSchedules(ctx, entityID.String()); err != nil {
 			return err
 		}
-		if !hadState {
-			materializedState = true
-		}
 		if mutation.StateCarrier.StateBuckets != nil {
 			if err := r.coordinator.reconcileClosedJoinSchedules(ctx, entityID.String(), mutation.StateCarrier); err != nil {
 				return err
@@ -225,11 +244,6 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 	if nextState != "" {
 		r.coordinator.notifyTestEntityStateUpdated(entityID.String(), nextState)
 		if err := r.coordinator.maybeDeactivateTerminalFlowInstance(ctx, entityID.String(), nextState); err != nil {
-			return err
-		}
-	}
-	if materializedState {
-		if err := r.coordinator.armWorkflowCurrentStageLifecycle(ctx, entityID.String(), ""); err != nil {
 			return err
 		}
 	}
@@ -309,54 +323,6 @@ func (r pipelineEngineStateRepo) ensureFlowOwnsEntity(ctx context.Context, entit
 		"entity_id":      entityID,
 		"owner_workflow": strings.TrimSpace(instance.WorkflowName),
 	})
-}
-
-type pipelineEngineTimerApplier struct {
-	coordinator *PipelineCoordinator
-}
-
-func (a pipelineEngineTimerApplier) ApplyTimerIntents(ctx context.Context, entityID identity.EntityID, intents []runtimeengine.TimerIntent) error {
-	pc := a.coordinator
-	if pc == nil || len(intents) == 0 {
-		return nil
-	}
-	entityID = identity.NormalizeEntityID(entityID.String())
-	if entityID.IsZero() {
-		return nil
-	}
-	if len(intents) != 1 {
-		return fmt.Errorf("workflow timer lifecycle requires exactly one event reconcile intent, got %d", len(intents))
-	}
-	for _, intent := range intents {
-		if intent.Operation != runtimeengine.TimerReconcile || strings.TrimSpace(intent.TriggerEventID) == "" ||
-			strings.TrimSpace(intent.TriggerEventType) == "" || intent.TriggeredAt.IsZero() {
-			return fmt.Errorf("workflow timer reconcile intent is missing exact event identity")
-		}
-		fromState := strings.TrimSpace(intent.FromState)
-		toState := strings.TrimSpace(intent.ToState)
-		cause := workflowTimerCause{
-			Kind:       workflowTimerCauseEvent,
-			EventID:    intent.TriggerEventID,
-			EventType:  intent.TriggerEventType,
-			OccurredAt: intent.TriggeredAt,
-			FromState:  fromState,
-			ToState:    toState,
-		}
-		if fromState != "" && toState != "" && fromState != toState {
-			cause.Kind = workflowTimerCauseTransition
-			cause.TransitionID = workflowTransitionIdentity(pc.WorkflowDefinition(), fromState, toState, intent.TriggerEventType)
-		}
-		if err := pc.workflowTimers.Reconcile(ctx, entityID.String(), fromState, toState, cause); err != nil {
-			return err
-		}
-		if err := pc.applyWorkflowJoinIntents(ctx, entityID.String(), fromState, toState); err != nil {
-			return err
-		}
-		if err := pc.applyWorkflowGateIntents(ctx, entityID.String(), fromState, toState, intent.TriggerEventType); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func newCoordinatorEngineEvaluator(pc *PipelineCoordinator) runtimeengine.Evaluator {
@@ -546,6 +512,10 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 		outbox = pc.bus.EngineOutbox()
 		dispatcher = pc.bus.EngineDispatcher()
 	}
+	var lifecycleOwner runtimeengine.WorkflowLifecycleEffectOwner
+	if pc.workflowStore != nil && pc.workflowStore.Enabled() {
+		lifecycleOwner = pipelineWorkflowLifecycleOwner{coordinator: pc}
+	}
 	return runtimeengine.RuntimeDependencies{
 		Source:              source,
 		StateRepo:           pipelineEngineStateRepo{coordinator: pc},
@@ -553,7 +523,7 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 		TxRunner:            pipelineEngineTxRunner{store: pc.workflowStore},
 		Locker:              pipelineEngineLocker{coordinator: pc},
 		Outbox:              outbox,
-		TimerApplier:        pipelineEngineTimerApplier{coordinator: pc},
+		WorkflowLifecycle:   lifecycleOwner,
 		Dispatcher:          dispatcher,
 		ActivityIntents:     pipelineActivityIntentWriter{coordinator: pc},
 		ActivityDispatcher:  pipelineActivityDispatcher{coordinator: pc},
@@ -970,7 +940,7 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 		instance.CurrentState = strings.TrimSpace(firstNonEmptyString(workflowInitialStateForFlow(source, flowID), "pending"))
 	}
 	if instance.EnteredStageAt.IsZero() {
-		instance.EnteredStageAt = time.Now().UTC()
+		return fmt.Errorf("workflow mutation requires materialized entry time")
 	}
 	existingGates := workflowStateGatesAsBools(instance.Metadata)
 	if len(mutation.StateCarrier.Gates) > 0 || len(mutation.ClearGates) > 0 || strings.TrimSpace(mutation.SetGate) != "" {

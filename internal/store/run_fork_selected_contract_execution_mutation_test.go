@@ -690,7 +690,7 @@ func TestSelectedContractExecutionMaterializationReconstructsActiveTimer(t *test
 	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload, fire_at, owner_agent, task_type, status, created_at)
-		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb, $5, 'agent-a', 'timer', 'active', $6)
+		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb, $5, 'agent-a', 'workflow_timer', 'active', $6)
 	`, sourceTimerID, sourceRunID, sourceRef.TaskID(), entityID, at.Add(time.Hour), at); err != nil {
 		t.Fatalf("seed timer: %v", err)
 	}

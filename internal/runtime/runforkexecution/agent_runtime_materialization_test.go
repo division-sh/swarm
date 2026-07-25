@@ -19,6 +19,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 )
@@ -191,7 +192,7 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 				AgentManagerOptions: runtimemanager.AgentManagerOptions{WorkOwner: owner},
 			},
 		},
-	}, eventBus)
+	}, eventBus, runtimepipeline.NewWorkflowInstanceStore(nil))
 	if err != nil {
 		t.Fatalf("build selected-contract mock runtime: %v", err)
 	}
@@ -243,7 +244,7 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 				AgentManagerOptions: runtimemanager.AgentManagerOptions{LifecycleStore: probe, WorkOwner: owner},
 			},
 		},
-	}, eventBus)
+	}, eventBus, runtimepipeline.NewWorkflowInstanceStore(nil))
 	if err != nil {
 		t.Fatalf("startSelectedContractAgentRuntime: %v", err)
 	}

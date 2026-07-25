@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
@@ -147,7 +146,7 @@ func loadRunForkReconstructableSourceTimersFromRevision(snapshot *runForkRevisio
 }
 
 func validateRunForkReconstructableSourceTimer(row runForkTimerReconstructionRow) (runForkTimerReconstructionRow, error) {
-	workflowTimer := timeridentity.IsWorkflowTimerActivationTaskID(row.TimerName)
+	workflowTimer := strings.TrimSpace(row.TaskType) == "workflow_timer"
 	if strings.TrimSpace(row.Status) != "active" || (row.FiredAt.Valid && !(workflowTimer && row.Recurring)) {
 		return runForkTimerReconstructionRow{}, runForkReplayResumeError(RunForkBlockerTimerHistoryUnproven, RunForkReplayResumeFactTimerHistory, "selected-contract timer reconstruction blocked: source timer history is not active-at-fork only")
 	}
@@ -160,41 +159,22 @@ func validateRunForkReconstructableSourceTimer(row runForkTimerReconstructionRow
 	if !json.Valid(row.FirePayload) {
 		return runForkTimerReconstructionRow{}, runForkReplayResumeError(RunForkBlockerTimerHistoryUnproven, RunForkReplayResumeFactTimerHistory, "selected-contract timer reconstruction blocked: source timer payload is invalid JSON")
 	}
-	if workflowTimer {
-		ref, ok := timeridentity.ParseWorkflowTimerActivationTaskID(row.TimerName)
-		if !ok || ref.ActivationID != strings.TrimSpace(row.TimerID) || strings.TrimSpace(row.OwnerNode) != "" {
-			return runForkTimerReconstructionRow{}, runForkReplayResumeError(RunForkBlockerTimerHistoryUnproven, RunForkReplayResumeFactTimerHistory, "selected-contract timer reconstruction blocked: workflow timer activation identity is invalid")
-		}
-		if strings.TrimSpace(row.RecurrenceCron) != "" {
-			return runForkTimerReconstructionRow{}, runForkReplayResumeError(RunForkBlockerTimerHistoryUnproven, RunForkReplayResumeFactTimerHistory, "selected-contract timer reconstruction blocked: workflow timer recurrence must use a persisted interval")
-		}
-	}
 	return row, nil
 }
 
 func remintRunForkWorkflowTimer(row runForkTimerReconstructionRow, sourceRunID, forkRunID, forkEventID string) (runForkTimerReconstructionRow, error) {
-	ref, ok := timeridentity.ParseWorkflowTimerActivationTaskID(row.TimerName)
-	if !ok || ref.ActivationID != strings.TrimSpace(row.TimerID) {
-		return row, fmt.Errorf("fork workflow timer activation identity is invalid")
-	}
-	var interval time.Duration
-	if strings.TrimSpace(row.RecurrenceInterval) != "" {
-		var parsed bool
-		interval, parsed = timeridentity.ParseDelayDuration(row.RecurrenceInterval)
-		if !parsed {
-			return row, fmt.Errorf("fork workflow timer recurrence interval %q is invalid", row.RecurrenceInterval)
-		}
-	}
-	source := runtimepipeline.WorkflowTimerActivation{
-		Ref: ref, RunID: sourceRunID, EntityID: row.EntityID, FlowInstance: row.FlowInstance,
-		OwnerAgent: row.OwnerAgent, EventType: row.FireEvent, Payload: append([]byte(nil), row.FirePayload...),
-		FireAt: row.FireAt, Recurring: row.Recurring, RecurrenceInterval: interval,
-		Status: row.Status, CreatedAt: row.CreatedAt,
+	source := runtimepipeline.PersistedWorkflowTimerForkSource{
+		ActivationID: row.TimerID, SerializedActivation: row.TimerName,
+		RunID: sourceRunID, EntityID: row.EntityID, FlowInstance: row.FlowInstance,
+		OwnerNode: row.OwnerNode, OwnerAgent: row.OwnerAgent, EventType: row.FireEvent,
+		Payload: append([]byte(nil), row.FirePayload...), FireAt: row.FireAt,
+		Recurring: row.Recurring, RecurrenceCron: row.RecurrenceCron,
+		RecurrenceInterval: row.RecurrenceInterval, Status: row.Status, CreatedAt: row.CreatedAt,
 	}
 	if row.FiredAt.Valid {
 		source.FiredAt = row.FiredAt.Time
 	}
-	forked, err := runtimepipeline.RemintWorkflowTimerActivationForFork(source, runtimepipeline.WorkflowTimerForkLineage{
+	forked, err := runtimepipeline.RemintPersistedWorkflowTimerForFork(source, runtimepipeline.WorkflowTimerForkLineage{
 		ForkRunID: forkRunID, ForkEventID: forkEventID,
 		ReconstructionOwner: RunForkHistoricalReplayTimerReconstructionOwner,
 	})
@@ -216,7 +196,7 @@ func insertRunForkSelectedContractTimerReconstructions(ctx context.Context, tx *
 	}
 	for _, row := range reconstruction.Rows {
 		var err error
-		if timeridentity.IsWorkflowTimerActivationTaskID(row.TimerName) {
+		if strings.TrimSpace(row.TaskType) == "workflow_timer" {
 			row, err = remintRunForkWorkflowTimer(row, sourceRunID, forkRunID, forkEventID)
 		} else {
 			row, err = forkGenericAttemptGenerationTimer(row, forkRunID)

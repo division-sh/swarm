@@ -305,17 +305,6 @@ type EmitIntent struct {
 	DeadLetterHint string
 }
 
-type TimerIntent struct {
-	Context          events.DeliveryContext
-	Operation        TimerOperation
-	Owner            identity.NodeID
-	FromState        string
-	ToState          string
-	TriggerEventID   string
-	TriggerEventType string
-	TriggeredAt      time.Time
-}
-
 type ActivityIntent struct {
 	Context          events.DeliveryContext
 	ActivityID       string
@@ -439,7 +428,6 @@ type ExecutionResult struct {
 	FanOutCount         int
 	Computed            map[string]any
 	StateMutation       StateMutation
-	TimerIntents        []TimerIntent
 	EmitIntents         []EmitIntent
 	ActivityIntents     []ActivityIntent
 	ComputeModuleTraces []ComputeModuleTrace

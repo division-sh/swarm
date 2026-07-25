@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -22,6 +23,8 @@ import (
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
+	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/lib/pq"
 )
@@ -36,6 +39,21 @@ type SchedulePersistence interface {
 	ClaimSchedule(ctx context.Context, sc Schedule) (bool, error)
 	ReleaseSchedule(ctx context.Context, sc Schedule) error
 	ReleaseScheduleClaims(ctx context.Context) error
+}
+
+func (s *WorkflowInstanceStore) readTimerObligations(ctx context.Context, scope runtimetimerobligation.Scope, observedAt time.Time) (runtimetimerobligation.Snapshot, error) {
+	if s == nil || s.db == nil {
+		return runtimetimerobligation.Snapshot{}, fmt.Errorf("timer obligation reader requires workflow store")
+	}
+	queryer := runtimetimerobligation.Queryer(s.db)
+	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
+		queryer = tx
+	}
+	dialect := runtimetimerobligation.DialectPostgres
+	if s.isSQLite() {
+		dialect = runtimetimerobligation.DialectSQLite
+	}
+	return runtimetimerobligation.Read(ctx, queryer, dialect, scope, observedAt)
 }
 
 type WorkflowInstance struct {
@@ -97,6 +115,7 @@ type WorkflowInstanceStore struct {
 	pipelineStore   runtimepipelineobligation.Store
 	decisionCards   decisioncard.Store
 	gateEvents      workflowGateMutationPublisher
+	lifecycleOwner  workflowInstanceLifecycleOwner
 }
 
 type standingGenerationRebindContextKey struct{}
@@ -117,6 +136,10 @@ func standingGenerationRebindAllowed(ctx context.Context) bool {
 
 type RuntimeMutationRunner interface {
 	RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error
+}
+
+type workflowInstanceLifecycleOwner interface {
+	ApplyWorkflowLifecycleEffects(context.Context, []runtimeworkflowlifecycle.Effect) error
 }
 
 type WorkflowInstanceFieldSelector struct {
@@ -184,6 +207,12 @@ func (s *WorkflowInstanceStore) ConfigureDecisionCardLifecycle(cards decisioncar
 		if len(publishers) > 0 {
 			s.gateEvents = publishers[0]
 		}
+	}
+}
+
+func (s *WorkflowInstanceStore) ConfigureWorkflowInstanceLifecycle(owner workflowInstanceLifecycleOwner) {
+	if s != nil {
+		s.lifecycleOwner = owner
 	}
 }
 
@@ -304,6 +333,62 @@ func (s *WorkflowInstanceStore) Create(ctx context.Context, instance WorkflowIns
 	})
 }
 
+func (s *WorkflowInstanceStore) MaterializeInitialEntry(ctx context.Context, instance WorkflowInstance, occurredAt time.Time) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("workflow instance lifecycle store is required")
+	}
+	occurredAt = occurredAt.UTC()
+	if occurredAt.IsZero() {
+		return fmt.Errorf("workflow initial materialization requires an exact occurrence time")
+	}
+	if s.lifecycleOwner == nil {
+		return fmt.Errorf("workflow instance lifecycle owner is required")
+	}
+	instance.EnteredStageAt = occurredAt
+	instance.CreatedAt = occurredAt
+	normalized, identity, ok, err := normalizeWorkflowInstanceForPersistence(instance)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("workflow initial materialization requires canonical instance identity")
+	}
+	effect, err := runtimeworkflowlifecycle.NewInitialEntry(identity.RowID(), normalized.CurrentState, occurredAt)
+	if err != nil {
+		return err
+	}
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+		existing, found, err := s.Load(txctx, identity.RowID())
+		if err != nil {
+			return err
+		}
+		if found {
+			if workflowInitialMaterializationEqual(existing, normalized, occurredAt) {
+				return nil
+			}
+			return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "workflow-instance-lifecycle", "materialize_initial_entry", map[string]any{"flow_instance": identity.StorageRef})
+		}
+		if err := s.Create(txctx, normalized); err != nil {
+			return err
+		}
+		return s.lifecycleOwner.ApplyWorkflowLifecycleEffects(txctx, []runtimeworkflowlifecycle.Effect{effect})
+	})
+}
+
+func workflowInitialMaterializationEqual(actual, expected WorkflowInstance, occurredAt time.Time) bool {
+	actualProjection, actualErr := workflowInstancePersistedProjectionFromInstance(actual, actual.StorageRef)
+	expectedProjection, expectedErr := workflowInstancePersistedProjectionFromInstance(expected, expected.StorageRef)
+	return actualErr == nil &&
+		expectedErr == nil &&
+		strings.TrimSpace(actual.StorageRef) == strings.TrimSpace(expected.StorageRef) &&
+		strings.TrimSpace(actual.WorkflowName) == strings.TrimSpace(expected.WorkflowName) &&
+		strings.TrimSpace(actual.WorkflowVersion) == strings.TrimSpace(expected.WorkflowVersion) &&
+		strings.TrimSpace(actual.CurrentState) == strings.TrimSpace(expected.CurrentState) &&
+		actual.EnteredStageAt.UTC().Equal(occurredAt.UTC()) &&
+		actual.CreatedAt.UTC().Equal(occurredAt.UTC()) &&
+		reflect.DeepEqual(actualProjection, expectedProjection)
+}
+
 func normalizeWorkflowInstanceForPersistence(instance WorkflowInstance) (WorkflowInstance, runtimeflowidentity.Persisted, bool, error) {
 	instance.InstanceID = strings.TrimSpace(instance.InstanceID)
 	instance.WorkflowName = strings.TrimSpace(instance.WorkflowName)
@@ -319,7 +404,10 @@ func normalizeWorkflowInstanceForPersistence(instance WorkflowInstance) (Workflo
 		)
 	}
 	if instance.EnteredStageAt.IsZero() {
-		instance.EnteredStageAt = time.Now().UTC()
+		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, false, fmt.Errorf("workflow instance requires exact entered_stage_at")
+	}
+	if instance.CreatedAt.IsZero() {
+		instance.CreatedAt = instance.EnteredStageAt.UTC()
 	}
 	if instance.Metadata == nil {
 		instance.Metadata = map[string]any{}
@@ -386,7 +474,7 @@ func (s *WorkflowInstanceStore) MutateE(ctx context.Context, instanceID string, 
 			return err
 		}
 		if !ok {
-			instance = WorkflowInstance{InstanceID: instanceID}
+			return fmt.Errorf("workflow instance %s does not exist", instanceID)
 		}
 		if err := fn(&instance); err != nil {
 			return err
@@ -1069,7 +1157,7 @@ func (s *WorkflowInstanceStore) createSpec(ctx context.Context, rowID, storageRe
 			instance_id, flow_template, mode, config, status, created_at
 		)
 		VALUES (
-			$1, $2, $3, $4::jsonb, 'active', now()
+			$1, $2, $3, $4::jsonb, 'active', $5
 		)
 	`
 	if allowRebind {
@@ -1082,7 +1170,7 @@ func (s *WorkflowInstanceStore) createSpec(ctx context.Context, rowID, storageRe
 				terminated_at = NULL
 		`
 	}
-	if _, err := tx.ExecContext(ctx, flowInstanceInsert, storageRef, instance.WorkflowName, mode, jsonOrDefault(configJSON, "{}")); err != nil {
+	if _, err := tx.ExecContext(ctx, flowInstanceInsert, storageRef, instance.WorkflowName, mode, jsonOrDefault(configJSON, "{}"), instance.CreatedAt.UTC()); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -1094,13 +1182,14 @@ func (s *WorkflowInstanceStore) createSpec(ctx context.Context, rowID, storageRe
 		VALUES (
 			$1::uuid, $2::uuid, $3, $4, NULLIF($5,''), NULLIF($6,''),
 			$7, $8::jsonb, $9::jsonb, $10::jsonb, 1,
-			$11, now(), now()
+			$11, $12, $12
 		)
 	`, runID, rowID, storageRef, projection.Control.EntityType, projection.Control.Slug, projection.Control.Name, instance.CurrentState,
 		jsonOrDefault(gatesJSON, "{}"),
 		jsonOrDefault(fieldsJSON, "{}"),
 		jsonOrDefault(accumulatorState, "{}"),
 		instance.EnteredStageAt,
+		instance.CreatedAt.UTC(),
 	); err != nil {
 		return err
 	}

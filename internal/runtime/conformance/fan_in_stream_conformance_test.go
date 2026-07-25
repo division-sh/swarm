@@ -116,12 +116,15 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	seedFanInBarrierRun(t, ctx, backend, backend.DB, runID)
 	runtime := newFanInBarrierRuntime(t, backend, backend.DB, source)
+	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	if err := runtime.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      templatefanin.ReceiverFlowInstance,
 		StorageRef:      templatefanin.ReceiverFlowInstance,
 		WorkflowName:    templatefanin.ReceiverFlowID,
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "active",
+		EnteredStageAt:  enteredAt,
+		CreatedAt:       enteredAt,
 		Metadata: map[string]any{
 			"entity_id":     runtimeflowidentity.EntityID(templatefanin.ReceiverFlowInstance),
 			"portfolio_id":  "portfolio-default",

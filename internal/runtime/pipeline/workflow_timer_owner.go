@@ -13,6 +13,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -83,7 +84,12 @@ const (
 // WorkflowTimerLifecycle owns workflow activation identity, row transitions,
 // scheduler projection, fire publication, restore, and handler authorization.
 type WorkflowTimerLifecycle struct {
-	coordinator *PipelineCoordinator
+	storeOwner  *WorkflowInstanceStore
+	source      semanticview.Source
+	publisher   workflowGateMutationPublisher
+	logger      systemNodeRuntimeLogger
+	workOwner   worklifetime.Occurrence
+	scheduler   *Scheduler
 	recoveryCtx context.Context
 	cancel      context.CancelFunc
 	recoveryMu  sync.Mutex
@@ -91,28 +97,23 @@ type WorkflowTimerLifecycle struct {
 	stopped     bool
 }
 
-func newWorkflowTimerLifecycle(coordinator *PipelineCoordinator) *WorkflowTimerLifecycle {
-	if coordinator == nil {
+func newWorkflowTimerLifecycle(store *WorkflowInstanceStore, source semanticview.Source, bus Bus, workOwner worklifetime.Occurrence, scheduler *Scheduler) *WorkflowTimerLifecycle {
+	if store == nil {
 		return nil
 	}
 	recoveryCtx, cancel := context.WithCancel(context.Background())
+	publisher, _ := bus.(workflowGateMutationPublisher)
 	return &WorkflowTimerLifecycle{
-		coordinator: coordinator,
+		storeOwner:  store,
+		source:      source,
+		publisher:   publisher,
+		logger:      bus,
+		workOwner:   workOwner,
+		scheduler:   scheduler,
 		recoveryCtx: recoveryCtx,
 		cancel:      cancel,
 		recovering:  make(map[string]chan struct{}),
 	}
-}
-
-func (pc *PipelineCoordinator) IsWorkflowTimerSchedule(schedule Schedule) bool {
-	return pc != nil && pc.workflowTimers != nil && schedule.CanonicalWorkflowTimer()
-}
-
-func (pc *PipelineCoordinator) FireWorkflowTimer(ctx context.Context, schedule Schedule) (WorkflowTimerFireOutcome, error) {
-	if pc == nil || pc.workflowTimers == nil {
-		return WorkflowTimerFireTerminal, fmt.Errorf("workflow timer lifecycle is unavailable")
-	}
-	return pc.workflowTimers.Fire(ctx, schedule)
 }
 
 func (pc *PipelineCoordinator) RestoreWorkflowTimers(ctx context.Context) error {
@@ -130,10 +131,10 @@ func (pc *PipelineCoordinator) StopWorkflowTimerLifecycle(ctx context.Context) e
 }
 
 func (l *WorkflowTimerLifecycle) store() *WorkflowInstanceStore {
-	if l == nil || l.coordinator == nil {
+	if l == nil {
 		return nil
 	}
-	return l.coordinator.workflowStore
+	return l.storeOwner
 }
 
 func (l *WorkflowTimerLifecycle) Reconcile(ctx context.Context, entityID, currentState, nextState string, cause workflowTimerCause) error {
@@ -159,7 +160,7 @@ func (l *WorkflowTimerLifecycle) Reconcile(ctx context.Context, entityID, curren
 	if entityID == "" {
 		return fmt.Errorf("workflow timer lifecycle requires canonical entity identity")
 	}
-	source := l.coordinator.SemanticSource()
+	source := l.source
 	if source == nil {
 		return fmt.Errorf("workflow timer lifecycle requires semantic source")
 	}
@@ -198,6 +199,9 @@ func (l *WorkflowTimerLifecycle) Reconcile(ctx context.Context, entityID, curren
 	generationStage := nextState
 	if generationStage == "" {
 		generationStage = currentState
+	}
+	if generationStage == "" {
+		generationStage = strings.TrimSpace(instance.CurrentState)
 	}
 	generation, _, err := workflowLoopGenerationForStage(source, &instance, generationStage)
 	if err != nil {
@@ -360,7 +364,7 @@ func workflowTimerGenerationPresent(items []attemptgeneration.Generation, target
 
 func (l *WorkflowTimerLifecycle) EnsureRegistered(ctx context.Context, ref timeridentity.WorkflowTimerActivationRef) error {
 	store := l.store()
-	if store == nil || !store.Enabled() || l.coordinator.timerScheduler == nil {
+	if store == nil || !store.Enabled() {
 		return nil
 	}
 	activation, found, err := store.loadWorkflowTimerActivation(ctx, ref.ActivationID, false)
@@ -370,14 +374,11 @@ func (l *WorkflowTimerLifecycle) EnsureRegistered(ctx context.Context, ref timer
 	if !found || activation.Ref != ref || activation.Status != workflowTimerStatusActive {
 		return nil
 	}
-	claimed, err := ClaimAndRegisterSchedule(ctx, l.coordinator.timerScheduleStore, l.coordinator.timerScheduler, activation.schedule())
+	wakeup, err := newWorkflowTimerWakeup(activation)
 	if err != nil {
 		return err
 	}
-	if !claimed && l.coordinator.timerScheduleStore != nil {
-		return fmt.Errorf("workflow timer activation %s is not yet claimed for registration", ref.ActivationID)
-	}
-	return nil
+	return l.registerWakeup(ctx, wakeup)
 }
 
 func (l *WorkflowTimerLifecycle) ensureRegisteredImmediately(ctx context.Context, ref timeridentity.WorkflowTimerActivationRef) error {
@@ -402,7 +403,7 @@ func (l *WorkflowTimerLifecycle) ensureRegisteredImmediately(ctx context.Context
 }
 
 func (l *WorkflowTimerLifecycle) queueEnsureRegistered(ctx context.Context, ref timeridentity.WorkflowTimerActivationRef) error {
-	if l == nil || l.coordinator == nil || l.coordinator.timerScheduler == nil {
+	if l == nil {
 		return nil
 	}
 	action := func(actionCtx context.Context) {
@@ -423,23 +424,11 @@ func (l *WorkflowTimerLifecycle) queueEnsureRegistered(ctx context.Context, ref 
 }
 
 func (l *WorkflowTimerLifecycle) queueCancellation(ctx context.Context, activation WorkflowTimerActivation) error {
-	if l == nil || l.coordinator == nil {
+	if l == nil {
 		return nil
 	}
-	schedule := activation.schedule()
 	action := func(actionCtx context.Context) {
-		postCommitCtx := withoutSQLTxContext(actionCtx)
-		if l.coordinator.timerScheduler != nil {
-			if err := l.coordinator.timerScheduler.CancelExact(schedule); err != nil {
-				l.logFailure(postCommitCtx, "workflow_timer_cancel_failed", activation.Ref, err)
-			}
-		}
-		if l.coordinator.timerScheduleStore != nil {
-			if err := l.coordinator.timerScheduleStore.ReleaseSchedule(postCommitCtx, schedule); err != nil {
-				l.logFailure(postCommitCtx, "workflow_timer_claim_release_failed", activation.Ref, err)
-				l.startReleaseRecovery(schedule, activation.Ref)
-			}
-		}
+		l.cancelWakeup(activation.Ref)
 	}
 	if _, inMutation := PipelineSQLTxFromContext(ctx); inMutation {
 		if !queuePipelinePostCommitAction(ctx, action) {
@@ -451,23 +440,30 @@ func (l *WorkflowTimerLifecycle) queueCancellation(ctx context.Context, activati
 	return nil
 }
 
-func (l *WorkflowTimerLifecycle) Fire(ctx context.Context, schedule Schedule) (WorkflowTimerFireOutcome, error) {
+func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup WorkflowTimerWakeup) (WorkflowTimerFireOutcome, *WorkflowTimerWakeup, error) {
 	store := l.store()
 	if store == nil || !store.Enabled() {
-		return WorkflowTimerFireTerminal, fmt.Errorf("workflow timer lifecycle store is unavailable")
+		return WorkflowTimerFireTerminal, nil, fmt.Errorf("workflow timer lifecycle store is unavailable")
 	}
-	occurrence, ok := timeridentity.ParseWorkflowTimerOccurrenceTaskID(schedule.TaskID)
-	if !ok || schedule.EffectiveTimerID() != occurrence.Activation.ActivationID {
-		return WorkflowTimerFireTerminal, fmt.Errorf("workflow timer callback identity is invalid")
+	if err := wakeup.validate(); err != nil {
+		return WorkflowTimerFireTerminal, nil, err
 	}
-	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(schedule.RunID))
+	occurrence := wakeup.Occurrence()
+	hint, found, err := store.loadWorkflowTimerActivation(ctx, occurrence.Activation.ActivationID, false)
+	if err != nil {
+		return WorkflowTimerFireRetry, nil, err
+	}
+	if !found {
+		return WorkflowTimerFireTerminal, nil, nil
+	}
+	ctx = runtimecorrelation.WithRunID(ctx, hint.RunID)
 	var (
 		activation  WorkflowTimerActivation
 		next        WorkflowTimerActivation
 		terminal    bool
 		terminalErr error
 	)
-	err := store.RunPipelineMutation(ctx, func(txctx context.Context) error {
+	err = store.RunPipelineMutation(ctx, func(txctx context.Context) error {
 		tx, ok := sqlTxFromContext(txctx)
 		if !ok || tx == nil {
 			return fmt.Errorf("workflow timer fire requires the selected transaction")
@@ -481,7 +477,7 @@ func (l *WorkflowTimerLifecycle) Fire(ctx context.Context, schedule Schedule) (W
 			}
 			return err
 		}
-		if activeRunID != strings.TrimSpace(schedule.RunID) {
+		if activeRunID != hint.RunID {
 			terminal = true
 			terminalErr = fmt.Errorf("workflow timer fire run mismatch")
 			return nil
@@ -504,13 +500,13 @@ func (l *WorkflowTimerLifecycle) Fire(ctx context.Context, schedule Schedule) (W
 			terminal = true
 			return nil
 		}
-		if !workflowTimerScheduleMatchesActivation(schedule, activation) {
-			terminal = true
-			terminalErr = fmt.Errorf("workflow timer callback does not match canonical activation")
-			return nil
+		if canonicalWorkflowTimerTime(time.Now()).Before(occurrence.DueAt) {
+			return fmt.Errorf(
+				"workflow timer wakeup for %s arrived before its due coordinate",
+				occurrence.Activation.ActivationID,
+			)
 		}
-		publisher, ok := l.coordinator.bus.(workflowGateMutationPublisher)
-		if !ok || publisher == nil {
+		if l.publisher == nil {
 			return fmt.Errorf("workflow timer fire requires transactional event publication")
 		}
 		firedAt := canonicalWorkflowTimerTime(time.Now())
@@ -528,80 +524,48 @@ func (l *WorkflowTimerLifecycle) Fire(ctx context.Context, schedule Schedule) (W
 		if err != nil {
 			return err
 		}
-		if err := publisher.PublishInMutation(txctx, evt); err != nil {
+		if err := l.publisher.PublishInMutation(txctx, evt); err != nil {
 			return err
 		}
 		next, err = store.completeWorkflowTimerOccurrence(txctx, activation, occurrence, firedAt)
 		if err != nil {
 			return err
 		}
-		return l.queueAfterFire(txctx, activation, next)
+		return nil
 	})
 	if err != nil {
 		recoveryCtx := withoutSQLTxContext(context.WithoutCancel(ctx))
 		if registerErr := l.ensureRegisteredImmediately(recoveryCtx, occurrence.Activation); registerErr != nil {
 			l.logFailure(recoveryCtx, "workflow_timer_register_failed", occurrence.Activation, registerErr)
 			l.startRegistrationRecovery(occurrence.Activation)
-			return WorkflowTimerFireRetry, errors.Join(err, fmt.Errorf("re-register workflow timer: %w", registerErr))
+			return WorkflowTimerFireRetry, nil, errors.Join(err, fmt.Errorf("re-register workflow timer: %w", registerErr))
 		}
-		return WorkflowTimerFireRetry, err
+		return WorkflowTimerFireRetry, nil, err
 	}
 	if terminal {
-		if l.coordinator.timerScheduleStore != nil {
-			if err := l.coordinator.timerScheduleStore.ReleaseSchedule(withoutSQLTxContext(ctx), schedule); err != nil {
-				l.startReleaseRecovery(schedule, occurrence.Activation)
-				return WorkflowTimerFireTerminal, errors.Join(terminalErr, err)
-			}
-		}
-		return WorkflowTimerFireTerminal, terminalErr
+		return WorkflowTimerFireTerminal, nil, terminalErr
 	}
-	return WorkflowTimerFireCommitted, nil
-}
-
-func workflowTimerScheduleMatchesActivation(schedule Schedule, activation WorkflowTimerActivation) bool {
-	want := activation.schedule()
-	schedule.NormalizeRunID()
-	schedule.NormalizeEntityID()
-	schedule.NormalizeFlowInstance()
-	schedule.NormalizeTimerID()
-	if strings.TrimSpace(schedule.Mode) == "" {
-		schedule.Mode = "once"
+	if next.Status != workflowTimerStatusActive {
+		return WorkflowTimerFireCommitted, nil, nil
 	}
-	return schedule.RunID == want.RunID && schedule.AgentID == want.AgentID &&
-		schedule.EventType == want.EventType && schedule.Mode == want.Mode &&
-		strings.TrimSpace(schedule.Cron) == "" && canonicalWorkflowTimerTime(schedule.At).Equal(want.At) &&
-		schedule.EntityID == want.EntityID && schedule.FlowInstance == want.FlowInstance &&
-		schedule.TaskID == want.TaskID && schedule.TimerID == want.TimerID && schedule.Context.Empty() &&
-		workflowTimerJSONEqual(schedule.Payload, want.Payload)
-}
-
-func (l *WorkflowTimerLifecycle) queueAfterFire(ctx context.Context, previous, next WorkflowTimerActivation) error {
-	previousSchedule := previous.schedule()
-	action := func(actionCtx context.Context) {
-		postCommitCtx := withoutSQLTxContext(actionCtx)
-		if l.coordinator.timerScheduleStore != nil {
-			if err := l.coordinator.timerScheduleStore.ReleaseSchedule(postCommitCtx, previousSchedule); err != nil {
-				l.logFailure(postCommitCtx, "workflow_timer_claim_release_failed", previous.Ref, err)
-				l.startReleaseRecovery(previousSchedule, previous.Ref)
-			}
-		}
-		if next.Status == workflowTimerStatusActive {
-			if err := l.ensureRegisteredImmediately(postCommitCtx, next.Ref); err != nil {
-				l.logFailure(postCommitCtx, "workflow_timer_recurrence_register_failed", next.Ref, err)
-				l.startRegistrationRecovery(next.Ref)
-			}
-		}
+	nextWakeup, err := newWorkflowTimerWakeup(next)
+	if err != nil {
+		return WorkflowTimerFireRetry, nil, err
 	}
-	if !queuePipelinePostCommitAction(ctx, action) {
-		return fmt.Errorf("workflow timer fire requires post-commit claim ownership")
-	}
-	return nil
+	return WorkflowTimerFireCommitted, &nextWakeup, nil
 }
 
 func (l *WorkflowTimerLifecycle) AuthorizeAcceptedEvent(ctx context.Context, evt events.Event) (WorkflowTimerActivation, timeridentity.WorkflowTimerOccurrenceRef, bool, error) {
+	exactProducer := evt.ProducerType() == events.EventProducerPlatform && evt.SourceAgent() == "runtime.workflow_timer"
+	if !exactProducer {
+		if _, reserved := timeridentity.ParseWorkflowTimerOccurrenceTaskID(evt.TaskID()); reserved {
+			return WorkflowTimerActivation{}, timeridentity.WorkflowTimerOccurrenceRef{}, true, fmt.Errorf("workflow timer occurrence requires the exact runtime.workflow_timer producer")
+		}
+		return WorkflowTimerActivation{}, timeridentity.WorkflowTimerOccurrenceRef{}, false, nil
+	}
 	occurrence, ok := timeridentity.ParseWorkflowTimerOccurrenceTaskID(evt.TaskID())
 	if !ok {
-		return WorkflowTimerActivation{}, timeridentity.WorkflowTimerOccurrenceRef{}, false, nil
+		return WorkflowTimerActivation{}, timeridentity.WorkflowTimerOccurrenceRef{}, true, fmt.Errorf("workflow timer producer requires a valid typed occurrence")
 	}
 	store := l.store()
 	if store == nil || !store.Enabled() {
@@ -618,7 +582,6 @@ func (l *WorkflowTimerLifecycle) AuthorizeAcceptedEvent(ctx context.Context, evt
 		evt.RunID() != activation.RunID || workflowEventEntityID(evt) != activation.EntityID ||
 		strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") != activation.FlowInstance ||
 		strings.TrimSpace(string(evt.Type())) != activation.EventType ||
-		evt.ProducerType() != events.EventProducerPlatform || evt.SourceAgent() != "runtime.workflow_timer" ||
 		!workflowTimerJSONEqual(evt.Payload(), activation.Payload) {
 		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf("accepted workflow timer event does not match canonical activation")
 	}
@@ -650,9 +613,6 @@ func (l *WorkflowTimerLifecycle) Restore(ctx context.Context) error {
 	if store == nil || !store.Enabled() {
 		return nil
 	}
-	if err := store.rejectObsoleteWorkflowTimerRows(ctx); err != nil {
-		return err
-	}
 	activations, err := store.listWorkflowTimerActivations(ctx, runtimecorrelation.RunIDFromContext(ctx), "", true)
 	if err != nil {
 		return err
@@ -677,18 +637,6 @@ func (l *WorkflowTimerLifecycle) startRegistrationRecovery(ref timeridentity.Wor
 	})
 }
 
-func (l *WorkflowTimerLifecycle) startReleaseRecovery(schedule Schedule, ref timeridentity.WorkflowTimerActivationRef) bool {
-	ref = ref.Normalize()
-	return l.startRecovery("release\x00"+scheduleKey(schedule), func(ctx context.Context) error {
-		if l.coordinator == nil || l.coordinator.timerScheduleStore == nil {
-			return nil
-		}
-		return l.coordinator.timerScheduleStore.ReleaseSchedule(ctx, schedule)
-	}, func(ctx context.Context, err error) {
-		l.logFailure(ctx, "workflow_timer_claim_release_retry_failed", ref, err)
-	})
-}
-
 func (l *WorkflowTimerLifecycle) startRecovery(key string, operation func(context.Context) error, onFailure func(context.Context, error)) bool {
 	if l == nil || operation == nil {
 		return false
@@ -706,11 +654,11 @@ func (l *WorkflowTimerLifecycle) startRecovery(key string, operation func(contex
 		l.recoveryMu.Unlock()
 		return true
 	}
-	if l.coordinator == nil || l.coordinator.workOwner == nil {
+	if l.workOwner == nil {
 		l.recoveryMu.Unlock()
 		return false
 	}
-	lease, err := l.coordinator.workOwner.Begin(l.recoveryCtx)
+	lease, err := l.workOwner.Begin(l.recoveryCtx)
 	if err != nil {
 		l.recoveryMu.Unlock()
 		return false
@@ -776,6 +724,9 @@ func (l *WorkflowTimerLifecycle) stop(ctx context.Context) error {
 		done = append(done, recoveryDone)
 	}
 	l.recoveryMu.Unlock()
+	if err := l.stopWakeups(ctx); err != nil {
+		return err
+	}
 	for _, recoveryDone := range done {
 		select {
 		case <-recoveryDone:
@@ -787,10 +738,10 @@ func (l *WorkflowTimerLifecycle) stop(ctx context.Context) error {
 }
 
 func (l *WorkflowTimerLifecycle) logFailure(ctx context.Context, action string, ref timeridentity.WorkflowTimerActivationRef, err error) {
-	if l == nil || l.coordinator == nil || l.coordinator.bus == nil || err == nil {
+	if l == nil || l.logger == nil || err == nil {
 		return
 	}
-	_ = l.coordinator.bus.LogRuntime(ctx, RuntimeLogEntry{
+	_ = l.logger.LogRuntime(ctx, RuntimeLogEntry{
 		Level: "error", Message: "Workflow timer lifecycle operation failed", Component: runtimeWorkflowID,
 		Action: action, Detail: map[string]any{"activation_id": ref.ActivationID, "declaration": ref.Declaration},
 	})

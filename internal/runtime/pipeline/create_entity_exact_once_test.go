@@ -105,9 +105,9 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 			assertMutationCount(t, pc.workflowStore, ctx, eventID, "amount", "entity_initial_value", "create_entity", 1)
 			assertMutationCount(t, pc.workflowStore, ctx, eventID, "who", "entity_initial_value", "create_entity", 1)
 			assertMutationCount(t, pc.workflowStore, ctx, eventID, "counter", "entity_initial_value", "create_entity", 1)
-			assertMutationCount(t, pc.workflowStore, ctx, eventID, "amount", "workflow_instance_store", "upsert", 1)
-			assertMutationCount(t, pc.workflowStore, ctx, eventID, "who", "workflow_instance_store", "upsert", 1)
-			assertMutationCount(t, pc.workflowStore, ctx, eventID, "counter", "workflow_instance_store", "upsert", 1)
+			assertMutationCount(t, pc.workflowStore, ctx, eventID, "amount", "workflow_instance_store", "upsert", 0)
+			assertMutationCount(t, pc.workflowStore, ctx, eventID, "who", "workflow_instance_store", "upsert", 0)
+			assertMutationCount(t, pc.workflowStore, ctx, eventID, "counter", "workflow_instance_store", "upsert", 0)
 		})
 	}
 }
@@ -170,7 +170,7 @@ func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *te
 			assertDeliveryOutcomeCount(t, pc.workflowStore, ctx, eventID, "w-node", 1)
 			assertDeliveryStatusCount(t, pc.workflowStore, ctx, eventID, "w-node", "delivered", 1)
 			assertMutationCount(t, pc.workflowStore, ctx, eventID, "amount", "entity_initial_value", "create_entity", 1)
-			assertMutationCount(t, pc.workflowStore, ctx, eventID, "amount", "workflow_instance_store", "upsert", 1)
+			assertMutationCount(t, pc.workflowStore, ctx, eventID, "amount", "workflow_instance_store", "upsert", 0)
 		})
 	}
 }

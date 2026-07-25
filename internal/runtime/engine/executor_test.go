@@ -27,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"gopkg.in/yaml.v3"
 )
 
@@ -202,13 +203,12 @@ func sourceWithPythonRendererSource(t *testing.T, source []byte) (semanticview.S
 func newStructuredRendererExecutor(t *testing.T, source semanticview.Source) *Executor {
 	t.Helper()
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:       source,
-		StateRepo:    stubStateRepo{},
-		TxRunner:     stubRunner{},
-		Locker:       stubLocker{},
-		Outbox:       stubOutbox{},
-		TimerApplier: stubTimerApplier{},
-		Dispatcher:   stubDispatcher{},
+		Source:     source,
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
 	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
 		`computed.rendered_bundle.format == "yaml"`: func(base BaseContext) (bool, error) {
 			rendered, _ := base.Computed.Raw()["rendered_bundle"].(map[string]any)
@@ -428,7 +428,6 @@ type recordingEmitOutbox struct {
 	intents []EmitIntent
 	err     error
 }
-type stubTimerApplier struct{}
 type stubDispatcher struct{}
 type stubActionRegistry struct {
 	entries map[identity.ActionKey]runtimeregistry.ActionInstruction
@@ -513,9 +512,6 @@ func (o *recordingEmitOutbox) WriteOutbox(_ context.Context, intents []EmitInten
 	o.intents = append(o.intents, intents...)
 	return nil
 }
-func (stubTimerApplier) ApplyTimerIntents(context.Context, identity.EntityID, []TimerIntent) error {
-	return nil
-}
 func (stubDispatcher) DispatchPostCommit(context.Context, []EmitIntent) error { return nil }
 func (s stubEvaluator) EvalBool(expression string, _ BaseContext) (bool, error) {
 	if err := s.errs[expression]; err != nil {
@@ -588,12 +584,38 @@ type stubTx struct{ ctx context.Context }
 
 func (s stubTx) Context() context.Context { return s.ctx }
 
+type testWorkflowLifecycleOwner struct {
+	effects []runtimeworkflowlifecycle.Effect
+	order   *[]string
+}
+
+func (o *testWorkflowLifecycleOwner) AcceptedEventEffect(entityID identity.EntityID, event events.Event, fromState, toState string) (runtimeworkflowlifecycle.Effect, error) {
+	var transition *runtimeworkflowlifecycle.Transition
+	if strings.TrimSpace(toState) != "" && strings.TrimSpace(toState) != strings.TrimSpace(fromState) {
+		value, err := runtimeworkflowlifecycle.NewTransition(fromState, toState, "test-transition")
+		if err != nil {
+			return runtimeworkflowlifecycle.Effect{}, err
+		}
+		transition = &value
+	}
+	return runtimeworkflowlifecycle.NewAcceptedEvent(entityID.String(), event.ID(), string(event.Type()), event.CreatedAt(), transition)
+}
+
+func (o *testWorkflowLifecycleOwner) ApplyWorkflowLifecycleEffects(_ context.Context, effects []runtimeworkflowlifecycle.Effect) error {
+	o.effects = append(o.effects, effects...)
+	if o.order != nil {
+		*o.order = append(*o.order, "lifecycle")
+	}
+	return nil
+}
+
 func TestExecutorTimerReconciliationRequiresExactEventAuthority(t *testing.T) {
+	owner := &testWorkflowLifecycleOwner{}
 	executor := &Executor{deps: RuntimeDependencies{Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{Timers: []runtimecontracts.WorkflowTimerContract{{
 			ID: "waiting.timeout", Stage: "waiting", StageOwned: true, Event: "timer.timeout", Delay: "1h",
 		}}},
-	})}}
+	}), WorkflowLifecycle: owner}}
 	frame := executor.newExecutionFrame(stubTx{ctx: context.Background()}, ExecutionRequest{
 		EntityID: "entity-1",
 		Event: eventtest.RunCreatingRootIngress(
@@ -601,17 +623,18 @@ func TestExecutorTimerReconciliationRequiresExactEventAuthority(t *testing.T) {
 		),
 		State: StateSnapshot{CurrentState: "waiting"},
 	})
-	if _, err := executor.buildTimerIntents(&frame); err == nil || !strings.Contains(err.Error(), "exact event id, type, and time") {
-		t.Fatalf("buildTimerIntents error = %v, want exact-authority refusal", err)
+	if _, _, err := executor.buildWorkflowLifecycleEffect(&frame); err == nil || !strings.Contains(err.Error(), "exact event identity") {
+		t.Fatalf("buildWorkflowLifecycleEffect error = %v, want exact-authority refusal", err)
 	}
 }
 
 func TestExecutorTimerReconciliationCarriesOnlyActualTransitionTarget(t *testing.T) {
+	owner := &testWorkflowLifecycleOwner{}
 	executor := &Executor{deps: RuntimeDependencies{Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{Timers: []runtimecontracts.WorkflowTimerContract{{
 			ID: "waiting.timeout", Event: "timer.timeout", StartOn: "state:waiting", Delay: "1h",
 		}}},
-	})}}
+	}), WorkflowLifecycle: owner}}
 	createdAt := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
 	frame := executor.newExecutionFrame(stubTx{ctx: context.Background()}, ExecutionRequest{
 		EntityID: "entity-1",
@@ -621,22 +644,26 @@ func TestExecutorTimerReconciliationCarriesOnlyActualTransitionTarget(t *testing
 		State: StateSnapshot{CurrentState: "waiting"},
 	})
 
-	intents, err := executor.buildTimerIntents(&frame)
+	effect, ok, err := executor.buildWorkflowLifecycleEffect(&frame)
 	if err != nil {
-		t.Fatalf("build event-only timer intent: %v", err)
+		t.Fatalf("build event-only lifecycle effect: %v", err)
 	}
-	if len(intents) != 1 || intents[0].FromState != "waiting" || intents[0].ToState != "" {
-		t.Fatalf("event-only timer intents = %#v, want waiting -> empty", intents)
+	if !ok {
+		t.Fatal("event-only lifecycle effect missing")
+	}
+	if _, hasTransition := effect.Transition(); hasTransition {
+		t.Fatalf("event-only lifecycle effect = %#v, want absent transition", effect)
 	}
 
 	frame.result.NextState = "done"
 	frame.result.StateMutation.NextState = "done"
-	intents, err = executor.buildTimerIntents(&frame)
+	effect, ok, err = executor.buildWorkflowLifecycleEffect(&frame)
 	if err != nil {
-		t.Fatalf("build transition timer intent: %v", err)
+		t.Fatalf("build transition lifecycle effect: %v", err)
 	}
-	if len(intents) != 1 || intents[0].FromState != "waiting" || intents[0].ToState != "done" {
-		t.Fatalf("transition timer intents = %#v, want waiting -> done", intents)
+	transition, hasTransition := effect.Transition()
+	if !ok || !hasTransition || transition.From() != "waiting" || transition.To() != "done" {
+		t.Fatalf("transition lifecycle effect = %#v, want waiting -> done", effect)
 	}
 }
 
@@ -658,13 +685,12 @@ func eventPayloadMap(t *testing.T, evt events.Event) map[string]any {
 
 func TestNewExecutor_DefaultsMaxChainDepth(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:       stubSource(),
-		StateRepo:    stubStateRepo{},
-		TxRunner:     stubRunner{},
-		Locker:       stubLocker{},
-		Outbox:       stubOutbox{},
-		TimerApplier: stubTimerApplier{},
-		Dispatcher:   stubDispatcher{},
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -681,7 +707,6 @@ func TestExecutor_ValidateRequestAllowsDeepInboundChainDepth(t *testing.T) {
 		TxRunner:      stubRunner{},
 		Locker:        stubLocker{},
 		Outbox:        stubOutbox{},
-		TimerApplier:  stubTimerApplier{},
 		Dispatcher:    stubDispatcher{},
 		MaxChainDepth: 2,
 	}, nil)
@@ -1051,13 +1076,12 @@ func TestExecutor_LoadsStateInsideEntityLock(t *testing.T) {
 
 func TestExecutor_StepOrderIsStable(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:       stubSource(),
-		StateRepo:    stubStateRepo{},
-		TxRunner:     stubRunner{},
-		Locker:       stubLocker{},
-		Outbox:       stubOutbox{},
-		TimerApplier: stubTimerApplier{},
-		Dispatcher:   stubDispatcher{},
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -1088,7 +1112,6 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 		TxRunner:      stubRunner{},
 		Locker:        stubLocker{},
 		Outbox:        stubOutbox{},
-		TimerApplier:  stubTimerApplier{},
 		Dispatcher:    stubDispatcher{},
 		PayloadShaper: shaper,
 	}, nil)
@@ -1941,13 +1964,12 @@ func TestExecutor_ComputeReadsAccumulatorByMatchedHandlerEventKey(t *testing.T) 
 
 func TestExecutor_PolicySheetLookupRowFeedsSelectionRow(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:       stubSource(),
-		StateRepo:    stubStateRepo{},
-		TxRunner:     stubRunner{},
-		Locker:       stubLocker{},
-		Outbox:       stubOutbox{},
-		TimerApplier: stubTimerApplier{},
-		Dispatcher:   stubDispatcher{},
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
 	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
 		`computed.template_path == "templates/service/go"`: func(base BaseContext) (bool, error) {
 			return base.Computed.Raw()["template_path"] == "templates/service/go", nil
@@ -2027,13 +2049,12 @@ func TestExecutor_PolicySheetLookupRowFeedsSelectionRow(t *testing.T) {
 func TestExecutor_PolicySheetComputeModuleRowFeedsSelectionRow(t *testing.T) {
 	source, module := sourceWithStructuredRendererModule(t)
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:       source,
-		StateRepo:    stubStateRepo{},
-		TxRunner:     stubRunner{},
-		Locker:       stubLocker{},
-		Outbox:       stubOutbox{},
-		TimerApplier: stubTimerApplier{},
-		Dispatcher:   stubDispatcher{},
+		Source:     source,
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
 	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
 		`computed.rendered_bundle.format == "yaml"`: func(base BaseContext) (bool, error) {
 			rendered, _ := base.Computed.Raw()["rendered_bundle"].(map[string]any)
@@ -2431,13 +2452,12 @@ func TestExecutor_PolicySheetValidateRowFeedsSelectionRow(t *testing.T) {
 		}},
 	})
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:       source,
-		StateRepo:    stubStateRepo{},
-		TxRunner:     stubRunner{},
-		Locker:       stubLocker{},
-		Outbox:       stubOutbox{},
-		TimerApplier: stubTimerApplier{},
-		Dispatcher:   stubDispatcher{},
+		Source:     source,
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
 	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
 		`computed.validation.deploy_manifest.valid == false`: func(base BaseContext) (bool, error) {
 			validation, _ := base.Computed.Raw()["validation"].(map[string]any)
@@ -2555,13 +2575,12 @@ func TestExecutor_PolicySheetValidateNumericEqualityCanonicalizesRuntimeValues(t
 		}},
 	})
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:       source,
-		StateRepo:    stubStateRepo{},
-		TxRunner:     stubRunner{},
-		Locker:       stubLocker{},
-		Outbox:       stubOutbox{},
-		TimerApplier: stubTimerApplier{},
-		Dispatcher:   stubDispatcher{},
+		Source:     source,
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
 	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
 		`computed.validation.count_match.valid == true`: func(base BaseContext) (bool, error) {
 			validation, _ := base.Computed.Raw()["validation"].(map[string]any)
@@ -2699,14 +2718,9 @@ func (l orderedLocker) WithEntityLock(ctx context.Context, _ identity.EntityID, 
 }
 
 type orderedOutbox struct{ order *[]string }
-type orderedTimerApplier struct{ order *[]string }
 
 func (o orderedOutbox) WriteOutbox(context.Context, []EmitIntent) error {
 	*o.order = append(*o.order, "outbox")
-	return nil
-}
-func (a orderedTimerApplier) ApplyTimerIntents(context.Context, identity.EntityID, []TimerIntent) error {
-	*a.order = append(*a.order, "timers")
 	return nil
 }
 
@@ -2869,14 +2883,15 @@ func TestExecutor_ActivityDispatchDoesNotRunWhenIntentPersistenceFails(t *testin
 func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 	order := []string{}
 	repo := &orderedStateRepo{order: &order}
+	lifecycle := &testWorkflowLifecycleOwner{order: &order}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:       stubSource(),
-		StateRepo:    repo,
-		TxRunner:     orderedRunner{order: &order},
-		Locker:       orderedLocker{order: &order},
-		Outbox:       orderedOutbox{order: &order},
-		TimerApplier: orderedTimerApplier{order: &order},
-		Dispatcher:   orderedDispatcher{order: &order},
+		Source:            stubSource(),
+		StateRepo:         repo,
+		TxRunner:          orderedRunner{order: &order},
+		Locker:            orderedLocker{order: &order},
+		Outbox:            orderedOutbox{order: &order},
+		WorkflowLifecycle: lifecycle,
+		Dispatcher:        orderedDispatcher{order: &order},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -2897,7 +2912,7 @@ func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if !reflect.DeepEqual(order, []string{"lock", "tx", "save", "timers", "outbox", "dispatch"}) {
+	if !reflect.DeepEqual(order, []string{"lock", "tx", "save", "lifecycle", "outbox", "dispatch"}) {
 		t.Fatalf("unexpected envelope order: %v", order)
 	}
 	if len(result.ExecutedSteps) != len(OrderedSteps) {
@@ -2927,13 +2942,12 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 	order := []string{}
 	repo := &orderedStateRepo{order: &order}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:       stubSource(),
-		StateRepo:    repo,
-		TxRunner:     stubRunner{},
-		Locker:       stubLocker{},
-		Outbox:       stubOutbox{},
-		TimerApplier: stubTimerApplier{},
-		Dispatcher:   stubDispatcher{},
+		Source:     stubSource(),
+		StateRepo:  repo,
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -3011,13 +3025,12 @@ func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
 	order := []string{}
 	repo := &orderedStateRepo{order: &order}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:       stubSource(),
-		StateRepo:    repo,
-		TxRunner:     stubRunner{},
-		Locker:       stubLocker{},
-		Outbox:       stubOutbox{},
-		TimerApplier: stubTimerApplier{},
-		Dispatcher:   stubDispatcher{},
+		Source:     stubSource(),
+		StateRepo:  repo,
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)

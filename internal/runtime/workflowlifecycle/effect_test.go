@@ -1,0 +1,136 @@
+package workflowlifecycle
+
+import (
+	"testing"
+	"time"
+)
+
+func TestWorkflowLifecycleEffectConstructionMatrix(t *testing.T) {
+	occurredAt := time.Date(2026, time.July, 25, 12, 0, 0, 0, time.UTC)
+
+	t.Run("initial entry", func(t *testing.T) {
+		effect, err := NewInitialEntry("entity-1", "waiting", occurredAt)
+		if err != nil {
+			t.Fatalf("NewInitialEntry: %v", err)
+		}
+		if effect.Kind() != KindInitialEntry || effect.InstanceID() != "entity-1" ||
+			effect.InitialStage() != "waiting" || !effect.OccurredAt().Equal(occurredAt) {
+			t.Fatalf("initial effect = %#v", effect)
+		}
+		if _, ok := effect.Transition(); ok {
+			t.Fatal("initial entry unexpectedly carried a transition")
+		}
+	})
+
+	t.Run("accepted event without transition", func(t *testing.T) {
+		effect, err := NewAcceptedEvent("entity-1", "event-1", "review.noted", occurredAt, nil)
+		if err != nil {
+			t.Fatalf("NewAcceptedEvent: %v", err)
+		}
+		if effect.Kind() != KindAcceptedEvent || effect.EventID() != "event-1" ||
+			effect.EventType() != "review.noted" || !effect.OccurredAt().Equal(occurredAt) {
+			t.Fatalf("accepted event effect = %#v", effect)
+		}
+		if _, ok := effect.Transition(); ok {
+			t.Fatal("event-only effect unexpectedly carried a transition")
+		}
+	})
+
+	t.Run("accepted event with complete transition", func(t *testing.T) {
+		transition, err := NewTransition("waiting", "approved", "waiting-approved")
+		if err != nil {
+			t.Fatalf("NewTransition: %v", err)
+		}
+		effect, err := NewAcceptedEvent("entity-1", "event-1", "review.approved", occurredAt, &transition)
+		if err != nil {
+			t.Fatalf("NewAcceptedEvent: %v", err)
+		}
+		got, ok := effect.Transition()
+		if !ok || got.From() != "waiting" || got.To() != "approved" || got.ID() != "waiting-approved" {
+			t.Fatalf("accepted transition = %#v ok=%v", got, ok)
+		}
+	})
+
+	for _, test := range []struct {
+		name string
+		make func() error
+	}{
+		{
+			name: "initial missing instance",
+			make: func() error {
+				_, err := NewInitialEntry("", "waiting", occurredAt)
+				return err
+			},
+		},
+		{
+			name: "initial missing stage",
+			make: func() error {
+				_, err := NewInitialEntry("entity-1", "", occurredAt)
+				return err
+			},
+		},
+		{
+			name: "initial missing occurrence time",
+			make: func() error {
+				_, err := NewInitialEntry("entity-1", "waiting", time.Time{})
+				return err
+			},
+		},
+		{
+			name: "accepted event missing identity",
+			make: func() error {
+				_, err := NewAcceptedEvent("entity-1", "", "review.noted", occurredAt, nil)
+				return err
+			},
+		},
+		{
+			name: "accepted event missing type",
+			make: func() error {
+				_, err := NewAcceptedEvent("entity-1", "event-1", "", occurredAt, nil)
+				return err
+			},
+		},
+		{
+			name: "accepted event missing occurrence time",
+			make: func() error {
+				_, err := NewAcceptedEvent("entity-1", "event-1", "review.noted", time.Time{}, nil)
+				return err
+			},
+		},
+		{
+			name: "transition missing source",
+			make: func() error {
+				_, err := NewTransition("", "approved", "waiting-approved")
+				return err
+			},
+		},
+		{
+			name: "transition missing target",
+			make: func() error {
+				_, err := NewTransition("waiting", "", "waiting-approved")
+				return err
+			},
+		},
+		{
+			name: "transition missing identity",
+			make: func() error {
+				_, err := NewTransition("waiting", "approved", "")
+				return err
+			},
+		},
+		{
+			name: "transition does not change state",
+			make: func() error {
+				_, err := NewTransition("waiting", "waiting", "waiting-waiting")
+				return err
+			},
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			if err := test.make(); err == nil {
+				t.Fatal("invalid lifecycle effect was constructible")
+			}
+		})
+	}
+}

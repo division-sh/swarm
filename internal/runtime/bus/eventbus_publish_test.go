@@ -3186,6 +3186,15 @@ func TestEventBusPublish_RecordsNoRoutedDiagnosticsForRetiredSiblingAutoWire(t *
 	}
 }
 
+func exactEventBusWorkflowFixtures(instances []runtimepipeline.WorkflowInstance) []runtimepipeline.WorkflowInstance {
+	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	for i := range instances {
+		instances[i].EnteredStageAt = enteredAt
+		instances[i].CreatedAt = enteredAt
+	}
+	return instances
+}
+
 func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnects(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
@@ -3225,7 +3234,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 	grandchildEntityID := runtimepipeline.FlowInstanceEntityID("child/grandchild")
 	store := runtimepipeline.NewWorkflowInstanceStore(db)
 	ctx := eventBusTestRunContext(t, db)
-	for _, instance := range []runtimepipeline.WorkflowInstance{
+	for _, instance := range exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{
 		{
 			InstanceID:      rootEntityID,
 			StorageRef:      rootEntityID,
@@ -3253,7 +3262,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 			WorkflowVersion: bundle.WorkflowVersion(),
 			CurrentState:    "finished",
 		},
-	} {
+	}) {
 		if err := store.Upsert(ctx, instance); err != nil {
 			t.Fatalf("seed workflow instance %q: %v", instance.InstanceID, err)
 		}
@@ -3378,7 +3387,7 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 		t.Fatal("PipelineCoordinator does not implement DeliveryRouteInterceptor")
 	}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	for _, instance := range []runtimepipeline.WorkflowInstance{
+	for _, instance := range exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{
 		{
 			InstanceID:      rootEntityID,
 			StorageRef:      rootEntityID,
@@ -3393,7 +3402,7 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 			WorkflowVersion: "v-test",
 			CurrentState:    "active",
 		},
-	} {
+	}) {
 		if err := workflowStore.Upsert(ctx, instance); err != nil {
 			t.Fatalf("seed workflow instance %s: %v", instance.InstanceID, err)
 		}
@@ -3628,7 +3637,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	const rootEntityID = "11111111-1111-1111-1111-111111111111"
 	ctx := eventBusTestRunContext(t, db)
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	for _, instance := range []runtimepipeline.WorkflowInstance{
+	for _, instance := range exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{
 		{
 			InstanceID:      rootEntityID,
 			StorageRef:      rootEntityID,
@@ -3653,7 +3662,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 			WorkflowVersion: bundle.WorkflowVersion(),
 			CurrentState:    "ready",
 		},
-	} {
+	}) {
 		if err := workflowStore.Upsert(ctx, instance); err != nil {
 			t.Fatalf("seed workflow instance %q: %v", instance.InstanceID, err)
 		}
@@ -3897,7 +3906,7 @@ func TestEventBusPublish_GatedChildFlowCompletionWithoutSubjectLinkFailsClosed(t
 	const rootEntityID = "11111111-1111-1111-1111-111111111111"
 	ctx := eventBusTestRunContext(t, db)
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	if err := workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
+	if err := workflowStore.Upsert(ctx, exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{{
 		InstanceID:      rootEntityID,
 		StorageRef:      rootEntityID,
 		WorkflowName:    bundle.WorkflowName(),
@@ -3906,7 +3915,7 @@ func TestEventBusPublish_GatedChildFlowCompletionWithoutSubjectLinkFailsClosed(t
 		Metadata: map[string]any{
 			"entity_id": rootEntityID,
 		},
-	}); err != nil {
+	}})[0]); err != nil {
 		t.Fatalf("seed root instance: %v", err)
 	}
 

@@ -22,6 +22,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -582,6 +583,76 @@ func assertContainsClass(t *testing.T, classes []string, want string) {
 	t.Fatalf("recoverable_work_classes = %#v, want %q present", classes, want)
 }
 
+func TestStartupRecoveryDecisionTimerFamilyAdmissionMatrix(t *testing.T) {
+	tests := []struct {
+		name       string
+		recovery   bool
+		blocking   int
+		intrinsic  int
+		want       startupRecoveryOutcome
+		wantReason startupRecoveryReasonCode
+	}{
+		{
+			name:       "enabled generic",
+			recovery:   true,
+			blocking:   1,
+			want:       startupRecoveryOutcomeAllowed,
+			wantReason: startupRecoveryReasonEnabledWithWork,
+		},
+		{
+			name:       "enabled workflow",
+			recovery:   true,
+			blocking:   1,
+			want:       startupRecoveryOutcomeAllowed,
+			wantReason: startupRecoveryReasonEnabledWithWork,
+		},
+		{
+			name:       "enabled mixed",
+			recovery:   true,
+			blocking:   2,
+			want:       startupRecoveryOutcomeAllowed,
+			wantReason: startupRecoveryReasonEnabledWithWork,
+		},
+		{
+			name:       "disabled generic",
+			blocking:   1,
+			want:       startupRecoveryOutcomeDenied,
+			wantReason: startupRecoveryReasonDisabledWithWork,
+		},
+		{
+			name:       "disabled workflow",
+			blocking:   1,
+			want:       startupRecoveryOutcomeDenied,
+			wantReason: startupRecoveryReasonDisabledWithWork,
+		},
+		{
+			name:       "disabled mixed",
+			blocking:   2,
+			want:       startupRecoveryOutcomeDenied,
+			wantReason: startupRecoveryReasonDisabledWithWork,
+		},
+		{
+			name:       "disabled intrinsic standing",
+			intrinsic:  1,
+			want:       startupRecoveryOutcomeAllowed,
+			wantReason: startupRecoveryReasonDisabledWithIntrinsic,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			report := newStartupRecoveryDecisionReport(startupRecoverySnapshot{
+				RecoveryOnStartup:        test.recovery,
+				InspectionComplete:       true,
+				StartupBlockingTimers:    test.blocking,
+				StandingTimerObligations: test.intrinsic,
+			})
+			if report.Outcome != test.want || report.ReasonCode != test.wantReason {
+				t.Fatalf("decision = %s/%s, want %s/%s", report.Outcome, report.ReasonCode, test.want, test.wantReason)
+			}
+		})
+	}
+}
+
 func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
@@ -630,10 +701,10 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 	if got := detailString(detail["decision_reason_code"]); got != string(startupRecoveryReasonDisabledWithWork) {
 		t.Fatalf("decision_reason_code = %q, want %q", got, startupRecoveryReasonDisabledWithWork)
 	}
-	if got := detailInt(detail["active_schedule_count"]); got != 1 {
-		t.Fatalf("active_schedule_count = %d, want 1", got)
+	if got := detailInt(detail["startup_blocking_timer_count"]); got != 1 {
+		t.Fatalf("startup_blocking_timer_count = %d, want 1", got)
 	}
-	assertContainsClass(t, detailClasses(detail["recoverable_work_classes"]), "active schedules")
+	assertContainsClass(t, detailClasses(detail["recoverable_work_classes"]), "timer obligations")
 }
 
 func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testing.T) {
@@ -783,7 +854,84 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 	if got := detailInt(detail["schedule_dropped_count"]); got != 0 {
 		t.Fatalf("schedule_dropped_count = %d, want 0", got)
 	}
-	assertContainsClass(t, detailClasses(detail["recoverable_work_classes"]), "active schedules")
+	assertContainsClass(t, detailClasses(detail["recoverable_work_classes"]), "timer obligations")
+}
+
+func TestRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDetail(t *testing.T) {
+	ctx := testAuthorActivityContext(context.Background())
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	module := loadRuntimeOwnershipWorkflowModule(t)
+	const runID = "31000000-0000-0000-0000-000000000001"
+	scheduleStore := &recordingRuntimeScheduleStore{
+		obligations: &runtimetimerobligation.Snapshot{
+			Runs: []runtimetimerobligation.RunObligations{{
+				RunID: runID,
+				Families: []runtimetimerobligation.FamilyObligation{{
+					Family:           runtimetimerobligation.FamilyWorkflowTimer,
+					ActiveCount:      1,
+					RecoverableCount: 1,
+				}},
+			}},
+		},
+	}
+
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
+		SQLDB:           db,
+		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
+		DeliveryStore:   newRuntimeShutdownDeliveryStore(t),
+		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
+		EventStore:      startupRecoveryMinimalEventStore{},
+		ManagerStore:    &recoveryGuardManagerStore{},
+		ScheduleStore:   scheduleStore,
+	}, Options: RuntimeOptions{
+		SelfCheck:      false,
+		WorkflowModule: module,
+		LLMRuntime:     noopLLMRuntime{},
+	}})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	if err := rt.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	_, _, failure, detail := latestStartupRecoveryDecisionLog(t, db)
+	if failure != nil {
+		t.Fatalf("log failure = %#v, want nil", failure)
+	}
+	if !detailBool(detail["schedule_restore_attempted"]) {
+		t.Fatalf("schedule_restore_attempted = %#v, want true for workflow-only restoration", detail["schedule_restore_attempted"])
+	}
+	if got := detailInt(detail["schedule_replayed_count"]); got != 0 {
+		t.Fatalf("generic schedule_replayed_count = %d, want 0", got)
+	}
+	if got := detailInt(detail["startup_blocking_timer_count"]); got != 1 {
+		t.Fatalf("startup_blocking_timer_count = %d, want 1", got)
+	}
+	obligations, ok := detail["timer_obligations"].(map[string]any)
+	if !ok {
+		t.Fatalf("timer_obligations = %#v, want object", detail["timer_obligations"])
+	}
+	runs, ok := obligations["runs"].([]any)
+	if !ok || len(runs) != 1 {
+		t.Fatalf("timer_obligations.runs = %#v, want one workflow-only run", obligations["runs"])
+	}
+
+	boot := startupRecoveryDecisionReport{
+		Snapshot: startupRecoverySnapshot{
+			RecoveryOnStartup:     true,
+			InspectionComplete:    true,
+			StartupBlockingTimers: 1,
+			TimerObligations:      *scheduleStore.obligations,
+		},
+	}.bootPayload()
+	if got := detailInt(boot["startup_blocking_timer_count"]); got != 1 {
+		t.Fatalf("boot startup_blocking_timer_count = %d, want 1", got)
+	}
+	if _, ok := boot["timer_obligations"].(runtimetimerobligation.Snapshot); !ok {
+		t.Fatalf("boot timer_obligations = %#v, want typed snapshot", boot["timer_obligations"])
+	}
 }
 
 func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *testing.T) {

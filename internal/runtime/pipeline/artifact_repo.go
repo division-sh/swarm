@@ -1040,7 +1040,10 @@ func (pc *PipelineCoordinator) persistArtifactRepoResult(ctx context.Context, ex
 		metadata[field] = value
 	}
 	mutation := runtimeengine.StateMutation{
-		StateCarrier: runtimeengine.NewStateCarrier(metadata, execCtx.Request.State.StateCarrier.Gates, execCtx.Request.State.StateCarrier.StateBuckets),
+		StateCarrier:     runtimeengine.NewStateCarrier(metadata, execCtx.Request.State.StateCarrier.Gates, execCtx.Request.State.StateCarrier.StateBuckets),
+		TriggerEventID:   strings.TrimSpace(execCtx.Request.Event.ID()),
+		TriggerEventType: strings.TrimSpace(string(execCtx.Request.Event.Type())),
+		TriggeredAt:      execCtx.Request.Event.CreatedAt(),
 	}
 	repo := pipelineEngineStateRepo{coordinator: pc}
 	return repo.SaveState(ctx, identity.NormalizeEntityID(execCtx.Request.EntityID.String()), mutation)

@@ -677,7 +677,7 @@ func assertRecoveredNodeDelivery(t *testing.T, ctx context.Context, selected run
 		t.Fatalf("Snapshot: %v", err)
 	}
 	if snapshot.Status != runtimedelivery.StatusDelivered {
-		t.Fatalf("recovered delivery status = %q, want delivered", snapshot.Status)
+		t.Fatalf("recovered delivery = %#v failure=%+v, want delivered", snapshot, snapshot.Failure)
 	}
 	outcomes, err := selected.Outcomes(ctx, snapshot.DeliveryID)
 	if err != nil {

@@ -39,7 +39,7 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 		time.Now().UTC(),
 	)
 
-	if err := workflowStore.Create(ctx, WorkflowInstance{
+	if err := workflowStore.Create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      parentEntityID,
 		StorageRef:      parentEntityID,
 		WorkflowName:    "root",
@@ -48,7 +48,7 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 		Metadata:        map[string]any{"entity_type": "parent"},
 		CreatedAt:       time.Now().UTC(),
 		UpdatedAt:       time.Now().UTC(),
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed parent workflow instance: %v", err)
 	}
 	parentRoute := seedExactOnceEventDelivery(t, workflowStore, ctx, parent, "fanout-node")
@@ -114,7 +114,7 @@ func newSQLiteDynamicActivationCoordinator(t *testing.T, db *sql.DB, workflowSto
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
 		WorkflowStore: workflowStore,
 		InstanceActivator: func(ctx context.Context, req FlowInstanceActivationRequest) error {
-			return workflowStore.Create(ctx, WorkflowInstance{
+			return workflowStore.Create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID:      strings.TrimSpace(req.Instance.InstanceID),
 				StorageRef:      strings.TrimSpace(req.Instance.InstancePath),
 				WorkflowName:    strings.TrimSpace(req.Instance.TemplateID),
@@ -131,7 +131,7 @@ func newSQLiteDynamicActivationCoordinator(t *testing.T, db *sql.DB, workflowSto
 				},
 				CreatedAt: time.Now().UTC(),
 				UpdatedAt: time.Now().UTC(),
-			})
+			}))
 		},
 		Module: &previewWorkflowModule{
 			bundle: bundle,

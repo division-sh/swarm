@@ -121,6 +121,9 @@ var (
 	compatCreateIndexPattern = regexp.MustCompile(`(?is)^create\s+(unique\s+)?index(?:\s+if\s+not\s+exists)?\s+("?[a-z_][a-z0-9_]*"?)\s+on\s+("?[a-z_][a-z0-9_]*"?)\s*\((.*)\)\s*(where\s+.+)?$`)
 	compatSQLSpacePattern    = regexp.MustCompile(`\s+`)
 	compatSQLCastPattern     = regexp.MustCompile(`::[a-z_][a-z0-9_]*(?:\[\])?`)
+	compatSQLTextCastPattern = regexp.MustCompile(`(?i)cast\(([^()]+)\s+as\s+text\)`)
+	compatSQLNumberPattern   = regexp.MustCompile(`'(-?[0-9]+)'`)
+	compatSQLAtomicParens    = regexp.MustCompile(`\(([a-z_][a-z0-9_.]*|-?[0-9]+)\)`)
 )
 
 func expectedSchemaShape(plans []SchemaTableDDL, dialect SchemaDialect) (schemaShape, error) {
@@ -300,6 +303,9 @@ func normalizeReference(value string) string {
 func normalizeConstraint(value string) string {
 	v := normalizeExpression(value)
 	v = compatSQLCastPattern.ReplaceAllString(v, "")
+	v = compatSQLTextCastPattern.ReplaceAllString(v, "$1")
+	v = compatSQLNumberPattern.ReplaceAllString(v, "$1")
+	v = stripPostgresAtomicParens(v)
 	v = strings.ReplaceAll(v, " = any (array[", " in (")
 	v = strings.ReplaceAll(v, " <> all (array[", " not in (")
 	v = strings.ReplaceAll(v, "])", ")")
@@ -307,6 +313,32 @@ func normalizeConstraint(value string) string {
 		return "check " + canonicalBooleanExpression(strings.TrimSpace(v[len("check "):]))
 	}
 	return v
+}
+
+func stripPostgresAtomicParens(value string) string {
+	for {
+		match := compatSQLAtomicParens.FindStringSubmatchIndex(value)
+		for len(match) != 0 && match[0] > 0 && isSQLIdentifierByte(value[match[0]-1]) {
+			next := compatSQLAtomicParens.FindStringSubmatchIndex(value[match[1]:])
+			if len(next) == 0 {
+				match = nil
+				break
+			}
+			offset := match[1]
+			for i := range next {
+				next[i] += offset
+			}
+			match = next
+		}
+		if len(match) == 0 {
+			return value
+		}
+		value = value[:match[0]] + value[match[2]:match[3]] + value[match[1]:]
+	}
+}
+
+func isSQLIdentifierByte(value byte) bool {
+	return value == '_' || value >= 'a' && value <= 'z' || value >= '0' && value <= '9'
 }
 
 func normalizeExpression(value string) string {
@@ -324,17 +356,11 @@ var singleValueInPattern = regexp.MustCompile(`(?is)^(.+?)\s+in\s+\(([^,()]+)\)$
 func canonicalBooleanExpression(value string) string {
 	value = trimBalancedOuterParens(strings.TrimSpace(value))
 	if parts := splitTopLevelSQLKeyword(value, "or"); len(parts) > 1 {
-		canonical := make([]string, 0, len(parts))
-		for _, part := range parts {
-			canonical = append(canonical, canonicalBooleanExpression(part))
-		}
+		canonical := canonicalBooleanOperands(parts, "or")
 		return "or(" + strings.Join(canonical, ",") + ")"
 	}
 	if parts := splitTopLevelSQLKeyword(value, "and"); len(parts) > 1 {
-		canonical := make([]string, 0, len(parts))
-		for _, part := range parts {
-			canonical = append(canonical, canonicalBooleanExpression(part))
-		}
+		canonical := canonicalBooleanOperands(parts, "and")
 		return "and(" + strings.Join(canonical, ",") + ")"
 	}
 	value = trimBalancedOuterParens(value)
@@ -344,6 +370,19 @@ func canonicalBooleanExpression(value string) string {
 		return strings.TrimSpace(matches[1]) + " = " + strings.TrimSpace(matches[2])
 	}
 	return value
+}
+
+func canonicalBooleanOperands(parts []string, operator string) []string {
+	canonical := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = trimBalancedOuterParens(strings.TrimSpace(part))
+		if nested := splitTopLevelSQLKeyword(part, operator); len(nested) > 1 {
+			canonical = append(canonical, canonicalBooleanOperands(nested, operator)...)
+			continue
+		}
+		canonical = append(canonical, canonicalBooleanExpression(part))
+	}
+	return canonical
 }
 
 func trimRedundantComparisonOperandParens(value string) string {

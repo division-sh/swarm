@@ -578,14 +578,14 @@ func TestExecuteNodeContractHandlerRejectsEmitWhenPersistencePrerequisiteFieldIs
 
 	pc, bus := newEmitPersistenceTestCoordinator(db)
 	const entityID = "11111111-1111-1111-1111-111111111111"
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "validation",
 		WorkflowVersion: "v-test",
 		CurrentState:    "researching",
 		Metadata:        map[string]any{},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
@@ -641,14 +641,14 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 
 	pc, bus := newEmitPersistenceTestCoordinator(db)
 	const entityID = "11111111-1111-1111-1111-111111111111"
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "validation",
 		WorkflowVersion: "v-test",
 		CurrentState:    "researching",
 		Metadata:        map[string]any{},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
@@ -729,7 +729,7 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 		}},
 	})
 	const entityID = "11111111-1111-1111-1111-111111111111"
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "validation",
@@ -738,7 +738,7 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 		Metadata: map[string]any{
 			"revision_count": 0,
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
@@ -803,14 +803,14 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 		}},
 	})
 	const entityID = "11111111-1111-1111-1111-111111111111"
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "validation",
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
 		Metadata:        map[string]any{},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
@@ -870,14 +870,14 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 		}},
 	})
 	const entityID = "11111111-1111-1111-1111-111111111111"
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "validation",
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
 		Metadata:        map[string]any{},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
@@ -1585,7 +1585,7 @@ node-a:
 
 func seedQueryEntitiesGuardInstance(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, entityID, storageRef, requestID string) {
 	t.Helper()
-	if err := store.Upsert(ctx, WorkflowInstance{
+	if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      storageRef,
 		WorkflowName:    "validation",
@@ -1595,7 +1595,7 @@ func seedQueryEntitiesGuardInstance(t *testing.T, store *WorkflowInstanceStore, 
 			"entity_id":  entityID,
 			"request_id": requestID,
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed query_entities guard instance %s: %v", entityID, err)
 	}
 }
@@ -2178,7 +2178,7 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 	)
 	childEntityID := FlowInstanceEntityID("child/inst-1")
 	grandchildEntityID := FlowInstanceEntityID("child/grandchild/inst-1")
-	if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      childEntityID,
 		StorageRef:      "child/inst-1",
 		WorkflowName:    "child",
@@ -2189,10 +2189,10 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 			"flow_path":        "child/inst-1",
 			"parent_entity_id": rootEntityID,
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed child instance: %v", err)
 	}
-	if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      grandchildEntityID,
 		StorageRef:      "child/grandchild/inst-1",
 		WorkflowName:    "grandchild",
@@ -2203,7 +2203,7 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 			"flow_path":        "child/grandchild/inst-1",
 			"parent_entity_id": childEntityID,
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed grandchild instance: %v", err)
 	}
 	if consume, handled, err := pc.workflowNodeInterceptPolicy(testAuthorActivityContext(t, context.Background()), "child/grandchild/micro.done", handlerTestRootIngress(

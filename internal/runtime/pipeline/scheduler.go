@@ -25,10 +25,93 @@ type Schedule struct {
 	EntityID     string
 	FlowInstance string
 	TaskID       string
-	// TimerID is populated only for canonical workflow activations. Generic
-	// schedule persistence must never manufacture or reinterpret it.
-	TimerID string
-	Payload []byte
+	Payload      []byte
+}
+
+type scheduledProjectionKind uint8
+
+const (
+	scheduledProjectionUnknown scheduledProjectionKind = iota
+	scheduledProjectionGeneric
+	scheduledProjectionWorkflowTimer
+)
+
+type scheduledProjection struct {
+	kind            scheduledProjectionKind
+	generic         Schedule
+	workflow        WorkflowTimerWakeup
+	onWorkflowTimer func(context.Context, WorkflowTimerWakeup)
+}
+
+func newGenericScheduledProjection(sc Schedule) (scheduledProjection, cronSpec, error) {
+	normalized, spec, err := validateSchedule(sc)
+	if err != nil {
+		return scheduledProjection{}, cronSpec{}, err
+	}
+	return scheduledProjection{kind: scheduledProjectionGeneric, generic: normalized}, spec, nil
+}
+
+func newWorkflowTimerScheduledProjection(wakeup WorkflowTimerWakeup, onFire func(context.Context, WorkflowTimerWakeup)) (scheduledProjection, cronSpec, error) {
+	if err := wakeup.validate(); err != nil {
+		return scheduledProjection{}, cronSpec{}, err
+	}
+	if onFire == nil {
+		return scheduledProjection{}, cronSpec{}, errors.New("workflow timer wakeup callback is required")
+	}
+	return scheduledProjection{
+		kind:            scheduledProjectionWorkflowTimer,
+		workflow:        wakeup,
+		onWorkflowTimer: onFire,
+	}, cronSpec{}, nil
+}
+
+func (p scheduledProjection) key() string {
+	switch p.kind {
+	case scheduledProjectionGeneric:
+		return scheduleKey(p.generic)
+	case scheduledProjectionWorkflowTimer:
+		return workflowTimerTaskFamily + "|" + p.workflow.Occurrence().Activation.ActivationID
+	default:
+		return ""
+	}
+}
+
+func (p scheduledProjection) mode() string {
+	if p.kind == scheduledProjectionGeneric {
+		return p.generic.Mode
+	}
+	if p.kind == scheduledProjectionWorkflowTimer {
+		return "once"
+	}
+	return ""
+}
+
+func (p scheduledProjection) dueAt() time.Time {
+	if p.kind == scheduledProjectionGeneric {
+		return p.generic.At
+	}
+	if p.kind == scheduledProjectionWorkflowTimer {
+		return p.workflow.DueAt()
+	}
+	return time.Time{}
+}
+
+func (p scheduledProjection) clone() scheduledProjection {
+	if p.kind == scheduledProjectionGeneric {
+		p.generic = cloneSchedule(p.generic)
+	}
+	return p
+}
+
+func (p scheduledProjection) fire(ctx context.Context, genericFire func(context.Context, Schedule)) {
+	switch p.kind {
+	case scheduledProjectionGeneric:
+		if genericFire != nil {
+			genericFire(ctx, p.generic)
+		}
+	case scheduledProjectionWorkflowTimer:
+		p.onWorkflowTimer(ctx, p.workflow)
+	}
 }
 
 func (s Schedule) EffectiveRunID() string {
@@ -72,22 +155,6 @@ func (s *Schedule) NormalizeFlowInstance() {
 	s.FlowInstance = s.EffectiveFlowInstance()
 }
 
-func (s Schedule) EffectiveTimerID() string {
-	return strings.TrimSpace(s.TimerID)
-}
-
-func (s *Schedule) NormalizeTimerID() {
-	if s == nil {
-		return
-	}
-	s.TimerID = s.EffectiveTimerID()
-}
-
-func (s Schedule) CanonicalWorkflowTimer() bool {
-	ref, ok := timeridentity.ParseWorkflowTimerOccurrenceTaskID(s.TaskID)
-	return ok && s.EffectiveTimerID() != "" && ref.Activation.ActivationID == s.EffectiveTimerID()
-}
-
 type Scheduler struct {
 	mu           sync.Mutex
 	onFire       func(context.Context, Schedule)
@@ -102,10 +169,11 @@ type Scheduler struct {
 type scheduledTask struct {
 	stop          chan struct{}
 	done          chan struct{}
+	prior         <-chan struct{}
 	lease         *worklifetime.Lease
 	owner         worklifetime.Occurrence
 	standingOwner *worklifetime.StandingOccurrence
-	schedule      Schedule
+	projection    scheduledProjection
 	state         scheduledTaskState
 	retiring      bool
 }
@@ -120,7 +188,7 @@ const (
 
 type parkedProjection struct {
 	task          *scheduledTask
-	schedule      Schedule
+	projection    scheduledProjection
 	originalOwner worklifetime.Occurrence
 	observedState scheduledTaskState
 	restorable    bool
@@ -207,13 +275,24 @@ func NewSchedulerWithWorkOwner(owner worklifetime.Occurrence, callbacks ...func(
 }
 
 func (s *Scheduler) Register(ctx context.Context, sc Schedule) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	var err error
-	sc, spec, err := validateSchedule(sc)
+	projection, spec, err := newGenericScheduledProjection(sc)
 	if err != nil {
 		return err
+	}
+	return s.registerProjection(ctx, projection, spec)
+}
+
+func (s *Scheduler) registerWorkflowTimerWakeup(ctx context.Context, wakeup WorkflowTimerWakeup, onFire func(context.Context, WorkflowTimerWakeup)) error {
+	projection, spec, err := newWorkflowTimerScheduledProjection(wakeup, onFire)
+	if err != nil {
+		return err
+	}
+	return s.registerProjection(ctx, projection, spec)
+}
+
+func (s *Scheduler) registerProjection(ctx context.Context, projection scheduledProjection, spec cronSpec) error {
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	s.mu.Lock()
@@ -225,7 +304,11 @@ func (s *Scheduler) Register(ctx context.Context, sc Schedule) error {
 		s.mu.Unlock()
 		return errors.New("scheduler requires a runtime work occurrence")
 	}
-	key := scheduleKey(sc)
+	key := projection.key()
+	if key == "" {
+		s.mu.Unlock()
+		return errors.New("scheduled projection identity is required")
+	}
 	if _, reserved := s.reservations[key]; reserved {
 		s.mu.Unlock()
 		return errors.New("schedule key is reserved by a standing replacement transition")
@@ -240,12 +323,22 @@ func (s *Scheduler) Register(ctx context.Context, sc Schedule) error {
 		return fmt.Errorf("admit scheduled task: %w", err)
 	}
 	if existing, ok := s.tasks[key]; ok {
+		taskPrior := existing.done
 		s.retireTaskLocked(key, existing)
+		standingOwner, _ := worklifetime.StandingProjection(owner)
+		task := &scheduledTask{
+			stop: make(chan struct{}), done: make(chan struct{}), prior: taskPrior, lease: lease,
+			owner: owner, standingOwner: standingOwner, projection: projection.clone(),
+		}
+		s.tasks[key] = task
+		s.mu.Unlock()
+		s.startTask(key, task, spec)
+		return nil
 	}
 	standingOwner, _ := worklifetime.StandingProjection(owner)
 	task := &scheduledTask{
 		stop: make(chan struct{}), done: make(chan struct{}), lease: lease,
-		owner: owner, standingOwner: standingOwner, schedule: cloneSchedule(sc),
+		owner: owner, standingOwner: standingOwner, projection: projection.clone(),
 	}
 	s.tasks[key] = task
 	s.mu.Unlock()
@@ -285,13 +378,14 @@ func (s *Scheduler) Cancel(agentID string, eventType string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for key := range s.reservations {
-		if scheduleKeyMatchesAgentEvent(key, agentID, eventType) {
+	for key, transition := range s.reservations {
+		if transition.reservesGenericAgentEvent(key, agentID, eventType) {
 			return errors.New("matching schedule key is reserved by a standing replacement transition")
 		}
 	}
 	for key, task := range s.tasks {
-		if !scheduleKeyMatchesAgentEvent(key, agentID, eventType) {
+		if task.projection.kind != scheduledProjectionGeneric ||
+			!scheduleKeyMatchesAgentEvent(key, agentID, eventType) {
 			continue
 		}
 		s.retireTaskLocked(key, task)
@@ -314,6 +408,57 @@ func (s *Scheduler) CancelExact(sc Schedule) error {
 		return nil
 	}
 	s.retireTaskLocked(key, task)
+	return nil
+}
+
+func (s *Scheduler) cancelWorkflowTimerWakeup(ref timeridentity.WorkflowTimerActivationRef) error {
+	ref = ref.Normalize()
+	if ref.ActivationID == "" {
+		return errors.New("workflow timer activation identity is required")
+	}
+	key := workflowTimerTaskFamily + "|" + ref.ActivationID
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, reserved := s.reservations[key]; reserved {
+		return errors.New("workflow timer key is reserved by a standing replacement transition")
+	}
+	task := s.tasks[key]
+	if task == nil {
+		return nil
+	}
+	if task.projection.kind != scheduledProjectionWorkflowTimer {
+		return errors.New("workflow timer key is owned by a different scheduled projection")
+	}
+	s.retireTaskLocked(key, task)
+	return nil
+}
+
+func (s *Scheduler) stopWorkflowTimerWakeups(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	done := make([]<-chan struct{}, 0)
+	for key, task := range s.tasks {
+		if task.projection.kind != scheduledProjectionWorkflowTimer {
+			continue
+		}
+		s.retireTaskLocked(key, task)
+		done = append(done, task.done)
+	}
+	for task := range s.draining {
+		if task.projection.kind == scheduledProjectionWorkflowTimer {
+			done = append(done, task.done)
+		}
+	}
+	s.mu.Unlock()
+	for _, taskDone := range done {
+		select {
+		case <-taskDone:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	return nil
 }
 
@@ -342,12 +487,12 @@ func (s *Scheduler) ParkOccurrence(ctx context.Context, owner *worklifetime.Stan
 		}
 		projection := parkedProjection{
 			task:          task,
-			schedule:      cloneSchedule(task.schedule),
+			projection:    task.projection.clone(),
 			originalOwner: task.owner,
 			observedState: task.state,
 		}
 		projection.restorable = projection.observedState == scheduledTaskArmed ||
-			(projection.observedState == scheduledTaskFiring && task.schedule.Mode == "cron")
+			(projection.observedState == scheduledTaskFiring && task.projection.mode() == "cron")
 		parked.projections = append(parked.projections, projection)
 		s.retireTaskLocked(key, task)
 	}
@@ -518,9 +663,9 @@ func prepareParkedSet(ctx context.Context, scheduler *Scheduler, bindings []park
 			if executionOwner == nil {
 				return fail(errors.New("parked schedule set requires an exact execution owner"))
 			}
-			schedule, spec, err := validateSchedule(cloneSchedule(projection.schedule))
+			normalized, spec, err := validateScheduledProjection(projection.projection.clone())
 			if err != nil {
-				return fail(fmt.Errorf("validate parked schedule: %w", err))
+				return fail(fmt.Errorf("validate parked scheduled projection: %w", err))
 			}
 			lease, err := executionOwner.Begin(ownerActionAdmissionContext(ctx))
 			if err != nil {
@@ -529,9 +674,9 @@ func prepareParkedSet(ctx context.Context, scheduler *Scheduler, bindings []park
 			standingOwner, _ := worklifetime.StandingProjection(executionOwner)
 			task := &scheduledTask{
 				stop: make(chan struct{}), done: make(chan struct{}), lease: lease,
-				owner: executionOwner, standingOwner: standingOwner, schedule: schedule,
+				owner: executionOwner, standingOwner: standingOwner, projection: normalized,
 			}
-			transition.tasks = append(transition.tasks, preparedParkedTask{key: scheduleKey(schedule), task: task, spec: spec})
+			transition.tasks = append(transition.tasks, preparedParkedTask{key: normalized.key(), task: task, spec: spec})
 		}
 	}
 
@@ -715,6 +860,20 @@ func (t *PreparedParkedSetRebind) targetsStandingOwner(owner *worklifetime.Stand
 	return false
 }
 
+func (t *PreparedParkedSetRebind) reservesGenericAgentEvent(key, agentID, eventType string) bool {
+	if t == nil {
+		return false
+	}
+	for _, prepared := range t.tasks {
+		if prepared.key == key &&
+			prepared.task.projection.kind == scheduledProjectionGeneric &&
+			scheduleKeyMatchesAgentEvent(key, agentID, eventType) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Scheduler) Stop() {
 	for {
 		s.mu.Lock()
@@ -743,24 +902,44 @@ func (s *Scheduler) Stop() {
 }
 
 func (s *Scheduler) startTask(key string, task *scheduledTask, spec cronSpec) {
-	switch task.schedule.Mode {
+	switch task.projection.mode() {
 	case "once":
 		go func() {
 			defer s.finishTask(key, task)
-			s.runOnce(task, key, task.schedule)
+			if !task.waitForPrior() {
+				return
+			}
+			s.runOnce(task, key, task.projection)
 		}()
 	case "cron":
 		go func() {
 			defer s.finishTask(key, task)
-			s.runCron(task, key, task.schedule, spec)
+			if !task.waitForPrior() {
+				return
+			}
+			s.runCron(task, key, task.projection, spec)
 		}()
 	default:
 		panic("validated schedule mode became unreachable")
 	}
 }
 
-func (s *Scheduler) runOnce(task *scheduledTask, key string, sc Schedule) {
-	delay := time.Until(sc.At)
+func (task *scheduledTask) waitForPrior() bool {
+	if task == nil || task.prior == nil {
+		return true
+	}
+	select {
+	case <-task.prior:
+		return true
+	case <-task.stop:
+		return false
+	case <-task.lease.Context().Done():
+		return false
+	}
+}
+
+func (s *Scheduler) runOnce(task *scheduledTask, key string, projection scheduledProjection) {
+	delay := time.Until(projection.dueAt())
 	if delay < 0 {
 		delay = 0
 	}
@@ -776,12 +955,12 @@ func (s *Scheduler) runOnce(task *scheduledTask, key string, sc Schedule) {
 		if !s.beginTaskFire(key, task) {
 			return
 		}
-		s.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), sc)
+		projection.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), s.onFire)
 		s.endTaskFire(task, false)
 	}
 }
 
-func (s *Scheduler) runCron(task *scheduledTask, key string, sc Schedule, spec cronSpec) {
+func (s *Scheduler) runCron(task *scheduledTask, key string, projection scheduledProjection, spec cronSpec) {
 	if spec.every > 0 {
 		ticker := time.NewTicker(spec.every)
 		defer ticker.Stop()
@@ -795,7 +974,7 @@ func (s *Scheduler) runCron(task *scheduledTask, key string, sc Schedule, spec c
 				if !s.beginTaskFire(key, task) {
 					return
 				}
-				s.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), sc)
+				projection.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), s.onFire)
 				if !s.endTaskFire(task, true) {
 					return
 				}
@@ -820,7 +999,7 @@ func (s *Scheduler) runCron(task *scheduledTask, key string, sc Schedule, spec c
 			if !s.beginTaskFire(key, task) {
 				return
 			}
-			s.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), sc)
+			projection.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), s.onFire)
 			if !s.endTaskFire(task, true) {
 				return
 			}
@@ -850,12 +1029,6 @@ func (s *Scheduler) endTaskFire(task *scheduledTask, recurring bool) bool {
 	}
 	task.state = scheduledTaskArmed
 	return true
-}
-
-func (s *Scheduler) fire(ctx context.Context, sc Schedule) {
-	if s.onFire != nil {
-		s.onFire(ctx, sc)
-	}
 }
 
 func (s *Scheduler) retireTaskLocked(key string, task *scheduledTask) {
@@ -897,7 +1070,6 @@ func scheduleKey(sc Schedule) string {
 		strings.TrimSpace(sc.EffectiveEntityID()),
 		strings.TrimSpace(sc.EffectiveFlowInstance()),
 		strings.TrimSpace(sc.TaskID),
-		strings.TrimSpace(sc.EffectiveTimerID()),
 	}, "|")
 }
 
@@ -914,7 +1086,6 @@ func validateSchedule(sc Schedule) (Schedule, cronSpec, error) {
 	sc.NormalizeDeliveryContext()
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
-	sc.NormalizeTimerID()
 	if sc.Mode == "" {
 		sc.Mode = "once"
 	}
@@ -934,6 +1105,21 @@ func validateSchedule(sc Schedule) (Schedule, cronSpec, error) {
 		return Schedule{}, cronSpec{}, fmt.Errorf("unsupported schedule mode: %s", sc.Mode)
 	}
 	return sc, spec, nil
+}
+
+func validateScheduledProjection(projection scheduledProjection) (scheduledProjection, cronSpec, error) {
+	switch projection.kind {
+	case scheduledProjectionGeneric:
+		normalized, spec, err := newGenericScheduledProjection(projection.generic)
+		if err != nil {
+			return scheduledProjection{}, cronSpec{}, err
+		}
+		return normalized, spec, nil
+	case scheduledProjectionWorkflowTimer:
+		return newWorkflowTimerScheduledProjection(projection.workflow, projection.onWorkflowTimer)
+	default:
+		return scheduledProjection{}, cronSpec{}, errors.New("scheduled projection kind is invalid")
+	}
 }
 
 func scheduleKeyMatchesAgentEvent(key, agentID, eventType string) bool {

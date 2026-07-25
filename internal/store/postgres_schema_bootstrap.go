@@ -164,7 +164,7 @@ func loadPostgresSchemaShape(ctx context.Context, q schemaQueryer, expected sche
 		return schemaShape{}, err
 	}
 	rows, err = q.QueryContext(ctx, `
-		SELECT c.relname, pg_get_constraintdef(con.oid, true)
+		SELECT c.relname, pg_get_constraintdef(con.oid, false)
 		FROM pg_catalog.pg_constraint con
 		JOIN pg_catalog.pg_class c ON c.oid = con.conrelid
 		JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace

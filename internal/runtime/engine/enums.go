@@ -80,22 +80,6 @@ func (f FailureDisposition) String() string {
 	}
 }
 
-type TimerOperation uint8
-
-const (
-	TimerUnknown TimerOperation = iota
-	TimerReconcile
-)
-
-func (t TimerOperation) String() string {
-	switch t {
-	case TimerReconcile:
-		return "reconcile"
-	default:
-		return ""
-	}
-}
-
 type GuardFailureAction uint8
 
 const (

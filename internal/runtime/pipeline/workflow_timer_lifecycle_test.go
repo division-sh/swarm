@@ -212,12 +212,12 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 		t.Fatal("expected coordinator")
 	}
 	ctx := testPipelineCoordinatorRunContext(t, pc)
-	if err := pc.workflowStore.Upsert(ctx, WorkflowInstance{
+	if err := pc.workflowStore.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      "ent-001",
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "waiting",
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
@@ -288,12 +288,12 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	if pc == nil {
 		t.Fatal("expected coordinator")
 	}
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      "ent-001",
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "ready",
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
@@ -394,13 +394,13 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 	if pc == nil {
 		t.Fatal("expected coordinator")
 	}
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      "ent-001",
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "ready",
 		Metadata:        map[string]any{},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
@@ -456,7 +456,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 	const rootEntityID = "11111111-1111-1111-1111-111111111111"
 	childEntityID := FlowInstanceEntityID("child/inst-1")
 	grandchildEntityID := FlowInstanceEntityID("child/grandchild/inst-1")
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      childEntityID,
 		StorageRef:      "child/inst-1",
 		WorkflowName:    "child",
@@ -467,10 +467,10 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 			"flow_path":        "child/inst-1",
 			"parent_entity_id": rootEntityID,
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed child instance: %v", err)
 	}
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      grandchildEntityID,
 		StorageRef:      "child/grandchild/inst-1",
 		WorkflowName:    "grandchild",
@@ -481,7 +481,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 			"flow_path":        "child/grandchild/inst-1",
 			"parent_entity_id": childEntityID,
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed grandchild instance: %v", err)
 	}
 
@@ -550,15 +550,15 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRo
 		childFlowPath = "child/9c38251c-4fba-4a18-9afc-774ede7cc866"
 	)
 	childRowID := FlowInstanceEntityID(childFlowPath)
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      rootEntityID,
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "idle",
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed root instance: %v", err)
 	}
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      childRowID,
 		StorageRef:      childFlowPath,
 		WorkflowName:    "child",
@@ -569,7 +569,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRo
 			"flow_path":        childFlowPath,
 			"parent_entity_id": rootEntityID,
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed child instance: %v", err)
 	}
 	if consume, handled, err := pc.workflowNodeInterceptPolicy(testAuthorActivityContext(t, context.Background()), "child/grandchild/micro.done", eventtest.RunCreatingRootIngress(
@@ -641,15 +641,15 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectInsideOuterSQLTxDo
 		childFlowPath = "child/9c38251c-4fba-4a18-9afc-774ede7cc866"
 	)
 	childRowID := FlowInstanceEntityID(childFlowPath)
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      rootEntityID,
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "idle",
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed root instance: %v", err)
 	}
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      childRowID,
 		StorageRef:      childFlowPath,
 		WorkflowName:    "child",
@@ -660,7 +660,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectInsideOuterSQLTxDo
 			"flow_path":        childFlowPath,
 			"parent_entity_id": rootEntityID,
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed child instance: %v", err)
 	}
 	tx, err := db.BeginTx(testAuthorActivityContext(t, context.Background()), nil)

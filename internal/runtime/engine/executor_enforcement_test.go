@@ -123,7 +123,6 @@ func TestExecutor_RejectsInvalidAdvancesToTransition(t *testing.T) {
 		TxRunner:            stubRunner{},
 		Locker:              stubLocker{},
 		Outbox:              stubOutbox{},
-		TimerApplier:        stubTimerApplier{},
 		Dispatcher:          stubDispatcher{},
 		TransitionValidator: rejectingTransitionValidator{},
 	}, nil)
@@ -159,13 +158,12 @@ func TestExecutor_GuardBlocksTransitionForTerminalState(t *testing.T) {
 		},
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:       stubSource(),
-		StateRepo:    repo,
-		TxRunner:     stubRunner{},
-		Locker:       stubLocker{},
-		Outbox:       stubOutbox{},
-		TimerApplier: stubTimerApplier{},
-		Dispatcher:   stubDispatcher{},
+		Source:     stubSource(),
+		StateRepo:  repo,
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
 		GuardRegistry: stubGuardRegistry{entries: map[identity.GuardKey]runtimeregistry.GuardInstruction{
 			identity.NormalizeGuardKey("not_in_terminal_state"): {
 				Key:     identity.NormalizeGuardKey("not_in_terminal_state"),
@@ -201,13 +199,12 @@ func TestExecutor_GuardBlocksTransitionForTerminalState(t *testing.T) {
 func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 	newExecutor := func(score int, allowed bool) *Executor {
 		exec, err := NewExecutor(RuntimeDependencies{
-			Source:       stubSource(),
-			StateRepo:    &persistentStateRepo{found: true, snapshot: StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{"score": score}, nil, map[string]map[string]any{})}},
-			TxRunner:     stubRunner{},
-			Locker:       stubLocker{},
-			Outbox:       stubOutbox{},
-			TimerApplier: stubTimerApplier{},
-			Dispatcher:   stubDispatcher{},
+			Source:     stubSource(),
+			StateRepo:  &persistentStateRepo{found: true, snapshot: StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{"score": score}, nil, map[string]map[string]any{})}},
+			TxRunner:   stubRunner{},
+			Locker:     stubLocker{},
+			Outbox:     stubOutbox{},
+			Dispatcher: stubDispatcher{},
 		}, stubEvaluator{bools: map[string]bool{
 			"entity.score >= 75": allowed,
 		}})
@@ -279,13 +276,12 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 		},
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:       stubSource(),
-		StateRepo:    repo,
-		TxRunner:     stubRunner{},
-		Locker:       stubLocker{},
-		Outbox:       stubOutbox{},
-		TimerApplier: stubTimerApplier{},
-		Dispatcher:   stubDispatcher{},
+		Source:     stubSource(),
+		StateRepo:  repo,
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
 	}, stubEvaluator{bools: map[string]bool{
 		"payload.score >= 70": true,
 	}})
@@ -344,13 +340,12 @@ func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T
 		},
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:       stubSource(),
-		StateRepo:    repo,
-		TxRunner:     stubRunner{},
-		Locker:       stubLocker{},
-		Outbox:       stubOutbox{},
-		TimerApplier: stubTimerApplier{},
-		Dispatcher:   stubDispatcher{},
+		Source:     stubSource(),
+		StateRepo:  repo,
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -430,13 +425,12 @@ func TestExecutor_FanInInputOwnsWindowAndDedupAtRuntime(t *testing.T) {
 		},
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:       source,
-		StateRepo:    repo,
-		TxRunner:     stubRunner{},
-		Locker:       stubLocker{},
-		Outbox:       stubOutbox{},
-		TimerApplier: stubTimerApplier{},
-		Dispatcher:   stubDispatcher{},
+		Source:     source,
+		StateRepo:  repo,
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)

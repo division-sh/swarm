@@ -209,7 +209,7 @@ func (s *WorkflowInstanceStore) mutateSQLiteE(ctx context.Context, instanceID st
 			return err
 		}
 		if !ok {
-			instance = WorkflowInstance{InstanceID: strings.TrimSpace(instanceID)}
+			return fmt.Errorf("workflow instance %s does not exist", strings.TrimSpace(instanceID))
 		}
 		if err := fn(&instance); err != nil {
 			return err
@@ -296,6 +296,10 @@ func (s *WorkflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 		mode := workflowInstanceMode(storageRef)
 		now := time.Now().UTC()
 		if createOnly {
+			now = instance.CreatedAt.UTC()
+			if now.IsZero() {
+				return fmt.Errorf("workflow initial materialization requires exact creation time")
+			}
 			flowInstanceInsert := `
 				INSERT INTO flow_instances (
 					instance_id, flow_template, mode, config, status, created_at

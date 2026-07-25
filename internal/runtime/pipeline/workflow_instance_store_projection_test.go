@@ -232,7 +232,7 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 	store := NewWorkflowInstanceStore(db)
 	ctx := testWorkflowStoreRunContext(t, store)
 	const storageRef = "review/inst-1"
-	first := WorkflowInstance{
+	first := materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      "inst-1",
 		StorageRef:      storageRef,
 		WorkflowName:    "review",
@@ -250,7 +250,7 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 		StateBuckets: map[string]any{
 			"score": map[string]any{"value": float64(1)},
 		},
-	}
+	})
 	if err := store.Create(ctx, first); err != nil {
 		t.Fatalf("create workflow instance: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestWorkflowInstanceStoreProjection_StaticRowsDoNotGainMaterializedFlowPath
 
 	store := NewWorkflowInstanceStore(db)
 	storageRef := uuid.NewString()
-	instance := WorkflowInstance{
+	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      storageRef,
 		StorageRef:      storageRef,
 		WorkflowName:    "static-flow",
@@ -340,7 +340,7 @@ func TestWorkflowInstanceStoreProjection_StaticRowsDoNotGainMaterializedFlowPath
 			"instance_id": storageRef,
 		},
 		StateBuckets: map[string]any{},
-	}
+	})
 
 	if err := store.Upsert(testWorkflowStoreRunContext(t, store), instance); err != nil {
 		t.Fatalf("upsert static workflow instance: %v", err)
@@ -430,7 +430,7 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 
 			store := NewWorkflowInstanceStore(db)
 			storageRef := "storage-ref"
-			if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
+			if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID:      "inst-1",
 				StorageRef:      storageRef,
 				WorkflowName:    "projection-flow",
@@ -440,7 +440,7 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 					"instance_id": "inst-1",
 				},
 				StateBuckets: map[string]any{},
-			}); err != nil {
+			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
 

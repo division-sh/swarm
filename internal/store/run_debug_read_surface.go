@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -503,7 +504,7 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 		return RunDebugReport{}, err
 	}
 	report.FailedDeliveries = failedDeliveries
-	testQuiescence, err := s.loadRunTestQuiescence(ctx, report.RunID)
+	testQuiescence, err := s.loadRunTestQuiescence(ctx, report.RunID, time.Now().UTC())
 	if err != nil {
 		return RunDebugReport{}, err
 	}
@@ -652,7 +653,7 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 	return report, nil
 }
 
-func (s *PostgresStore) loadRunTestQuiescence(ctx context.Context, runID string) (RunTestQuiescence, error) {
+func (s *PostgresStore) loadRunTestQuiescence(ctx context.Context, runID string, observedAt time.Time) (RunTestQuiescence, error) {
 	var out RunTestQuiescence
 	summary, err := s.SummarizeRun(ctx, runID)
 	if err != nil {
@@ -664,15 +665,19 @@ func (s *PostgresStore) loadRunTestQuiescence(ctx context.Context, runID string)
 		return RunTestQuiescence{}, fmt.Errorf("load run test quiescence unsettled pipeline events: %w", err)
 	}
 	out.UnsettledPipelineEvents = pipelineSummary.Replayable + pipelineSummary.Deferred
-	if err := s.DB.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM timers
-		WHERE run_id = $1::uuid
-		  AND status = 'active'
-		  AND fire_at <= now()
-	`, runID).Scan(&out.DueTimers); err != nil {
-		return RunTestQuiescence{}, fmt.Errorf("load run test quiescence due timers: %w", err)
+	scope, err := runtimetimerobligation.Run(runID)
+	if err != nil {
+		return RunTestQuiescence{}, err
 	}
+	timerSnapshot, err := s.ReadTimerObligations(ctx, scope, observedAt)
+	if err != nil {
+		return RunTestQuiescence{}, fmt.Errorf("load run test quiescence timer obligations: %w", err)
+	}
+	runTimers, ok := timerSnapshot.Run(runID)
+	if !ok {
+		return RunTestQuiescence{}, fmt.Errorf("load run test quiescence timer obligations: snapshot omitted requested run")
+	}
+	out.DueTimers = runTimers.Totals().DueCount
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM agent_sessions

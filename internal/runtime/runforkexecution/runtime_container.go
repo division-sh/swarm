@@ -296,7 +296,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 			}
 		}
 	}()
-	agentRuntime, admission, err := startSelectedContractAgentRuntime(runCtx, req, bus)
+	agentRuntime, admission, err := startSelectedContractAgentRuntime(runCtx, req, bus, workflowStore)
 	if err != nil {
 		return nil, err
 	}

@@ -43,8 +43,8 @@ func TestCreateFlowInstanceResolvesInstanceIDFromPayloadPath(t *testing.T) {
 	trigger := eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("custom.triggered"),
-		testPipelineRunID,
 		"",
+		testPipelineRunID,
 		[]byte(`{"entity_id":"ent-1","desired_instance_id":"inst-42","name":"alpha"}`),
 		0,
 		"",
@@ -88,7 +88,7 @@ func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 		module:        &pipelineFixtureWorkflowModule{source: source},
 		workflowStore: store,
 		instanceActivator: func(ctx context.Context, req FlowInstanceActivationRequest) error {
-			return store.Upsert(ctx, WorkflowInstance{
+			return store.MaterializeInitialEntry(ctx, WorkflowInstance{
 				InstanceID:      req.Instance.InstanceID,
 				StorageRef:      req.Instance.InstancePath,
 				WorkflowName:    req.Instance.TemplateID,
@@ -100,10 +100,11 @@ func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 					"flow_path":        req.Instance.InstancePath,
 					"parent_entity_id": req.Instance.ParentEntityID,
 				},
-			})
+			}, req.OccurredAt)
 		},
 	}
-	pc.workflowTimers = newWorkflowTimerLifecycle(pc)
+	pc.workflowTimers = newWorkflowTimerLifecycle(store, pc.SemanticSource(), pc.bus, pc.workOwner, pc.timerScheduler)
+	store.ConfigureWorkflowInstanceLifecycle(pipelineWorkflowLifecycleOwner{coordinator: pc})
 	trigger := eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("spawn.requested"),
@@ -114,12 +115,10 @@ func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 		runID,
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
-		time.Time{},
+		time.Now().UTC(),
 	)
 	triggerCtx := workflowTriggerContext{Event: trigger}
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
-	beforeCreate := time.Now().UTC()
-
 	err := pc.createFlowInstance(ctx, triggerCtx, handlerExecutionPlan{
 		Template:       "review",
 		InstanceIDFrom: "payload.instance_id",
@@ -144,8 +143,8 @@ func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 		t.Fatalf("timer declaration = %q, want review.awaiting_review.expired", activation.Ref.Declaration)
 	}
 	scheduledAt := activation.FireAt
-	if scheduledAt.Before(beforeCreate.Add(2*time.Hour)) || scheduledAt.After(time.Now().UTC().Add(2*time.Hour+time.Second)) {
-		t.Fatalf("schedule At = %s, want child-flow policy rendered delay near 2h after create", scheduledAt)
+	if want := trigger.CreatedAt().Add(2 * time.Hour); !scheduledAt.Equal(want) {
+		t.Fatalf("schedule At = %s, want exact trigger-relative time %s", scheduledAt, want)
 	}
 }
 
@@ -693,7 +692,7 @@ opco.ceo_ready:
       emit: opco.ceo_ready
 `,
 	})
-	evt := eventtest.RunCreatingRootIngress(
+	evt := handlerTestRootIngress(
 		uuid.NewString(),
 		events.EventType("operating/inst-1/opco.product_initialization_requested"),
 		"",
@@ -773,14 +772,14 @@ states: [initializing, ready]
 `,
 	})
 	const entityID = "11111111-1111-1111-1111-111111111111"
-	evt := eventtest.RunCreatingRootIngress(
+	evt := handlerTestRootIngress(
 		uuid.NewString(),
 		events.EventType("operating/inst-1/build_progress"),
 		"",
 		"",
 		mustJSON(map[string]any{"entity_id": entityID, "summary": "compile complete"}),
 		0,
-		"",
+		testPipelineRunID,
 		"",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "operating/inst-1"),
 		time.Time{},
@@ -812,7 +811,7 @@ states: [initializing, ready]
 		module:         staticSemanticWorkflowModule{source: source},
 	}
 	ctx := testPipelineCoordinatorRunContext(t, pc)
-	if err := workflowStore.Upsert(ctx, WorkflowInstance{
+	if err := workflowStore.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "operating",
@@ -820,7 +819,7 @@ states: [initializing, ready]
 		CurrentState:    "initializing",
 		Metadata:        map[string]any{},
 		StateBuckets:    map[string]any{},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 	configurePipelineTestDeliveryOwner(t, pc)

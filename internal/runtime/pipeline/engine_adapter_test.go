@@ -42,6 +42,23 @@ func testEngineStateSnapshot(metadata map[string]any, gates map[string]bool, buc
 	}
 }
 
+func applyMaterializedEngineStateMutationForTest(
+	t *testing.T,
+	instance *WorkflowInstance,
+	mutation runtimeengine.StateMutation,
+	allowedFields map[string]struct{},
+	source semanticview.Source,
+	flowID string,
+) {
+	t.Helper()
+	if instance.EnteredStageAt.IsZero() {
+		instance.EnteredStageAt = time.Date(2026, time.July, 25, 12, 0, 0, 0, time.UTC)
+	}
+	if err := applyEngineStateMutation(instance, mutation, allowedFields, source, flowID); err != nil {
+		t.Fatalf("apply materialized engine state mutation: %v", err)
+	}
+}
+
 func TestApplyEngineStateMutationMirrorsDataAccumulationIntoEntityProjection(t *testing.T) {
 	instance := &WorkflowInstance{
 		Metadata:     map[string]any{"research_context": map[string]any{"summary": "done"}},
@@ -57,7 +74,7 @@ func TestApplyEngineStateMutationMirrorsDataAccumulationIntoEntityProjection(t *
 			{TargetField: "research_context", SourceField: "research_context"},
 		},
 	}
-	applyEngineStateMutation(instance, mutation, map[string]struct{}{"research_context": {}}, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, map[string]struct{}{"research_context": {}}, nil, "")
 
 	entityProjection, _ := workflowStateBucketObject(*instance, workflowStateBucketEntityProjection)
 	got, ok := entityProjection["research_context"].(map[string]any)
@@ -81,7 +98,7 @@ func TestApplyEngineStateMutationMergesGateDeltasIntoExistingMetadata(t *testing
 	mutation := testEngineStateMutation(nil, map[string]bool{"g_c": true}, nil)
 	mutation.SetGate = "g_c"
 
-	applyEngineStateMutation(instance, mutation, nil, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
 
 	gates := workflowStateGatesAsBools(instance.Metadata)
 	want := map[string]bool{"g_a": true, "g_b": true, "g_c": true}
@@ -110,7 +127,7 @@ func TestApplyEngineStateMutationScopesChildFlowGates(t *testing.T) {
 	mutation := testEngineStateMutation(nil, map[string]bool{"g_validated": true}, nil)
 	mutation.SetGate = "g_validated"
 
-	applyEngineStateMutation(instance, mutation, nil, source, "child")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, source, "child")
 
 	gates := workflowStateGatesAsBools(instance.Metadata)
 	if !gates["child/g_validated"] {
@@ -160,7 +177,7 @@ child_entity:
 		},
 	})
 	const entityID = "11111111-1111-1111-1111-111111111111"
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      "child/existing",
 		WorkflowName:    "child",
@@ -171,7 +188,7 @@ child_entity:
 			"request_id": "req-existing",
 			"flow_path":  "child/existing",
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed child workflow instance: %v", err)
 	}
 
@@ -198,7 +215,7 @@ func TestApplyEngineStateMutationPreservesExistingMetadataOnGateOnlyMutation(t *
 	mutation := testEngineStateMutation(nil, map[string]bool{"g_ready": true}, nil)
 	mutation.SetGate = "g_ready"
 
-	applyEngineStateMutation(instance, mutation, nil, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
 
 	if !workflowStateGatesAsBools(instance.Metadata)["g_ready"] {
 		t.Fatalf("gates = %#v, want g_ready=true", instance.Metadata["gates"])
@@ -228,7 +245,7 @@ func TestApplyEngineStateMutationPreservesRuntimeControlMetadata(t *testing.T) {
 		"business_status":      "new",
 	}, nil, nil)
 
-	applyEngineStateMutation(instance, mutation, nil, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
 
 	for key, want := range map[string]any{
 		"storage_ref":          "review/inst-1",
@@ -264,7 +281,7 @@ func TestApplyEngineStateMutationRejectsAuthoredParentRouteInsertion(t *testing.
 		"parent_entity_id":     "parent-ent",
 	}, nil, nil)
 
-	applyEngineStateMutation(instance, mutation, nil, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
 
 	for _, key := range []string{"parent_flow_id", "parent_flow_instance", "parent_entity_id"} {
 		if _, ok := instance.Metadata[key]; ok {
@@ -291,7 +308,7 @@ func TestApplyEngineStateMutationRejectsAuthoredParentRouteCompletion(t *testing
 		"parent_entity_id":     "wrong-parent",
 	}, nil, nil)
 
-	applyEngineStateMutation(instance, mutation, nil, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
 
 	if _, ok := instance.Metadata["parent_flow_id"]; ok {
 		t.Fatalf("parent_flow_id = %#v, want absent", instance.Metadata["parent_flow_id"])
@@ -384,14 +401,14 @@ func TestMaybeDeactivateTerminalFlowInstance_IgnoresRootWorkflowEntity(t *testin
 	})
 
 	const entityID = "11111111-1111-1111-1111-111111111111"
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "root",
 		WorkflowVersion: "v-test",
 		CurrentState:    "pending",
 		Metadata:        map[string]any{},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed root instance: %v", err)
 	}
 
@@ -439,7 +456,7 @@ func TestMaybeDeactivateTerminalFlowInstance_PassesTerminalStateToTemplateDeacti
 	const flowPath = "review/inst-1"
 	entityID := FlowInstanceEntityID(flowPath)
 	const parentEntityID = "22222222-2222-2222-2222-222222222222"
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      "inst-1",
 		StorageRef:      flowPath,
 		WorkflowName:    "review",
@@ -451,7 +468,7 @@ func TestMaybeDeactivateTerminalFlowInstance_PassesTerminalStateToTemplateDeacti
 			"flow_path":        flowPath,
 			"parent_entity_id": parentEntityID,
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed template instance: %v", err)
 	}
 
@@ -469,7 +486,7 @@ func TestMaybeDeactivateTerminalFlowInstance_PassesTerminalStateToTemplateDeacti
 	}
 }
 
-func TestApplyEngineStateMutationInitializesWorkflowInstanceDefaults(t *testing.T) {
+func TestApplyEngineStateMutationRejectsMissingMaterializedEntryTime(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name:    "empire",
@@ -486,19 +503,9 @@ func TestApplyEngineStateMutationInitializesWorkflowInstanceDefaults(t *testing.
 		},
 	}
 
-	applyEngineStateMutation(instance, mutation, map[string]struct{}{"name": {}}, source, "scoring")
-
-	if got := instance.WorkflowName; got != "scoring" {
-		t.Fatalf("WorkflowName = %q, want scoring", got)
-	}
-	if got := instance.WorkflowVersion; got != "7.1.0" {
-		t.Fatalf("WorkflowVersion = %q, want 7.1.0", got)
-	}
-	if got := instance.CurrentState; got != "pending" {
-		t.Fatalf("CurrentState = %q, want pending", got)
-	}
-	if instance.EnteredStageAt.IsZero() {
-		t.Fatal("expected EnteredStageAt to be initialized")
+	err := applyEngineStateMutation(instance, mutation, map[string]struct{}{"name": {}}, source, "scoring")
+	if err == nil || !strings.Contains(err.Error(), "materialized entry time") {
+		t.Fatalf("applyEngineStateMutation error = %v, want materialized entry time refusal", err)
 	}
 }
 
@@ -534,7 +541,7 @@ func TestApplyEngineStateMutationMirrorsAllowedMetadataFieldsWithoutDataAccumula
 		"scoring_rubric":  "corpus_rubric",
 	}, nil, nil)
 
-	applyEngineStateMutation(instance, mutation, map[string]struct{}{
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, map[string]struct{}{
 		"composite_score": {},
 		"scoring_rubric":  {},
 	}, nil, "")
@@ -555,7 +562,7 @@ func TestApplyEngineStateMutationDoesNotCaptureSubjectIDFromMetadata(t *testing.
 	instance := &WorkflowInstance{}
 	mutation := testEngineStateMutation(map[string]any{}, nil, nil)
 
-	applyEngineStateMutation(instance, mutation, nil, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
 
 	if got := strings.TrimSpace(asString(instance.Metadata["subject_id"])); got != "" {
 		t.Fatalf("metadata subject_id = %q, want removed", got)
@@ -581,9 +588,9 @@ func TestUpdateEntityState_ReturnsWorkflowStoreMutationError(t *testing.T) {
 
 	const entityID = "11111111-1111-1111-1111-111111111111"
 	ctx := testPipelineRunContextNoSeed(t)
-	err := pc.updateEntityState(testWorkflowStateTransitionContext(ctx, entityID, "scoring/vertical.marginal"), entityID, "marginal_review", "scoring/vertical.marginal")
+	err := pc.persistWorkflowStateForTest(testWorkflowStateTransitionContext(ctx, entityID, "scoring/vertical.marginal"), entityID, "marginal_review", "scoring/vertical.marginal")
 	if err == nil {
-		t.Fatal("expected updateEntityState to fail when workflow store mutate fails")
+		t.Fatal("expected workflow state persistence to fail when workflow store mutate fails")
 	}
 }
 
@@ -591,14 +598,14 @@ func TestPipelineEngineStateRepoSaveStateRejectsForeignFlowWrite(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := NewWorkflowInstanceStore(db)
 	entityID := "11111111-1111-1111-1111-111111111111"
-	if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "flow-a",
 		WorkflowVersion: "1.6.0",
 		CurrentState:    "pending",
 		Metadata:        map[string]any{},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("upsert flow-a entity: %v", err)
 	}
 
@@ -682,7 +689,7 @@ func TestPipelineEngineStateRepoRoundTripsTypedCarrier(t *testing.T) {
 		},
 	}
 	entityID := identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111")
-	if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID.String(),
 		StorageRef:      entityID.String(),
 		WorkflowName:    "root",
@@ -690,7 +697,7 @@ func TestPipelineEngineStateRepoRoundTripsTypedCarrier(t *testing.T) {
 		CurrentState:    "pending",
 		Metadata:        map[string]any{},
 		StateBuckets:    map[string]any{},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 	mutation := testEngineStateMutation(
@@ -726,7 +733,7 @@ func TestPipelineEngineStateRepoLoadStateRejectsMalformedPersistedCarrier(t *tes
 
 	t.Run("state_buckets", func(t *testing.T) {
 		store := NewWorkflowInstanceStore(db)
-		if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
+		if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 			InstanceID:      "22222222-2222-2222-2222-222222222222",
 			StorageRef:      "22222222-2222-2222-2222-222222222222",
 			WorkflowName:    "root",
@@ -735,7 +742,7 @@ func TestPipelineEngineStateRepoLoadStateRejectsMalformedPersistedCarrier(t *tes
 			StateBuckets: map[string]any{
 				"evidence": "bad",
 			},
-		}); err != nil {
+		})); err != nil {
 			t.Fatalf("upsert malformed state bucket instance: %v", err)
 		}
 		repo := pipelineEngineStateRepo{coordinator: &PipelineCoordinator{workflowStore: store}}
@@ -867,7 +874,7 @@ func TestPipelineEngineActionRunner_RecordEvidenceUsesMatchedHandlerEvidenceTarg
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := testWorkflowStoreRunContext(t, store)
-			if err := store.Upsert(ctx, WorkflowInstance{
+			if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID:      tt.entityID,
 				StorageRef:      tt.entityID,
 				WorkflowName:    "operating",
@@ -875,7 +882,7 @@ func TestPipelineEngineActionRunner_RecordEvidenceUsesMatchedHandlerEvidenceTarg
 				CurrentState:    "initializing",
 				Metadata:        map[string]any{},
 				StateBuckets:    map[string]any{},
-			}); err != nil {
+			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
 
@@ -1166,14 +1173,14 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
-	if err := store.Upsert(ctx, WorkflowInstance{
+	if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "working",
 		Metadata:        cloneStringAnyMap(initial),
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
@@ -1502,14 +1509,14 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsAgentVisibleArtifac
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
-	if err := store.Upsert(ctx, WorkflowInstance{
+	if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
@@ -1575,14 +1582,14 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsUnusableArtifactRoo
 			ctx := testWorkflowStoreRunContext(t, store)
 			entityID := "22222222-2222-2222-2222-222222222222"
 			initial := testArtifactRepoEntityFields()
-			if err := store.Upsert(ctx, WorkflowInstance{
+			if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID:      entityID,
 				StorageRef:      entityID,
 				WorkflowName:    "artifact-repo",
 				WorkflowVersion: "1.0.0",
 				CurrentState:    "ready",
 				Metadata:        cloneStringAnyMap(initial),
-			}); err != nil {
+			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
 			action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
@@ -1629,14 +1636,14 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitQueuesSuccessResultEvent(t
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
-	if err := store.Upsert(ctx, WorkflowInstance{
+	if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
@@ -1685,14 +1692,14 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitQueuesSuccessResultEvent(t
 		t.Fatalf("same-source replay queued success event count = %d, want 1", got)
 	}
 
-	if err := store.Upsert(ctx, WorkflowInstance{
+	if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("reset workflow instance to simulate DB/git split: %v", err)
 	}
 	repairAction, repairCtx := testArtifactRepoActionAndContext(entityID, initial, "55555555-5555-5555-5555-555555555555", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
@@ -1730,14 +1737,14 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesSuccessResultThroughO
 	ctx := testWorkflowStoreRunContext(t, workflowStore)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
-	if err := workflowStore.Upsert(ctx, WorkflowInstance{
+	if err := workflowStore.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
@@ -1799,14 +1806,14 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesFailureResultThroughO
 	ctx := testWorkflowStoreRunContext(t, workflowStore)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
-	if err := workflowStore.Upsert(ctx, WorkflowInstance{
+	if err := workflowStore.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
@@ -1872,14 +1879,14 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitFailureResultOutboxFailureR
 	ctx := testWorkflowStoreRunContext(t, workflowStore)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
-	if err := workflowStore.Upsert(ctx, WorkflowInstance{
+	if err := workflowStore.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
@@ -1934,14 +1941,14 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedWithoutResultEv
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
-	if err := store.Upsert(ctx, WorkflowInstance{
+	if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
@@ -1992,14 +1999,14 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnInvalidSucces
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
-	if err := store.Upsert(ctx, WorkflowInstance{
+	if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
@@ -2036,14 +2043,14 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAl
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
-	if err := store.Upsert(ctx, WorkflowInstance{
+	if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
@@ -2098,14 +2105,14 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnYAMLSchemaMis
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
-	if err := store.Upsert(ctx, WorkflowInstance{
+	if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "rank: 2\n")
@@ -2137,14 +2144,14 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsRequestIDContentCon
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
-	if err := store.Upsert(ctx, WorkflowInstance{
+	if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
@@ -2185,14 +2192,14 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistor
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
-	if err := store.Upsert(ctx, WorkflowInstance{
+	if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
@@ -2258,14 +2265,14 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRepairsDBStateFromGitHisto
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
-	if err := store.Upsert(ctx, WorkflowInstance{
+	if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
@@ -2277,14 +2284,14 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRepairsDBStateFromGitHisto
 		t.Fatalf("load committed workflow instance: %v", err)
 	}
 	ref := strings.TrimSpace(asString(committed.Metadata["current_ref"]))
-	if err := store.Upsert(ctx, WorkflowInstance{
+	if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("reset workflow instance to simulate DB/git split: %v", err)
 	}
 
@@ -2313,14 +2320,14 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitEnforcesProjectedRepoSize(
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
-	if err := store.Upsert(ctx, WorkflowInstance{
+	if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
@@ -3145,7 +3152,7 @@ func (s *recordingScheduleStore) CompleteScheduleFireExact(context.Context, Sche
 	return nil
 }
 
-func TestPipelineEngineTimerApplierPersistsTimersAndDefersSchedulerToPostCommit(t *testing.T) {
+func TestPipelineEngineLifecycleEffectApplierPersistsTimersAndDefersSchedulerToPostCommit(t *testing.T) {
 	store := &recordingScheduleStore{}
 	scheduler := NewSchedulerWithWorkOwner(pipelineTestWorkOwner(t))
 	defer scheduler.Stop()

@@ -723,6 +723,8 @@ func (h *runtimeHarness) seedInitialState(entityID string) {
 		WorkflowName:    h.bundle.WorkflowName(),
 		WorkflowVersion: h.bundle.WorkflowVersion(),
 		CurrentState:    initialState,
+		EnteredStageAt:  h.startedAt,
+		CreatedAt:       h.startedAt,
 	}); err != nil {
 		h.t.Fatalf("seed initial workflow state for %s: %v", entityID, err)
 	}
@@ -757,6 +759,8 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 			WorkflowName:    h.bundle.WorkflowName(),
 			WorkflowVersion: h.bundle.WorkflowVersion(),
 			CurrentState:    h.initialState,
+			EnteredStageAt:  h.startedAt,
+			CreatedAt:       h.startedAt,
 		}
 	}
 	if strings.TrimSpace(instance.InstanceID) == "" {

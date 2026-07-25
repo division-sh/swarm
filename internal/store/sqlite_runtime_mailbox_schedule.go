@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
@@ -23,6 +23,16 @@ type sqliteScheduleExecutor interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func (s *SQLiteRuntimeStore) ReadTimerObligations(ctx context.Context, scope runtimetimerobligation.Scope, observedAt time.Time) (runtimetimerobligation.Snapshot, error) {
+	if s == nil || s.DB == nil {
+		return runtimetimerobligation.Snapshot{}, fmt.Errorf("timer obligation reader requires SQLite store")
+	}
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		return runtimetimerobligation.Read(ctx, tx, runtimetimerobligation.DialectSQLite, scope, observedAt)
+	}
+	return runtimetimerobligation.Read(ctx, s.DB, runtimetimerobligation.DialectSQLite, scope, observedAt)
 }
 
 func (s *SQLiteRuntimeStore) InsertMailboxItem(ctx context.Context, item runtimetools.MailboxItem) (string, error) {
@@ -215,9 +225,6 @@ func (s *SQLiteRuntimeStore) UpsertSchedule(ctx context.Context, sc runtimepipel
 	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
 		return fmt.Errorf("agent_id and event_type are required")
 	}
-	if sc.EffectiveTimerID() != "" {
-		return fmt.Errorf("workflow timer activations must be persisted by WorkflowTimerLifecycle")
-	}
 	timerName, err := genericScheduleTimerName(sc)
 	if err != nil {
 		return err
@@ -281,9 +288,6 @@ func (s *SQLiteRuntimeStore) cancelSQLiteScheduleExact(ctx context.Context, sc r
 	sc.NormalizeRunID()
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
-	if sc.EffectiveTimerID() != "" {
-		return fmt.Errorf("workflow timer cancellation must be owned by WorkflowTimerLifecycle")
-	}
 	if err := s.runRuntimeMutation(ctx, "sqlite schedule cancel", func(txctx context.Context, tx *sql.Tx) error {
 		if requireActive && strings.TrimSpace(sc.RunID) != "" {
 			if err := storerunlifecycle.RequireActive(txctx, tx, sc.RunID, storerunlifecycle.DialectSQLite); err != nil {
@@ -299,9 +303,9 @@ func (s *SQLiteRuntimeStore) cancelSQLiteScheduleExact(ctx context.Context, sc r
 			  AND COALESCE(entity_id, '') = COALESCE(?, '')
 			  AND COALESCE(flow_instance, '') = COALESCE(?, '')
 			  AND COALESCE(json_extract(fire_payload, '$.__schedule_task_id'), '') = ?
-			  AND instr(timer_name, ?) <> 1
+			  AND task_type IN ('timer', 'scheduled_task', 'deadline', 'global_recurring')
 			  AND status = 'active'
-		`, sqliteNullUUID(sc.RunID), sc.AgentID, sc.EventType, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance), strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix())
+		`, sqliteNullUUID(sc.RunID), sc.AgentID, sc.EventType, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance), strings.TrimSpace(sc.TaskID))
 		return err
 	}); err != nil {
 		return fmt.Errorf("cancel sqlite timer exact: %w", err)
@@ -323,10 +327,10 @@ func (s *SQLiteRuntimeStore) LoadActiveSchedules(ctx context.Context) ([]runtime
 		LEFT JOIN runs run ON run.run_id = t.run_id
 		WHERE t.status = 'active'
 		  AND COALESCE(t.owner_agent, '') <> ''
-		  AND instr(t.timer_name, ?) <> 1
+		  AND t.task_type IN ('timer', 'scheduled_task', 'deadline', 'global_recurring')
 		  AND (t.run_id IS NULL OR run.status IN ('running', 'paused'))
 		ORDER BY t.fire_at ASC
-	`, timeridentity.WorkflowTimerActivationTaskPrefix())
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("load sqlite active schedules: %w", err)
 	}
@@ -366,9 +370,6 @@ func (s *SQLiteRuntimeStore) MarkScheduleFiredExact(ctx context.Context, sc runt
 	sc.NormalizeRunID()
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
-	if sc.EffectiveTimerID() != "" {
-		return fmt.Errorf("workflow timer completion must be owned by WorkflowTimerLifecycle")
-	}
 	if err := s.runRuntimeMutation(ctx, "sqlite schedule fired", func(txctx context.Context, tx *sql.Tx) error {
 		if strings.TrimSpace(sc.RunID) != "" {
 			if err := storerunlifecycle.RequireActive(txctx, tx, sc.RunID, storerunlifecycle.DialectSQLite); err != nil {
@@ -384,9 +385,9 @@ func (s *SQLiteRuntimeStore) MarkScheduleFiredExact(ctx context.Context, sc runt
 			  AND COALESCE(entity_id, '') = COALESCE(?, '')
 			  AND COALESCE(flow_instance, '') = COALESCE(?, '')
 			  AND COALESCE(json_extract(fire_payload, '$.__schedule_task_id'), '') = ?
-			  AND instr(timer_name, ?) <> 1
+			  AND task_type IN ('timer', 'scheduled_task', 'deadline', 'global_recurring')
 			  AND status = 'active'
-		`, time.Now().UTC(), sqliteNullUUID(sc.RunID), sc.AgentID, sc.EventType, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance), strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix())
+		`, time.Now().UTC(), sqliteNullUUID(sc.RunID), sc.AgentID, sc.EventType, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance), strings.TrimSpace(sc.TaskID))
 		return err
 	}); err != nil {
 		return fmt.Errorf("mark sqlite timer fired exact: %w", err)
@@ -403,7 +404,6 @@ func (s *SQLiteRuntimeStore) ClaimSchedule(ctx context.Context, sc runtimepipeli
 	sc.NormalizeRunID()
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
-	sc.NormalizeTimerID()
 	var active bool
 	exec := sqliteScheduleDBExecutor(ctx, s.DB)
 	if strings.TrimSpace(sc.RunID) != "" {
@@ -413,34 +413,6 @@ func (s *SQLiteRuntimeStore) ClaimSchedule(ctx context.Context, sc runtimepipeli
 			}
 			return false, err
 		}
-	}
-	if sc.EffectiveTimerID() != "" {
-		occurrence, ok := timeridentity.ParseWorkflowTimerOccurrenceTaskID(sc.TaskID)
-		if !ok || occurrence.Activation.ActivationID != sc.EffectiveTimerID() {
-			return false, fmt.Errorf("workflow timer claim identity is invalid")
-		}
-		err := exec.QueryRowContext(ctx, `
-			SELECT EXISTS (
-				SELECT 1
-				FROM timers t
-				LEFT JOIN runs run ON run.run_id = t.run_id
-				WHERE t.timer_id = ?
-				  AND t.timer_name = ?
-				  AND t.run_id = ?
-				  AND t.owner_agent = ?
-				  AND t.fire_event = ?
-				  AND t.entity_id = ?
-				  AND t.flow_instance = ?
-				  AND t.fire_at = ?
-				  AND t.status = 'active'
-				  AND run.status IN ('running', 'paused')
-			)
-		`, sc.TimerID, occurrence.Activation.TaskID(), sc.RunID, sc.AgentID, sc.EventType,
-			sc.EntityID, sc.FlowInstance, occurrence.DueAt).Scan(&active)
-		if err != nil {
-			return false, fmt.Errorf("claim sqlite workflow timer ownership: %w", err)
-		}
-		return active, nil
 	}
 	err := exec.QueryRowContext(ctx, `
 		SELECT EXISTS (
@@ -453,11 +425,11 @@ func (s *SQLiteRuntimeStore) ClaimSchedule(ctx context.Context, sc runtimepipeli
 			  AND COALESCE(t.entity_id, '') = COALESCE(?, '')
 			  AND COALESCE(t.flow_instance, '') = COALESCE(?, '')
 			  AND COALESCE(json_extract(t.fire_payload, '$.__schedule_task_id'), '') = ?
-			  AND instr(t.timer_name, ?) <> 1
+			  AND t.task_type IN ('timer', 'scheduled_task', 'deadline', 'global_recurring')
 			  AND t.status = 'active'
 			  AND (t.run_id IS NULL OR run.status IN ('running', 'paused'))
 		)
-	`, sqliteNullUUID(sc.RunID), sc.AgentID, sc.EventType, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance), strings.TrimSpace(sc.TaskID), timeridentity.WorkflowTimerActivationTaskPrefix()).Scan(&active)
+	`, sqliteNullUUID(sc.RunID), sc.AgentID, sc.EventType, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance), strings.TrimSpace(sc.TaskID)).Scan(&active)
 	if err != nil {
 		return false, fmt.Errorf("claim sqlite schedule ownership: %w", err)
 	}

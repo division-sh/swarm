@@ -79,11 +79,36 @@ func testWorkflowStoreRunContext(t *testing.T, store *WorkflowInstanceStore) con
 	return testPipelineRunContext(t, store.db)
 }
 
+func materializedWorkflowInstanceForTest(instance WorkflowInstance) WorkflowInstance {
+	occurredAt := time.Date(2026, time.July, 25, 12, 0, 0, 0, time.UTC)
+	if instance.EnteredStageAt.IsZero() {
+		instance.EnteredStageAt = occurredAt
+	}
+	if instance.CreatedAt.IsZero() {
+		instance.CreatedAt = occurredAt
+	}
+	return instance
+}
+
+func configureWorkflowLifecycleForTest(t testing.TB, pc *PipelineCoordinator) {
+	t.Helper()
+	if pc == nil || pc.workflowStore == nil {
+		return
+	}
+	if pc.workflowTimers == nil {
+		pc.workflowTimers = newWorkflowTimerLifecycle(pc.workflowStore, pc.SemanticSource(), pc.bus, pc.workOwner, pc.timerScheduler)
+	}
+	if pc.workflowStore.lifecycleOwner == nil {
+		pc.workflowStore.ConfigureWorkflowInstanceLifecycle(pipelineWorkflowLifecycleOwner{coordinator: pc})
+	}
+}
+
 func testPipelineCoordinatorRunContext(t *testing.T, pc *PipelineCoordinator) context.Context {
 	t.Helper()
 	if pc == nil {
 		t.Fatal("test pipeline coordinator run context requires coordinator")
 	}
+	configureWorkflowLifecycleForTest(t, pc)
 	if pc.db != nil {
 		return testPipelineRunContext(t, pc.db)
 	}

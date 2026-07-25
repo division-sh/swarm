@@ -233,12 +233,15 @@ func seedFanInBarrierRun(t *testing.T, ctx context.Context, backend fanInBarrier
 func seedFanInBarrierPortfolioShell(t *testing.T, ctx context.Context, workflowStore *runtimepipeline.WorkflowInstanceStore, bundle *runtimecontracts.WorkflowContractBundle) {
 	t.Helper()
 	entityID := runtimepipeline.FlowInstanceEntityID("portfolio")
+	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	if err := workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      "portfolio",
 		StorageRef:      "portfolio",
 		WorkflowName:    "portfolio",
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "collecting",
+		EnteredStageAt:  enteredAt,
+		CreatedAt:       enteredAt,
 		Metadata: map[string]any{
 			"entity_id":     entityID,
 			"portfolio_id":  "portfolio",

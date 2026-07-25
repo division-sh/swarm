@@ -9,15 +9,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
-type deliveryContextTimerApplier struct {
-	intents []TimerIntent
-}
-
-func (r *deliveryContextTimerApplier) ApplyTimerIntents(_ context.Context, _ identity.EntityID, intents []TimerIntent) error {
-	r.intents = append([]TimerIntent(nil), intents...)
-	return nil
-}
-
 type deliveryContextActivityWriter struct {
 	intents []ActivityIntent
 }
@@ -29,12 +20,10 @@ func (r *deliveryContextActivityWriter) WriteActivityIntents(_ context.Context, 
 
 func TestExecutorPersistPropagatesDeliveryContextToEveryContinuationIntent(t *testing.T) {
 	outbox := &recordingEmitOutbox{}
-	timers := &deliveryContextTimerApplier{}
 	activities := &deliveryContextActivityWriter{}
 	exec := &Executor{deps: RuntimeDependencies{
 		StateRepo:       stubStateRepo{},
 		Outbox:          outbox,
-		TimerApplier:    timers,
 		ActivityIntents: activities,
 	}}
 	deliveryContext := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:intent-propagation"}}
@@ -43,7 +32,6 @@ func TestExecutorPersistPropagatesDeliveryContextToEveryContinuationIntent(t *te
 		req: ExecutionRequest{EntityID: identity.EntityID("entity-a")},
 		result: ExecutionResult{
 			EmitIntents:     []EmitIntent{{}},
-			TimerIntents:    []TimerIntent{{Operation: TimerReconcile}},
 			ActivityIntents: []ActivityIntent{{ActivityID: "provider-call", ExecutionMode: executionmode.Live}},
 		},
 	}
@@ -52,9 +40,6 @@ func TestExecutorPersistPropagatesDeliveryContextToEveryContinuationIntent(t *te
 	}
 	if len(outbox.intents) != 1 || outbox.intents[0].Context.ReplyContextID() != deliveryContext.ReplyContextID() {
 		t.Fatalf("emit context = %#v", outbox.intents)
-	}
-	if len(timers.intents) != 1 || timers.intents[0].Context.ReplyContextID() != deliveryContext.ReplyContextID() {
-		t.Fatalf("timer context = %#v", timers.intents)
 	}
 	if len(activities.intents) != 1 || activities.intents[0].Context.ReplyContextID() != deliveryContext.ReplyContextID() {
 		t.Fatalf("activity context = %#v", activities.intents)

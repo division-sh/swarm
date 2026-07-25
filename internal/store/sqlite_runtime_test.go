@@ -23,6 +23,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -420,14 +421,14 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 	}
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 	bus := &sqliteFlowActivationBus{}
+	bundle := sqliteFlowActivationBundle()
+	configureSQLiteFlowActivationLifecycle(t, sqliteStore, workflowStore, bus, bundle)
 	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		WorkflowInstances: workflowStore,
 		LLMBackend:        "anthropic",
 		LifecycleStore:    sqliteStore,
 		WorkOwner:         storeTestWorkOwner(t),
 	}, sqliteStore))
-	bundle := sqliteFlowActivationBundle()
-
 	req := sqliteFlowActivationRequest(bundle, "review", "inst-1", "parent-ent", "review/inst-1")
 	if err := workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
 		return manager.ActivateFlowInstance(txctx, req)
@@ -465,14 +466,14 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 	}
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 	bus := &sqliteFlowActivationBus{}
+	bundle := sqliteFlowActivationBundle()
+	configureSQLiteFlowActivationLifecycle(t, sqliteStore, workflowStore, bus, bundle)
 	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		WorkflowInstances: workflowStore,
 		LLMBackend:        "anthropic",
 		LifecycleStore:    sqliteStore,
 		WorkOwner:         storeTestWorkOwner(t),
 	}, sqliteStore))
-	bundle := sqliteFlowActivationBundle()
-
 	start := make(chan struct{})
 	errs := make(chan error, 2)
 	var wg sync.WaitGroup
@@ -542,6 +543,54 @@ func (*sqliteFlowActivationBus) AdmitBundleSourceFact(ctx context.Context) (cont
 	return ctx, nil
 }
 
+type sqliteFlowActivationWorkflowModule struct {
+	source  semanticview.Source
+	guards  runtimepipeline.GuardRegistry
+	actions runtimepipeline.ActionRegistry
+}
+
+func configureSQLiteFlowActivationLifecycle(
+	t *testing.T,
+	selected *SQLiteRuntimeStore,
+	workflowStore *runtimepipeline.WorkflowInstanceStore,
+	bus *sqliteFlowActivationBus,
+	bundle *runtimecontracts.WorkflowContractBundle,
+) {
+	t.Helper()
+	source := semanticview.Wrap(bundle)
+	module := sqliteFlowActivationWorkflowModule{
+		source:  source,
+		guards:  runtimepipeline.NewContractGuardRegistry(source),
+		actions: runtimepipeline.NewContractActionRegistry(source),
+	}
+	runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.DB, runtimepipeline.PipelineCoordinatorOptions{
+		Module:              module,
+		WorkflowStore:       workflowStore,
+		PipelineObligations: selected.PipelineObligations(),
+		WorkOwner:           storeTestWorkOwner(t),
+	})
+}
+
+func (m sqliteFlowActivationWorkflowModule) SemanticSource() semanticview.Source {
+	return m.source
+}
+
+func (m sqliteFlowActivationWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
+	return nil
+}
+
+func (m sqliteFlowActivationWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
+	return nil
+}
+
+func (m sqliteFlowActivationWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry {
+	return m.guards
+}
+
+func (m sqliteFlowActivationWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry {
+	return m.actions
+}
+
 func (b *sqliteFlowActivationBus) Publish(_ context.Context, evt events.Event) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -554,6 +603,12 @@ func (*sqliteFlowActivationBus) PublishDirect(context.Context, events.Event, []s
 }
 
 func (*sqliteFlowActivationBus) PublishPersistedRecipients(context.Context, events.Event, []string) error {
+	return nil
+}
+
+func (*sqliteFlowActivationBus) ResolveSubscribedRecipients(string) []string { return nil }
+func (*sqliteFlowActivationBus) EngineOutbox() runtimeengine.OutboxWriter    { return nil }
+func (*sqliteFlowActivationBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 	return nil
 }
 
@@ -657,6 +712,7 @@ func sqliteFlowActivationRequest(bundle *runtimecontracts.WorkflowContractBundle
 	return runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: semanticview.Wrap(bundle),
 		Instance:       instance,
+		OccurredAt:     time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
 	}
 }
 

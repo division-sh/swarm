@@ -1099,12 +1099,12 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 	if got := readString(detail["decision_reason_code"]); got != "recovery_disabled_with_persisted_work" {
 		t.Fatalf("detail.decision_reason_code = %q, want recovery_disabled_with_persisted_work", got)
 	}
-	if got, _ := detail["active_schedule_count"].(float64); int(got) != 1 {
-		t.Fatalf("detail.active_schedule_count = %v, want 1", detail["active_schedule_count"])
+	if got, _ := detail["startup_blocking_timer_count"].(float64); int(got) != 1 {
+		t.Fatalf("detail.startup_blocking_timer_count = %v, want 1", detail["startup_blocking_timer_count"])
 	}
 	classes, _ := detail["recoverable_work_classes"].([]any)
-	if len(classes) != 1 || readString(classes[0]) != "active schedules" {
-		t.Fatalf("detail.recoverable_work_classes = %#v, want [active schedules]", detail["recoverable_work_classes"])
+	if len(classes) != 1 || readString(classes[0]) != "timer obligations" {
+		t.Fatalf("detail.recoverable_work_classes = %#v, want [timer obligations]", detail["recoverable_work_classes"])
 	}
 }
 
@@ -1854,12 +1854,15 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 
 	instanceStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	entityID := uuid.NewString()
+	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	if err := instanceStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "mutation-flow",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "queued",
+		EnteredStageAt:  enteredAt,
+		CreatedAt:       enteredAt,
 		Metadata: map[string]any{
 			"status": "open",
 			"gates": map[string]any{
@@ -1878,6 +1881,8 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 		WorkflowName:    "mutation-flow",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "done",
+		EnteredStageAt:  enteredAt,
+		CreatedAt:       enteredAt,
 		Metadata: map[string]any{
 			"status": "closed",
 			"gates": map[string]any{

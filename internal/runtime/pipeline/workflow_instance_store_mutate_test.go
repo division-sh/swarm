@@ -130,7 +130,7 @@ func TestUpdateEntityState_PreservesMutationCommittedWhileTransitionWaits(t *tes
 
 	<-firstEntered
 	go func() {
-		errCh <- pc.updateEntityState(transitionCtx, entityID, "done", "workflow.completed")
+		errCh <- pc.persistWorkflowStateForTest(transitionCtx, entityID, "done", "workflow.completed")
 	}()
 
 	time.Sleep(100 * time.Millisecond)
@@ -204,7 +204,7 @@ func TestWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRows(t *testing.T
 	entityID := uuid.NewString()
 	storageRef := entityID
 	now := time.Now().UTC().Round(time.Microsecond)
-	if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      storageRef,
 		WorkflowName:    "mutation-flow",
@@ -212,7 +212,7 @@ func TestWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRows(t *testing.T
 		CurrentState:    "queued",
 		Metadata:        map[string]any{},
 		StateBuckets:    map[string]any{},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
@@ -261,7 +261,7 @@ func TestWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRows(t *testing.T
 
 func seedWorkflowInstanceForMutationTest(t *testing.T, store *WorkflowInstanceStore, entityID string) {
 	t.Helper()
-	if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "mutation-flow",
@@ -269,7 +269,7 @@ func seedWorkflowInstanceForMutationTest(t *testing.T, store *WorkflowInstanceSt
 		CurrentState:    "queued",
 		Metadata:        map[string]any{},
 		StateBuckets:    map[string]any{},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 }

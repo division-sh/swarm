@@ -57,3 +57,98 @@ func TestRemintWorkflowTimerActivationForForkPreservesOccurrenceLattice(t *testi
 		})
 	}
 }
+
+func TestRemintPersistedWorkflowTimerForForkOwnsStrictDecode(t *testing.T) {
+	createdAt := canonicalWorkflowTimerTime(time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC))
+	ref := timeridentity.WorkflowTimerActivationRef{
+		ActivationID: uuid.NewString(),
+		Declaration:  "waiting.timeout",
+	}
+	validSource := func() PersistedWorkflowTimerForkSource {
+		return PersistedWorkflowTimerForkSource{
+			ActivationID:         ref.ActivationID,
+			SerializedActivation: ref.TaskID(),
+			RunID:                uuid.NewString(),
+			EntityID:             uuid.NewString(),
+			FlowInstance:         "proof/1",
+			OwnerAgent:           "runtime",
+			EventType:            "platform.stage_timer",
+			Payload:              []byte(`{"source":true}`),
+			FireAt:               createdAt.Add(time.Hour),
+			Status:               workflowTimerStatusActive,
+			CreatedAt:            createdAt,
+		}
+	}
+	lineage := WorkflowTimerForkLineage{
+		ForkRunID:           uuid.NewString(),
+		ForkEventID:         uuid.NewString(),
+		ReconstructionOwner: "selected_contract_execution",
+	}
+
+	forked, err := RemintPersistedWorkflowTimerForFork(validSource(), lineage)
+	if err != nil {
+		t.Fatalf("RemintPersistedWorkflowTimerForFork(valid): %v", err)
+	}
+	if forked.SourceTimerID != ref.ActivationID || forked.RunID != lineage.ForkRunID {
+		t.Fatalf("forked activation = %#v, want source identity and fork run", forked)
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*PersistedWorkflowTimerForkSource)
+	}{
+		{
+			name: "malformed serialized activation",
+			mutate: func(source *PersistedWorkflowTimerForkSource) {
+				source.SerializedActivation = "workflow_timer:v1:invalid"
+			},
+		},
+		{
+			name: "activation id mismatch",
+			mutate: func(source *PersistedWorkflowTimerForkSource) {
+				source.ActivationID = uuid.NewString()
+			},
+		},
+		{
+			name: "node owner",
+			mutate: func(source *PersistedWorkflowTimerForkSource) {
+				source.OwnerNode = "timer-node"
+			},
+		},
+		{
+			name: "cron recurrence",
+			mutate: func(source *PersistedWorkflowTimerForkSource) {
+				source.Recurring = true
+				source.RecurrenceCron = "* * * * *"
+			},
+		},
+		{
+			name: "invalid recurrence interval",
+			mutate: func(source *PersistedWorkflowTimerForkSource) {
+				source.Recurring = true
+				source.RecurrenceInterval = "tomorrow"
+			},
+		},
+		{
+			name: "missing exact scope",
+			mutate: func(source *PersistedWorkflowTimerForkSource) {
+				source.FlowInstance = ""
+			},
+		},
+		{
+			name: "non-object payload",
+			mutate: func(source *PersistedWorkflowTimerForkSource) {
+				source.Payload = []byte(`[]`)
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := validSource()
+			test.mutate(&source)
+			if _, err := RemintPersistedWorkflowTimerForFork(source, lineage); err == nil {
+				t.Fatal("RemintPersistedWorkflowTimerForFork succeeded, want fail-closed decode")
+			}
+		})
+	}
+}

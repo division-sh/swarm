@@ -88,3 +88,58 @@ func TestSelectedStoreLegacySchemaInterpretersAreAbsent(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestNormalizeConstraintTreatsPostgresBooleanDeparseAsEquivalent(t *testing.T) {
+	authored := `CHECK (
+		task_type <> 'workflow_timer' OR (
+			(source_timer_id IS NULL AND forked_from_run_id IS NULL) OR
+			(source_timer_id IS NOT NULL AND forked_from_run_id IS NOT NULL)
+		)
+	)`
+	deparsed := `CHECK (
+		task_type <> 'workflow_timer' OR
+		source_timer_id IS NULL AND forked_from_run_id IS NULL OR
+		source_timer_id IS NOT NULL AND forked_from_run_id IS NOT NULL
+	)`
+	if got, want := normalizeConstraint(deparsed), normalizeConstraint(authored); got != want {
+		t.Fatalf("normalized deparsed constraint = %q, want %q", got, want)
+	}
+
+	authoredPayload := `CHECK (
+		task_type <> 'workflow_timer' OR
+		(SUBSTR(CAST(fire_payload AS TEXT), 1, 1) = '{' AND SUBSTR(CAST(fire_payload AS TEXT), LENGTH(CAST(fire_payload AS TEXT)), 1) = '}')
+	)`
+	deparsedPayload := `CHECK (
+		task_type <> 'workflow_timer' OR
+		(SUBSTR(fire_payload, 1, 1) = '{' AND SUBSTR(fire_payload, LENGTH(fire_payload), 1) = '}')
+	)`
+	if got, want := normalizeConstraint(deparsedPayload), normalizeConstraint(authoredPayload); got != want {
+		t.Fatalf("normalized deparsed payload constraint = %q, want %q", got, want)
+	}
+
+	authoredAtomicOperands := `CHECK (
+		COALESCE(cache_read_input_tokens, 0) + COALESCE(cache_creation_input_tokens, 0) <= input_tokens AND
+		provider_reported_cost_usd >= 0
+	)`
+	deparsedAtomicOperands := `CHECK (
+		COALESCE(cache_read_input_tokens, (0)) + COALESCE(cache_creation_input_tokens, (0)) <= input_tokens AND
+		provider_reported_cost_usd >= (0)
+	)`
+	if got, want := normalizeConstraint(deparsedAtomicOperands), normalizeConstraint(authoredAtomicOperands); got != want {
+		t.Fatalf("normalized deparsed atomic operands = %q, want %q", got, want)
+	}
+
+	authoredStatus := `CHECK (
+		task_type <> 'workflow_timer' OR (
+			(recurring = FALSE AND (
+				(status IN ('active', 'cancelled') AND fired_at IS NULL) OR
+				(status = 'fired' AND fired_at IS NOT NULL AND fired_at >= fire_at)
+			)) OR
+			(recurring = TRUE AND status IN ('active', 'cancelled') AND (fired_at IS NULL OR fired_at >= created_at))
+		)
+	)`
+	deparsedStatus := `CHECK (((task_type <> 'workflow_timer'::text) OR (((recurring = false) AND (((status = ANY (ARRAY['active'::text, 'cancelled'::text])) AND (fired_at IS NULL)) OR ((status = 'fired'::text) AND (fired_at IS NOT NULL) AND (fired_at >= fire_at)))) OR ((recurring = true) AND (status = ANY (ARRAY['active'::text, 'cancelled'::text])) AND ((fired_at IS NULL) OR (fired_at >= created_at))))))`
+	if got, want := normalizeConstraint(deparsedStatus), normalizeConstraint(authoredStatus); got != want {
+		t.Fatalf("normalized deparsed status constraint = %q, want %q", got, want)
+	}
+}

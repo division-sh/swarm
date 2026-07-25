@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -45,7 +44,7 @@ func selectedScheduleStoreCases() []selectedScheduleStoreCase {
 	}
 }
 
-func TestGenericScheduleStoreCannotInterpretWorkflowTimerRows(t *testing.T) {
+func TestGenericScheduleAPIsCannotInterpretWorkflowTimerFamilyOnBothStores(t *testing.T) {
 	for _, tc := range selectedScheduleStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			store, db, ctx := tc.open(t)
@@ -66,7 +65,7 @@ func TestGenericScheduleStoreCannotInterpretWorkflowTimerRows(t *testing.T) {
 					INSERT INTO timers (
 						timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
 						fire_at, recurring, owner_agent, task_type, status, created_at
-					) VALUES (?, ?, ?, ?, 'timer-proof', 'timer.timeout', ?, ?, false, 'runtime', 'timer', 'active', ?)
+					) VALUES (?, ?, ?, ?, 'timer-proof', 'timer.timeout', ?, ?, false, 'runtime', 'workflow_timer', 'active', ?)
 				`, activationID, runID, ref.TaskID(), entityID, string(payload), fireAt, fireAt.Add(-time.Hour))
 				if err != nil {
 					t.Fatalf("insert SQLite workflow activation: %v", err)
@@ -77,7 +76,7 @@ func TestGenericScheduleStoreCannotInterpretWorkflowTimerRows(t *testing.T) {
 						timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
 						fire_at, recurring, owner_agent, task_type, status, created_at
 					) VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'timer-proof', 'timer.timeout', $5::jsonb,
-					          $6, false, 'runtime', 'timer', 'active', $7)
+					          $6, false, 'runtime', 'workflow_timer', 'active', $7)
 				`, activationID, runID, ref.TaskID(), entityID, string(payload), fireAt, fireAt.Add(-time.Hour))
 				if err != nil {
 					t.Fatalf("insert PostgreSQL workflow activation: %v", err)
@@ -137,7 +136,7 @@ func TestGenericScheduleStoreCannotInterpretWorkflowTimerRows(t *testing.T) {
 	}
 }
 
-func TestGenericScheduleStoreRejectsReservedWorkflowTimerIdentityOnBothStores(t *testing.T) {
+func TestGenericScheduleIdentityDoesNotInferWorkflowTimerFamilyOnBothStores(t *testing.T) {
 	reserved := timeridentity.WorkflowTimerActivationTaskPrefix() + "malformed"
 	activation := timeridentity.WorkflowTimerActivationRef{
 		ActivationID: uuid.NewString(),
@@ -150,36 +149,203 @@ func TestGenericScheduleStoreRejectsReservedWorkflowTimerIdentityOnBothStores(t 
 	for _, tc := range selectedScheduleStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			store, db, ctx := tc.open(t)
-			for _, test := range []struct {
+			tests := []struct {
 				name      string
 				taskID    string
 				eventType string
-				wantError string
 			}{
-				{name: "reserved_task_id", taskID: reserved, eventType: "generic.tick", wantError: "reserved workflow timer prefix"},
-				{name: "reserved_event_type_fallback", eventType: reserved, wantError: "reserved workflow timer prefix"},
-				{name: "trimmed_activation_task_id", taskID: "  " + activation.TaskID() + "  ", eventType: "generic.tick", wantError: "reserved workflow timer prefix"},
-				{name: "trimmed_occurrence_task_id", taskID: "\t" + occurrence.TaskID() + "\n", eventType: "generic.tick", wantError: "workflow timer occurrences must be persisted"},
-			} {
+				{name: "former_reserved_task_id", taskID: reserved, eventType: "generic.tick"},
+				{name: "former_reserved_event_type", taskID: "generic-event-prefix", eventType: reserved},
+				{name: "activation_shaped_task_id", taskID: activation.TaskID(), eventType: "generic.tick"},
+				{name: "occurrence_shaped_task_id", taskID: occurrence.TaskID(), eventType: "generic.tick"},
+			}
+			for _, test := range tests {
 				t.Run(test.name, func(t *testing.T) {
-					err := store.UpsertSchedule(ctx, runtimepipeline.Schedule{
-						AgentID: "generic", EventType: test.eventType, TaskID: test.taskID,
+					if err := store.UpsertSchedule(ctx, runtimepipeline.Schedule{
+						AgentID: "generic-" + test.name, EventType: test.eventType, TaskID: test.taskID,
 						Mode: "once", At: time.Now().UTC().Add(time.Hour),
-					})
-					if err == nil || !strings.Contains(err.Error(), test.wantError) {
-						t.Fatalf("UpsertSchedule error = %v, want %q refusal", err, test.wantError)
+					}); err != nil {
+						t.Fatalf("UpsertSchedule inferred workflow ownership from an opaque identity: %v", err)
+					}
+				})
+			}
+			var workflowRows int
+			switch store.(type) {
+			case *SQLiteRuntimeStore:
+				if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM timers WHERE task_type = 'workflow_timer'`).Scan(&workflowRows); err != nil {
+					t.Fatalf("count SQLite workflow timer rows: %v", err)
+				}
+			case *PostgresStore:
+				if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM timers WHERE task_type = 'workflow_timer'`).Scan(&workflowRows); err != nil {
+					t.Fatalf("count PostgreSQL workflow timer rows: %v", err)
+				}
+			default:
+				t.Fatalf("unsupported schedule store %T", store)
+			}
+			if workflowRows != 0 {
+				t.Fatalf("generic identity-shaped schedules persisted as workflow_timer rows = %d, want 0", workflowRows)
+			}
+			active, err := store.LoadActiveSchedules(ctx)
+			if err != nil {
+				t.Fatalf("load generic schedules: %v", err)
+			}
+			if len(active) != len(tests) {
+				t.Fatalf("generic schedules loaded = %d, want %d", len(active), len(tests))
+			}
+		})
+	}
+}
+
+func TestWorkflowTimerFreshSchemaOneInvalidFactMatrixOnBothStores(t *testing.T) {
+	type invalidFact struct {
+		name   string
+		mutate func(*workflowTimerDDLProofRow)
+	}
+	invalidFacts := []invalidFact{
+		{name: "missing run", mutate: func(row *workflowTimerDDLProofRow) { row.runID = nil }},
+		{name: "missing entity", mutate: func(row *workflowTimerDDLProofRow) { row.entityID = nil }},
+		{name: "blank flow instance", mutate: func(row *workflowTimerDDLProofRow) { row.flowInstance = " " }},
+		{name: "blank activation identity", mutate: func(row *workflowTimerDDLProofRow) { row.timerName = " " }},
+		{name: "blank fire event", mutate: func(row *workflowTimerDDLProofRow) { row.fireEvent = " " }},
+		{name: "node owner", mutate: func(row *workflowTimerDDLProofRow) { row.ownerNode = "workflow-node" }},
+		{name: "blank agent owner", mutate: func(row *workflowTimerDDLProofRow) { row.ownerAgent = " " }},
+		{name: "cron recurrence", mutate: func(row *workflowTimerDDLProofRow) { row.recurrenceCron = "@daily" }},
+		{name: "non-object payload", mutate: func(row *workflowTimerDDLProofRow) { row.payload = "[]" }},
+		{name: "due before creation", mutate: func(row *workflowTimerDDLProofRow) { row.fireAt = row.createdAt.Add(-time.Second) }},
+		{name: "partial fork lineage", mutate: func(row *workflowTimerDDLProofRow) { row.reconstructionOwner = "selected-fork" }},
+		{name: "one-shot interval", mutate: func(row *workflowTimerDDLProofRow) { row.recurrenceInterval = "1h" }},
+		{name: "recurring without interval", mutate: func(row *workflowTimerDDLProofRow) { row.recurring = true }},
+		{name: "active one-shot with fired time", mutate: func(row *workflowTimerDDLProofRow) { row.firedAt = row.fireAt }},
+		{name: "fired one-shot without fired time", mutate: func(row *workflowTimerDDLProofRow) { row.status = "fired" }},
+		{name: "fired one-shot before due", mutate: func(row *workflowTimerDDLProofRow) {
+			row.status = "fired"
+			row.firedAt = row.createdAt
+		}},
+		{name: "fired recurring row", mutate: func(row *workflowTimerDDLProofRow) {
+			row.recurring = true
+			row.recurrenceInterval = "1h"
+			row.status = "fired"
+			row.firedAt = row.fireAt
+		}},
+		{name: "expired workflow row", mutate: func(row *workflowTimerDDLProofRow) { row.status = "expired" }},
+	}
+
+	for _, tc := range selectedScheduleStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, db, ctx := tc.open(t)
+			runID := runtimecorrelation.RunIDFromContext(ctx)
+			valid := newWorkflowTimerDDLProofRow(runID)
+			if err := insertWorkflowTimerDDLProofRow(ctx, db, store, valid); err != nil {
+				t.Fatalf("insert canonical workflow timer row: %v", err)
+			}
+			for _, test := range invalidFacts {
+				test := test
+				t.Run(test.name, func(t *testing.T) {
+					row := newWorkflowTimerDDLProofRow(runID)
+					test.mutate(&row)
+					if err := insertWorkflowTimerDDLProofRow(ctx, db, store, row); err == nil {
+						t.Fatal("fresh schema accepted an invalid workflow timer fact")
 					}
 					var rows int
-					if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM timers`).Scan(&rows); err != nil {
-						t.Fatalf("count timers after refused insert: %v", err)
+					query := `SELECT COUNT(*) FROM timers WHERE timer_id = ?`
+					if _, ok := store.(*PostgresStore); ok {
+						query = `SELECT COUNT(*) FROM timers WHERE timer_id = $1::uuid`
+					}
+					if err := db.QueryRowContext(ctx, query, row.timerID).Scan(&rows); err != nil {
+						t.Fatalf("count rejected workflow timer row: %v", err)
 					}
 					if rows != 0 {
-						t.Fatalf("persisted timers after refused insert = %d, want 0", rows)
+						t.Fatalf("invalid workflow timer rows = %d, want 0", rows)
 					}
 				})
 			}
 		})
 	}
+}
+
+type workflowTimerDDLProofRow struct {
+	timerID             string
+	runID               any
+	timerName           string
+	entityID            any
+	flowInstance        string
+	fireEvent           string
+	payload             string
+	fireAt              time.Time
+	recurring           bool
+	recurrenceCron      any
+	recurrenceInterval  any
+	ownerNode           any
+	ownerAgent          string
+	status              string
+	firedAt             any
+	createdAt           time.Time
+	sourceTimerID       any
+	forkedFromRunID     any
+	forkedFromEventID   any
+	reconstructionOwner any
+}
+
+func newWorkflowTimerDDLProofRow(runID string) workflowTimerDDLProofRow {
+	timerID := uuid.NewString()
+	createdAt := time.Now().UTC().Truncate(time.Microsecond)
+	ref := timeridentity.WorkflowTimerActivationRef{
+		ActivationID: timerID,
+		Declaration:  "waiting.timeout",
+	}
+	return workflowTimerDDLProofRow{
+		timerID:      timerID,
+		runID:        runID,
+		timerName:    ref.TaskID(),
+		entityID:     uuid.NewString(),
+		flowInstance: "root",
+		fireEvent:    "timer.timeout",
+		payload:      `{"business":true}`,
+		fireAt:       createdAt.Add(time.Hour),
+		ownerAgent:   "workflow-runtime",
+		status:       "active",
+		createdAt:    createdAt,
+	}
+}
+
+func insertWorkflowTimerDDLProofRow(
+	ctx context.Context,
+	db *sql.DB,
+	store runtimepipeline.SchedulePersistence,
+	row workflowTimerDDLProofRow,
+) error {
+	args := []any{
+		row.timerID, row.runID, row.timerName, row.entityID, row.flowInstance, row.fireEvent,
+		row.payload, row.fireAt, row.recurring, row.recurrenceCron, row.recurrenceInterval,
+		row.ownerNode, row.ownerAgent, row.status, row.firedAt, row.createdAt, row.sourceTimerID,
+		row.forkedFromRunID, row.forkedFromEventID, row.reconstructionOwner,
+	}
+	if _, ok := store.(*PostgresStore); ok {
+		_, err := db.ExecContext(ctx, `
+			INSERT INTO timers (
+				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
+				fire_at, recurring, recurrence_cron, recurrence_interval, owner_node, owner_agent,
+				task_type, status, fired_at, created_at, source_timer_id, forked_from_run_id,
+				forked_from_event_id, reconstruction_owner
+			) VALUES (
+				$1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7::jsonb,
+				$8, $9, $10, $11, $12, $13, 'workflow_timer', $14, $15, $16,
+				$17::uuid, $18::uuid, $19::uuid, $20
+			)
+		`, args...)
+		return err
+	}
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO timers (
+			timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
+			fire_at, recurring, recurrence_cron, recurrence_interval, owner_node, owner_agent,
+			task_type, status, fired_at, created_at, source_timer_id, forked_from_run_id,
+			forked_from_event_id, reconstruction_owner
+		) VALUES (
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'workflow_timer', ?, ?, ?, ?, ?, ?, ?
+		)
+	`, args...)
+	return err
 }
 
 func TestGenericRecurringScheduleFiresRestoresAndCancelsOnBothStores(t *testing.T) {
@@ -217,7 +383,7 @@ func TestGenericRecurringScheduleFiresRestoresAndCancelsOnBothStores(t *testing.
 			}
 
 			restored, err := store.LoadActiveSchedules(ctx)
-			if err != nil || len(restored) != 1 || restored[0].TaskID != schedule.TaskID || restored[0].EffectiveTimerID() != "" {
+			if err != nil || len(restored) != 1 || restored[0].TaskID != schedule.TaskID {
 				t.Fatalf("restored generic recurring schedules = %#v, err=%v", restored, err)
 			}
 			secondResults := make(chan error, 8)
