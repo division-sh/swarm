@@ -22,28 +22,42 @@ type advisoryLockLease interface {
 }
 
 type sqlAdvisoryLockLease struct {
-	mu              sync.Mutex
-	session         *postgresSessionAuthority
-	lockKey         string
-	releaseSession  func() error
-	releaseCapacity func()
-	onTerminal      func()
-	unlocked        bool
-	released        bool
-	testUnlock      func(context.Context, *postgresSessionAuthority, string) (bool, error)
+	mu                       sync.Mutex
+	session                  *postgresSessionAuthority
+	lockKey                  string
+	releaseSession           func() error
+	releaseCapacity          func()
+	onTerminal               func()
+	unlocked                 bool
+	released                 bool
+	testUnlock               func(context.Context, *postgresSessionAuthority, string) (bool, error)
+	testBeforeBeginOperation func()
 }
 
 type postgresSessionAuthorityContextKey struct{}
 
 type postgresSessionAuthority struct {
-	operationMu    sync.Mutex
-	mu             sync.Mutex
-	conn           *sql.Conn
-	activeTx       *sql.Tx
-	refs           int
-	closed         bool
-	discardPending bool
-	leases         map[*sqlAdvisoryLockLease]struct{}
+	operationMu             sync.Mutex
+	mu                      sync.Mutex
+	conn                    *sql.Conn
+	activeTx                *sql.Tx
+	refs                    int
+	closed                  bool
+	discardPending          bool
+	leases                  map[*sqlAdvisoryLockLease]struct{}
+	pendingLeaseRetirements []*sqlAdvisoryLockLease
+}
+
+type postgresSessionDiscard struct {
+	leases []*sqlAdvisoryLockLease
+	err    error
+}
+
+func (d postgresSessionDiscard) drain() error {
+	for _, lease := range d.leases {
+		lease.retireFromSession()
+	}
+	return d.err
 }
 
 func newPostgresSessionAuthority(conn *sql.Conn) *postgresSessionAuthority {
@@ -214,12 +228,12 @@ func (a *postgresSessionAuthority) release() error {
 }
 
 func (a *postgresSessionAuthority) forceDiscard() error {
-	return a.forceDiscardExcept(nil)
+	return a.prepareDiscardExcept(nil).drain()
 }
 
-func (a *postgresSessionAuthority) forceDiscardExcept(except *sqlAdvisoryLockLease) error {
+func (a *postgresSessionAuthority) prepareDiscardExcept(except *sqlAdvisoryLockLease) postgresSessionDiscard {
 	if a == nil {
-		return nil
+		return postgresSessionDiscard{}
 	}
 	a.mu.Lock()
 	a.discardPending = true
@@ -230,15 +244,24 @@ func (a *postgresSessionAuthority) forceDiscardExcept(except *sqlAdvisoryLockLea
 			leases = append(leases, lease)
 		}
 	}
+	if a.activeTx != nil {
+		a.pendingLeaseRetirements = append(a.pendingLeaseRetirements, leases...)
+		a.mu.Unlock()
+		return postgresSessionDiscard{}
+	}
+	leases = append(leases, a.takePendingLeaseRetirementsLocked()...)
 	var err error
 	if !a.closed && a.conn != nil && a.activeTx == nil {
 		err = a.forceDiscardConnectionLocked()
 	}
 	a.mu.Unlock()
-	for _, lease := range leases {
-		lease.retireFromSession()
-	}
-	return err
+	return postgresSessionDiscard{leases: leases, err: err}
+}
+
+func (a *postgresSessionAuthority) takePendingLeaseRetirementsLocked() []*sqlAdvisoryLockLease {
+	retirements := a.pendingLeaseRetirements
+	a.pendingLeaseRetirements = nil
+	return retirements
 }
 
 func (a *postgresSessionAuthority) forceDiscardConnectionLocked() error {
@@ -291,11 +314,13 @@ func (a *postgresSessionAuthority) endTx(tx *sql.Tx) error {
 	}
 	a.activeTx = nil
 	var err error
-	if a.discardPending {
+	if a.discardPending && !a.closed && a.conn != nil {
 		err = a.forceDiscardConnectionLocked()
 	}
+	retirements := a.takePendingLeaseRetirementsLocked()
 	a.mu.Unlock()
 	a.operationMu.Unlock()
+	postgresSessionDiscard{leases: retirements}.drain()
 	return err
 }
 
@@ -386,18 +411,28 @@ func (l *sqlAdvisoryLockLease) releaseWithRetirement(ctx context.Context) error 
 	}
 	ctx = context.WithoutCancel(ctx)
 	session := l.session
+	if l.testBeforeBeginOperation != nil {
+		l.testBeforeBeginOperation()
+	}
 	endOperation, operationErr := session.beginOperation(ctx)
 	if operationErr != nil {
-		discardErr := session.forceDiscardExcept(l)
+		discard := session.prepareDiscardExcept(l)
 		actions := l.retireLocked()
 		l.mu.Unlock()
 		actions.run()
 		return errors.Join(
 			fmt.Errorf("release advisory lock: %w", operationErr),
-			wrapAdvisoryDiscardError(discardErr),
+			wrapAdvisoryDiscardError(discard.drain()),
 		)
 	}
-	defer endOperation()
+	terminalDiscard := func(releaseErr error) error {
+		discard := session.prepareDiscardExcept(l)
+		actions := l.retireLocked()
+		l.mu.Unlock()
+		endOperation()
+		actions.run()
+		return errors.Join(releaseErr, wrapAdvisoryDiscardError(discard.drain()))
+	}
 	if !l.unlocked {
 		var (
 			unlocked bool
@@ -410,35 +445,24 @@ func (l *sqlAdvisoryLockLease) releaseWithRetirement(ctx context.Context) error 
 		}
 		if err != nil {
 			releaseErr := fmt.Errorf("release advisory lock: %w", err)
-			discardErr := session.forceDiscardExcept(l)
-			actions := l.retireLocked()
-			l.mu.Unlock()
-			actions.run()
-			return errors.Join(releaseErr, wrapAdvisoryDiscardError(discardErr))
+			return terminalDiscard(releaseErr)
 		}
 		if !unlocked {
 			releaseErr := errors.New("release advisory lock: PostgreSQL session did not own the lock")
-			discardErr := session.forceDiscardExcept(l)
-			actions := l.retireLocked()
-			l.mu.Unlock()
-			actions.run()
-			return errors.Join(releaseErr, wrapAdvisoryDiscardError(discardErr))
+			return terminalDiscard(releaseErr)
 		}
 		l.unlocked = true
 	}
 	if l.releaseSession != nil {
 		if err := l.releaseSession(); err != nil {
 			closeErr := fmt.Errorf("close advisory lock session: %w", err)
-			discardErr := session.forceDiscardExcept(l)
-			actions := l.retireLocked()
-			l.mu.Unlock()
-			actions.run()
-			return errors.Join(closeErr, wrapAdvisoryDiscardError(discardErr))
+			return terminalDiscard(closeErr)
 		}
 	}
 	session.detach(l)
 	actions := l.retireLocked()
 	l.mu.Unlock()
+	endOperation()
 	actions.run()
 	return nil
 }
