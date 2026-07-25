@@ -165,6 +165,9 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) error {
 // of process-local deliveries accepted from that dispatch. Durable retry work
 // remains owned by the store and is not reinterpreted as live local work.
 func (eb *EventBus) PublishAndWait(ctx context.Context, evt events.Event) error {
+	if _, active := runtimepipeline.PipelineSQLTxFromContext(ctx); active {
+		return errors.New("PublishAndWait cannot dispatch before its active mutation commits")
+	}
 	lease, err := eb.beginRuntimeWork(ctx)
 	if err != nil {
 		return err
@@ -181,9 +184,6 @@ func (eb *EventBus) PublishAndWait(ctx context.Context, evt events.Event) error 
 	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt})
 	if err != nil {
 		return err
-	}
-	if _, active := runtimepipeline.PipelineSQLTxFromContext(ctx); active {
-		return errors.New("PublishAndWait cannot dispatch before its active mutation commits")
 	}
 	group := newLocalDeliveryCompletionGroup()
 	waitCtx := ctx
