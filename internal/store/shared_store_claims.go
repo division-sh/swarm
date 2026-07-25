@@ -269,16 +269,21 @@ func (l *sqlAdvisoryLockLease) BindContext(ctx context.Context) context.Context 
 }
 
 func (l *sqlAdvisoryLockLease) Release(ctx context.Context) error {
+	_, err := l.releaseWithRetirement(ctx)
+	return err
+}
+
+func (l *sqlAdvisoryLockLease) releaseWithRetirement(ctx context.Context) (bool, error) {
 	if l == nil {
-		return nil
+		return true, nil
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.released {
-		return nil
+		return true, nil
 	}
 	if l.session == nil {
-		return errors.New("advisory lock lease has no private session authority")
+		return false, errors.New("advisory lock lease has no private session authority")
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -295,18 +300,29 @@ func (l *sqlAdvisoryLockLease) Release(ctx context.Context) error {
 			err = l.session.queryRowContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, l.lockKey).Scan(&unlocked)
 		}
 		if err != nil {
-			return fmt.Errorf("release advisory lock: %w", err)
+			return false, fmt.Errorf("release advisory lock: %w", err)
 		}
 		if !unlocked {
-			return errors.New("release advisory lock: PostgreSQL session did not own the lock")
+			return false, errors.New("release advisory lock: PostgreSQL session did not own the lock")
 		}
 		l.unlocked = true
 	}
 	if l.releaseSession != nil {
 		if err := l.releaseSession(); err != nil {
-			return fmt.Errorf("close advisory lock session: %w", err)
+			closeErr := fmt.Errorf("close advisory lock session: %w", err)
+			discardErr := l.session.forceDiscard()
+			l.retireLocked()
+			if discardErr != nil {
+				return true, errors.Join(closeErr, fmt.Errorf("discard unlocked advisory lock session: %w", discardErr))
+			}
+			return true, closeErr
 		}
 	}
+	l.retireLocked()
+	return true, nil
+}
+
+func (l *sqlAdvisoryLockLease) retireLocked() {
 	if l.releaseCapacity != nil {
 		l.releaseCapacity()
 	}
@@ -314,7 +330,6 @@ func (l *sqlAdvisoryLockLease) Release(ctx context.Context) error {
 	l.releaseSession = nil
 	l.session = nil
 	l.released = true
-	return nil
 }
 
 func (l *sqlAdvisoryLockLease) ReleaseOrDiscard(ctx context.Context) error {

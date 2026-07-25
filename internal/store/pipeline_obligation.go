@@ -21,10 +21,12 @@ import (
 )
 
 type pipelineClaimState struct {
-	claim         runtimepipelineobligation.Claim
-	scanToken     string
-	postgresLease *sqlAdvisoryLockLease
-	operationMu   sync.Mutex
+	claim                         runtimepipelineobligation.Claim
+	scanToken                     string
+	postgresLease                 *sqlAdvisoryLockLease
+	operationMu                   sync.Mutex
+	testBeforeSQLiteOperationLock func()
+	testAfterSQLiteOperationLock  func()
 }
 
 type pipelineScanState struct {
@@ -494,17 +496,33 @@ func (s *sqlitePipelineObligationStore) CloseScan(_ context.Context, scan runtim
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	s.pipelineClaimMu.Lock()
-	defer s.pipelineClaimMu.Unlock()
 	if scans[token] != state {
+		s.pipelineClaimMu.Unlock()
 		return runtimepipelineobligation.ErrStaleScan
 	}
 	state.closed = true
-	_, claims := s.pipelineClaimOwner()
-	for claimToken := range state.openClaims {
-		delete(claims, claimToken)
+	claims := make([]runtimepipelineobligation.Claim, 0, len(state.openClaims))
+	for _, claim := range state.openClaims {
+		claims = append(claims, claim)
 	}
-	delete(scans, token)
-	return nil
+	s.pipelineClaimMu.Unlock()
+	var releaseErr error
+	for _, claim := range claims {
+		if err := s.releaseSQLitePipelineClaim(claim); err != nil &&
+			!errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
+			releaseErr = errors.Join(releaseErr, err)
+		}
+	}
+	s.pipelineClaimMu.Lock()
+	if current := scans[token]; current != state {
+		releaseErr = errors.Join(releaseErr, runtimepipelineobligation.ErrStaleScan)
+	} else if len(state.openClaims) == 0 {
+		delete(scans, token)
+	} else if releaseErr == nil {
+		releaseErr = errors.New("close SQLite pipeline scan left current claims")
+	}
+	s.pipelineClaimMu.Unlock()
+	return releaseErr
 }
 
 func (s *PostgresStore) postgresPipelineScanState(scan runtimepipelineobligation.Scan) (*pipelineScanState, error) {
@@ -636,9 +654,17 @@ func (s *sqlitePipelineObligationStore) MarkDecisionProcessed(ctx context.Contex
 	if claim.Purpose() != runtimepipelineobligation.PurposePublication && claim.Purpose() != runtimepipelineobligation.PurposeDecisionRoute {
 		return runtimepipelineobligation.ErrWrongClaim
 	}
+	state, err := s.lockSQLitePipelineClaim(claim)
+	if err != nil {
+		return err
+	}
+	defer state.operationMu.Unlock()
 	return s.runRuntimeMutation(ctx, "mark sqlite decision route processed", func(txctx context.Context, tx *sql.Tx) error {
-		if _, err := s.sqlitePipelineClaimState(claim); err != nil {
-			return err
+		if current, err := s.sqlitePipelineClaimState(claim); err != nil || current != state {
+			if err != nil {
+				return err
+			}
+			return runtimepipelineobligation.ErrStaleClaim
 		}
 		return markDecisionRouteProcessedTx(txctx, tx, claim.EventID(), false, s.now())
 	})
@@ -1488,15 +1514,23 @@ func (s *sqlitePipelineObligationStore) Settle(ctx context.Context, claim runtim
 	if err := disposition.ValidateFor(claim.Purpose()); err != nil {
 		return err
 	}
+	state, err := s.lockSQLitePipelineClaim(claim)
+	if err != nil {
+		return err
+	}
+	defer state.operationMu.Unlock()
 	if err := s.runRuntimeMutation(ctx, "settle sqlite pipeline obligation", func(txctx context.Context, tx *sql.Tx) error {
-		if _, err := s.sqlitePipelineClaimState(claim); err != nil {
-			return err
+		if current, err := s.sqlitePipelineClaimState(claim); err != nil || current != state {
+			if err != nil {
+				return err
+			}
+			return runtimepipelineobligation.ErrStaleClaim
 		}
 		return writePipelineDispositionTx(txctx, tx, claim.EventID(), claim.Purpose(), disposition, false, s.now())
 	}); err != nil {
 		return err
 	}
-	return s.releaseSQLitePipelineClaim(claim)
+	return s.releaseSQLitePipelineClaimLocked(claim, state)
 }
 
 type pipelineExecer interface {
@@ -1931,6 +1965,29 @@ func (s *SQLiteRuntimeStore) sqlitePipelineClaimState(claim runtimepipelineoblig
 	return state, nil
 }
 
+func (s *SQLiteRuntimeStore) lockSQLitePipelineClaim(claim runtimepipelineobligation.Claim) (*pipelineClaimState, error) {
+	state, err := s.sqlitePipelineClaimState(claim)
+	if err != nil {
+		return nil, err
+	}
+	if state.testBeforeSQLiteOperationLock != nil {
+		state.testBeforeSQLiteOperationLock()
+	}
+	state.operationMu.Lock()
+	current, err := s.sqlitePipelineClaimState(claim)
+	if err != nil || current != state {
+		state.operationMu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+		return nil, runtimepipelineobligation.ErrStaleClaim
+	}
+	if state.testAfterSQLiteOperationLock != nil {
+		state.testAfterSQLiteOperationLock()
+	}
+	return state, nil
+}
+
 func (s *postgresPipelineObligationStore) Release(ctx context.Context, claim runtimepipelineobligation.Claim) error {
 	return s.releasePostgresPipelineClaim(ctx, claim)
 }
@@ -1973,8 +2030,9 @@ func (s *PostgresStore) releasePostgresPipelineClaimLocked(ctx context.Context, 
 	if state.postgresLease == nil {
 		return runtimepipelineobligation.ErrStaleClaim
 	}
-	if err := state.postgresLease.Release(context.WithoutCancel(ctx)); err != nil {
-		return err
+	retired, releaseErr := state.postgresLease.releaseWithRetirement(context.WithoutCancel(ctx))
+	if !retired {
+		return releaseErr
 	}
 	registry.mu.Lock()
 	if registry.claims[token] != state {
@@ -1987,10 +2045,19 @@ func (s *PostgresStore) releasePostgresPipelineClaimLocked(ctx context.Context, 
 	delete(registry.claims, token)
 	registry.mu.Unlock()
 	state.postgresLease = nil
-	return nil
+	return releaseErr
 }
 
 func (s *SQLiteRuntimeStore) releaseSQLitePipelineClaim(claim runtimepipelineobligation.Claim) error {
+	state, err := s.lockSQLitePipelineClaim(claim)
+	if err != nil {
+		return err
+	}
+	defer state.operationMu.Unlock()
+	return s.releaseSQLitePipelineClaimLocked(claim, state)
+}
+
+func (s *SQLiteRuntimeStore) releaseSQLitePipelineClaimLocked(claim runtimepipelineobligation.Claim, state *pipelineClaimState) error {
 	s.pipelineClaimMu.Lock()
 	defer s.pipelineClaimMu.Unlock()
 	issuer, claims := s.pipelineClaimOwner()
@@ -1998,9 +2065,11 @@ func (s *SQLiteRuntimeStore) releaseSQLitePipelineClaim(claim runtimepipelineobl
 	if err != nil {
 		return err
 	}
-	state := claims[token]
-	if state == nil {
+	if state == nil || claims[token] != state {
 		return runtimepipelineobligation.ErrStaleClaim
+	}
+	if err := issuer.Verify(state.claim, claim.EventID(), claim.Purpose()); err != nil {
+		return err
 	}
 	_, scans := s.pipelineScanOwner()
 	if scanState := scans[state.scanToken]; scanState != nil {
