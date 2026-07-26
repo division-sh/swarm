@@ -102,15 +102,13 @@ func TestAcceptedWorkflowTimerEventRoutingMatrixOnBothStores(t *testing.T) {
 					wantErr:        true,
 				},
 				{
-					name: "reserved occurrence from wrong producer",
+					name: "occurrence-shaped opaque task from generic scheduler",
 					event: eventtest.RuntimeControl(
-						canonical.ID(), canonical.Type(), "runtime", canonical.TaskID(),
+						canonical.ID(), canonical.Type(), "runtime.scheduler", canonical.TaskID(),
 						canonical.Payload(), 0, canonical.RunID(), "", events.EventEnvelope{
 							EntityID: entityID, FlowInstance: activation.FlowInstance,
 						}, canonical.CreatedAt(),
 					),
-					wantRecognized: true,
-					wantErr:        true,
 				},
 				{
 					name: "ordinary task from another producer",
