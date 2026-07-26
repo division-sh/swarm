@@ -84,17 +84,20 @@ const (
 // WorkflowTimerLifecycle owns workflow activation identity, row transitions,
 // scheduler projection, fire publication, restore, and handler authorization.
 type WorkflowTimerLifecycle struct {
-	storeOwner  *WorkflowInstanceStore
-	source      semanticview.Source
-	publisher   workflowGateMutationPublisher
-	logger      systemNodeRuntimeLogger
-	workOwner   worklifetime.Occurrence
-	scheduler   *Scheduler
-	recoveryCtx context.Context
-	cancel      context.CancelFunc
-	recoveryMu  sync.Mutex
-	recovering  map[string]chan struct{}
-	stopped     bool
+	storeOwner   *WorkflowInstanceStore
+	source       semanticview.Source
+	publisher    workflowGateMutationPublisher
+	logger       systemNodeRuntimeLogger
+	workOwner    worklifetime.Occurrence
+	scheduler    *Scheduler
+	recoveryCtx  context.Context
+	cancel       context.CancelFunc
+	projectionMu sync.Mutex
+	recoveryMu   sync.Mutex
+	recovering   map[string]chan struct{}
+	stopped      bool
+
+	testAfterWakeupLoad func()
 }
 
 func newWorkflowTimerLifecycle(store *WorkflowInstanceStore, source semanticview.Source, bus Bus, workOwner worklifetime.Occurrence, scheduler *Scheduler) *WorkflowTimerLifecycle {
@@ -103,17 +106,22 @@ func newWorkflowTimerLifecycle(store *WorkflowInstanceStore, source semanticview
 	}
 	recoveryCtx, cancel := context.WithCancel(context.Background())
 	publisher, _ := bus.(workflowGateMutationPublisher)
-	return &WorkflowTimerLifecycle{
+	lifecycle := &WorkflowTimerLifecycle{
 		storeOwner:  store,
 		source:      source,
 		publisher:   publisher,
 		logger:      bus,
 		workOwner:   workOwner,
-		scheduler:   scheduler,
 		recoveryCtx: recoveryCtx,
 		cancel:      cancel,
 		recovering:  make(map[string]chan struct{}),
 	}
+	if scheduler != nil {
+		if err := lifecycle.bindScheduler(scheduler); err != nil {
+			panic(fmt.Sprintf("pipeline: bind workflow timer lifecycle: %v", err))
+		}
+	}
+	return lifecycle
 }
 
 func (pc *PipelineCoordinator) RestoreWorkflowTimers(ctx context.Context) error {
@@ -225,7 +233,7 @@ func (l *WorkflowTimerLifecycle) Reconcile(ctx context.Context, entityID, curren
 		key := workflowTimerGenerationKey(declaration.ID, generation)
 		if existing, found := activeByDeclaration[key]; found {
 			if existing.Ref == activation.Ref {
-				if err := l.queueEnsureRegistered(ctx, existing.Ref); err != nil {
+				if err := l.queueWakeupReconcile(ctx, existing.Ref); err != nil {
 					return err
 				}
 			}
@@ -237,7 +245,7 @@ func (l *WorkflowTimerLifecycle) Reconcile(ctx context.Context, entityID, curren
 		}
 		if persisted.Status == workflowTimerStatusActive {
 			activeByDeclaration[key] = persisted
-			if err := l.queueEnsureRegistered(ctx, persisted.Ref); err != nil {
+			if err := l.queueWakeupReconcile(ctx, persisted.Ref); err != nil {
 				return err
 			}
 		}
@@ -362,7 +370,44 @@ func workflowTimerGenerationPresent(items []attemptgeneration.Generation, target
 	return false
 }
 
-func (l *WorkflowTimerLifecycle) EnsureRegistered(ctx context.Context, ref timeridentity.WorkflowTimerActivationRef) error {
+func (l *WorkflowTimerLifecycle) bindScheduler(scheduler *Scheduler) error {
+	if l == nil {
+		return errors.New("workflow timer lifecycle is required")
+	}
+	if scheduler == nil {
+		return errors.New("workflow timer scheduler is required")
+	}
+	l.projectionMu.Lock()
+	defer l.projectionMu.Unlock()
+	if l.stopped {
+		return errors.New("workflow timer lifecycle is stopped")
+	}
+	if l.scheduler != nil {
+		return errors.New("workflow timer lifecycle already has a scheduler")
+	}
+	if err := scheduler.bindWorkflowTimerLifecycle(l.handleWakeup); err != nil {
+		return err
+	}
+	l.scheduler = scheduler
+	return nil
+}
+
+// ReconcileWakeup is the sole durable-to-process projection boundary. Every
+// caller reloads canonical state and either installs its exact active occurrence
+// or retires the local key under the same lifecycle fence.
+func (l *WorkflowTimerLifecycle) ReconcileWakeup(ctx context.Context, ref timeridentity.WorkflowTimerActivationRef) error {
+	if l == nil {
+		return nil
+	}
+	ref = ref.Normalize()
+	if !ref.Valid() {
+		return errors.New("workflow timer wakeup reconciliation requires exact activation identity")
+	}
+	l.projectionMu.Lock()
+	defer l.projectionMu.Unlock()
+	if l.stopped {
+		return l.retireWakeup(ref)
+	}
 	store := l.store()
 	if store == nil || !store.Enabled() {
 		return nil
@@ -371,8 +416,11 @@ func (l *WorkflowTimerLifecycle) EnsureRegistered(ctx context.Context, ref timer
 	if err != nil {
 		return err
 	}
+	if l.testAfterWakeupLoad != nil {
+		l.testAfterWakeupLoad()
+	}
 	if !found || activation.Ref != ref || activation.Status != workflowTimerStatusActive {
-		return nil
+		return l.retireWakeup(ref)
 	}
 	wakeup, err := newWorkflowTimerWakeup(activation)
 	if err != nil {
@@ -381,7 +429,7 @@ func (l *WorkflowTimerLifecycle) EnsureRegistered(ctx context.Context, ref timer
 	return l.registerWakeup(ctx, wakeup)
 }
 
-func (l *WorkflowTimerLifecycle) ensureRegisteredImmediately(ctx context.Context, ref timeridentity.WorkflowTimerActivationRef) error {
+func (l *WorkflowTimerLifecycle) reconcileWakeupImmediately(ctx context.Context, ref timeridentity.WorkflowTimerActivationRef) error {
 	var last error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
@@ -393,7 +441,7 @@ func (l *WorkflowTimerLifecycle) ensureRegisteredImmediately(ctx context.Context
 			case <-timer.C:
 			}
 		}
-		if err := l.EnsureRegistered(ctx, ref); err != nil {
+		if err := l.ReconcileWakeup(ctx, ref); err != nil {
 			last = err
 			continue
 		}
@@ -402,42 +450,28 @@ func (l *WorkflowTimerLifecycle) ensureRegisteredImmediately(ctx context.Context
 	return last
 }
 
-func (l *WorkflowTimerLifecycle) queueEnsureRegistered(ctx context.Context, ref timeridentity.WorkflowTimerActivationRef) error {
+func (l *WorkflowTimerLifecycle) queueWakeupReconcile(ctx context.Context, ref timeridentity.WorkflowTimerActivationRef) error {
 	if l == nil {
 		return nil
 	}
 	action := func(actionCtx context.Context) {
 		postCommitCtx := withoutSQLTxContext(actionCtx)
-		if err := l.ensureRegisteredImmediately(postCommitCtx, ref); err != nil {
-			l.logFailure(postCommitCtx, "workflow_timer_register_failed", ref, err)
-			l.startRegistrationRecovery(ref)
+		if err := l.reconcileWakeupImmediately(postCommitCtx, ref); err != nil {
+			l.logFailure(postCommitCtx, "workflow_timer_reconcile_failed", ref, err)
+			l.startWakeupRecovery(ref)
 		}
 	}
 	if _, inMutation := PipelineSQLTxFromContext(ctx); inMutation {
 		if !queuePipelinePostCommitAction(ctx, action) {
-			return fmt.Errorf("workflow timer activation requires post-commit registration ownership")
+			return fmt.Errorf("workflow timer wakeup reconciliation requires post-commit ownership")
 		}
 		return nil
 	}
-	action(ctx)
-	return nil
+	return l.reconcileWakeupImmediately(withoutSQLTxContext(ctx), ref)
 }
 
 func (l *WorkflowTimerLifecycle) queueCancellation(ctx context.Context, activation WorkflowTimerActivation) error {
-	if l == nil {
-		return nil
-	}
-	action := func(actionCtx context.Context) {
-		l.cancelWakeup(activation.Ref)
-	}
-	if _, inMutation := PipelineSQLTxFromContext(ctx); inMutation {
-		if !queuePipelinePostCommitAction(ctx, action) {
-			return fmt.Errorf("workflow timer cancellation requires post-commit scheduler ownership")
-		}
-		return nil
-	}
-	action(ctx)
-	return nil
+	return l.queueWakeupReconcile(ctx, activation.Ref)
 }
 
 func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup WorkflowTimerWakeup) (WorkflowTimerFireOutcome, bool, error) {
@@ -535,9 +569,9 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 	})
 	if err != nil {
 		recoveryCtx := withoutSQLTxContext(context.WithoutCancel(ctx))
-		if registerErr := l.ensureRegisteredImmediately(recoveryCtx, occurrence.Activation); registerErr != nil {
+		if registerErr := l.reconcileWakeupImmediately(recoveryCtx, occurrence.Activation); registerErr != nil {
 			l.logFailure(recoveryCtx, "workflow_timer_register_failed", occurrence.Activation, registerErr)
-			l.startRegistrationRecovery(occurrence.Activation)
+			l.startWakeupRecovery(occurrence.Activation)
 			return WorkflowTimerFireRetry, false, errors.Join(err, fmt.Errorf("re-register workflow timer: %w", registerErr))
 		}
 		return WorkflowTimerFireRetry, false, err
@@ -614,9 +648,9 @@ func (l *WorkflowTimerLifecycle) Restore(ctx context.Context) error {
 		return err
 	}
 	for _, activation := range activations {
-		if err := l.ensureRegisteredImmediately(ctx, activation.Ref); err != nil {
+		if err := l.reconcileWakeupImmediately(ctx, activation.Ref); err != nil {
 			l.logFailure(ctx, "workflow_timer_restore_register_failed", activation.Ref, err)
-			if !l.startRegistrationRecovery(activation.Ref) {
+			if !l.startWakeupRecovery(activation.Ref) {
 				return fmt.Errorf("restore workflow timer %s: %w", activation.Ref.ActivationID, err)
 			}
 		}
@@ -624,12 +658,12 @@ func (l *WorkflowTimerLifecycle) Restore(ctx context.Context) error {
 	return nil
 }
 
-func (l *WorkflowTimerLifecycle) startRegistrationRecovery(ref timeridentity.WorkflowTimerActivationRef) bool {
+func (l *WorkflowTimerLifecycle) startWakeupRecovery(ref timeridentity.WorkflowTimerActivationRef) bool {
 	ref = ref.Normalize()
-	return l.startRecovery("register\x00"+ref.ActivationID, func(ctx context.Context) error {
-		return l.EnsureRegistered(ctx, ref)
+	return l.startRecovery("reconcile\x00"+ref.ActivationID, func(ctx context.Context) error {
+		return l.ReconcileWakeup(ctx, ref)
 	}, func(ctx context.Context, err error) {
-		l.logFailure(ctx, "workflow_timer_register_retry_failed", ref, err)
+		l.logFailure(ctx, "workflow_timer_reconcile_retry_failed", ref, err)
 	})
 }
 
@@ -641,27 +675,32 @@ func (l *WorkflowTimerLifecycle) startRecovery(key string, operation func(contex
 	if key == "" {
 		return false
 	}
-	l.recoveryMu.Lock()
+	l.projectionMu.Lock()
 	if l.stopped {
-		l.recoveryMu.Unlock()
+		l.projectionMu.Unlock()
 		return false
 	}
+	l.recoveryMu.Lock()
 	if _, exists := l.recovering[key]; exists {
 		l.recoveryMu.Unlock()
+		l.projectionMu.Unlock()
 		return true
 	}
 	if l.workOwner == nil {
 		l.recoveryMu.Unlock()
+		l.projectionMu.Unlock()
 		return false
 	}
 	lease, err := l.workOwner.Begin(l.recoveryCtx)
 	if err != nil {
 		l.recoveryMu.Unlock()
+		l.projectionMu.Unlock()
 		return false
 	}
 	done := make(chan struct{})
 	l.recovering[key] = done
 	l.recoveryMu.Unlock()
+	l.projectionMu.Unlock()
 
 	go func() {
 		defer func() {
@@ -710,16 +749,18 @@ func (l *WorkflowTimerLifecycle) stop(ctx context.Context) error {
 	if l == nil {
 		return nil
 	}
-	l.recoveryMu.Lock()
+	l.projectionMu.Lock()
 	if !l.stopped {
 		l.stopped = true
 		l.cancel()
 	}
+	l.recoveryMu.Lock()
 	done := make([]<-chan struct{}, 0, len(l.recovering))
 	for _, recoveryDone := range l.recovering {
 		done = append(done, recoveryDone)
 	}
 	l.recoveryMu.Unlock()
+	l.projectionMu.Unlock()
 	if err := l.stopWakeups(ctx); err != nil {
 		return err
 	}

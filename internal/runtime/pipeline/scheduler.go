@@ -37,10 +37,9 @@ const (
 )
 
 type scheduledProjection struct {
-	kind            scheduledProjectionKind
-	generic         Schedule
-	workflow        WorkflowTimerWakeup
-	onWorkflowTimer func(context.Context, WorkflowTimerWakeup)
+	kind     scheduledProjectionKind
+	generic  Schedule
+	workflow WorkflowTimerWakeup
 }
 
 func newGenericScheduledProjection(sc Schedule) (scheduledProjection, cronSpec, error) {
@@ -51,17 +50,13 @@ func newGenericScheduledProjection(sc Schedule) (scheduledProjection, cronSpec, 
 	return scheduledProjection{kind: scheduledProjectionGeneric, generic: normalized}, spec, nil
 }
 
-func newWorkflowTimerScheduledProjection(wakeup WorkflowTimerWakeup, onFire func(context.Context, WorkflowTimerWakeup)) (scheduledProjection, cronSpec, error) {
+func newWorkflowTimerScheduledProjection(wakeup WorkflowTimerWakeup) (scheduledProjection, cronSpec, error) {
 	if err := wakeup.validate(); err != nil {
 		return scheduledProjection{}, cronSpec{}, err
 	}
-	if onFire == nil {
-		return scheduledProjection{}, cronSpec{}, errors.New("workflow timer wakeup callback is required")
-	}
 	return scheduledProjection{
-		kind:            scheduledProjectionWorkflowTimer,
-		workflow:        wakeup,
-		onWorkflowTimer: onFire,
+		kind:     scheduledProjectionWorkflowTimer,
+		workflow: wakeup,
 	}, cronSpec{}, nil
 }
 
@@ -103,14 +98,21 @@ func (p scheduledProjection) clone() scheduledProjection {
 	return p
 }
 
-func (p scheduledProjection) fire(ctx context.Context, genericFire func(context.Context, Schedule)) {
+func (p scheduledProjection) fire(
+	ctx context.Context,
+	genericFire func(context.Context, Schedule),
+	workflowTimerFire func(context.Context, WorkflowTimerWakeup),
+) {
 	switch p.kind {
 	case scheduledProjectionGeneric:
 		if genericFire != nil {
 			genericFire(ctx, p.generic)
 		}
 	case scheduledProjectionWorkflowTimer:
-		p.onWorkflowTimer(ctx, p.workflow)
+		if workflowTimerFire == nil {
+			panic("workflow timer scheduler binding became unavailable")
+		}
+		workflowTimerFire(ctx, p.workflow)
 	}
 }
 
@@ -156,14 +158,15 @@ func (s *Schedule) NormalizeFlowInstance() {
 }
 
 type Scheduler struct {
-	mu           sync.Mutex
-	onFire       func(context.Context, Schedule)
-	tasks        map[string]*scheduledTask
-	draining     map[*scheduledTask]struct{}
-	reservations map[string]*PreparedParkedSetRebind
-	transitions  map[*PreparedParkedSetRebind]struct{}
-	stopped      bool
-	owner        worklifetime.Occurrence
+	mu              sync.Mutex
+	onFire          func(context.Context, Schedule)
+	onWorkflowTimer func(context.Context, WorkflowTimerWakeup)
+	tasks           map[string]*scheduledTask
+	draining        map[*scheduledTask]struct{}
+	reservations    map[string]*PreparedParkedSetRebind
+	transitions     map[*PreparedParkedSetRebind]struct{}
+	stopped         bool
+	owner           worklifetime.Occurrence
 }
 
 type scheduledTask struct {
@@ -274,6 +277,25 @@ func NewSchedulerWithWorkOwner(owner worklifetime.Occurrence, callbacks ...func(
 	}
 }
 
+func (s *Scheduler) bindWorkflowTimerLifecycle(callback func(context.Context, WorkflowTimerWakeup)) error {
+	if s == nil {
+		return errors.New("workflow timer lifecycle requires a scheduler")
+	}
+	if callback == nil {
+		return errors.New("workflow timer lifecycle callback is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped {
+		return errors.New("cannot bind workflow timer lifecycle to a stopped scheduler")
+	}
+	if s.onWorkflowTimer != nil {
+		return errors.New("workflow timer lifecycle is already bound")
+	}
+	s.onWorkflowTimer = callback
+	return nil
+}
+
 func (s *Scheduler) Register(ctx context.Context, sc Schedule) error {
 	projection, spec, err := newGenericScheduledProjection(sc)
 	if err != nil {
@@ -282,8 +304,8 @@ func (s *Scheduler) Register(ctx context.Context, sc Schedule) error {
 	return s.registerProjection(ctx, projection, spec)
 }
 
-func (s *Scheduler) registerWorkflowTimerWakeup(ctx context.Context, wakeup WorkflowTimerWakeup, onFire func(context.Context, WorkflowTimerWakeup)) error {
-	projection, spec, err := newWorkflowTimerScheduledProjection(wakeup, onFire)
+func (s *Scheduler) registerWorkflowTimerWakeup(ctx context.Context, wakeup WorkflowTimerWakeup) error {
+	projection, spec, err := newWorkflowTimerScheduledProjection(wakeup)
 	if err != nil {
 		return err
 	}
@@ -303,6 +325,10 @@ func (s *Scheduler) registerProjection(ctx context.Context, projection scheduled
 	if s.owner == nil {
 		s.mu.Unlock()
 		return errors.New("scheduler requires a runtime work occurrence")
+	}
+	if projection.kind == scheduledProjectionWorkflowTimer && s.onWorkflowTimer == nil {
+		s.mu.Unlock()
+		return errors.New("workflow timer lifecycle is not bound to scheduler")
 	}
 	key := projection.key()
 	if key == "" {
@@ -694,6 +720,12 @@ func prepareParkedSet(ctx context.Context, scheduler *Scheduler, bindings []park
 		scheduler.mu.Unlock()
 		return fail(errors.New("target scheduler stopped"))
 	}
+	for _, prepared := range transition.tasks {
+		if prepared.task.projection.kind == scheduledProjectionWorkflowTimer && scheduler.onWorkflowTimer == nil {
+			scheduler.mu.Unlock()
+			return fail(errors.New("target scheduler has no workflow timer lifecycle binding"))
+		}
+	}
 	for _, key := range transition.keys {
 		if _, reserved := scheduler.reservations[key]; reserved {
 			scheduler.mu.Unlock()
@@ -955,7 +987,7 @@ func (s *Scheduler) runOnce(task *scheduledTask, key string, projection schedule
 		if !s.beginTaskFire(key, task) {
 			return
 		}
-		projection.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), s.onFire)
+		projection.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), s.onFire, s.onWorkflowTimer)
 		s.endTaskFire(task, false)
 	}
 }
@@ -974,7 +1006,7 @@ func (s *Scheduler) runCron(task *scheduledTask, key string, projection schedule
 				if !s.beginTaskFire(key, task) {
 					return
 				}
-				projection.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), s.onFire)
+				projection.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), s.onFire, s.onWorkflowTimer)
 				if !s.endTaskFire(task, true) {
 					return
 				}
@@ -999,7 +1031,7 @@ func (s *Scheduler) runCron(task *scheduledTask, key string, projection schedule
 			if !s.beginTaskFire(key, task) {
 				return
 			}
-			projection.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), s.onFire)
+			projection.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), s.onFire, s.onWorkflowTimer)
 			if !s.endTaskFire(task, true) {
 				return
 			}
@@ -1116,7 +1148,7 @@ func validateScheduledProjection(projection scheduledProjection) (scheduledProje
 		}
 		return normalized, spec, nil
 	case scheduledProjectionWorkflowTimer:
-		return newWorkflowTimerScheduledProjection(projection.workflow, projection.onWorkflowTimer)
+		return newWorkflowTimerScheduledProjection(projection.workflow)
 	default:
 		return scheduledProjection{}, cronSpec{}, errors.New("scheduled projection kind is invalid")
 	}

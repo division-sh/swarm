@@ -1156,7 +1156,7 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 					if err != nil {
 						t.Fatalf("read standing schema: %v", err)
 					}
-					withTimer := strings.Replace(string(rawSchema), "  active:\n    initial: true\n    gate:", "  active:\n    initial: true\n    timers:\n      - after: 30s\n        advances_to: done\n    gate:", 1)
+					withTimer := strings.Replace(string(rawSchema), "  active:\n    initial: true\n    gate:", "  active:\n    initial: true\n    timers:\n      - after: 5s\n        advances_to: done\n    gate:", 1)
 					if withTimer == string(rawSchema) {
 						t.Fatal("standing timer insertion point not found")
 					}
@@ -1300,6 +1300,27 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 					}
 					if count != 0 {
 						t.Fatalf("adopted timer events at publication = %d, want 0", count)
+					}
+					if changedHash {
+						deadline := time.Now().Add(10 * time.Second)
+						for time.Now().Before(deadline) {
+							if err := stores.SQLDB.QueryRowContext(context.Background(), `SELECT status FROM timers`).Scan(&timerStatus); err != nil {
+								t.Fatalf("reload changed-hash adopted timer: %v", err)
+							}
+							if timerStatus == "fired" {
+								break
+							}
+							time.Sleep(25 * time.Millisecond)
+						}
+						if timerStatus != "fired" {
+							t.Fatalf("changed-hash adopted timer status = %q, want candidate lifecycle fire", timerStatus)
+						}
+						if err := stores.SQLDB.QueryRowContext(context.Background(), query, timerEvent).Scan(&count); err != nil {
+							t.Fatalf("count changed-hash adopted timer events: %v", err)
+						}
+						if count != 1 {
+							t.Fatalf("changed-hash adopted timer events = %d, want 1 from candidate lifecycle", count)
+						}
 					}
 				})
 			}
