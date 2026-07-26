@@ -1,12 +1,10 @@
 package store
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -138,37 +136,6 @@ func forkGateActivationState(raw map[string]any, forkRunID, flowInstance, entity
 		out[key] = value
 	}
 	return out, bindings, nil
-}
-
-func forkGenericAttemptGenerationTimer(row runForkTimerReconstructionRow, forkRunID string) (runForkTimerReconstructionRow, error) {
-	payload := map[string]any{}
-	if err := json.Unmarshal(row.FirePayload, &payload); err != nil {
-		return row, err
-	}
-	handle, ok := timeridentity.ParseTimerHandle(payload)
-	if !ok || !handle.Generation.Valid() {
-		return row, nil
-	}
-	forked, err := loopruntime.ForkGeneration(handle.Generation, forkRunID, row.EntityID)
-	if err != nil {
-		return row, fmt.Errorf("fork timer loop generation: %w", err)
-	}
-	handle.Generation = forked
-	metadata := handle.PayloadMetadata()
-	for key, value := range payload {
-		if key == "timer_handle" || key == handle.Generation.RevisionField {
-			continue
-		}
-		metadata[key] = value
-	}
-	metadata[forked.RevisionField] = forked.RevisionID
-	raw, err := json.Marshal(metadata)
-	if err != nil {
-		return row, err
-	}
-	row.TimerName = handle.TaskID()
-	row.FirePayload = raw
-	return row, nil
 }
 
 func cloneForkLoopState(raw map[string]any) map[string]any {

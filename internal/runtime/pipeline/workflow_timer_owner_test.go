@@ -162,6 +162,22 @@ func TestWorkflowTimerWakeupProjectionCarriesOnlyFamilyOccurrenceAndDueAt(t *tes
 	}
 }
 
+func TestWorkflowTimerActiveProjectionRequiresSchedulerOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			pc, _, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, &recordingPipelineBus{}, false)
+
+			if err := pc.workflowTimers.ReconcileWakeup(ctx, activation.Ref); !errors.Is(err, errWorkflowTimerSchedulerRequired) {
+				t.Fatalf("ReconcileWakeup error = %v, want scheduler-required failure", err)
+			}
+			if err := pc.RestoreWorkflowTimers(ctx); !errors.Is(err, errWorkflowTimerSchedulerRequired) {
+				t.Fatalf("RestoreWorkflowTimers error = %v, want scheduler-required failure", err)
+			}
+		})
+	}
+}
+
 type settledPipelineTestObligationOwner struct {
 	unavailablePipelineTestObligationOwner
 }
@@ -1061,7 +1077,7 @@ func TestWorkflowTimerWakeupReconciliationSerializesCancellationOnBothStores(t *
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
-			pc, _, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, &recordingPipelineBus{}, false)
+			pc, _, activation := seedWorkflowTimerOwnerActivationWithDelay(t, store, ctx, &recordingPipelineBus{}, false, "1h")
 			loaded := make(chan struct{})
 			release := make(chan struct{})
 			defer func() {
@@ -1119,7 +1135,7 @@ func TestWorkflowTimerWakeupReconciliationRetiresTerminalAndMissingRowsOnBothSto
 		for _, state := range []string{"terminal", "missing"} {
 			t.Run(tc.name+"/"+state, func(t *testing.T) {
 				store, ctx := tc.open(t)
-				pc, _, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, &recordingPipelineBus{}, false)
+				pc, _, activation := seedWorkflowTimerOwnerActivationWithDelay(t, store, ctx, &recordingPipelineBus{}, false, "1h")
 				switch state {
 				case "terminal":
 					if err := store.RunPipelineMutation(ctx, func(txctx context.Context) error {
@@ -1157,7 +1173,7 @@ func TestWorkflowTimerLifecycleStopFencesRestoreAndRecoveryOnBothStores(t *testi
 		for _, operation := range []string{"restore", "recovery"} {
 			t.Run(tc.name+"/"+operation, func(t *testing.T) {
 				store, ctx := tc.open(t)
-				pc, _, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, &recordingPipelineBus{}, false)
+				pc, _, activation := seedWorkflowTimerOwnerActivationWithDelay(t, store, ctx, &recordingPipelineBus{}, false, "1h")
 				if err := pc.workflowTimers.retireWakeup(activation.Ref); err != nil {
 					t.Fatalf("retire initial wakeup: %v", err)
 				}

@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -674,7 +673,7 @@ func TestSelectedContractExecutionActivationKeepsPostFrontierActiveDeliveryFailC
 	}
 }
 
-func TestSelectedContractExecutionMaterializationReconstructsActiveTimer(t *testing.T) {
+func TestSelectedContractExecutionMaterializationRejectsActiveTimerBeforeMutation(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
@@ -705,54 +704,23 @@ func TestSelectedContractExecutionMaterializationReconstructsActiveTimer(t *test
 			WorkflowVersion: "v1",
 		},
 	})
-	if err != nil {
-		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+	if err == nil || !strings.Contains(err.Error(), RunForkBlockerTimerHistoryUnproven) {
+		t.Fatalf("MaterializeRunForkForSelectedContractExecution result=%#v error=%v, want timer blocker", materialized, err)
 	}
-	if materialized.ForkRunID == "" {
-		t.Fatalf("materialized fork run_id is empty: %#v", materialized)
+	if materialized.ForkRunID != "" {
+		t.Fatalf("materialized timer-bearing fork: %#v", materialized)
 	}
-	for _, blocker := range materialized.ReplayResumeAdmission.UnsupportedBlockers {
-		if blocker.Code == RunForkBlockerTimerHistoryUnproven {
-			t.Fatalf("timer blocker survived reconstruction: %#v", materialized.ReplayResumeAdmission.UnsupportedBlockers)
-		}
-	}
-	var forkTimerID, forkTimerName, forkSourceTimerID string
-	var forkPayload []byte
-	if err := db.QueryRowContext(ctx, `
-		SELECT timer_id::text, timer_name, source_timer_id::text, fire_payload
-		FROM timers
-		WHERE run_id = $1::uuid
-		  AND source_timer_id IS NOT NULL
-		  AND forked_from_run_id = $2::uuid
-		  AND forked_from_event_id = $3::uuid
-		  AND reconstruction_owner = $4
-		  AND status = 'active'
-	`, materialized.ForkRunID, sourceRunID, eventID, RunForkHistoricalReplayTimerReconstructionOwner).Scan(
-		&forkTimerID, &forkTimerName, &forkSourceTimerID, &forkPayload,
-	); err != nil {
-		t.Fatalf("load reconstructed fork timer: %v", err)
-	}
-	expectedForkTimerID := timeridentity.WorkflowTimerForkActivationID(sourceTimerID, materialized.ForkRunID, eventID)
-	forkRef, ok := timeridentity.ParseWorkflowTimerActivationTaskID(forkTimerName)
-	if !ok || forkTimerID != expectedForkTimerID || forkSourceTimerID != sourceTimerID ||
-		forkRef.ActivationID != expectedForkTimerID || forkRef.Declaration != sourceRef.Declaration {
-		t.Fatalf("reconstructed fork timer = id:%q source:%q ref:%#v", forkTimerID, forkSourceTimerID, forkRef)
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(forkPayload, &payload); err != nil {
-		t.Fatalf("decode reconstructed fork timer payload: %v", err)
-	}
-	if len(payload) != 1 || payload["source"] != true {
-		t.Fatalf("reconstructed business payload = %#v, want unchanged source payload", payload)
-	}
+	assertNoSelectedContractForkRows(t, db, sourceRunID)
+	assertNoForkTimerCopiesForSource(t, db, sourceRunID)
+
 	var sourceTimerCount int
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM timers
-		WHERE run_id = $1::uuid
-		  AND source_timer_id IS NULL
+		WHERE timer_id = $1::uuid
+		  AND run_id = $2::uuid
 		  AND status = 'active'
-	`, sourceRunID).Scan(&sourceTimerCount); err != nil {
+	`, sourceTimerID, sourceRunID).Scan(&sourceTimerCount); err != nil {
 		t.Fatalf("count source timers: %v", err)
 	}
 	if sourceTimerCount != 1 {
@@ -762,9 +730,8 @@ func TestSelectedContractExecutionMaterializationReconstructsActiveTimer(t *test
 
 func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerHistory(t *testing.T) {
 	cases := []struct {
-		name           string
-		insertTimer    func(t *testing.T, db *sql.DB, sourceRunID, entityID string, at time.Time)
-		expectedReason string
+		name        string
+		insertTimer func(t *testing.T, db *sql.DB, sourceRunID, entityID string, at time.Time)
 	}{
 		{
 			name: "fired timer",
@@ -783,7 +750,6 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 					t.Fatalf("seed fired timer: %v", err)
 				}
 			},
-			expectedReason: "source timer history is not active-at-fork only",
 		},
 		{
 			name: "non-active timer",
@@ -802,7 +768,6 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 					t.Fatalf("seed cancelled timer: %v", err)
 				}
 			},
-			expectedReason: "source timer history is not active-at-fork only",
 		},
 		{
 			name: "missing executable owner",
@@ -821,7 +786,6 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 					t.Fatalf("seed ownerless timer: %v", err)
 				}
 			},
-			expectedReason: "source timer lacks executable owner/event identity",
 		},
 		{
 			name: "missing fire event",
@@ -840,7 +804,6 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 					t.Fatalf("seed eventless timer: %v", err)
 				}
 			},
-			expectedReason: "source timer lacks executable owner/event identity",
 		},
 	}
 
@@ -867,8 +830,8 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 					WorkflowVersion: "v1",
 				},
 			})
-			if err == nil || !strings.Contains(err.Error(), tc.expectedReason) {
-				t.Fatalf("materialization error = %v, want %q", err, tc.expectedReason)
+			if err == nil || !strings.Contains(err.Error(), RunForkBlockerTimerHistoryUnproven) {
+				t.Fatalf("materialization error = %v, want %s", err, RunForkBlockerTimerHistoryUnproven)
 			}
 			if materialized.ForkRunID != "" {
 				t.Fatalf("materialized fork despite unsupported timer history: %#v", materialized)
@@ -879,19 +842,7 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 	}
 }
 
-func TestSelectedContractTimerReconstructionFailsClosedForInvalidPayload(t *testing.T) {
-	_, err := validateRunForkReconstructableSourceTimer(runForkTimerReconstructionRow{
-		Status:      "active",
-		OwnerAgent:  "agent-a",
-		FireEvent:   "timer.selected",
-		FirePayload: []byte(`{"broken"`),
-	})
-	if err == nil || !strings.Contains(err.Error(), "source timer payload is invalid JSON") {
-		t.Fatalf("validate invalid timer payload error = %v", err)
-	}
-}
-
-func TestSelectedContractTimerReconstructionRemainsFixedWhenSourceTimerIsDeletedLater(t *testing.T) {
+func TestSelectedContractTimerBlockerRemainsFixedWhenSourceTimerIsDeletedLater(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
@@ -918,31 +869,34 @@ func TestSelectedContractTimerReconstructionRemainsFixedWhenSourceTimerIsDeleted
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
-	if !runForkPlanHasTimerBlocker(plan) {
+	if !runForkTestHasPlanBlocker(plan, RunForkBlockerTimerHistoryUnproven) {
 		t.Fatalf("plan missing timer blocker: %#v", plan.ReplayResumeAdmission)
 	}
 	if _, err := db.ExecContext(ctx, `DELETE FROM timers WHERE timer_id = $1::uuid`, timerID); err != nil {
 		t.Fatalf("delete timer after planning: %v", err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
-	reconstruction, err := pg.planRunForkSelectedContractTimerReconstruction(ctx, plan)
-	if err != nil {
-		t.Fatalf("reconstruct timer from original fixed snapshot: %v", err)
-	}
-	if !reconstruction.Required || len(reconstruction.Rows) != 1 || reconstruction.Rows[0].TimerID != timerID {
-		t.Fatalf("original reconstruction = %#v, want deleted source timer from fixed snapshot", reconstruction)
-	}
 	repeatedPlan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
 	if err != nil {
 		t.Fatalf("repeat PlanRunFork: %v", err)
 	}
-	repeated, err := pg.planRunForkSelectedContractTimerReconstruction(ctx, repeatedPlan)
-	if err != nil {
-		t.Fatalf("reconstruct timer from repeated fixed snapshot: %v", err)
+	if !runForkTestHasPlanBlocker(repeatedPlan, RunForkBlockerTimerHistoryUnproven) {
+		t.Fatalf("repeated fixed-revision plan lost timer blocker: %#v", repeatedPlan.ReplayResumeAdmission)
 	}
-	if !repeated.Required || len(repeated.Rows) != 1 || repeated.Rows[0].TimerID != timerID {
-		t.Fatalf("repeated reconstruction = %#v, want identical historical timer", repeated)
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          eventID,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), RunForkBlockerTimerHistoryUnproven) || materialized.ForkRunID != "" {
+		t.Fatalf("fixed timer blocker materialization result=%#v error=%v", materialized, err)
 	}
+	assertNoSelectedContractForkRows(t, db, sourceRunID)
 }
 
 func TestPostTSourceTimerActivatesAsSelectedBranchDivergence(t *testing.T) {

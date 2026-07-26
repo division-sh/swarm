@@ -279,15 +279,13 @@ func historicalReplayTimersAdmission(replay store.RunForkReplayResumeAdmission) 
 		}
 	}
 	if replayDispositionHas(replay, store.RunForkReplayResumeFactTimerHistory, store.RunForkReplayResumeDispositionReconstruct) {
-		return store.RunForkHistoricalReplayFactAdmission{
-			Fact:        store.RunForkHistoricalReplayFactTimers,
-			Admission:   store.RunForkHistoricalReplayAdmissionReconstructedForkState,
-			SourceOwner: store.RunForkHistoricalReplayTimerReconstructionOwner,
-			Tracker:     "#642",
-			Message:     "active source timers are lineage inputs only; fork-local timer rows are reconstructed under the fork run_id by the timer reconstruction owner",
-		}
+		return historicalReplaySplitFact(
+			store.RunForkHistoricalReplayFactTimers,
+			"timer reconstruction is unsupported until #642 provides a long-lived selected-fork timer owner",
+			"#642",
+		)
 	}
-	return historicalReplaySplitFact(store.RunForkHistoricalReplayFactTimers, "timer reconstruction remains split unless the canonical replay taxonomy admits active timer reconstruction", "#564")
+	return historicalReplaySplitFact(store.RunForkHistoricalReplayFactTimers, "timer reconstruction remains fail-closed under the long-lived selected-fork timer owner gate", "#642")
 }
 
 func historicalReplayEventDeliveriesAdmission(replay store.RunForkReplayResumeAdmission) store.RunForkHistoricalReplayFactAdmission {
@@ -682,7 +680,7 @@ func historicalReplayBlockedSiblings() []store.RunForkSelectedContractExecutionB
 		{
 			Concept:     "timer_reconstruction",
 			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
-			Reason:      "timer reconstruction remains under #564 until a timer owner is approved",
+			Reason:      "timer reconstruction remains under #642 until a long-lived selected-fork timer owner is approved",
 		},
 		{
 			Concept:     "route_persistence_runtime_recovery",

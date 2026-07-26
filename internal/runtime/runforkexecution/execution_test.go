@@ -31,6 +31,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -55,6 +56,140 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
+
+func TestExecuteSelectedContractRunForkRejectsTimerBearingWorkBeforeMutation(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		seedSourceTimer bool
+		wantCode        string
+	}{
+		{
+			name:            "revisioned active source timer",
+			seedSourceTimer: true,
+			wantCode:        store.RunForkBlockerTimerHistoryUnproven,
+		},
+		{
+			name:     "selected handler can create workflow timer",
+			wantCode: selectedContractTimerOwnerUnavailable,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, db, _ := testutil.StartPostgres(t)
+			pg := storetest.AdmitPostgresRuntimeStore(t, db)
+			ctx := runForkTestContext(t)
+			repoRoot := runForkExecutionRepoRoot(t)
+			contractsRoot := filepath.Join(repoRoot, "tests/tier5-flow-lifecycle/test-timer-fire")
+			loader := ContractBundleSourceLoader{
+				RepoRoot:         repoRoot,
+				PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+			}
+			sourceRunID := uuid.NewString()
+			entityID := uuid.NewString()
+			sourceEventID := uuid.NewString()
+			at := time.Unix(1700002210, 0).UTC()
+			seedSelectedExecutionSourceRunWithPrimaryRoute(
+				t,
+				db,
+				sourceRunID,
+				entityID,
+				sourceEventID,
+				"timer.scheduled",
+				at,
+				events.DeliveryRoute{SubscriberType: "node", SubscriberID: "test-node"},
+				nil,
+			)
+
+			sourceTimerID := ""
+			if test.seedSourceTimer {
+				sourceTimerID = uuid.NewString()
+				ref := timeridentity.WorkflowTimerActivationRef{
+					ActivationID: sourceTimerID,
+					Declaration:  "test-node.check_timer",
+				}
+				if _, err := db.ExecContext(ctx, `
+					INSERT INTO timers (
+						timer_id, run_id, timer_name, entity_id, flow_instance, fire_event,
+						fire_payload, fire_at, owner_agent, task_type, status, created_at
+					)
+					VALUES (
+						$1::uuid, $2::uuid, $3, $4::uuid, 'flow-a/1', 'timer.check',
+						'{}'::jsonb, $5, 'test-node', 'workflow_timer', 'active', $6
+					)
+				`, sourceTimerID, sourceRunID, ref.TaskID(), entityID, at.Add(time.Hour), at); err != nil {
+					t.Fatalf("seed source workflow timer: %v", err)
+				}
+			}
+			captureSelectedExecutionSourceRevision(t, db, sourceRunID)
+			var sourceStatusBefore string
+			if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatusBefore); err != nil {
+				t.Fatalf("load source status before rejection: %v", err)
+			}
+
+			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+				SourceRunID:         sourceRunID,
+				At:                  sourceEventID,
+				ConfirmSourceFreeze: true,
+				Store:               pg,
+				SourceLoader:        loader,
+				ContractSelection: store.RunForkContractSelection{
+					Mode:          store.RunForkContractSelectionModeSelectedContracts,
+					ContractsRoot: contractsRoot,
+				},
+			})
+			failure, ok := runtimefailures.EnvelopeFromError(err)
+			if err == nil || !ok || failure.Class != runtimefailures.ClassDependencyUnavailable || failure.Detail.Code != test.wantCode {
+				t.Fatalf("ExecuteSelectedContractRunFork result=%#v error=%v, want %s rejection", result, err, test.wantCode)
+			}
+			if result.Owner != store.RunForkSelectedContractExecutionOwner || result.Materialization.ForkRunID != "" {
+				t.Fatalf("rejected result = %#v, want owner and no materialization", result)
+			}
+
+			assertSelectedContractTimerRejectionHasNoForkMutation(t, ctx, db, sourceRunID)
+			var sourceStatusAfter string
+			if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatusAfter); err != nil {
+				t.Fatalf("load source status after rejection: %v", err)
+			}
+			if sourceStatusAfter != sourceStatusBefore {
+				t.Fatalf("source status changed from %q to %q during rejected timer-bearing fork", sourceStatusBefore, sourceStatusAfter)
+			}
+			if sourceTimerID != "" {
+				var status string
+				if err := db.QueryRowContext(ctx, `SELECT status FROM timers WHERE timer_id = $1::uuid AND run_id = $2::uuid`, sourceTimerID, sourceRunID).Scan(&status); err != nil {
+					t.Fatalf("load rejected source timer: %v", err)
+				}
+				if status != "active" {
+					t.Fatalf("source timer status = %q, want active and untouched", status)
+				}
+			}
+		})
+	}
+}
+
+func assertSelectedContractTimerRejectionHasNoForkMutation(t testing.TB, ctx context.Context, db *sql.DB, sourceRunID string) {
+	t.Helper()
+	for _, probe := range []struct {
+		name  string
+		query string
+	}{
+		{name: "runs", query: `SELECT COUNT(*) FROM runs WHERE forked_from_run_id = $1::uuid`},
+		{name: "bindings", query: `SELECT COUNT(*) FROM run_fork_selected_contract_bindings WHERE source_run_id = $1::uuid`},
+		{name: "route recoveries", query: `SELECT COUNT(*) FROM run_fork_selected_contract_route_recoveries WHERE source_run_id = $1::uuid`},
+		{name: "branch divergences", query: `SELECT COUNT(*) FROM run_fork_selected_contract_branch_divergences WHERE source_run_id = $1::uuid`},
+		{name: "execution lineage", query: `SELECT COUNT(*) FROM run_fork_selected_contract_executions WHERE source_run_id = $1::uuid`},
+		{name: "runtime executions", query: `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE source_run_id = $1::uuid`},
+		{name: "events", query: `SELECT COUNT(*) FROM events WHERE run_id IN (SELECT run_id FROM runs WHERE forked_from_run_id = $1::uuid)`},
+		{name: "deliveries", query: `SELECT COUNT(*) FROM event_deliveries WHERE run_id IN (SELECT run_id FROM runs WHERE forked_from_run_id = $1::uuid)`},
+		{name: "timers", query: `SELECT COUNT(*) FROM timers WHERE forked_from_run_id = $1::uuid`},
+	} {
+		var count int
+		if err := db.QueryRowContext(ctx, probe.query, sourceRunID).Scan(&count); err != nil {
+			t.Fatalf("count rejected fork %s: %v", probe.name, err)
+		}
+		if count != 0 {
+			t.Fatalf("timer-bearing rejection created %d fork %s row(s)", count, probe.name)
+		}
+	}
+}
 
 func seedRunForkAgentTurnCapabilitySurface(t testing.TB, ctx context.Context, pg *store.PostgresStore, runID, turnID, sessionID, agentID, runtimeMode string) string {
 	t.Helper()

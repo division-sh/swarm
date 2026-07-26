@@ -443,6 +443,9 @@ func (l *WorkflowTimerLifecycle) reconcileWakeupImmediately(ctx context.Context,
 		}
 		if err := l.ReconcileWakeup(ctx, ref); err != nil {
 			last = err
+			if errors.Is(err, errWorkflowTimerSchedulerRequired) {
+				return err
+			}
 			continue
 		}
 		return nil
@@ -458,6 +461,9 @@ func (l *WorkflowTimerLifecycle) queueWakeupReconcile(ctx context.Context, ref t
 		postCommitCtx := withoutSQLTxContext(actionCtx)
 		if err := l.reconcileWakeupImmediately(postCommitCtx, ref); err != nil {
 			l.logFailure(postCommitCtx, "workflow_timer_reconcile_failed", ref, err)
+			if errors.Is(err, errWorkflowTimerSchedulerRequired) {
+				return
+			}
 			l.startWakeupRecovery(ref)
 		}
 	}
@@ -646,6 +652,14 @@ func (l *WorkflowTimerLifecycle) Restore(ctx context.Context) error {
 	activations, err := store.listWorkflowTimerActivations(ctx, runtimecorrelation.RunIDFromContext(ctx), "", true)
 	if err != nil {
 		return err
+	}
+	if len(activations) > 0 {
+		l.projectionMu.Lock()
+		schedulerMissing := l.scheduler == nil
+		l.projectionMu.Unlock()
+		if schedulerMissing {
+			return fmt.Errorf("restore workflow timers with %d active activation(s): %w", len(activations), errWorkflowTimerSchedulerRequired)
+		}
 	}
 	for _, activation := range activations {
 		if err := l.reconcileWakeupImmediately(ctx, activation.Ref); err != nil {

@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,6 +13,8 @@ type workflowTimerWakeupFamily uint8
 
 const workflowTimerActivationWakeup workflowTimerWakeupFamily = 1
 const workflowTimerTaskFamily = "workflow_timer"
+
+var errWorkflowTimerSchedulerRequired = errors.New("workflow timer scheduler is required for active wakeup reconciliation")
 
 // WorkflowTimerWakeup is the complete process-local projection of one durable
 // workflow timer occurrence. All execution facts are reloaded from storage.
@@ -64,8 +67,11 @@ func (w WorkflowTimerWakeup) validate() error {
 }
 
 func (l *WorkflowTimerLifecycle) registerWakeup(ctx context.Context, wakeup WorkflowTimerWakeup) error {
-	if l == nil || l.scheduler == nil {
-		return nil
+	if l == nil {
+		return fmt.Errorf("workflow timer lifecycle is required")
+	}
+	if l.scheduler == nil {
+		return errWorkflowTimerSchedulerRequired
 	}
 	if err := wakeup.validate(); err != nil {
 		return err

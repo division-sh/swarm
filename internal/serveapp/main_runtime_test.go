@@ -36,7 +36,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -45,7 +44,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
-	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
@@ -1067,7 +1065,7 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 	}
 }
 
-func TestRunServeRuntimeJoinForkReplayPreservesActivationAndTimer(t *testing.T) {
+func TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation(t *testing.T) {
 	endpoint, db, bundleHash, _, pg := startServedJoinProofRuntime(t)
 	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name": "order.started", "bundle_hash": bundleHash,
@@ -1099,52 +1097,39 @@ func TestRunServeRuntimeJoinForkReplayPreservesActivationAndTimer(t *testing.T) 
 		t.Fatalf("plan served join fork frontier: %v", err)
 	}
 
-	var fork apiv1.RunForkExecutionResult
-	requireServedJSONRPCResult(t, endpoint, "run.fork", map[string]any{
+	rpcErr := requireServedJSONRPCError(t, endpoint, "run.fork", map[string]any{
 		"source_run_id": initial.RunID, "fork_event_id": forkEventID, "confirm_source_freeze": true, "idempotency_key": "join-fork-" + uuid.NewString(),
-	}, &fork)
-	if fork.ForkRunID == "" || fork.SourceRunID != initial.RunID || fork.ExecutedEventCount != 1 {
-		t.Fatalf("join run.fork result = %#v", fork)
+	})
+	if rpcErr == nil {
+		t.Fatal("join run.fork succeeded, want timer-history rejection")
 	}
-	forkCtx := runtimecorrelation.WithRunID(context.Background(), fork.ForkRunID)
-	instance, ok, err := runtimepipeline.NewWorkflowInstanceStore(db).Load(forkCtx, entityID)
-	if err != nil || !ok {
-		t.Fatalf("load fork join instance = %#v, %v, %v", instance, ok, err)
+	details, ok := rpcErr.Data["details"].(map[string]any)
+	if !ok {
+		t.Fatalf("join run.fork error details = %#v", rpcErr.Data["details"])
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
-	if err != nil {
-		t.Fatal(err)
+	failure := decodeServedFailureEnvelope(t, details["failure"])
+	if failure.Class != runtimefailures.ClassDependencyUnavailable || failure.Detail.Code != store.RunForkBlockerTimerHistoryUnproven {
+		t.Fatalf("join run.fork failure = %#v, want dependency-unavailable/%s", failure, store.RunForkBlockerTimerHistoryUnproven)
 	}
-	activation, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", joinruntime.ActivationKey("awaiting", "awaiting", "dispatch-1"))
-	if err != nil || !ok || activation.Status != joinruntime.StatusOpen || activation.Completed() != 1 || activation.Expected() != 2 {
-		t.Fatalf("fork join activation = %#v, %v, %v", activation, ok, err)
+	var forkRuns, forkTimers int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM runs WHERE forked_from_run_id = $1::uuid`, initial.RunID).Scan(&forkRuns); err != nil {
+		t.Fatalf("count rejected join fork runs: %v", err)
 	}
-	if output, ok := activation.Outputs["a"]; !ok || output.Hash == "" {
-		t.Fatalf("fork join output = %#v", activation.Outputs)
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM timers WHERE forked_from_run_id = $1::uuid`, initial.RunID).Scan(&forkTimers); err != nil {
+		t.Fatalf("count rejected join fork timers: %v", err)
 	}
-	var fireEvent string
-	var firePayload []byte
-	var reconstructed int
+	if forkRuns != 0 || forkTimers != 0 {
+		t.Fatalf("timer-bearing served rejection mutated fork state: runs=%d timers=%d", forkRuns, forkTimers)
+	}
+	var sourceTimers int
 	if err := db.QueryRowContext(context.Background(), `
-		SELECT fire_event, fire_payload, COUNT(*) OVER ()
-		FROM timers
-		WHERE run_id = $1::uuid
-		  AND source_timer_id IS NOT NULL
-		  AND forked_from_run_id = $2::uuid
-		  AND forked_from_event_id = $3::uuid
-		  AND reconstruction_owner = $4
-		  AND status = 'active'
-	`, fork.ForkRunID, initial.RunID, forkEventID, store.RunForkHistoricalReplayTimerReconstructionOwner).Scan(&fireEvent, &firePayload, &reconstructed); err != nil {
-		t.Fatalf("load reconstructed join timer: %v", err)
+		SELECT COUNT(*) FROM timers
+		WHERE run_id = $1::uuid AND fire_event = 'platform.join_timeout' AND status = 'active'
+	`, initial.RunID).Scan(&sourceTimers); err != nil {
+		t.Fatalf("count preserved source join timers: %v", err)
 	}
-	var timerPayload map[string]any
-	if err := json.Unmarshal(firePayload, &timerPayload); err != nil {
-		t.Fatalf("decode reconstructed join timer payload: %v", err)
-	}
-	handle, ok := timeridentity.ParseTimerHandle(timerPayload)
-	if reconstructed != 1 || fireEvent != "platform.join_timeout" || !ok || handle.Kind != timeridentity.TimerHandleJoinTimeout ||
-		handle.Join.Stage != "awaiting" || handle.Join.JoinID != "awaiting" {
-		t.Fatalf("fork join timer = event:%q count:%d handle:%#v parsed:%v", fireEvent, reconstructed, handle, ok)
+	if sourceTimers != 1 {
+		t.Fatalf("source join timers = %d, want one untouched active timer", sourceTimers)
 	}
 }
 

@@ -38,6 +38,17 @@ func TestWorkflowTimerStoreCannotInterpretTypedIdentity(t *testing.T) {
 	})
 }
 
+func TestSelectedContractTimerReconstructionWriterStaticAbsence(t *testing.T) {
+	assertProductionSymbolsAbsent(t, []string{
+		"RunForkHistoricalReplayTimerReconstructionOwner",
+		"RemintWorkflowTimerActivationForFork",
+		"RemintPersistedWorkflowTimerForFork",
+		"planRunForkSelectedContractTimerReconstruction",
+		"insertRunForkSelectedContractTimerReconstructions",
+		"runForkReplayResumeAdmissionWithTimerReconstruction",
+	})
+}
+
 func assertProductionSymbolsAbsent(t *testing.T, forbidden []string) {
 	t.Helper()
 	root := filepath.Clean(filepath.Join("..", "..", ".."))
