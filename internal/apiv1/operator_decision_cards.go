@@ -433,8 +433,12 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 		if err != nil {
 			return nil, err
 		}
-	} else if provider, ok := opts.Events.(runtimeBundleSourceFactProvider); ok {
-		ctx = provider.WithBundleSourceFact(ctx)
+	}
+	if provider, ok := opts.Events.(runtimeBundleSourceFactProvider); ok {
+		ctx, err = provider.AdmitBundleSourceFact(ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
 	idempotencyKey := strings.TrimSpace(stringParam(req.Params, "idempotency_key"))
 	result := semanticvalue.EmptyObject()

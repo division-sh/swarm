@@ -131,7 +131,7 @@ func TestInsertRejectsDeletedPersistedBundleSourceFact(t *testing.T) {
 		t.Fatalf("NewPersistedBundleSourceFact: %v", err)
 	}
 	seedMutationLogBundleRow(t, db, sourceFact.BundleHash())
-	seedMutationLogActiveRun(t, db, runID, nil)
+	seedMutationLogActiveRun(t, db, runID, &sourceFact)
 	if _, err := db.ExecContext(context.Background(), `DELETE FROM bundles WHERE bundle_hash = $1`, sourceFact.BundleHash()); err != nil {
 		t.Fatalf("delete bundle row: %v", err)
 	}
@@ -154,6 +154,113 @@ func TestInsertRejectsDeletedPersistedBundleSourceFact(t *testing.T) {
 	}
 	if count := countMutationRowsForRun(t, db, runID); count != 0 {
 		t.Fatalf("entity_mutations rows for %s = %d, want 0", runID, count)
+	}
+	if count := countMutationAuthorActivityForRun(t, db, runID); count != 0 {
+		t.Fatalf("author activity rows for %s = %d, want 0", runID, count)
+	}
+}
+
+func TestInsertRejectsBundleSourceFactUnrelatedToActiveRunBeforeMutation(t *testing.T) {
+	const bundleHashA = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const bundleHashB = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+	for _, tc := range []struct {
+		name        string
+		runFact     func(t *testing.T) runtimecorrelation.BundleSourceFact
+		contextFact func(t *testing.T) (runtimecorrelation.BundleSourceFact, bool)
+		seedContext bool
+		want        string
+	}{
+		{
+			name: "foreign hash",
+			runFact: func(t *testing.T) runtimecorrelation.BundleSourceFact {
+				return persistedMutationLogFact(t, bundleHashA)
+			},
+			contextFact: func(t *testing.T) (runtimecorrelation.BundleSourceFact, bool) {
+				return persistedMutationLogFact(t, bundleHashB), true
+			},
+			seedContext: true,
+			want:        "does not match active run",
+		},
+		{
+			name: "same hash different source",
+			runFact: func(t *testing.T) runtimecorrelation.BundleSourceFact {
+				return ephemeralMutationLogFact(t, bundleHashA)
+			},
+			contextFact: func(t *testing.T) (runtimecorrelation.BundleSourceFact, bool) {
+				return persistedMutationLogFact(t, bundleHashA), true
+			},
+			seedContext: true,
+			want:        "does not match active run",
+		},
+		{
+			name: "missing context fact",
+			runFact: func(t *testing.T) runtimecorrelation.BundleSourceFact {
+				return ephemeralMutationLogFact(t, bundleHashA)
+			},
+			contextFact: func(t *testing.T) (runtimecorrelation.BundleSourceFact, bool) {
+				return runtimecorrelation.BundleSourceFact{}, false
+			},
+			want: "bundle source fact is required",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, db, _ := testutil.StartPostgres(t)
+			runID := uuid.NewString()
+			runFact := tc.runFact(t)
+			if runFact.IsPersisted() {
+				seedMutationLogBundleRow(t, db, runFact.BundleHash())
+			}
+			contextFact, hasContextFact := tc.contextFact(t)
+			if tc.seedContext && contextFact.IsPersisted() && !runFact.Matches(contextFact) {
+				seedMutationLogBundleRow(t, db, contextFact.BundleHash())
+			}
+			seedMutationLogActiveRun(t, db, runID, &runFact)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityRuntimeContext(context.Background()), runID)
+			if hasContextFact {
+				ctx = runtimecorrelation.WithBundleSourceFact(ctx, contextFact)
+			}
+
+			err := insertMutationLogRecord(t, ctx, db, Record{
+				EntityID:   uuid.NewString(),
+				Field:      "current_state",
+				OldValue:   "open",
+				NewValue:   "closed",
+				WriterType: "system_node",
+				WriterID:   "review",
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Insert error = %v, want %q", err, tc.want)
+			}
+			if count := countMutationRowsForRun(t, db, runID); count != 0 {
+				t.Fatalf("entity_mutations rows for %s = %d, want 0", runID, count)
+			}
+			if count := countMutationAuthorActivityForRun(t, db, runID); count != 0 {
+				t.Fatalf("author activity rows for %s = %d, want 0", runID, count)
+			}
+		})
+	}
+}
+
+func TestInsertAcceptsExactEphemeralBundleSourceFact(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	runID := uuid.NewString()
+	sourceFact := ephemeralMutationLogFact(t, "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+	seedMutationLogActiveRun(t, db, runID, &sourceFact)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityRuntimeContext(context.Background()), runID)
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
+
+	if err := insertMutationLogRecord(t, ctx, db, Record{
+		EntityID:   uuid.NewString(),
+		Field:      "status",
+		NewValue:   "open",
+		WriterType: "system_node",
+		WriterID:   "review",
+	}); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if count := countMutationRowsForRun(t, db, runID); count != 1 {
+		t.Fatalf("entity_mutations rows for %s = %d, want 1", runID, count)
 	}
 }
 
@@ -246,4 +353,31 @@ func countMutationRowsForRun(t *testing.T, db *sql.DB, runID string) int {
 		t.Fatalf("count entity_mutations rows for %s: %v", runID, err)
 	}
 	return count
+}
+
+func countMutationAuthorActivityForRun(t *testing.T, db *sql.DB, runID string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `SELECT COUNT(*) FROM author_activity_occurrences WHERE run_id = $1::uuid`, runID).Scan(&count); err != nil {
+		t.Fatalf("count author activity rows for %s: %v", runID, err)
+	}
+	return count
+}
+
+func persistedMutationLogFact(t *testing.T, bundleHash string) runtimecorrelation.BundleSourceFact {
+	t.Helper()
+	fact, err := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
+	if err != nil {
+		t.Fatalf("NewPersistedBundleSourceFact: %v", err)
+	}
+	return fact
+}
+
+func ephemeralMutationLogFact(t *testing.T, bundleHash string) runtimecorrelation.BundleSourceFact {
+	t.Helper()
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+	if err != nil {
+		t.Fatalf("NewEphemeralBundleSourceFact: %v", err)
+	}
+	return fact
 }

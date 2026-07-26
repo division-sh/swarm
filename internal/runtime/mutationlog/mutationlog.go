@@ -76,11 +76,16 @@ func Insert(ctx context.Context, db DBTX, rec Record) error {
 	if err != nil {
 		return ErrInvalidMutationLogWriter(err.Error())
 	}
-	if err := storerunlifecycle.RequireActive(ctx, tx, runID, storerunlifecycle.DialectPostgres); err != nil {
+	runFact, err := storerunlifecycle.RequireActiveSource(ctx, tx, runID, storerunlifecycle.DialectPostgres)
+	if err != nil {
 		return err
 	}
-	if err := requireBundleSourceAvailable(ctx, tx); err != nil {
-		return err
+	contextFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("mutation log bundle source fact is required")
+	}
+	if !runFact.Matches(contextFact) {
+		return fmt.Errorf("mutation log bundle source fact does not match active run")
 	}
 
 	oldValue, err := jsonbArg(rec.OldValue)
@@ -126,33 +131,6 @@ func Insert(ctx context.Context, db DBTX, rec Record) error {
 	}
 	return runtimeauthoractivity.Record(ctx, draft)
 }
-
-func requireBundleSourceAvailable(ctx context.Context, db DBTX) error {
-	fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
-	if !ok {
-		return fmt.Errorf("mutation log bundle source fact is required")
-	}
-	if err := fact.Validate(); err != nil {
-		return err
-	}
-	bundleHash, bundleSource := fact.StorageValues()
-	if !fact.IsPersisted() {
-		return nil
-	}
-	var exists bool
-	if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = $1)`, bundleHash).Scan(&exists); err != nil {
-		return fmt.Errorf("validate mutation log persisted bundle source: %w", err)
-	}
-	if !exists {
-		return &storerunlifecycle.PersistedBundleUnavailableError{
-			BundleHash:   bundleHash,
-			BundleSource: bundleSource,
-			Cause:        "persisted_missing_bundle_row",
-		}
-	}
-	return nil
-}
-
 func AuthorActivityDraft(ctx context.Context, runID, mutationID string, rec Record, occurredAt time.Time) (runtimeauthoractivity.Draft, bool, error) {
 	if strings.TrimSpace(rec.Field) != "current_state" {
 		return runtimeauthoractivity.Draft{}, false, nil

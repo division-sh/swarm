@@ -213,7 +213,8 @@ func runtimeBundleContextByRun(ctx context.Context, opts OperatorReadOptions, ru
 	selectedRuntime := use.Runtime()
 	selected := operatorOptionsForBundleContext(opts, contextDef, selectedRuntime)
 	fact := contextDef.BundleSourceFact
-	if err := fact.Validate(); err != nil || fact.BundleHash() != availability.BundleHash {
+	runFact, decodeErr := runtimecorrelation.DecodeBundleSourceFact(availability.BundleHash, availability.BundleSource.String())
+	if decodeErr != nil || !fact.Matches(runFact) {
 		return ctx, opts, availability, NewApplicationError(BundleDataIntegrityErrorCode, false, map[string]any{
 			"run_id": strings.TrimSpace(runID), "bundle_hash": availability.BundleHash, "cause": "runtime_source_fact_mismatch",
 		})

@@ -160,6 +160,74 @@ func TestPlatformSpecResumeRecoveryRejectsLegacyBundleSourceStates(t *testing.T)
 	}
 }
 
+func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testing.T) {
+	root := repositoryRootForBundleIdentityTest(t)
+	for _, check := range []struct {
+		path       string
+		required   []string
+		prohibited []string
+	}{
+		{
+			path: "internal/runtime/mutationlog/mutationlog.go",
+			required: []string{
+				"storerunlifecycle.RequireActiveSource",
+				"runFact.Matches(contextFact)",
+			},
+			prohibited: []string{
+				"func requireBundleSourceAvailable",
+				"SELECT EXISTS (SELECT 1 FROM bundles",
+			},
+		},
+		{
+			path: "internal/runtime/bus/eventbus_publish.go",
+			required: []string{
+				"func (eb *EventBus) admitBundleSourceFact(ctx context.Context) (context.Context, error)",
+				"!sourceFact.Matches(contextFact)",
+				"func (eb *EventBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error)",
+			},
+			prohibited: []string{
+				"func (eb *EventBus) WithBundleSourceFact",
+			},
+		},
+		{
+			path: "internal/runtime/manager/agent_manager.go",
+			required: []string{
+				"!current.Matches(fact)",
+			},
+			prohibited: []string{
+				"current.BundleHash() != fact.BundleHash()",
+			},
+		},
+		{
+			path: "internal/apiv1/operator_runtime_context.go",
+			required: []string{
+				"DecodeBundleSourceFact(availability.BundleHash, availability.BundleSource.String())",
+				"!fact.Matches(runFact)",
+			},
+		},
+		{
+			path: "internal/apiv1/operator_bundle_admission.go",
+			required: []string{
+				"!publisherFact.Matches(runFact)",
+				"!publisherFact.Matches(currentFact)",
+				"!current.Matches(fact)",
+			},
+		},
+	} {
+		source := readRepositoryFile(t, filepath.Join(root, filepath.FromSlash(check.path)))
+		for _, required := range check.required {
+			if !strings.Contains(source, required) {
+				t.Errorf("%s no longer consumes exact opaque bundle source ownership through %q", check.path, required)
+			}
+		}
+		for _, prohibited := range check.prohibited {
+			if strings.Contains(source, prohibited) {
+				t.Errorf("%s restored non-authoritative bundle source handoff %q", check.path, prohibited)
+			}
+		}
+	}
+}
+
 func collectLegacyBundleSourceStatePaths(value any, path string, out *[]string) {
 	switch typed := value.(type) {
 	case map[string]any:

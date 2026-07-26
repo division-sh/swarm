@@ -109,6 +109,22 @@ func TestOperatorRuntimeContextManagerRoutesExistingRunByStoredBundle(t *testing
 	}
 }
 
+func TestOperatorRuntimeContextManagerRejectsExistingRunSameHashDifferentSourceBeforeMutation(t *testing.T) {
+	fixture := newOperatorRuntimeContextFixture(t)
+	handler := fixture.handler(t)
+	runID := uuid.NewString()
+	seedRuntimeContextRunBundle(t, fixture.db, runID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourceEphemeral)
+
+	resp := rpcCall(t, handler, eventPublishExistingRunBody(runID, "", "idem-context-source-mismatch"))
+	assertRuntimeContextBundleError(t, resp, "event.publish", BundleDataIntegrityErrorCode, "runtime_source_fact_mismatch")
+	if got := countEventRowsByRunID(t, fixture.db, runID); got != 0 {
+		t.Fatalf("event rows for source-mismatched run = %d, want 0", got)
+	}
+	if got := countAPIIdempotencyRows(t, fixture.db); got != 0 {
+		t.Fatalf("api_idempotency rows for source-mismatched run = %d, want 0", got)
+	}
+}
+
 func TestOperatorRuntimeContextManagerRejectsExistingRunUnavailableSourceStates(t *testing.T) {
 	tests := []struct {
 		name          string

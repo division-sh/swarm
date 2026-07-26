@@ -36,7 +36,7 @@ type agentDirectiveRunTargetResolver interface {
 }
 
 type bundleSourceFactContextOwner interface {
-	WithBundleSourceFact(context.Context) context.Context
+	AdmitBundleSourceFact(context.Context) (context.Context, error)
 }
 
 const DefaultShutdownGrace = 30 * time.Second
@@ -472,7 +472,10 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 	}
 	reservationCtx := runtimecorrelation.WithRunID(am.runtimePlatformControlEventContext(ctx), target.RunID)
 	if owner, ok := am.bus.(bundleSourceFactContextOwner); ok && owner != nil {
-		reservationCtx = owner.WithBundleSourceFact(reservationCtx)
+		reservationCtx, err = owner.AdmitBundleSourceFact(reservationCtx)
+		if err != nil {
+			return runtimeagentcontrol.SendDirectiveResult{}, err
+		}
 	}
 	reservation, err := operationStore.ReserveDirectiveOperation(reservationCtx, runtimeagentcontrol.ReserveDirectiveOperationRequest{
 		Operation: runtimeagentcontrol.DirectiveOperation{

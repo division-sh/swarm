@@ -17,7 +17,7 @@ type RunBundleContextStore interface {
 }
 
 type runtimeBundleSourceFactProvider interface {
-	WithBundleSourceFact(context.Context) context.Context
+	AdmitBundleSourceFact(context.Context) (context.Context, error)
 }
 
 func resolveEventPublicationBundleScope(
@@ -47,13 +47,22 @@ func resolveEventPublicationBundleScope(
 			if err != nil {
 				return ctx, opts, params, err
 			}
+			runFact, decodeErr := runtimecorrelation.DecodeBundleSourceFact(runAvailability.BundleHash, runAvailability.BundleSource.String())
 			currentFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
-			if !ok || currentFact.BundleHash() != runAvailability.BundleHash {
+			if decodeErr != nil || !ok || !currentFact.Matches(runFact) {
 				return ctx, opts, params, NewApplicationError(BundleDataIntegrityErrorCode, false, map[string]any{
 					"run_id": params.RunID, "bundle_hash": runAvailability.BundleHash, "cause": "runtime_source_fact_mismatch",
 				})
 			}
-			params.BundleSourceFact = currentFact
+			var publisherFact runtimecorrelation.BundleSourceFact
+			var hasPublisherFact bool
+			ctx, publisherFact, hasPublisherFact, err = eventPublicationRuntimeSourceContext(ctx, selectedOpts.Events)
+			if err != nil || !hasPublisherFact || !publisherFact.Matches(runFact) {
+				return ctx, opts, params, NewApplicationError(BundleDataIntegrityErrorCode, false, map[string]any{
+					"run_id": params.RunID, "bundle_hash": runAvailability.BundleHash, "cause": "runtime_source_fact_mismatch",
+				})
+			}
+			params.BundleSourceFact = runFact
 			return ctx, selectedOpts, params, nil
 		}
 		if err := eventPublicationRunBundleAvailable(runAvailability); err != nil {
@@ -66,12 +75,26 @@ func resolveEventPublicationBundleScope(
 		}
 		params.BundleSourceFact = currentFact
 		ctx, err = eventPublicationSourceContext(ctx, currentFact)
+		if err != nil {
+			return ctx, opts, params, err
+		}
+		var publisherFact runtimecorrelation.BundleSourceFact
+		var hasPublisherFact bool
+		ctx, publisherFact, hasPublisherFact, err = eventPublicationRuntimeSourceContext(ctx, opts.Events)
+		if err != nil || !hasPublisherFact || !publisherFact.Matches(currentFact) {
+			return ctx, opts, params, NewApplicationError(BundleDataIntegrityErrorCode, false, map[string]any{
+				"run_id": params.RunID, "bundle_hash": runAvailability.BundleHash, "cause": "runtime_source_fact_mismatch",
+			})
+		}
 		return ctx, opts, params, err
 	}
 	var currentFact runtimecorrelation.BundleSourceFact
 	var hasCurrentFact bool
 	if runtimeContextManager(opts) == nil {
-		ctx, currentFact, hasCurrentFact = eventPublicationRuntimeSourceContext(ctx, opts.Events)
+		ctx, currentFact, hasCurrentFact, err = eventPublicationRuntimeSourceContext(ctx, opts.Events)
+		if err != nil {
+			return ctx, opts, params, err
+		}
 		if resolvedHash == "" && hasCurrentFact {
 			resolvedHash = currentFact.BundleHash()
 		}
@@ -101,7 +124,15 @@ func resolveEventPublicationBundleScope(
 			})
 		}
 		currentFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
-		if !ok || currentFact.BundleHash() != resolvedHash {
+		if !ok {
+			return ctx, opts, params, NewApplicationError(BundleDataIntegrityErrorCode, false, map[string]any{
+				"bundle_hash": resolvedHash, "run_id": strings.TrimSpace(params.RunID), "cause": "runtime_source_fact_mismatch",
+			})
+		}
+		var publisherFact runtimecorrelation.BundleSourceFact
+		var hasPublisherFact bool
+		ctx, publisherFact, hasPublisherFact, err = eventPublicationRuntimeSourceContext(ctx, selectedOpts.Events)
+		if err != nil || !hasPublisherFact || !publisherFact.Matches(currentFact) {
 			return ctx, opts, params, NewApplicationError(BundleDataIntegrityErrorCode, false, map[string]any{
 				"bundle_hash": resolvedHash, "run_id": strings.TrimSpace(params.RunID), "cause": "runtime_source_fact_mismatch",
 			})
@@ -134,6 +165,9 @@ func eventPublicationSourceContext(ctx context.Context, fact runtimecorrelation.
 	if err := fact.Validate(); err != nil {
 		return ctx, fmt.Errorf("resolve event publication bundle source fact: %w", err)
 	}
+	if current, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok && !current.Matches(fact) {
+		return ctx, fmt.Errorf("event publication bundle source fact conflicts with selected run")
+	}
 	scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, fact.BundleHash())
 	if err != nil {
 		return ctx, fmt.Errorf("resolve event publication author activity scope: %w", err)
@@ -143,13 +177,17 @@ func eventPublicationSourceContext(ctx context.Context, fact runtimecorrelation.
 	return runtimeauthoractivity.WithScope(ctx, scope), nil
 }
 
-func eventPublicationRuntimeSourceContext(ctx context.Context, publisher EventPublisher) (context.Context, runtimecorrelation.BundleSourceFact, bool) {
+func eventPublicationRuntimeSourceContext(ctx context.Context, publisher EventPublisher) (context.Context, runtimecorrelation.BundleSourceFact, bool, error) {
 	provider, ok := publisher.(runtimeBundleSourceFactProvider)
 	if ok && provider != nil {
-		ctx = provider.WithBundleSourceFact(ctx)
+		var err error
+		ctx, err = provider.AdmitBundleSourceFact(ctx)
+		if err != nil {
+			return ctx, runtimecorrelation.BundleSourceFact{}, false, err
+		}
 	}
 	fact, found := runtimecorrelation.BundleSourceFactFromContext(ctx)
-	return ctx, fact, found
+	return ctx, fact, found, nil
 }
 
 func eventPublicationRunBundleContext(

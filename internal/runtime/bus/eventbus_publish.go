@@ -150,7 +150,10 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) error {
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
-	ctx = eb.withBundleSourceFact(ctx)
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
+	}
 	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt})
 	if err != nil {
 		return err
@@ -180,7 +183,10 @@ func (eb *EventBus) PublishAndWait(ctx context.Context, evt events.Event) error 
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
-	ctx = eb.withBundleSourceFact(ctx)
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
+	}
 	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt})
 	if err != nil {
 		return err
@@ -214,7 +220,10 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
-	ctx = eb.withBundleSourceFact(ctx)
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
+	}
 	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt})
 	if err != nil {
 		return err
@@ -398,7 +407,10 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return PreparedPublish{}, err
 	}
-	ctx = eb.withBundleSourceFact(ctx)
+	ctx, err := eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return PreparedPublish{}, err
+	}
 	if evt.AdmissionClass() != events.EventAdmissionSelectedForkReplay {
 		return PreparedPublish{}, fmt.Errorf("selected-fork preparation requires selected_fork_replay event class")
 	}
@@ -486,7 +498,11 @@ func (eb *EventBus) admitPublishEvent(ctx context.Context, evt events.Event) (co
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return ctx, events.AdmittedEvent{}, err
 	}
-	ctx = eb.withBundleSourceFact(ctx)
+	var err error
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return ctx, events.AdmittedEvent{}, err
+	}
 	if evt.Type() == "" {
 		return ctx, events.AdmittedEvent{}, errors.New("event type is required")
 	}
@@ -1007,25 +1023,35 @@ func projectEventForDeliveryRoute(evt events.Event, route events.DeliveryRoute) 
 	return projected, nil
 }
 
-func (eb *EventBus) withBundleSourceFact(ctx context.Context) context.Context {
-	if ctx == nil || eb == nil {
-		return ctx
+func (eb *EventBus) admitBundleSourceFact(ctx context.Context) (context.Context, error) {
+	if eb == nil {
+		return ctx, errors.New("event bus is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	eb.mu.RLock()
 	runtimeInstanceID := eb.runtimeInstanceID
 	sourceFact := eb.bundleSourceFact
 	eb.mu.RUnlock()
+
+	contextFact, hasContextFact := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	hasOwnedFact := sourceFact.Validate() == nil
+	if hasOwnedFact && hasContextFact && !sourceFact.Matches(contextFact) {
+		return ctx, errors.New("event bus bundle source fact conflicts with publication context")
+	}
+	admittedFact := contextFact
+	if hasOwnedFact {
+		admittedFact = sourceFact
+		if !hasContextFact {
+			ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
+		}
+	}
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
-	if runtimeInstanceID != "" && sourceFact.BundleHash() != "" {
-		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, sourceFact.BundleHash()))
+	if runtimeInstanceID != "" && admittedFact.Validate() == nil {
+		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, admittedFact.BundleHash()))
 	}
-	if _, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
-		return ctx
-	}
-	if sourceFact.Validate() == nil {
-		return runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
-	}
-	return ctx
+	return ctx, nil
 }
 
 func (eb *EventBus) withAuthorActivityEventDescriptor(ctx context.Context, evt events.Event) (context.Context, error) {
@@ -1053,8 +1079,8 @@ func (eb *EventBus) withAuthorActivityEventDescriptor(ctx context.Context, evt e
 	})
 }
 
-func (eb *EventBus) WithBundleSourceFact(ctx context.Context) context.Context {
-	return eb.withBundleSourceFact(ctx)
+func (eb *EventBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
+	return eb.admitBundleSourceFact(ctx)
 }
 
 func (eb *EventBus) convergeStandaloneRuntimePlatformRun(ctx context.Context, evt events.Event) error {
@@ -1480,7 +1506,10 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
-	ctx = eb.withBundleSourceFact(ctx)
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
+	}
 	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt, direct: true, directRecipients: uniqueStrings(recipients)})
 	if err != nil {
 		return err
@@ -1507,7 +1536,10 @@ func (eb *EventBus) PublishDirectRoutes(ctx context.Context, evt events.Event, r
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
-	ctx = eb.withBundleSourceFact(ctx)
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
+	}
 	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{
 		bus: eb, event: evt, direct: true, directRoutes: events.NormalizeDeliveryRoutes(routes),
 	})
@@ -1643,7 +1675,11 @@ func (eb *EventBus) RecoverPersistedPipeline(ctx context.Context, work runtimepi
 
 func (eb *EventBus) publishClaimedPipeline(ctx context.Context, evt events.Event, scope runtimepipelineobligation.CommittedScope, recipients []string) (runtimepipelineobligation.ExecutionOutcome, error) {
 	eb.clearPendingOutboxOperation(evt.ID())
-	ctx = eb.withBundleSourceFact(ctx)
+	var err error
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return runtimepipelineobligation.Continue(), err
+	}
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return runtimepipelineobligation.Continue(), err

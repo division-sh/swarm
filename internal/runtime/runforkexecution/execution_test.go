@@ -476,7 +476,8 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 	// A forked source rejects ordinary post-terminal event production. Exercise
 	// the same canonical constructor on an independent active control run instead.
 	controlRunID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', now(), 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, controlRunID); err != nil {
+	controlBundleHash, controlBundleSource := loaded.BundleSourceFact.StorageValues()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', now(), $2, $3)`, controlRunID, controlBundleHash, controlBundleSource); err != nil {
 		t.Fatalf("seed control run: %v", err)
 	}
 	controlEventID := uuid.NewString()

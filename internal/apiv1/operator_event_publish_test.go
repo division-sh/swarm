@@ -343,6 +343,43 @@ func TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock(t *t
 	}
 }
 
+func TestOperatorEventPublishSQLiteRejectsExistingRunSameHashDifferentSourceBeforeMutation(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	bus, err := newScopedAPITestEventBus(t, sqliteStore, runStartTestEventBusOptions(source))
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	handler := eventPublishTestHandlerWithStores(t, sqliteStore, sqliteStore, sqliteStore, bus, source)
+	runID := uuid.NewString()
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
+		VALUES (?, 'name: source-mismatch', '{}')
+	`, runStartTestBundleHash); err != nil {
+		t.Fatalf("seed SQLite bundle row: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES (?, 'running', ?, 'persisted', ?)
+	`, runID, runStartTestBundleHash, time.Now().UTC()); err != nil {
+		t.Fatalf("seed source-mismatched SQLite run: %v", err)
+	}
+
+	body := fmt.Sprintf(
+		`{"jsonrpc":"2.0","id":"publish","method":"event.publish","params":{"run_id":%q,"event_name":"scan.requested","payload":{"topic":"source-mismatch"},"idempotency_key":"idem-sqlite-source-mismatch"}}`,
+		runID,
+	)
+	resp := rpcCall(t, handler, body)
+	assertRuntimeContextBundleError(t, resp, "event.publish", BundleDataIntegrityErrorCode, "runtime_source_fact_mismatch")
+	if count := countSQLiteEventRowsByRunID(t, sqliteStore.DB, runID); count != 0 {
+		t.Fatalf("sqlite event rows for source-mismatched run = %d, want 0", count)
+	}
+	if count := countSQLiteAPIIdempotencyRows(t, sqliteStore.DB); count != 0 {
+		t.Fatalf("sqlite api_idempotency rows for source-mismatched run = %d, want 0", count)
+	}
+}
+
 func TestOperatorEventPublishSQLitePayloadFailureLeavesNoIdempotencyCompletionOrRows(t *testing.T) {
 	ctx := context.Background()
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
@@ -1864,8 +1901,8 @@ func (p *plainEventPublisher) Publish(context.Context, events.Event) error {
 	return nil
 }
 
-func (p *plainEventPublisher) WithBundleSourceFact(ctx context.Context) context.Context {
-	return runtimecorrelation.WithBundleSourceFact(ctx, runStartTestBundleSourceFact())
+func (p *plainEventPublisher) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
+	return runtimecorrelation.WithBundleSourceFact(ctx, runStartTestBundleSourceFact()), nil
 }
 
 type failStandalonePipelineReceiptOnceStore struct {

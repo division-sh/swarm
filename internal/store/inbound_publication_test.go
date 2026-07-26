@@ -83,7 +83,10 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 		ServiceID: serviceID, PackageKey: packageKey, FlowID: flowID, InstanceID: instanceID, EntityID: entityID,
 		Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("8", 64)),
 	}
-	ctx := testAuthorActivityContextForBundle(candidate.Source.BundleHash())
+	ctx := runtimecorrelation.WithBundleSourceFact(
+		testAuthorActivityContextForBundle(candidate.Source.BundleHash()),
+		candidate.Source,
+	)
 	seedStoreTestPersistedBundle(t, db, candidate.Source.BundleHash())
 	registrar, ok := store.(testAuthorActivityCatalogRegistrar)
 	if !ok {
@@ -192,7 +195,10 @@ func runInboundPublicationStandingGenerationRebindProof(t *testing.T, db *sql.DB
 		EntityID:   uuid.NewString(),
 		Source:     mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("9", 64)),
 	}
-	ctx := testAuthorActivityContextForBundle(candidate.Source.BundleHash())
+	ctx := runtimecorrelation.WithBundleSourceFact(
+		testAuthorActivityContextForBundle(candidate.Source.BundleHash()),
+		candidate.Source,
+	)
 	seedStoreTestPersistedBundle(t, db, candidate.Source.BundleHash())
 	registrar, ok := store.(testAuthorActivityCatalogRegistrar)
 	if !ok {
