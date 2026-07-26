@@ -6517,7 +6517,13 @@ engine:
       mutation as the triggering state/event effect. The engine owns one fail-closed handled-outcome classification consumed
       by both public handler mapping and timer-intent production; an unhandled event produces no start or cancellation intent.
       The row's persisted `fire_at` is the executable occurrence coordinate. Policy/config changes do not rewrite an active
-      coordinate without an explicit reschedule operation.
+      coordinate without an explicit reschedule operation. Initial-entry materialization commits those durable timer rows
+      dormant and never registers a process-local wakeup itself. Every initial-entry caller must invoke the one named
+      `ArmInitialEntryTimers` lifecycle operation only after the exact receiving runtime is ready. Existing pipeline routes
+      queue that operation in their selected mutation's post-commit work. Dynamic flow activation invokes it only after the
+      new flow route and all declared agents are installed; when activation participates in an outer selected mutation,
+      agent installation and timer arming are one ordered post-commit action. Installation failure leaves the durable active
+      row unarmed for exact recovery and cannot publish through a partial recipient topology.
     - 3. Leaving an owning stage, matching cancel_on, loop-generation supersession, run quiescence, or preservation cleanup
       may only monotonically cancel or delete the canonical row. Cancellation is in the same mutation as the causal lifecycle
       transition; the in-memory scheduler is updated only after commit. Registration and cancellation do not issue opposing

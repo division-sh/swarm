@@ -149,6 +149,7 @@ type RuntimeMutationRunner interface {
 
 type workflowInstanceLifecycleOwner interface {
 	ApplyWorkflowLifecycleEffects(context.Context, []runtimeworkflowlifecycle.Effect) error
+	ArmInitialEntryTimers(context.Context, string) error
 }
 
 type WorkflowInstanceFieldSelector struct {
@@ -395,6 +396,22 @@ func (s *WorkflowInstanceStore) MaterializeInitialEntry(ctx context.Context, ins
 		return WorkflowInitialMaterializationUnknown, fmt.Errorf("workflow initial materialization completed without a disposition")
 	}
 	return result, nil
+}
+
+// ArmInitialEntryTimers projects the durable initial-entry timer facts only
+// after the caller has installed the runtime route that can receive them.
+func (s *WorkflowInstanceStore) ArmInitialEntryTimers(ctx context.Context, instanceID string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("workflow instance lifecycle store is required")
+	}
+	if s.lifecycleOwner == nil {
+		return fmt.Errorf("workflow instance lifecycle owner is required")
+	}
+	instanceID = strings.TrimSpace(instanceID)
+	if instanceID == "" {
+		return fmt.Errorf("workflow initial timer activation requires instance identity")
+	}
+	return s.lifecycleOwner.ArmInitialEntryTimers(ctx, instanceID)
 }
 
 func workflowInitialMaterializationEqual(actual, expected WorkflowInstance, occurredAt time.Time) bool {

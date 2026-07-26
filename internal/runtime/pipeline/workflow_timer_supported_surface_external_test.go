@@ -69,6 +69,9 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
 			}
+			if err := selected.workflowStore.ArmInitialEntryTimers(ctx, entityID); err != nil {
+				t.Fatalf("arm initial workflow timers: %v", err)
+			}
 
 			deadline := time.Now().Add(5 * time.Second)
 			for time.Now().Before(deadline) {
@@ -138,6 +141,9 @@ func TestRecurringWorkflowTimerDoesNotReregisterAfterSynchronousTransitionCancel
 				Metadata: map[string]any{"run_id": runID},
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
+			}
+			if err := selected.workflowStore.ArmInitialEntryTimers(ctx, entityID); err != nil {
+				t.Fatalf("arm initial workflow timers: %v", err)
 			}
 
 			stateDeadline := time.Now().Add(5 * time.Second)
@@ -384,6 +390,9 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
 			}
+			if err := selected.workflowStore.ArmInitialEntryTimers(ctx, entityID); err != nil {
+				t.Fatalf("arm initial workflow timers: %v", err)
+			}
 			waitWorkflowTimerEventCount(t, selected, fireErrors, runID, runtimecontracts.WorkflowStageTimerInternalEvent, 2)
 
 			scheduler.Stop()
@@ -495,6 +504,9 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
 			}
+			if err := selected.workflowStore.ArmInitialEntryTimers(ctx, entityID); err != nil {
+				t.Fatalf("arm initial workflow timers: %v", err)
+			}
 
 			select {
 			case <-validator.secondAttempt:
@@ -578,6 +590,9 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 				Metadata: map[string]any{"run_id": runID},
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
+			}
+			if err := selected.workflowStore.ArmInitialEntryTimers(ctx, entityID); err != nil {
+				t.Fatalf("arm initial workflow timers: %v", err)
 			}
 
 			deadline := time.Now().Add(5 * time.Second)

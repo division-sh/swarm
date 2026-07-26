@@ -146,6 +146,14 @@ func (l *WorkflowTimerLifecycle) store() *WorkflowInstanceStore {
 }
 
 func (l *WorkflowTimerLifecycle) Reconcile(ctx context.Context, entityID, currentState, nextState string, cause workflowTimerCause) error {
+	return l.reconcile(ctx, entityID, currentState, nextState, cause, true)
+}
+
+func (l *WorkflowTimerLifecycle) reconcileInitialEntry(ctx context.Context, entityID, initialState string, cause workflowTimerCause) error {
+	return l.reconcile(ctx, entityID, "", initialState, cause, false)
+}
+
+func (l *WorkflowTimerLifecycle) reconcile(ctx context.Context, entityID, currentState, nextState string, cause workflowTimerCause, armWakeups bool) error {
 	store := l.store()
 	if store == nil || !store.Enabled() {
 		return nil
@@ -232,7 +240,7 @@ func (l *WorkflowTimerLifecycle) Reconcile(ctx context.Context, entityID, curren
 		activation := workflowTimerActivationForCause(runID, entityID, instance.StorageRef, declaration, generation, cause, interval)
 		key := workflowTimerGenerationKey(declaration.ID, generation)
 		if existing, found := activeByDeclaration[key]; found {
-			if existing.Ref == activation.Ref {
+			if armWakeups && existing.Ref == activation.Ref {
 				if err := l.queueWakeupReconcile(ctx, existing.Ref); err != nil {
 					return err
 				}
@@ -245,9 +253,44 @@ func (l *WorkflowTimerLifecycle) Reconcile(ctx context.Context, entityID, curren
 		}
 		if persisted.Status == workflowTimerStatusActive {
 			activeByDeclaration[key] = persisted
-			if err := l.queueWakeupReconcile(ctx, persisted.Ref); err != nil {
-				return err
+			if armWakeups {
+				if err := l.queueWakeupReconcile(ctx, persisted.Ref); err != nil {
+					return err
+				}
 			}
+		}
+	}
+	return nil
+}
+
+func (l *WorkflowTimerLifecycle) ArmInitialEntryTimers(ctx context.Context, instanceID string) error {
+	store := l.store()
+	if store == nil || !store.Enabled() {
+		return nil
+	}
+	instanceID = strings.TrimSpace(instanceID)
+	if instanceID == "" {
+		return fmt.Errorf("workflow initial timer activation requires instance identity")
+	}
+	instance, found, err := store.Load(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("workflow initial timer activation instance %s is missing", instanceID)
+	}
+	entityID := workflowTimerCanonicalEntityID(instance, instanceID)
+	runID := workflowTimerRunID(ctx, instance)
+	if entityID == "" || runID == "" {
+		return fmt.Errorf("workflow initial timer activation requires exact run and entity identity")
+	}
+	active, err := store.listWorkflowTimerActivations(ctx, runID, entityID, true)
+	if err != nil {
+		return err
+	}
+	for _, activation := range active {
+		if err := l.queueWakeupReconcile(ctx, activation.Ref); err != nil {
+			return err
 		}
 	}
 	return nil

@@ -72,6 +72,9 @@ func (pc *PipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entit
 		if materialization != WorkflowInitialMaterializationCreated && materialization != WorkflowInitialMaterializationAlreadyExists {
 			return fmt.Errorf("workflow initial materialization returned unknown result %d", materialization)
 		}
+		if err := pc.workflowStore.ArmInitialEntryTimers(ctx, entityID); err != nil {
+			return err
+		}
 	}
 	return pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
 		instance.Metadata = workflowMaterializeEntityMetadata(pc.SemanticSource(), flowID, instance.Metadata)

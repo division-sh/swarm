@@ -27,6 +27,7 @@ import (
 
 type flowInstancePersistence interface {
 	MaterializeInitialEntry(ctx context.Context, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) (runtimepipeline.WorkflowInitialMaterializationResult, error)
+	ArmInitialEntryTimers(ctx context.Context, instanceID string) error
 	MarkTerminated(ctx context.Context, storageRef string, terminatedAt time.Time) error
 	Load(ctx context.Context, instanceID string) (runtimepipeline.WorkflowInstance, bool, error)
 	LoadRouteRecoveryProjection(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error)
@@ -155,13 +156,19 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
 			postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(actionCtx))
 			if err := am.installFlowInstanceAgents(postCommitCtx, req, schema, scope); err != nil {
-				am.logFlowInstanceActivationSideEffectFailure(req, err)
+				am.logFlowInstanceActivationSideEffectFailure(req, "agent_activation_failed", "install_agents", err)
+				return
+			}
+			if err := am.workflowInstances.ArmInitialEntryTimers(postCommitCtx, flowPath); err != nil {
+				am.logFlowInstanceActivationSideEffectFailure(req, "initial_timer_activation_failed", "arm_initial_timers", err)
 			}
 		}) {
 			return fmt.Errorf("flow instance %s requires post-commit agent activation", flowPath)
 		}
 	} else if err := am.installFlowInstanceRuntime(ctx, req, schema, scope); err != nil {
 		return err
+	} else if err := am.workflowInstances.ArmInitialEntryTimers(ctx, flowPath); err != nil {
+		return fmt.Errorf("arm initial workflow timers for %s: %w", flowPath, err)
 	}
 	if strings.TrimSpace(autoEmitName) != "" {
 		autoEmitEvent, ok := autoEmitResult.Get()
@@ -277,16 +284,16 @@ func (am *AgentManager) installFlowInstanceRoute(ctx context.Context, req runtim
 	return fmt.Errorf("event bus does not support context-aware derived flow-instance routing for %s", instance.InstancePath)
 }
 
-func (am *AgentManager) logFlowInstanceActivationSideEffectFailure(req runtimepipeline.FlowInstanceActivationRequest, err error) {
+func (am *AgentManager) logFlowInstanceActivationSideEffectFailure(req runtimepipeline.FlowInstanceActivationRequest, action, operation string, err error) {
 	if am == nil || am.bus == nil || err == nil {
 		return
 	}
 	_ = am.bus.LogRuntime(context.Background(), runtimepipeline.RuntimeLogEntry{
-		Level: "error", Message: "Flow instance agent activation failed after commit",
-		Component: "flow_activation", Action: "agent_activation_failed",
+		Level: "error", Message: "Flow instance runtime activation failed after commit",
+		Component: "flow_activation", Action: strings.TrimSpace(action),
 		EntityID: strings.TrimSpace(req.Instance.EntityID),
 		Detail:   map[string]any{"flow_path": strings.TrimSpace(req.Instance.InstancePath)},
-		Failure:  failureEnvelope(err, "flow_activation", "install_agents"),
+		Failure:  failureEnvelope(err, "flow_activation", strings.TrimSpace(operation)),
 	})
 }
 
