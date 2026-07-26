@@ -7,8 +7,11 @@ import (
 	"regexp"
 	stdruntime "runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 var runInsertPattern = regexp.MustCompile(`(?is)INSERT\s+INTO\s+runs\s*\(([^)]*)\)`)
@@ -132,6 +135,48 @@ func TestRepositoryContainsNoLegacyBundleIdentityInterpreter(t *testing.T) {
 			if strings.Contains(source, retired) {
 				t.Errorf("%s retains retired bundle identity interpreter %q", repositoryRelativePath(t, root, path), retired)
 			}
+		}
+	}
+}
+
+func TestPlatformSpecResumeRecoveryRejectsLegacyBundleSourceStates(t *testing.T) {
+	root := repositoryRootForBundleIdentityTest(t)
+	var document map[string]any
+	if err := yaml.Unmarshal([]byte(readRepositoryFile(t, filepath.Join(root, "platform-spec.yaml"))), &document); err != nil {
+		t.Fatalf("parse platform spec: %v", err)
+	}
+	multiBundle, ok := document["multi_bundle_persistence"].(map[string]any)
+	if !ok {
+		t.Fatal("platform spec is missing multi_bundle_persistence")
+	}
+	resumeRecovery, ok := multiBundle["resume_and_recovery"].(map[string]any)
+	if !ok {
+		t.Fatal("platform spec is missing multi_bundle_persistence.resume_and_recovery")
+	}
+	var legacyPaths []string
+	collectLegacyBundleSourceStatePaths(resumeRecovery, "multi_bundle_persistence.resume_and_recovery", &legacyPaths)
+	if len(legacyPaths) != 0 {
+		t.Fatalf("resume/recovery retains legacy bundle source states: %s", strings.Join(legacyPaths, ", "))
+	}
+}
+
+func collectLegacyBundleSourceStatePaths(value any, path string, out *[]string) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			childPath := path + "." + key
+			if strings.Contains(strings.ToLower(key), "legacy") {
+				*out = append(*out, childPath)
+			}
+			collectLegacyBundleSourceStatePaths(child, childPath, out)
+		}
+	case []any:
+		for index, child := range typed {
+			collectLegacyBundleSourceStatePaths(child, path+"["+strconv.Itoa(index)+"]", out)
+		}
+	case string:
+		if strings.Contains(strings.ToLower(typed), "legacy") {
+			*out = append(*out, path)
 		}
 	}
 }

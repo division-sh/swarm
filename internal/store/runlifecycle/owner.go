@@ -152,18 +152,8 @@ func EnsureActiveSQLite(ctx context.Context, db DBTX, runID, triggerEventID, tri
 		startedAt = time.Now().UTC()
 	}
 	bundleHash, bundleSource := opts.BundleSourceFact.StorageValues()
-	if opts.BundleSourceFact.IsPersisted() {
-		exists, err := persistedBundleRowExistsForDialect(ctx, db, DialectSQLite, bundleHash)
-		if err != nil {
-			return fmt.Errorf("ensure sqlite run row: validate persisted bundle source: %w", err)
-		}
-		if !exists {
-			return &PersistedBundleUnavailableError{
-				BundleHash:   bundleHash,
-				BundleSource: bundleSource,
-				Cause:        "persisted_missing_bundle_row",
-			}
-		}
+	if err := admitBundleIdentityMutation(ctx, db, DialectSQLite, opts.BundleSourceFact); err != nil {
+		return fmt.Errorf("ensure sqlite run row: %w", err)
 	}
 	var existed bool
 	if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = ?)`, runID).Scan(&existed); err != nil {
@@ -370,23 +360,8 @@ func CreateActive(
 	if startedAt.IsZero() {
 		startedAt = time.Now().UTC()
 	}
-	if fact.IsPersisted() {
-		if dialect == DialectPostgres {
-			if err := lockRunCreation(ctx, db); err != nil {
-				return err
-			}
-		}
-		exists, err := persistedBundleRowExistsForDialect(ctx, db, dialect, fact.BundleHash())
-		if err != nil {
-			return fmt.Errorf("create active run: validate persisted bundle source: %w", err)
-		}
-		if !exists {
-			return &PersistedBundleUnavailableError{
-				BundleHash:   fact.BundleHash(),
-				BundleSource: BundleSourcePersisted,
-				Cause:        "persisted_missing_bundle_row",
-			}
-		}
+	if err := admitBundleIdentityMutation(ctx, db, dialect, fact); err != nil {
+		return fmt.Errorf("create active run: %w", err)
 	}
 	bundleHash, bundleSource := fact.StorageValues()
 	var err error
@@ -436,18 +411,8 @@ func ReviseBundleIdentity(
 	if err := fact.Validate(); err != nil {
 		return fmt.Errorf("revise run bundle identity: %w", err)
 	}
-	if fact.IsPersisted() {
-		exists, err := persistedBundleRowExistsForDialect(ctx, db, dialect, fact.BundleHash())
-		if err != nil {
-			return fmt.Errorf("revise run bundle identity: validate persisted bundle source: %w", err)
-		}
-		if !exists {
-			return &PersistedBundleUnavailableError{
-				BundleHash:   fact.BundleHash(),
-				BundleSource: BundleSourcePersisted,
-				Cause:        "persisted_missing_bundle_row",
-			}
-		}
+	if err := admitBundleIdentityMutation(ctx, db, dialect, fact); err != nil {
+		return fmt.Errorf("revise run bundle identity: %w", err)
 	}
 	bundleHash, bundleSource := fact.StorageValues()
 	var (
@@ -523,19 +488,8 @@ func ensureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 				return nil
 			}
 		}
-		if err := lockRunCreation(ctx, db); err != nil {
-			return err
-		}
-		exists, err := persistedBundleRowExists(ctx, db, bundleHash)
-		if err != nil {
-			return fmt.Errorf("ensure run row: validate persisted bundle source: %w", err)
-		}
-		if !exists {
-			return &PersistedBundleUnavailableError{
-				BundleHash:   bundleHash,
-				BundleSource: bundleSource,
-				Cause:        "persisted_missing_bundle_row",
-			}
+		if err := admitBundleIdentityMutation(ctx, db, DialectPostgres, opts.BundleSourceFact); err != nil {
+			return fmt.Errorf("ensure run row: %w", err)
 		}
 	}
 	insertCols := []string{"run_id", "status"}
@@ -626,15 +580,35 @@ func ensureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 	return nil
 }
 
-func lockRunCreation(ctx context.Context, db DBTX) error {
-	if _, err := db.ExecContext(ctx, `LOCK TABLE runs IN ROW EXCLUSIVE MODE`); err != nil {
-		return fmt.Errorf("ensure run row: lock run creation: %w", err)
+func admitBundleIdentityMutation(ctx context.Context, db DBTX, dialect Dialect, fact runtimecorrelation.BundleSourceFact) error {
+	if !fact.IsPersisted() {
+		return nil
+	}
+	if dialect == DialectPostgres {
+		if err := lockPersistedBundleAdmission(ctx, db); err != nil {
+			return err
+		}
+	}
+	bundleHash, bundleSource := fact.StorageValues()
+	exists, err := persistedBundleRowExistsForDialect(ctx, db, dialect, bundleHash)
+	if err != nil {
+		return fmt.Errorf("validate persisted bundle source: %w", err)
+	}
+	if !exists {
+		return &PersistedBundleUnavailableError{
+			BundleHash:   bundleHash,
+			BundleSource: bundleSource,
+			Cause:        "persisted_missing_bundle_row",
+		}
 	}
 	return nil
 }
 
-func persistedBundleRowExists(ctx context.Context, db DBTX, bundleHash string) (bool, error) {
-	return persistedBundleRowExistsForDialect(ctx, db, DialectPostgres, bundleHash)
+func lockPersistedBundleAdmission(ctx context.Context, db DBTX) error {
+	if _, err := db.ExecContext(ctx, `LOCK TABLE runs IN ROW EXCLUSIVE MODE`); err != nil {
+		return fmt.Errorf("serialize persisted bundle admission: %w", err)
+	}
+	return nil
 }
 
 func persistedBundleRowExistsForDialect(ctx context.Context, db DBTX, dialect Dialect, bundleHash string) (bool, error) {

@@ -40,6 +40,9 @@ func InsertFork(ctx context.Context, db DBTX, forkRunID, status, sourceRunID, fo
 	if err := opts.BundleSourceFact.Validate(); err != nil {
 		return fmt.Errorf("insert fork run: %w", err)
 	}
+	if err := admitBundleIdentityMutation(ctx, db, DialectPostgres, opts.BundleSourceFact); err != nil {
+		return fmt.Errorf("insert fork run: %w", err)
+	}
 	bundleHash, bundleSource := opts.BundleSourceFact.StorageValues()
 	occurrenceScope, err := runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
 	if err != nil {
