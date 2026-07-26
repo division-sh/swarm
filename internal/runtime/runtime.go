@@ -1446,37 +1446,47 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	rt.emitBootProgress(9, "system_nodes_start", "ok", fmt.Sprintf("%d nodes subscribed", systemNodeCount))
 	if skipPersistentStartupRecovery {
 		rt.emitBootProgress(10, "schedule_restoration", "skipped", "persistent startup recovery disabled")
-	} else if rt.Scheduler != nil && rt.Stores.ScheduleStore != nil {
-		startupRecoveryDecision.ScheduleRestoreAttempted = true
-		schedules, err := rt.Stores.ScheduleStore.LoadActiveSchedules(ctx)
-		if err != nil {
-			rt.emitBootProgress(10, "schedule_restoration", "FAILED", err.Error())
-			return fmt.Errorf("load schedules failed: %w", err)
+	} else if rt.Scheduler != nil {
+		restoredFamilies := make([]string, 0, 2)
+		if rt.Stores.ScheduleStore != nil {
+			startupRecoveryDecision.ScheduleRestoreAttempted = true
+			schedules, err := rt.Stores.ScheduleStore.LoadActiveSchedules(ctx)
+			if err != nil {
+				rt.emitBootProgress(10, "schedule_restoration", "FAILED", err.Error())
+				return fmt.Errorf("load schedules failed: %w", err)
+			}
+			results := restoreStartupTimerSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Logger, schedules)
+			timerReplayCount, timerSkipCount, timerDropCount, _ := summarizeStartupTimerRecovery(results)
+			startupRecoveryDecision.ScheduleReplayCount = timerReplayCount
+			startupRecoveryDecision.ScheduleSkipCount = timerSkipCount
+			startupRecoveryDecision.ScheduleDropCount = timerDropCount
+			if err := ensureBootWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Pipeline, schedules); err != nil {
+				if rt.Logger != nil {
+					handleRuntimeLogPersistenceError("scheduler", "ensure_boot_timers_failed", rt.Logger.Error(ctx, "scheduler", "ensure_boot_timers_failed", nil, err))
+				}
+			}
+			if startupRecoveryDecision.Outcome != startupRecoveryOutcomeDegraded && startupRecoveryDecision.ScheduleDropCount > 0 {
+				startupRecoveryDecision.Outcome = startupRecoveryOutcomeDegraded
+				startupRecoveryDecision.ReasonCode = startupRecoveryReasonScheduleRestore
+				startupRecoveryDecision.Failure = newStartupRecoveryFailure(runtimefailures.ClassDependencyUnavailable, "schedule_restore_failed", "restore_schedules", map[string]any{"dropped_count": startupRecoveryDecision.ScheduleDropCount}, nil)
+			}
+			restoredFamilies = append(restoredFamilies, fmt.Sprintf("%d generic schedules restored, %d skipped, %d dropped", startupRecoveryDecision.ScheduleReplayCount, startupRecoveryDecision.ScheduleSkipCount, startupRecoveryDecision.ScheduleDropCount))
 		}
-		results := restoreStartupTimerSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Logger, schedules)
-		timerReplayCount, timerSkipCount, timerDropCount, _ := summarizeStartupTimerRecovery(results)
-		startupRecoveryDecision.ScheduleReplayCount = timerReplayCount
-		startupRecoveryDecision.ScheduleSkipCount = timerSkipCount
-		startupRecoveryDecision.ScheduleDropCount = timerDropCount
 		if rt.Pipeline != nil {
+			startupRecoveryDecision.ScheduleRestoreAttempted = true
 			if err := rt.Pipeline.RestoreWorkflowTimers(ctx); err != nil {
 				rt.emitBootProgress(10, "schedule_restoration", "FAILED", err.Error())
 				return fmt.Errorf("restore workflow timers: %w", err)
 			}
+			restoredFamilies = append(restoredFamilies, "workflow timers restored")
 		}
-		if err := ensureBootWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Pipeline, schedules); err != nil {
-			if rt.Logger != nil {
-				handleRuntimeLogPersistenceError("scheduler", "ensure_boot_timers_failed", rt.Logger.Error(ctx, "scheduler", "ensure_boot_timers_failed", nil, err))
-			}
+		if len(restoredFamilies) == 0 {
+			rt.emitBootProgress(10, "schedule_restoration", "skipped", "no persistent timer owner available")
+		} else {
+			rt.emitBootProgress(10, "schedule_restoration", "ok", strings.Join(restoredFamilies, "; "))
 		}
-		if startupRecoveryDecision.Outcome != startupRecoveryOutcomeDegraded && startupRecoveryDecision.ScheduleDropCount > 0 {
-			startupRecoveryDecision.Outcome = startupRecoveryOutcomeDegraded
-			startupRecoveryDecision.ReasonCode = startupRecoveryReasonScheduleRestore
-			startupRecoveryDecision.Failure = newStartupRecoveryFailure(runtimefailures.ClassDependencyUnavailable, "schedule_restore_failed", "restore_schedules", map[string]any{"dropped_count": startupRecoveryDecision.ScheduleDropCount}, nil)
-		}
-		rt.emitBootProgress(10, "schedule_restoration", "ok", fmt.Sprintf("%d schedules restored, %d skipped, %d dropped", startupRecoveryDecision.ScheduleReplayCount, startupRecoveryDecision.ScheduleSkipCount, startupRecoveryDecision.ScheduleDropCount))
 	} else {
-		rt.emitBootProgress(10, "schedule_restoration", "skipped", "scheduler or schedule store unavailable")
+		rt.emitBootProgress(10, "schedule_restoration", "skipped", "scheduler unavailable")
 	}
 	if skipPersistentStartupRecovery {
 		rt.emitBootProgress(11, "manager_recovery_if_enabled", "skipped", "persistent startup recovery disabled")
