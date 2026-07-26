@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -1317,6 +1318,72 @@ func TestWorkflowTimerRecoveryCoalescesTypedOccurrencesAndJoins(t *testing.T) {
 			pc.workflowTimers.recoveryMu.Unlock()
 			if recovering != 0 {
 				t.Fatalf("recoveries after shutdown = %d, want 0", recovering)
+			}
+		})
+	}
+}
+
+func TestWorkflowTimerGlobalRestoreDefersStandingUntilRunScopedAdoptionOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			standingCtx := ctx
+			if store.isSQLite() {
+				if _, err := store.db.ExecContext(ctx, `
+					CREATE TABLE standing_services (
+						current_run_id TEXT NOT NULL,
+						declaration_present BOOLEAN NOT NULL,
+						effective_state TEXT NOT NULL
+					)
+				`); err != nil {
+					t.Fatalf("create standing ownership fixture: %v", err)
+				}
+				if _, err := store.db.ExecContext(ctx, `
+					INSERT INTO standing_services (current_run_id, declaration_present, effective_state)
+					VALUES (?, TRUE, 'active')
+				`, runtimecorrelation.RunIDFromContext(ctx)); err != nil {
+					t.Fatalf("seed standing ownership fixture: %v", err)
+				}
+			} else {
+				packageKey := "root"
+				flowID := "standing-workflow-timer"
+				standing, err := store.ReconcileStandingService(ctx, StandingServiceCandidate{
+					ServiceID:  runtimeflowidentity.StandingServiceID(packageKey, flowID),
+					PackageKey: packageKey,
+					FlowID:     flowID,
+					InstanceID: flowID,
+					EntityID:   uuid.NewString(),
+					Source: runtimecorrelation.BundleSourceFact{
+						BundleHash:   "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+						BundleSource: "ephemeral",
+					},
+				})
+				if err != nil {
+					t.Fatalf("reconcile standing service: %v", err)
+				}
+				standingCtx = runtimecorrelation.WithRunID(ctx, standing.RunID)
+			}
+			pc, _, _ := seedWorkflowTimerOwnerActivationAt(
+				t, store, standingCtx, &recordingPipelineBus{}, false, "1h", time.Now(), false,
+			)
+			scheduler := newWorkflowTimerTestScheduler(t, pc.workflowTimers.workOwner)
+			if err := pc.workflowTimers.bindScheduler(scheduler); err != nil {
+				t.Fatalf("bind workflow timer scheduler: %v", err)
+			}
+
+			globalCtx := testAuthorActivityContext(t, context.Background())
+			if err := pc.RestoreWorkflowTimers(globalCtx); err != nil {
+				t.Fatalf("global restore workflow timers: %v", err)
+			}
+			if active, draining := workflowTimerScheduledCounts(scheduler); active != 0 || draining != 0 {
+				t.Fatalf("global restore scheduled standing wakeups active=%d draining=%d, want 0", active, draining)
+			}
+
+			if err := pc.RestoreWorkflowTimers(standingCtx); err != nil {
+				t.Fatalf("run-scoped restore workflow timers: %v", err)
+			}
+			if active, draining := workflowTimerScheduledCounts(scheduler); active != 1 || draining != 0 {
+				t.Fatalf("standing adoption scheduled wakeups active=%d draining=%d, want active=1 draining=0", active, draining)
 			}
 		})
 	}
