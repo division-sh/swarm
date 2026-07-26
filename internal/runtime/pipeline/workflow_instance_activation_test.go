@@ -33,6 +33,10 @@ func (o *workflowInitialMaterializationTestOwner) ApplyWorkflowLifecycleEffects(
 	return nil
 }
 
+func (*workflowInitialMaterializationTestOwner) ArmInitialEntryTimers(context.Context, string) error {
+	return nil
+}
+
 func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffectsSQLitePostgres(t *testing.T) {
 	for _, tc := range []struct {
 		name  string

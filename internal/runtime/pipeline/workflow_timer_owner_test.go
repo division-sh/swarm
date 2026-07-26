@@ -1389,6 +1389,75 @@ func TestWorkflowTimerGlobalRestoreDefersStandingUntilRunScopedAdoptionOnBothSto
 	}
 }
 
+func TestWorkflowTimerInitialEntryStaysDormantUntilExplicitArmOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			owner := pipelineTestWorkOwner(t)
+			scheduler := newWorkflowTimerTestScheduler(t, owner)
+			published := make(chan events.Event, 1)
+			bus := &recordingPipelineBus{
+				publishInMutationHook: func(_ context.Context, event events.Event) error {
+					published <- event
+					return nil
+				},
+			}
+			NewPipelineCoordinatorWithOptions(bus, store.db, PipelineCoordinatorOptions{
+				Module: &pipelineFixtureWorkflowModule{
+					source: semanticview.Wrap(workflowTimerOwnerBundleWithDelay(false, "1ns")),
+				},
+				WorkflowStore:  store,
+				WorkOwner:      owner,
+				TimerScheduler: scheduler,
+			})
+			entityID := uuid.NewString()
+			createdAt := canonicalWorkflowTimerTime(time.Now().Add(-time.Second))
+			result, err := store.MaterializeInitialEntry(ctx, WorkflowInstance{
+				InstanceID: entityID, StorageRef: entityID, WorkflowName: "workflow-timer-owner-test",
+				WorkflowVersion: "1.0.0", CurrentState: "waiting",
+				Metadata: map[string]any{"run_id": runtimecorrelation.RunIDFromContext(ctx)},
+			}, createdAt)
+			if err != nil {
+				t.Fatalf("MaterializeInitialEntry: %v", err)
+			}
+			if result != WorkflowInitialMaterializationCreated {
+				t.Fatalf("materialization result = %d, want created", result)
+			}
+			active := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
+			if len(active) != 1 {
+				t.Fatalf("durable initial timers = %#v, want one", active)
+			}
+			if scheduled, draining := workflowTimerScheduledCounts(scheduler); scheduled != 0 || draining != 0 {
+				t.Fatalf("pre-arm wakeups active=%d draining=%d, want 0", scheduled, draining)
+			}
+			select {
+			case event := <-published:
+				t.Fatalf("initial timer published before explicit arm: %s", event.ID())
+			default:
+			}
+
+			if err := store.ArmInitialEntryTimers(ctx, entityID); err != nil {
+				t.Fatalf("ArmInitialEntryTimers: %v", err)
+			}
+			var event events.Event
+			select {
+			case event = <-published:
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for explicitly armed initial timer")
+			}
+			if event.RunID() != runtimecorrelation.RunIDFromContext(ctx) || event.EntityID() != entityID {
+				t.Fatalf("published timer scope run=%q entity=%q, want run=%q entity=%q", event.RunID(), event.EntityID(), runtimecorrelation.RunIDFromContext(ctx), entityID)
+			}
+			waitForWorkflowTimerPersistedStatus(t, store, ctx, active[0].Ref.ActivationID, workflowTimerStatusFired)
+			select {
+			case duplicate := <-published:
+				t.Fatalf("initial timer published more than once: %s", duplicate.ID())
+			default:
+			}
+		})
+	}
+}
+
 func waitForWorkflowTimerCondition(t *testing.T, timeout time.Duration, condition func() bool, description string) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)

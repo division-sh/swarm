@@ -59,7 +59,7 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"go|internal/runtime/mcp/client.go|stdioRPCClient.Call|477":                                                          {asyncSiteSynchronousJoin, "request cancellation notification is bounded by the call completion context"},
 	"go|internal/runtime/pipeline/scheduler.go|Scheduler.startTask|939":                                                  {asyncSiteCanonicalOwner, "the scheduler task owns its full execution occurrence plus an exact parkable standing projection, aggregate target-key reservation, linearized fire state, and done channel"},
 	"go|internal/runtime/pipeline/scheduler.go|Scheduler.startTask|947":                                                  {asyncSiteCanonicalOwner, "the cron scheduler task owns its full execution occurrence plus an exact parkable standing projection, aggregate target-key reservation, linearized fire state, and done channel"},
-	"go|internal/runtime/pipeline/workflow_timer_owner.go|WorkflowTimerLifecycle.startRecovery|732":                      {asyncSiteCanonicalOwner, "timer recovery acquires its runtime occurrence before launch and settles on return"},
+	"go|internal/runtime/pipeline/workflow_timer_owner.go|WorkflowTimerLifecycle.startRecovery|775":                      {asyncSiteCanonicalOwner, "timer recovery acquires its runtime occurrence before launch and settles on return"},
 	"go|internal/runtime/pythonmodule/runtime.go|newInterpreterModuleForContext|305":                                     {asyncSiteSynchronousJoin, "the interpreter stderr collector is joined when module startup completes"},
 	"go|internal/runtime/pythonmodule/runtime.go|runHarness|209":                                                         {asyncSiteSynchronousJoin, "the harness execution result is joined before the call returns"},
 	"go|internal/runtime/runforkexecution/agent_runtime_materialization.go|startSelectedContractAgentRuntimeGateway|466": {asyncSiteCanonicalOwner, "the selected-fork gateway is admitted under and joined by its selected-fork occurrence"},
@@ -81,9 +81,9 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"owner_action|internal/runtime/bus/outbox.go|engineOutbox.WriteOutbox|118":                                           {asyncSiteCanonicalOwner, "outbox post-commit dispatch is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/bus/outbox.go|engineOutbox.WriteOutbox|83":                                            {asyncSiteCanonicalOwner, "outbox rollback claim release is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/manager/agent_manager.go|AgentManager.spawnAgentInternal|339":                         {asyncSiteCanonicalOwner, "agent registration post-commit work is wrapped by an owner-bound action lease"},
-	"owner_action|internal/runtime/manager/flow_activation.go|AgentManager.ActivateFlowInstance|155":                     {asyncSiteCanonicalOwner, "flow activation post-commit work is wrapped by an owner-bound action lease"},
-	"owner_action|internal/runtime/manager/flow_activation.go|AgentManager.ActivateFlowInstance|191":                     {asyncSiteCanonicalOwner, "flow activation auto-emit is wrapped by an owner-bound action lease"},
-	"owner_action|internal/runtime/manager/flow_activation.go|AgentManager.DeactivateFlowInstanceModel|650":              {asyncSiteCanonicalOwner, "flow deactivation post-commit work is wrapped by an owner-bound action lease"},
+	"owner_action|internal/runtime/manager/flow_activation.go|AgentManager.ActivateFlowInstance|156":                     {asyncSiteCanonicalOwner, "flow activation installs agents and arms initial timers through one ordered owner-bound action lease"},
+	"owner_action|internal/runtime/manager/flow_activation.go|AgentManager.ActivateFlowInstance|198":                     {asyncSiteCanonicalOwner, "flow activation auto-emit is wrapped by an owner-bound action lease"},
+	"owner_action|internal/runtime/manager/flow_activation.go|AgentManager.DeactivateFlowInstanceModel|657":              {asyncSiteCanonicalOwner, "flow deactivation post-commit work is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/pipeline/activity_engine.go|pipelineActivityIntentWriter.WriteActivityIntents|113":    {asyncSiteCanonicalOwner, "activity intent logging is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/pipeline/coordinator.go|PipelineCoordinator.recordInterceptedEmitDeadLetters|704":     {asyncSiteCanonicalOwner, "dead-letter publication is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/pipeline/generic_schedule_lifecycle.go|PipelineCoordinator.cancelGenericSchedule|64":  {asyncSiteCanonicalOwner, "schedule cancellation is wrapped by an owner-bound action lease"},
@@ -91,7 +91,7 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"owner_action|internal/runtime/pipeline/runtime_support.go|QueuePipelineAfterPublishAction|535":                      {asyncSiteCanonicalOwner, "the exported after-publish facade delegates to the canonical owner-bound queue"},
 	"owner_action|internal/runtime/pipeline/runtime_support.go|QueuePipelinePostCommitAction|437":                        {asyncSiteCanonicalOwner, "the exported post-commit facade delegates to the canonical owner-bound queue"},
 	"owner_action|internal/runtime/pipeline/runtime_support.go|QueuePipelineRollbackAction|488":                          {asyncSiteCanonicalOwner, "the exported rollback facade delegates to the canonical owner-bound queue"},
-	"owner_action|internal/runtime/pipeline/workflow_timer_owner.go|WorkflowTimerLifecycle.queueWakeupReconcile|471":     {asyncSiteCanonicalOwner, "timer registration and cancellation converge through one owner-bound post-commit action"},
+	"owner_action|internal/runtime/pipeline/workflow_timer_owner.go|WorkflowTimerLifecycle.queueWakeupReconcile|514":     {asyncSiteCanonicalOwner, "timer registration and cancellation converge through one owner-bound post-commit action"},
 }
 
 var retiredLifetimeOwners = []string{

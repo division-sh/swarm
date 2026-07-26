@@ -97,7 +97,11 @@ func (pc *PipelineCoordinator) applyWorkflowLifecycleEffect(ctx context.Context,
 	default:
 		return fmt.Errorf("workflow lifecycle effect kind is unsupported")
 	}
-	if err := pc.workflowTimers.Reconcile(ctx, entityID, fromState, toState, cause); err != nil {
+	if effect.Kind() == runtimeworkflowlifecycle.KindInitialEntry {
+		if err := pc.workflowTimers.reconcileInitialEntry(ctx, entityID, toState, cause); err != nil {
+			return err
+		}
+	} else if err := pc.workflowTimers.Reconcile(ctx, entityID, fromState, toState, cause); err != nil {
 		return err
 	}
 	if err := pc.applyWorkflowJoinIntents(ctx, entityID, fromState, toState, effect.OccurredAt()); err != nil {
@@ -113,4 +117,12 @@ func (pc *PipelineCoordinator) applyAcceptedWorkflowEvent(ctx context.Context, e
 		return err
 	}
 	return owner.ApplyWorkflowLifecycleEffects(ctx, []runtimeworkflowlifecycle.Effect{effect})
+}
+
+func (o pipelineWorkflowLifecycleOwner) ArmInitialEntryTimers(ctx context.Context, instanceID string) error {
+	pc := o.coordinator
+	if pc == nil || pc.workflowTimers == nil {
+		return fmt.Errorf("workflow timer lifecycle owner is unavailable")
+	}
+	return pc.workflowTimers.ArmInitialEntryTimers(ctx, instanceID)
 }

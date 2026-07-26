@@ -96,6 +96,8 @@ type flowActivationTestInstanceStore struct {
 	byStorageRef     map[string]runtimepipeline.WorkflowInstance
 	routeLoads       []runtimeflowidentity.Route
 	materialization  runtimepipeline.WorkflowInitialMaterializationResult
+	armedEntries     []string
+	armInitialEntry  func(string) error
 }
 
 type flowActivationTestStore struct {
@@ -170,6 +172,15 @@ func (s *flowActivationTestInstanceStore) MaterializeInitialEntry(_ context.Cont
 		return runtimepipeline.WorkflowInitialMaterializationUnknown, err
 	}
 	return runtimepipeline.WorkflowInitialMaterializationCreated, nil
+}
+
+func (s *flowActivationTestInstanceStore) ArmInitialEntryTimers(_ context.Context, instanceID string) error {
+	instanceID = strings.TrimSpace(instanceID)
+	s.armedEntries = append(s.armedEntries, instanceID)
+	if s.armInitialEntry != nil {
+		return s.armInitialEntry(instanceID)
+	}
+	return nil
 }
 
 func (s *flowActivationTestInstanceStore) storeInstance(instance runtimepipeline.WorkflowInstance) {
@@ -635,6 +646,60 @@ func TestActivateFlowInstanceDefersAgentStartupUntilMutationCommit(t *testing.T)
 	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
 	if _, ok := am.GetAgentConfig("reviewer-inst-1"); !ok {
 		t.Fatal("flow agent did not start after activation commit")
+	}
+}
+
+func TestActivateFlowInstanceArmsInitialTimersOnlyAfterRuntimeInstallation(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		inMutation bool
+	}{
+		{name: "direct"},
+		{name: "post_commit", inMutation: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bus := &flowActivationTestBus{}
+			instances := &flowActivationTestInstanceStore{}
+			var am *AgentManager
+			instances.armInitialEntry = func(instanceID string) error {
+				if instanceID != "review/inst-1" {
+					return fmt.Errorf("armed instance = %q, want review/inst-1", instanceID)
+				}
+				if len(bus.addedPaths) != 1 || bus.addedPaths[0] != "review/inst-1" {
+					return fmt.Errorf("timer armed before route installation: %#v", bus.addedPaths)
+				}
+				if _, ok := am.GetAgentConfig("reviewer-inst-1"); !ok {
+					return errors.New("timer armed before agent installation")
+				}
+				return nil
+			}
+			am = newFlowActivationManager(t, bus, instances)
+			ctx := testAuthorActivityContext(context.Background())
+			postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
+			if tc.inMutation {
+				ctx = runtimepipeline.WithPipelineSQLTxContext(ctx, &sql.Tx{})
+				ctx = withFlowActivationPostCommit(ctx, &postCommit)
+			}
+
+			if err := am.ActivateFlowInstance(ctx, testActivationRequest(testFlowBundle(""), "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
+				t.Fatalf("ActivateFlowInstance: %v", err)
+			}
+			if tc.inMutation {
+				if len(instances.armedEntries) != 0 {
+					t.Fatalf("armed entries before commit = %#v, want none", instances.armedEntries)
+				}
+				if len(postCommit) != 1 {
+					t.Fatalf("post-commit actions = %d, want one runtime-install-and-arm action", len(postCommit))
+				}
+				runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+			}
+			if len(instances.armedEntries) != 1 || instances.armedEntries[0] != "review/inst-1" {
+				t.Fatalf("armed entries = %#v, want [review/inst-1]", instances.armedEntries)
+			}
+			if len(bus.runtimeLogs) != 0 {
+				t.Fatalf("runtime logs = %#v, want no activation failure", bus.runtimeLogs)
+			}
+		})
 	}
 }
 

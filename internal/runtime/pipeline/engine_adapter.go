@@ -213,6 +213,9 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 			if materialization != WorkflowInitialMaterializationCreated && materialization != WorkflowInitialMaterializationAlreadyExists {
 				return fmt.Errorf("workflow initial materialization returned unknown result %d", materialization)
 			}
+			if err := r.coordinator.workflowStore.ArmInitialEntryTimers(ctx, entityID.String()); err != nil {
+				return err
+			}
 		}
 		allowedFields := workflowEntitySchemaFields(r.coordinator.SemanticSource(), pipelineFlowScope(ctx))
 		if err := r.coordinator.workflowStore.MutateE(ctx, entityID.String(), func(instance *WorkflowInstance) error {
