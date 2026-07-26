@@ -14816,7 +14816,7 @@ multi_bundle_persistence:
           their managed identity proves the affected run_id.
       persisted_bundle_present: restart_may_resume_or_recover_the_run_under_runtime_recovery_owners
       persisted_bundle_missing: fail_serve_with_BUNDLE_DATA_INTEGRITY_ERROR_until_operator_repairs_data
-      ephemeral_deleted_or_legacy: >
+      ephemeral_or_deleted: >
         Active mid-flight runs cannot be resumed after process restart. Runtime recovery must orphan/terminalize them
         through the active-run and delivery cleanup owner chain instead of pretending their filesystem bundle is still
         authoritative.
