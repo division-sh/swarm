@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1055,6 +1057,178 @@ func TestWorkflowTimerLifecycleActivationRollbackDoesNotRegisterOnBothStores(t *
 	}
 }
 
+func TestWorkflowTimerWakeupReconciliationSerializesCancellationOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			pc, _, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, &recordingPipelineBus{}, false)
+			loaded := make(chan struct{})
+			release := make(chan struct{})
+			defer func() {
+				select {
+				case <-release:
+				default:
+					close(release)
+				}
+			}()
+			var loadedOnce sync.Once
+			pc.workflowTimers.testAfterWakeupLoad = func() {
+				loadedOnce.Do(func() { close(loaded) })
+				<-release
+			}
+
+			reconcileErr := make(chan error, 1)
+			go func() {
+				reconcileErr <- pc.workflowTimers.ReconcileWakeup(ctx, activation.Ref)
+			}()
+			select {
+			case <-loaded:
+			case <-time.After(time.Second):
+				t.Fatal("wakeup reconciliation did not pause after canonical reload")
+			}
+
+			cancelErr := make(chan error, 1)
+			go func() {
+				cancelErr <- store.RunPipelineMutation(ctx, func(txctx context.Context) error {
+					cancelled, changed, err := store.cancelWorkflowTimerActivation(txctx, activation.Ref)
+					if err != nil {
+						return err
+					}
+					if !changed {
+						return errors.New("workflow timer cancellation did not change the active row")
+					}
+					return pc.workflowTimers.queueCancellation(txctx, cancelled)
+				})
+			}()
+			waitForWorkflowTimerPersistedStatus(t, store, ctx, activation.Ref.ActivationID, workflowTimerStatusCancelled)
+			close(release)
+
+			if err := <-reconcileErr; err != nil {
+				t.Fatalf("stale-snapshot reconciliation: %v", err)
+			}
+			if err := <-cancelErr; err != nil {
+				t.Fatalf("cancel workflow timer: %v", err)
+			}
+			waitForWorkflowTimerSchedulerEmpty(t, pc.timerScheduler)
+		})
+	}
+}
+
+func TestWorkflowTimerWakeupReconciliationRetiresTerminalAndMissingRowsOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		for _, state := range []string{"terminal", "missing"} {
+			t.Run(tc.name+"/"+state, func(t *testing.T) {
+				store, ctx := tc.open(t)
+				pc, _, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, &recordingPipelineBus{}, false)
+				switch state {
+				case "terminal":
+					if err := store.RunPipelineMutation(ctx, func(txctx context.Context) error {
+						_, changed, err := store.cancelWorkflowTimerActivation(txctx, activation.Ref)
+						if err == nil && !changed {
+							return errors.New("workflow timer cancellation did not change the active row")
+						}
+						return err
+					}); err != nil {
+						t.Fatalf("terminalize workflow timer: %v", err)
+					}
+				case "missing":
+					placeholder := "$1"
+					if store.isSQLite() {
+						placeholder = "?"
+					}
+					if _, err := store.db.ExecContext(ctx, "DELETE FROM timers WHERE timer_id = "+placeholder, activation.Ref.ActivationID); err != nil {
+						t.Fatalf("delete workflow timer row: %v", err)
+					}
+				default:
+					t.Fatalf("unsupported state %q", state)
+				}
+
+				if err := pc.workflowTimers.ReconcileWakeup(ctx, activation.Ref); err != nil {
+					t.Fatalf("reconcile %s workflow timer: %v", state, err)
+				}
+				waitForWorkflowTimerSchedulerEmpty(t, pc.timerScheduler)
+			})
+		}
+	}
+}
+
+func TestWorkflowTimerLifecycleStopFencesRestoreAndRecoveryOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		for _, operation := range []string{"restore", "recovery"} {
+			t.Run(tc.name+"/"+operation, func(t *testing.T) {
+				store, ctx := tc.open(t)
+				pc, _, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, &recordingPipelineBus{}, false)
+				if err := pc.workflowTimers.retireWakeup(activation.Ref); err != nil {
+					t.Fatalf("retire initial wakeup: %v", err)
+				}
+				waitForWorkflowTimerSchedulerEmpty(t, pc.timerScheduler)
+
+				loaded := make(chan struct{})
+				release := make(chan struct{})
+				defer func() {
+					select {
+					case <-release:
+					default:
+						close(release)
+					}
+				}()
+				var loadedOnce sync.Once
+				pc.workflowTimers.testAfterWakeupLoad = func() {
+					loadedOnce.Do(func() { close(loaded) })
+					<-release
+				}
+
+				operationErr := make(chan error, 1)
+				switch operation {
+				case "restore":
+					go func() { operationErr <- pc.RestoreWorkflowTimers(ctx) }()
+				case "recovery":
+					if !pc.workflowTimers.startWakeupRecovery(activation.Ref) {
+						t.Fatal("start workflow timer recovery")
+					}
+				default:
+					t.Fatalf("unsupported operation %q", operation)
+				}
+				select {
+				case <-loaded:
+				case <-time.After(time.Second):
+					t.Fatalf("%s did not pause after canonical reload", operation)
+				}
+
+				stopStarted := make(chan struct{})
+				stopErr := make(chan error, 1)
+				go func() {
+					close(stopStarted)
+					stopCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+					defer cancel()
+					stopErr <- pc.StopWorkflowTimerLifecycle(stopCtx)
+				}()
+				<-stopStarted
+				close(release)
+				if operation == "restore" {
+					if err := <-operationErr; err != nil {
+						t.Fatalf("restore workflow timers: %v", err)
+					}
+				}
+				if err := <-stopErr; err != nil {
+					t.Fatalf("stop workflow timer lifecycle: %v", err)
+				}
+				waitForWorkflowTimerSchedulerEmpty(t, pc.timerScheduler)
+				pc.workflowTimers.recoveryMu.Lock()
+				recovering := len(pc.workflowTimers.recovering)
+				pc.workflowTimers.recoveryMu.Unlock()
+				if recovering != 0 {
+					t.Fatalf("recoveries after lifecycle stop = %d, want 0", recovering)
+				}
+				if err := pc.workflowTimers.ReconcileWakeup(ctx, activation.Ref); err != nil {
+					t.Fatalf("post-stop reconciliation: %v", err)
+				}
+				waitForWorkflowTimerSchedulerEmpty(t, pc.timerScheduler)
+			})
+		}
+	}
+}
+
 func TestWorkflowTimerRecoveryCoalescesTypedOccurrencesAndJoins(t *testing.T) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name+"/coalesces", func(t *testing.T) {
@@ -1063,15 +1237,19 @@ func TestWorkflowTimerRecoveryCoalescesTypedOccurrencesAndJoins(t *testing.T) {
 				t, store, ctx, &recordingPipelineBus{}, false, "1h", time.Now(), false,
 			)
 			pc.workflowTimers.workOwner = pipelineTestWorkOwner(t)
-			pc.workflowTimers.scheduler = newWorkflowTimerTestScheduler(t, pc.workflowTimers.workOwner)
-			pc.workflowTimers.cancelWakeup(activation.Ref)
+			if err := pc.workflowTimers.bindScheduler(newWorkflowTimerTestScheduler(t, pc.workflowTimers.workOwner)); err != nil {
+				t.Fatalf("bind workflow timer scheduler: %v", err)
+			}
+			if err := pc.workflowTimers.retireWakeup(activation.Ref); err != nil {
+				t.Fatalf("retire initial workflow timer wakeup: %v", err)
+			}
 			waitForWorkflowTimerCondition(t, time.Second, func() bool {
 				active, draining := workflowTimerScheduledCounts(pc.workflowTimers.scheduler)
 				return active == 0 && draining == 0
 			}, "initial typed wakeup cancellation")
 
 			for attempt := 0; attempt < 3; attempt++ {
-				if !pc.workflowTimers.startRegistrationRecovery(activation.Ref) {
+				if !pc.workflowTimers.startWakeupRecovery(activation.Ref) {
 					t.Fatalf("start coalesced recovery attempt %d", attempt+1)
 				}
 			}
@@ -1105,9 +1283,13 @@ func TestWorkflowTimerRecoveryCoalescesTypedOccurrencesAndJoins(t *testing.T) {
 				t, store, ctx, &recordingPipelineBus{}, false, "1h", time.Now(), false,
 			)
 			pc.workflowTimers.workOwner = pipelineTestWorkOwner(t)
-			pc.workflowTimers.scheduler = newWorkflowTimerTestScheduler(t, pc.workflowTimers.workOwner)
-			pc.workflowTimers.cancelWakeup(activation.Ref)
-			if !pc.workflowTimers.startRegistrationRecovery(activation.Ref) {
+			if err := pc.workflowTimers.bindScheduler(newWorkflowTimerTestScheduler(t, pc.workflowTimers.workOwner)); err != nil {
+				t.Fatalf("bind workflow timer scheduler: %v", err)
+			}
+			if err := pc.workflowTimers.retireWakeup(activation.Ref); err != nil {
+				t.Fatalf("retire initial workflow timer wakeup: %v", err)
+			}
+			if !pc.workflowTimers.startWakeupRecovery(activation.Ref) {
 				t.Fatal("start pending recovery")
 			}
 			stopCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -1138,6 +1320,41 @@ func waitForWorkflowTimerCondition(t *testing.T, timeout time.Duration, conditio
 	t.Fatalf("timed out waiting for %s", description)
 }
 
+func waitForWorkflowTimerPersistedStatus(
+	t *testing.T,
+	store *WorkflowInstanceStore,
+	ctx context.Context,
+	activationID string,
+	want string,
+) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		activation, found, err := store.loadWorkflowTimerActivation(ctx, activationID, false)
+		if err == nil && found && activation.Status == want {
+			return
+		}
+		lastErr = err
+		runtime.Gosched()
+	}
+	t.Fatalf("workflow timer %s did not reach persisted status %s: last error=%v", activationID, want, lastErr)
+}
+
+func waitForWorkflowTimerSchedulerEmpty(t *testing.T, scheduler *Scheduler) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		active, draining := workflowTimerScheduledCounts(scheduler)
+		if active == 0 && draining == 0 {
+			return
+		}
+		runtime.Gosched()
+	}
+	active, draining := workflowTimerScheduledCounts(scheduler)
+	t.Fatalf("workflow timer scheduler active=%d draining=%d, want empty", active, draining)
+}
+
 func TestWorkflowTimerLifecycleSchedulerRetryPreservesOccurrenceOnBothStores(t *testing.T) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1152,7 +1369,7 @@ func TestWorkflowTimerLifecycleSchedulerRetryPreservesOccurrenceOnBothStores(t *
 				defer cancel()
 				_ = pc.StopWorkflowTimerLifecycle(stopCtx)
 			})
-			if err := pc.workflowTimers.EnsureRegistered(ctx, activation.Ref); err != nil {
+			if err := pc.workflowTimers.ReconcileWakeup(ctx, activation.Ref); err != nil {
 				t.Fatalf("register workflow timer wakeup: %v", err)
 			}
 			waitForWorkflowTimerCondition(t, 5*time.Second, func() bool {

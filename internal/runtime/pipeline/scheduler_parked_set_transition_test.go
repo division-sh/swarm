@@ -39,10 +39,15 @@ func TestWorkflowTimerWakeupReplacementUsesOneCanonicalSchedulerProjection(t *te
 		},
 		dueAt: dueAt,
 	}
-	var active, maximum, calls atomic.Int32
+	var active, maximum, predecessorCalls, successorCalls atomic.Int32
 	started := make(chan struct{}, 2)
 	releaseIncumbent := make(chan struct{})
-	callback := func(context.Context, WorkflowTimerWakeup) {
+	if err := source.bindWorkflowTimerLifecycle(func(context.Context, WorkflowTimerWakeup) {
+		predecessorCalls.Add(1)
+	}); err != nil {
+		t.Fatalf("bind predecessor workflow lifecycle: %v", err)
+	}
+	if err := target.bindWorkflowTimerLifecycle(func(context.Context, WorkflowTimerWakeup) {
 		current := active.Add(1)
 		for {
 			observed := maximum.Load()
@@ -50,22 +55,24 @@ func TestWorkflowTimerWakeupReplacementUsesOneCanonicalSchedulerProjection(t *te
 				break
 			}
 		}
-		call := calls.Add(1)
+		call := successorCalls.Add(1)
 		started <- struct{}{}
 		if call == 1 {
 			<-releaseIncumbent
 		}
 		active.Add(-1)
+	}); err != nil {
+		t.Fatalf("bind successor workflow lifecycle: %v", err)
 	}
 
-	if err := source.registerWorkflowTimerWakeup(worklifetime.WithOccurrence(context.Background(), predecessor), wakeup, callback); err != nil {
+	if err := source.registerWorkflowTimerWakeup(worklifetime.WithOccurrence(context.Background(), predecessor), wakeup); err != nil {
 		t.Fatalf("register predecessor workflow wakeup: %v", err)
 	}
 	parked, err := source.ParkOccurrence(context.Background(), predecessor)
 	if err != nil {
 		t.Fatalf("park predecessor workflow wakeup: %v", err)
 	}
-	if err := target.registerWorkflowTimerWakeup(context.Background(), wakeup, callback); err != nil {
+	if err := target.registerWorkflowTimerWakeup(context.Background(), wakeup); err != nil {
 		t.Fatalf("register runtime-owned candidate wakeup: %v", err)
 	}
 	select {
@@ -87,7 +94,7 @@ func TestWorkflowTimerWakeupReplacementUsesOneCanonicalSchedulerProjection(t *te
 		prepared <- preparedResult{transition: transition, err: prepareErr}
 	}()
 	waitForWorkflowTimerReservation(t, target, ref)
-	if err := target.registerWorkflowTimerWakeup(worklifetime.WithOccurrence(context.Background(), successor), wakeup, callback); err == nil {
+	if err := target.registerWorkflowTimerWakeup(worklifetime.WithOccurrence(context.Background(), successor), wakeup); err == nil {
 		t.Fatal("same-key workflow wakeup registration bypassed replacement reservation")
 	}
 	if err := target.cancelWorkflowTimerWakeup(ref); err == nil {
@@ -130,8 +137,89 @@ func TestWorkflowTimerWakeupReplacementUsesOneCanonicalSchedulerProjection(t *te
 	if got := maximum.Load(); got != 1 {
 		t.Fatalf("maximum concurrent workflow wakeups = %d, want 1", got)
 	}
-	if got := calls.Load(); got != 2 {
-		t.Fatalf("workflow wakeup callback calls = %d, want incumbent plus rebound", got)
+	if got := predecessorCalls.Load(); got != 0 {
+		t.Fatalf("predecessor workflow lifecycle calls = %d, want 0 after rebind", got)
+	}
+	if got := successorCalls.Load(); got != 2 {
+		t.Fatalf("successor workflow lifecycle calls = %d, want incumbent plus rebound", got)
+	}
+}
+
+func TestWorkflowTimerWakeupRollbackRestoresPredecessorLifecycleBinding(t *testing.T) {
+	runtimeOwner := pipelineTestWorkOwner(t)
+	predecessor := newSchedulerTestStanding(t, runtimeOwner, "workflow-timer-rollback-source", 1)
+	source := NewSchedulerWithWorkOwner(runtimeOwner)
+	t.Cleanup(func() {
+		source.Stop()
+		_ = source.Wait(context.Background())
+	})
+
+	dueAt := canonicalWorkflowTimerTime(time.Now().Add(100 * time.Millisecond))
+	ref := timeridentity.WorkflowTimerActivationRef{
+		ActivationID: timeridentity.WorkflowTimerActivationID("workflow-timer-rollback"),
+		Declaration:  "review.expiry",
+	}
+	wakeup := WorkflowTimerWakeup{
+		family: workflowTimerActivationWakeup,
+		occurrence: timeridentity.WorkflowTimerOccurrenceRef{
+			Activation: ref,
+			DueAt:      dueAt,
+		},
+		dueAt: dueAt,
+	}
+	predecessorCalled := make(chan struct{}, 1)
+	if err := source.bindWorkflowTimerLifecycle(func(context.Context, WorkflowTimerWakeup) {
+		predecessorCalled <- struct{}{}
+	}); err != nil {
+		t.Fatalf("bind predecessor workflow lifecycle: %v", err)
+	}
+	if err := source.registerWorkflowTimerWakeup(
+		worklifetime.WithOccurrence(context.Background(), predecessor),
+		wakeup,
+	); err != nil {
+		t.Fatalf("register predecessor workflow wakeup: %v", err)
+	}
+	parked, err := source.ParkOccurrence(context.Background(), predecessor)
+	if err != nil {
+		t.Fatalf("park predecessor workflow wakeup: %v", err)
+	}
+	if err := parked.RestoreOriginal(context.Background()); err != nil {
+		t.Fatalf("restore original workflow wakeup: %v", err)
+	}
+	select {
+	case <-predecessorCalled:
+	case <-time.After(time.Second):
+		t.Fatal("restored workflow wakeup did not invoke predecessor lifecycle")
+	}
+}
+
+func TestWorkflowTimerSchedulerBindingFailsClosed(t *testing.T) {
+	runtimeOwner := pipelineTestWorkOwner(t)
+	scheduler := NewSchedulerWithWorkOwner(runtimeOwner)
+	t.Cleanup(func() {
+		scheduler.Stop()
+		_ = scheduler.Wait(context.Background())
+	})
+	dueAt := canonicalWorkflowTimerTime(time.Now().Add(time.Hour))
+	wakeup := WorkflowTimerWakeup{
+		family: workflowTimerActivationWakeup,
+		occurrence: timeridentity.WorkflowTimerOccurrenceRef{
+			Activation: timeridentity.WorkflowTimerActivationRef{
+				ActivationID: timeridentity.WorkflowTimerActivationID("workflow-timer-binding"),
+				Declaration:  "review.expiry",
+			},
+			DueAt: dueAt,
+		},
+		dueAt: dueAt,
+	}
+	if err := scheduler.registerWorkflowTimerWakeup(context.Background(), wakeup); err == nil {
+		t.Fatal("workflow wakeup registered without lifecycle binding")
+	}
+	if err := scheduler.bindWorkflowTimerLifecycle(func(context.Context, WorkflowTimerWakeup) {}); err != nil {
+		t.Fatalf("bind workflow timer lifecycle: %v", err)
+	}
+	if err := scheduler.bindWorkflowTimerLifecycle(func(context.Context, WorkflowTimerWakeup) {}); err == nil {
+		t.Fatal("second workflow timer lifecycle binding succeeded")
 	}
 }
 

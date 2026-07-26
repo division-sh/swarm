@@ -6507,20 +6507,28 @@ engine:
       coordinate without an explicit reschedule operation.
     - 3. Leaving an owning stage, matching cancel_on, loop-generation supersession, run quiescence, or preservation cleanup
       may only monotonically cancel or delete the canonical row. Cancellation is in the same mutation as the causal lifecycle
-      transition; the in-memory scheduler is updated only after commit.
+      transition; the in-memory scheduler is updated only after commit. Registration and cancellation do not issue opposing
+      local commands from stale snapshots. One lifecycle-serialized wakeup reconciliation reloads the exact durable activation
+      and either registers its current active occurrence or retires the local activation key when the row is terminal, missing,
+      mismatched, or the lifecycle has begun stopping.
     - 4. WorkflowTimerLifecycle projects one minimal typed wake-up containing only the workflow family, exact typed
       occurrence key, and due coordinate. The process-local wakeup owns a worklifetime occurrence lease before registration and
       serializes replacement of the same activation key before a successor can fire. Its callback reloads and locks the
       canonical workflow_timer activation before publication or recurrence. Callback time, copied run/entity/event/payload
-      facts, random identity, or reconstructed workflow snapshots are not executable authority.
+      facts, random identity, or reconstructed workflow snapshots are not executable authority. The projection is an inert
+      typed fact and never retains a lifecycle callback. Each Scheduler binds exactly once, fail closed, to its current
+      WorkflowTimerLifecycle; parked rollback dispatches through the predecessor scheduler binding, while replacement rebind
+      transfers only wakeup facts and dispatches through the successor scheduler binding.
     - 5. Fire publication and row completion occur in one selected database transaction. The event ID is deterministic from
       activation ID plus persisted due coordinate. A one-shot row becomes fired. A recurring row remains active and atomically
       advances `fire_at` by its persisted positive recurrence interval; therefore retries of one occurrence reuse its ID while
       distinct recurring occurrences receive distinct IDs.
     - 6. A recurring next coordinate is registered only after the outer fire transaction commits. Exact registration
       failures remain lifecycle-owned, coalesced retries until registration succeeds, the row ceases to be active, or
-      runtime shutdown begins. Registration, cancellation, restore, retry, recurrence, and replacement consume one
-      lifecycle-owned wakeup set; workflow timers do not acquire or release generic schedule claims.
+      runtime shutdown begins. Post-commit birth, cancellation, restore, retry, recurrence, and recovery all consume the same
+      convergent reconciliation operation. Lifecycle stop fences that operation before retiring and joining the complete local
+      wakeup set, so a concurrent restore or recovery cannot repopulate a stopped scheduler. Workflow timers do not acquire or
+      release generic schedule claims.
     - 7. The accepted timer-event router selects the exact `platform/runtime.workflow_timer` producer before parsing the
       typed occurrence. A malformed exact-producer event and a valid reserved occurrence from any other producer fail
       closed. The accepted timer event is authorized against the canonical row and exact deterministic occurrence ID before any

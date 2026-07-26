@@ -70,7 +70,7 @@ func (l *WorkflowTimerLifecycle) registerWakeup(ctx context.Context, wakeup Work
 	if err := wakeup.validate(); err != nil {
 		return err
 	}
-	return l.scheduler.registerWorkflowTimerWakeup(ctx, wakeup, l.handleWakeup)
+	return l.scheduler.registerWorkflowTimerWakeup(ctx, wakeup)
 }
 
 func (l *WorkflowTimerLifecycle) handleWakeup(ctx context.Context, wakeup WorkflowTimerWakeup) {
@@ -79,25 +79,23 @@ func (l *WorkflowTimerLifecycle) handleWakeup(ctx context.Context, wakeup Workfl
 		l.logFailure(ctx, "workflow_timer_fire_failed", wakeup.Occurrence().Activation, err)
 	}
 	if outcome == WorkflowTimerFireRetry {
-		l.startRegistrationRecovery(wakeup.Occurrence().Activation)
+		l.startWakeupRecovery(wakeup.Occurrence().Activation)
 		return
 	}
 	if outcome == WorkflowTimerFireCommitted && recurrenceCommitted {
 		ref := wakeup.Occurrence().Activation
-		if err := l.EnsureRegistered(ownerActionAdmissionContext(ctx), ref); err != nil {
-			l.logFailure(ctx, "workflow_timer_recurrence_register_failed", ref, err)
-			l.startRegistrationRecovery(ref)
+		if err := l.ReconcileWakeup(ownerActionAdmissionContext(ctx), ref); err != nil {
+			l.logFailure(ctx, "workflow_timer_recurrence_reconcile_failed", ref, err)
+			l.startWakeupRecovery(ref)
 		}
 	}
 }
 
-func (l *WorkflowTimerLifecycle) cancelWakeup(ref timeridentity.WorkflowTimerActivationRef) {
+func (l *WorkflowTimerLifecycle) retireWakeup(ref timeridentity.WorkflowTimerActivationRef) error {
 	if l == nil || l.scheduler == nil {
-		return
+		return nil
 	}
-	if err := l.scheduler.cancelWorkflowTimerWakeup(ref); err != nil {
-		l.logFailure(context.Background(), "workflow_timer_cancel_failed", ref, err)
-	}
+	return l.scheduler.cancelWorkflowTimerWakeup(ref)
 }
 
 func (l *WorkflowTimerLifecycle) stopWakeups(ctx context.Context) error {
