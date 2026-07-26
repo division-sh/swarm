@@ -1,13 +1,13 @@
 package pipeline
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +15,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -345,7 +346,7 @@ func (s *WorkflowInstanceStore) MaterializeInitialEntry(ctx context.Context, ins
 	if s == nil || s.db == nil {
 		return WorkflowInitialMaterializationUnknown, fmt.Errorf("workflow instance lifecycle store is required")
 	}
-	occurredAt = occurredAt.UTC()
+	occurredAt = canonicalWorkflowInstancePersistedTime(occurredAt)
 	if occurredAt.IsZero() {
 		return WorkflowInitialMaterializationUnknown, fmt.Errorf("workflow initial materialization requires an exact occurrence time")
 	}
@@ -399,15 +400,23 @@ func (s *WorkflowInstanceStore) MaterializeInitialEntry(ctx context.Context, ins
 func workflowInitialMaterializationEqual(actual, expected WorkflowInstance, occurredAt time.Time) bool {
 	actualProjection, actualErr := workflowInstancePersistedProjectionFromInstance(actual, actual.StorageRef)
 	expectedProjection, expectedErr := workflowInstancePersistedProjectionFromInstance(expected, expected.StorageRef)
+	actualJSON, actualJSONErr := canonicaljson.Bytes(actualProjection)
+	expectedJSON, expectedJSONErr := canonicaljson.Bytes(expectedProjection)
 	return actualErr == nil &&
 		expectedErr == nil &&
+		actualJSONErr == nil &&
+		expectedJSONErr == nil &&
 		strings.TrimSpace(actual.StorageRef) == strings.TrimSpace(expected.StorageRef) &&
 		strings.TrimSpace(actual.WorkflowName) == strings.TrimSpace(expected.WorkflowName) &&
 		strings.TrimSpace(actual.WorkflowVersion) == strings.TrimSpace(expected.WorkflowVersion) &&
 		strings.TrimSpace(actual.CurrentState) == strings.TrimSpace(expected.CurrentState) &&
-		actual.EnteredStageAt.UTC().Equal(occurredAt.UTC()) &&
-		actual.CreatedAt.UTC().Equal(occurredAt.UTC()) &&
-		reflect.DeepEqual(actualProjection, expectedProjection)
+		canonicalWorkflowInstancePersistedTime(actual.EnteredStageAt).Equal(canonicalWorkflowInstancePersistedTime(occurredAt)) &&
+		canonicalWorkflowInstancePersistedTime(actual.CreatedAt).Equal(canonicalWorkflowInstancePersistedTime(occurredAt)) &&
+		bytes.Equal(actualJSON, expectedJSON)
+}
+
+func canonicalWorkflowInstancePersistedTime(value time.Time) time.Time {
+	return value.UTC().Truncate(time.Microsecond)
 }
 
 func normalizeWorkflowInstanceForPersistence(instance WorkflowInstance) (WorkflowInstance, runtimeflowidentity.Persisted, bool, error) {
