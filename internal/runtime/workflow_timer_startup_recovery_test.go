@@ -258,7 +258,7 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 			}
 
 			seedRuntime, seedProcess := newRuntime()
-			occurredAt := time.Now().UTC()
+			occurredAt := time.Now().UTC().Add(-time.Second)
 			seedCtx := worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence())
 			result, err := workflowStore.MaterializeInitialEntry(seedCtx, runtimepipeline.WorkflowInstance{
 				InstanceID:      entityID,
@@ -296,6 +296,18 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 			}
 			assertBootDetail("recovery_snapshot_inspection", "timer obligations")
 			assertBootDetail("schedule_restoration", "workflow timers restored")
+			var managerRecoveryIndex, scheduleRestoreIndex = -1, -1
+			for i, event := range bootProgress {
+				switch event.Name {
+				case "manager_recovery_if_enabled":
+					managerRecoveryIndex = i
+				case "schedule_restoration":
+					scheduleRestoreIndex = i
+				}
+			}
+			if managerRecoveryIndex < 0 || scheduleRestoreIndex < 0 || managerRecoveryIndex >= scheduleRestoreIndex {
+				t.Fatalf("boot order manager=%d schedule=%d, want manager recovery before runnable timer restoration", managerRecoveryIndex, scheduleRestoreIndex)
+			}
 
 			deadline := time.Now().Add(8 * time.Second)
 			for {
@@ -332,7 +344,7 @@ func workflowTimerStartupRecoveryBundle() *runtimecontracts.WorkflowContractBund
 		Timers: []runtimecontracts.WorkflowTimerContract{{
 			ID: "waiting.timeout", Stage: "waiting", StageOwned: true, AdvancesTo: "done",
 			Owner: "runtime", Event: runtimecontracts.WorkflowStageTimerInternalEvent,
-			StartOn: "state:waiting", Delay: "2s",
+			StartOn: "state:waiting", Delay: "25ms",
 		}},
 	}, Events: map[string]runtimecontracts.EventCatalogEntry{"generic.tick": {}}}
 	bundle.Platform.Platform.Name = "swarm"

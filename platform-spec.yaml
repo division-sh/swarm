@@ -6581,8 +6581,10 @@ engine:
     crash_recovery: >
       Restart restores only active typed workflow rows for active runs and registers their exact persisted occurrence
       coordinates once whenever the selected workflow store and Scheduler are available, independently of whether a generic
-      ScheduleStore is configured. A runtime that adopts an already-active standing run after startup performs the same run-scoped exact-row
-      registration only after the standing reconciliation mutation commits; it does not wait for another process restart.
+      ScheduleStore is configured. Runtime-scoped restoration occurs only after manager route/agent hydration succeeds.
+      Global restoration excludes standing-service runs; a runtime that adopts an already-active standing run performs the
+      same run-scoped exact-row registration only after the standing reconciliation mutation commits and its runtime route
+      is installed. It does not wait for another process restart.
       Overdue coordinates fire late by contract and retain deterministic occurrence identity. The runtime does not reconstruct
       timers from workflow-instance state, handlers, declarations, or logs. A database containing obsolete workflow-instance-owned
       timer rows is unsupported pre-1.0 state and startup refuses it; recreate the database rather than migrating, converting, or
@@ -21812,22 +21814,29 @@ cli_specification:
             name: system_nodes_start
             owner: internal/runtime
           - step: 10
-            name: schedule_restoration
-            owner: internal/runtime
-          - step: 11
             name: manager_recovery_if_enabled
             owner: internal/runtime
             ordering: >
               When persistent startup recovery is enabled, the runtime MUST hydrate persisted agent state and register
               every admitted live agent receiver before it recovers any executable workflow-node delivery. The successful
               agent-hydration boundary authorizes the initial node-delivery recovery pass, which in turn opens standing
-              node recovery. A recovered node handler therefore observes the same receiver registry as post-readiness
-              dispatch rather than treating an unhydrated persisted agent as an absent recipient.
+              node recovery and runnable workflow-timer restoration. A recovered node handler or due workflow timer
+              therefore observes the same receiver registry as post-readiness dispatch rather than treating an unhydrated
+              persisted agent as an absent recipient.
             failure_rule: >
               If persisted agent hydration fails, startup records the canonical degraded manager-recovery decision and
-              MUST keep the executable node-delivery recovery gate closed. It MUST NOT claim, retry, settle, or dead-letter
-              a node delivery against a partially hydrated receiver registry. No timer, polling loop, or later maintenance
-              pass may bypass that gate.
+              MUST keep executable node-delivery recovery and workflow-timer activation closed. It MUST NOT claim, retry,
+              settle, dead-letter, or publish recovered work against a partially hydrated receiver registry. No timer,
+              polling loop, or later maintenance pass may bypass that gate.
+          - step: 11
+            name: schedule_restoration
+            owner: internal/runtime
+            ordering: >
+              The schedule-restoration step follows manager recovery. Runtime-owned workflow timers become runnable only
+              after manager route/agent hydration succeeds. Global workflow-timer restoration excludes standing-service
+              run IDs because standing reconciliation owns their route, agent, generation, and publication boundary. EnsureStandingTargets,
+              EnsureStandingServiceTargets, or EnsureStandingReplacementTargets restores each admitted standing run's
+              exact active workflow timers only after that standing mutation commits and its runtime route is installed.
           - step: 12
             name: outbox_sweeper
             owner: internal/runtime

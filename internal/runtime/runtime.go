@@ -141,8 +141,8 @@ var canonicalBootProgressNames = [...]string{
 	"recovery_decision",
 	"pipeline_maintenance",
 	"system_nodes_start",
-	"schedule_restoration",
 	"manager_recovery_if_enabled",
+	"schedule_restoration",
 	"outbox_sweeper",
 	"static_agents_bootstrap",
 	"flow_required_agents",
@@ -1444,15 +1444,56 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		return err
 	}
 	rt.emitBootProgress(9, "system_nodes_start", "ok", fmt.Sprintf("%d nodes subscribed", systemNodeCount))
+	workflowTimerRestoreReady := true
 	if skipPersistentStartupRecovery {
-		rt.emitBootProgress(10, "schedule_restoration", "skipped", "persistent startup recovery disabled")
+		rt.emitBootProgress(10, "manager_recovery_if_enabled", "skipped", "persistent startup recovery disabled")
+	} else if !rt.Config.Runtime.RecoveryOnStartup {
+		rt.emitBootProgress(10, "manager_recovery_if_enabled", "skipped", "recovery_on_startup disabled")
+	} else {
+		recovered := make([]string, 0, 2)
+		agentHydrationSucceeded := true
+		if rt.Manager != nil {
+			startupRecoveryDecision.ManagerRecoveryAttempted = true
+			_, err := rt.Manager.HydrateForStartup(ctx)
+			if err != nil {
+				agentHydrationSucceeded = false
+				workflowTimerRestoreReady = false
+				rt.recordStartupManagerRecoveryFailure(ctx, &startupRecoveryDecision, err)
+			} else {
+				recovered = append(recovered, "agent state")
+			}
+		}
+		if rt.Pipeline != nil && agentHydrationSucceeded {
+			if err := rt.Pipeline.RecoverNodeDeliveries(ctx); err != nil {
+				rt.emitBootProgress(10, "manager_recovery_if_enabled", "FAILED", err.Error())
+				return fmt.Errorf("recover executable workflow-node deliveries: %w", err)
+			}
+			recovered = append(recovered, "workflow-node deliveries")
+		}
+		status := "ok"
+		if startupRecoveryDecision.Outcome == startupRecoveryOutcomeDegraded {
+			status = string(startupRecoveryDecision.Outcome)
+		}
+		detail := "no executable delivery consumers available"
+		if !agentHydrationSucceeded && rt.Pipeline != nil {
+			detail = "agent state hydration failed; workflow-node delivery recovery withheld"
+		} else if !agentHydrationSucceeded {
+			detail = "agent state hydration failed"
+		} else if len(recovered) > 0 {
+			detail = strings.Join(recovered, " and ") + " hydrated; managed replay awaits execution admission"
+		}
+		rt.emitBootProgress(10, "manager_recovery_if_enabled", status, detail)
+	}
+	if skipPersistentStartupRecovery {
+		rt.emitBootProgress(11, "schedule_restoration", "skipped", "persistent startup recovery disabled")
 	} else if rt.Scheduler != nil {
 		restoredFamilies := make([]string, 0, 2)
+		scheduleRestoreStatus := "ok"
 		if rt.Stores.ScheduleStore != nil {
 			startupRecoveryDecision.ScheduleRestoreAttempted = true
 			schedules, err := rt.Stores.ScheduleStore.LoadActiveSchedules(ctx)
 			if err != nil {
-				rt.emitBootProgress(10, "schedule_restoration", "FAILED", err.Error())
+				rt.emitBootProgress(11, "schedule_restoration", "FAILED", err.Error())
 				return fmt.Errorf("load schedules failed: %w", err)
 			}
 			results := restoreStartupTimerSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Logger, schedules)
@@ -1473,58 +1514,25 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			restoredFamilies = append(restoredFamilies, fmt.Sprintf("%d generic schedules restored, %d skipped, %d dropped", startupRecoveryDecision.ScheduleReplayCount, startupRecoveryDecision.ScheduleSkipCount, startupRecoveryDecision.ScheduleDropCount))
 		}
 		if rt.Pipeline != nil {
-			startupRecoveryDecision.ScheduleRestoreAttempted = true
-			if err := rt.Pipeline.RestoreWorkflowTimers(ctx); err != nil {
-				rt.emitBootProgress(10, "schedule_restoration", "FAILED", err.Error())
-				return fmt.Errorf("restore workflow timers: %w", err)
+			if !workflowTimerRestoreReady {
+				scheduleRestoreStatus = string(startupRecoveryOutcomeDegraded)
+				restoredFamilies = append(restoredFamilies, "workflow timers withheld until manager recovery succeeds")
+			} else {
+				startupRecoveryDecision.ScheduleRestoreAttempted = true
+				if err := rt.Pipeline.RestoreWorkflowTimers(ctx); err != nil {
+					rt.emitBootProgress(11, "schedule_restoration", "FAILED", err.Error())
+					return fmt.Errorf("restore workflow timers: %w", err)
+				}
+				restoredFamilies = append(restoredFamilies, "workflow timers restored")
 			}
-			restoredFamilies = append(restoredFamilies, "workflow timers restored")
 		}
 		if len(restoredFamilies) == 0 {
-			rt.emitBootProgress(10, "schedule_restoration", "skipped", "no persistent timer owner available")
+			rt.emitBootProgress(11, "schedule_restoration", "skipped", "no persistent timer owner available")
 		} else {
-			rt.emitBootProgress(10, "schedule_restoration", "ok", strings.Join(restoredFamilies, "; "))
+			rt.emitBootProgress(11, "schedule_restoration", scheduleRestoreStatus, strings.Join(restoredFamilies, "; "))
 		}
 	} else {
-		rt.emitBootProgress(10, "schedule_restoration", "skipped", "scheduler unavailable")
-	}
-	if skipPersistentStartupRecovery {
-		rt.emitBootProgress(11, "manager_recovery_if_enabled", "skipped", "persistent startup recovery disabled")
-	} else if !rt.Config.Runtime.RecoveryOnStartup {
-		rt.emitBootProgress(11, "manager_recovery_if_enabled", "skipped", "recovery_on_startup disabled")
-	} else {
-		recovered := make([]string, 0, 2)
-		agentHydrationSucceeded := true
-		if rt.Manager != nil {
-			startupRecoveryDecision.ManagerRecoveryAttempted = true
-			_, err := rt.Manager.HydrateForStartup(ctx)
-			if err != nil {
-				agentHydrationSucceeded = false
-				rt.recordStartupManagerRecoveryFailure(ctx, &startupRecoveryDecision, err)
-			} else {
-				recovered = append(recovered, "agent state")
-			}
-		}
-		if rt.Pipeline != nil && agentHydrationSucceeded {
-			if err := rt.Pipeline.RecoverNodeDeliveries(ctx); err != nil {
-				rt.emitBootProgress(11, "manager_recovery_if_enabled", "FAILED", err.Error())
-				return fmt.Errorf("recover executable workflow-node deliveries: %w", err)
-			}
-			recovered = append(recovered, "workflow-node deliveries")
-		}
-		status := "ok"
-		if startupRecoveryDecision.Outcome == startupRecoveryOutcomeDegraded {
-			status = string(startupRecoveryDecision.Outcome)
-		}
-		detail := "no executable delivery consumers available"
-		if !agentHydrationSucceeded && rt.Pipeline != nil {
-			detail = "agent state hydration failed; workflow-node delivery recovery withheld"
-		} else if !agentHydrationSucceeded {
-			detail = "agent state hydration failed"
-		} else if len(recovered) > 0 {
-			detail = strings.Join(recovered, " and ") + " hydrated; managed replay awaits execution admission"
-		}
-		rt.emitBootProgress(11, "manager_recovery_if_enabled", status, detail)
+		rt.emitBootProgress(11, "schedule_restoration", "skipped", "scheduler unavailable")
 	}
 	if rt.Bus != nil {
 		sweeperConfig := rt.Options.TestOutboxSweeperConfig
