@@ -195,6 +195,10 @@ func (s *flowActivationTestStore) CommitAgentLifecycleTransition(_ context.Conte
 }
 func (*flowActivationTestStore) EnsureEntitySchema(context.Context, string) error { return nil }
 
+func (*flowActivationTestBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
+	return admitManagerTestBusContext(ctx)
+}
+
 func (b *flowActivationTestBus) Publish(ctx context.Context, evt events.Event) error {
 	b.published = append(b.published, evt)
 	b.publishedContexts = append(b.publishedContexts, events.DeliveryContextFromContext(ctx))

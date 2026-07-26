@@ -8,8 +8,11 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/google/uuid"
 )
+
+const builderTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
 type testRuntimeAcquirer struct {
 	runtime *runtimepkg.Runtime
@@ -28,7 +31,7 @@ func newTestRuntimeAcquirer(t testing.TB, rt *runtimepkg.Runtime) RuntimeAcquire
 	process := worklifetime.NewProcess()
 	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: uuid.NewString(),
-		BundleHash:        "builder-test-bundle",
+		BundleHash:        builderTestBundleHash,
 	})
 	if err != nil {
 		t.Fatalf("new builder test runtime occurrence: %v", err)
@@ -51,6 +54,13 @@ func newTestOwnedEventBus(t testing.TB, store runtimebus.EventStore, opts runtim
 	t.Helper()
 	acquirer := newTestRuntimeAcquirer(t, nil).(*testRuntimeAcquirer)
 	opts.WorkOwner = acquirer.owner
+	if opts.BundleSourceFact.Validate() != nil {
+		fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(builderTestBundleHash)
+		if err != nil {
+			t.Fatalf("construct builder test bundle source fact: %v", err)
+		}
+		opts.BundleSourceFact = fact
+	}
 	bus, err := runtimebus.NewEphemeralEventBusWithOptions(store, opts)
 	if err != nil {
 		t.Fatalf("new owned builder event bus: %v", err)

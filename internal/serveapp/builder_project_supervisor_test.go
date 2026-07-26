@@ -418,7 +418,11 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 		eventsStore := &processIngressEventStore{}
 		persistence.store = eventsStore
 		workOwner := newSupervisorTestRuntimeOccurrence(t, hash)
-		bus, err := runtimebus.NewEphemeralEventBusWithOptions(eventsStore, runtimebus.EventBusOptions{ProviderOutputVerifier: catalog, WorkOwner: workOwner})
+		bus, err := runtimebus.NewEphemeralEventBusWithOptions(eventsStore, runtimebus.EventBusOptions{
+			BundleSourceFact:       mustServeTestEphemeralBundleSourceFact(hash),
+			ProviderOutputVerifier: catalog,
+			WorkOwner:              workOwner,
+		})
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions(%s): %v", alias, err)
 		}
@@ -2282,7 +2286,10 @@ func TestDashboardDynamicAgentControl_DeniesWhenRuntimeShutdownAdmissionClosed(t
 	agent := builderControlTestAgent{id: "agent-1"}
 	hash := runtimeContextTestHash("8")
 	workOwner := newSupervisorTestRuntimeOccurrence(t, hash)
-	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: workOwner})
+	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
+		BundleSourceFact: mustServeTestEphemeralBundleSourceFact(hash),
+		WorkOwner:        workOwner,
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}

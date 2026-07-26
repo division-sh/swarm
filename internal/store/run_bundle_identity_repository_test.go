@@ -182,11 +182,28 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 			path: "internal/runtime/bus/eventbus_publish.go",
 			required: []string{
 				"func (eb *EventBus) admitBundleSourceFact(ctx context.Context) (context.Context, error)",
+				"!hasOwnedFact && !hasContextFact",
 				"!sourceFact.Matches(contextFact)",
 				"func (eb *EventBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error)",
 			},
 			prohibited: []string{
 				"func (eb *EventBus) WithBundleSourceFact",
+			},
+		},
+		{
+			path: "internal/runtime/manager/types.go",
+			required: []string{
+				"AdmitBundleSourceFact(context.Context) (context.Context, error)",
+			},
+		},
+		{
+			path: "internal/runtime/manager/runtime.go",
+			required: []string{
+				"ctx, err = am.bus.AdmitBundleSourceFact(ctx)",
+			},
+			prohibited: []string{
+				"type bundleSourceFactContextOwner interface",
+				"am.bus.(bundleSourceFactContextOwner)",
 			},
 		},
 		{

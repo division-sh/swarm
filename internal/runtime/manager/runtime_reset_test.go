@@ -22,6 +22,10 @@ type resetTestBus struct {
 	resetErr   error
 }
 
+func (*resetTestBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
+	return admitManagerTestBusContext(ctx)
+}
+
 func (b *resetTestBus) Publish(_ context.Context, evt events.Event) error {
 	if b.publishErr != nil {
 		return b.publishErr

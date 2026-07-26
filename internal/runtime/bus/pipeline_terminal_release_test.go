@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -436,6 +437,52 @@ func TestEventBusResetPreservesPendingOperationUntilPriorRetirementSucceeds(t *t
 	bus.mu.RUnlock()
 	if pending != 0 {
 		t.Fatalf("pending operations after terminal release = %d, want 0", pending)
+	}
+}
+
+func TestRecoveredPublicationRejectsForeignSourceBeforePendingRelease(t *testing.T) {
+	owner := newTerminalReleasePipelineOwner()
+	bus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{PipelineObligations: owner})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	eventID := uuid.NewString()
+	event := eventtest.RuntimeControl(eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now())
+	claim, err := bus.claimPipelinePublication(context.Background(), eventID)
+	if err != nil {
+		t.Fatalf("claim pending publication: %v", err)
+	}
+	bus.stagePendingOutboxOperation(
+		context.Background(),
+		runtimeengine.EmitIntent{Event: event},
+		EventAppendInserted,
+		claim,
+	)
+	foreign, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	if err != nil {
+		t.Fatalf("construct foreign source fact: %v", err)
+	}
+	ctx := runtimecorrelation.WithBundleSourceFact(context.Background(), foreign)
+
+	if _, err := bus.RecoverPersistedPipeline(ctx, runtimepipelineobligation.ClaimedWork{
+		Event: event,
+		Scope: runtimepipelineobligation.ScopeSubscribed,
+	}, nil); err == nil || !strings.Contains(err.Error(), "bundle source fact conflicts") {
+		t.Fatalf("RecoverPersistedPipeline error = %v, want bundle source conflict", err)
+	}
+	if got := owner.releaseCalls[eventID]; got != 0 {
+		t.Fatalf("pending release calls = %d, want 0", got)
+	}
+	bus.mu.RLock()
+	pending := len(bus.pendingOutboxByID[eventID])
+	bus.mu.RUnlock()
+	if pending != 1 {
+		t.Fatalf("pending operations = %d, want exact operation retained", pending)
+	}
+
+	bus.clearPendingOutboxOperation(eventID)
+	if got := owner.releaseCalls[eventID]; got != 1 {
+		t.Fatalf("cleanup release calls = %d, want 1", got)
 	}
 }
 

@@ -73,6 +73,12 @@ func newRuntimeTestEventBus(t testing.TB, store runtimebus.EventStore) (*runtime
 
 func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore, opts runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
 	t.Helper()
+	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
+		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
+	}
+	if opts.BundleSourceFact.Validate() != nil {
+		opts.BundleSourceFact = testBundleSourceFact(t, runtimeTestBundleHash)
+	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = runtimeTestOccurrence(t, runtimeTestBundleHash)
 	}

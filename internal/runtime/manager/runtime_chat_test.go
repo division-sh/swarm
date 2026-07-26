@@ -74,10 +74,19 @@ func (s *directiveTargetStore) ResolveAgentDirectiveRunTarget(context.Context, s
 }
 
 type directiveTestBus struct {
-	direct []events.Event
-	store  *directiveEventStore
+	direct     []events.Event
+	store      *directiveEventStore
+	admitErr   error
+	admitCalls int
 }
 
+func (b *directiveTestBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
+	b.admitCalls++
+	if b.admitErr != nil {
+		return ctx, b.admitErr
+	}
+	return ctx, nil
+}
 func (b *directiveTestBus) Publish(_ context.Context, evt events.Event) error {
 	return nil
 }
@@ -129,6 +138,7 @@ type directiveEventStore struct {
 	mutationGate         *sync.Mutex
 	recordExecutedCalls  int
 	finalizeFailureCalls int
+	reconcileCalls       int
 }
 
 func (s *directiveEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
@@ -289,6 +299,7 @@ func (s *directiveEventStore) ReconcileDirectiveOperation(_ context.Context, ope
 	defer unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reconcileCalls++
 	op, ok := s.operations[operationID]
 	if !ok {
 		return runtimeagentcontrol.DirectiveOperation{}, false, nil
@@ -306,6 +317,12 @@ func (s *directiveEventStore) ReconcileDirectiveOperation(_ context.Context, ope
 		s.operations[operationID] = op
 	}
 	return op, true, nil
+}
+
+func (s *directiveEventStore) reconcileCallCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.reconcileCalls
 }
 
 func (s *directiveEventStore) lockMutationGate() func() {
@@ -857,9 +874,83 @@ func TestAgentManager_SendDirectiveExpiredTerminalKeyStartsFreshOperation(t *tes
 	}
 }
 
+func TestAgentManager_SendDirectiveRejectsSourceBeforeExpiredReplayReconciliation(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		state runtimeagentcontrol.DirectiveOperationState
+	}{
+		{name: "terminal", state: runtimeagentcontrol.DirectiveOperationSucceeded},
+		{name: "executing", state: runtimeagentcontrol.DirectiveOperationExecuting},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now().UTC()
+			operation := runtimeagentcontrol.DirectiveOperation{
+				OperationID:    "11111111-1111-4111-8111-111111111199",
+				Method:         runtimeagentcontrol.DirectiveOperationMethod,
+				ActorTokenID:   "operator-token",
+				IdempotencyKey: "expired-source-key",
+				RequestHash:    "request-hash",
+				AgentID:        "campaign-coordinator",
+				Directive:      "inspect",
+				State:          tc.state,
+			}
+			if tc.state == runtimeagentcontrol.DirectiveOperationSucceeded {
+				operation.ExpiresAt = now.Add(-time.Second)
+			} else {
+				operation.ExecutionLeaseExpiresAt = now.Add(-time.Second)
+			}
+			directiveStore := &directiveEventStore{
+				operations: map[string]runtimeagentcontrol.DirectiveOperation{
+					operation.OperationID: operation,
+				},
+			}
+			admissionErr := errors.New("event bus bundle source fact conflicts with manager context")
+			bus := &directiveTestBus{store: directiveStore, admitErr: admissionErr}
+			store := &directiveTargetStore{target: runtimeagentcontrol.RunTargetResolution{
+				RunID: "00000000-0000-0000-0000-000000000799",
+				Mode:  runtimeagentcontrol.RunResolutionSpecified,
+			}}
+			agent := &chatTestAgent{id: operation.AgentID}
+			am := newTestAgentManager(t, bus, nil, store)
+			installDirectiveTestAgent(t, am, agent)
+
+			_, err := am.SendDirective(testAuthorActivityContext(context.Background()), runtimeagentcontrol.SendDirectiveRequest{
+				AgentID:        operation.AgentID,
+				Directive:      operation.Directive,
+				ActorTokenID:   operation.ActorTokenID,
+				IdempotencyKey: operation.IdempotencyKey,
+				RequestHash:    operation.RequestHash,
+			})
+			if !errors.Is(err, admissionErr) {
+				t.Fatalf("SendDirective error = %v, want source admission error", err)
+			}
+			if bus.admitCalls != 1 {
+				t.Fatalf("source admission calls = %d, want 1", bus.admitCalls)
+			}
+			if got := directiveStore.reconcileCallCount(); got != 0 {
+				t.Fatalf("reconciliation calls = %d, want 0", got)
+			}
+			unchanged, ok, loadErr := directiveStore.LoadDirectiveOperationByKey(
+				context.Background(),
+				operation.Method,
+				operation.ActorTokenID,
+				operation.IdempotencyKey,
+			)
+			if loadErr != nil || !ok {
+				t.Fatalf("load unchanged operation ok=%v err=%v", ok, loadErr)
+			}
+			if unchanged.State != operation.State ||
+				!unchanged.ExpiresAt.Equal(operation.ExpiresAt) ||
+				!unchanged.ExecutionLeaseExpiresAt.Equal(operation.ExecutionLeaseExpiresAt) {
+				t.Fatalf("operation mutated before source admission: got %#v want %#v", unchanged, operation)
+			}
+		})
+	}
+}
+
 func TestAgentManager_ChatWithAgent_DeniesWhenRuntimeShutdownAdmissionClosed(t *testing.T) {
 	agent := &chatTestAgent{id: "campaign-coordinator"}
-	am := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{
+	am := newTestAgentManagerWithOptions(t, &directiveTestBus{}, nil, AgentManagerOptions{
 		RuntimeShutdownAdmissionClosed: func() bool { return true },
 	})
 	installDirectiveTestAgent(t, am, agent)

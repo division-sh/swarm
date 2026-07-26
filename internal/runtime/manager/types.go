@@ -37,6 +37,7 @@ type BoardInteractiveAgent interface {
 type AgentFactory func(cfg models.AgentConfig) (Agent, error)
 
 type Bus interface {
+	AdmitBundleSourceFact(context.Context) (context.Context, error)
 	Publish(ctx context.Context, evt events.Event) error
 	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
 	SweepPipelineObligations(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error)
