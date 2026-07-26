@@ -895,7 +895,10 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 		},
 	}
 	state.observability.events["evt-1"] = mutatingProbeOriginalEvent("evt-1", []string{"agent-a"}, runtimedelivery.StatusDelivered)
-	state.events = &mutatingProbeEventPublisher{state: state}
+	state.events = &mutatingProbeEventPublisher{
+		state:            state,
+		bundleSourceFact: mustAPITestPersistedBundleSourceFact(runStartTestBundleHash),
+	}
 	state.runFork = &mutatingProbeRunForkExecutor{state: state}
 	state.testSetup = &mutatingProbeTestSetupStore{state: state}
 	state.runForkAvailability = &recordingRunForkAvailability{
@@ -1260,6 +1263,7 @@ var _ BundleCatalogRegisterStore = (*mutatingProbeBundleCatalog)(nil)
 
 type mutatingProbeEventPublisher struct {
 	state                   *mutatingRuntimeProbeState
+	bundleSourceFact        runtimecorrelation.BundleSourceFact
 	publishErr              error
 	directErr               error
 	checkErr                error
@@ -1280,11 +1284,11 @@ func (p *mutatingProbeEventPublisher) PublishAcknowledged(ctx context.Context, e
 	return p.Publish(ctx, evt)
 }
 
-func (p *mutatingProbeEventPublisher) WithBundleSourceFact(ctx context.Context) context.Context {
+func (p *mutatingProbeEventPublisher) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
 	if p.missingBundleSourceFact {
-		return ctx
+		return ctx, nil
 	}
-	return runtimecorrelation.WithBundleSourceFact(ctx, runStartTestBundleSourceFact())
+	return runtimecorrelation.WithBundleSourceFact(ctx, p.bundleSourceFact), nil
 }
 
 func (p *mutatingProbeEventPublisher) PublishInMutation(ctx context.Context, evt events.Event) error {

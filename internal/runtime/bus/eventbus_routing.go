@@ -1063,7 +1063,11 @@ func (eb *EventBus) logRuntime(ctx context.Context, level diaglog.Level, message
 		}
 	}
 	ctx = runtimecorrelation.WithRuntimeDiagnosticLineage(ctx, eventID, eventType)
-	ctx = eb.withBundleSourceFact(ctx)
+	var err error
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
+	}
 	if err := logger.Log(ctx, level, message, component, action, eventID, eventType, agentID, entityID, sessionID, correlation, detail, runtimefailures.CloneEnvelope(failure), durationUS); err != nil {
 		diaglog.ProcessLog("error", "diagnostics", "runtime log persistence failed",
 			"component", strings.TrimSpace(component),
@@ -1091,6 +1095,10 @@ func (eb *EventBus) LogRuntime(ctx context.Context, entry runtimepipeline.Runtim
 		}
 	}
 	ctx = runtimecorrelation.WithRuntimeDiagnosticLineage(ctx, entry.EventID, entry.EventType)
-	ctx = eb.withBundleSourceFact(ctx)
+	var err error
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
+	}
 	return logger.Log(ctx, entry.Level, entry.Message, entry.Component, entry.Action, entry.EventID, entry.EventType, entry.AgentID, entry.EffectiveEntityID(), entry.SessionID, entry.Correlation, entry.Detail, runtimefailures.CloneEnvelope(entry.Failure), entry.DurationUS)
 }

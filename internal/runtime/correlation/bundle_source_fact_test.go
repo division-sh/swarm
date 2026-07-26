@@ -54,6 +54,38 @@ func TestBundleSourceFactRejectsNonExecutableSources(t *testing.T) {
 	}
 }
 
+func TestBundleSourceFactMatchesCompleteOpaqueIdentity(t *testing.T) {
+	persisted, err := NewPersistedBundleSourceFact(testCanonicalBundleHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	same, err := NewPersistedBundleSourceFact(testCanonicalBundleHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ephemeral, err := NewEphemeralBundleSourceFact(testCanonicalBundleHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := NewPersistedBundleSourceFact("bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !persisted.Matches(same) {
+		t.Fatal("identical persisted facts do not match")
+	}
+	for name, candidate := range map[string]BundleSourceFact{
+		"same hash different source": ephemeral,
+		"different hash":             other,
+		"zero":                       {},
+	} {
+		if persisted.Matches(candidate) || candidate.Matches(persisted) {
+			t.Fatalf("%s unexpectedly matches", name)
+		}
+	}
+}
+
 func TestBundleSourceFactHasClosedConstructionSurface(t *testing.T) {
 	typ := reflect.TypeOf(BundleSourceFact{})
 	for i := 0; i < typ.NumField(); i++ {

@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
@@ -21,6 +23,65 @@ type publishAndWaitCommitSpy struct {
 func (s *publishAndWaitCommitSpy) CommitPublish(ctx context.Context, plan CommitPublishPlan) (PreparedPublish, error) {
 	s.commitCalls++
 	return s.InMemoryEventStore.CommitPublish(ctx, plan)
+}
+
+func TestEventBusBundleSourceAdmissionRejectsConflictingOwnersBeforeCommit(t *testing.T) {
+	const ownedHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	owned, err := runtimecorrelation.NewPersistedBundleSourceFact(ownedHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongSource, err := runtimecorrelation.NewEphemeralBundleSourceFact(ownedHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for name, contextFact := range map[string]runtimecorrelation.BundleSourceFact{
+		"different hash":             foreign,
+		"same hash different source": wrongSource,
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := &publishAndWaitCommitSpy{}
+			eb, err := newScopedTestEventBus(store, EventBusOptions{BundleSourceFact: owned})
+			if err != nil {
+				t.Fatalf("create event bus: %v", err)
+			}
+			ctx := runtimecorrelation.WithBundleSourceFact(context.Background(), contextFact)
+
+			err = eb.Publish(ctx, completionTreeEvent("11111111-1111-4111-8111-111111111144", "custom.root"))
+			if err == nil || !strings.Contains(err.Error(), "bundle source fact conflicts") {
+				t.Fatalf("Publish error = %v, want bundle source conflict", err)
+			}
+			if store.commitCalls != 0 {
+				t.Fatalf("commit calls = %d, want 0", store.commitCalls)
+			}
+		})
+	}
+}
+
+func TestEventBusBundleSourceAdmissionAllowsContextOwnedSelectedForkBus(t *testing.T) {
+	sourceFact, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eb, err := NewEphemeralEventBusWithOptions(InMemoryEventStore{}, EventBusOptions{})
+	if err != nil {
+		t.Fatalf("create ownerless selected-fork event bus: %v", err)
+	}
+	ctx := runtimecorrelation.WithBundleSourceFact(context.Background(), sourceFact)
+
+	admitted, err := eb.AdmitBundleSourceFact(ctx)
+	if err != nil {
+		t.Fatalf("AdmitBundleSourceFact: %v", err)
+	}
+	got, ok := runtimecorrelation.BundleSourceFactFromContext(admitted)
+	if !ok || !got.Matches(sourceFact) {
+		t.Fatalf("admitted source fact = %#v/%v, want exact context-owned fact", got, ok)
+	}
 }
 
 func TestEventBusPublishAndWaitRejectsActiveMutationBeforeCommit(t *testing.T) {

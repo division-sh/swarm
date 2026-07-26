@@ -84,6 +84,11 @@ func (f BundleSourceFact) IsEphemeral() bool {
 	return f.source == executableBundleSourceEphemeral
 }
 
+func (f BundleSourceFact) Matches(other BundleSourceFact) bool {
+	return f.Validate() == nil && other.Validate() == nil &&
+		f.bundleHash == other.bundleHash && f.source == other.source
+}
+
 func (f BundleSourceFact) StorageValues() (bundleHash, bundleSource string) {
 	if f.Validate() != nil {
 		return "", ""

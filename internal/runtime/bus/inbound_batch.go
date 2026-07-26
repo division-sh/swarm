@@ -38,7 +38,11 @@ func (eb *EventBus) PrepareInboundDeliveryBatchInMutation(ctx context.Context, b
 	if eb == nil {
 		return nil, fmt.Errorf("event bus is required")
 	}
-	ctx = eb.withBundleSourceFact(ctx)
+	var err error
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return nil, err
+	}
 	validated, err := preflightInboundDeliveryBatch(eb.providerOutputAuthorizationVerifier(), batch)
 	if err != nil {
 		return nil, err

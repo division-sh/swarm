@@ -622,8 +622,8 @@ func (p failingRunStartPublisher) Publish(context.Context, events.Event) error {
 	return p.err
 }
 
-func (p failingRunStartPublisher) WithBundleSourceFact(ctx context.Context) context.Context {
-	return runtimecorrelation.WithBundleSourceFact(ctx, runStartTestBundleSourceFact())
+func (p failingRunStartPublisher) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
+	return runtimecorrelation.WithBundleSourceFact(ctx, runStartTestBundleSourceFact()), nil
 }
 
 type missingRunStartBundleScopePublisher struct{}
