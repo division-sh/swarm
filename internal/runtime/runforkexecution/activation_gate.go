@@ -131,6 +131,10 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("plan selected-contract activation gate: %w", err)
 	}
+	deferredWorkAdmission, err := admitSelectedContractDeferredWork(plan, loadedSource.Source)
+	if err != nil {
+		return SelectedContractActivationGateResult{Owner: store.RunForkSelectedContractExecutionActivationGateOwner}, err
+	}
 	replayAdmission := store.RunForkSelectedContractReplayResumeAdmission(plan)
 	if len(plan.ReplayResumeAdmission.Dispositions) > 0 || len(plan.ReplayResumeAdmission.UnsupportedBlockers) > 0 {
 		plan.UnsupportedBlockers = replayAdmission.UnsupportedBlockers
@@ -171,15 +175,16 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		return SelectedContractActivationGateResult{}, err
 	}
 	admission, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
-		ForkRunID:         forkRunID,
-		SourceRunID:       binding.SourceRunID,
-		BundleSourceFact:  expectedSourceFact,
-		BindingReader:     req.Store,
-		SourceLoader:      req.SourceLoader,
-		FrontierAdmission: frontier,
-		RouteAdmission:    routeAdmission,
-		RouteTopology:     routeTopology,
-		ExecutionModel:    model,
+		ForkRunID:             forkRunID,
+		SourceRunID:           binding.SourceRunID,
+		BundleSourceFact:      expectedSourceFact,
+		BindingReader:         req.Store,
+		SourceLoader:          req.SourceLoader,
+		FrontierAdmission:     frontier,
+		RouteAdmission:        routeAdmission,
+		RouteTopology:         routeTopology,
+		ExecutionModel:        model,
+		DeferredWorkAdmission: deferredWorkAdmission,
 	})
 	if err != nil {
 		return SelectedContractActivationGateResult{}, err
@@ -254,15 +259,16 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		result.ContractSwapBootResumeExecution = &contractSwapExecution
 		sourceEventIDs := contractSwapBootResumeSourceEvents(contractSwapExecution)
 		container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
-			Store:             pgStore,
-			Admission:         admission,
-			LoadedSource:      loadedSource,
-			RecipientPlanning: *model.RecipientPlanning,
-			SourceRunID:       binding.SourceRunID,
-			ForkRunID:         forkRunID,
-			ForkEventID:       plan.ForkPoint.EventID,
-			SourceEvents:      sourceEventIDs,
-			ExecutionOwner:    store.RunForkHistoricalReplayContractSwapBootResumeOwner,
+			Store:                 pgStore,
+			Admission:             admission,
+			LoadedSource:          loadedSource,
+			RecipientPlanning:     *model.RecipientPlanning,
+			SourceRunID:           binding.SourceRunID,
+			ForkRunID:             forkRunID,
+			ForkEventID:           plan.ForkPoint.EventID,
+			SourceEvents:          sourceEventIDs,
+			ExecutionOwner:        store.RunForkHistoricalReplayContractSwapBootResumeOwner,
+			DeferredWorkAdmission: deferredWorkAdmission,
 		})
 		if err != nil {
 			return result, cleanupSelectedContractExecutionFailure(ctx, pgStore, forkRunID, err)

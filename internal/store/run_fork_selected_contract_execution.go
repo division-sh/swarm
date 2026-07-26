@@ -12,6 +12,7 @@ import (
 const (
 	RunForkSelectedContractExecutionModelOwner                                 = "runtime.run_fork.selected_contract_execution_model"
 	RunForkSelectedContractExecutionAdmissionOwner                             = "runtime.run_fork.selected_contract_execution_admission"
+	RunForkSelectedContractDeferredWorkAdmissionOwner                          = "runtime.run_fork.selected_contract_deferred_work_admission"
 	RunForkSelectedContractExecutionActivationGateOwner                        = "runtime.run_fork.selected_contract_execution.activation_gate"
 	RunForkSelectedContractExecutionOwner                                      = "runtime.run_fork.selected_contract_execution"
 	RunForkSelectedContractRouteAdmissionOwner                                 = "runtime.run_fork.selected_contract_route_admission"
@@ -103,29 +104,30 @@ type RunForkSelectedContractExecution struct {
 }
 
 type RunForkSelectedContractExecutionAdmission struct {
-	Owner                 string                                     `json:"owner"`
-	FutureExecutionOwner  string                                     `json:"future_execution_owner"`
-	NonMutating           bool                                       `json:"non_mutating"`
-	ExecutionSupported    bool                                       `json:"execution_supported"`
-	ForkRunID             string                                     `json:"fork_run_id"`
-	SourceRunID           string                                     `json:"source_run_id"`
-	ForkEventID           string                                     `json:"fork_event_id"`
-	ContractSelection     RunForkContractSelection                   `json:"contract_selection"`
-	ContractBindingOwner  string                                     `json:"contract_binding_owner"`
-	AdmissionOwner        string                                     `json:"admission_owner"`
-	AdmissionUse          string                                     `json:"admission_use"`
-	ExecutionModelOwner   string                                     `json:"execution_model_owner"`
-	SourceWorkflowName    string                                     `json:"source_workflow_name"`
-	SourceWorkflowVersion string                                     `json:"source_workflow_version"`
-	FrontierEventCount    int                                        `json:"frontier_event_count"`
-	FrontierEvents        []RunForkSelectedContractFrontierEvent     `json:"frontier_events,omitempty"`
-	RouteTopology         *RunForkSelectedContractRouteTopology      `json:"route_topology,omitempty"`
-	RecipientPlanning     *RunForkSelectedContractRecipientPlanning  `json:"recipient_planning,omitempty"`
-	ContractBinding       RunForkSelectedContractExecutionBoundary   `json:"contract_binding"`
-	RequiredConsumers     []RunForkSelectedContractExecutionBoundary `json:"required_consumers,omitempty"`
-	BlockedSiblings       []RunForkSelectedContractExecutionBoundary `json:"blocked_siblings,omitempty"`
-	InvalidPaths          []RunForkSelectedContractExecutionBoundary `json:"invalid_paths,omitempty"`
-	UnsupportedBlockers   []RunForkUnsupportedBlocker                `json:"unsupported_blockers,omitempty"`
+	Owner                      string                                     `json:"owner"`
+	FutureExecutionOwner       string                                     `json:"future_execution_owner"`
+	NonMutating                bool                                       `json:"non_mutating"`
+	ExecutionSupported         bool                                       `json:"execution_supported"`
+	ForkRunID                  string                                     `json:"fork_run_id"`
+	SourceRunID                string                                     `json:"source_run_id"`
+	ForkEventID                string                                     `json:"fork_event_id"`
+	ContractSelection          RunForkContractSelection                   `json:"contract_selection"`
+	ContractBindingOwner       string                                     `json:"contract_binding_owner"`
+	AdmissionOwner             string                                     `json:"admission_owner"`
+	AdmissionUse               string                                     `json:"admission_use"`
+	ExecutionModelOwner        string                                     `json:"execution_model_owner"`
+	DeferredWorkAdmissionOwner string                                     `json:"deferred_work_admission_owner"`
+	SourceWorkflowName         string                                     `json:"source_workflow_name"`
+	SourceWorkflowVersion      string                                     `json:"source_workflow_version"`
+	FrontierEventCount         int                                        `json:"frontier_event_count"`
+	FrontierEvents             []RunForkSelectedContractFrontierEvent     `json:"frontier_events,omitempty"`
+	RouteTopology              *RunForkSelectedContractRouteTopology      `json:"route_topology,omitempty"`
+	RecipientPlanning          *RunForkSelectedContractRecipientPlanning  `json:"recipient_planning,omitempty"`
+	ContractBinding            RunForkSelectedContractExecutionBoundary   `json:"contract_binding"`
+	RequiredConsumers          []RunForkSelectedContractExecutionBoundary `json:"required_consumers,omitempty"`
+	BlockedSiblings            []RunForkSelectedContractExecutionBoundary `json:"blocked_siblings,omitempty"`
+	InvalidPaths               []RunForkSelectedContractExecutionBoundary `json:"invalid_paths,omitempty"`
+	UnsupportedBlockers        []RunForkUnsupportedBlocker                `json:"unsupported_blockers,omitempty"`
 }
 
 type RunForkSelectedContractFrontierEvent struct {

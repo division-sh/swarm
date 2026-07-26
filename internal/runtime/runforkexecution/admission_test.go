@@ -33,13 +33,14 @@ func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testin
 	model := testSelectedContractExecutionModel(t, frontier)
 
 	admission, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
-		ForkRunID:         forkRunID,
-		BindingReader:     reader,
-		SourceLoader:      sourceLoader,
-		FrontierAdmission: frontier,
-		RouteAdmission:    routeAdmission,
-		RouteTopology:     routeTopology,
-		ExecutionModel:    model,
+		ForkRunID:             forkRunID,
+		BindingReader:         reader,
+		SourceLoader:          sourceLoader,
+		FrontierAdmission:     frontier,
+		RouteAdmission:        routeAdmission,
+		RouteTopology:         routeTopology,
+		ExecutionModel:        model,
+		DeferredWorkAdmission: selectedContractDeferredWorkAdmissionForTest(t, binding.SourceRunID, binding.ForkEventID, sourceLoader.loaded.Source),
 	})
 	if err != nil {
 		t.Fatalf("BuildSelectedContractExecutionAdmission: %v", err)
@@ -64,6 +65,7 @@ func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testin
 	}
 	if admission.AdmissionOwner != store.RunForkContractFrontierAdmissionOwner ||
 		admission.ExecutionModelOwner != store.RunForkSelectedContractExecutionModelOwner ||
+		admission.DeferredWorkAdmissionOwner != store.RunForkSelectedContractDeferredWorkAdmissionOwner ||
 		admission.AdmissionUse != store.RunForkSelectedContractExecutionAdmissionUseDurableBinding {
 		t.Fatalf("admission evidence accounting = %#v", admission)
 	}
@@ -98,6 +100,29 @@ func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testin
 	}
 	if !unsupportedBlockerHas(admission.UnsupportedBlockers, store.RunForkBlockerSelectedContractRouteAdmissionNonMutating) {
 		t.Fatalf("unsupported blockers = %#v, want non-mutating route admission blocker", admission.UnsupportedBlockers)
+	}
+}
+
+func TestBuildSelectedContractExecutionAdmissionRequiresDeferredWorkAdmission(t *testing.T) {
+	ctx := context.Background()
+	forkRunID := uuid.NewString()
+	binding := testSelectedContractBinding(forkRunID)
+	sourceLoader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
+	frontier := testContractFrontierAdmission(binding.ContractSelection)
+	routeAdmission := testSelectedContractRouteAdmission(frontier)
+	routeTopology := testSelectedContractRouteTopologyFromAdmission(t, frontier, routeAdmission)
+
+	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
+		ForkRunID:         forkRunID,
+		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
+		SourceLoader:      sourceLoader,
+		FrontierAdmission: frontier,
+		RouteAdmission:    routeAdmission,
+		RouteTopology:     routeTopology,
+		ExecutionModel:    testSelectedContractExecutionModel(t, frontier),
+	})
+	if err == nil || !strings.Contains(err.Error(), store.RunForkSelectedContractDeferredWorkAdmissionOwner) {
+		t.Fatalf("error = %v, want deferred-work admission failure", err)
 	}
 }
 
@@ -1009,6 +1034,18 @@ func testPersistedBundleSourceFact(bundleHash string) runtimecorrelation.BundleS
 		panic(err)
 	}
 	return fact
+}
+
+func selectedContractDeferredWorkAdmissionForTest(t testing.TB, sourceRunID, forkEventID string, source semanticview.Source) selectedContractDeferredWorkAdmission {
+	t.Helper()
+	admission, err := admitSelectedContractDeferredWork(store.RunForkPlan{
+		SourceRunID: sourceRunID,
+		ForkPoint:   store.RunForkPoint{EventID: forkEventID},
+	}, source)
+	if err != nil {
+		t.Fatalf("admit selected-contract deferred work: %v", err)
+	}
+	return admission
 }
 
 func testContractFrontierAdmission(selection store.RunForkContractSelection) store.RunForkContractFrontierAdmission {

@@ -134,7 +134,7 @@ rows:
     proof_refs:
       - {kind: go_test, name: TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers}
       - {kind: go_test, name: TestSelectedContractExecutionMaterializationRejectsActiveTimerBeforeMutation}
-      - {kind: go_test, name: TestExecuteSelectedContractRunForkRejectsTimerBearingWorkBeforeMutation}
+      - {kind: go_test, name: TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation}
       - {kind: go_test, name: TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerHistory}
     rationale: "Timer current rows remain fail-closed. Selected-contract execution rejects revisioned timer history and timer-capable selected sources before any fork mutation until #642 supplies a long-lived timer owner."
 
@@ -304,7 +304,7 @@ rows:
     enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
     proof_refs:
       - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionRejectsStaleTimerReconstructionDisposition}
-      - {kind: go_test, name: TestExecuteSelectedContractRunForkRejectsTimerBearingWorkBeforeMutation}
+      - {kind: go_test, name: TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation}
     rationale: "Timer-bearing selected execution remains fail-closed until #642 provides a long-lived selected-fork timer owner."
 
   - id: routes

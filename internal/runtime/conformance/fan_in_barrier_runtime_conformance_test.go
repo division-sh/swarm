@@ -31,6 +31,7 @@ type fanInBarrierConformanceStore interface {
 	runtimebus.EventStore
 	runtimedelivery.Store
 	runtimebus.FlowInstanceRoutePersistence
+	runtimepipeline.SchedulePersistence
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
 }
 
@@ -211,10 +212,11 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 	}
 	diagnosticBus := &fanInBarrierDiagnosticBus{EventBus: eventBus}
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(diagnosticBus, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:            module,
-		InstanceActivator: manager.ActivateFlowInstance,
-		WorkflowStore:     workflowStore,
-		DeliveryStore:     backend,
+		Module:             module,
+		InstanceActivator:  manager.ActivateFlowInstance,
+		WorkflowStore:      workflowStore,
+		DeliveryStore:      backend,
+		TimerScheduleStore: backend,
 	})
 	return fanInBarrierRuntime{bus: eventBus, diagnostics: diagnosticBus, workflowStore: workflowStore}
 }

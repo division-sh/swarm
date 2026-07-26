@@ -4856,6 +4856,12 @@ engine:
     close: >-
       Completion, timeout, and stage exit persist one closed reason. Completion/timeout outcomes and timer cancellation share
       the selected-store transaction; in-memory scheduler registration/cancellation happens only after commit.
+    schedule_ownership: >-
+      A join activation that creates its mandatory completion or timeout schedule must have at least one exact owner before
+      the selected mutation can commit: either a durable generic schedule store or a process scheduler. If neither capability
+      is present, generic schedule persistence fails closed and the containing join activation mutation rolls back. A
+      durable-store-only path may commit for later canonical restoration; a process-scheduler-only path may own the local
+      occurrence. Missing ownership is never treated as successful scheduling.
     recovery: >-
       Restart, replay, and fork consume persisted members/window/close/timer facts. They do not re-read mutable entity
       membership, synthesize an arrival-owned activation, or resurrect a closed timeout.
@@ -13580,7 +13586,8 @@ run_model:
     description: 'Fork creates an isolated run by reconstructing provable current state at a selected event revision,
       optionally loading selected contracts, and then executing only owner-admitted fork-local work. The supported
       model is bounded re-execution from inputs: delivery_event_replay_ready pending unstarted agent deliveries and
-      timer-free selected-contract frontier execution. The system does not infer arbitrary
+      deferred-work-free selected-contract frontier execution (no selected revision timer history, workflow timers,
+      or timed joins). The system does not infer arbitrary
       unfinished work; in-progress delivery, session, turn, audit, non-agent, route, retry/idempotency, and other
       unsupported historical facts remain permanently fail-closed unless a later issue names a concrete consumer and
       proves a new owner.'
@@ -13807,12 +13814,19 @@ run_model:
       projection rather than current routing_rules. not_applicable adds no route blocker; unknown_unversioned remains
       flow_route_history_unproven for generic execution and may be discharged for selected execution only by matching
       selected binding, frontier, static/dynamic topology, recipient, and persisted route-recovery proof. Active source
-      timers remain fail-closed under #642. Before materialization, runtime.run_fork.selected_contract_execution rejects
-      both relevant timer history in the selected revision and a selected semantic source that declares workflow timers,
-      because its ephemeral fork-local container has no long-lived timer process owner after command return. Rejection
-      creates no fork run, binding, route, event, delivery, workflow state, lineage, or timer row and leaves source rows
-      untouched. Source timer rows are never copied as executable truth, fired as source work, or used as selected-fork
-      suppressors. Timer facts committed after the selected revision remain fail-closed. The
+      timers remain fail-closed under #642. runtime.run_fork.selected_contract_deferred_work_admission is the one
+      selected-fork capability owner for work that would outlive the ephemeral selected-fork container. It classifies
+      relevant timer history in the selected revision, selected semantic workflow-timer declarations, and selected semantic
+      timed-join declarations. Direct selected execution consumes this admission before materialization. Activation of an
+      already materialized selected fork consumes it before delivery replay, state-only activation, event publication,
+      workflow mutation, or runtime-container issuance. The admitted capability is carried through the selected execution
+      admission and consumed again by every fork-local runtime-container construction; a changed selected source fails
+      closed. Rejection by direct execution creates no fork run, binding, route, event, delivery, workflow state, lineage,
+      join, schedule, or timer row. Rejection during staged activation leaves the existing materialized fork and source rows
+      unchanged and creates no executable mutation. Source timer rows are never copied as executable truth, fired as source
+      work, or used as selected-fork suppressors. Agent-authored scheduling already fails closed because the selected
+      executor has no scheduler, while boot/global schedules are not executed by the ephemeral container. Timer facts
+      committed after the selected revision remain fail-closed. The
       runtime.run_fork.selected_contract_execution owner must continue to
       consume unresolved flow_route_history blockers and MUST NOT copy or query current routing_rules as historical truth, persist fork-local route rows, derive
       selected-source recipients for execution outside recipient planning, or use source route outcomes as selected-fork
@@ -14079,8 +14093,9 @@ run_model:
       and the canonical store.run_fork.replay_resume_admission taxonomy, validates that every historical source fact
       family has exactly one executable, reconstructed, lineage-only, fail-closed, or split-sibling classification, and
       emits the executable work set that downstream store/runtime writers may mutate. The current supported closure
-      level is canonical owner promotion with delivery_event_replay_ready and timer-free selected-contract frontier
-      execution. Timer history remains a fail-closed/split fact under #642; a stale reconstruction disposition cannot
+      level is canonical owner promotion with delivery_event_replay_ready and deferred-work-free selected-contract
+      frontier execution (no selected revision timer history, workflow timers, or timed joins). Timer history remains
+      a fail-closed/split fact under #642; a stale reconstruction disposition cannot
       authorize mutation, and no current store or runtime owner writes fork-local reconstructed timer rows. The
       selected-contract contract-swap child runtime.run_fork.historical_replay_execution.contract_swap_boot_resume may
       execute only already-admitted delivery_event_replay_ready work under selected/swapped contracts. Full
@@ -14198,10 +14213,15 @@ run_model:
         pre-existing conversation rows, generic/state-only activation, broad source-run resumption, timers, routes,
         non-agent replay, restart recovery, and operator surfaces remain fail-closed or split siblings unless
         independently approved.'
-      3d_selected_contract_timer_route_policy: 'For selected-contract mutating fork execution, source timer facts
-        remain revisioned fail-closed evidence, and any selected semantic source that declares workflow timers is rejected
-        before materialization because the ephemeral selected-fork container has no long-lived timer owner. Neither case
-        may create fork or timer state. Route history is projected as
+      3d_selected_contract_timer_route_policy: 'For selected-contract mutating fork execution,
+        runtime.run_fork.selected_contract_deferred_work_admission classifies source timer history, workflow-timer
+        declarations, and timed-join declarations as unsupported while the ephemeral selected-fork container has no
+        long-lived deferred-work owner. Direct execution rejects before materialization; staged activation rejects before
+        delivery replay, state-only activation, publication, workflow mutation, or container issuance. The admission is
+        carried through selected execution admission and every container construction. No rejected path may create
+        executable event, delivery, workflow, join, generic schedule, timer, lineage, or runtime-execution state. Agent
+        scheduling remains fail-closed without a selected scheduler; boot/global schedules are not executed by this
+        container. Route history is projected as
         not_applicable or unknown_unversioned without querying current routing_rules. Generic execution preserves
         flow_route_history_unproven. Selected execution may clear unknown_unversioned only through matching selected
         frontier/binding/static-dynamic topology/recipient proof and persisted route recovery, before materialization,
@@ -14294,8 +14314,9 @@ run_model:
         runtime.run_fork.selected_contract_execution.fork_local_runtime_container and the normal runtime pipeline, records selected
         execution lineage, writes fork-local outcomes, consumes the fork-local runtime/platform event lineage policy for
         causally parented runtime control outputs, consumes typed runtime lineage before persisting runtime diagnostic
-        lineage, and regenerates follow-up events under the fork run_id. This surface supports only timer-free selected
-        revisions and timer-free selected semantic sources; timer-bearing admission fails before any fork mutation. This
+        lineage, and regenerates follow-up events under the fork run_id. This surface supports only deferred-work-free
+        selected revisions and selected semantic sources: relevant timer history, workflow-timer declarations, and
+        timed-join declarations fail admission before direct materialization or staged executable mutation. This
         bounded owner does not include route persistence/recovery, timer reconstruction, session/turn/audit reconstruction, non-agent replay, contract-swap
         boot/resume beyond selected frontier execution, runtime restart recovery, and UI/API ownership remain separate
         parents or siblings. Source session/turn/audit facts present in the selected revision may be admitted only as lineage/no-action
@@ -14404,8 +14425,9 @@ run_model:
         context required by approved owners; boot does not reconstruct source sessions, turns, audits, routes,
         idempotency, or arbitrary in-flight work.'
       5_resume: 'Execute only owner-admitted fork-local work under the new run_id. Today that means the
-        delivery_event_replay_ready primitive and timer-free selected-contract frontier execution when independently
-        admitted. Unsupported historical fact families
+        delivery_event_replay_ready primitive and deferred-work-free selected-contract frontier execution when
+        independently admitted: no selected revision timer history, workflow timers, or timed joins. Unsupported
+        historical fact families
         fail closed with typed blockers; the platform never infers unfinished source work from current rows.'
     parallel_safety: 'Each source transaction publishes all changed fork-reader families under one commit-serialized
       per-run revision. Concurrent same-run transactions serialize through the revision head; multi-run transactions

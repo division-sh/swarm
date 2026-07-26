@@ -37,6 +37,7 @@ type SelectedContractForkLocalRuntimeContainer struct {
 	ForkEventID                                    string                                           `json:"fork_event_id"`
 	SourceEventIDs                                 []string                                         `json:"source_event_ids,omitempty"`
 	RecipientPlanningOwner                         string                                           `json:"recipient_planning_owner"`
+	DeferredWorkAdmissionOwner                     string                                           `json:"deferred_work_admission_owner"`
 	AuthoritativeAgentDeliveryMaterializationOwner string                                           `json:"authoritative_agent_delivery_materialization_owner"`
 	AgentRuntimeMaterializationOwner               string                                           `json:"agent_runtime_materialization_owner,omitempty"`
 	RuntimePlatformEventLineagePolicyOwner         string                                           `json:"runtime_platform_event_lineage_policy_owner"`
@@ -85,6 +86,15 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	if err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
+	if err := req.DeferredWorkAdmission.validate(sourceRunID, forkEventID, req.LoadedSource.Source); err != nil {
+		return selectedContractForkLocalRuntimeContainer{}, err
+	}
+	if req.Admission.DeferredWorkAdmissionOwner != store.RunForkSelectedContractDeferredWorkAdmissionOwner {
+		return selectedContractForkLocalRuntimeContainer{}, fmt.Errorf("%s requires %s execution admission evidence",
+			store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+			store.RunForkSelectedContractDeferredWorkAdmissionOwner,
+		)
+	}
 	if strings.TrimSpace(req.RecipientPlanning.Owner) != store.RunForkSelectedContractRecipientPlanningOwner {
 		return selectedContractForkLocalRuntimeContainer{}, fmt.Errorf("%s requires %s; got %q",
 			store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
@@ -118,13 +128,14 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	}
 	req.ExecutionOwner = executionOwner
 	proof := SelectedContractForkLocalRuntimeContainer{
-		Owner:                  store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
-		ExecutionOwner:         executionOwner,
-		SourceRunID:            sourceRunID,
-		ForkRunID:              forkRunID,
-		ForkEventID:            forkEventID,
-		SourceEventIDs:         sourceEventIDs,
-		RecipientPlanningOwner: req.RecipientPlanning.Owner,
+		Owner:                      store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+		ExecutionOwner:             executionOwner,
+		SourceRunID:                sourceRunID,
+		ForkRunID:                  forkRunID,
+		ForkEventID:                forkEventID,
+		SourceEventIDs:             sourceEventIDs,
+		RecipientPlanningOwner:     req.RecipientPlanning.Owner,
+		DeferredWorkAdmissionOwner: req.DeferredWorkAdmission.owner,
 		AuthoritativeAgentDeliveryMaterializationOwner: deliveryMaterialization.Owner,
 		AgentRuntimeMaterializationOwner:               agentRuntimeOwner,
 		RuntimePlatformEventLineagePolicyOwner:         store.RunForkSelectedContractForkLocalRuntimePlatformEventLineagePolicyOwner,

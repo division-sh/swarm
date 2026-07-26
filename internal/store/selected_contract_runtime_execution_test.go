@@ -65,6 +65,9 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 		{name: "mutating", mutate: func(a *RunForkSelectedContractExecutionAdmission) { a.NonMutating = false }},
 		{name: "already executable", mutate: func(a *RunForkSelectedContractExecutionAdmission) { a.ExecutionSupported = true }},
 		{name: "binding owner", mutate: func(a *RunForkSelectedContractExecutionAdmission) { a.ContractBindingOwner = "caller.local" }},
+		{name: "deferred-work admission owner", mutate: func(a *RunForkSelectedContractExecutionAdmission) {
+			a.DeferredWorkAdmissionOwner = "caller.local"
+		}},
 		{name: "admission use", mutate: func(a *RunForkSelectedContractExecutionAdmission) {
 			a.AdmissionUse = RunForkSelectedContractExecutionAdmissionUseEvidenceOnly
 		}},
@@ -741,6 +744,7 @@ func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorit
 		ContractSelection: selection, ContractBindingOwner: RunForkSelectedContractBindingOwner,
 		AdmissionOwner: "runtime.run_fork.frontier", AdmissionUse: RunForkSelectedContractExecutionAdmissionUseDurableBinding,
 		ExecutionModelOwner: RunForkSelectedContractExecutionModelOwner, SourceWorkflowName: "workflow", SourceWorkflowVersion: "v1",
+		DeferredWorkAdmissionOwner: RunForkSelectedContractDeferredWorkAdmissionOwner,
 	}
 	return selectedCompletionFixture{
 		store: store, db: db, sqlite: sqlite, sourceRun: sourceRun, forkRun: forkRun, eventID: eventID, admission: admission,

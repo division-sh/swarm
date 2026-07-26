@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -23,6 +24,43 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+func TestWorkflowJoinRequiresGenericScheduleOwnerBeforeMutationOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			bundle := workflowJoinLifecycleBundle()
+			pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+				Module:        &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)},
+				WorkflowStore: store,
+			})
+			path := "orders/" + uuid.NewString()
+			entityID := FlowInstanceEntityID(path)
+			if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+				InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0",
+				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{"a"}},
+			})); err != nil {
+				t.Fatal(err)
+			}
+
+			err := applyTestInitialEntryEffect(ctx, pc, entityID)
+			if !errors.Is(err, errGenericScheduleOwnerRequired) {
+				t.Fatalf("arm ownerless join error = %v, want %v", err, errGenericScheduleOwnerRequired)
+			}
+			instance, ok, err := store.Load(ctx, entityID)
+			if err != nil || !ok {
+				t.Fatalf("load after rejected ownerless join = %v, %v", ok, err)
+			}
+			carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if activation, found, loadErr := joinruntime.Load(carrier.StateBuckets, "join-node", workflowJoinActivationKey()); loadErr != nil || found {
+				t.Fatalf("ownerless join activation = %#v, found=%v error=%v, want rollback", activation, found, loadErr)
+			}
+		})
+	}
+}
 
 func TestArmWorkflowJoinPersistsActivationAndScheduleAtomically(t *testing.T) {
 	for _, tc := range []struct {
