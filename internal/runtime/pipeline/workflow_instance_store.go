@@ -41,7 +41,7 @@ type SchedulePersistence interface {
 	ReleaseScheduleClaims(ctx context.Context) error
 }
 
-func (s *WorkflowInstanceStore) readTimerObligations(ctx context.Context, scope runtimetimerobligation.Scope, observedAt time.Time) (runtimetimerobligation.Snapshot, error) {
+func (s *WorkflowInstanceStore) ReadTimerObligations(ctx context.Context, scope runtimetimerobligation.Scope, observedAt time.Time) (runtimetimerobligation.Snapshot, error) {
 	if s == nil || s.db == nil {
 		return runtimetimerobligation.Snapshot{}, fmt.Errorf("timer obligation reader requires workflow store")
 	}

@@ -238,12 +238,12 @@ func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context, observedA
 	if rt == nil {
 		return snapshot, nil
 	}
-	if rt.Stores.ScheduleStore != nil {
-		reader, ok := rt.Stores.ScheduleStore.(runtimetimerobligation.Reader)
-		if !ok {
-			snapshot.InspectionComplete = false
-			return snapshot, fmt.Errorf("inspect timer obligations: selected schedule store lacks timer obligation authority")
-		}
+	reader, err := rt.startupTimerObligationReader()
+	if err != nil {
+		snapshot.InspectionComplete = false
+		return snapshot, err
+	}
+	if reader != nil {
 		obligations, err := reader.ReadTimerObligations(ctx, runtimetimerobligation.All(), observedAt)
 		if err != nil {
 			snapshot.InspectionComplete = false
@@ -280,6 +280,23 @@ func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context, observedA
 		snapshot.Manager = managerSnapshot
 	}
 	return snapshot, nil
+}
+
+func (rt *Runtime) startupTimerObligationReader() (runtimetimerobligation.Reader, error) {
+	if rt == nil {
+		return nil, nil
+	}
+	if rt.Stores.ScheduleStore != nil {
+		reader, ok := rt.Stores.ScheduleStore.(runtimetimerobligation.Reader)
+		if !ok {
+			return nil, fmt.Errorf("inspect timer obligations: selected schedule store lacks timer obligation authority")
+		}
+		return reader, nil
+	}
+	if rt.Stores.PipelineStore != nil && rt.Stores.PipelineStore.Enabled() {
+		return rt.Stores.PipelineStore, nil
+	}
+	return nil, nil
 }
 
 func (rt *Runtime) logStartupRecoveryDecision(ctx context.Context, report startupRecoveryDecisionReport) {

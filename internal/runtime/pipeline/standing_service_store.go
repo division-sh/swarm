@@ -1032,7 +1032,7 @@ func (s *WorkflowInstanceStore) standingRunHasLiveWorkTx(ctx context.Context, tx
 	if err != nil {
 		return false, err
 	}
-	snapshot, err := s.readTimerObligations(WithPipelineSQLTxContext(ctx, tx), scope, observedAt)
+	snapshot, err := s.ReadTimerObligations(WithPipelineSQLTxContext(ctx, tx), scope, observedAt)
 	if err != nil {
 		return false, fmt.Errorf("inspect standing run timer work: %w", err)
 	}

@@ -6560,14 +6560,17 @@ engine:
         Startup admission and recovery detail, run diagnosis/test quiescence, and standing restart-abandon liveness consume
         this projection. Recovery-disabled startup rejects non-intrinsic recoverable timer work, permits standing intrinsic
         timer work with the explicit recovery_disabled_with_intrinsic_timer_work reason, and never reports intrinsic work as
-        no persisted work. Executable generic and workflow restoration remain family-specific operations after admission.
+        no persisted work. The selected workflow store supplies this exact projection when no generic schedule store is
+        configured; startup does not make workflow-timer inspection depend on a generic schedule capability. Executable
+        generic and workflow restoration remain family-specific operations after admission.
         Bundle-delete planning is a separate read-only, policy-free identity projection. Preservation, active-run quiescence,
         standing abandonment, destructive reset, and final run completion remain their named monotonic owners.
       failure_rule: Unknown structural families and invalid family/status/scope rows fail closed; no payload, SQL row,
         executable schedule, or inferred identity escapes this projection.
     crash_recovery: >
       Restart restores only active typed workflow rows for active runs and registers their exact persisted occurrence
-      coordinates once. A runtime that adopts an already-active standing run after startup performs the same run-scoped exact-row
+      coordinates once whenever the selected workflow store and Scheduler are available, independently of whether a generic
+      ScheduleStore is configured. A runtime that adopts an already-active standing run after startup performs the same run-scoped exact-row
       registration only after the standing reconciliation mutation commits; it does not wait for another process restart.
       Overdue coordinates fire late by contract and retain deterministic occurrence identity. The runtime does not reconstruct
       timers from workflow-instance state, handlers, declarations, or logs. A database containing obsolete workflow-instance-owned
