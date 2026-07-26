@@ -538,6 +538,10 @@ type sqliteFlowActivationBus struct {
 	published     []events.Event
 }
 
+func (*sqliteFlowActivationBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
+	return ctx, nil
+}
+
 func (b *sqliteFlowActivationBus) Publish(_ context.Context, evt events.Event) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()

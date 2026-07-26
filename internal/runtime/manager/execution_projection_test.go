@@ -95,6 +95,9 @@ func newProjectionTestManager(t *testing.T, bus Bus, factory AgentFactory, store
 	return newTestAgentManagerWithOptions(t, bus, factory, AgentManagerOptions{WorkOwner: owner}, stores...)
 }
 
+func (*projectionTestBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
+	return admitManagerTestBusContext(ctx)
+}
 func (*projectionTestBus) Publish(context.Context, events.Event) error { return nil }
 func (b *projectionTestBus) PublishDirect(_ context.Context, event events.Event, recipients []string) error {
 	for _, recipient := range recipients {

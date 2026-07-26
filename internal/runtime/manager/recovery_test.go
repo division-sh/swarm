@@ -42,6 +42,10 @@ type directiveRecoveryTestBus struct {
 	order []string
 }
 
+func (*recoveryTestBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
+	return admitManagerTestBusContext(ctx)
+}
+
 type recoveryBudgetGuardStub struct {
 	err   error
 	calls int

@@ -39,6 +39,10 @@ func receiptTestEvent(id string) events.Event {
 	return eventtest.RunCreatingRootIngress(id, events.EventType("work.requested"), "source", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
 }
 
+func (*recordingReceiptBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
+	return admitManagerTestBusContext(ctx)
+}
+
 func (b *recordingReceiptBus) Publish(_ context.Context, evt events.Event) error {
 	b.published = append(b.published, evt)
 	return nil
@@ -158,6 +162,10 @@ type partialOutputRetryBus struct {
 	failSecond bool
 	attempts   []string
 	succeeded  []string
+}
+
+func (*partialOutputRetryBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
+	return admitManagerTestBusContext(ctx)
 }
 
 func (b *partialOutputRetryBus) Publish(_ context.Context, event events.Event) error {

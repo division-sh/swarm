@@ -17,6 +17,13 @@ type managerTestWorkFixture struct {
 
 var managerTestWorkFixtures sync.Map
 
+func admitManagerTestBusContext(ctx context.Context) (context.Context, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return ctx, nil
+}
+
 func newTestManagerWorkOwner(t *testing.T) worklifetime.Occurrence {
 	t.Helper()
 	if existing, ok := managerTestWorkFixtures.Load(t); ok {

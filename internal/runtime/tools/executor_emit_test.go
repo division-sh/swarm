@@ -17,6 +17,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -32,6 +33,8 @@ type publishBusCapture struct {
 	event events.Event
 	count int
 }
+
+const emitRoutePlanTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
 func (b *publishBusCapture) Publish(_ context.Context, evt events.Event) error {
 	b.event = evt
@@ -80,10 +83,14 @@ func newEmitRoutePlanEventBus(t *testing.T, store *emitRoutePlanStore, source se
 	process := worklifetime.NewProcess()
 	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: "emit-route-plan-test",
-		BundleHash:        "emit-route-plan-test-bundle",
+		BundleHash:        emitRoutePlanTestBundleHash,
 	})
 	if err != nil {
 		t.Fatalf("create emit route-plan runtime occurrence: %v", err)
+	}
+	sourceFact, err := runtimecorrelation.NewEphemeralBundleSourceFact(emitRoutePlanTestBundleHash)
+	if err != nil {
+		t.Fatalf("construct emit route-plan source fact: %v", err)
 	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -96,7 +103,11 @@ func newEmitRoutePlanEventBus(t *testing.T, store *emitRoutePlanStore, source se
 			t.Errorf("join emit route-plan process owner: %v", err)
 		}
 	})
-	bus, err := runtimebus.NewEphemeralEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source, WorkOwner: owner})
+	bus, err := runtimebus.NewEphemeralEventBusWithOptions(store, runtimebus.EventBusOptions{
+		BundleSourceFact: sourceFact,
+		ContractBundle:   source,
+		WorkOwner:        owner,
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}

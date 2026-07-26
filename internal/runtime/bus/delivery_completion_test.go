@@ -84,6 +84,43 @@ func TestEventBusBundleSourceAdmissionAllowsContextOwnedSelectedForkBus(t *testi
 	}
 }
 
+func TestEventBusBundleSourceAdmissionRejectsMissingOwnerBeforeCommit(t *testing.T) {
+	store := &publishAndWaitCommitSpy{}
+	process := worklifetime.NewProcess()
+	runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+		RuntimeInstanceID: "ownerless-source-runtime",
+		BundleHash:        "ownerless-source-bundle",
+	})
+	if err != nil {
+		t.Fatalf("create runtime occurrence: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if _, err := runtimeOwner.RetireAndWait(ctx); err != nil {
+			t.Errorf("retire runtime occurrence: %v", err)
+		}
+		if _, err := process.Join(ctx); err != nil {
+			t.Errorf("join process occurrence: %v", err)
+		}
+	})
+	eb, err := NewEphemeralEventBusWithOptions(store, EventBusOptions{
+		RuntimeInstanceID: "ownerless-source-runtime",
+		WorkOwner:         runtimeOwner,
+	})
+	if err != nil {
+		t.Fatalf("create ownerless event bus: %v", err)
+	}
+
+	err = eb.Publish(context.Background(), completionTreeEvent("11111111-1111-4111-8111-111111111145", "custom.root"))
+	if err == nil || !strings.Contains(err.Error(), "bundle source fact is required") {
+		t.Fatalf("Publish error = %v, want missing bundle source fact", err)
+	}
+	if store.commitCalls != 0 {
+		t.Fatalf("commit calls = %d, want 0", store.commitCalls)
+	}
+}
+
 func TestEventBusPublishAndWaitRejectsActiveMutationBeforeCommit(t *testing.T) {
 	store := &publishAndWaitCommitSpy{}
 	eb, err := newScopedTestEventBus(store)

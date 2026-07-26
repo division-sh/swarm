@@ -16,22 +16,37 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 )
 
+const selectedContractAgentTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+func selectedContractAgentTestSourceFact(t *testing.T) runtimecorrelation.BundleSourceFact {
+	t.Helper()
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(selectedContractAgentTestBundleHash)
+	if err != nil {
+		t.Fatalf("construct selected-contract source fact: %v", err)
+	}
+	return fact
+}
+
 func TestSelectedContractAgentRuntimeWaitsForCurrentRouteSettlementAfterPredecessorRetirement(t *testing.T) {
 	processOwner := worklifetime.NewProcess()
 	runtimeOwner, err := processOwner.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: "selected-contract-test-runtime",
-		BundleHash:        "selected-contract-test-bundle",
+		BundleHash:        selectedContractAgentTestBundleHash,
 	})
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: runtimeOwner})
+	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
+		BundleSourceFact: selectedContractAgentTestSourceFact(t),
+		WorkOwner:        runtimeOwner,
+	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -159,7 +174,10 @@ func (selectedContractSelfReleaseAgent) OnEvent(context.Context, events.Event) (
 
 func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 	owner := testGatewayWorkOwner(t)
-	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: owner})
+	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
+		BundleSourceFact: selectedContractAgentTestSourceFact(t),
+		WorkOwner:        owner,
+	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -187,7 +205,10 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 
 func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkScopeForSelfRelease(t *testing.T) {
 	owner := testGatewayWorkOwner(t)
-	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: owner})
+	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
+		BundleSourceFact: selectedContractAgentTestSourceFact(t),
+		WorkOwner:        owner,
+	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

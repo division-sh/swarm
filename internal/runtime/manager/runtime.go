@@ -35,10 +35,6 @@ type agentDirectiveRunTargetResolver interface {
 	ResolveAgentDirectiveRunTarget(ctx context.Context, agentID, explicitRunID string) (runtimeagentcontrol.RunTargetResolution, error)
 }
 
-type bundleSourceFactContextOwner interface {
-	AdmitBundleSourceFact(context.Context) (context.Context, error)
-}
-
 const DefaultShutdownGrace = 30 * time.Second
 
 const (
@@ -385,6 +381,13 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
+	if am.bus == nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, errors.New("event bus is not configured")
+	}
+	ctx, err = am.bus.AdmitBundleSourceFact(ctx)
+	if err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, err
+	}
 	if am.shutdownAdmissionClosed() {
 		return runtimeagentcontrol.SendDirectiveResult{}, agentControlNotRunning(req.AgentID, runtimeagentcontrol.StatusTerminated)
 	}
@@ -471,12 +474,6 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 		return runtimeagentcontrol.SendDirectiveResult{}, fmt.Errorf("admit directive event: %w", err)
 	}
 	reservationCtx := runtimecorrelation.WithRunID(am.runtimePlatformControlEventContext(ctx), target.RunID)
-	if owner, ok := am.bus.(bundleSourceFactContextOwner); ok && owner != nil {
-		reservationCtx, err = owner.AdmitBundleSourceFact(reservationCtx)
-		if err != nil {
-			return runtimeagentcontrol.SendDirectiveResult{}, err
-		}
-	}
 	reservation, err := operationStore.ReserveDirectiveOperation(reservationCtx, runtimeagentcontrol.ReserveDirectiveOperationRequest{
 		Operation: runtimeagentcontrol.DirectiveOperation{
 			OperationID:      operationID,

@@ -425,6 +425,9 @@ type selectedRouteRecoveryPostgresBus struct {
 	logs  []runtimepipeline.RuntimeLogEntry
 }
 
+func (*selectedRouteRecoveryPostgresBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
+	return ctx, nil
+}
 func (*selectedRouteRecoveryPostgresBus) Publish(context.Context, events.Event) error { return nil }
 func (*selectedRouteRecoveryPostgresBus) PublishDirect(context.Context, events.Event, []string) error {
 	return nil

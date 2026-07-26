@@ -1037,6 +1037,9 @@ func (eb *EventBus) admitBundleSourceFact(ctx context.Context) (context.Context,
 
 	contextFact, hasContextFact := runtimecorrelation.BundleSourceFactFromContext(ctx)
 	hasOwnedFact := sourceFact.Validate() == nil
+	if !hasOwnedFact && !hasContextFact {
+		return ctx, errors.New("event bus bundle source fact is required")
+	}
 	if hasOwnedFact && hasContextFact && !sourceFact.Matches(contextFact) {
 		return ctx, errors.New("event bus bundle source fact conflicts with publication context")
 	}
@@ -1674,12 +1677,12 @@ func (eb *EventBus) RecoverPersistedPipeline(ctx context.Context, work runtimepi
 }
 
 func (eb *EventBus) publishClaimedPipeline(ctx context.Context, evt events.Event, scope runtimepipelineobligation.CommittedScope, recipients []string) (runtimepipelineobligation.ExecutionOutcome, error) {
-	eb.clearPendingOutboxOperation(evt.ID())
 	var err error
 	ctx, err = eb.admitBundleSourceFact(ctx)
 	if err != nil {
 		return runtimepipelineobligation.Continue(), err
 	}
+	eb.clearPendingOutboxOperation(evt.ID())
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return runtimepipelineobligation.Continue(), err
