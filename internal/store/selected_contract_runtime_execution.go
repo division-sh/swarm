@@ -196,7 +196,8 @@ func issueSelectedContractRuntimeExecution(ctx context.Context, tx *sql.Tx, dial
 func validateSelectedRuntimeAdmission(admission RunForkSelectedContractExecutionAdmission) error {
 	if admission.Owner != RunForkSelectedContractExecutionAdmissionOwner || admission.FutureExecutionOwner != RunForkSelectedContractExecutionOwner ||
 		!admission.NonMutating || admission.ExecutionSupported || admission.ContractBindingOwner != RunForkSelectedContractBindingOwner ||
-		admission.AdmissionUse != RunForkSelectedContractExecutionAdmissionUseDurableBinding {
+		admission.AdmissionUse != RunForkSelectedContractExecutionAdmissionUseDurableBinding ||
+		admission.DeferredWorkAdmissionOwner != RunForkSelectedContractDeferredWorkAdmissionOwner {
 		return fmt.Errorf("selected-contract runtime issuance requires exact non-mutating execution admission")
 	}
 	if !validUUIDStrings(admission.ForkRunID, admission.SourceRunID, admission.ForkEventID) {

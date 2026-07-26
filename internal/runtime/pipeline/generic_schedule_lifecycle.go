@@ -2,8 +2,11 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"strings"
 )
+
+var errGenericScheduleOwnerRequired = errors.New("generic schedule persistence requires a durable store or process scheduler owner")
 
 // persistGenericSchedule is reserved for non-workflow schedule families such
 // as join closure. Workflow timer declarations use WorkflowTimerLifecycle.
@@ -12,6 +15,9 @@ func (pc *PipelineCoordinator) persistGenericSchedule(ctx context.Context, sched
 		return nil
 	}
 	schedule = scheduleWithRunIDFromContext(ctx, schedule)
+	if pc.timerScheduleStore == nil && pc.timerScheduler == nil {
+		return errGenericScheduleOwnerRequired
+	}
 	if pc.timerScheduleStore != nil {
 		if err := pc.timerScheduleStore.UpsertSchedule(ctx, schedule); err != nil {
 			return err

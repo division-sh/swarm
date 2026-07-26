@@ -17,11 +17,8 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 )
-
-const selectedContractTimerOwnerUnavailable = "selected_contract_timer_owner_unavailable"
 
 type SelectedContractExecutionRequest struct {
 	SourceRunID         string
@@ -117,7 +114,8 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if err != nil {
 		return SelectedContractExecutionResult{}, fmt.Errorf("plan selected-contract execution: %w", err)
 	}
-	if err := rejectSelectedContractTimerBearingExecution(plan, loadedSource.Source); err != nil {
+	deferredWorkAdmission, err := admitSelectedContractDeferredWork(plan, loadedSource.Source)
+	if err != nil {
 		return SelectedContractExecutionResult{Owner: store.RunForkSelectedContractExecutionOwner}, err
 	}
 	frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{
@@ -188,30 +186,32 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		return SelectedContractExecutionResult{Owner: store.RunForkSelectedContractExecutionOwner, Materialization: materialization}, err
 	}
 	admission, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
-		ForkRunID:         materialization.ForkRunID,
-		SourceRunID:       plan.SourceRunID,
-		BundleSourceFact:  loadedSource.BundleSourceFact,
-		BindingReader:     req.Store,
-		SourceLoader:      req.SourceLoader,
-		FrontierAdmission: frontier,
-		RouteAdmission:    routeAdmission,
-		RouteTopology:     routeTopology,
-		ExecutionModel:    model,
+		ForkRunID:             materialization.ForkRunID,
+		SourceRunID:           plan.SourceRunID,
+		BundleSourceFact:      loadedSource.BundleSourceFact,
+		BindingReader:         req.Store,
+		SourceLoader:          req.SourceLoader,
+		FrontierAdmission:     frontier,
+		RouteAdmission:        routeAdmission,
+		RouteTopology:         routeTopology,
+		ExecutionModel:        model,
+		DeferredWorkAdmission: deferredWorkAdmission,
 	})
 	if err != nil {
 		return SelectedContractExecutionResult{Owner: store.RunForkSelectedContractExecutionOwner, Materialization: materialization}, err
 	}
 	container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
-		Store:             req.Store,
-		Admission:         admission,
-		LoadedSource:      loadedSource,
-		RecipientPlanning: *model.RecipientPlanning,
-		AgentRuntime:      agentRuntime,
-		SourceRunID:       plan.SourceRunID,
-		ForkRunID:         materialization.ForkRunID,
-		ForkEventID:       plan.ForkPoint.EventID,
-		SourceEvents:      sourceEventIDs,
-		ExecutionOwner:    store.RunForkSelectedContractExecutionOwner,
+		Store:                 req.Store,
+		Admission:             admission,
+		LoadedSource:          loadedSource,
+		RecipientPlanning:     *model.RecipientPlanning,
+		AgentRuntime:          agentRuntime,
+		SourceRunID:           plan.SourceRunID,
+		ForkRunID:             materialization.ForkRunID,
+		ForkEventID:           plan.ForkPoint.EventID,
+		SourceEvents:          sourceEventIDs,
+		ExecutionOwner:        store.RunForkSelectedContractExecutionOwner,
+		DeferredWorkAdmission: deferredWorkAdmission,
 	})
 	if err != nil {
 		return SelectedContractExecutionResult{
@@ -286,30 +286,6 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	return result, err
 }
 
-func rejectSelectedContractTimerBearingExecution(plan store.RunForkPlan, source semanticview.Source) error {
-	for _, blocker := range plan.UnsupportedBlockers {
-		if strings.TrimSpace(blocker.Code) == store.RunForkBlockerTimerHistoryUnproven {
-			return runtimefailures.New(
-				runtimefailures.ClassDependencyUnavailable,
-				store.RunForkBlockerTimerHistoryUnproven,
-				"selected-contract-run-fork",
-				"admit-timer-ownership",
-				nil,
-			)
-		}
-	}
-	if source != nil && len(source.WorkflowTimers()) > 0 {
-		return runtimefailures.New(
-			runtimefailures.ClassDependencyUnavailable,
-			selectedContractTimerOwnerUnavailable,
-			"selected-contract-run-fork",
-			"admit-timer-ownership",
-			nil,
-		)
-	}
-	return nil
-}
-
 func validateSelectedContractExecutionFrontierForMutation(frontier store.RunForkContractFrontierAdmission) error {
 	for _, blocker := range frontier.UnsupportedBlockers {
 		code := strings.TrimSpace(blocker.Code)
@@ -340,16 +316,17 @@ func cleanupSelectedContractExecutionFailure(ctx context.Context, store *store.P
 }
 
 type publishSelectedContractForkEventsRequest struct {
-	Store             *store.PostgresStore
-	Admission         store.RunForkSelectedContractExecutionAdmission
-	LoadedSource      LoadedSelectedContractSource
-	RecipientPlanning store.RunForkSelectedContractRecipientPlanning
-	AgentRuntime      selectedContractAgentRuntimePlan
-	SourceRunID       string
-	ForkRunID         string
-	ForkEventID       string
-	SourceEvents      []string
-	ExecutionOwner    string
+	Store                 *store.PostgresStore
+	Admission             store.RunForkSelectedContractExecutionAdmission
+	LoadedSource          LoadedSelectedContractSource
+	RecipientPlanning     store.RunForkSelectedContractRecipientPlanning
+	AgentRuntime          selectedContractAgentRuntimePlan
+	SourceRunID           string
+	ForkRunID             string
+	ForkEventID           string
+	SourceEvents          []string
+	ExecutionOwner        string
+	DeferredWorkAdmission selectedContractDeferredWorkAdmission
 }
 
 func selectedContractForkEvent(sourceRunID, forkRunID, forkEventID string, sourceEvent store.RunForkSelectedContractSourceEvent, producerID string) (events.Event, error) {

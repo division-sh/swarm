@@ -337,15 +337,16 @@ func cleanupLoadedSelectedContractSource(source LoadedSelectedContractSource) {
 }
 
 type SelectedContractExecutionAdmissionRequest struct {
-	ForkRunID         string
-	SourceRunID       string
-	BundleSourceFact  runtimecorrelation.BundleSourceFact
-	BindingReader     SelectedContractBindingReader
-	SourceLoader      SelectedContractSourceLoader
-	FrontierAdmission store.RunForkContractFrontierAdmission
-	RouteAdmission    store.RunForkSelectedContractRouteAdmission
-	RouteTopology     store.RunForkSelectedContractRouteTopology
-	ExecutionModel    store.RunForkSelectedContractExecution
+	ForkRunID             string
+	SourceRunID           string
+	BundleSourceFact      runtimecorrelation.BundleSourceFact
+	BindingReader         SelectedContractBindingReader
+	SourceLoader          SelectedContractSourceLoader
+	FrontierAdmission     store.RunForkContractFrontierAdmission
+	RouteAdmission        store.RunForkSelectedContractRouteAdmission
+	RouteTopology         store.RunForkSelectedContractRouteTopology
+	ExecutionModel        store.RunForkSelectedContractExecution
+	DeferredWorkAdmission selectedContractDeferredWorkAdmission
 }
 
 func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedContractExecutionAdmissionRequest) (store.RunForkSelectedContractExecutionAdmission, error) {
@@ -398,6 +399,9 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 	if err := validateSelectedContractRecipientPlanning(req.FrontierAdmission, req.RouteAdmission, req.RouteTopology, *recipientPlanning); err != nil {
 		return store.RunForkSelectedContractExecutionAdmission{}, err
 	}
+	if err := req.DeferredWorkAdmission.validate(binding.SourceRunID, binding.ForkEventID, loadedSource.Source); err != nil {
+		return store.RunForkSelectedContractExecutionAdmission{}, err
+	}
 
 	unsupportedBlockers := append([]store.RunForkUnsupportedBlocker(nil), req.ExecutionModel.UnsupportedBlockers...)
 	unsupportedBlockers = appendRunForkUnsupportedBlocker(unsupportedBlockers, store.RunForkUnsupportedBlocker{
@@ -406,24 +410,25 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 	})
 
 	return store.RunForkSelectedContractExecutionAdmission{
-		Owner:                 store.RunForkSelectedContractExecutionAdmissionOwner,
-		FutureExecutionOwner:  store.RunForkSelectedContractExecutionOwner,
-		NonMutating:           true,
-		ExecutionSupported:    false,
-		ForkRunID:             binding.ForkRunID,
-		SourceRunID:           binding.SourceRunID,
-		ForkEventID:           binding.ForkEventID,
-		ContractSelection:     binding.ContractSelection,
-		ContractBindingOwner:  binding.Owner,
-		AdmissionOwner:        req.FrontierAdmission.Owner,
-		AdmissionUse:          store.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
-		ExecutionModelOwner:   req.ExecutionModel.Owner,
-		SourceWorkflowName:    strings.TrimSpace(loadedSource.Source.WorkflowName()),
-		SourceWorkflowVersion: strings.TrimSpace(loadedSource.Source.WorkflowVersion()),
-		FrontierEventCount:    req.ExecutionModel.FrontierEventCount,
-		FrontierEvents:        append([]store.RunForkSelectedContractFrontierEvent(nil), req.ExecutionModel.FrontierEvents...),
-		RouteTopology:         &req.RouteTopology,
-		RecipientPlanning:     recipientPlanning,
+		Owner:                      store.RunForkSelectedContractExecutionAdmissionOwner,
+		FutureExecutionOwner:       store.RunForkSelectedContractExecutionOwner,
+		NonMutating:                true,
+		ExecutionSupported:         false,
+		ForkRunID:                  binding.ForkRunID,
+		SourceRunID:                binding.SourceRunID,
+		ForkEventID:                binding.ForkEventID,
+		ContractSelection:          binding.ContractSelection,
+		ContractBindingOwner:       binding.Owner,
+		AdmissionOwner:             req.FrontierAdmission.Owner,
+		AdmissionUse:               store.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
+		ExecutionModelOwner:        req.ExecutionModel.Owner,
+		DeferredWorkAdmissionOwner: req.DeferredWorkAdmission.owner,
+		SourceWorkflowName:         strings.TrimSpace(loadedSource.Source.WorkflowName()),
+		SourceWorkflowVersion:      strings.TrimSpace(loadedSource.Source.WorkflowVersion()),
+		FrontierEventCount:         req.ExecutionModel.FrontierEventCount,
+		FrontierEvents:             append([]store.RunForkSelectedContractFrontierEvent(nil), req.ExecutionModel.FrontierEvents...),
+		RouteTopology:              &req.RouteTopology,
+		RecipientPlanning:          recipientPlanning,
 		ContractBinding: store.RunForkSelectedContractExecutionBoundary{
 			Concept:     "selected_contract_binding",
 			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
