@@ -48,6 +48,11 @@ func (eb *EventBus) StartOutboxSweeper(ctx context.Context, cfg OutboxSweeperCon
 	if eb == nil {
 		return nil
 	}
+	var err error
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
+	}
 	if cfg.Interval <= 0 || cfg.Limit <= 0 {
 		defaults := DefaultOutboxSweeperConfig()
 		if cfg.Interval <= 0 {
@@ -135,11 +140,15 @@ func (eb *EventBus) SweepPipelineObligations(ctx context.Context, limit int) (ru
 	if eb == nil || eb.store == nil {
 		return runtimepipelineobligation.SweepResult{}, errors.New("event bus and event store are required")
 	}
+	var err error
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return runtimepipelineobligation.SweepResult{}, err
+	}
 	eb.mu.RLock()
 	ingressGate := eb.runtimeIngressDispatchGate
 	eb.mu.RUnlock()
 	paused := false
-	var err error
 	if ingressGate != nil {
 		paused, err = ingressGate.QueueableIngressPaused(ctx)
 	}
@@ -163,6 +172,10 @@ func (eb *EventBus) SweepPipelineObligations(ctx context.Context, limit int) (ru
 }
 
 func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtimepipelineobligation.ScanRequest, limit int) (result runtimepipelineobligation.SweepResult, err error) {
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return result, err
+	}
 	eb.pipelineSweepMu.Lock()
 	defer eb.pipelineSweepMu.Unlock()
 	if eb.pipelineScans == nil {
@@ -444,6 +457,11 @@ func (eb *EventBus) ReleaseRuntimeIngressQueue(ctx context.Context, limit int) (
 func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, limit int) (runtimepipelineobligation.SweepResult, error) {
 	if eb == nil || eb.pipelineObligations == nil {
 		return runtimepipelineobligation.SweepResult{}, errors.New("pipeline obligation owner is required")
+	}
+	var err error
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return runtimepipelineobligation.SweepResult{}, err
 	}
 	runID = strings.TrimSpace(runID)
 	if runID == "" {

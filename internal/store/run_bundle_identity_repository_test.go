@@ -185,9 +185,34 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 				"!hasOwnedFact && !hasContextFact",
 				"!sourceFact.Matches(contextFact)",
 				"func (eb *EventBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error)",
+				"func (eb *EventBus) admitPreparedPublish(ctx context.Context, prepared PreparedPublish) error",
+				"prepared.publicationClaim.bus != eb",
+				"if err := eb.admitPreparedPublish(ctx, prepared); err != nil",
 			},
 			prohibited: []string{
 				"func (eb *EventBus) WithBundleSourceFact",
+			},
+		},
+		{
+			path: "internal/runtime/bus/outbox.go",
+			required: []string{
+				"func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.EmitIntent) error",
+				"ctx, err = o.bus.admitBundleSourceFact(ctx)",
+				"func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runtimeengine.EmitIntent) error",
+				"ctx, err = d.bus.admitBundleSourceFact(ctx)",
+				"func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fallback runtimeengine.EmitIntent)",
+				"ctx, err = d.bus.admitBundleSourceFact(ctx)",
+				"dispatchCtx = runtimecorrelation.WithBundleSourceFact(dispatchCtx, sourceFact)",
+			},
+		},
+		{
+			path: "internal/runtime/bus/sweeper.go",
+			required: []string{
+				"func (eb *EventBus) StartOutboxSweeper(ctx context.Context, cfg OutboxSweeperConfig) error",
+				"func (eb *EventBus) SweepPipelineObligations(ctx context.Context, limit int)",
+				"func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtimepipelineobligation.ScanRequest, limit int)",
+				"func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, limit int)",
+				"ctx, err = eb.admitBundleSourceFact(ctx)",
 			},
 		},
 		{

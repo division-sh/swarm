@@ -395,7 +395,21 @@ func (p PreparedPublish) WithCommitOutcome(outcome EventAppendOutcome) (Prepared
 // AbandonPreparedPublish releases preparation-only process state when the
 // named durable operation does not commit or dispatch the prepared event.
 func (eb *EventBus) AbandonPreparedPublish(ctx context.Context, prepared PreparedPublish) error {
+	if err := eb.admitPreparedPublish(ctx, prepared); err != nil {
+		return err
+	}
 	return prepared.publicationClaim.Release(ctx)
+}
+
+func (eb *EventBus) admitPreparedPublish(ctx context.Context, prepared PreparedPublish) error {
+	if prepared.publicationClaim == nil {
+		return errors.New("prepared publication claim is required")
+	}
+	if eb == nil || prepared.publicationClaim.bus != eb {
+		return errors.New("prepared publication belongs to a different event bus")
+	}
+	_, err := eb.admitBundleSourceFact(preparedPublishDispatchContext(ctx, prepared))
+	return err
 }
 
 // PrepareSelectedForkPublish performs canonical admission and route planning
@@ -650,6 +664,9 @@ func (eb *EventBus) PublishDirectInMutation(ctx context.Context, evt events.Even
 }
 
 func (eb *EventBus) queuePreparedPublishInMutation(ctx context.Context, prepared PreparedPublish) error {
+	if err := eb.admitPreparedPublish(ctx, prepared); err != nil {
+		return err
+	}
 	_, ok := CommitPublishTransactionFromContext(ctx)
 	if !ok {
 		return errors.New("typed CommitPublish transaction context is required")
@@ -676,8 +693,8 @@ func (eb *EventBus) queuePreparedPublishForActiveMutation(ctx context.Context, p
 // DispatchPreparedPublish consumes only the plan finalized by
 // PreparePublishInMutation. It never invokes route planning again.
 func (eb *EventBus) DispatchPreparedPublish(ctx context.Context, prepared PreparedPublish) (err error) {
-	if prepared.publicationClaim == nil {
-		return errors.New("prepared publication claim is required")
+	if err := eb.admitPreparedPublish(ctx, prepared); err != nil {
+		return err
 	}
 	lease, err := eb.beginRuntimeWork(ctx)
 	if err != nil {
@@ -694,8 +711,8 @@ func (eb *EventBus) DispatchPreparedPublish(ctx context.Context, prepared Prepar
 // the complete local-delivery tree produced by its handlers. It is intended
 // for bounded runtimes that must finish their accepted story before retiring.
 func (eb *EventBus) DispatchPreparedPublishAndWait(ctx context.Context, prepared PreparedPublish) (err error) {
-	if prepared.publicationClaim == nil {
-		return errors.New("prepared publication claim is required")
+	if err := eb.admitPreparedPublish(ctx, prepared); err != nil {
+		return err
 	}
 	lease, err := eb.beginRuntimeWork(ctx)
 	if err != nil {
@@ -722,8 +739,8 @@ func (eb *EventBus) dispatchPreparedPublish(ctx context.Context, prepared Prepar
 }
 
 func (eb *EventBus) dispatchPreparedPublishWithCompletion(ctx context.Context, prepared PreparedPublish, completion func() error) (err error) {
-	if prepared.publicationClaim == nil {
-		return errors.New("prepared publication claim is required")
+	if err := eb.admitPreparedPublish(ctx, prepared); err != nil {
+		return err
 	}
 	ctx = preparedPublishDispatchContext(ctx, prepared)
 	defer func() {
@@ -771,8 +788,8 @@ func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared P
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if prepared.publicationClaim == nil {
-		return errors.New("prepared publication claim is required")
+	if err := eb.admitPreparedPublish(ctx, prepared); err != nil {
+		return err
 	}
 	releaseOnFailure := func(err error) error {
 		return errors.Join(err, prepared.publicationClaim.Release(preparedPublishDispatchContext(ctx, prepared)))
