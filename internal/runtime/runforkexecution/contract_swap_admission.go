@@ -189,7 +189,7 @@ func contractSwapBootResumeBlockedSiblings() []store.RunForkSelectedContractExec
 		{
 			Concept:     "timer_reconstruction",
 			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
-			Reason:      "source timer facts remain fail-closed until a timer reconstruction owner is approved",
+			Reason:      "source timer facts remain fail-closed under #642 until a long-lived selected-fork timer owner is approved",
 		},
 		{
 			Concept:     "sessions_turns_audits",

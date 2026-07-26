@@ -1,7 +1,6 @@
 package store
 
 import (
-	"bytes"
 	"strings"
 	"testing"
 	"time"
@@ -11,10 +10,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
-	"github.com/google/uuid"
 )
 
-func TestForkAttemptGenerationRemintsActivationAndTimerIdentity(t *testing.T) {
+func TestForkAttemptGenerationRemintsActivationIdentity(t *testing.T) {
 	now := time.Date(2026, time.July, 11, 12, 0, 0, 0, time.UTC)
 	activation, err := loopruntime.New("source-run", "entity-1", "validation", "revision", "revision_id", "event-1", "drafting", 3, now)
 	if err != nil {
@@ -63,31 +61,6 @@ func TestForkAttemptGenerationRemintsActivationAndTimerIdentity(t *testing.T) {
 		}
 	}
 
-	sourceTimerID := uuid.NewString()
-	ref := timeridentity.WorkflowTimerActivationRef{
-		ActivationID: sourceTimerID,
-		Declaration:  "review.expiry",
-		Generation:   activation.Generation(),
-	}
-	payload := []byte(`{"business":"unchanged"}`)
-	row := runForkTimerReconstructionRow{
-		TimerID: sourceTimerID, EntityID: "entity-1", FlowInstance: "review/1",
-		TimerName: ref.TaskID(), FireEvent: "review.expired", FirePayload: payload,
-		FireAt: now.Add(time.Hour), OwnerAgent: "reviewer", TaskType: "timer",
-		Status: "active", CreatedAt: now,
-	}
-	forkedRow, err := remintRunForkWorkflowTimer(row, "source-run", "fork-run", uuid.NewString())
-	if err != nil {
-		t.Fatal(err)
-	}
-	forkedRef, ok := timeridentity.ParseWorkflowTimerActivationTaskID(forkedRow.TimerName)
-	if !ok || !forkedRef.Generation.Equal(forked.Generation()) || forkedRow.TimerName == row.TimerName ||
-		forkedRow.ForkTimerID == row.TimerID || forkedRef.ActivationID != forkedRow.ForkTimerID {
-		t.Fatalf("forked timer = row %#v ref %#v", forkedRow, forkedRef)
-	}
-	if !bytes.Equal(forkedRow.FirePayload, payload) {
-		t.Fatalf("forked business payload = %s, want %s", forkedRow.FirePayload, payload)
-	}
 }
 
 func TestForkGateActivationStateRemintsAuthorityIdentity(t *testing.T) {

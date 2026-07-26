@@ -38,8 +38,6 @@ stale_language_policy:
       reason: "Legacy-named admission owner retained as non-mutating matrix owner."
     - identifier: RunForkHistoricalReplayContractSwapBootResumeOwner
       reason: "Legacy-named selected-contract child retained; bounded to selected-frontier delivery_event_replay_ready."
-    - identifier: RunForkHistoricalReplayTimerReconstructionOwner
-      reason: "Legacy-named timer child retained for approved active-at-T timer reconstruction."
     - identifier: RunForkHistoricalReplayFact*
       reason: "Legacy-named fact-family constants retained as internal matrix vocabulary."
     - identifier: RunForkHistoricalReplayAdmission*
@@ -129,15 +127,16 @@ rows:
 
   - id: timer_history
     fact: timer_history
-    disposition: fail_closed_or_reconstruct
+    disposition: fail_closed_blocker
     owner: store.run_fork.replay_resume_admission
     blocker_codes: [timer_history_unproven]
-    enforcement_point: internal/store/run_fork_timer_reconstruction.go
+    enforcement_point: internal/store/run_fork_replay_resume_admission.go
     proof_refs:
       - {kind: go_test, name: TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers}
-      - {kind: go_test, name: TestSelectedContractExecutionMaterializationReconstructsActiveTimer}
+      - {kind: go_test, name: TestSelectedContractExecutionMaterializationRejectsActiveTimerBeforeMutation}
+      - {kind: go_test, name: TestExecuteSelectedContractRunForkRejectsTimerBearingWorkBeforeMutation}
       - {kind: go_test, name: TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerHistory}
-    rationale: "Timer current rows block by default; approved active-at-T timer reconstruction writes fresh fork-local timer rows."
+    rationale: "Timer current rows remain fail-closed. Selected-contract execution rejects revisioned timer history and timer-capable selected sources before any fork mutation until #642 supplies a long-lived timer owner."
 
   - id: flow_route_history
     fact: flow_route_history
@@ -299,14 +298,14 @@ rows:
 
   - id: timers
     fact: timers
-    disposition: reconstructed_fork_local_state
-    owner: runtime.run_fork.historical_replay_execution.timer_reconstruction
+    disposition: split_sibling
+    owner: runtime.run_fork.historical_replay_execution_admission
     blocker_codes: [timer_history_unproven]
     enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
     proof_refs:
-      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionReportsTimerReconstructionOwner}
-      - {kind: go_test, name: TestSelectedContractTimerReconstructionFailsClosedForInvalidPayload}
-    rationale: "Only active source timers with approved lineage can be reconstructed as fresh fork-local rows."
+      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionRejectsStaleTimerReconstructionDisposition}
+      - {kind: go_test, name: TestExecuteSelectedContractRunForkRejectsTimerBearingWorkBeforeMutation}
+    rationale: "Timer-bearing selected execution remains fail-closed until #642 provides a long-lived selected-fork timer owner."
 
   - id: routes
     fact: routes

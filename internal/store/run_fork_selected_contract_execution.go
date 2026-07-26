@@ -27,7 +27,6 @@ const (
 	RunForkHistoricalReplayExecutionAdmissionOwner                             = "runtime.run_fork.historical_replay_execution_admission"
 	RunForkHistoricalReplayExecutionOwner                                      = "runtime.run_fork.historical_replay_execution"
 	RunForkHistoricalReplayContractSwapBootResumeOwner                         = RunForkHistoricalReplayExecutionOwner + ".contract_swap_boot_resume"
-	RunForkHistoricalReplayTimerReconstructionOwner                            = RunForkHistoricalReplayExecutionOwner + ".timer_reconstruction"
 	RunForkSelectedContractBranchDivergenceOwner                               = "store.run_fork.selected_contract_branch_divergence"
 	RunForkSelectedContractSourceAdvancedConversationHistoryPolicyOwner        = RunForkSelectedContractExecutionOwner + ".source_advanced_conversation_history_policy"
 	RunForkSelectedContractActiveSourceDeliveryConversationCouplingPolicyOwner = RunForkSelectedContractExecutionOwner + ".active_source_delivery_conversation_coupling_policy"

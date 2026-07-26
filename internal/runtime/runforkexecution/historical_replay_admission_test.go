@@ -177,7 +177,7 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsReplayablePrimitiveWithou
 	}
 }
 
-func TestBuildHistoricalReplayExecutionAdmissionReportsTimerReconstructionOwner(t *testing.T) {
+func TestBuildHistoricalReplayExecutionAdmissionRejectsStaleTimerReconstructionDisposition(t *testing.T) {
 	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
 	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
 	replayAdmission := store.RunForkReplayResumeAdmission{
@@ -187,7 +187,7 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsTimerReconstructionOwner(
 			Fact:           store.RunForkReplayResumeFactTimerHistory,
 			Disposition:    store.RunForkReplayResumeDispositionReconstruct,
 			Classification: store.RunForkHistoricalReplayAdmissionReconstructedForkState,
-			Message:        "timer reconstruction owner admits active source timers",
+			Message:        "stale timer reconstruction disposition",
 		}},
 	}
 	contractSwapAdmission, err := BuildContractSwapBootResumeAdmission(ContractSwapBootResumeAdmissionRequest{
@@ -212,8 +212,7 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsTimerReconstructionOwner(
 	if !ok {
 		t.Fatalf("timer fact admission missing: %#v", admission.FactAdmissions)
 	}
-	if timerAdmission.Admission != store.RunForkHistoricalReplayAdmissionReconstructedForkState ||
-		timerAdmission.SourceOwner != store.RunForkHistoricalReplayTimerReconstructionOwner ||
+	if timerAdmission.Admission != store.RunForkHistoricalReplayAdmissionSplitSibling ||
 		timerAdmission.Tracker != "#642" {
 		t.Fatalf("timer admission = %#v", timerAdmission)
 	}

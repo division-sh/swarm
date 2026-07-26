@@ -6518,7 +6518,9 @@ engine:
       facts, random identity, or reconstructed workflow snapshots are not executable authority. The projection is an inert
       typed fact and never retains a lifecycle callback. Each Scheduler binds exactly once, fail closed, to its current
       WorkflowTimerLifecycle; parked rollback dispatches through the predecessor scheduler binding, while replacement rebind
-      transfers only wakeup facts and dispatches through the successor scheduler binding.
+      transfers only wakeup facts and dispatches through the successor scheduler binding. Reconciliation or restore of an
+      active workflow activation without a bound Scheduler fails closed; absence of process-local projection ownership is
+      never reported as successful recovery.
     - 5. Fire publication and row completion occur in one selected database transaction. The event ID is deterministic from
       activation ID plus persisted due coordinate. A one-shot row becomes fired. A recurring row remains active and atomically
       advances `fire_at` by its persisted positive recurrence interval; therefore retries of one occurrence reuse its ID while
@@ -13133,7 +13135,8 @@ platform_tables:
         atomically. Generic schedule readers must exclude typed workflow activation rows. reply_context_id separately carries
         opaque route-scoped continuation authority for one-shot generic timers. owner_node OR owner_agent identifies who declared the timer
         (mutually exclusive). source_timer_id, forked_from_run_id, forked_from_event_id, and reconstruction_owner are
-        lineage-only fields for fork-local reconstructed timers and must not make the source timer executable fork truth.
+        reserved lineage fields with no current writer. Selected-contract execution cannot populate them until #642
+        supplies a long-lived fork timer owner; their presence never makes a source timer executable fork truth.
         recurrence_cron supports cron expressions for global recurring schedules. recurrence_interval supports duration
         strings (e.g., "24h") for entity-scoped recurring timers. task_type: timer (one-shot schedule, including global
         non-recurring boot timers), scheduled_task (recurring entity), deadline (hard cutoff), global_recurring
@@ -13565,8 +13568,8 @@ run_model:
   fork:
     description: 'Fork creates an isolated run by reconstructing provable current state at a selected event revision,
       optionally loading selected contracts, and then executing only owner-admitted fork-local work. The supported
-      model is bounded re-execution from inputs: delivery_event_replay_ready pending unstarted agent deliveries,
-      selected-contract frontier execution, and approved timer reconstruction. The system does not infer arbitrary
+      model is bounded re-execution from inputs: delivery_event_replay_ready pending unstarted agent deliveries and
+      timer-free selected-contract frontier execution. The system does not infer arbitrary
       unfinished work; in-progress delivery, session, turn, audit, non-agent, route, retry/idempotency, and other
       unsupported historical facts remain permanently fail-closed unless a later issue names a concrete consumer and
       proves a new owner.'
@@ -13793,12 +13796,13 @@ run_model:
       projection rather than current routing_rules. not_applicable adds no route blocker; unknown_unversioned remains
       flow_route_history_unproven for generic execution and may be discharged for selected execution only by matching
       selected binding, frontier, static/dynamic topology, recipient, and persisted route-recovery proof. Active source
-      timers may be reconstructed only by runtime.run_fork.historical_replay_execution.timer_reconstruction, which
-      consumes store.run_fork.replay_resume_admission timer_history as lineage, writes fresh fork-local timer rows under
-      the fork run_id with source_timer_id/forked_from_run_id/forked_from_event_id/reconstruction_owner lineage, and
-      requires scheduler claim/fire/recovery identity to include run_id. Source timer rows are never copied as executable
-      truth, fired as source work, or used as selected-fork suppressors. Unsupported source timer histories and timer
-      facts committed after the selected revision remain fail-closed. The runtime.run_fork.selected_contract_execution owner must continue to
+      timers remain fail-closed under #642. Before materialization, runtime.run_fork.selected_contract_execution rejects
+      both relevant timer history in the selected revision and a selected semantic source that declares workflow timers,
+      because its ephemeral fork-local container has no long-lived timer process owner after command return. Rejection
+      creates no fork run, binding, route, event, delivery, workflow state, lineage, or timer row and leaves source rows
+      untouched. Source timer rows are never copied as executable truth, fired as source work, or used as selected-fork
+      suppressors. Timer facts committed after the selected revision remain fail-closed. The
+      runtime.run_fork.selected_contract_execution owner must continue to
       consume unresolved flow_route_history blockers and MUST NOT copy or query current routing_rules as historical truth, persist fork-local route rows, derive
       selected-source recipients for execution outside recipient planning, or use source route outcomes as selected-fork
       suppressors.'
@@ -14001,7 +14005,9 @@ run_model:
       persistence compiles it to source_event_id. It creates fresh
       fork-local events and event_deliveries under the fork run_id, records selected source-to-fork lineage in
       run_fork_selected_contract_executions, runs selected handlers through the fork-local runtime container and normal runtime pipeline, writes fork-local
-      outcomes, and regenerates emitted follow-ups under the fork run_id. When selected frontier work is a
+      outcomes, and regenerates emitted follow-ups under the fork run_id. This surface is timer-free: relevant timer
+      history in the selected revision or any workflow-timer declaration in the selected semantic source rejects the
+      request before materialization, because no long-lived timer owner survives the ephemeral container. When selected frontier work is a
       platform.activity_requested event, source preparation MUST bind the request payload source_event_id to the actual
       fork-local frontier event before deriving fork-local request/result identities. read_only with reexecute_read executes
       the connector exactly once under that fork-local generation and does not copy a source attempt;
@@ -14062,11 +14068,9 @@ run_model:
       and the canonical store.run_fork.replay_resume_admission taxonomy, validates that every historical source fact
       family has exactly one executable, reconstructed, lineage-only, fail-closed, or split-sibling classification, and
       emits the executable work set that downstream store/runtime writers may mutate. The current supported closure
-      level is canonical owner promotion with delivery_event_replay_ready plus the selected-contract active-timer
-      reconstruction child runtime.run_fork.historical_replay_execution.timer_reconstruction. The timer reconstruction
-      child may reconstruct only active source timers present in the selected revision into fresh fork-local timer rows under fork run_id with
-      lineage fields; it does not copy source rows, fire source timers, clear route/session/turn/audit/non-agent
-      blockers, or authorize full scheduler/recovery replay beyond run-scoped timer claim/fire/reload identity. The
+      level is canonical owner promotion with delivery_event_replay_ready and timer-free selected-contract frontier
+      execution. Timer history remains a fail-closed/split fact under #642; a stale reconstruction disposition cannot
+      authorize mutation, and no current store or runtime owner writes fork-local reconstructed timer rows. The
       selected-contract contract-swap child runtime.run_fork.historical_replay_execution.contract_swap_boot_resume may
       execute only already-admitted delivery_event_replay_ready work under selected/swapped contracts. Full
       product-complete source-run resumption for routes, sessions, turns, audits, non-agent/node/system work,
@@ -14184,11 +14188,13 @@ run_model:
         non-agent replay, restart recovery, and operator surfaces remain fail-closed or split siblings unless
         independently approved.'
       3d_selected_contract_timer_route_policy: 'For selected-contract mutating fork execution, source timer facts
-        remain revisioned evidence and unsupported histories remain blockers. Route history is projected as
+        remain revisioned fail-closed evidence, and any selected semantic source that declares workflow timers is rejected
+        before materialization because the ephemeral selected-fork container has no long-lived timer owner. Neither case
+        may create fork or timer state. Route history is projected as
         not_applicable or unknown_unversioned without querying current routing_rules. Generic execution preserves
         flow_route_history_unproven. Selected execution may clear unknown_unversioned only through matching selected
         frontier/binding/static-dynamic topology/recipient proof and persisted route recovery, before materialization,
-        publish, or activation. Timer reconstruction remains a separately gated fork replay/resume child.'
+        publish, or activation. Feature-preserving timer reconstruction remains gated by #642.'
       3e_selected_contract_route_admission: 'For selected-contract mutating fork execution, selected route/subscription
         admission is evidence-only and non-mutating. It distinguishes frontier recipient admission from historical
         route reconstruction, carries unknown_unversioned as an unresolved requirement, and uses the selected contract
@@ -14277,8 +14283,9 @@ run_model:
         runtime.run_fork.selected_contract_execution.fork_local_runtime_container and the normal runtime pipeline, records selected
         execution lineage, writes fork-local outcomes, consumes the fork-local runtime/platform event lineage policy for
         causally parented runtime control outputs, consumes typed runtime lineage before persisting runtime diagnostic
-        lineage, and regenerates follow-up events under the fork run_id. This bounded owner does not include route
-        persistence/recovery, timer reconstruction, session/turn/audit reconstruction, non-agent replay, contract-swap
+        lineage, and regenerates follow-up events under the fork run_id. This surface supports only timer-free selected
+        revisions and timer-free selected semantic sources; timer-bearing admission fails before any fork mutation. This
+        bounded owner does not include route persistence/recovery, timer reconstruction, session/turn/audit reconstruction, non-agent replay, contract-swap
         boot/resume beyond selected frontier execution, runtime restart recovery, and UI/API ownership remain separate
         parents or siblings. Source session/turn/audit facts present in the selected revision may be admitted only as lineage/no-action
         evidence by the separate selected-contract session/turn/audit lineage policy. Post-revision source session/turn/audit
@@ -14386,8 +14393,8 @@ run_model:
         context required by approved owners; boot does not reconstruct source sessions, turns, audits, routes,
         idempotency, or arbitrary in-flight work.'
       5_resume: 'Execute only owner-admitted fork-local work under the new run_id. Today that means the
-        delivery_event_replay_ready primitive, selected-contract frontier execution when independently admitted, and
-        timer reconstruction where the timer owner has proven active lineage in the selected revision. Unsupported historical fact families
+        delivery_event_replay_ready primitive and timer-free selected-contract frontier execution when independently
+        admitted. Unsupported historical fact families
         fail closed with typed blockers; the platform never infers unfinished source work from current rows.'
     parallel_safety: 'Each source transaction publishes all changed fork-reader families under one commit-serialized
       per-run revision. Concurrent same-run transactions serialize through the revision head; multi-run transactions

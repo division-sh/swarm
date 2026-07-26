@@ -14,10 +14,14 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 )
+
+const selectedContractTimerOwnerUnavailable = "selected_contract_timer_owner_unavailable"
 
 type SelectedContractExecutionRequest struct {
 	SourceRunID         string
@@ -112,6 +116,9 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	})
 	if err != nil {
 		return SelectedContractExecutionResult{}, fmt.Errorf("plan selected-contract execution: %w", err)
+	}
+	if err := rejectSelectedContractTimerBearingExecution(plan, loadedSource.Source); err != nil {
+		return SelectedContractExecutionResult{Owner: store.RunForkSelectedContractExecutionOwner}, err
 	}
 	frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{
 		Plan:              plan,
@@ -277,6 +284,30 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		ForkEvents:                         published,
 	}
 	return result, err
+}
+
+func rejectSelectedContractTimerBearingExecution(plan store.RunForkPlan, source semanticview.Source) error {
+	for _, blocker := range plan.UnsupportedBlockers {
+		if strings.TrimSpace(blocker.Code) == store.RunForkBlockerTimerHistoryUnproven {
+			return runtimefailures.New(
+				runtimefailures.ClassDependencyUnavailable,
+				store.RunForkBlockerTimerHistoryUnproven,
+				"selected-contract-run-fork",
+				"admit-timer-ownership",
+				nil,
+			)
+		}
+	}
+	if source != nil && len(source.WorkflowTimers()) > 0 {
+		return runtimefailures.New(
+			runtimefailures.ClassDependencyUnavailable,
+			selectedContractTimerOwnerUnavailable,
+			"selected-contract-run-fork",
+			"admit-timer-ownership",
+			nil,
+		)
+	}
+	return nil
 }
 
 func validateSelectedContractExecutionFrontierForMutation(frontier store.RunForkContractFrontierAdmission) error {

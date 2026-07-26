@@ -186,22 +186,6 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 		return RunForkMaterialization{}, err
 	}
 	replayAdmission := RunForkSelectedContractReplayResumeAdmission(plan)
-	timerReconstruction, err := s.planRunForkSelectedContractTimerReconstruction(ctx, plan)
-	if err != nil {
-		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
-			admission := runForkReplayResumeAdmissionWithBlocker(replayAdmission, fact, blocker)
-			return RunForkMaterialization{
-				SourceRunID:           plan.SourceRunID,
-				ForkPoint:             plan.ForkPoint,
-				ExecutionReady:        false,
-				ReplayResumeAdmission: admission,
-				UnsupportedBlockers:   admission.UnsupportedBlockers,
-				DeliveryResumeBlocked: true,
-			}, err
-		}
-		return RunForkMaterialization{}, err
-	}
-	replayAdmission = runForkReplayResumeAdmissionWithTimerReconstruction(replayAdmission, timerReconstruction)
 	forkRunID := deterministicRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint.EventID)
 	routeRecovery, routeResolved, err := prepareRunForkSelectedContractRouteResolution(plan, forkRunID, selection, req.FrontierAdmission, req.RouteTopology, req.RecipientPlanning)
 	if err != nil {
@@ -291,9 +275,6 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 		if err := insertRunForkSelectedContractRouteRecovery(ctx, tx, routeRecovery); err != nil {
 			return RunForkMaterialization{}, err
 		}
-	}
-	if err := insertRunForkSelectedContractTimerReconstructions(ctx, tx, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, timerReconstruction, now); err != nil {
-		return RunForkMaterialization{}, err
 	}
 	if err := commitRunForkAuthorActivityTransaction(ctx, tx); err != nil {
 		return RunForkMaterialization{}, fmt.Errorf("commit selected-contract fork materialization: %w", err)
@@ -403,11 +384,6 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 		}
 		result.ReplayResumeAdmission = RunForkReplayResumeAdmissionWithSelectedRouteResolution(result.ReplayResumeAdmission)
 	}
-	timerResolved, err := runForkSelectedContractTimerReconstructionComplete(ctx, tx, lineage, plan)
-	if err != nil {
-		return result, err
-	}
-	result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithTimerReconstruction(result.ReplayResumeAdmission, runForkTimerReconstructionPlan{Required: timerResolved})
 	if blockers := runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, result.ReplayResumeAdmission, req.AllowedSourceEventIDs); len(blockers) > 0 {
 		result.UnsupportedBlockers = blockers
 		return result, fmt.Errorf("selected-contract fork activation blocked: %s", runForkBlockerCodes(blockers))
@@ -1020,7 +996,12 @@ func (s *PostgresStore) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx c
 	return ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision(ctx, tx, sourceRunID, revision)
 }
 
-func ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision(ctx context.Context, q timerReconstructionQueryer, sourceRunID string, forkRevision int64) error {
+type selectedContractExecutionQueryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision(ctx context.Context, q selectedContractExecutionQueryer, sourceRunID string, forkRevision int64) error {
 	var exists bool
 	query := `
 		SELECT EXISTS (
@@ -1053,7 +1034,7 @@ func runForkSelectedContractConversationAdvancedFacts(facts []string) []string {
 	return uniqueNonEmptyStrings(out)
 }
 
-func ensureRunForkNoPostForkActiveConversationDeliverySessionCoupling(ctx context.Context, q timerReconstructionQueryer, lineage runForkActivationLineage) error {
+func ensureRunForkNoPostForkActiveConversationDeliverySessionCoupling(ctx context.Context, q selectedContractExecutionQueryer, lineage runForkActivationLineage) error {
 	snapshots, err := postgresDeliveryAdapter.ActiveCouplingSnapshotsForRun(ctx, q, lineage.SourceRunID)
 	if err != nil {
 		return fmt.Errorf("check selected-contract source delivery snapshots: %w", err)
