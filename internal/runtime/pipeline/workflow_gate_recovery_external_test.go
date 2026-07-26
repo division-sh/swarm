@@ -1070,7 +1070,7 @@ func testDecisionRouteSettlementRetry(t *testing.T, selected gateRecoveryStoreCa
 		DecisionCards: selected.cards, BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle),
 	})
 	at := time.Now().UTC().Add(-time.Minute)
-	if err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+	if _, err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID: "launch/settlement-" + uuid.NewString(), StorageRef: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: at,
 		Metadata: map[string]any{"entity_id": entityID, "run_id": runID},
@@ -1221,7 +1221,7 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 		Module: gateRecoveryModule{source: semanticview.Wrap(bundle)}, WorkflowStore: tc.workflowStore,
 		DecisionCards: tc.cards, BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle),
 	})
-	if err := tc.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+	if _, err := tc.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID: "launch/foreground-" + uuid.NewString(), StorageRef: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: at,
 		Metadata: map[string]any{"entity_id": entityID, "run_id": runID},
@@ -1357,7 +1357,7 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 	}
 	matching := newCoordinator(gateRecoveryBundle)
 	enteredAt := time.Now().UTC().Add(-25 * time.Hour)
-	if err := tc.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+	if _, err := tc.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID: "launch/review-terminal", StorageRef: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: enteredAt,
 		Metadata: map[string]any{"entity_id": entityID, "run_id": runID},
@@ -1438,7 +1438,7 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	matching := newCoordinator(gateRecoveryBundle)
 
 	scenarioAt := time.Now().UTC().Add(-25 * time.Hour)
-	if err := tc.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+	if _, err := tc.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID: "launch/review-1", StorageRef: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: scenarioAt,
 		Metadata: map[string]any{"entity_id": entityID, "run_id": runID},

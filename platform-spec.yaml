@@ -6482,7 +6482,10 @@ engine:
         invalid_fields: [delay, interrupting, repeat, recurring]
     lifecycle:
     - 1. A workflow instance is first materialized through one named lifecycle operation that commits its initial row and
-      an `InitialEntry` effect in one selected mutation. Ordinary mutation is existing-only. An accepted event produces
+      an `InitialEntry` effect in one selected mutation. The operation returns a closed `created` or `already_materialized`
+      disposition. Exact lifecycle replay returns `already_materialized` without reapplying initial-entry effects. Public
+      dynamic-instance creation maps that disposition to the canonical conflicting-duplicate failure before route, agent,
+      or `auto_emit_on_create` side effects. Ordinary mutation is existing-only. An accepted event produces
       one ordered `AcceptedEvent` effect carrying exact event identity, occurrence time, and either no transition or a
       complete typed from/to/transition identity. Timer, join, and gate reactions consume those effects in order and do
       not reconstruct empty-string transitions or choose local clocks. A workflow timer activation is derived only from

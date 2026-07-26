@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -16,11 +17,88 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	"time"
 )
+
+type workflowInitialMaterializationTestOwner struct {
+	effects int
+}
+
+func (o *workflowInitialMaterializationTestOwner) ApplyWorkflowLifecycleEffects(_ context.Context, effects []runtimeworkflowlifecycle.Effect) error {
+	o.effects += len(effects)
+	return nil
+}
+
+func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffectsSQLitePostgres(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T) (*WorkflowInstanceStore, context.Context)
+	}{
+		{
+			name: "sqlite",
+			setup: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+				db := newSQLiteWorkflowInstanceStoreTestDB(t)
+				return newSQLiteWorkflowInstanceStoreForTest(t, db), sqliteExactOnceRunContext(t, db)
+			},
+		},
+		{
+			name: "postgres",
+			setup: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				return NewWorkflowInstanceStore(db), testPipelineRunContext(t, db)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.setup(t)
+			owner := &workflowInitialMaterializationTestOwner{}
+			store.ConfigureWorkflowInstanceLifecycle(owner)
+			occurredAt := time.Date(2026, time.July, 26, 12, 0, 0, 0, time.UTC)
+			instance := WorkflowInstance{
+				InstanceID:      "inst-1",
+				StorageRef:      "review/inst-1",
+				WorkflowName:    "review",
+				WorkflowVersion: "1.0.0",
+				CurrentState:    "pending",
+				Metadata: map[string]any{
+					"instance_id": "inst-1",
+					"flow_path":   "review/inst-1",
+				},
+			}
+
+			first, err := store.MaterializeInitialEntry(ctx, instance, occurredAt)
+			if err != nil {
+				t.Fatalf("first MaterializeInitialEntry: %v", err)
+			}
+			if first != WorkflowInitialMaterializationCreated {
+				t.Fatalf("first materialization = %d, want created", first)
+			}
+			replay, err := store.MaterializeInitialEntry(ctx, instance, occurredAt)
+			if err != nil {
+				t.Fatalf("replay MaterializeInitialEntry: %v", err)
+			}
+			if replay != WorkflowInitialMaterializationAlreadyExists {
+				t.Fatalf("replay materialization = %d, want already exists", replay)
+			}
+			if owner.effects != 1 {
+				t.Fatalf("initial-entry effects = %d, want exactly 1", owner.effects)
+			}
+
+			conflict := instance
+			conflict.CurrentState = "active"
+			if _, err := store.MaterializeInitialEntry(ctx, conflict, occurredAt); err == nil {
+				t.Fatal("conflicting replay succeeded")
+			} else if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Class != runtimefailures.ClassConflictingDuplicate {
+				t.Fatalf("conflicting replay failure = %#v, want conflicting duplicate", failure)
+			}
+		})
+	}
+}
 
 func testCreateFlowInstanceContext(trigger workflowTriggerContext) values.Context {
 	payload := parsePayloadMap(trigger.Event.Payload())
@@ -88,7 +166,7 @@ func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 		module:        &pipelineFixtureWorkflowModule{source: source},
 		workflowStore: store,
 		instanceActivator: func(ctx context.Context, req FlowInstanceActivationRequest) error {
-			return store.MaterializeInitialEntry(ctx, WorkflowInstance{
+			_, err := store.MaterializeInitialEntry(ctx, WorkflowInstance{
 				InstanceID:      req.Instance.InstanceID,
 				StorageRef:      req.Instance.InstancePath,
 				WorkflowName:    req.Instance.TemplateID,
@@ -101,6 +179,7 @@ func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 					"parent_entity_id": req.Instance.ParentEntityID,
 				},
 			}, req.OccurredAt)
+			return err
 		},
 	}
 	pc.workflowTimers = newWorkflowTimerLifecycle(store, pc.SemanticSource(), pc.bus, pc.workOwner, pc.timerScheduler)

@@ -59,14 +59,18 @@ func (pc *PipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entit
 			workflowVersion = source.WorkflowVersion()
 		}
 		initialState := strings.TrimSpace(firstNonEmptyString(workflowInitialStateForFlow(source, flowID), "pending"))
-		if err := pc.workflowStore.MaterializeInitialEntry(ctx, WorkflowInstance{
+		materialization, err := pc.workflowStore.MaterializeInitialEntry(ctx, WorkflowInstance{
 			InstanceID:      entityID,
 			WorkflowName:    workflowName,
 			WorkflowVersion: workflowVersion,
 			CurrentState:    initialState,
 			Metadata:        workflowMaterializeEntityMetadata(source, flowID, nil),
-		}, inbound.CreatedAt()); err != nil {
+		}, inbound.CreatedAt())
+		if err != nil {
 			return err
+		}
+		if materialization != WorkflowInitialMaterializationCreated && materialization != WorkflowInitialMaterializationAlreadyExists {
+			return fmt.Errorf("workflow initial materialization returned unknown result %d", materialization)
 		}
 	}
 	return pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {

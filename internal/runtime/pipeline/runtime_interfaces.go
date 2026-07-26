@@ -63,7 +63,7 @@ type WorkflowInstancePersistence interface {
 	List(ctx context.Context) ([]WorkflowInstance, error)
 	SelectActiveByFields(ctx context.Context, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error)
 	Create(ctx context.Context, instance WorkflowInstance) error
-	MaterializeInitialEntry(ctx context.Context, instance WorkflowInstance, occurredAt time.Time) error
+	MaterializeInitialEntry(ctx context.Context, instance WorkflowInstance, occurredAt time.Time) (WorkflowInitialMaterializationResult, error)
 	Upsert(ctx context.Context, instance WorkflowInstance) error
 	MarkTerminated(ctx context.Context, instanceID string, terminatedAt time.Time) error
 	Mutate(ctx context.Context, instanceID string, fn func(*WorkflowInstance)) error

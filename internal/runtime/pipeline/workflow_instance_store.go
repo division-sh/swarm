@@ -73,6 +73,14 @@ type WorkflowInstance struct {
 	UpdatedAt         time.Time
 }
 
+type WorkflowInitialMaterializationResult uint8
+
+const (
+	WorkflowInitialMaterializationUnknown WorkflowInitialMaterializationResult = iota
+	WorkflowInitialMaterializationCreated
+	WorkflowInitialMaterializationAlreadyExists
+)
+
 type WorkflowTransitionRecord struct {
 	TransitionID    string    `json:"transition_id"`
 	From            string    `json:"from"`
@@ -333,37 +341,39 @@ func (s *WorkflowInstanceStore) Create(ctx context.Context, instance WorkflowIns
 	})
 }
 
-func (s *WorkflowInstanceStore) MaterializeInitialEntry(ctx context.Context, instance WorkflowInstance, occurredAt time.Time) error {
+func (s *WorkflowInstanceStore) MaterializeInitialEntry(ctx context.Context, instance WorkflowInstance, occurredAt time.Time) (WorkflowInitialMaterializationResult, error) {
 	if s == nil || s.db == nil {
-		return fmt.Errorf("workflow instance lifecycle store is required")
+		return WorkflowInitialMaterializationUnknown, fmt.Errorf("workflow instance lifecycle store is required")
 	}
 	occurredAt = occurredAt.UTC()
 	if occurredAt.IsZero() {
-		return fmt.Errorf("workflow initial materialization requires an exact occurrence time")
+		return WorkflowInitialMaterializationUnknown, fmt.Errorf("workflow initial materialization requires an exact occurrence time")
 	}
 	if s.lifecycleOwner == nil {
-		return fmt.Errorf("workflow instance lifecycle owner is required")
+		return WorkflowInitialMaterializationUnknown, fmt.Errorf("workflow instance lifecycle owner is required")
 	}
 	instance.EnteredStageAt = occurredAt
 	instance.CreatedAt = occurredAt
 	normalized, identity, ok, err := normalizeWorkflowInstanceForPersistence(instance)
 	if err != nil {
-		return err
+		return WorkflowInitialMaterializationUnknown, err
 	}
 	if !ok {
-		return fmt.Errorf("workflow initial materialization requires canonical instance identity")
+		return WorkflowInitialMaterializationUnknown, fmt.Errorf("workflow initial materialization requires canonical instance identity")
 	}
 	effect, err := runtimeworkflowlifecycle.NewInitialEntry(identity.RowID(), normalized.CurrentState, occurredAt)
 	if err != nil {
-		return err
+		return WorkflowInitialMaterializationUnknown, err
 	}
-	return s.runInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+	result := WorkflowInitialMaterializationUnknown
+	err = s.runInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
 		existing, found, err := s.Load(txctx, identity.RowID())
 		if err != nil {
 			return err
 		}
 		if found {
 			if workflowInitialMaterializationEqual(existing, normalized, occurredAt) {
+				result = WorkflowInitialMaterializationAlreadyExists
 				return nil
 			}
 			return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "workflow-instance-lifecycle", "materialize_initial_entry", map[string]any{"flow_instance": identity.StorageRef})
@@ -371,8 +381,19 @@ func (s *WorkflowInstanceStore) MaterializeInitialEntry(ctx context.Context, ins
 		if err := s.Create(txctx, normalized); err != nil {
 			return err
 		}
-		return s.lifecycleOwner.ApplyWorkflowLifecycleEffects(txctx, []runtimeworkflowlifecycle.Effect{effect})
+		if err := s.lifecycleOwner.ApplyWorkflowLifecycleEffects(txctx, []runtimeworkflowlifecycle.Effect{effect}); err != nil {
+			return err
+		}
+		result = WorkflowInitialMaterializationCreated
+		return nil
 	})
+	if err != nil {
+		return WorkflowInitialMaterializationUnknown, err
+	}
+	if result == WorkflowInitialMaterializationUnknown {
+		return WorkflowInitialMaterializationUnknown, fmt.Errorf("workflow initial materialization completed without a disposition")
+	}
+	return result, nil
 }
 
 func workflowInitialMaterializationEqual(actual, expected WorkflowInstance, occurredAt time.Time) bool {

@@ -17,6 +17,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerequiredagents "github.com/division-sh/swarm/internal/runtime/requiredagents"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -25,7 +26,7 @@ import (
 )
 
 type flowInstancePersistence interface {
-	MaterializeInitialEntry(ctx context.Context, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) error
+	MaterializeInitialEntry(ctx context.Context, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) (runtimepipeline.WorkflowInitialMaterializationResult, error)
 	MarkTerminated(ctx context.Context, storageRef string, terminatedAt time.Time) error
 	Load(ctx context.Context, instanceID string) (runtimepipeline.WorkflowInstance, bool, error)
 	LoadRouteRecoveryProjection(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error)
@@ -128,7 +129,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	if occurredAt.IsZero() {
 		return fmt.Errorf("flow activation requires an exact occurrence time")
 	}
-	if err := am.workflowInstances.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+	materialization, err := am.workflowInstances.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      instanceID,
 		StorageRef:      flowPath,
 		WorkflowName:    templateID,
@@ -136,8 +137,16 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		CurrentState:    initialState,
 		Config:          cloneFlowConfig(req.Config),
 		Metadata:        metadata,
-	}, occurredAt); err != nil {
+	}, occurredAt)
+	if err != nil {
 		return fmt.Errorf("persist flow instance %s: %w", flowPath, err)
+	}
+	switch materialization {
+	case runtimepipeline.WorkflowInitialMaterializationCreated:
+	case runtimepipeline.WorkflowInitialMaterializationAlreadyExists:
+		return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "flow-instance-lifecycle", "activate_flow_instance", map[string]any{"flow_instance": flowPath})
+	default:
+		return fmt.Errorf("persist flow instance %s: unknown initial materialization result %d", flowPath, materialization)
 	}
 	if _, inMutation := runtimepipeline.PipelineSQLTxFromContext(ctx); inMutation {
 		if err := am.installFlowInstanceRoute(ctx, req); err != nil {
