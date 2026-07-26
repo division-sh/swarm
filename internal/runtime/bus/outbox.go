@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -47,6 +48,11 @@ func (eb *EventBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.EmitIntent) error {
 	if o.bus == nil || len(intents) == 0 {
 		return nil
+	}
+	var err error
+	ctx, err = o.bus.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
 	}
 	lease, err := o.bus.beginRuntimeWork(ctx)
 	if err != nil {
@@ -136,6 +142,11 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 	if d.bus == nil || len(intents) == 0 {
 		return nil
 	}
+	var err error
+	ctx, err = d.bus.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
+	}
 	lease, err := d.bus.beginRuntimeWork(ctx)
 	if err != nil {
 		return err
@@ -166,10 +177,12 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		queuedIntents := clonePostCommitEmitIntents(intents)
+		sourceFact, _ := runtimecorrelation.BundleSourceFactFromContext(ctx)
 		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
 			postCommitActions := make([]runtimepipeline.OwnerAction, 0, 4)
 			rollbackActions := make([]runtimepipeline.OwnerAction, 0, 4)
 			dispatchCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(actionCtx))
+			dispatchCtx = runtimecorrelation.WithBundleSourceFact(dispatchCtx, sourceFact)
 			dispatchCtx = runtimepipeline.WithPipelinePostCommitActions(dispatchCtx, &postCommitActions)
 			dispatchCtx = runtimepipeline.WithPipelineRollbackActions(dispatchCtx, &rollbackActions)
 			if err := d.DispatchPostCommit(dispatchCtx, queuedIntents); err != nil {
@@ -199,6 +212,10 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 }
 
 func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fallback runtimeengine.EmitIntent) (handled bool, err error) {
+	ctx, err = d.bus.admitBundleSourceFact(ctx)
+	if err != nil {
+		return false, err
+	}
 	operation, ok := d.bus.takePendingOutboxOperation(fallback.Event.ID())
 	if !ok {
 		return false, nil
@@ -219,6 +236,10 @@ func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fa
 }
 
 func (d engineDispatcher) dispatchAndRecord(ctx context.Context, intent runtimeengine.EmitIntent, publicationClaim *pipelinePublicationClaim) (err error) {
+	ctx, err = d.bus.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
+	}
 	var recoveryClaim runtimepipelineobligation.Claim
 	claimOpen := false
 	if publicationClaim == nil && d.bus.pipelineObligations != nil {
