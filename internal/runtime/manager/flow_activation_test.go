@@ -95,6 +95,7 @@ type flowActivationTestInstanceStore struct {
 	terminatedAtSeen []time.Time
 	byStorageRef     map[string]runtimepipeline.WorkflowInstance
 	routeLoads       []runtimeflowidentity.Route
+	materialization  runtimepipeline.WorkflowInitialMaterializationResult
 }
 
 type flowActivationTestStore struct {
@@ -159,10 +160,16 @@ func (s *flowActivationTestInstanceStore) Create(_ context.Context, instance run
 	return nil
 }
 
-func (s *flowActivationTestInstanceStore) MaterializeInitialEntry(_ context.Context, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) error {
+func (s *flowActivationTestInstanceStore) MaterializeInitialEntry(_ context.Context, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) (runtimepipeline.WorkflowInitialMaterializationResult, error) {
+	if s.materialization != runtimepipeline.WorkflowInitialMaterializationUnknown {
+		return s.materialization, nil
+	}
 	instance.CreatedAt = occurredAt.UTC()
 	instance.EnteredStageAt = occurredAt.UTC()
-	return s.Create(context.Background(), instance)
+	if err := s.Create(context.Background(), instance); err != nil {
+		return runtimepipeline.WorkflowInitialMaterializationUnknown, err
+	}
+	return runtimepipeline.WorkflowInitialMaterializationCreated, nil
 }
 
 func (s *flowActivationTestInstanceStore) storeInstance(instance runtimepipeline.WorkflowInstance) {
@@ -970,7 +977,7 @@ func TestActivateFlowInstanceQueuesAutoEmitUntilPostCommitWhenAvailable(t *testi
 	}
 }
 
-func TestActivateFlowInstanceRejectsDuplicateInstanceIDBeforeSideEffects(t *testing.T) {
+func TestActivateFlowInstanceRejectsIdenticalReplayBeforeCreationSideEffects(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
 	store := &flowActivationTestStore{}
@@ -986,10 +993,11 @@ func TestActivateFlowInstanceRejectsDuplicateInstanceIDBeforeSideEffects(t *test
 	firstPublished := len(bus.published)
 	firstAgents := len(store.upserts)
 
+	instances.materialization = runtimepipeline.WorkflowInitialMaterializationAlreadyExists
 	err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req)
 	failure, ok := runtimefailures.As(err)
 	if err == nil || !ok || failure.Failure.Class != runtimefailures.ClassConflictingDuplicate || failure.Failure.Detail.Code != "flow_instance_already_exists" {
-		t.Fatalf("duplicate ActivateFlowInstance failure = %#v, want canonical already-exists failure", failure)
+		t.Fatalf("identical replay ActivateFlowInstance failure = %#v, want canonical already-exists failure", failure)
 	}
 	if len(instances.creates) != firstCreates {
 		t.Fatalf("creates = %d, want unchanged %d", len(instances.creates), firstCreates)
@@ -1002,6 +1010,56 @@ func TestActivateFlowInstanceRejectsDuplicateInstanceIDBeforeSideEffects(t *test
 	}
 	if len(store.upserts) != firstAgents {
 		t.Fatalf("persisted agents = %#v, want unchanged agent side effects", store.upserts)
+	}
+}
+
+func TestActivateFlowInstanceCanonicalStoreRejectsIdenticalReplayBeforeCreationSideEffects(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	const runID = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+		ON CONFLICT (run_id) DO NOTHING
+	`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	routeStore := &flowActivationTestRouteStore{}
+	bus := &flowActivationTestBus{routeStore: routeStore}
+	agentStore := &flowActivationTestStore{}
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	bundle := testFlowBundle("task.started")
+	runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module:        newFlowActivationWorkflowModule(t, bundle),
+		WorkflowStore: workflowStore,
+		WorkOwner:     newTestManagerWorkOwner(t),
+	})
+	am := newFlowActivationManager(t, bus, workflowStore, agentStore)
+	req := testActivationRequest(bundle, "review", "inst-1", "11111111-1111-1111-1111-111111111111", "review/inst-1")
+	req.TriggerEvent = testFlowActivationTriggerEvent(req.TriggerEvent.ID(), runID)
+
+	if err := am.ActivateFlowInstance(ctx, req); err != nil {
+		t.Fatalf("first ActivateFlowInstance: %v", err)
+	}
+	firstRoutes := len(bus.addedPaths)
+	firstPublished := len(bus.published)
+	firstAgents := len(agentStore.upserts)
+
+	err := am.ActivateFlowInstance(ctx, req)
+	failure, ok := runtimefailures.As(err)
+	if err == nil || !ok || failure.Failure.Class != runtimefailures.ClassConflictingDuplicate || failure.Failure.Detail.Code != "flow_instance_already_exists" {
+		t.Fatalf("identical replay ActivateFlowInstance failure = %#v, want canonical already-exists failure", failure)
+	}
+	if len(bus.addedPaths) != firstRoutes {
+		t.Fatalf("added paths = %#v, want unchanged route side effects", bus.addedPaths)
+	}
+	if len(bus.published) != firstPublished {
+		t.Fatalf("published events = %#v, want unchanged auto-emit side effects", bus.published)
+	}
+	if len(agentStore.upserts) != firstAgents {
+		t.Fatalf("persisted agents = %#v, want unchanged agent side effects", agentStore.upserts)
 	}
 }
 

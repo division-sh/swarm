@@ -62,7 +62,7 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 			bus.SetInterceptors(coordinator)
 
 			createdAt := time.Now().UTC()
-			if err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
 				Metadata: map[string]any{"run_id": runID},
@@ -132,7 +132,7 @@ func TestRecurringWorkflowTimerDoesNotReregisterAfterSynchronousTransitionCancel
 			bus.SetInterceptors(coordinator)
 
 			createdAt := time.Now().UTC().Add(-4900 * time.Millisecond)
-			if err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
 				Metadata: map[string]any{"run_id": runID},
@@ -210,7 +210,7 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 			bus.SetInterceptors(coordinator)
 
 			createdAt := time.Now().UTC()
-			if err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
 				Metadata: map[string]any{"run_id": runID},
@@ -377,7 +377,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			bus.SetInterceptors(coordinator)
 
 			createdAt := time.Now().UTC()
-			if err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
 				Metadata: map[string]any{"run_id": runID},
@@ -488,7 +488,7 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 			})
 
 			createdAt := time.Now().UTC()
-			if err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
 				Metadata: map[string]any{"run_id": runID},
@@ -572,7 +572,7 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 			bus.SetInterceptors(coordinator)
 
 			createdAt := time.Now().UTC()
-			if err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
 				Metadata: map[string]any{"run_id": runID},

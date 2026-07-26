@@ -199,15 +199,19 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 				workflowVersion = source.WorkflowVersion()
 			}
 			initialState := strings.TrimSpace(firstNonEmptyString(workflowInitialStateForFlow(source, flowID), "pending"))
-			if err := r.coordinator.workflowStore.MaterializeInitialEntry(ctx, WorkflowInstance{
+			materialization, err := r.coordinator.workflowStore.MaterializeInitialEntry(ctx, WorkflowInstance{
 				InstanceID:      entityID.String(),
 				WorkflowName:    workflowName,
 				WorkflowVersion: workflowVersion,
 				CurrentState:    initialState,
 				Metadata:        workflowMaterializeEntityMetadata(source, flowID, mutation.StateCarrier.PersistedMetadata()),
 				StateBuckets:    mutation.StateCarrier.PersistedStateBuckets(),
-			}, mutation.TriggeredAt); err != nil {
+			}, mutation.TriggeredAt)
+			if err != nil {
 				return err
+			}
+			if materialization != WorkflowInitialMaterializationCreated && materialization != WorkflowInitialMaterializationAlreadyExists {
+				return fmt.Errorf("workflow initial materialization returned unknown result %d", materialization)
 			}
 		}
 		allowedFields := workflowEntitySchemaFields(r.coordinator.SemanticSource(), pipelineFlowScope(ctx))
