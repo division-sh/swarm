@@ -92,6 +92,92 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 	}
 }
 
+func TestRecurringWorkflowTimerDoesNotReregisterAfterSynchronousTransitionCancellationOnBothStores(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		open func(*testing.T) gateRecoveryStoreCase
+	}{
+		{name: "sqlite", open: openSQLiteGateRecoveryStore},
+		{name: "postgres", open: openPostgresGateRecoveryStore},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			selected := tc.open(t)
+			runID := uuid.NewString()
+			entityID := uuid.NewString()
+			insertGateRecoveryRun(t, selected, runID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+			bundle := workflowTimerServedLifecycleBundle(true)
+			bundle.Semantics.Timers[0].Delay = "5s"
+			source := semanticview.Wrap(bundle)
+			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
+				ContractBundle: source, PayloadValidator: strictWorkflowTimerPayloadValidator,
+			}, runtimecontracts.WorkflowStageTimerInternalEvent)
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			scheduleStore, ok := selected.events.(runtimepipeline.SchedulePersistence)
+			if !ok {
+				t.Fatalf("selected %s store does not implement SchedulePersistence", selected.name)
+			}
+
+			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(
+				pipelineExternalTestWorkOwner(t),
+				func(context.Context, runtimepipeline.Schedule) {},
+			)
+			t.Cleanup(scheduler.Stop)
+			coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
+				Module: gateRecoveryModule{source: source}, WorkflowStore: selected.workflowStore,
+				TimerScheduler: scheduler, TimerScheduleStore: scheduleStore, WorkOwner: pipelineExternalTestWorkOwner(t),
+			})
+			bus.SetInterceptors(coordinator)
+
+			createdAt := time.Now().UTC().Add(-4900 * time.Millisecond)
+			if err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+				InstanceID: entityID, StorageRef: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
+				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
+				Metadata: map[string]any{"run_id": runID},
+			}, createdAt); err != nil {
+				t.Fatalf("materialize workflow instance: %v", err)
+			}
+
+			stateDeadline := time.Now().Add(5 * time.Second)
+			for {
+				instance, found, err := selected.workflowStore.Load(ctx, entityID)
+				if err != nil {
+					t.Fatalf("load workflow instance: %v", err)
+				}
+				if found && instance.CurrentState == "done" {
+					break
+				}
+				if time.Now().After(stateDeadline) {
+					t.Fatal("recurring workflow timer did not synchronously advance the workflow")
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			assertWorkflowTimerServedRows(t, selected, runID, entityID, "cancelled", 1)
+
+			settleDeadline := time.Now().Add(2 * time.Second)
+			for {
+				active, draining := runtimepipeline.WorkflowTimerScheduledCountsForTest(scheduler)
+				if active == 0 && draining == 0 {
+					break
+				}
+				if time.Now().After(settleDeadline) {
+					t.Fatalf(
+						"workflow timer scheduler retained a projection after synchronous cancellation: active=%d draining=%d",
+						active,
+						draining,
+					)
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			if got := workflowTimerEventCount(t, selected, runID, runtimecontracts.WorkflowStageTimerInternalEvent); got != 1 {
+				t.Fatalf("workflow timer events after synchronous cancellation = %d, want 1", got)
+			}
+		})
+	}
+}
+
 func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBothStores(t *testing.T) {
 	for _, tc := range []struct {
 		name string

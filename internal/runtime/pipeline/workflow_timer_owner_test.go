@@ -1334,6 +1334,10 @@ func workflowTimerScheduledCounts(scheduler *Scheduler) (active, draining int) {
 	return active, draining
 }
 
+func WorkflowTimerScheduledCountsForTest(scheduler *Scheduler) (active, draining int) {
+	return workflowTimerScheduledCounts(scheduler)
+}
+
 func loadWorkflowTimerOwnerActivation(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, activationID string) WorkflowTimerActivation {
 	t.Helper()
 	activation, found, err := store.loadWorkflowTimerActivation(ctx, activationID, false)

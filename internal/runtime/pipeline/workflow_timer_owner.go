@@ -440,21 +440,21 @@ func (l *WorkflowTimerLifecycle) queueCancellation(ctx context.Context, activati
 	return nil
 }
 
-func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup WorkflowTimerWakeup) (WorkflowTimerFireOutcome, *WorkflowTimerWakeup, error) {
+func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup WorkflowTimerWakeup) (WorkflowTimerFireOutcome, bool, error) {
 	store := l.store()
 	if store == nil || !store.Enabled() {
-		return WorkflowTimerFireTerminal, nil, fmt.Errorf("workflow timer lifecycle store is unavailable")
+		return WorkflowTimerFireTerminal, false, fmt.Errorf("workflow timer lifecycle store is unavailable")
 	}
 	if err := wakeup.validate(); err != nil {
-		return WorkflowTimerFireTerminal, nil, err
+		return WorkflowTimerFireTerminal, false, err
 	}
 	occurrence := wakeup.Occurrence()
 	hint, found, err := store.loadWorkflowTimerActivation(ctx, occurrence.Activation.ActivationID, false)
 	if err != nil {
-		return WorkflowTimerFireRetry, nil, err
+		return WorkflowTimerFireRetry, false, err
 	}
 	if !found {
-		return WorkflowTimerFireTerminal, nil, nil
+		return WorkflowTimerFireTerminal, false, nil
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, hint.RunID)
 	var (
@@ -538,21 +538,17 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 		if registerErr := l.ensureRegisteredImmediately(recoveryCtx, occurrence.Activation); registerErr != nil {
 			l.logFailure(recoveryCtx, "workflow_timer_register_failed", occurrence.Activation, registerErr)
 			l.startRegistrationRecovery(occurrence.Activation)
-			return WorkflowTimerFireRetry, nil, errors.Join(err, fmt.Errorf("re-register workflow timer: %w", registerErr))
+			return WorkflowTimerFireRetry, false, errors.Join(err, fmt.Errorf("re-register workflow timer: %w", registerErr))
 		}
-		return WorkflowTimerFireRetry, nil, err
+		return WorkflowTimerFireRetry, false, err
 	}
 	if terminal {
-		return WorkflowTimerFireTerminal, nil, terminalErr
+		return WorkflowTimerFireTerminal, false, terminalErr
 	}
 	if next.Status != workflowTimerStatusActive {
-		return WorkflowTimerFireCommitted, nil, nil
+		return WorkflowTimerFireCommitted, false, nil
 	}
-	nextWakeup, err := newWorkflowTimerWakeup(next)
-	if err != nil {
-		return WorkflowTimerFireRetry, nil, err
-	}
-	return WorkflowTimerFireCommitted, &nextWakeup, nil
+	return WorkflowTimerFireCommitted, true, nil
 }
 
 func (l *WorkflowTimerLifecycle) AuthorizeAcceptedEvent(ctx context.Context, evt events.Event) (WorkflowTimerActivation, timeridentity.WorkflowTimerOccurrenceRef, bool, error) {

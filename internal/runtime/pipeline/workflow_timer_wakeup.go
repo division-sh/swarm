@@ -74,7 +74,7 @@ func (l *WorkflowTimerLifecycle) registerWakeup(ctx context.Context, wakeup Work
 }
 
 func (l *WorkflowTimerLifecycle) handleWakeup(ctx context.Context, wakeup WorkflowTimerWakeup) {
-	outcome, next, err := l.fireWakeup(ctx, wakeup)
+	outcome, recurrenceCommitted, err := l.fireWakeup(ctx, wakeup)
 	if err != nil {
 		l.logFailure(ctx, "workflow_timer_fire_failed", wakeup.Occurrence().Activation, err)
 	}
@@ -82,10 +82,11 @@ func (l *WorkflowTimerLifecycle) handleWakeup(ctx context.Context, wakeup Workfl
 		l.startRegistrationRecovery(wakeup.Occurrence().Activation)
 		return
 	}
-	if outcome == WorkflowTimerFireCommitted && next != nil {
-		if err := l.registerWakeup(ownerActionAdmissionContext(ctx), *next); err != nil {
-			l.logFailure(ctx, "workflow_timer_recurrence_register_failed", next.Occurrence().Activation, err)
-			l.startRegistrationRecovery(next.Occurrence().Activation)
+	if outcome == WorkflowTimerFireCommitted && recurrenceCommitted {
+		ref := wakeup.Occurrence().Activation
+		if err := l.EnsureRegistered(ownerActionAdmissionContext(ctx), ref); err != nil {
+			l.logFailure(ctx, "workflow_timer_recurrence_register_failed", ref, err)
+			l.startRegistrationRecovery(ref)
 		}
 	}
 }
