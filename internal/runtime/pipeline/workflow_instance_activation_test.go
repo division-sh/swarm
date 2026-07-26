@@ -58,16 +58,25 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			store, ctx := tc.setup(t)
 			owner := &workflowInitialMaterializationTestOwner{}
 			store.ConfigureWorkflowInstanceLifecycle(owner)
-			occurredAt := time.Date(2026, time.July, 26, 12, 0, 0, 0, time.UTC)
+			occurredAt := time.Date(2026, time.July, 26, 12, 0, 0, 987654321, time.UTC)
 			instance := WorkflowInstance{
 				InstanceID:      "inst-1",
 				StorageRef:      "review/inst-1",
 				WorkflowName:    "review",
 				WorkflowVersion: "1.0.0",
 				CurrentState:    "pending",
+				Config: map[string]any{
+					"attempt_limit": 3,
+					"policy":        map[string]any{"weights": []any{1, 2, 3}},
+				},
+				StateBuckets: map[string]any{
+					"totals": map[string]any{"accepted": 1},
+				},
 				Metadata: map[string]any{
 					"instance_id": "inst-1",
 					"flow_path":   "review/inst-1",
+					"priority":    2,
+					"routing":     map[string]any{"shards": []any{1, 4}},
 				},
 			}
 
@@ -77,6 +86,17 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			}
 			if first != WorkflowInitialMaterializationCreated {
 				t.Fatalf("first materialization = %d, want created", first)
+			}
+			persisted, found, err := store.Load(ctx, instance.StorageRef)
+			if err != nil {
+				t.Fatalf("load persisted initial materialization: %v", err)
+			}
+			if !found {
+				t.Fatal("persisted initial materialization not found")
+			}
+			wantPersistedAt := occurredAt.UTC().Truncate(time.Microsecond)
+			if !persisted.EnteredStageAt.Equal(wantPersistedAt) || !persisted.CreatedAt.Equal(wantPersistedAt) {
+				t.Fatalf("persisted timestamps = entered %s created %s, want %s", persisted.EnteredStageAt, persisted.CreatedAt, wantPersistedAt)
 			}
 			replay, err := store.MaterializeInitialEntry(ctx, instance, occurredAt)
 			if err != nil {
