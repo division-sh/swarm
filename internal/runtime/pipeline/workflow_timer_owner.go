@@ -594,9 +594,6 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 func (l *WorkflowTimerLifecycle) AuthorizeAcceptedEvent(ctx context.Context, evt events.Event) (WorkflowTimerActivation, timeridentity.WorkflowTimerOccurrenceRef, bool, error) {
 	exactProducer := evt.ProducerType() == events.EventProducerPlatform && evt.SourceAgent() == "runtime.workflow_timer"
 	if !exactProducer {
-		if _, reserved := timeridentity.ParseWorkflowTimerOccurrenceTaskID(evt.TaskID()); reserved {
-			return WorkflowTimerActivation{}, timeridentity.WorkflowTimerOccurrenceRef{}, true, fmt.Errorf("workflow timer occurrence requires the exact runtime.workflow_timer producer")
-		}
 		return WorkflowTimerActivation{}, timeridentity.WorkflowTimerOccurrenceRef{}, false, nil
 	}
 	occurrence, ok := timeridentity.ParseWorkflowTimerOccurrenceTaskID(evt.TaskID())

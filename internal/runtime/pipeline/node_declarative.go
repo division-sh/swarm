@@ -351,6 +351,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	if hasSelectedState && strings.TrimSpace(selectedState.EntityID) != "" && strings.TrimSpace(currentState.EntityID) == "" {
 		currentState = selectedState
 	}
+	prepareHandlerMaterializationState(source, flowID, handler, &currentState)
 	exec := e.executor
 	node := e.node
 	var (
@@ -497,6 +498,16 @@ func handlerMaterializesEntity(source semanticview.Source, flowID string, handle
 		}
 	}
 	return false
+}
+
+func prepareHandlerMaterializationState(source semanticview.Source, flowID string, handler SystemNodeEventHandler, state *WorkflowState) {
+	if state == nil || !handlerMaterializesEntity(source, flowID, handler) {
+		return
+	}
+	state.Metadata = workflowMaterializeEntityMetadata(source, flowID, state.Metadata)
+	if strings.TrimSpace(string(state.Stage)) == "" {
+		state.Stage = NormalizeWorkflowStateID(workflowInitialStateForFlow(source, flowID))
+	}
 }
 
 func handlerActionMaterializesEntity(handler SystemNodeEventHandler) bool {

@@ -334,12 +334,7 @@ func resolveHandlerEntityIDForFlow(
 	if err != nil {
 		return "", evt, err
 	}
-	if state != nil && handlerMaterializesEntity(source, flowID, handler) {
-		state.Metadata = workflowMaterializeEntityMetadata(source, flowID, state.Metadata)
-		if strings.TrimSpace(string(state.Stage)) == "" {
-			state.Stage = NormalizeWorkflowStateID(workflowInitialStateForFlow(source, flowID))
-		}
-	}
+	prepareHandlerMaterializationState(source, flowID, handler, state)
 	if state != nil && strings.TrimSpace(state.EntityID) == "" {
 		state.EntityID = entityID
 	}

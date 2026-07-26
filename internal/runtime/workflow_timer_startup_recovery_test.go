@@ -11,6 +11,7 @@ import (
 	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -27,9 +28,143 @@ import (
 type workflowTimerStartupStore interface {
 	runtimebus.EventStore
 	runtimepipeline.RuntimeMutationRunner
+	runtimepipeline.SchedulePersistence
 	runtimedelivery.Store
 	runtimemanager.ManagerPersistence
 	PipelineObligations() runtimepipelineobligation.Store
+}
+
+func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOnBothStores(t *testing.T) {
+	for _, backend := range []struct {
+		name string
+		open func(*testing.T) (*sql.DB, workflowTimerStartupStore, *runtimepipeline.WorkflowInstanceStore, bool)
+	}{
+		{
+			name: "sqlite",
+			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, *runtimepipeline.WorkflowInstanceStore, bool) {
+				selected := storetest.StartSQLiteRuntimeStore(t)
+				return selected.DB, selected, runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(selected.DB, selected), false
+			},
+		},
+		{
+			name: "postgres",
+			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, *runtimepipeline.WorkflowInstanceStore, bool) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				selected := storetest.AdmitPostgresRuntimeStore(t, db)
+				return db, selected, runtimepipeline.NewWorkflowInstanceStore(db), true
+			},
+		},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
+			db, selected, workflowStore, postgres := backend.open(t)
+			runID := uuid.NewString()
+			entityID := uuid.NewString()
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			insertRun := `INSERT INTO runs (run_id, status) VALUES (?, 'running')`
+			if postgres {
+				insertRun = `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`
+			}
+			if _, err := db.ExecContext(ctx, insertRun, runID); err != nil {
+				t.Fatalf("seed active run: %v", err)
+			}
+
+			process := worklifetime.NewProcess()
+			runtimeDB := db
+			if !postgres {
+				runtimeDB = nil
+			}
+			source := semanticview.Wrap(workflowTimerStartupRecoveryBundle())
+			rt, err := swarmruntime.NewRuntime(ctx, swarmruntime.RuntimeDeps{
+				Config: &config.Config{
+					Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
+					LLM:     config.LLMConfig{Backend: "anthropic"},
+				},
+				Stores: swarmruntime.Stores{
+					SQLDB:               runtimeDB,
+					EventStore:          selected,
+					ScheduleStore:       selected,
+					PipelineStore:       workflowStore,
+					ManagerStore:        selected,
+					DeliveryStore:       selected,
+					PipelineObligations: selected.PipelineObligations(),
+				},
+				Options: swarmruntime.RuntimeOptions{
+					SelfCheck:         false,
+					WorkflowModule:    newRuntimeTestWorkflowModule(t, source),
+					LLMRuntime:        workflowTimerStartupLLM{},
+					RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+					BundleSourceFact:  authorActivityTestBundleSourceFact,
+					BundleFingerprint: authorActivityTestBundleSourceFact.BundleFingerprint,
+					ProcessWorkOwner:  process,
+				},
+			})
+			if err != nil {
+				t.Fatalf("NewRuntime: %v", err)
+			}
+			t.Cleanup(func() {
+				if err := rt.Shutdown(); err != nil {
+					t.Errorf("shutdown runtime: %v", err)
+				}
+				joinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if _, err := process.Join(joinCtx); err != nil {
+					t.Errorf("join process owner: %v", err)
+				}
+			})
+			if err := rt.Start(ctx); err != nil {
+				t.Fatalf("Start runtime: %v", err)
+			}
+
+			occurrence := timeridentity.WorkflowTimerOccurrenceRef{
+				Activation: timeridentity.WorkflowTimerActivationRef{
+					ActivationID: uuid.NewString(),
+					Declaration:  "generic.opaque",
+				},
+				DueAt: time.Now().UTC().Add(50 * time.Millisecond).Truncate(time.Microsecond),
+			}.Normalize()
+			schedule := runtimepipeline.Schedule{
+				RunID:        runID,
+				AgentID:      "runtime",
+				EventType:    "generic.tick",
+				Mode:         "once",
+				At:           occurrence.DueAt,
+				EntityID:     entityID,
+				FlowInstance: "root",
+				TaskID:       occurrence.TaskID(),
+				Payload:      []byte(`{}`),
+			}
+			if err := selected.UpsertSchedule(ctx, schedule); err != nil {
+				t.Fatalf("persist generic occurrence-shaped schedule: %v", err)
+			}
+			if err := rt.Scheduler.Register(ctx, schedule); err != nil {
+				t.Fatalf("register generic occurrence-shaped schedule: %v", err)
+			}
+
+			deadline := time.Now().Add(5 * time.Second)
+			for {
+				var eventCount int
+				query := `SELECT COUNT(*) FROM events WHERE task_id = ? AND produced_by = 'runtime.scheduler' AND produced_by_type = 'platform'`
+				if postgres {
+					query = `SELECT COUNT(*) FROM events WHERE task_id = $1 AND produced_by = 'runtime.scheduler' AND produced_by_type = 'platform'`
+				}
+				if err := db.QueryRowContext(ctx, query, occurrence.TaskID()).Scan(&eventCount); err != nil {
+					t.Fatalf("read generic scheduled event: %v", err)
+				}
+				active, err := selected.LoadActiveSchedules(ctx)
+				if err != nil {
+					t.Fatalf("load active generic schedules: %v", err)
+				}
+				if eventCount == 1 && len(active) == 0 {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("generic occurrence-shaped fire did not publish and complete: events=%d active=%#v", eventCount, active)
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+		})
+	}
 }
 
 func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStores(t *testing.T) {
@@ -199,7 +334,7 @@ func workflowTimerStartupRecoveryBundle() *runtimecontracts.WorkflowContractBund
 			Owner: "runtime", Event: runtimecontracts.WorkflowStageTimerInternalEvent,
 			StartOn: "state:waiting", Delay: "2s",
 		}},
-	}}
+	}, Events: map[string]runtimecontracts.EventCatalogEntry{"generic.tick": {}}}
 	bundle.Platform.Platform.Name = "swarm"
 	bundle.Platform.Platform.Version = "0.7.0"
 	return bundle

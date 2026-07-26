@@ -1,0 +1,97 @@
+package pipeline
+
+import (
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/google/uuid"
+)
+
+func TestDeclarativeFirstEventTransitionsFromCanonicalInitialStateOnBothStores(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:         "first-event-transition",
+			Version:      "1",
+			InitialStage: "waiting",
+			Stages: []runtimecontracts.WorkflowStageContract{
+				{ID: "waiting"},
+				{ID: "done"},
+			},
+			TerminalStages: []string{"done"},
+		},
+	}
+	workflow := NewWorkflowDefinition("first-event-transition", []WorkflowStage{
+		{Name: "waiting"},
+		{Name: "done", Terminal: true},
+	}, []WorkflowTransition{{
+		Name: "accept",
+		From: []WorkflowStateID{"waiting"},
+		To:   "done",
+	}})
+
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			pc := &PipelineCoordinator{
+				bus:            &recordingPipelineBus{},
+				workflowStore:  store,
+				expressionEval: newWorkflowExpressionEvaluator(),
+				entityLocks:    map[string]*sync.Mutex{},
+				module: &previewWorkflowModule{
+					bundle:   bundle,
+					workflow: workflow,
+				},
+			}
+			configureWorkflowLifecycleForTest(t, pc)
+
+			entityID := uuid.NewString()
+			eventID := uuid.NewString()
+			occurredAt := time.Now().UTC()
+			evt := eventtest.RunCreatingRootIngress(
+				eventID,
+				events.EventType("request.accepted"),
+				"",
+				"",
+				[]byte(`{}`),
+				0,
+				correlation.RunIDFromContext(ctx),
+				"",
+				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+				occurredAt,
+			)
+			engine := newCoordinatorHandlerExecutionEngine(pc, "acceptor")
+			outcome, err := engine.ExecuteHandlerSteps(ctx, runtimecontracts.SystemNodeEventHandler{
+				AdvancesTo: "done",
+			}, evt, "request.accepted")
+			if err != nil {
+				t.Fatalf("execute first event transition: %v", err)
+			}
+			if outcome == nil || !outcome.Handled {
+				t.Fatalf("first event outcome = %#v, want handled", outcome)
+			}
+
+			instance, found, err := store.Load(ctx, entityID)
+			if err != nil {
+				t.Fatalf("load first-event workflow instance: %v", err)
+			}
+			if !found {
+				t.Fatal("first-event workflow instance was not materialized")
+			}
+			if instance.CurrentState != "done" {
+				t.Fatalf("current state = %q, want done", instance.CurrentState)
+			}
+			if len(instance.TransitionHistory) != 1 {
+				t.Fatalf("transition history = %#v, want one transition", instance.TransitionHistory)
+			}
+			transition := instance.TransitionHistory[0]
+			if transition.From != "waiting" || transition.To != "done" || transition.TriggerEventID != eventID {
+				t.Fatalf("first-event transition = %#v, want waiting -> done from %s", transition, eventID)
+			}
+		})
+	}
+}
