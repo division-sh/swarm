@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,6 +15,29 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
+
+type dynamicFlowRuntimeReadinessFinalizationError struct {
+	cause error
+}
+
+func (e *dynamicFlowRuntimeReadinessFinalizationError) Error() string {
+	if e == nil || e.cause == nil {
+		return "dynamic flow runtime readiness finalization failed"
+	}
+	return "dynamic flow runtime readiness finalization failed: " + e.cause.Error()
+}
+
+func (e *dynamicFlowRuntimeReadinessFinalizationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+func IsDynamicFlowRuntimeReadinessFinalizationError(err error) bool {
+	var target *dynamicFlowRuntimeReadinessFinalizationError
+	return errors.As(err, &target)
+}
 
 func (am *AgentManager) finalizeDynamicFlowRuntimeReadinessForStartup(ctx context.Context) error {
 	if am == nil || am.workflowInstances == nil {

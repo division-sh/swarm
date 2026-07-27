@@ -306,6 +306,57 @@ func (s startupRecoveryManagerStore) LoadAgents(context.Context) ([]runtimemanag
 
 func (startupRecoveryManagerStore) EnsureEntitySchema(context.Context, string) error { return nil }
 
+type startupReadinessFinalizationStore struct {
+	items []runtimepipeline.DynamicFlowRuntimeReadiness
+}
+
+func (*startupReadinessFinalizationStore) MaterializeInitialEntry(
+	context.Context,
+	runtimepipeline.WorkflowInstance,
+	time.Time,
+) (runtimepipeline.WorkflowInitialMaterializationResult, error) {
+	return 0, errors.New("unexpected readiness materialization")
+}
+
+func (*startupReadinessFinalizationStore) ArmInitialEntryTimers(context.Context, string) error {
+	return errors.New("unexpected readiness timer arm")
+}
+
+func (*startupReadinessFinalizationStore) LoadDynamicFlowRuntimeReadiness(
+	context.Context,
+	string,
+	string,
+) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error) {
+	return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, errors.New("unexpected readiness load")
+}
+
+func (s *startupReadinessFinalizationStore) ListDynamicFlowRuntimeReadiness(context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
+	return append([]runtimepipeline.DynamicFlowRuntimeReadiness(nil), s.items...), nil
+}
+
+func (*startupReadinessFinalizationStore) MarkDynamicFlowRuntimeTopologyReady(context.Context, string, string, time.Time) error {
+	return errors.New("unexpected readiness topology completion")
+}
+
+func (*startupReadinessFinalizationStore) MarkDynamicFlowRuntimeCreationEventEmitted(context.Context, string, string, time.Time) error {
+	return errors.New("unexpected readiness creation completion")
+}
+
+func (*startupReadinessFinalizationStore) MarkTerminated(context.Context, string, time.Time) error {
+	return errors.New("unexpected readiness termination")
+}
+
+func (*startupReadinessFinalizationStore) Load(context.Context, string) (runtimepipeline.WorkflowInstance, bool, error) {
+	return runtimepipeline.WorkflowInstance{}, false, errors.New("unexpected readiness workflow load")
+}
+
+func (*startupReadinessFinalizationStore) LoadRouteRecoveryProjection(
+	context.Context,
+	runtimeflowidentity.Route,
+) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error) {
+	return runtimepipeline.WorkflowInstanceRouteRecoveryProjection{}, errors.New("unexpected readiness route projection")
+}
+
 type startupRecoveryFlakyManagerStore struct {
 	remainingFailures int
 	loadErr           error
@@ -1242,6 +1293,73 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 		t.Fatalf("manager_reset_attempted = %#v, want true", detail["manager_reset_attempted"])
 	}
 	assertContainsClass(t, detailClasses(detail["recoverable_work_classes"]), "events missing pipeline receipts")
+}
+
+func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *testing.T) {
+	ctx := testAuthorActivityContext(context.Background())
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	module := loadRuntimeOwnershipWorkflowModule(t)
+	activeWorkflowVersion := strings.TrimSpace(module.SemanticSource().WorkflowVersion())
+	if activeWorkflowVersion == "" {
+		t.Fatal("startup readiness test requires an active workflow version")
+	}
+	deliveryStore := newRuntimeShutdownDeliveryStore(t)
+	managerStore := &startupRecoveryManagerStore{}
+
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
+		SQLDB:           db,
+		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
+		DeliveryStore:   deliveryStore,
+		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
+		EventStore:      startupRecoveryMinimalEventStore{},
+		ManagerStore:    managerStore,
+	}, Options: RuntimeOptions{
+		SelfCheck:      false,
+		WorkflowModule: module,
+		LLMRuntime:     noopLLMRuntime{},
+	}})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	if err := rt.Manager.Shutdown(); err != nil {
+		t.Fatalf("retire constructed manager before readiness failure replacement: %v", err)
+	}
+	runID := eventtest.UUID("startup-readiness-fatal-run")
+	readinessStore := &startupReadinessFinalizationStore{items: []runtimepipeline.DynamicFlowRuntimeReadiness{{
+		InstancePath: "review/inst-1",
+		Plan: runtimepipeline.DynamicFlowRuntimeReadinessPlan{
+			Identity: runtimeflowidentity.Instance{
+				TemplateID: "review", ScopeKey: "review", InstanceID: "inst-1",
+				InstancePath: "review/inst-1", EntityID: eventtest.UUID("startup-readiness-fatal-entity"),
+				HasStoredPath: true,
+			},
+			RunID:           runID,
+			WorkflowVersion: activeWorkflowVersion + "-changed",
+		},
+	}}}
+	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+		return startupManagerReplayRuntimeAgent{id: cfg.ID}, nil
+	}, runtimemanager.AgentManagerOptions{
+		BaseContext:                    ctx,
+		LifecycleStore:                 managerStore,
+		DeliveryStore:                  deliveryStore,
+		SemanticSource:                 module.SemanticSource(),
+		WorkflowInstances:              readinessStore,
+		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
+		WorkOwner:                      rt.WorkOccurrence(),
+	}, managerStore)
+
+	err = rt.Start(ctx)
+	if err == nil {
+		t.Fatal("Start succeeded across dynamic flow readiness finalization failure")
+	}
+	if !runtimemanager.IsDynamicFlowRuntimeReadinessFinalizationError(err) {
+		t.Fatalf("Start error = %v, want dynamic flow readiness finalization error", err)
+	}
+	if !strings.Contains(err.Error(), "workflow version changed") {
+		t.Fatalf("Start error = %v, want exact readiness failure evidence", err)
+	}
 }
 
 func TestRuntimeStart_RecoveryInspectionFailureDoesNotBlockRecoveryEnabledStartup(t *testing.T) {

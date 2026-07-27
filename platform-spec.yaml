@@ -4571,9 +4571,10 @@ engine:
           route and declared-agent revisions, reconcile missing topology, and verify both process-local and persisted
           completeness before timers or creation events become runnable. JSON object key order or PostgreSQL JSONB
           normalization cannot manufacture lifecycle revision drift, while a changed fact must change the revision.
-          Recovery MUST NOT read `entity_state`, synthesize or choose a run, infer readiness from existing subsets, fall back
-          to current-state loading, or re-render route subscribers from route identity alone. Missing, inactive, terminated,
-          malformed, version-drifted, or identity-mismatched projections fail startup closed.
+          Recovery MUST enumerate both running and paused run generations because both remain active and recoverable, while
+          excluding every terminal run state. It MUST NOT read `entity_state`, synthesize or choose a run, infer readiness from
+          existing subsets, fall back to current-state loading, or re-render route subscribers from route identity alone.
+          Missing, inactive, terminated, malformed, version-drifted, or identity-mismatched projections fail startup closed.
       auto_emit: Flow schemas may declare auto_emit_on_create. When the platform creates an instance, it automatically emits
         the declared event after the exact route and complete declared-agent topology are verified and initial timers are
         armed. Event ID, lineage, payload, execution mode, delivery context, and occurrence time belong to the durable
@@ -6542,8 +6543,9 @@ engine:
       projection of the readiness plan, not a second readiness owner. The finalizer reconciles and verifies all declared
       agents and the route in process and storage, records topology readiness, arms initial timers, then publishes the
       deterministic creation-only event exactly once. A failed or partial boundary remains durable pending work; startup
-      fails closed rather than globally restoring its timer through an unverified topology. No best-effort completion
-      callback chain, subset inference, second wakeup owner, migration, or compatibility path exists.
+      finalization failure is boot-fatal, never degraded replay, and prevents global timer restoration through unverified
+      topology. No best-effort completion callback chain, subset inference, second wakeup owner, migration, or compatibility
+      path exists.
     - 3. Leaving an owning stage, matching cancel_on, loop-generation supersession, run quiescence, or preservation cleanup
       may only monotonically cancel or delete the canonical row. Cancellation is in the same mutation as the causal lifecycle
       transition; the in-memory scheduler is updated only after commit. Registration and cancellation do not issue opposing

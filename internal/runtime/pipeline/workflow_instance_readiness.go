@@ -323,7 +323,7 @@ func (s *WorkflowInstanceStore) ListDynamicFlowRuntimeReadiness(ctx context.Cont
 		JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
 		JOIN runs AS run ON run.run_id = readiness.run_id
 		WHERE LOWER(BTRIM(instance.status)) = 'active' AND instance.terminated_at IS NULL
-		  AND LOWER(BTRIM(run.status)) = 'running'
+		  AND LOWER(BTRIM(run.status)) IN ('running', 'paused')
 		ORDER BY readiness.run_id, readiness.instance_id
 	`
 	if s.isSQLite() {
@@ -333,7 +333,7 @@ func (s *WorkflowInstanceStore) ListDynamicFlowRuntimeReadiness(ctx context.Cont
 			JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
 			JOIN runs AS run ON run.run_id = readiness.run_id
 			WHERE LOWER(TRIM(instance.status)) = 'active' AND instance.terminated_at IS NULL
-			  AND LOWER(TRIM(run.status)) = 'running'
+			  AND LOWER(TRIM(run.status)) IN ('running', 'paused')
 			ORDER BY readiness.run_id, readiness.instance_id
 		`
 	}
