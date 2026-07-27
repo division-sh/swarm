@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,7 +34,40 @@ type notifyAllChildrenStore interface {
 	runtimedelivery.Store
 	ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error)
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
+	ListFlowInstanceRouteRecords(context.Context, runtimeflowidentity.Route) ([]runtimebus.FlowInstanceRouteRecord, error)
 	PipelineObligations() runtimepipelineobligation.Store
+}
+
+type failingNotifyAllChildrenPostgresStore struct {
+	*store.PostgresStore
+	failExactRouteReplacement atomic.Bool
+}
+
+func (s *failingNotifyAllChildrenPostgresStore) ReplaceFlowInstanceRouteRecords(
+	ctx context.Context,
+	identity runtimeflowidentity.Route,
+	routes []runtimebus.FlowInstanceRouteRecord,
+) error {
+	if s.failExactRouteReplacement.Load() {
+		return fmt.Errorf("injected postgres exact route replacement failure")
+	}
+	return s.PostgresStore.ReplaceFlowInstanceRouteRecords(ctx, identity, routes)
+}
+
+type failingNotifyAllChildrenSQLiteStore struct {
+	*store.SQLiteRuntimeStore
+	failExactRouteReplacement atomic.Bool
+}
+
+func (s *failingNotifyAllChildrenSQLiteStore) ReplaceFlowInstanceRouteRecords(
+	ctx context.Context,
+	identity runtimeflowidentity.Route,
+	routes []runtimebus.FlowInstanceRouteRecord,
+) error {
+	if s.failExactRouteReplacement.Load() {
+		return fmt.Errorf("injected sqlite exact route replacement failure")
+	}
+	return s.SQLiteRuntimeStore.ReplaceFlowInstanceRouteRecords(ctx, identity, routes)
 }
 
 type notifyAllChildrenRuntime struct {
@@ -41,6 +75,95 @@ type notifyAllChildrenRuntime struct {
 	diagnostics *fanInBarrierDiagnosticBus
 	manager     *runtimemanager.AgentManager
 	pipeline    *runtimepipeline.PipelineCoordinator
+}
+
+func TestDynamicFlowTerminalizationAndRouteReplacementRollbackTogetherOnBothBackends(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T) (notifyAllChildrenStore, *sql.DB, func())
+	}{
+		{
+			name: "postgres",
+			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB, func()) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				selected := &failingNotifyAllChildrenPostgresStore{
+					PostgresStore: storetest.AdmitPostgresRuntimeStore(t, db),
+				}
+				return selected, db, func() { selected.failExactRouteReplacement.Store(true) }
+			},
+		},
+		{
+			name: "sqlite",
+			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB, func()) {
+				base := storetest.StartSQLiteRuntimeStore(t)
+				selected := &failingNotifyAllChildrenSQLiteStore{SQLiteRuntimeStore: base}
+				return selected, base.DB, func() { selected.failExactRouteReplacement.Store(true) }
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			selected, db, failReplacement := tc.setup(t)
+			runID := uuid.NewString()
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
+			runtime := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now)
+
+			publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.opened", map[string]any{
+				"portfolio_id": "portfolio-main",
+			})
+			publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.account.register.requested", map[string]any{
+				"portfolio_id": "portfolio-main",
+				"account_id":   "acct-rollback",
+			})
+			descriptor, ok := notifyAllChildrenAccountDescriptors(t, ctx, selected)["acct-rollback"]
+			if !ok {
+				t.Fatal("created account descriptor is missing")
+			}
+			route := runtimeflowidentity.StoredRoute(
+				notifyallchildren.ChildFlowID,
+				descriptor.InstanceID,
+				descriptor.FlowInstance,
+			)
+			before, err := selected.ListFlowInstanceRouteRecords(ctx, route)
+			if err != nil || len(before) == 0 {
+				t.Fatalf("load prior exact route set: routes=%#v err=%v", before, err)
+			}
+			if !runtime.bus.HasFlowInstanceRoute(route) {
+				t.Fatal("created process route is not active before terminalization")
+			}
+
+			failReplacement()
+			err = runtime.manager.DeactivateFlowInstanceModel(ctx, runtimepipeline.FlowInstanceDeactivationRequest{
+				ContractBundle: source,
+				Instance: runtimeflowidentity.Stored(
+					source,
+					notifyallchildren.ChildFlowID,
+					descriptor.FlowInstance,
+					descriptor.InstanceID,
+					descriptor.EntityID,
+					"",
+				),
+				FinalState: "active",
+			})
+			if err == nil || !strings.Contains(err.Error(), "exact route replacement failure") {
+				t.Fatalf("DeactivateFlowInstanceModel error = %v, want injected route replacement failure", err)
+			}
+
+			if got := loadNotifyAllChildrenFlowInstanceStatus(t, ctx, selected, db, descriptor.FlowInstance); got != "active" {
+				t.Fatalf("flow instance status after replacement rollback = %q, want active", got)
+			}
+			after, err := selected.ListFlowInstanceRouteRecords(ctx, route)
+			if err != nil || !slices.EqualFunc(after, before, func(a, b runtimebus.FlowInstanceRouteRecord) bool {
+				return a == b
+			}) {
+				t.Fatalf("exact route set after replacement rollback: before=%#v after=%#v err=%v", before, after, err)
+			}
+			if !runtime.bus.HasFlowInstanceRoute(route) {
+				t.Fatal("process route retired despite selected mutation rollback")
+			}
+		})
+	}
 }
 
 func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndReplayOnBothBackends(t *testing.T) {
@@ -263,7 +386,10 @@ func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, d
 		}
 	}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	if sqliteStore, ok := backend.(*store.SQLiteRuntimeStore); ok {
+	switch sqliteStore := backend.(type) {
+	case *store.SQLiteRuntimeStore:
+		workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, sqliteStore)
+	case *failingNotifyAllChildrenSQLiteStore:
 		workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, sqliteStore)
 	}
 	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, nil, runtimemanager.AgentManagerOptions{
@@ -296,6 +422,25 @@ func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, d
 		WorkOwner:         workOwner,
 	})
 	return notifyAllChildrenRuntime{bus: eventBus, diagnostics: diagnosticBus, manager: manager, pipeline: coordinator}
+}
+
+func loadNotifyAllChildrenFlowInstanceStatus(
+	t *testing.T,
+	ctx context.Context,
+	backend notifyAllChildrenStore,
+	db *sql.DB,
+	instancePath string,
+) string {
+	t.Helper()
+	query := `SELECT status FROM flow_instances WHERE instance_id = $1`
+	if _, ok := backend.(*failingNotifyAllChildrenSQLiteStore); ok {
+		query = `SELECT status FROM flow_instances WHERE instance_id = ?`
+	}
+	var status string
+	if err := db.QueryRowContext(ctx, query, instancePath).Scan(&status); err != nil {
+		t.Fatalf("load flow instance status %s: %v", instancePath, err)
+	}
+	return strings.TrimSpace(status)
 }
 
 func publishNotifyAllChildrenEvent(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, source semanticview.Source, runID, localEvent string, payload map[string]any) string {

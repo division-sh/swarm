@@ -131,6 +131,28 @@ func TestSelectedContractHandlerDynamicFlowCreationCapabilityMatrix(t *testing.T
 	}
 }
 
+func TestSelectedContractFlowInputResolutionDynamicFlowOwnerMatrix(t *testing.T) {
+	for _, tc := range []struct {
+		mode string
+		want bool
+	}{
+		{mode: runtimecontracts.FlowInputResolutionModeCreate, want: true},
+		{mode: runtimecontracts.FlowInputResolutionModeSelect, want: false},
+		{mode: runtimecontracts.FlowInputResolutionModeSelectOrCreate, want: true},
+		{mode: runtimecontracts.FlowInputResolutionModeFanIn, want: false},
+		{mode: runtimecontracts.FlowInputResolutionModeFanOut, want: false},
+		{mode: runtimecontracts.FlowInputResolutionModeReply, want: false},
+		{mode: "", want: false},
+		{mode: "future-mode", want: true},
+	} {
+		t.Run(strings.ReplaceAll(tc.mode, "-", "_"), func(t *testing.T) {
+			if got := selectedContractFlowInputResolutionRequiresDynamicFlowOwner(tc.mode); got != tc.want {
+				t.Fatalf("selectedContractFlowInputResolutionRequiresDynamicFlowOwner(%q) = %t, want %t", tc.mode, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSelectedContractDeferredWorkAdmissionRejectsSourceDrift(t *testing.T) {
 	plan := store.RunForkPlan{
 		SourceRunID: uuid.NewString(),

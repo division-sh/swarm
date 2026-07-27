@@ -158,6 +158,12 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			SpecRef:        "platform-spec.yaml#engine.timer_model.dynamic_flow_runtime_readiness",
 			Reason:         "dynamic flow activation observes the selected pipeline transaction only to stage exact route publication and the canonical readiness finalizer after commit",
 		},
+		"internal/runtime/manager/flow_runtime_readiness.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2113,
+			SpecRef:        "platform-spec.yaml#engine.timer_model.dynamic_flow_runtime_readiness",
+			Reason:         "the run-scoped readiness owner observes transaction presence only to defer revised topology reconciliation until the selected source-revision mutation commits",
+		},
 		"internal/runtime/dbtx.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,

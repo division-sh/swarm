@@ -71,9 +71,9 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"go|internal/serveapp/main.go|Run|1259":                                                                              {asyncSiteCanonicalOwner, "the MCP listener is admitted under served-process ownership and joined at shutdown"},
 	"go|internal/serveapp/run_stalled_monitor.go|startServeRunStalledEscalation|50":                                      {asyncSiteCanonicalOwner, "the stalled-run monitor has a process lease and exact stop-and-wait completion"},
 	"go|internal/serveapp/serve_author_activity.go|newServeAuthorActivityFollower|56":                                    {asyncSiteCanonicalOwner, "the author-activity follower has a process lease and exact close/join path"},
-	"owner_action|internal/runtime/bus/eventbus.go|EventBus.AddFlowInstanceRouteContext|691":                             {asyncSiteCanonicalOwner, "post-commit route installation is wrapped by an owner-bound action lease"},
-	"owner_action|internal/runtime/bus/eventbus.go|EventBus.AddFlowInstanceRouteContext|711":                             {asyncSiteCanonicalOwner, "rollback route cleanup is wrapped by an owner-bound action lease"},
-	"owner_action|internal/runtime/bus/eventbus.go|EventBus.RemoveFlowInstanceRouteContext|799":                          {asyncSiteCanonicalOwner, "terminal exact-set persistence queues process route retirement under the selected mutation owner"},
+	"owner_action|internal/runtime/bus/eventbus.go|EventBus.AddFlowInstanceRouteContext|694":                             {asyncSiteCanonicalOwner, "post-commit route installation is wrapped by an owner-bound action lease"},
+	"owner_action|internal/runtime/bus/eventbus.go|EventBus.AddFlowInstanceRouteContext|714":                             {asyncSiteCanonicalOwner, "rollback route cleanup is wrapped by an owner-bound action lease"},
+	"owner_action|internal/runtime/bus/eventbus.go|EventBus.RemoveFlowInstanceRouteContext|802":                          {asyncSiteCanonicalOwner, "terminal exact-set persistence queues process route retirement under the selected mutation owner"},
 	"owner_action|internal/runtime/bus/eventbus_publish.go|EventBus.prepareAdmittedPublishInMutation|551":                {asyncSiteCanonicalOwner, "publication-claim rollback is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/bus/eventbus_publish.go|EventBus.prepareAdmittedPublishInMutation|599":                {asyncSiteCanonicalOwner, "post-commit admitted dispatch is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/bus/eventbus_publish.go|EventBus.queuePreparedPublishInMutation|669":                  {asyncSiteCanonicalOwner, "prepared post-commit dispatch is wrapped by an owner-bound action lease"},
@@ -82,9 +82,9 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"owner_action|internal/runtime/bus/outbox.go|engineOutbox.WriteOutbox|118":                                           {asyncSiteCanonicalOwner, "outbox post-commit dispatch is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/bus/outbox.go|engineOutbox.WriteOutbox|83":                                            {asyncSiteCanonicalOwner, "outbox rollback claim release is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/manager/agent_manager.go|AgentManager.spawnAgentInternal|345":                         {asyncSiteCanonicalOwner, "agent registration post-commit work is wrapped by an owner-bound action lease"},
-	"owner_action|internal/runtime/manager/flow_activation.go|AgentManager.ActivateFlowInstance|192":                     {asyncSiteCanonicalOwner, "the one durable dynamic-runtime readiness finalizer is wrapped by an owner-bound post-commit action lease"},
-	"owner_action|internal/runtime/manager/flow_activation.go|AgentManager.EnsureFlowInstance|235":                       {asyncSiteCanonicalOwner, "exact replay and ensure consume the durable readiness finalizer after selected-mutation commit"},
-	"owner_action|internal/runtime/manager/flow_activation.go|AgentManager.DeactivateFlowInstanceModel|733":              {asyncSiteCanonicalOwner, "flow deactivation post-commit work is wrapped by an owner-bound action lease"},
+	"owner_action|internal/runtime/manager/flow_activation.go|AgentManager.ActivateFlowInstance|197":                     {asyncSiteCanonicalOwner, "the one durable dynamic-runtime readiness finalizer is wrapped by an owner-bound post-commit action lease"},
+	"owner_action|internal/runtime/manager/flow_activation.go|AgentManager.EnsureFlowInstance|243":                       {asyncSiteCanonicalOwner, "exact replay and ensure consume the durable readiness finalizer after selected-mutation commit"},
+	"owner_action|internal/runtime/manager/flow_activation.go|AgentManager.deactivateFlowInstanceModelInMutation|763":    {asyncSiteCanonicalOwner, "flow deactivation post-commit work is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/pipeline/activity_engine.go|pipelineActivityIntentWriter.WriteActivityIntents|113":    {asyncSiteCanonicalOwner, "activity intent logging is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/pipeline/coordinator.go|PipelineCoordinator.recordInterceptedEmitDeadLetters|704":     {asyncSiteCanonicalOwner, "dead-letter publication is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/pipeline/generic_schedule_lifecycle.go|PipelineCoordinator.cancelGenericSchedule|64":  {asyncSiteCanonicalOwner, "schedule cancellation is wrapped by an owner-bound action lease"},
@@ -93,6 +93,13 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"owner_action|internal/runtime/pipeline/runtime_support.go|QueuePipelinePostCommitAction|437":                        {asyncSiteCanonicalOwner, "the exported post-commit facade delegates to the canonical owner-bound queue"},
 	"owner_action|internal/runtime/pipeline/runtime_support.go|QueuePipelineRollbackAction|488":                          {asyncSiteCanonicalOwner, "the exported rollback facade delegates to the canonical owner-bound queue"},
 	"owner_action|internal/runtime/pipeline/workflow_timer_owner.go|WorkflowTimerLifecycle.queueWakeupReconcile|514":     {asyncSiteCanonicalOwner, "timer registration and cancellation converge through one owner-bound post-commit action"},
+}
+
+func init() {
+	productionAsyncSiteLedger["owner_action|internal/runtime/manager/flow_runtime_readiness.go|AgentManager.ReconcileDynamicFlowRuntimeReadinessPlansForRun|252"] = asyncSiteLedgerEntry{
+		class: asyncSiteCanonicalOwner,
+		proof: "source revision queues each changed run-local readiness key for post-commit topology reconciliation",
+	}
 }
 
 var retiredLifetimeOwners = []string{

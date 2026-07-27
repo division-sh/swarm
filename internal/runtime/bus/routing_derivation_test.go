@@ -332,7 +332,7 @@ func TestEventBusExactFlowInstanceRouteTopologyRemovesObsoleteObserverRows(t *te
 	}
 }
 
-func TestEventBusStageFlowInstanceRouteExcludesForeignSemanticSourceDescriptors(t *testing.T) {
+func TestEventBusStageFlowInstanceRouteRejectsForeignSemanticSourceDescriptorsBeforeReplacement(t *testing.T) {
 	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
 		WorkerMode:   "template",
 		ProducerMode: "template",
@@ -353,20 +353,21 @@ func TestEventBusStageFlowInstanceRouteExcludesForeignSemanticSourceDescriptors(
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	prior := runtimebus.FlowInstanceRouteRecord{
+		Identity: current, EventPattern: "producer/current/prior.event",
+		SubscriberType: "agent", SubscriberID: "prior-agent", SourceFlow: "producer",
+	}
+	store.routes = map[string]runtimebus.FlowInstanceRouteRecord{"prior": prior}
 	stageCtx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), &sql.Tx{})
-	if err := eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: current}); err != nil {
-		t.Fatalf("StageFlowInstanceRouteContext: %v", err)
+	err = eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: current})
+	if err == nil || !strings.Contains(err.Error(), "semantic source does not match") {
+		t.Fatalf("StageFlowInstanceRouteContext error = %v, want foreign semantic-source rejection", err)
 	}
-	for _, identity := range store.replaceCalls {
-		if identity.InstancePath == foreign.InstancePath {
-			t.Fatalf("foreign semantic-source owner was replaced: %#v", store.replaceCalls)
-		}
+	if len(store.replaceCalls) != 0 {
+		t.Fatalf("route owners replaced across foreign semantic-source rejection: %#v", store.replaceCalls)
 	}
-	for _, route := range store.stagedRoutes {
-		if route.Identity.InstancePath == foreign.InstancePath ||
-			strings.Contains(route.EventPattern, foreign.InstancePath) {
-			t.Fatalf("foreign semantic-source route leaked into persisted topology: %#v", route)
-		}
+	if len(store.stagedRoutes) != 0 || len(store.routes) != 1 || store.routes["prior"] != prior {
+		t.Fatalf("route truth changed across foreign semantic-source rejection: staged=%#v routes=%#v", store.stagedRoutes, store.routes)
 	}
 }
 

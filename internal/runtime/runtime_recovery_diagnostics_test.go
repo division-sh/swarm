@@ -322,6 +322,14 @@ func (*startupReadinessFinalizationStore) ArmInitialEntryTimers(context.Context,
 	return errors.New("unexpected readiness timer arm")
 }
 
+func (*startupReadinessFinalizationStore) ReconcileDynamicFlowRuntimeReadinessPlan(
+	context.Context,
+	runtimepipeline.DynamicFlowRuntimeReadinessPlan,
+	time.Time,
+) (bool, error) {
+	return false, errors.New("unexpected readiness plan reconciliation")
+}
+
 func (s *startupReadinessFinalizationStore) LoadDynamicFlowRuntimeReadiness(
 	_ context.Context,
 	runID string,

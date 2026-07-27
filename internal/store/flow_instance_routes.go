@@ -666,9 +666,15 @@ func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context) (
 		SELECT
 			COALESCE(fi.instance_id, ''),
 			COALESCE(fi.flow_template, ''),
-			COALESCE(run.bundle_hash, ''),
-			COALESCE(run.bundle_source, ''),
-			COALESCE(NULLIF(readiness.plan->>'workflow_version', ''), fi.config->>'workflow_version', ''),
+			CASE
+				WHEN readiness.run_id IS NOT NULL THEN COALESCE(run.bundle_hash, '')
+				ELSE ''
+			END,
+			CASE
+				WHEN readiness.run_id IS NOT NULL THEN COALESCE(run.bundle_source, '')
+				ELSE ''
+			END,
+			COALESCE(NULLIF(BTRIM(readiness.plan->>'workflow_version'), ''), ''),
 			COALESCE(es.fields, '{}'::jsonb)
 		FROM flow_instances fi
 		LEFT JOIN flow_instance_runtime_readiness readiness
@@ -731,13 +737,15 @@ func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptors(ctx context.Conte
 		SELECT
 			COALESCE(fi.instance_id, ''),
 			COALESCE(fi.flow_template, ''),
-			COALESCE(run.bundle_hash, ''),
-			COALESCE(run.bundle_source, ''),
-			COALESCE(
-				NULLIF(json_extract(readiness.plan, '$.workflow_version'), ''),
-				json_extract(fi.config, '$.workflow_version'),
-				''
-			),
+			CASE
+				WHEN readiness.run_id IS NOT NULL THEN COALESCE(run.bundle_hash, '')
+				ELSE ''
+			END,
+			CASE
+				WHEN readiness.run_id IS NOT NULL THEN COALESCE(run.bundle_source, '')
+				ELSE ''
+			END,
+			COALESCE(NULLIF(TRIM(json_extract(readiness.plan, '$.workflow_version')), ''), ''),
 			COALESCE((
 			SELECT es.fields
 			FROM entity_state es
