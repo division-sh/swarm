@@ -354,7 +354,11 @@ func (*startupReadinessFinalizationStore) MarkDynamicFlowRuntimeTopologyReady(co
 	return errors.New("unexpected readiness topology completion")
 }
 
-func (*startupReadinessFinalizationStore) MarkDynamicFlowRuntimeCreationEventEmitted(context.Context, string, string, time.Time) error {
+func (*startupReadinessFinalizationStore) CommitDynamicFlowRuntimeCreationOccurrence(
+	context.Context,
+	runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest,
+	runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher,
+) error {
 	return errors.New("unexpected readiness creation completion")
 }
 

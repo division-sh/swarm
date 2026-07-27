@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -18,6 +19,7 @@ const (
 	selectedContractDeferredWorkRevisionTimerHistory = "revision_timer_history"
 	selectedContractDeferredWorkWorkflowTimer        = "workflow_timer"
 	selectedContractDeferredWorkWorkflowJoinTimeout  = "workflow_join_timeout"
+	selectedContractDeferredWorkDynamicFlowCreation  = "dynamic_flow_instance_creation"
 )
 
 type selectedContractDeferredWorkAdmission struct {
@@ -88,7 +90,7 @@ func (a selectedContractDeferredWorkAdmission) validate(sourceRunID, forkEventID
 }
 
 func selectedContractDeferredWorkCapabilities(plan store.RunForkPlan, source semanticview.Source) ([]string, bool) {
-	capabilities := make([]string, 0, 3)
+	capabilities := make([]string, 0, 4)
 	revisionTimerHistory := false
 	for _, blocker := range plan.UnsupportedBlockers {
 		if strings.TrimSpace(blocker.Code) == store.RunForkBlockerTimerHistoryUnproven {
@@ -107,9 +109,56 @@ func selectedContractDeferredWorkCapabilities(plan store.RunForkPlan, source sem
 				break
 			}
 		}
+		if selectedContractSourceCanCreateDynamicFlow(source) {
+			capabilities = append(capabilities, selectedContractDeferredWorkDynamicFlowCreation)
+		}
 	}
 	sort.Strings(capabilities)
 	return capabilities, revisionTimerHistory
+}
+
+func selectedContractSourceCanCreateDynamicFlow(source semanticview.Source) bool {
+	if source == nil {
+		return false
+	}
+	for flowID := range source.FlowSchemaEntries() {
+		for _, pin := range source.FlowInputEventPins(flowID) {
+			if strings.TrimSpace(pin.Resolution.Mode) != runtimecontracts.FlowInputResolutionModeCreate {
+				continue
+			}
+			if len(semanticview.ResolvedCompositionConnectsTo(source, flowID, pin.PinName())) > 0 {
+				return true
+			}
+		}
+	}
+	for nodeID := range source.NodeEntries() {
+		for _, handler := range source.NodeEventHandlers(nodeID) {
+			if selectedContractHandlerCreatesDynamicFlow(handler) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func selectedContractHandlerCreatesDynamicFlow(handler runtimecontracts.SystemNodeEventHandler) bool {
+	creates := func(action runtimecontracts.ActionSpec) bool {
+		return runtimecontracts.NormalizeHandlerActionID(action.ID) == "create_flow_instance"
+	}
+	if creates(handler.Action) {
+		return true
+	}
+	for _, rules := range [][]runtimecontracts.HandlerRuleEntry{handler.Rules, handler.OnComplete} {
+		for _, rule := range rules {
+			if creates(rule.Action) {
+				return true
+			}
+		}
+	}
+	if handler.Join != nil {
+		return creates(handler.Join.OnComplete.Action) || creates(handler.Join.Timeout.Outcome.Action)
+	}
+	return false
 }
 
 func validSelectedContractDeferredWorkCoordinates(sourceRunID, forkEventID string) bool {

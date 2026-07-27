@@ -1307,6 +1307,10 @@ func (s routeMaterializationDBProofStore) PipelineObligations() runtimepipelineo
 	return s.pg.PipelineObligations()
 }
 
+func (s routeMaterializationDBProofStore) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
+	return s.pg.RunRuntimeMutationContext(ctx, fn)
+}
+
 func (s routeMaterializationDBProofStore) RegisterAuthorActivityEventCatalog(scope runtimeauthoractivity.Scope, descriptors []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error) {
 	return s.pg.RegisterAuthorActivityEventCatalog(scope, descriptors)
 }
@@ -1333,6 +1337,10 @@ func (s routeMaterializationDBProofStore) ListFlowInstanceRoutes(ctx context.Con
 
 func (s routeMaterializationDBProofStore) ListFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.Route) ([]runtimebus.FlowInstanceRouteRecord, error) {
 	return s.pg.ListFlowInstanceRouteRecords(ctx, identity)
+}
+
+func (s routeMaterializationDBProofStore) ListActiveFlowInstanceDescriptors(ctx context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	return s.pg.ListActiveFlowInstanceDescriptors(ctx)
 }
 
 func seedRuntimeTestRun(t *testing.T, db *sql.DB) context.Context {

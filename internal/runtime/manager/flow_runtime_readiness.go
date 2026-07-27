@@ -297,13 +297,39 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	if err != nil {
 		return err
 	}
-	publishCtx := runtimebus.WithoutCommitPublishTransaction(ctx)
-	publishCtx = events.WithDeliveryContext(publishCtx, plan.CreationEvent.DeliveryContext)
-	if err := am.bus.Publish(publishCtx, evt); err != nil {
-		return fmt.Errorf("publish dynamic flow creation event %s: %w", plan.CreationEvent.EventType, err)
+	publisher, ok := am.bus.(runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher)
+	if !ok || publisher == nil {
+		return fmt.Errorf("dynamic flow creation occurrence requires transactional event publisher")
 	}
-	if err := am.workflowInstances.MarkDynamicFlowRuntimeCreationEventEmitted(ctx, plan.RunID, readiness.InstancePath, time.Now().UTC()); err != nil {
-		return fmt.Errorf("record dynamic flow creation event completion %s: %w", readiness.InstancePath, err)
+	creationCtx := events.WithDeliveryContext(ctx, plan.CreationEvent.DeliveryContext)
+	if err := am.workflowInstances.CommitDynamicFlowRuntimeCreationOccurrence(
+		creationCtx,
+		runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest{
+			RunID:        plan.RunID,
+			InstancePath: readiness.InstancePath,
+			Plan:         plan,
+			Event:        evt,
+			OccurredAt:   time.Now().UTC(),
+		},
+		publisher,
+	); err != nil {
+		fresh, found, loadErr := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, key.instancePath)
+		if loadErr == nil && (!found || !fresh.Eligible()) {
+			if retireErr := am.retireDynamicFlowProcessTopology(key.instancePath); retireErr != nil {
+				return errors.Join(
+					fmt.Errorf("commit dynamic flow creation occurrence %s: %w", readiness.InstancePath, err),
+					fmt.Errorf("retire terminal dynamic flow process topology %s: %w", readiness.InstancePath, retireErr),
+				)
+			}
+			return nil
+		}
+		if loadErr != nil {
+			return errors.Join(
+				fmt.Errorf("commit dynamic flow creation occurrence %s: %w", readiness.InstancePath, err),
+				fmt.Errorf("reload dynamic flow creation eligibility %s: %w", readiness.InstancePath, loadErr),
+			)
+		}
+		return fmt.Errorf("commit dynamic flow creation occurrence %s: %w", readiness.InstancePath, err)
 	}
 	published = false
 	return nil

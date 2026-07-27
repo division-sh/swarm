@@ -48,13 +48,16 @@ func TestDynamicFlowRuntimeReadinessProductionConsumersStatic(t *testing.T) {
 	for _, ownerCall := range []string{
 		"LoadDynamicFlowRuntimeReadiness",
 		"MarkDynamicFlowRuntimeTopologyReady",
-		"MarkDynamicFlowRuntimeCreationEventEmitted",
+		"CommitDynamicFlowRuntimeCreationOccurrence",
 	} {
 		for file, count := range calls[ownerCall] {
 			if file != "flow_runtime_readiness.go" || count == 0 {
 				t.Fatalf("%s has non-owner production consumer %s (%d calls)", ownerCall, file, count)
 			}
 		}
+	}
+	if got := calls["MarkDynamicFlowRuntimeCreationEventEmitted"]; len(got) != 0 {
+		t.Fatalf("split creation completion writer remains in manager: %#v", got)
 	}
 	if got := calls["StageFlowInstanceRouteContext"]; len(got) != 1 || got["flow_activation.go"] != 1 {
 		t.Fatalf("route staging consumers = %#v, want one manager adapter", got)

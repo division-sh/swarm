@@ -69,7 +69,7 @@ type WorkflowInstancePersistence interface {
 	ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]DynamicFlowRuntimeReadiness, error)
 	ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]DynamicFlowRuntimeReadinessKey, error)
 	MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, runID, instanceID string, readyAt time.Time) error
-	MarkDynamicFlowRuntimeCreationEventEmitted(ctx context.Context, runID, instanceID string, emittedAt time.Time) error
+	CommitDynamicFlowRuntimeCreationOccurrence(context.Context, DynamicFlowRuntimeCreationOccurrenceRequest, DynamicFlowRuntimeCreationOccurrencePublisher) error
 	Upsert(ctx context.Context, instance WorkflowInstance) error
 	MarkTerminated(ctx context.Context, instanceID string, terminatedAt time.Time) error
 	Mutate(ctx context.Context, instanceID string, fn func(*WorkflowInstance)) error
