@@ -49,18 +49,12 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 	if o.bus == nil || len(intents) == 0 {
 		return nil
 	}
-	var err error
-	ctx, err = o.bus.admitBundleSourceFact(ctx)
-	if err != nil {
-		return err
-	}
-	lease, err := o.bus.beginRuntimeWork(ctx)
+	ctx, lease, err := o.bus.beginRuntimeWork(ctx)
 	if err != nil {
 		return err
 	}
 	if lease != nil {
 		defer func() { _ = lease.Done() }()
-		ctx = bindWorkContext(ctx, lease, o.bus.workOwner)
 	}
 	transaction, ok := CommitPublishTransactionFromContext(ctx)
 	if !ok || transaction == nil {
@@ -142,18 +136,12 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 	if d.bus == nil || len(intents) == 0 {
 		return nil
 	}
-	var err error
-	ctx, err = d.bus.admitBundleSourceFact(ctx)
-	if err != nil {
-		return err
-	}
-	lease, err := d.bus.beginRuntimeWork(ctx)
+	ctx, lease, err := d.bus.beginRuntimeWork(ctx)
 	if err != nil {
 		return err
 	}
 	if lease != nil {
 		defer func() { _ = lease.Done() }()
-		ctx = bindWorkContext(ctx, lease, d.bus.workOwner)
 	}
 	normalized := make([]runtimeengine.EmitIntent, 0, len(intents))
 	for i := range intents {

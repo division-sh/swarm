@@ -183,7 +183,13 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 			required: []string{
 				"durable event bus requires an immutable bundle source fact",
 				"cleanupCtx, err := eb.admitBundleSourceFact(context.Background())",
+				"cleanupCtx, err := p.bus.admitBundleSourceFact(p.lifecycleCtx)",
+				"cleanupCtx, err := eb.admitBundleSourceFact(context.WithoutCancel(handle.lifecycleCtx))",
 				"operation.publicationClaim.Release(cleanupCtx)",
+			},
+			prohibited: []string{
+				"retireAndWait(context.Background()",
+				"NewRoute(context.Background()",
 			},
 		},
 		{
@@ -198,6 +204,10 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 				"eb.admitBundleSourceFact(ctx)",
 				"eb.admitBundleSourceFact(dispatchCtx)",
 				"dispatchCtx, err := eb.admitPreparedPublish(ctx, prepared)",
+				"func (eb *EventBus) beginRuntimeWork(ctx context.Context) (context.Context, *worklifetime.Lease, error)",
+				"admittedCtx, err := eb.admitBundleSourceFact(ctx)",
+				"lease, err := owner.Begin(admittedCtx)",
+				"return bindWorkContext(admittedCtx, lease, owner), lease, nil",
 			},
 			prohibited: []string{
 				"func (eb *EventBus) WithBundleSourceFact",
@@ -207,9 +217,9 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 			path: "internal/runtime/bus/outbox.go",
 			required: []string{
 				"func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.EmitIntent) error",
-				"ctx, err = o.bus.admitBundleSourceFact(ctx)",
+				"ctx, lease, err := o.bus.beginRuntimeWork(ctx)",
 				"func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runtimeengine.EmitIntent) error",
-				"ctx, err = d.bus.admitBundleSourceFact(ctx)",
+				"ctx, lease, err := d.bus.beginRuntimeWork(ctx)",
 				"func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fallback runtimeengine.EmitIntent)",
 				"ctx, err = d.bus.admitBundleSourceFact(ctx)",
 				"dispatchCtx = runtimecorrelation.WithBundleSourceFact(dispatchCtx, sourceFact)",
@@ -227,10 +237,19 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 			path: "internal/runtime/bus/sweeper.go",
 			required: []string{
 				"func (eb *EventBus) StartOutboxSweeper(ctx context.Context, cfg OutboxSweeperConfig) error",
+				"ctx, lease, err := eb.beginRuntimeWork(ctx)",
 				"func (eb *EventBus) SweepPipelineObligations(ctx context.Context, limit int)",
 				"func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtimepipelineobligation.ScanRequest, limit int)",
 				"func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, limit int)",
 				"func (eb *EventBus) closePipelineScanLocked(ctx context.Context, request runtimepipelineobligation.ScanRequest) error",
+				"ctx, err = eb.admitBundleSourceFact(ctx)",
+			},
+		},
+		{
+			path: "internal/runtime/bus/run_completion.go",
+			required: []string{
+				"func (eb *EventBus) ConvergeDeliveryRunCompletion(ctx context.Context, evt events.Event) error",
+				"func (eb *EventBus) ConvergeNormalRunCompletionForEvent(ctx context.Context, eventID string) error",
 				"ctx, err = eb.admitBundleSourceFact(ctx)",
 			},
 		},
@@ -266,6 +285,13 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 			},
 		},
 		{
+			path: "platform-spec.yaml",
+			required: []string{
+				"Every durable operation admits that fact before work-occurrence admission or local/store mutation",
+				"internal subscriptions, and agent/internal route generations remain bound to that exact fact",
+			},
+		},
+		{
 			path: "internal/apiv1/operator_runtime_context.go",
 			required: []string{
 				"DecodeBundleSourceFact(availability.BundleHash, availability.BundleSource.String())",
@@ -291,6 +317,130 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 			if strings.Contains(source, prohibited) {
 				t.Errorf("%s restored non-authoritative bundle source handoff %q", check.path, prohibited)
 			}
+		}
+	}
+}
+
+func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
+	root := repositoryRootForBundleIdentityTest(t)
+	const (
+		operationMutation      = "mutation"
+		operationRetained      = "retained capability"
+		operationAdmittedChild = "already-admitted child"
+		operationPureRead      = "pure read"
+	)
+	ledger := map[string]string{
+		"AbandonPreparedPublish":                 operationMutation,
+		"AddFlowInstanceRoute":                   operationAdmittedChild,
+		"AddFlowInstanceRouteContext":            operationMutation,
+		"AdmitBundleSourceFact":                  operationPureRead,
+		"CheckDirectRecipients":                  operationPureRead,
+		"CheckPublishRecipientPlan":              operationPureRead,
+		"ConvergeDeliveryRunCompletion":          operationMutation,
+		"ConvergeNormalRunCompletionForEvent":    operationMutation,
+		"DispatchPreparedPublish":                operationMutation,
+		"DispatchPreparedPublishAndWait":         operationMutation,
+		"DispatchPreparedPublishAsync":           operationMutation,
+		"EngineDispatcher":                       operationRetained,
+		"EngineOutbox":                           operationRetained,
+		"HasFlowInstanceRoute":                   operationPureRead,
+		"LogRuntime":                             operationMutation,
+		"MarkDeliveryInProgress":                 operationMutation,
+		"OutboxSweeperActive":                    operationPureRead,
+		"PinRoutingDescriptors":                  operationPureRead,
+		"PipelineObligationOwner":                operationRetained,
+		"PipelineWorkPresence":                   operationPureRead,
+		"PrepareAgentRoute":                      operationRetained,
+		"PrepareInboundDeliveryBatchInMutation":  operationMutation,
+		"PreparePublishInMutation":               operationMutation,
+		"PrepareSelectedForkPublish":             operationMutation,
+		"Publish":                                operationMutation,
+		"PublishAcknowledged":                    operationMutation,
+		"PublishAndWait":                         operationMutation,
+		"PublishDirect":                          operationMutation,
+		"PublishDirectInMutation":                operationMutation,
+		"PublishDirectRoutes":                    operationMutation,
+		"PublishInMutation":                      operationAdmittedChild,
+		"RecoverPersistedPipeline":               operationMutation,
+		"RegisterRuntimeActiveAgentDescriptor":   operationRetained,
+		"ReleaseRunQueue":                        operationMutation,
+		"ReleaseRuntimeIngressQueue":             operationMutation,
+		"RemoveAgentRoute":                       operationMutation,
+		"RemoveFlowInstanceRoute":                operationAdmittedChild,
+		"RemoveFlowInstanceRouteContext":         operationMutation,
+		"ReplaceAgentRoute":                      operationAdmittedChild,
+		"ResetInMemoryState":                     operationMutation,
+		"ResolveSubscribedRecipients":            operationPureRead,
+		"RestorePersistedFlowInstanceRoute":      operationMutation,
+		"RouteTable":                             operationRetained,
+		"RuntimeMutationRunner":                  operationRetained,
+		"SetInterceptors":                        operationRetained,
+		"SetLoggerHook":                          operationRetained,
+		"SetProviderOutputAuthorizationVerifier": operationRetained,
+		"SetRunDispatchGate":                     operationRetained,
+		"SetRuntimeIngressDispatchGate":          operationRetained,
+		"StartOutboxSweeper":                     operationRetained,
+		"Store":                                  operationRetained,
+		"SubscribeInternal":                      operationRetained,
+		"SweepPipelineObligations":               operationMutation,
+		"WaitForOutboxSweeper":                   operationMutation,
+		"WaitForQuiescence":                      operationMutation,
+	}
+	found := map[string]bool{}
+	methodPattern := regexp.MustCompile(`func \([A-Za-z_][A-Za-z0-9_]* \*EventBus\) ([A-Z][A-Za-z0-9_]*)\(`)
+	err := filepath.WalkDir(filepath.Join(root, "internal", "runtime", "bus"), func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		for _, match := range methodPattern.FindAllStringSubmatch(readRepositoryFile(t, path), -1) {
+			method := match[1]
+			category, ok := ledger[method]
+			if !ok {
+				t.Errorf("%s is an unclassified exported EventBus operation", method)
+				continue
+			}
+			switch category {
+			case operationMutation, operationRetained, operationAdmittedChild, operationPureRead:
+			default:
+				t.Errorf("%s has unknown EventBus operation category %q", method, category)
+			}
+			found[method] = true
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk EventBus exported operations: %v", err)
+	}
+	for method := range ledger {
+		if !found[method] {
+			t.Errorf("classified EventBus operation %s no longer exists", method)
+		}
+	}
+
+	for _, operationRoot := range []struct {
+		category string
+		path     string
+		owner    string
+		guard    string
+	}{
+		{operationMutation, "internal/runtime/bus/eventbus_publish.go", "beginRuntimeWork", "admitBundleSourceFact(ctx)"},
+		{operationMutation, "internal/runtime/bus/eventbus_publish.go", "convergeStandaloneRuntimePlatformRun", "admitBundleSourceFact(ctx)"},
+		{operationMutation, "internal/runtime/bus/outbox.go", "dispatchPendingOutboxOperation", "admitBundleSourceFact(ctx)"},
+		{operationMutation, "internal/runtime/bus/outbox.go", "dispatchAndRecord", "admitBundleSourceFact(ctx)"},
+		{operationMutation, "internal/runtime/bus/outbox.go", "clearPendingOutboxOperation", "admitBundleSourceFact(ctx)"},
+		{operationMutation, "internal/runtime/bus/pipeline_publication_claim.go", "claimPipelinePublication", "admitBundleSourceFact(ctx)"},
+		{operationRetained, "internal/runtime/bus/eventbus.go", "completeInternalSubscription", "admitBundleSourceFact(context.WithoutCancel(handle.lifecycleCtx))"},
+		{operationMutation, "internal/runtime/bus/sweeper.go", "closePipelineScanLocked", "admitBundleSourceFact(ctx)"},
+	} {
+		source := readRepositoryFile(t, filepath.Join(root, filepath.FromSlash(operationRoot.path)))
+		if !strings.Contains(source, "func ") || !strings.Contains(source, operationRoot.owner) || !strings.Contains(source, operationRoot.guard) {
+			t.Errorf(
+				"%s store-facing %s root %s no longer consumes %q",
+				operationRoot.category, operationRoot.path, operationRoot.owner, operationRoot.guard,
+			)
 		}
 	}
 }

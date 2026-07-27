@@ -364,6 +364,11 @@ func (eb *EventBus) MarkDeliveryInProgress(ctx context.Context, agentID, session
 	if eb == nil || eb.store == nil {
 		return false, nil
 	}
+	var err error
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return false, err
+	}
 	claim, ok := runtimedelivery.ClaimFromContext(ctx)
 	if !ok || claim.SubscriberClass() != runtimedelivery.SubscriberAgent || claim.SubscriberID() != strings.TrimSpace(agentID) {
 		return false, fmt.Errorf("agent session binding requires the exact current delivery claim")
@@ -402,6 +407,9 @@ func (eb *EventBus) RestorePersistedFlowInstanceRoute(req FlowInstanceRouteMater
 	if eb == nil {
 		return errors.New("event bus is required")
 	}
+	if _, err := eb.admitBundleSourceFact(context.Background()); err != nil {
+		return err
+	}
 	eb.mu.RLock()
 	table := eb.routeTable
 	eb.mu.RUnlock()
@@ -415,8 +423,10 @@ func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowIns
 	if eb == nil {
 		return errors.New("event bus is required")
 	}
-	if ctx == nil {
-		ctx = context.Background()
+	var err error
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
 	}
 	eb.mu.RLock()
 	table := eb.routeTable
@@ -450,10 +460,12 @@ func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowIns
 			}
 		}
 		if !hadStagedRoute {
-			if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
-				actionCtx = runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(actionCtx))
+			postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(
+				runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx)),
+			)
+			if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(context.Context) {
 				if err := table.AddFlowInstanceRoute(req); err != nil {
-					_ = eb.LogRuntime(actionCtx, runtimepipeline.RuntimeLogEntry{
+					_ = eb.LogRuntime(postCommitCtx, runtimepipeline.RuntimeLogEntry{
 						Level: "error", Message: "Post-commit flow-instance route publication failed",
 						Component: "eventbus", Action: "flow_instance_route_post_commit_publish_failed",
 						Detail: map[string]any{"instance_path": req.Identity.InstancePath, "error": err.Error()},
@@ -508,6 +520,11 @@ func (eb *EventBus) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) 
 func (eb *EventBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity runtimeflowidentity.Route) error {
 	if eb == nil {
 		return errors.New("event bus is required")
+	}
+	var err error
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
 	}
 	eb.mu.RLock()
 	table := eb.routeTable
@@ -685,6 +702,11 @@ func (eb *EventBus) WaitForQuiescence(ctx context.Context) error {
 	if eb == nil {
 		return nil
 	}
+	var err error
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
+	}
 	eb.mu.Lock()
 	routes := append([]*agentRouteHandle(nil), eb.retiringAgentRoutes...)
 	handles := append([]*internalSubscriptionHandle(nil), eb.retiringInternalHandles...)
@@ -718,14 +740,15 @@ type AgentRoutePreparation interface {
 }
 
 type preparedAgentRoute struct {
-	mu         sync.Mutex
-	bus        *EventBus
-	token      runtimeeffects.LifecycleToken
-	eventTypes []events.EventType
-	route      *agentRouteHandle
-	ch         chan *LocalDelivery
-	published  bool
-	discarded  bool
+	mu           sync.Mutex
+	bus          *EventBus
+	lifecycleCtx context.Context
+	token        runtimeeffects.LifecycleToken
+	eventTypes   []events.EventType
+	route        *agentRouteHandle
+	ch           chan *LocalDelivery
+	published    bool
+	discarded    bool
 }
 
 func (p *preparedAgentRoute) Deliveries() <-chan *LocalDelivery {
@@ -738,6 +761,10 @@ func (p *preparedAgentRoute) Deliveries() <-chan *LocalDelivery {
 func (p *preparedAgentRoute) Publish() error {
 	if p == nil || p.bus == nil || p.route == nil {
 		return errors.New("prepared agent route is required")
+	}
+	cleanupCtx, err := p.bus.admitBundleSourceFact(p.lifecycleCtx)
+	if err != nil {
+		return err
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -753,18 +780,18 @@ func (p *preparedAgentRoute) Publish() error {
 	old, oldInternal := eb.detachSubscriberLocked(agentID)
 	eb.mu.Unlock()
 	if old != nil {
-		if err := old.retireAndWait(context.Background(), eb.store); err != nil {
+		if err := old.retireAndWait(cleanupCtx, eb.store); err != nil {
 			eb.retainRetiringAgentRoute(old)
 			p.discarded = true
-			_ = p.route.retireAndWait(context.Background(), eb.store)
+			_ = p.route.retireAndWait(cleanupCtx, eb.store)
 			return fmt.Errorf("retire predecessor agent route: %w", err)
 		}
 	}
 	if oldInternal != nil {
-		if err := oldInternal.retireAndWait(context.Background(), eb.store); err != nil {
+		if err := oldInternal.retireAndWait(cleanupCtx, eb.store); err != nil {
 			eb.retainRetiringInternalHandle(oldInternal)
 			p.discarded = true
-			_ = p.route.retireAndWait(context.Background(), eb.store)
+			_ = p.route.retireAndWait(cleanupCtx, eb.store)
 			return fmt.Errorf("retire predecessor internal route: %w", err)
 		}
 	}
@@ -792,6 +819,14 @@ func (p *preparedAgentRoute) Discard() error {
 	if p == nil || p.route == nil {
 		return nil
 	}
+	eb := p.bus
+	if eb == nil {
+		return nil
+	}
+	cleanupCtx, err := eb.admitBundleSourceFact(p.lifecycleCtx)
+	if err != nil {
+		return err
+	}
 	p.mu.Lock()
 	if p.discarded {
 		p.mu.Unlock()
@@ -799,27 +834,27 @@ func (p *preparedAgentRoute) Discard() error {
 	}
 	p.discarded = true
 	published := p.published
-	eb := p.bus
 	token := p.token
 	route := p.route
 	p.mu.Unlock()
-	if published && eb != nil {
+	if published {
 		eb.RemoveAgentRoute(token)
 		return nil
 	}
-	if eb == nil {
-		return nil
-	}
-	return route.retireAndWait(context.Background(), eb.store)
+	return route.retireAndWait(cleanupCtx, eb.store)
 }
 
 func (eb *EventBus) PrepareAgentRoute(token runtimeeffects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) AgentRoutePreparation {
 	if eb == nil || eb.workOwner == nil || !token.Valid() || !admission.ValidForAgent(token.AgentID) {
 		return nil
 	}
+	lifecycleCtx, err := eb.admitBundleSourceFact(context.Background())
+	if err != nil {
+		return nil
+	}
 	eventTypes := admittedAgentEventTypes(admission)
 	agentID := strings.TrimSpace(token.AgentID)
-	owner, err := eb.workOwner.NewRoute(context.Background(), worklifetime.RouteIdentity{
+	owner, err := eb.workOwner.NewRoute(lifecycleCtx, worklifetime.RouteIdentity{
 		RuntimeEpoch: uint64(token.RuntimeEpoch), AgentID: agentID, Generation: token.Generation,
 	})
 	if err != nil {
@@ -827,7 +862,10 @@ func (eb *EventBus) PrepareAgentRoute(token runtimeeffects.LifecycleToken, admis
 	}
 	ch := make(chan *LocalDelivery, 128)
 	route := newAgentRouteHandle(token, ch, owner)
-	return &preparedAgentRoute{bus: eb, token: token, eventTypes: eventTypes, route: route, ch: ch}
+	return &preparedAgentRoute{
+		bus: eb, lifecycleCtx: lifecycleCtx, token: token,
+		eventTypes: eventTypes, route: route, ch: ch,
+	}
 }
 
 // ReplaceAgentRoute remains the direct exact-generation operation for callers
@@ -855,6 +893,10 @@ func (eb *EventBus) RemoveAgentRoute(token runtimeeffects.LifecycleToken) {
 	if eb == nil || !token.Valid() {
 		return
 	}
+	cleanupCtx, err := eb.admitBundleSourceFact(context.Background())
+	if err != nil {
+		return
+	}
 	agentID := strings.TrimSpace(token.AgentID)
 	eb.mu.Lock()
 	if current := eb.agentRouteHandles[agentID]; current == nil || current.token != token {
@@ -864,7 +906,7 @@ func (eb *EventBus) RemoveAgentRoute(token runtimeeffects.LifecycleToken) {
 	route, _ := eb.detachSubscriberLocked(agentID)
 	eb.mu.Unlock()
 	if route != nil {
-		if err := route.retireAndWait(context.Background(), eb.store); err != nil {
+		if err := route.retireAndWait(cleanupCtx, eb.store); err != nil {
 			eb.retainRetiringAgentRoute(route)
 		}
 	}
@@ -874,8 +916,10 @@ func (eb *EventBus) SubscribeInternal(ctx context.Context, subscriberID string, 
 	if eb == nil || eb.workOwner == nil {
 		return nil, errors.New("event bus runtime work owner is required")
 	}
-	if ctx == nil {
-		ctx = context.Background()
+	var err error
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return nil, err
 	}
 	subscriberID = strings.TrimSpace(subscriberID)
 	if subscriberID == "" {
@@ -948,6 +992,10 @@ func (eb *EventBus) completeInternalSubscription(handle *internalSubscriptionHan
 	if eb == nil || handle == nil {
 		return nil
 	}
+	cleanupCtx, err := eb.admitBundleSourceFact(context.WithoutCancel(handle.lifecycleCtx))
+	if err != nil {
+		return err
+	}
 	eb.mu.Lock()
 	natural := eb.internalHandles[handle.subscriberID] == handle
 	if natural {
@@ -957,7 +1005,7 @@ func (eb *EventBus) completeInternalSubscription(handle *internalSubscriptionHan
 	if !natural {
 		return nil
 	}
-	if err := handle.retireAndWait(context.Background(), eb.store); err != nil {
+	if err := handle.retireAndWait(cleanupCtx, eb.store); err != nil {
 		eb.retainRetiringInternalHandle(handle)
 		return err
 	}
