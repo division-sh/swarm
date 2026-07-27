@@ -286,6 +286,8 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			}
 			if prior, found, err := store.LoadDynamicFlowRuntimeReadiness(ctx, runID, instance.StorageRef); err != nil || !found || prior.CreationEventEmittedAt.IsZero() {
 				t.Fatalf("retired generation readiness changed: found=%v readiness=%#v err=%v", found, prior, err)
+			} else if prior.Eligible() {
+				t.Fatal("retired generation readiness remained eligible")
 			}
 			if successor, found, err := store.LoadDynamicFlowRuntimeReadiness(nextContext, nextRunID, instance.StorageRef); err != nil || !found || !successor.TopologyReadyAt.IsZero() {
 				t.Fatalf("successor generation readiness: found=%v readiness=%#v err=%v", found, successor, err)
@@ -308,9 +310,21 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if _, err := store.db.ExecContext(nextContext, statusQuery, "cancelled", nextRunID); err != nil {
 				t.Fatalf("retire successor readiness run: %v", err)
 			}
+			if err := store.MarkDynamicFlowRuntimeTopologyReady(nextContext, nextRunID, instance.StorageRef, occurredAt.Add(2*time.Hour)); err == nil {
+				t.Fatal("terminal successor accepted topology completion")
+			}
+			if successor, found, err := store.LoadDynamicFlowRuntimeReadiness(nextContext, nextRunID, instance.StorageRef); err != nil || !found {
+				t.Fatalf("load terminal successor readiness: found=%v err=%v", found, err)
+			} else if successor.Eligible() {
+				t.Fatal("terminal successor readiness remained eligible")
+			}
 			items, err = store.ListDynamicFlowRuntimeReadiness(nextContext)
 			if err != nil || len(items) != 0 {
 				t.Fatalf("terminal generation readiness: items=%#v err=%v", items, err)
+			}
+			keys, err := store.ListDynamicFlowRuntimeReadinessKeys(nextContext)
+			if err != nil || len(keys) != 2 || keys[0].InstancePath != instance.StorageRef || keys[1].InstancePath != instance.StorageRef {
+				t.Fatalf("readiness route owners: keys=%#v err=%v", keys, err)
 			}
 
 			changed := plan

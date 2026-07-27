@@ -799,7 +799,7 @@ func newDurableReplyConformanceBus(t *testing.T, ctx context.Context, backend du
 		}
 		var err error
 		if _, exists := persistedByPath[req.Identity.InstancePath]; exists {
-			err = eb.RestorePersistedFlowInstanceRoute(req)
+			err = eb.PublishPersistedFlowInstanceRoute(req)
 		} else {
 			err = eb.AddFlowInstanceRouteContext(ctx, req)
 		}

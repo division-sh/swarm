@@ -427,33 +427,34 @@ func (eb *EventBus) VerifyFlowInstanceRoute(ctx context.Context, identity runtim
 	if err != nil {
 		return err
 	}
-	routeRecordKeys := func(records []FlowInstanceRouteRecord) []string {
-		keys := make([]string, 0, len(records))
-		for _, record := range records {
-			keys = append(keys, strings.Join([]string{
-				strings.Trim(record.Identity.InstancePath, "/"),
-				strings.TrimSpace(record.EventPattern),
-				strings.TrimSpace(record.SubscriberType),
-				strings.TrimSpace(record.SubscriberID),
-				strings.TrimSpace(record.SourceFlow),
-			}, "\x00"))
-		}
-		sort.Strings(keys)
-		return keys
-	}
-	if !slices.Equal(routeRecordKeys(actual), routeRecordKeys(expected)) {
+	if !slices.Equal(flowInstanceRouteRecordKeys(actual), flowInstanceRouteRecordKeys(expected)) {
 		return fmt.Errorf("flow-instance route %s persisted topology does not match process topology", identity.InstancePath)
 	}
 	return nil
+}
+
+func flowInstanceRouteRecordKeys(records []FlowInstanceRouteRecord) []string {
+	keys := make([]string, 0, len(records))
+	for _, record := range records {
+		keys = append(keys, strings.Join([]string{
+			strings.Trim(record.Identity.InstancePath, "/"),
+			strings.TrimSpace(record.EventPattern),
+			strings.TrimSpace(record.SubscriberType),
+			strings.TrimSpace(record.SubscriberID),
+			strings.TrimSpace(record.SourceFlow),
+		}, "\x00"))
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func (eb *EventBus) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationRequest) error {
 	return eb.AddFlowInstanceRouteContext(context.Background(), req)
 }
 
-// RestorePersistedFlowInstanceRoute rebuilds the in-memory route table from
-// already-persisted route truth without rewriting that truth during startup.
-func (eb *EventBus) RestorePersistedFlowInstanceRoute(req FlowInstanceRouteMaterializationRequest) error {
+// PublishPersistedFlowInstanceRoute makes already-persisted route truth
+// process-visible without rewriting storage.
+func (eb *EventBus) PublishPersistedFlowInstanceRoute(req FlowInstanceRouteMaterializationRequest) error {
 	if eb == nil {
 		return errors.New("event bus is required")
 	}
@@ -467,6 +468,109 @@ func (eb *EventBus) RestorePersistedFlowInstanceRoute(req FlowInstanceRouteMater
 		return errors.New("route table is not initialized")
 	}
 	return table.AddFlowInstanceRoute(req.Normalized())
+}
+
+// RetirePublishedFlowInstanceRoute removes process-visible route truth without
+// changing its durable lifecycle.
+func (eb *EventBus) RetirePublishedFlowInstanceRoute(identity runtimeflowidentity.Route) error {
+	if eb == nil {
+		return errors.New("event bus is required")
+	}
+	eb.mu.RLock()
+	table := eb.routeTable
+	eb.mu.RUnlock()
+	if table == nil {
+		return errors.New("route table is not initialized")
+	}
+	return table.RemoveFlowInstanceRoute(identity)
+}
+
+// StageFlowInstanceRouteContext persists the exact derived route set but keeps
+// it process-invisible until its topology owner publishes it.
+func (eb *EventBus) StageFlowInstanceRouteContext(ctx context.Context, req FlowInstanceRouteMaterializationRequest) error {
+	if eb == nil {
+		return errors.New("event bus is required")
+	}
+	var err error
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
+	}
+	eb.mu.RLock()
+	table := eb.routeTable
+	eb.mu.RUnlock()
+	if table == nil {
+		return errors.New("route table is not initialized")
+	}
+	persister, ok := eb.store.(FlowInstanceRoutePersistence)
+	if !ok || persister == nil {
+		return errors.New("flow-instance route persistence is required")
+	}
+	req = req.Normalized()
+	expectedTable, err := DeriveRouteTable(table.source)
+	if err != nil {
+		return fmt.Errorf("derive persisted flow-instance route table: %w", err)
+	}
+	if err := expectedTable.AddFlowInstanceRoute(req); err != nil {
+		return err
+	}
+	expectedRoutes := expectedTable.MaterializedRoutes(req.Identity)
+	persistedRouteExact := func(readCtx context.Context) (bool, error) {
+		reader, ok := eb.store.(FlowInstanceRouteRecordReader)
+		if !ok || reader == nil {
+			return false, nil
+		}
+		actual, err := reader.ListFlowInstanceRouteRecords(readCtx, req.Identity)
+		if err != nil {
+			return false, err
+		}
+		return slices.Equal(
+			flowInstanceRouteRecordKeys(actual),
+			flowInstanceRouteRecordKeys(expectedRoutes),
+		), nil
+	}
+	stage := func(txctx context.Context) error {
+		staged := transactionRouteTableFromContext(txctx)
+		if staged == nil {
+			var err error
+			staged, err = DeriveRouteTable(table.source)
+			if err != nil {
+				return fmt.Errorf("derive persisted flow-instance route table: %w", err)
+			}
+		}
+		if err := staged.AddFlowInstanceRoute(req); err != nil {
+			return err
+		}
+		routes := staged.MaterializedRoutes(req.Identity)
+		exact, err := persistedRouteExact(txctx)
+		if err != nil {
+			return err
+		}
+		if exact {
+			return nil
+		}
+		for _, route := range routes {
+			if err := persister.UpsertFlowInstanceRoute(txctx, route); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if _, active := runtimepipeline.PipelineSQLTxFromContext(ctx); active {
+		return stage(ctx)
+	}
+	exact, err := persistedRouteExact(ctx)
+	if err != nil {
+		return err
+	}
+	if exact {
+		return nil
+	}
+	runner := eb.RuntimeMutationRunner()
+	if runner == nil {
+		return errors.New("flow-instance route staging requires selected runtime mutation")
+	}
+	return runner.RunRuntimeMutationContext(ctx, stage)
 }
 
 func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowInstanceRouteMaterializationRequest) error {

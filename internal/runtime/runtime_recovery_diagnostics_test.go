@@ -322,16 +322,32 @@ func (*startupReadinessFinalizationStore) ArmInitialEntryTimers(context.Context,
 	return errors.New("unexpected readiness timer arm")
 }
 
-func (*startupReadinessFinalizationStore) LoadDynamicFlowRuntimeReadiness(
-	context.Context,
-	string,
-	string,
+func (s *startupReadinessFinalizationStore) LoadDynamicFlowRuntimeReadiness(
+	_ context.Context,
+	runID string,
+	instancePath string,
 ) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error) {
-	return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, errors.New("unexpected readiness load")
+	for _, item := range s.items {
+		if item.Plan.RunID == runID && item.InstancePath == instancePath {
+			return item, true, nil
+		}
+	}
+	return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, nil
 }
 
 func (s *startupReadinessFinalizationStore) ListDynamicFlowRuntimeReadiness(context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
 	return append([]runtimepipeline.DynamicFlowRuntimeReadiness(nil), s.items...), nil
+}
+
+func (s *startupReadinessFinalizationStore) ListDynamicFlowRuntimeReadinessKeys(context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadinessKey, error) {
+	keys := make([]runtimepipeline.DynamicFlowRuntimeReadinessKey, 0, len(s.items))
+	for _, item := range s.items {
+		keys = append(keys, runtimepipeline.DynamicFlowRuntimeReadinessKey{
+			RunID:        item.Plan.RunID,
+			InstancePath: item.InstancePath,
+		})
+	}
+	return keys, nil
 }
 
 func (*startupReadinessFinalizationStore) MarkDynamicFlowRuntimeTopologyReady(context.Context, string, string, time.Time) error {
@@ -1327,7 +1343,9 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 	}
 	runID := eventtest.UUID("startup-readiness-fatal-run")
 	readinessStore := &startupReadinessFinalizationStore{items: []runtimepipeline.DynamicFlowRuntimeReadiness{{
-		InstancePath: "review/inst-1",
+		InstancePath:   "review/inst-1",
+		RunStatus:      "running",
+		InstanceStatus: "active",
 		Plan: runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 			Identity: runtimeflowidentity.Instance{
 				TemplateID: "review", ScopeKey: "review", InstanceID: "inst-1",

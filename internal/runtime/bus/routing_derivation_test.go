@@ -2,6 +2,7 @@ package bus_test
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"time"
 )
@@ -109,7 +111,7 @@ func (s *routePersistenceTestStore) UpsertFlowInstanceRoute(_ context.Context, r
 	return nil
 }
 
-func TestEventBusRestorePersistedFlowInstanceRouteDoesNotRewritePersistence(t *testing.T) {
+func TestEventBusPublishPersistedFlowInstanceRouteDoesNotRewritePersistence(t *testing.T) {
 	store := &routePersistenceTestStore{}
 	eb, err := newScopedTestEventBus(store)
 	if err != nil {
@@ -123,14 +125,99 @@ func TestEventBusRestorePersistedFlowInstanceRouteDoesNotRewritePersistence(t *t
 		},
 		Identity: runtimeflowidentity.DeriveRoute("review", "inst-1"),
 	}
-	if err := eb.RestorePersistedFlowInstanceRoute(req); err != nil {
-		t.Fatalf("RestorePersistedFlowInstanceRoute: %v", err)
+	if err := eb.PublishPersistedFlowInstanceRoute(req); err != nil {
+		t.Fatalf("PublishPersistedFlowInstanceRoute: %v", err)
 	}
 	if store.upsertCalls != 0 || len(store.routes) != 0 {
 		t.Fatalf("route recovery rewrote persistence: calls=%d routes=%#v", store.upsertCalls, store.routes)
 	}
 	if got := eb.RouteTable().Resolve("review/inst-1/task.started"); len(got) != 1 || got[0].ID != "reviewer-inst-1" {
 		t.Fatalf("restored route subscribers = %#v, want reviewer-inst-1", got)
+	}
+}
+
+func TestEventBusStageFlowInstanceRouteKeepsPublicationManifestInvisibleUntilReadiness(t *testing.T) {
+	store := &routePersistenceTestStore{}
+	bundle := routeMaterializationConfigVarBundle()
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{
+		ContractBundle: semanticview.Wrap(bundle),
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	identity := runtimeflowidentity.DeriveRoute("operating", "11111111-1111-4111-8111-111111111111")
+	req := runtimebus.FlowInstanceRouteMaterializationRequest{
+		Identity: identity,
+		ActivationVariables: map[string]string{
+			"vertical_id": "11111111-1111-4111-8111-111111111111",
+		},
+	}
+	stageCtx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), &sql.Tx{})
+	if err := eb.StageFlowInstanceRouteContext(stageCtx, req); err != nil {
+		t.Fatalf("StageFlowInstanceRouteContext: %v", err)
+	}
+	if len(store.routes) == 0 {
+		t.Fatal("staged route was not persisted")
+	}
+	if eb.HasFlowInstanceRoute(identity) {
+		t.Fatal("staged route became process-visible before readiness")
+	}
+	runtimebustest.Subscribe(t, eb, "ceo-11111111-1111-4111-8111-111111111111")
+	defer runtimebustest.Unsubscribe(eb, "ceo-11111111-1111-4111-8111-111111111111")
+	before := eventtest.RunCreatingRootIngress(
+		eventtest.UUID("event-before-runtime-readiness"),
+		events.EventType("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested"),
+		"", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{},
+	)
+	if err := eb.Publish(context.Background(), before); err != nil {
+		t.Fatalf("Publish before readiness: %v", err)
+	}
+	if got := store.deliveries[before.ID()]; len(got) != 0 {
+		t.Fatalf("pre-readiness delivery recipients = %#v, want none", got)
+	}
+	if err := eb.PublishPersistedFlowInstanceRoute(req); err != nil {
+		t.Fatalf("PublishPersistedFlowInstanceRoute: %v", err)
+	}
+	after := eventtest.RunCreatingRootIngress(
+		eventtest.UUID("event-after-runtime-readiness"),
+		events.EventType("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested"),
+		"", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{},
+	)
+	if err := eb.Publish(context.Background(), after); err != nil {
+		t.Fatalf("Publish after readiness: %v", err)
+	}
+	got := store.deliveries[after.ID()]
+	if len(got) != 1 || got[0] != "ceo-11111111-1111-4111-8111-111111111111" {
+		t.Fatalf("post-readiness delivery recipients = %#v, want exact instantiated agent", got)
+	}
+}
+
+func TestEventBusStageFlowInstanceRouteAcceptsExactEmptyRouteSet(t *testing.T) {
+	store := &routePersistenceTestStore{}
+	eb, err := newScopedTestEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	identity := runtimeflowidentity.DeriveRoute("observer", "inst-1")
+	req := runtimebus.FlowInstanceRouteMaterializationRequest{
+		Identity: identity,
+		Template: runtimecontracts.SystemNodeContract{ID: "observer-{instance_id}"},
+	}
+	stageCtx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), &sql.Tx{})
+	if err := eb.StageFlowInstanceRouteContext(stageCtx, req); err != nil {
+		t.Fatalf("StageFlowInstanceRouteContext: %v", err)
+	}
+	if store.upsertCalls != 0 {
+		t.Fatalf("empty route set persistence calls = %d, want none", store.upsertCalls)
+	}
+	if eb.HasFlowInstanceRoute(identity) {
+		t.Fatal("empty staged route became process-visible before readiness")
+	}
+	if err := eb.PublishPersistedFlowInstanceRoute(req); err != nil {
+		t.Fatalf("PublishPersistedFlowInstanceRoute: %v", err)
+	}
+	if !eb.HasFlowInstanceRoute(identity) {
+		t.Fatal("exact empty route topology was not published as process-ready")
 	}
 }
 
