@@ -428,6 +428,16 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			terminated_at TIMESTAMP,
 			created_at TIMESTAMP
 		)`,
+		`CREATE TABLE flow_instance_runtime_readiness (
+			run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+			instance_id TEXT NOT NULL REFERENCES flow_instances(instance_id) ON DELETE CASCADE,
+			plan TEXT NOT NULL,
+			topology_ready_at TIMESTAMP,
+			creation_event_emitted_at TIMESTAMP,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			PRIMARY KEY (run_id, instance_id)
+		)`,
 		`CREATE TABLE entity_state (
 			run_id TEXT,
 			entity_id TEXT,

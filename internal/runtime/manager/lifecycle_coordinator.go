@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -222,7 +223,7 @@ func prepareManagerRunAuthorities(parent context.Context, owner worklifetime.Occ
 }
 
 func lifecycleConfigRevision(rec PersistedAgent) (string, error) {
-	raw, err := json.Marshal(rec.Config)
+	raw, err := canonicaljson.Bytes(rec.Config)
 	if err != nil {
 		return "", err
 	}

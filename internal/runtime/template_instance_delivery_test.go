@@ -268,7 +268,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
 		DeliveryStore:     pg,
-	}))
+	}, pg))
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
@@ -803,6 +803,7 @@ auto_emit_on_create:
   id: ceo-{product_id}
   type: generic
   role: ceo
+  model: regular
   subscriptions: [opco.product_initialization_requested]
 `,
 	}
@@ -1328,6 +1329,10 @@ func (s routeMaterializationDBProofStore) DeleteFlowInstanceRoute(ctx context.Co
 
 func (s routeMaterializationDBProofStore) ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.Route, error) {
 	return s.pg.ListFlowInstanceRoutes(ctx)
+}
+
+func (s routeMaterializationDBProofStore) ListFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.Route) ([]runtimebus.FlowInstanceRouteRecord, error) {
+	return s.pg.ListFlowInstanceRouteRecords(ctx, identity)
 }
 
 func seedRuntimeTestRun(t *testing.T, db *sql.DB) context.Context {

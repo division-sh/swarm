@@ -944,6 +944,9 @@ func (am *AgentManager) HydrateForStartup(ctx context.Context) (StartupReplaySum
 	if err := am.restoreSelectedContractRouteRecoveries(ctx); err != nil {
 		return summary, err
 	}
+	if err := am.finalizeDynamicFlowRuntimeReadinessForStartup(ctx); err != nil {
+		return summary, fmt.Errorf("finalize dynamic flow runtime readiness: %w", err)
+	}
 	return summary, nil
 }
 

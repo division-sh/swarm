@@ -4523,20 +4523,27 @@ engine:
         decides when to create instances based on its product logic. Same pattern as agent sharding — nodes orchestrate instance
         creation.
       instance_id: Supplied by the node (from event payload or generated). Must be unique within the template scope. If already
-        exists, creation fails with error before mutating flow_instances, entity_state, routes, agents, or auto_emit_on_create.
+        exists with different semantic facts, creation fails before mutating flow_instances, entity_state, routes, agents,
+        timers, or auto_emit_on_create. Exact replay consumes the existing durable readiness plan idempotently so an
+        interrupted creation can converge without repeating the creation-only event.
       process:
       - 1. Node handler calls create_flow_instance with template ID and instance_id
       - '2. Platform validates: template exists and is mode: template'
-      - '3. Platform validates: instance_id is unique within template scope; duplicate resolved IDs fail closed before create side
-        effects'
+      - '3. Platform validates: instance_id is new or an exact semantic replay; conflicting resolved IDs fail closed before
+        create side effects'
       - 4. Platform loads flow template contracts from flows/{template}/
       - '5. Platform constructs paths: {template_id}/{instance_id}/{local_name}'
-      - 6. Platform registers new nodes, agents, events in runtime registry
-      - 7. Platform expands wildcard subscriptions to include new instance
-      - 8. Platform resolves local subscriptions for new instance
-      - 9. Platform records the full ParentRoute from the calling handler context on the child instance metadata
-      - 10. Platform creates entity record at initial_state from schema.yaml
-      - 11. New instance nodes and agents start
+      - 6. Platform atomically creates the entity at initial_state, dormant initial timers, and one durable runtime-readiness
+        plan containing the exact route, declared-agent revisions, run, and optional deterministic creation event occurrence
+      - 7. When creation participates in a selected mutation, it also stages the exact route in that mutation so later
+        same-mutation publication can consume it; route process publication remains non-runnable topology
+      - 8. One idempotent readiness finalizer reconciles every declared agent and the exact route from that plan
+      - 9. The finalizer verifies the complete process-local and persisted route/agent topology
+      - 10. The finalizer records topology readiness and arms the dormant initial timers
+      - 11. The finalizer publishes the deterministic creation-only event, when declared, and records completion after
+        exact event persistence
+      - 12. Direct activation, selected-mutation post-commit activation, exact replay / EnsureFlowInstance, and startup all
+        consume this same finalizer
       parent_route:
         description: Full structural route from the child instance back to the creating parent.
         metadata_fields:
@@ -4557,15 +4564,21 @@ engine:
           persistence, delivery planning, active-agent lookup, and runtime recovery consume that materialized route truth and
           MUST NOT independently reinterpret authored subscriber templates.
         recovery: Startup recovery of active flow-instance routes MUST load one exact run-independent projection from the
-          active `flow_instances` row identified by the persisted route's instance path. That projection owns the validated
-          stored instance identity, including deterministic entity and parent facts, plus the cloned activation config. Its
-          derived route MUST exactly equal the persisted route before installation. Recovery MUST NOT read `entity_state`,
-          synthesize or choose a run, fall back to current-state loading, or re-render route subscribers from route identity
-          alone. Installation restores only the in-memory route table and MUST NOT rewrite the already-persisted route.
-          Missing, inactive, terminated, malformed, or identity-mismatched projections fail startup closed.
+          active `flow_instances` row identified by the persisted route's instance path. Dynamic instances additionally
+          consume their exact `flow_instance_runtime_readiness` plan. The plan owns the creation run and expected declared
+          agent revisions computed over canonical JSON semantics; the flow projection owns the validated stored instance
+          identity, deterministic entity and parent facts, and cloned activation config. The finalizer MUST derive the same
+          route and declared-agent revisions, reconcile missing topology, and verify both process-local and persisted
+          completeness before timers or creation events become runnable. JSON object key order or PostgreSQL JSONB
+          normalization cannot manufacture lifecycle revision drift, while a changed fact must change the revision.
+          Recovery MUST NOT read `entity_state`, synthesize or choose a run, infer readiness from existing subsets, fall back
+          to current-state loading, or re-render route subscribers from route identity alone. Missing, inactive, terminated,
+          malformed, version-drifted, or identity-mismatched projections fail startup closed.
       auto_emit: Flow schemas may declare auto_emit_on_create. When the platform creates an instance, it automatically emits
-        the declared event after the instance is fully started. Duplicate create failures MUST NOT auto-emit. This bootstraps
-        the flow without requiring an external trigger.
+        the declared event after the exact route and complete declared-agent topology are verified and initial timers are
+        armed. Event ID, lineage, payload, execution mode, delivery context, and occurrence time belong to the durable
+        readiness plan. Publication exact-duplicate semantics plus a durable completion fact make replay exactly once.
+        Conflicting duplicates do not auto-emit. This bootstraps the flow without requiring an external trigger.
     addressing:
       static_flows: '{flow_id}/{local_name} — one level, no instance segment'
       template_instances: '{template_id}/{instance_id}/{local_name} — extra segment for instance'
@@ -6491,8 +6504,9 @@ engine:
       an `InitialEntry` effect in one selected mutation. The operation returns a closed `created` or `already_materialized`
       disposition. Initial-entry occurrence time is admitted at UTC microsecond precision before persistence or effect
       construction. Exact lifecycle replay compares the storage-canonical semantic JSON projection and that canonical time,
-      then returns `already_materialized` without reapplying initial-entry effects. Public dynamic-instance creation maps that
-      disposition to the canonical conflicting-duplicate failure before route, agent, or `auto_emit_on_create` side effects.
+      then returns `already_materialized` without reapplying initial-entry effects. Public dynamic-instance creation treats an
+      exact replay as an idempotent readiness-reconciliation request; a semantically different duplicate remains a canonical
+      conflicting-duplicate failure before route, agent, timer, or `auto_emit_on_create` side effects.
       Ordinary mutation is existing-only. Before a first handled entity-materializing event executes, every handler entry
       path supplies the exact authored initial stage as its source state; persistence then commits `InitialEntry` before
       applying that event's transition in the same selected mutation. An accepted event produces
@@ -6520,10 +6534,16 @@ engine:
       coordinate without an explicit reschedule operation. Initial-entry materialization commits those durable timer rows
       dormant and never registers a process-local wakeup itself. Every initial-entry caller must invoke the one named
       `ArmInitialEntryTimers` lifecycle operation only after the exact receiving runtime is ready. Existing pipeline routes
-      queue that operation in their selected mutation's post-commit work. Dynamic flow activation invokes it only after the
-      new flow route and all declared agents are installed; when activation participates in an outer selected mutation,
-      agent installation and timer arming are one ordered post-commit action. Installation failure leaves the durable active
-      row unarmed for exact recovery and cannot publish through a partial recipient topology.
+      queue that operation in their selected mutation's post-commit work. Dynamic instances have one durable, idempotent
+      runtime-readiness finalizer backed by `flow_instance_runtime_readiness`. Initial materialization atomically records the
+      desired exact route, complete declared-agent revision set, creation run, and optional creation-event occurrence. Direct
+      activation, selected-mutation post-commit finalization, exact replay / `EnsureFlowInstance`, and startup consume the same
+      owner. A selected creation mutation stages its exact route before any later same-mutation publication; this is an early
+      projection of the readiness plan, not a second readiness owner. The finalizer reconciles and verifies all declared
+      agents and the route in process and storage, records topology readiness, arms initial timers, then publishes the
+      deterministic creation-only event exactly once. A failed or partial boundary remains durable pending work; startup
+      fails closed rather than globally restoring its timer through an unverified topology. No best-effort completion
+      callback chain, subset inference, second wakeup owner, migration, or compatibility path exists.
     - 3. Leaving an owning stage, matching cancel_on, loop-generation supersession, run quiescence, or preservation cleanup
       may only monotonically cancel or delete the canonical row. Cancellation is in the same mutation as the causal lifecycle
       transition; the in-memory scheduler is updated only after commit. Registration and cancellation do not issue opposing
@@ -11576,6 +11596,7 @@ platform_tables:
         - agent_sessions
         - entity_mutations
         - entity_state
+        - flow_instance_runtime_readiness
         - run_control_state
         - events
       retain_directive_authority:
@@ -13146,6 +13167,28 @@ platform_tables:
         \            JSONB NOT NULL DEFAULT '{}',\n    status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active',\
         \ 'draining', 'terminated')),\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    terminated_at     TIMESTAMPTZ\n\
         );"
+    flow_instance_runtime_readiness:
+      description: >-
+        Durable run-generation-scoped desired runtime topology and creation occurrence for dynamic flow instances. The typed plan is written
+        atomically with initial workflow materialization. Activation replay, EnsureFlowInstance, and startup consume the
+        same idempotent finalizer: reconcile and verify the exact route and complete declared-agent revision set, record
+        topology_ready_at, arm initial workflow timers, then publish the deterministic creation-only event exactly once
+        before recording creation_event_emitted_at. A creation event completion without topology readiness is invalid.
+        This table is platform lifecycle state, never application flow config. Fresh schemas only; no migration,
+        inference, fallback, or compatibility reader is supported.
+      ddl: |
+        CREATE TABLE flow_instance_runtime_readiness (
+            run_id                      UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+            instance_id                 TEXT NOT NULL REFERENCES flow_instances(instance_id) ON DELETE CASCADE,
+            plan                        JSONB NOT NULL,
+            topology_ready_at           TIMESTAMPTZ,
+            creation_event_emitted_at   TIMESTAMPTZ,
+            created_at                  TIMESTAMPTZ NOT NULL,
+            updated_at                  TIMESTAMPTZ NOT NULL,
+            PRIMARY KEY (run_id, instance_id),
+            CHECK (creation_event_emitted_at IS NULL OR topology_ready_at IS NOT NULL),
+            CHECK (updated_at >= created_at)
+        );
     timers:
       description: 'Durable timer and scheduled task store. Persisted across restarts. Run-scoped timers carry run_id and
         are claimed, fired, cancelled, and recovered under that run identity. Entity-scoped timers: entity_id and
@@ -30993,6 +31036,8 @@ agent_lifecycle_authority:
   lifecycle_token:
     fields: [runtime_epoch, agent_id, generation]
     rule: Every managed agent execution context carries exactly one token. Missing or superseded authority fails before external launch.
+  config_revision:
+    rule: The complete normalized AgentConfig is hashed over canonical JSON semantics. Object-key order and selected-store JSONB normalization are representation-only and cannot change the revision; any semantic config change must change it.
   process_execution_projection:
     owner: one typed agentExecutionProjection inside the per-agent lifecycle cell
     fields: [agent, config, exact_subscriptions, lifecycle_token, generation_context, loop_cancel, loop_done, route_handle, direct_execution_leases]

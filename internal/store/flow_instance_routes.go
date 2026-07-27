@@ -413,6 +413,85 @@ func (s *SQLiteRuntimeStore) ListFlowInstanceRoutes(ctx context.Context) ([]runt
 	return out, nil
 }
 
+func (s *PostgresStore) ListFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.Route) ([]runtimebus.FlowInstanceRouteRecord, error) {
+	if s == nil || s.DB == nil {
+		return nil, fmt.Errorf("postgres store is required for flow instance routes")
+	}
+	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
+	if !identity.Valid() {
+		return nil, fmt.Errorf("flow instance route identity is required")
+	}
+	q := flowInstanceDescriptorQueryer(s.DB)
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		q = tx
+	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
+		q = conn
+	}
+	return listFlowInstanceRouteRecords(ctx, q, identity, `
+		SELECT event_pattern, subscriber_type, subscriber_id, COALESCE(source_flow, '')
+		FROM routing_rules
+		JOIN flow_instances fi ON fi.instance_id = routing_rules.flow_instance
+		WHERE routing_rules.flow_instance = $1
+		  AND routing_rules.is_materialized = true
+		  AND routing_rules.status = 'active'
+		  AND fi.status = 'active'
+		ORDER BY event_pattern, subscriber_type, subscriber_id, source_flow
+	`)
+}
+
+func (s *SQLiteRuntimeStore) ListFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.Route) ([]runtimebus.FlowInstanceRouteRecord, error) {
+	if s == nil || s.DB == nil {
+		return nil, fmt.Errorf("sqlite runtime store is required for flow instance routes")
+	}
+	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
+	if !identity.Valid() {
+		return nil, fmt.Errorf("flow instance route identity is required")
+	}
+	q := flowInstanceDescriptorQueryer(s.DB)
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		q = tx
+	}
+	return listFlowInstanceRouteRecords(ctx, q, identity, `
+		SELECT event_pattern, subscriber_type, subscriber_id, COALESCE(source_flow, '')
+		FROM routing_rules
+		JOIN flow_instances fi ON fi.instance_id = routing_rules.flow_instance
+		WHERE routing_rules.flow_instance = ?
+		  AND routing_rules.is_materialized = TRUE
+		  AND routing_rules.status = 'active'
+		  AND fi.status = 'active'
+		ORDER BY event_pattern, subscriber_type, subscriber_id, source_flow
+	`)
+}
+
+func listFlowInstanceRouteRecords(
+	ctx context.Context,
+	q flowInstanceDescriptorQueryer,
+	identity runtimeflowidentity.Route,
+	query string,
+) ([]runtimebus.FlowInstanceRouteRecord, error) {
+	rows, err := q.QueryContext(ctx, query, identity.InstancePath)
+	if err != nil {
+		return nil, fmt.Errorf("list exact flow instance route records %s: %w", identity.InstancePath, err)
+	}
+	defer rows.Close()
+	var out []runtimebus.FlowInstanceRouteRecord
+	for rows.Next() {
+		var record runtimebus.FlowInstanceRouteRecord
+		record.Identity = identity
+		if err := rows.Scan(&record.EventPattern, &record.SubscriberType, &record.SubscriberID, &record.SourceFlow); err != nil {
+			return nil, fmt.Errorf("scan exact flow instance route record %s: %w", identity.InstancePath, err)
+		}
+		if strings.TrimSpace(record.SourceFlow) == "" {
+			record.SourceFlow = identity.ScopeKey
+		}
+		out = append(out, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate exact flow instance route records %s: %w", identity.InstancePath, err)
+	}
+	return out, nil
+}
+
 func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("postgres store is required for active flow instance descriptors")

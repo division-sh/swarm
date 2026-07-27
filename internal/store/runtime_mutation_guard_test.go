@@ -761,6 +761,12 @@ func classifyWorkflowInstanceStoreCallSite(site runtimeWriterCallSite) (runtimeW
 }
 
 func classifyWorkflowInstanceStoreSpecCallSite(site runtimeWriterCallSite) (runtimeWriterClassification, string, bool) {
+	if site.Path == "internal/runtime/pipeline/workflow_instance_readiness.go" &&
+		site.Function == "insertDynamicFlowRuntimeReadinessPlan" &&
+		site.UsesPipelineTxFromContext &&
+		site.CallReceiver == "tx" {
+		return classActiveTxHelper, "dynamic flow readiness is inserted through the caller's selected workflow transaction", true
+	}
 	if site.Path != "internal/runtime/pipeline/workflow_instance_store.go" {
 		return "", "", false
 	}

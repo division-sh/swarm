@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"encoding/json"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,6 +12,28 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 )
+
+func TestLifecycleConfigRevisionUsesCanonicalConfigFacts(t *testing.T) {
+	revision := func(raw string) string {
+		t.Helper()
+		got, err := lifecycleConfigRevision(PersistedAgent{Config: runtimeactors.AgentConfig{
+			ID: "agent", Config: json.RawMessage(raw),
+		}})
+		if err != nil {
+			t.Fatalf("lifecycleConfigRevision(%s): %v", raw, err)
+		}
+		return got
+	}
+	left := revision(`{"conversation_reference":"42","template_instance_key":"abc"}`)
+	right := revision(`{"template_instance_key":"abc","conversation_reference":"42"}`)
+	if left != right {
+		t.Fatalf("representation-equivalent config revisions differ: left=%s right=%s", left, right)
+	}
+	changed := revision(`{"template_instance_key":"abc","conversation_reference":"84"}`)
+	if changed == left {
+		t.Fatalf("semantic config change retained revision %s", changed)
+	}
+}
 
 type lifecycleTransitionTrackingBus struct {
 	*runtimebus.EventBus

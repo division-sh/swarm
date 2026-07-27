@@ -62,6 +62,7 @@ type WorkflowInstance struct {
 	StorageRef        string
 	WorkflowName      string
 	WorkflowVersion   string
+	RuntimeReadiness  *DynamicFlowRuntimeReadinessPlan
 	Status            string
 	TerminatedAt      time.Time
 	CurrentState      string
@@ -374,7 +375,11 @@ func (s *WorkflowInstanceStore) MaterializeInitialEntry(ctx context.Context, ins
 			return err
 		}
 		if found {
-			if workflowInitialMaterializationEqual(existing, normalized, occurredAt) {
+			readinessEqual, err := s.dynamicFlowRuntimeReadinessPlanEqual(txctx, identity.StorageRef, normalized.RuntimeReadiness)
+			if err != nil {
+				return err
+			}
+			if workflowInitialMaterializationEqual(existing, normalized, occurredAt) && readinessEqual {
 				result = WorkflowInitialMaterializationAlreadyExists
 				return nil
 			}
@@ -382,6 +387,11 @@ func (s *WorkflowInstanceStore) MaterializeInitialEntry(ctx context.Context, ins
 		}
 		if err := s.Create(txctx, normalized); err != nil {
 			return err
+		}
+		if normalized.RuntimeReadiness != nil {
+			if err := s.insertDynamicFlowRuntimeReadinessPlan(txctx, identity.StorageRef, *normalized.RuntimeReadiness, occurredAt); err != nil {
+				return err
+			}
 		}
 		if err := s.lifecycleOwner.ApplyWorkflowLifecycleEffects(txctx, []runtimeworkflowlifecycle.Effect{effect}); err != nil {
 			return err

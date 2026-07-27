@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -395,6 +397,54 @@ func (eb *EventBus) RouteTable() *RouteTable {
 func (eb *EventBus) HasFlowInstanceRoute(identity runtimeflowidentity.Route) bool {
 	table := eb.RouteTable()
 	return table != nil && table.HasFlowInstanceRoute(identity)
+}
+
+func (eb *EventBus) ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.Route, error) {
+	if eb == nil || eb.store == nil {
+		return nil, errors.New("event bus store is required")
+	}
+	store, ok := eb.store.(FlowInstanceRoutePersistence)
+	if !ok || store == nil {
+		return nil, errors.New("event bus store does not support flow-instance route persistence")
+	}
+	return store.ListFlowInstanceRoutes(ctx)
+}
+
+func (eb *EventBus) VerifyFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error {
+	if eb == nil || eb.store == nil {
+		return errors.New("event bus store is required")
+	}
+	table := eb.RouteTable()
+	if table == nil || !table.HasFlowInstanceRoute(identity) {
+		return fmt.Errorf("flow-instance route %s is not process-ready", identity.InstancePath)
+	}
+	expected := table.MaterializedRoutes(identity)
+	reader, ok := eb.store.(FlowInstanceRouteRecordReader)
+	if !ok || reader == nil {
+		return errors.New("event bus store does not expose exact flow-instance route records")
+	}
+	actual, err := reader.ListFlowInstanceRouteRecords(ctx, identity)
+	if err != nil {
+		return err
+	}
+	routeRecordKeys := func(records []FlowInstanceRouteRecord) []string {
+		keys := make([]string, 0, len(records))
+		for _, record := range records {
+			keys = append(keys, strings.Join([]string{
+				strings.Trim(record.Identity.InstancePath, "/"),
+				strings.TrimSpace(record.EventPattern),
+				strings.TrimSpace(record.SubscriberType),
+				strings.TrimSpace(record.SubscriberID),
+				strings.TrimSpace(record.SourceFlow),
+			}, "\x00"))
+		}
+		sort.Strings(keys)
+		return keys
+	}
+	if !slices.Equal(routeRecordKeys(actual), routeRecordKeys(expected)) {
+		return fmt.Errorf("flow-instance route %s persisted topology does not match process topology", identity.InstancePath)
+	}
+	return nil
 }
 
 func (eb *EventBus) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationRequest) error {
