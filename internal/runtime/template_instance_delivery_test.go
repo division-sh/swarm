@@ -994,6 +994,20 @@ func (s *providerRollbackPostgresStore) UpsertFlowInstanceRoute(ctx context.Cont
 	return upsertProviderRollbackFlowInstanceRoute(ctx, route, s.proof, s.PostgresStore.UpsertFlowInstanceRoute)
 }
 
+func (s *providerRollbackPostgresStore) ReplaceFlowInstanceRouteRecords(
+	ctx context.Context,
+	identity runtimeflowidentity.Route,
+	routes []runtimebus.FlowInstanceRouteRecord,
+) error {
+	return replaceProviderRollbackFlowInstanceRoutes(
+		ctx,
+		identity,
+		routes,
+		s.proof,
+		s.PostgresStore.ReplaceFlowInstanceRouteRecords,
+	)
+}
+
 func (s *providerRollbackPostgresStore) RunInboundPublicationMutation(ctx context.Context, request runtimeinbound.Request, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
 	return s.PostgresStore.RunInboundPublicationMutation(ctx, request, func(mutation runtimeinbound.Mutation) error {
 		if err := fn(newProviderRollbackMutation(mutation, s.proof)); err != nil {
@@ -1010,6 +1024,20 @@ type providerRollbackSQLiteStore struct {
 
 func (s *providerRollbackSQLiteStore) UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error {
 	return upsertProviderRollbackFlowInstanceRoute(ctx, route, s.proof, s.SQLiteRuntimeStore.UpsertFlowInstanceRoute)
+}
+
+func (s *providerRollbackSQLiteStore) ReplaceFlowInstanceRouteRecords(
+	ctx context.Context,
+	identity runtimeflowidentity.Route,
+	routes []runtimebus.FlowInstanceRouteRecord,
+) error {
+	return replaceProviderRollbackFlowInstanceRoutes(
+		ctx,
+		identity,
+		routes,
+		s.proof,
+		s.SQLiteRuntimeStore.ReplaceFlowInstanceRouteRecords,
+	)
 }
 
 func (s *providerRollbackSQLiteStore) RunInboundPublicationMutation(ctx context.Context, request runtimeinbound.Request, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
@@ -1040,6 +1068,37 @@ func upsertProviderRollbackFlowInstanceRoute(
 		return proof.fail(providerRollbackAfterEntityCreation)
 	}
 	if err := upsert(ctx, route); err != nil {
+		return err
+	}
+	if proof.checkpoint == providerRollbackAfterRouteMaterialization {
+		if err := requireProviderRollbackRowVisible(ctx, "routing_rules"); err != nil {
+			return err
+		}
+		return proof.fail(providerRollbackAfterRouteMaterialization)
+	}
+	return nil
+}
+
+func replaceProviderRollbackFlowInstanceRoutes(
+	ctx context.Context,
+	identity runtimeflowidentity.Route,
+	routes []runtimebus.FlowInstanceRouteRecord,
+	proof *providerRollbackProof,
+	replace func(context.Context, runtimeflowidentity.Route, []runtimebus.FlowInstanceRouteRecord) error,
+) error {
+	switch proof.checkpoint {
+	case providerRollbackAfterFlowInstanceCreation:
+		if err := requireProviderRollbackRowVisible(ctx, "flow_instances"); err != nil {
+			return err
+		}
+		return proof.fail(providerRollbackAfterFlowInstanceCreation)
+	case providerRollbackAfterEntityCreation:
+		if err := requireProviderRollbackRowVisible(ctx, "entity_state"); err != nil {
+			return err
+		}
+		return proof.fail(providerRollbackAfterEntityCreation)
+	}
+	if err := replace(ctx, identity, routes); err != nil {
 		return err
 	}
 	if proof.checkpoint == providerRollbackAfterRouteMaterialization {
@@ -1325,6 +1384,14 @@ func (s routeMaterializationDBProofStore) ListEventDeliveryRecipients(ctx contex
 
 func (s routeMaterializationDBProofStore) UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error {
 	return s.pg.UpsertFlowInstanceRoute(ctx, route)
+}
+
+func (s routeMaterializationDBProofStore) ReplaceFlowInstanceRouteRecords(
+	ctx context.Context,
+	identity runtimeflowidentity.Route,
+	routes []runtimebus.FlowInstanceRouteRecord,
+) error {
+	return s.pg.ReplaceFlowInstanceRouteRecords(ctx, identity, routes)
 }
 
 func (s routeMaterializationDBProofStore) DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error {

@@ -30,6 +30,12 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTempl
 		t.Fatalf("seed runs: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO flow_instance_runtime_readiness (run_id, instance_id, plan, created_at, updated_at)
+		VALUES (?, 'component-scaffold/active', '{"workflow_version":"1.0.0"}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, runID); err != nil {
+		t.Fatalf("seed flow-instance readiness: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
 		VALUES
 			('22222222-2222-4222-8222-222222222222', ?, 'component-scaffold/active', 'component', 'ready', '{"vertical_id":"v-active","weight":1.1234567}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
@@ -58,6 +64,11 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTempl
 	if got.FlowTemplate != "component-scaffold" {
 		t.Fatalf("FlowTemplate = %q, want component-scaffold", got.FlowTemplate)
 	}
+	if got.BundleHash != "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" ||
+		got.BundleSource != "ephemeral" ||
+		got.WorkflowVersion != "1.0.0" {
+		t.Fatalf("semantic source = %#v, want exact run bundle and workflow version", got)
+	}
 	if got.AddressFields["entity.vertical_id"] != "v-active" {
 		t.Fatalf("AddressFields[entity.vertical_id] = %q, want v-active", got.AddressFields["entity.vertical_id"])
 	}
@@ -66,43 +77,19 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTempl
 	}
 }
 
-func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsOmitsAddressFieldsWithoutRunScope(t *testing.T) {
+func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsAllowsUnscopedEmptyCensus(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES ('component-scaffold/active', 'component-scaffold', 'template', '{}', 'active', CURRENT_TIMESTAMP)
-	`); err != nil {
-		t.Fatalf("seed flow_instances: %v", err)
-	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ('44444444-4444-4444-8444-444444444444', 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`); err != nil {
-		t.Fatalf("seed runs: %v", err)
-	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
-		VALUES ('33333333-3333-4333-8333-333333333333', '44444444-4444-4444-8444-444444444444', 'component-scaffold/active', 'component', 'ready', '{"vertical_id":"wrong-run"}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-	`); err != nil {
-		t.Fatalf("seed entity_state: %v", err)
-	}
-
 	descriptors, err := sqliteStore.ListActiveFlowInstanceDescriptors(ctx)
-	if err != nil {
-		t.Fatalf("ListActiveFlowInstanceDescriptors: %v", err)
-	}
-	if len(descriptors) != 1 {
-		t.Fatalf("descriptors = %#v, want exactly active template descriptor", descriptors)
-	}
-	if len(descriptors[0].AddressFields) != 0 {
-		t.Fatalf("AddressFields = %#v, want no run-scoped descriptor evidence without run_id", descriptors[0].AddressFields)
+	if err != nil || len(descriptors) != 0 {
+		t.Fatalf("unscoped descriptor census: descriptors=%#v err=%v", descriptors, err)
 	}
 }
 
 func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsReadsPipelineTransaction(t *testing.T) {
-	ctx := testAuthorActivityContext()
+	const runID = "11111111-1111-4111-8111-111111111111"
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 
 	tx, err := sqliteStore.DB.BeginTx(ctx, nil)
@@ -111,10 +98,28 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsReadsPipelineTransac
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
+	`, runID); err != nil {
+		t.Fatalf("seed run in tx: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 		VALUES ('component-scaffold/uncommitted', 'component-scaffold', 'template', '{}', 'active', CURRENT_TIMESTAMP)
 	`); err != nil {
 		t.Fatalf("seed flow_instances in tx: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO flow_instance_runtime_readiness (run_id, instance_id, plan, created_at, updated_at)
+		VALUES (?, 'component-scaffold/uncommitted', '{"workflow_version":"1.0.0"}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, runID); err != nil {
+		t.Fatalf("seed readiness in tx: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
+		VALUES ('22222222-2222-4222-8222-222222222222', ?, 'component-scaffold/uncommitted', 'component', 'ready', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, runID); err != nil {
+		t.Fatalf("seed entity state in tx: %v", err)
 	}
 
 	descriptors, err := sqliteStore.ListActiveFlowInstanceDescriptors(runtimepipeline.WithPipelineSQLTxContext(ctx, tx))
