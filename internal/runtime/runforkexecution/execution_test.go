@@ -95,6 +95,13 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			wantCode:       selectedContractDeferredWorkOwnerUnavailable,
 			wantCapability: selectedContractDeferredWorkDynamicFlowCreation,
 		},
+		{
+			name:           "selected connect can select or create missing dynamic flow",
+			fixture:        "examples/routing/template-select-or-create",
+			eventName:      "producer/account.requested",
+			wantCode:       selectedContractDeferredWorkOwnerUnavailable,
+			wantCapability: selectedContractDeferredWorkDynamicFlowCreation,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
@@ -237,6 +244,19 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 			name:           "delivery replay dynamic flow creation",
 			fixture:        "examples/routing/template-create-minted-key",
 			eventName:      "validation.triggered",
+			wantCapability: selectedContractDeferredWorkDynamicFlowCreation,
+		},
+		{
+			name:           "delivery replay select or create missing dynamic flow",
+			fixture:        "examples/routing/template-select-or-create",
+			eventName:      "producer/account.requested",
+			wantCapability: selectedContractDeferredWorkDynamicFlowCreation,
+		},
+		{
+			name:           "state only select or create missing dynamic flow",
+			fixture:        "examples/routing/template-select-or-create",
+			eventName:      "producer/account.requested",
+			stateOnly:      true,
 			wantCapability: selectedContractDeferredWorkDynamicFlowCreation,
 		},
 	} {

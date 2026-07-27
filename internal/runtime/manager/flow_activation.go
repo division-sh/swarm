@@ -27,6 +27,7 @@ import (
 type flowInstancePersistence interface {
 	MaterializeInitialEntry(ctx context.Context, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) (runtimepipeline.WorkflowInitialMaterializationResult, error)
 	ArmInitialEntryTimers(ctx context.Context, instanceID string) error
+	ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, plan runtimepipeline.DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error)
 	LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID, instanceID string) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
 	ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error)
 	ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadinessKey, error)
@@ -56,6 +57,10 @@ type publishedFlowInstanceRouteRetirer interface {
 
 type flowInstanceRouteContextRemover interface {
 	RemoveFlowInstanceRouteContext(context.Context, runtimeflowidentity.Route) error
+}
+
+type flowInstanceTerminalMutationOwner interface {
+	RunPipelineMutation(context.Context, func(context.Context) error) error
 }
 
 type terminalFlowInstanceSideEffectPlan struct {
@@ -226,6 +231,9 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 	}
 	runID, err := exactFlowActivationRunID(ctx, req)
 	if err != nil {
+		return false, err
+	}
+	if err := am.reconcileEnsuredDynamicFlowRuntimeReadinessPlan(ctx, req, runID); err != nil {
 		return false, err
 	}
 	if _, transactional := runtimepipeline.PipelineSQLTxFromContext(ctx); transactional {
@@ -680,6 +688,28 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 	if templateID == "" || instanceID == "" || flowPath == "" || entityID == "" {
 		return fmt.Errorf("template_id, instance_id, flow_path, and entity_id are required")
 	}
+	if _, active := runtimepipeline.PipelineSQLTxFromContext(ctx); active {
+		return am.deactivateFlowInstanceModelInMutation(ctx, req)
+	}
+	owner, ok := am.workflowInstances.(flowInstanceTerminalMutationOwner)
+	if !ok || owner == nil {
+		return fmt.Errorf("flow instance terminalization requires selected pipeline mutation ownership")
+	}
+	return owner.RunPipelineMutation(ctx, func(txctx context.Context) error {
+		if _, active := runtimepipeline.PipelineSQLTxFromContext(txctx); !active {
+			return fmt.Errorf("flow instance terminalization mutation did not provide selected transaction")
+		}
+		return am.deactivateFlowInstanceModelInMutation(txctx, req)
+	})
+}
+
+func (am *AgentManager) deactivateFlowInstanceModelInMutation(
+	ctx context.Context,
+	req runtimepipeline.FlowInstanceDeactivationRequest,
+) error {
+	instance := req.Instance
+	entityID := strings.TrimSpace(instance.EntityID)
+	flowPath := strings.TrimSpace(instance.InstancePath)
 	if err := am.workflowInstances.MarkTerminated(ctx, flowPath, time.Now().UTC()); err != nil {
 		return fmt.Errorf("persist flow instance terminal state %s: %w", flowPath, err)
 	}
@@ -730,14 +760,14 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 		RunID:      runID,
 		FinalState: req.FinalState,
 	}
-	if runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
+	if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
 		if err := am.applyTerminalFlowInstanceSideEffects(actionCtx, plan); err != nil {
 			am.logTerminalFlowInstanceSideEffectFailure(plan, err)
 		}
 	}) {
-		return nil
+		return fmt.Errorf("terminal flow-instance side effects require selected mutation post-commit ownership")
 	}
-	return am.applyTerminalFlowInstanceSideEffects(ctx, plan)
+	return nil
 }
 
 func (am *AgentManager) applyTerminalFlowInstanceSideEffects(ctx context.Context, plan terminalFlowInstanceSideEffectPlan) error {

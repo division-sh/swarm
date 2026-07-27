@@ -301,6 +301,125 @@ func (s *WorkflowInstanceStore) dynamicFlowRuntimeReadinessPlanEqual(
 	return string(actualJSON) == string(expectedJSON), nil
 }
 
+// ReconcileDynamicFlowRuntimeReadinessPlan advances the durable topology owner
+// when an existing flow instance is ensured against a revised semantic source.
+func (s *WorkflowInstanceStore) ReconcileDynamicFlowRuntimeReadinessPlan(
+	ctx context.Context,
+	expected DynamicFlowRuntimeReadinessPlan,
+	observedAt time.Time,
+) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("workflow instance lifecycle store is required")
+	}
+	normalized, err := expected.Normalized()
+	if err != nil {
+		return false, err
+	}
+	observedAt = canonicalWorkflowInstancePersistedTime(observedAt)
+	if observedAt.IsZero() {
+		return false, fmt.Errorf("dynamic flow runtime readiness reconciliation requires an exact occurrence time")
+	}
+
+	changed := false
+	err = s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		activeRunID, err := s.requireActiveWorkflowRun(txctx, tx)
+		if err != nil {
+			return err
+		}
+		if activeRunID != normalized.RunID {
+			return fmt.Errorf(
+				"dynamic flow runtime readiness reconciliation run identity changed: expected=%s actual=%s",
+				normalized.RunID,
+				activeRunID,
+			)
+		}
+		instancePath := normalized.Identity.InstancePath
+		if err := s.lockDynamicFlowRuntimeCreationEligibility(txctx, tx, normalized.RunID, instancePath); err != nil {
+			return err
+		}
+		current, found, err := s.LoadDynamicFlowRuntimeReadiness(txctx, normalized.RunID, instancePath)
+		if err != nil {
+			return err
+		}
+		if !found || !current.Eligible() {
+			return fmt.Errorf(
+				"dynamic flow runtime readiness reconciliation requires one active eligible record: %s",
+				instancePath,
+			)
+		}
+		if current.Plan.Identity != normalized.Identity || current.Plan.RunID != normalized.RunID {
+			return fmt.Errorf("dynamic flow runtime readiness reconciliation identity changed for %s", instancePath)
+		}
+		actualJSON, err := canonicaljson.Bytes(current.Plan)
+		if err != nil {
+			return fmt.Errorf("encode persisted dynamic flow runtime readiness %s: %w", instancePath, err)
+		}
+		expectedJSON, err := canonicaljson.Bytes(normalized)
+		if err != nil {
+			return fmt.Errorf("encode expected dynamic flow runtime readiness %s: %w", instancePath, err)
+		}
+		if string(actualJSON) == string(expectedJSON) {
+			return nil
+		}
+		if !current.CreationEventEmittedAt.IsZero() {
+			actualCreationJSON, err := canonicaljson.Bytes(current.Plan.CreationEvent)
+			if err != nil {
+				return fmt.Errorf("encode emitted dynamic flow creation plan %s: %w", instancePath, err)
+			}
+			expectedCreationJSON, err := canonicaljson.Bytes(normalized.CreationEvent)
+			if err != nil {
+				return fmt.Errorf("encode revised dynamic flow creation plan %s: %w", instancePath, err)
+			}
+			if string(actualCreationJSON) != string(expectedCreationJSON) {
+				return fmt.Errorf("dynamic flow runtime readiness cannot revise emitted creation occurrence for %s", instancePath)
+			}
+		}
+		if s.isSQLite() {
+			result, err := tx.ExecContext(txctx, `
+				UPDATE flow_instance_runtime_readiness
+				SET plan = ?,
+				    topology_ready_at = CASE WHEN creation_event_emitted_at IS NULL THEN NULL ELSE topology_ready_at END,
+				    updated_at = ?
+				WHERE run_id = ? AND instance_id = ?
+			`, expectedJSON, observedAt, normalized.RunID, instancePath)
+			if err != nil {
+				return err
+			}
+			rows, err := result.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("count dynamic flow runtime readiness reconciliation rows for %s: %w", instancePath, err)
+			}
+			if rows != 1 {
+				return fmt.Errorf("dynamic flow runtime readiness reconciliation changed %d rows for %s", rows, instancePath)
+			}
+		} else {
+			result, err := tx.ExecContext(txctx, `
+				UPDATE flow_instance_runtime_readiness
+				SET plan = $1::jsonb,
+				    topology_ready_at = CASE WHEN creation_event_emitted_at IS NULL THEN NULL ELSE topology_ready_at END,
+				    updated_at = $2
+				WHERE run_id = $3::uuid AND instance_id = $4
+			`, expectedJSON, observedAt, normalized.RunID, instancePath)
+			if err != nil {
+				return err
+			}
+			rows, err := result.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("count dynamic flow runtime readiness reconciliation rows for %s: %w", instancePath, err)
+			}
+			if rows != 1 {
+				return fmt.Errorf("dynamic flow runtime readiness reconciliation changed %d rows for %s", rows, instancePath)
+			}
+		}
+		changed = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return changed, nil
+}
+
 func (s *WorkflowInstanceStore) LoadDynamicFlowRuntimeReadiness(
 	ctx context.Context,
 	runID string,

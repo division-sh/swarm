@@ -480,7 +480,10 @@ func (eb *EventBus) activeFlowInstanceDescriptorsForSemanticSource(
 		if descriptor.BundleHash != bundleHash ||
 			descriptor.BundleSource != bundleSource ||
 			descriptor.WorkflowVersion != workflowVersion {
-			continue
+			return nil, fmt.Errorf(
+				"active flow-instance descriptor %s semantic source does not match the current EventBus source",
+				descriptor.FlowInstance,
+			)
 		}
 		out = append(out, descriptor)
 	}

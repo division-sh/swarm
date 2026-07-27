@@ -260,6 +260,29 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if items[0].TopologyReadyAt.IsZero() || items[0].CreationEventEmittedAt.IsZero() {
 				t.Fatalf("completed readiness = %#v", items[0])
 			}
+			revisedPlan := plan
+			revisedPlan.WorkflowVersion = "1.0.1"
+			reconciled, err := store.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, revisedPlan, readyAt.Add(2*time.Second))
+			if err != nil || !reconciled {
+				t.Fatalf("reconcile revised readiness plan: changed=%v err=%v", reconciled, err)
+			}
+			revised, found, err := store.LoadDynamicFlowRuntimeReadiness(ctx, runID, instance.StorageRef)
+			if err != nil || !found {
+				t.Fatalf("load revised readiness: found=%v err=%v", found, err)
+			}
+			if revised.Plan.WorkflowVersion != "1.0.1" || revised.TopologyReadyAt.IsZero() || revised.CreationEventEmittedAt.IsZero() {
+				t.Fatalf("revised readiness = %#v", revised)
+			}
+			conflictingCreation := revisedPlan
+			conflictingCreationEvent := *revisedPlan.CreationEvent
+			conflictingCreationEvent.EventID = uuid.NewString()
+			conflictingCreation.CreationEvent = &conflictingCreationEvent
+			if _, err := store.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, conflictingCreation, readyAt.Add(3*time.Second)); err == nil {
+				t.Fatal("revised readiness replaced an emitted creation occurrence")
+			}
+			if err := store.MarkDynamicFlowRuntimeTopologyReady(ctx, runID, instance.StorageRef, readyAt.Add(4*time.Second)); err != nil {
+				t.Fatalf("mark revised topology ready: %v", err)
+			}
 
 			nextRunID := uuid.NewString()
 			sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)

@@ -514,6 +514,9 @@ func (rt *Runtime) ensureStandingTargets(ctx context.Context, serviceID string) 
 			if reconciliation.Generation > 1 {
 				txctx = runtimepipeline.WithStandingGenerationRebind(txctx)
 			}
+			if err := rt.Manager.ReconcileDynamicFlowRuntimeReadinessPlansForRun(txctx, source, time.Now().UTC()); err != nil {
+				return err
+			}
 			wasCreated, err := rt.Manager.EnsureFlowInstance(txctx, runtimepipeline.FlowInstanceActivationRequest{
 				ContractBundle: source,
 				Instance:       instance,

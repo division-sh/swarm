@@ -1082,7 +1082,7 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 	if err != nil {
 		return err
 	}
-	mode := workflowInstanceMode(storageRef)
+	mode := workflowInstanceMode(instance)
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO flow_instances (
 			instance_id, flow_template, mode, config, status, created_at
@@ -1092,7 +1092,6 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 		)
 		ON CONFLICT (instance_id) DO UPDATE SET
 			flow_template = EXCLUDED.flow_template,
-			mode = EXCLUDED.mode,
 			config = EXCLUDED.config,
 			status = CASE WHEN flow_instances.status = 'terminated' THEN flow_instances.status ELSE 'active' END
 	`, storageRef, instance.WorkflowName, mode, jsonOrDefault(configJSON, "{}")); err != nil {
@@ -1199,7 +1198,7 @@ func (s *WorkflowInstanceStore) createSpec(ctx context.Context, rowID, storageRe
 	if err != nil {
 		return err
 	}
-	mode := workflowInstanceMode(storageRef)
+	mode := workflowInstanceMode(instance)
 	flowInstanceInsert := `
 		INSERT INTO flow_instances (
 			instance_id, flow_template, mode, config, status, created_at
@@ -1753,8 +1752,8 @@ func workflowInstanceTransitionHistoryFromConfig(config map[string]any) ([]Workf
 	return out, nil
 }
 
-func workflowInstanceMode(storageRef string) string {
-	if strings.Contains(strings.TrimSpace(storageRef), "/") {
+func workflowInstanceMode(instance WorkflowInstance) string {
+	if instance.RuntimeReadiness != nil {
 		return "template"
 	}
 	return "static"

@@ -293,7 +293,7 @@ func (s *WorkflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 		if err != nil {
 			return err
 		}
-		mode := workflowInstanceMode(storageRef)
+		mode := workflowInstanceMode(instance)
 		now := time.Now().UTC()
 		if createOnly {
 			now = instance.CreatedAt.UTC()
@@ -339,7 +339,6 @@ func (s *WorkflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 				VALUES (?, ?, ?, ?, 'active', ?)
 				ON CONFLICT(instance_id) DO UPDATE SET
 					flow_template = excluded.flow_template,
-					mode = excluded.mode,
 					config = excluded.config,
 					status = CASE WHEN flow_instances.status = 'terminated' THEN flow_instances.status ELSE 'active' END
 			`, storageRef, instance.WorkflowName, mode, jsonOrDefault(configJSON, "{}"), now); err != nil {

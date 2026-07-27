@@ -4537,13 +4537,19 @@ engine:
         plan containing the exact route, declared-agent revisions, run, and optional deterministic creation event occurrence
       - 7. When creation participates in a selected mutation, it derives the complete active dynamic-instance topology from
         selected-store descriptors carrying the exact creating-run semantic source coordinate
-        `{bundle_hash, bundle_source, workflow_version}`. It admits only descriptors matching the current EventBus source and
+        `{bundle_hash, bundle_source, workflow_version}`. Bundle hash/source and workflow version are authoritative only when
+        projected through the exact current-run `flow_instance_runtime_readiness` owner. The querying run, current
+        `flow_instances.config`, path shape, or a readiness row from another run cannot supply or complete that coordinate.
+        Missing, partial, malformed, wrong-run, or nonmatching source coordinates fail closed before any exact route owner is
+        replaced. When an active run's source revision changes, one run-scoped readiness reconciler must advance every active
+        `{run_id, instance_id}` plan from the revised semantic source and its exact persisted route projection before any route
+        derivation in that selected mutation. It preserves an already emitted creation occurrence, resets incomplete topology
+        readiness, and queues each changed key for post-commit reconciliation; no per-route source repair is permitted. It
+        admits only descriptors matching the current EventBus source and
         replaces the complete active route-row set for every affected owner in that mutation, where rows absent from the newly
         derived set become inactive and expected rows are upserted. This includes cross-instance observer routes owned by an
-        already-active consumer when the new instance is the observed source. Missing-source descriptors fail closed;
-        descriptors from another source remain under their own route owner and MUST NOT be reinterpreted through the current
-        bundle. An unscoped descriptor read may support non-authoritative target description but cannot authorize route
-        persistence.
+        already-active consumer when the new instance is the observed source. An unscoped descriptor read may support
+        non-authoritative target description but cannot authorize route persistence.
         Persisted route truth MUST remain absent from the global process route table and independent recipient planning until
         readiness reconciliation publishes it. The selected mutation's private route overlay consumes the same exact
         topology so the triggering delivery can complete atomically; that overlay is not global publication authority.
@@ -4590,9 +4596,10 @@ engine:
           inactivating previously active rows absent from the derived set; additive upsert is not an exact-set operation.
           Creation and terminal source/consumer removal consume the same owner. Deriving only the newly created or removed
           instance is invalid because cross-instance observers depend on both lifecycle owners. A missing-source descriptor
-          fails closed. A descriptor from another semantic source belongs to a different route owner and MUST NOT be
-          interpreted through the current bundle. Store-wide or run-unscoped descriptors may remain target-description facts,
-          but they cannot authorize persisted route derivation.
+          fails closed. The coordinate exists only through the exact current-run readiness row; current-run query context,
+          `flow_instances.config`, another run's readiness, and storage-path shape are not source authority. A malformed,
+          partial, or foreign coordinate fails the entire exact-set derivation before mutation. Store-wide or run-unscoped
+          descriptors may remain target-description facts, but they cannot authorize persisted route derivation.
         recovery: Startup recovery of active flow-instance routes MUST load one exact run-independent projection from the
           active `flow_instances` row identified by the persisted route's instance path. Dynamic instances additionally
           consume their exact `flow_instance_runtime_readiness` plan. The plan owns the creation run and expected declared
@@ -12838,7 +12845,9 @@ platform_tables:
           the derived set and upserts expected rows with concrete flow_instance and rendered subscriber_id.
         terminate_flow_instance: In the same selected mutation as terminal lifecycle truth, derive topology without the
           terminal owner and exact-set replace every affected source/consumer owner plus the terminal owner's empty set.
-          Process route retirement is post-commit.
+          Every direct or composed caller must enter that selected mutation before terminal state changes; no two-transaction
+          fallback exists. Replacement failure rolls terminal lifecycle and every route owner back together. Process route
+          retirement and agent teardown are post-commit only.
         event_dispatch: SELECT WHERE event_pattern matches AND status = active. Concrete rows (is_materialized) take priority
           over wildcards.
     mailbox:
@@ -13243,7 +13252,10 @@ platform_tables:
             INDEX idx_runtime_effect_budget_reservations_scope (period_start_utc, scope_kind, scope_key)
         );
     flow_instances:
-      description: Registry of all flow instances (static and dynamic). One row per instance.
+      description: >-
+        Registry of all flow instances (static and dynamic). One row per instance. `mode=template` is selected at initial
+        construction only by the exact dynamic runtime-readiness fact committed with that instance; slash/path shape is not
+        a mode classifier. Later state upserts preserve the persisted mode rather than reinterpreting identity text.
       ddl: "CREATE TABLE flow_instances (\n    instance_id       TEXT PRIMARY KEY,\n    flow_template     TEXT NOT NULL,\n\
         \    mode              TEXT NOT NULL CHECK (mode IN ('static', 'template')),\n    parent_instance   TEXT,\n    config\
         \            JSONB NOT NULL DEFAULT '{}',\n    status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active',\
@@ -13956,7 +13968,8 @@ run_model:
       timers remain fail-closed under #642. runtime.run_fork.selected_contract_deferred_work_admission is the one
       selected-fork capability owner for work that would outlive the ephemeral selected-fork container. It classifies
       relevant timer history in the selected revision, selected semantic workflow-timer declarations, selected semantic
-      timed-join declarations, connect-time template inputs with exact `resolution.mode: create`, and authored
+      timed-join declarations, connect-time template inputs whose resolution can create (`create` and
+      `select-or-create`), and authored
       `create_flow_instance` actions. Direct selected execution consumes this admission before materialization. Activation of an
       already materialized selected fork consumes it before delivery replay, state-only activation, event publication,
       workflow mutation, or runtime-container issuance. The admitted capability is carried through the selected execution
@@ -14355,7 +14368,9 @@ run_model:
         independently approved.'
       3d_selected_contract_timer_route_policy: 'For selected-contract mutating fork execution,
         runtime.run_fork.selected_contract_deferred_work_admission classifies source timer history, workflow-timer
-        declarations, timed-join declarations, connect-time create resolution, and authored create_flow_instance actions as
+        declarations, timed-join declarations, connect-time resolution through the exhaustive six-mode matrix
+        (`create` and `select-or-create` can create; `select`, `fan-in`, `fan-out`, and `reply` cannot), and authored
+        create_flow_instance actions as
         unsupported while the ephemeral selected-fork container has no
         long-lived deferred-work owner. Direct execution rejects before materialization; staged activation rejects before
         delivery replay, state-only activation, publication, workflow mutation, or container issuance. The admission is
@@ -14568,7 +14583,8 @@ run_model:
         idempotency, or arbitrary in-flight work.'
       5_resume: 'Execute only owner-admitted fork-local work under the new run_id. Today that means the
         delivery_event_replay_ready primitive and deferred-work-free selected-contract frontier execution when
-        independently admitted: no selected revision timer history, workflow timers, or timed joins. Unsupported
+        independently admitted: no selected revision timer history, workflow timers, timed joins, or semantically
+        dynamic-flow-creating input resolution. Unsupported
         historical fact families
         fail closed with typed blockers; the platform never infers unfinished source work from current rows.'
     parallel_safety: 'Each source transaction publishes all changed fork-reader families under one commit-serialized

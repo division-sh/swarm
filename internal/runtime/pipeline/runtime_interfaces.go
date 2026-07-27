@@ -65,6 +65,7 @@ type WorkflowInstancePersistence interface {
 	Create(ctx context.Context, instance WorkflowInstance) error
 	MaterializeInitialEntry(ctx context.Context, instance WorkflowInstance, occurredAt time.Time) (WorkflowInitialMaterializationResult, error)
 	ArmInitialEntryTimers(ctx context.Context, instanceID string) error
+	ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error)
 	LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID, instanceID string) (DynamicFlowRuntimeReadiness, bool, error)
 	ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]DynamicFlowRuntimeReadiness, error)
 	ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]DynamicFlowRuntimeReadinessKey, error)

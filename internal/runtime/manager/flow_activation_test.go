@@ -125,6 +125,46 @@ type flowActivationTestInstanceStore struct {
 	beforeCreation   func()
 }
 
+func (s *flowActivationTestInstanceStore) RunPipelineMutation(ctx context.Context, fn func(context.Context) error) error {
+	if fn == nil {
+		return nil
+	}
+	creates := append([]runtimepipeline.WorkflowInstance(nil), s.creates...)
+	upserts := append([]runtimepipeline.WorkflowInstance(nil), s.upserts...)
+	terminatedPaths := append([]string(nil), s.terminatedPaths...)
+	terminatedAtSeen := append([]time.Time(nil), s.terminatedAtSeen...)
+	byStorageRef := make(map[string]runtimepipeline.WorkflowInstance, len(s.byStorageRef))
+	for key, value := range s.byStorageRef {
+		byStorageRef[key] = value
+	}
+	s.readinessMu.Lock()
+	readiness := make(map[string]runtimepipeline.DynamicFlowRuntimeReadiness, len(s.readiness))
+	for key, value := range s.readiness {
+		readiness[key] = value
+	}
+	s.readinessMu.Unlock()
+
+	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
+	rollback := make([]runtimepipeline.OwnerAction, 0, 1)
+	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, &sql.Tx{})
+	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
+	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollback)
+	if err := fn(txctx); err != nil {
+		s.creates = creates
+		s.upserts = upserts
+		s.terminatedPaths = terminatedPaths
+		s.terminatedAtSeen = terminatedAtSeen
+		s.byStorageRef = byStorageRef
+		s.readinessMu.Lock()
+		s.readiness = readiness
+		s.readinessMu.Unlock()
+		runtimepipeline.FlushPipelineRollbackActions(rollback)
+		return err
+	}
+	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	return nil
+}
+
 type flowActivationTestStore struct {
 	upserts      []PersistedAgent
 	terminated   []string
@@ -260,6 +300,54 @@ func (s *flowActivationTestInstanceStore) LoadDynamicFlowRuntimeReadiness(_ cont
 	defer s.readinessMu.Unlock()
 	item, ok := s.readiness[flowActivationReadinessKey(runID, instanceID)]
 	return item, ok, nil
+}
+
+func (s *flowActivationTestInstanceStore) ReconcileDynamicFlowRuntimeReadinessPlan(
+	_ context.Context,
+	plan runtimepipeline.DynamicFlowRuntimeReadinessPlan,
+	_ time.Time,
+) (bool, error) {
+	normalized, err := plan.Normalized()
+	if err != nil {
+		return false, err
+	}
+	s.readinessMu.Lock()
+	defer s.readinessMu.Unlock()
+	key := flowActivationReadinessKey(normalized.RunID, normalized.Identity.InstancePath)
+	current, ok := s.readiness[key]
+	if !ok || !current.Eligible() {
+		return false, fmt.Errorf("readiness not found")
+	}
+	actualJSON, err := json.Marshal(current.Plan)
+	if err != nil {
+		return false, err
+	}
+	expectedJSON, err := json.Marshal(normalized)
+	if err != nil {
+		return false, err
+	}
+	if string(actualJSON) == string(expectedJSON) {
+		return false, nil
+	}
+	if !current.CreationEventEmittedAt.IsZero() {
+		actualCreationJSON, err := json.Marshal(current.Plan.CreationEvent)
+		if err != nil {
+			return false, err
+		}
+		expectedCreationJSON, err := json.Marshal(normalized.CreationEvent)
+		if err != nil {
+			return false, err
+		}
+		if string(actualCreationJSON) != string(expectedCreationJSON) {
+			return false, fmt.Errorf("cannot revise emitted creation occurrence")
+		}
+	}
+	current.Plan = normalized
+	if current.CreationEventEmittedAt.IsZero() {
+		current.TopologyReadyAt = time.Time{}
+	}
+	s.readiness[key] = current
+	return true, nil
 }
 
 func (s *flowActivationTestInstanceStore) ListDynamicFlowRuntimeReadiness(context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
@@ -1575,6 +1663,40 @@ func TestEnsureFlowInstanceRestoresPersistedDeclaredAgentsWithoutNewLifecycleTra
 	}
 }
 
+func TestEnsureFlowInstanceReconcilesRevisedSemanticSourceIntoReadinessOwner(t *testing.T) {
+	instances := &flowActivationTestInstanceStore{}
+	agents := &flowActivationTestStore{}
+	firstBundle := testFlowBundleWithTwoAgents("")
+	firstReq := testActivationRequest(firstBundle, "review", "inst-1", "ent-1", "review/inst-1")
+	ctx := testAuthorActivityContext(context.Background())
+	first := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances, agents)
+	if err := first.ActivateFlowInstance(ctx, firstReq); err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+
+	revisedBundle := testFlowBundleWithTwoAgents("")
+	revisedBundle.Semantics.Version = "v-revised"
+	revisedReq := testActivationRequest(revisedBundle, "review", "inst-1", "ent-1", "review/inst-1")
+	restarted := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances, agents)
+	restarted.semanticSource = semanticview.Wrap(revisedBundle)
+	if created, err := restarted.EnsureFlowInstance(ctx, revisedReq); err != nil {
+		t.Fatalf("EnsureFlowInstance revised source: %v", err)
+	} else if created {
+		t.Fatal("EnsureFlowInstance reported a new instance for source revision")
+	}
+	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(
+		ctx,
+		revisedReq.TriggerEvent.RunID(),
+		revisedReq.Instance.InstancePath,
+	)
+	if err != nil || !found {
+		t.Fatalf("load revised readiness: found=%v err=%v", found, err)
+	}
+	if readiness.Plan.WorkflowVersion != "v-revised" || readiness.TopologyReadyAt.IsZero() {
+		t.Fatalf("revised readiness = %#v", readiness)
+	}
+}
+
 func TestEnsureFlowInstanceDefersReadinessVerificationUntilMutationCommit(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
@@ -2385,6 +2507,7 @@ func TestDeactivateFlowInstanceQueuesTerminalSideEffectsUntilPostCommitWhenAvail
 	}
 	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
 	ctx := withFlowActivationPostCommit(flowActivationRunContext(), &postCommit)
+	ctx = runtimepipeline.WithPipelineSQLTxContext(ctx, &sql.Tx{})
 	if err := am.DeactivateFlowInstance(ctx, "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
 		t.Fatalf("DeactivateFlowInstance: %v", err)
 	}
@@ -2496,6 +2619,13 @@ func TestDeactivateFlowInstanceFailsBeforePostCommitSideEffectsWhenRoutePersiste
 	}
 	if len(postCommit) != 0 {
 		t.Fatalf("post-commit actions after route failure = %d, want none", len(postCommit))
+	}
+	if len(instances.terminatedPaths) != 0 {
+		t.Fatalf("terminal state survived route replacement rollback: %#v", instances.terminatedPaths)
+	}
+	instance, ok, loadErr := instances.Load(context.Background(), "review/inst-1")
+	if loadErr != nil || !ok || instance.Status != "active" {
+		t.Fatalf("flow instance after route replacement rollback: found=%t instance=%#v err=%v", ok, instance, loadErr)
 	}
 }
 

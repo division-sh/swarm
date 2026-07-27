@@ -114,6 +114,148 @@ func (am *AgentManager) reconcilePendingDynamicFlowRuntimeReadiness(
 	return errors.Join(reconcileErrs...)
 }
 
+func (am *AgentManager) reconcileEnsuredDynamicFlowRuntimeReadinessPlan(
+	ctx context.Context,
+	req runtimepipeline.FlowInstanceActivationRequest,
+	runID string,
+) error {
+	templateID := strings.TrimSpace(req.Instance.TemplateID)
+	scope, ok := semanticview.FlowScopeByID(req.ContractBundle, templateID)
+	if !ok {
+		return fmt.Errorf("flow contract view not found: %s", templateID)
+	}
+	schema, ok := req.ContractBundle.FlowSchemaByID(templateID)
+	if !ok {
+		return fmt.Errorf("flow schema not found: %s", templateID)
+	}
+	agentRecords, err := am.flowInstanceAgentRecords(req, schema, scope)
+	if err != nil {
+		return err
+	}
+	occurredAt := req.OccurredAt.UTC()
+	if !req.TriggerEvent.CreatedAt().IsZero() {
+		occurredAt = req.TriggerEvent.CreatedAt().UTC()
+	}
+	if occurredAt.IsZero() {
+		return fmt.Errorf("flow readiness reconciliation requires an exact occurrence time")
+	}
+	current, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, runID, req.Instance.InstancePath)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("dynamic flow runtime readiness not found for %s", req.Instance.InstancePath)
+	}
+	expected := current.Plan
+	expected.Identity = req.Instance
+	expected.WorkflowVersion = strings.TrimSpace(req.ContractBundle.WorkflowVersion())
+	expected.Agents = make([]runtimepipeline.DynamicFlowRuntimeAgentExpectation, 0, len(agentRecords))
+	for _, record := range agentRecords {
+		revision, err := lifecycleConfigRevision(record)
+		if err != nil {
+			return fmt.Errorf("derive dynamic flow agent revision %s: %w", record.Config.ID, err)
+		}
+		expected.Agents = append(expected.Agents, runtimepipeline.DynamicFlowRuntimeAgentExpectation{
+			AgentID: record.Config.ID, ConfigRevision: revision,
+		})
+	}
+	if _, err := am.workflowInstances.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, expected, occurredAt); err != nil {
+		return fmt.Errorf("reconcile dynamic flow runtime readiness plan %s: %w", req.Instance.InstancePath, err)
+	}
+	return nil
+}
+
+// ReconcileDynamicFlowRuntimeReadinessPlansForRun advances every active
+// readiness owner in the selected run before revised routes are derived.
+func (am *AgentManager) ReconcileDynamicFlowRuntimeReadinessPlansForRun(
+	ctx context.Context,
+	source semanticview.Source,
+	observedAt time.Time,
+) error {
+	if am == nil || am.workflowInstances == nil {
+		return fmt.Errorf("dynamic flow runtime readiness reconciler requires manager and workflow store")
+	}
+	if source == nil || strings.TrimSpace(source.WorkflowVersion()) == "" {
+		return fmt.Errorf("dynamic flow runtime readiness reconciler requires semantic source")
+	}
+	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+	if runID == "" {
+		return fmt.Errorf("dynamic flow runtime readiness reconciliation requires exact run_id")
+	}
+	observedAt = observedAt.UTC()
+	if observedAt.IsZero() {
+		return fmt.Errorf("dynamic flow runtime readiness reconciliation requires exact occurrence time")
+	}
+	if _, transactional := runtimepipeline.PipelineSQLTxFromContext(ctx); !transactional {
+		return fmt.Errorf("run-scoped dynamic flow runtime readiness reconciliation requires selected mutation")
+	}
+	items, err := am.workflowInstances.ListDynamicFlowRuntimeReadiness(ctx)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item.Plan.RunID != runID {
+			continue
+		}
+		projection, err := am.workflowInstances.LoadRouteRecoveryProjection(ctx, item.Plan.Identity.Route())
+		if err != nil {
+			return fmt.Errorf("load dynamic flow readiness projection %s: %w", item.InstancePath, err)
+		}
+		scope, ok := semanticview.FlowScopeByID(source, projection.Identity.TemplateID)
+		if !ok {
+			return fmt.Errorf("flow contract view not found: %s", projection.Identity.TemplateID)
+		}
+		schema, ok := source.FlowSchemaByID(projection.Identity.TemplateID)
+		if !ok {
+			return fmt.Errorf("flow schema not found: %s", projection.Identity.TemplateID)
+		}
+		records, err := am.flowInstanceAgentRecords(runtimepipeline.FlowInstanceActivationRequest{
+			ContractBundle: source,
+			Instance:       projection.Identity,
+			Config:         projection.Config,
+		}, schema, scope)
+		if err != nil {
+			return fmt.Errorf("derive dynamic flow readiness agents %s: %w", item.InstancePath, err)
+		}
+		expected := item.Plan
+		expected.Identity = projection.Identity
+		expected.WorkflowVersion = strings.TrimSpace(source.WorkflowVersion())
+		expected.Agents = make([]runtimepipeline.DynamicFlowRuntimeAgentExpectation, 0, len(records))
+		for _, record := range records {
+			revision, err := lifecycleConfigRevision(record)
+			if err != nil {
+				return fmt.Errorf("derive dynamic flow agent revision %s: %w", record.Config.ID, err)
+			}
+			expected.Agents = append(expected.Agents, runtimepipeline.DynamicFlowRuntimeAgentExpectation{
+				AgentID: record.Config.ID, ConfigRevision: revision,
+			})
+		}
+		changed, err := am.workflowInstances.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, expected, observedAt)
+		if err != nil {
+			return fmt.Errorf("reconcile dynamic flow runtime readiness plan %s: %w", item.InstancePath, err)
+		}
+		if !changed {
+			continue
+		}
+		key, err := newDynamicFlowRuntimeReadinessKey(runID, item.InstancePath)
+		if err != nil {
+			return err
+		}
+		reconcile := func(actionCtx context.Context) {
+			postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(
+				runtimepipeline.WithoutPipelineSQLTxContext(actionCtx),
+			)
+			if err := am.reconcileDynamicFlowRuntimeReadiness(postCommitCtx, key.runID, key.instancePath, source); err != nil {
+				am.signalDynamicFlowRuntimeReadiness()
+			}
+		}
+		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, reconcile) {
+			return fmt.Errorf("dynamic flow runtime readiness %s requires post-commit reconciliation owner", item.InstancePath)
+		}
+	}
+	return nil
+}
+
 func (am *AgentManager) signalDynamicFlowRuntimeReadiness() {
 	if am == nil || am.dynamicFlowReadinessSignal == nil {
 		return

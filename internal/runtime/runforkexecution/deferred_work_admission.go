@@ -123,7 +123,7 @@ func selectedContractSourceCanCreateDynamicFlow(source semanticview.Source) bool
 	}
 	for flowID := range source.FlowSchemaEntries() {
 		for _, pin := range source.FlowInputEventPins(flowID) {
-			if strings.TrimSpace(pin.Resolution.Mode) != runtimecontracts.FlowInputResolutionModeCreate {
+			if !selectedContractFlowInputResolutionRequiresDynamicFlowOwner(pin.Resolution.Mode) {
 				continue
 			}
 			if len(semanticview.ResolvedCompositionConnectsTo(source, flowID, pin.PinName())) > 0 {
@@ -139,6 +139,25 @@ func selectedContractSourceCanCreateDynamicFlow(source semanticview.Source) bool
 		}
 	}
 	return false
+}
+
+func selectedContractFlowInputResolutionRequiresDynamicFlowOwner(mode string) bool {
+	switch strings.TrimSpace(mode) {
+	case runtimecontracts.FlowInputResolutionModeCreate,
+		runtimecontracts.FlowInputResolutionModeSelectOrCreate:
+		return true
+	case runtimecontracts.FlowInputResolutionModeSelect,
+		runtimecontracts.FlowInputResolutionModeFanIn,
+		runtimecontracts.FlowInputResolutionModeFanOut,
+		runtimecontracts.FlowInputResolutionModeReply:
+		return false
+	case "":
+		return false
+	default:
+		// Invalid or newly introduced modes cannot silently bypass the selected
+		// container's missing long-lived dynamic-flow owner.
+		return true
+	}
 }
 
 func selectedContractHandlerCreatesDynamicFlow(handler runtimecontracts.SystemNodeEventHandler) bool {
