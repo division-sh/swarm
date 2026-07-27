@@ -1139,6 +1139,19 @@ seam_families:
       The matrix proves selected route-authority rows. This inventory proves
       the repo-wide drift audit boundary and identifies guardrails that should
       prevent future narrow closure.
+  - id: bundle_source_operation_guard
+    layer: conformance_guardrails
+    classification: separate_semantic_concept
+    paths:
+      - internal/runtime/bus/bundle_source_mutation_roots_test.go
+      - internal/store/run_bundle_identity_repository_test.go
+    search_dimensions: [live_agent_subscription_route_authority, descriptor_evidence, direct_delivery_path]
+    notes: >
+      Bundle-source hostile tests invoke the existing public operations, and
+      the repository ledger names every exported EventBus operation for source
+      ownership classification. Those references guard source admission and
+      capability lifetime; they do not produce, infer, or replace route
+      authority.
 guardrail_proposals:
   - id: drift_inventory_search_dimension_guard
     implementation_state: implemented_in_this_pr

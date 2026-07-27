@@ -3,7 +3,6 @@ package bus
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -48,11 +47,16 @@ func (eb *EventBus) StartOutboxSweeper(ctx context.Context, cfg OutboxSweeperCon
 	if eb == nil {
 		return nil
 	}
-	var err error
-	ctx, err = eb.admitBundleSourceFact(ctx)
+	ctx, lease, err := eb.beginRuntimeWork(ctx)
 	if err != nil {
 		return err
 	}
+	closeLease := true
+	defer func() {
+		if closeLease {
+			_ = lease.Done()
+		}
+	}()
 	if cfg.Interval <= 0 || cfg.Limit <= 0 {
 		defaults := DefaultOutboxSweeperConfig()
 		if cfg.Interval <= 0 {
@@ -67,24 +71,16 @@ func (eb *EventBus) StartOutboxSweeper(ctx context.Context, cfg OutboxSweeperCon
 		eb.mu.Unlock()
 		return nil
 	}
-	if eb.workOwner == nil {
-		eb.mu.Unlock()
-		return errors.New("outbox sweeper requires a runtime work occurrence")
-	}
-	lease, err := eb.workOwner.Begin(ctx)
-	if err != nil {
-		eb.mu.Unlock()
-		return fmt.Errorf("admit outbox sweeper: %w", err)
-	}
 	eb.outboxSweeperActive = true
 	done := make(chan struct{})
 	eb.outboxSweeperDone = done
 	eb.mu.Unlock()
+	closeLease = false
 
 	go func() {
 		defer close(done)
 		defer func() { _ = lease.Done() }()
-		defer func() { _ = eb.closeAllPipelineScans(context.Background()) }()
+		defer func() { _ = eb.closeAllPipelineScans(context.WithoutCancel(ctx)) }()
 		ticker := time.NewTicker(cfg.Interval)
 		defer ticker.Stop()
 		defer func() {
@@ -92,7 +88,7 @@ func (eb *EventBus) StartOutboxSweeper(ctx context.Context, cfg OutboxSweeperCon
 			eb.outboxSweeperActive = false
 			eb.mu.Unlock()
 		}()
-		workCtx := lease.Context()
+		workCtx := ctx
 		for {
 			if _, err := eb.SweepPipelineObligations(workCtx, cfg.Limit); err != nil {
 				eb.logRuntime(workCtx, "warn", "Outbox sweep failed", "eventbus", "outbox_sweep_failed", "", "", "", "", "", nil, map[string]any{

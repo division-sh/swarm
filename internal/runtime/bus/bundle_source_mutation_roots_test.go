@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -11,8 +12,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -210,6 +214,74 @@ type sourceMutationProbeTransaction struct {
 	finalize int
 }
 
+type sourceBoundaryProbeStore struct {
+	InMemoryEventStore
+	runtimedelivery.Store
+
+	upsertCalls    int
+	deleteCalls    int
+	bindCalls      int
+	standaloneRuns int
+	normalRuns     int
+	routes         map[string]FlowInstanceRouteRecord
+	upsertFact     runtimecorrelation.BundleSourceFact
+	deleteFact     runtimecorrelation.BundleSourceFact
+	bindFact       runtimecorrelation.BundleSourceFact
+	standaloneFact runtimecorrelation.BundleSourceFact
+	normalFact     runtimecorrelation.BundleSourceFact
+}
+
+func (s *sourceBoundaryProbeStore) UpsertFlowInstanceRoute(ctx context.Context, route FlowInstanceRouteRecord) error {
+	s.upsertCalls++
+	s.upsertFact, _ = runtimecorrelation.BundleSourceFactFromContext(ctx)
+	if s.routes == nil {
+		s.routes = map[string]FlowInstanceRouteRecord{}
+	}
+	s.routes[route.Identity.InstancePath+"\x00"+route.EventPattern] = route
+	return nil
+}
+
+func (s *sourceBoundaryProbeStore) DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error {
+	s.deleteCalls++
+	s.deleteFact, _ = runtimecorrelation.BundleSourceFactFromContext(ctx)
+	for key, route := range s.routes {
+		if route.Identity == identity {
+			delete(s.routes, key)
+		}
+	}
+	return nil
+}
+
+func (s *sourceBoundaryProbeStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.Route, error) {
+	seen := map[runtimeflowidentity.Route]struct{}{}
+	for _, route := range s.routes {
+		seen[route.Identity] = struct{}{}
+	}
+	out := make([]runtimeflowidentity.Route, 0, len(seen))
+	for route := range seen {
+		out = append(out, route)
+	}
+	return out, nil
+}
+
+func (s *sourceBoundaryProbeStore) BindAgentSession(ctx context.Context, _ runtimedelivery.Claim, _ string) (runtimedelivery.Snapshot, error) {
+	s.bindCalls++
+	s.bindFact, _ = runtimecorrelation.BundleSourceFactFromContext(ctx)
+	return runtimedelivery.Snapshot{}, nil
+}
+
+func (s *sourceBoundaryProbeStore) ConvergeStandaloneRuntimePlatformRun(ctx context.Context, _ events.Event) error {
+	s.standaloneRuns++
+	s.standaloneFact, _ = runtimecorrelation.BundleSourceFactFromContext(ctx)
+	return nil
+}
+
+func (s *sourceBoundaryProbeStore) ConvergeNormalRunCompletion(ctx context.Context, _ string, _ []string, _ map[string][]string) error {
+	s.normalRuns++
+	s.normalFact, _ = runtimecorrelation.BundleSourceFactFromContext(ctx)
+	return nil
+}
+
 func (t *sourceMutationProbeTransaction) BeginPreparedPublish(context.Context, PreparedPublishEvent) (EventAppendOutcome, error) {
 	t.begin++
 	return EventAppendInserted, nil
@@ -234,6 +306,15 @@ func newSourceMutationProbeBus(
 	fact runtimecorrelation.BundleSourceFact,
 	owner *sourceMutationProbeOwner,
 ) *EventBus {
+	return newSourceMutationProbeBusWithStore(t, InMemoryEventStore{}, fact, owner)
+}
+
+func newSourceMutationProbeBusWithStore(
+	t testing.TB,
+	store EventStore,
+	fact runtimecorrelation.BundleSourceFact,
+	owner *sourceMutationProbeOwner,
+) *EventBus {
 	t.Helper()
 	process := worklifetime.NewProcess()
 	runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
@@ -250,7 +331,7 @@ func newSourceMutationProbeBus(
 		process.Retire()
 		_, _ = process.Join(ctx)
 	})
-	bus, err := NewEventBusWithOptions(InMemoryEventStore{}, EventBusOptions{
+	bus, err := NewEventBusWithOptions(store, EventBusOptions{
 		BundleSourceFact:    fact,
 		RuntimeInstanceID:   uuid.NewString(),
 		PipelineObligations: owner,
@@ -260,6 +341,29 @@ func newSourceMutationProbeBus(
 		t.Fatalf("create event bus: %v", err)
 	}
 	return bus
+}
+
+func newFencedSourceMutationOccurrence(t testing.TB) worklifetime.Occurrence {
+	t.Helper()
+	process := worklifetime.NewProcess()
+	runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+		RuntimeInstanceID: uuid.NewString(),
+		BundleHash:        "foreign-fenced-source",
+	})
+	if err != nil {
+		t.Fatalf("create fenced runtime occurrence: %v", err)
+	}
+	if err := runtimeOwner.Fence(); err != nil {
+		t.Fatalf("fence foreign runtime occurrence: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_, _ = runtimeOwner.RetireAndWait(ctx)
+		process.Retire()
+		_, _ = process.Join(ctx)
+	})
+	return runtimeOwner
 }
 
 func sourceMutationEvent() events.Event {
@@ -297,6 +401,252 @@ func TestDurableEventBusConstructionRequiresImmutableBundleSourceFact(t *testing
 	}
 	if _, err := NewEphemeralEventBus(InMemoryEventStore{}); err != nil {
 		t.Fatalf("ownerless ephemeral constructor: %v", err)
+	}
+}
+
+func TestPublishRootsRejectForeignSourceBeforeWorkOccurrenceAdmission(t *testing.T) {
+	owned := sourceMutationFact(t, "a")
+	foreign := sourceMutationFact(t, "b")
+	owner := newSourceMutationProbeOwner()
+	bus := newSourceMutationProbeBus(t, owned, owner)
+	fenced := newFencedSourceMutationOccurrence(t)
+
+	for _, tc := range []struct {
+		name string
+		run  func(context.Context) error
+	}{
+		{name: "publish", run: func(ctx context.Context) error {
+			return bus.Publish(ctx, sourceMutationEvent())
+		}},
+		{name: "publish and wait", run: func(ctx context.Context) error {
+			return bus.PublishAndWait(ctx, sourceMutationEvent())
+		}},
+		{name: "publish acknowledged", run: func(ctx context.Context) error {
+			return bus.PublishAcknowledged(ctx, sourceMutationEvent())
+		}},
+		{name: "prepare in mutation", run: func(ctx context.Context) error {
+			transaction := &sourceMutationProbeTransaction{}
+			ctx, _ = sourceMutationContext(ctx, transaction)
+			_, err := bus.PreparePublishInMutation(ctx, sourceMutationEvent())
+			if transaction.begin != 0 || transaction.finalize != 0 {
+				return fmt.Errorf("prepare mutated transaction before rejection: %#v", transaction)
+			}
+			return err
+		}},
+		{name: "direct in mutation", run: func(ctx context.Context) error {
+			transaction := &sourceMutationProbeTransaction{}
+			ctx, _ = sourceMutationContext(ctx, transaction)
+			err := bus.PublishDirectInMutation(ctx, sourceMutationEvent(), []string{"agent-a"})
+			if transaction.begin != 0 || transaction.finalize != 0 {
+				return fmt.Errorf("direct mutation changed transaction before rejection: %#v", transaction)
+			}
+			return err
+		}},
+		{name: "direct", run: func(ctx context.Context) error {
+			return bus.PublishDirect(ctx, sourceMutationEvent(), []string{"agent-a"})
+		}},
+		{name: "direct routes", run: func(ctx context.Context) error {
+			return bus.PublishDirectRoutes(ctx, sourceMutationEvent(), []events.DeliveryRoute{{
+				SubscriberType: "agent",
+				SubscriberID:   "agent-a",
+			}})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := runtimecorrelation.WithBundleSourceFact(context.Background(), foreign)
+			ctx = worklifetime.WithOccurrence(ctx, fenced)
+			err := tc.run(ctx)
+			if err == nil || !strings.Contains(err.Error(), "bundle source fact conflicts") {
+				t.Fatalf("error = %v, want source conflict before work admission", err)
+			}
+			if strings.Contains(err.Error(), "work admission is fenced") {
+				t.Fatalf("error = %v, source admission lost precedence to work fencing", err)
+			}
+			if got := owner.counts(); got != (sourceMutationProbeCounts{}) {
+				t.Fatalf("pipeline mutations = %#v, want zero", got)
+			}
+		})
+	}
+}
+
+func TestAdjacentDurableMutationRootsRejectForeignSourceBeforeMutation(t *testing.T) {
+	owned := sourceMutationFact(t, "c")
+	foreign := sourceMutationFact(t, "d")
+	owner := newSourceMutationProbeOwner()
+	store := &sourceBoundaryProbeStore{}
+	bus := newSourceMutationProbeBusWithStore(t, store, owned, owner)
+	foreignCtx := runtimecorrelation.WithBundleSourceFact(context.Background(), foreign)
+	req := FlowInstanceRouteMaterializationRequest{
+		Template: runtimecontracts.SystemNodeContract{
+			ID:           "worker-{instance_id}",
+			Produces:     []string{"task.completed"},
+			SubscribesTo: []string{"task.requested"},
+		},
+		Identity: runtimeflowidentity.DeriveRoute("work", "instance-a"),
+	}
+
+	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
+	rollback := make([]runtimepipeline.OwnerAction, 0, 1)
+	routeCtx := runtimepipeline.WithPipelineSQLTxContext(foreignCtx, &sql.Tx{})
+	routeCtx = runtimepipeline.WithPipelinePostCommitActions(routeCtx, &postCommit)
+	routeCtx = runtimepipeline.WithPipelineRollbackActions(routeCtx, &rollback)
+	if err := bus.AddFlowInstanceRouteContext(routeCtx, req); err == nil ||
+		!strings.Contains(err.Error(), "bundle source fact conflicts") {
+		t.Fatalf("foreign route add error = %v, want source conflict", err)
+	}
+	if store.upsertCalls != 0 || len(postCommit) != 0 || len(rollback) != 0 || bus.HasFlowInstanceRoute(req.Identity) {
+		t.Fatalf(
+			"route add mutations = upsert:%d post_commit:%d rollback:%d local:%v, want zero",
+			store.upsertCalls, len(postCommit), len(rollback), bus.HasFlowInstanceRoute(req.Identity),
+		)
+	}
+
+	if err := bus.AddFlowInstanceRouteContext(context.Background(), req); err != nil {
+		t.Fatalf("owner-bound route add: %v", err)
+	}
+	if store.upsertCalls == 0 || !owned.Matches(store.upsertFact) || !bus.HasFlowInstanceRoute(req.Identity) {
+		t.Fatal("owner-bound route add did not persist and publish with the immutable source")
+	}
+	beforeDeletes := store.deleteCalls
+	if err := bus.RemoveFlowInstanceRouteContext(foreignCtx, req.Identity); err == nil ||
+		!strings.Contains(err.Error(), "bundle source fact conflicts") {
+		t.Fatalf("foreign route remove error = %v, want source conflict", err)
+	}
+	if store.deleteCalls != beforeDeletes || !bus.HasFlowInstanceRoute(req.Identity) {
+		t.Fatal("foreign route removal mutated persistence or the local route table")
+	}
+	if err := bus.RemoveFlowInstanceRoute(req.Identity); err != nil {
+		t.Fatalf("owner-bound no-context route removal: %v", err)
+	}
+	if store.deleteCalls != beforeDeletes+1 || !owned.Matches(store.deleteFact) || bus.HasFlowInstanceRoute(req.Identity) {
+		t.Fatal("owner-bound route removal did not use the immutable bus source")
+	}
+
+	if _, err := bus.MarkDeliveryInProgress(foreignCtx, "agent-a", "session-a"); err == nil ||
+		!strings.Contains(err.Error(), "bundle source fact conflicts") {
+		t.Fatalf("foreign delivery-session error = %v, want source conflict", err)
+	}
+	if store.bindCalls != 0 {
+		t.Fatalf("delivery-session store mutations = %d, want zero", store.bindCalls)
+	}
+
+	evt := sourceMutationEvent()
+	for _, run := range []struct {
+		name string
+		call func(context.Context) error
+	}{
+		{name: "delivery convergence", call: func(ctx context.Context) error {
+			return bus.ConvergeDeliveryRunCompletion(ctx, evt)
+		}},
+		{name: "standalone convergence", call: func(ctx context.Context) error {
+			return bus.convergeStandaloneRuntimePlatformRun(ctx, evt)
+		}},
+		{name: "normal convergence", call: func(ctx context.Context) error {
+			return bus.ConvergeNormalRunCompletionForEvent(ctx, evt.ID())
+		}},
+	} {
+		t.Run(run.name, func(t *testing.T) {
+			beforeStandalone, beforeNormal := store.standaloneRuns, store.normalRuns
+			if err := run.call(foreignCtx); err == nil ||
+				!strings.Contains(err.Error(), "bundle source fact conflicts") {
+				t.Fatalf("error = %v, want source conflict", err)
+			}
+			if store.standaloneRuns != beforeStandalone || store.normalRuns != beforeNormal {
+				t.Fatalf(
+					"convergence mutations = standalone:%d normal:%d, want unchanged %d/%d",
+					store.standaloneRuns, store.normalRuns, beforeStandalone, beforeNormal,
+				)
+			}
+		})
+	}
+	if err := bus.ConvergeDeliveryRunCompletion(context.Background(), evt); err != nil {
+		t.Fatalf("owner-bound delivery convergence: %v", err)
+	}
+	if store.standaloneRuns != 1 || store.normalRuns != 1 ||
+		!owned.Matches(store.standaloneFact) || !owned.Matches(store.normalFact) {
+		t.Fatal("owner-bound convergence did not preserve the immutable bus source")
+	}
+}
+
+func TestDeliverySessionBindingRejectsForeignSourceWithExactClaimBeforeStoreMutation(t *testing.T) {
+	owned := sourceMutationFact(t, "7")
+	foreign := sourceMutationFact(t, "8")
+	store := newExactHandoffProofStore(t, false)
+	bus := newSourceMutationProbeBusWithStore(t, store, owned, newSourceMutationProbeOwner())
+	eventID, runID := uuid.NewString(), uuid.NewString()
+	sessionID := uuid.NewString()
+	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
+	store.seed(t, eventID, runID, route)
+	claim := store.claim(t, eventID, runID, route)
+	store.seedSession(t, sessionID, runID, "agent-a")
+
+	foreignCtx := runtimedelivery.WithClaim(context.Background(), claim)
+	foreignCtx = runtimecorrelation.WithBundleSourceFact(foreignCtx, foreign)
+	if _, err := bus.MarkDeliveryInProgress(foreignCtx, "agent-a", sessionID); err == nil ||
+		!strings.Contains(err.Error(), "bundle source fact conflicts") {
+		t.Fatalf("foreign session binding error = %v, want source conflict", err)
+	}
+	store.mu.Lock()
+	binds := store.binds
+	store.mu.Unlock()
+	if binds != 0 {
+		t.Fatalf("foreign session binding mutated store %d times", binds)
+	}
+
+	ownerCtx := runtimedelivery.WithClaim(context.Background(), claim)
+	bound, err := bus.MarkDeliveryInProgress(ownerCtx, "agent-a", sessionID)
+	if err != nil {
+		t.Fatalf("owner-bound session binding: %v", err)
+	}
+	store.mu.Lock()
+	binds, bindFact := store.binds, store.bindFact
+	store.mu.Unlock()
+	if !bound || binds != 1 || !owned.Matches(bindFact) {
+		t.Fatal("owner-bound session binding did not carry the immutable bus source")
+	}
+}
+
+func TestSubscriptionAndQuiescenceRejectForeignSourceBeforeLifecycleMutation(t *testing.T) {
+	owned := sourceMutationFact(t, "e")
+	foreign := sourceMutationFact(t, "f")
+	bus := newSourceMutationProbeBus(t, owned, newSourceMutationProbeOwner())
+	foreignCtx := runtimecorrelation.WithBundleSourceFact(context.Background(), foreign)
+
+	if _, err := bus.SubscribeInternal(foreignCtx, "foreign-subscription", events.EventType("test.work")); err == nil ||
+		!strings.Contains(err.Error(), "bundle source fact conflicts") {
+		t.Fatalf("SubscribeInternal error = %v, want source conflict", err)
+	}
+	bus.mu.RLock()
+	installed := bus.internalHandles["foreign-subscription"]
+	bus.mu.RUnlock()
+	if installed != nil {
+		t.Fatal("foreign subscription installed a retained lifecycle handle")
+	}
+
+	lifecycleCtx, err := bus.admitBundleSourceFact(context.Background())
+	if err != nil {
+		t.Fatalf("derive owner lifecycle context: %v", err)
+	}
+	handle := newInternalSubscriptionHandle(lifecycleCtx, bus, "quiescence-proof", nil)
+	bus.mu.Lock()
+	bus.retiringInternalHandles = append(bus.retiringInternalHandles, handle)
+	bus.mu.Unlock()
+	if err := bus.WaitForQuiescence(foreignCtx); err == nil ||
+		!strings.Contains(err.Error(), "bundle source fact conflicts") {
+		t.Fatalf("WaitForQuiescence error = %v, want source conflict", err)
+	}
+	handle.mu.RLock()
+	active := handle.active
+	handle.mu.RUnlock()
+	bus.mu.RLock()
+	retained := len(bus.retiringInternalHandles)
+	bus.mu.RUnlock()
+	if !active || retained != 1 {
+		t.Fatalf("foreign quiescence changed retained lifecycle state: active=%v retained=%d", active, retained)
+	}
+	close(handle.receiverDone)
+	if err := bus.WaitForQuiescence(context.Background()); err != nil {
+		t.Fatalf("owner-bound quiescence: %v", err)
 	}
 }
 

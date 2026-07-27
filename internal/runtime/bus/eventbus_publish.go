@@ -138,20 +138,15 @@ func (eb *EventBus) logDispatchQueued(ctx context.Context, reason string, evt ev
 }
 
 func (eb *EventBus) Publish(ctx context.Context, evt events.Event) error {
-	lease, err := eb.beginRuntimeWork(ctx)
+	ctx, lease, err := eb.beginRuntimeWork(ctx)
 	if err != nil {
 		return err
 	}
 	if lease != nil {
 		defer func() { _ = lease.Done() }()
-		ctx = bindWorkContext(ctx, lease, eb.workOwner)
 	}
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
-		return err
-	}
-	ctx, err = eb.admitBundleSourceFact(ctx)
-	if err != nil {
 		return err
 	}
 	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt})
@@ -171,20 +166,15 @@ func (eb *EventBus) PublishAndWait(ctx context.Context, evt events.Event) error 
 	if _, active := runtimepipeline.PipelineSQLTxFromContext(ctx); active {
 		return errors.New("PublishAndWait cannot dispatch before its active mutation commits")
 	}
-	lease, err := eb.beginRuntimeWork(ctx)
+	ctx, lease, err := eb.beginRuntimeWork(ctx)
 	if err != nil {
 		return err
 	}
 	if lease != nil {
 		defer func() { _ = lease.Done() }()
-		ctx = bindWorkContext(ctx, lease, eb.workOwner)
 	}
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
-		return err
-	}
-	ctx, err = eb.admitBundleSourceFact(ctx)
-	if err != nil {
 		return err
 	}
 	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt})
@@ -208,20 +198,15 @@ func (eb *EventBus) PublishAndWait(ctx context.Context, evt events.Event) error 
 // Public API surfaces use this when success means durable acceptance rather than
 // downstream handler completion.
 func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) error {
-	lease, err := eb.beginRuntimeWork(ctx)
+	ctx, lease, err := eb.beginRuntimeWork(ctx)
 	if err != nil {
 		return err
 	}
 	if lease != nil {
 		defer func() { _ = lease.Done() }()
-		ctx = bindWorkContext(ctx, lease, eb.workOwner)
 	}
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
-		return err
-	}
-	ctx, err = eb.admitBundleSourceFact(ctx)
-	if err != nil {
 		return err
 	}
 	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt})
@@ -493,13 +478,12 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 // active typed mutation. Dispatch is deliberately separate and may happen only
 // after the selected-store transaction commits.
 func (eb *EventBus) PreparePublishInMutation(ctx context.Context, evt events.Event) (PreparedPublish, error) {
-	lease, err := eb.beginRuntimeWork(ctx)
+	ctx, lease, err := eb.beginRuntimeWork(ctx)
 	if err != nil {
 		return PreparedPublish{}, err
 	}
 	if lease != nil {
 		defer func() { _ = lease.Done() }()
-		ctx = bindWorkContext(ctx, lease, eb.workOwner)
 	}
 	return eb.preparePublishInMutation(ctx, evt, runtimepipelineobligation.ScopeSubscribed, func(ctx context.Context, evt events.Event) (RoutePlan, error) {
 		return eb.planSubscribedRoutePlan(ctx, evt, true)
@@ -646,13 +630,12 @@ func (eb *EventBus) PublishInMutation(ctx context.Context, evt events.Event) err
 // It persists the exact direct-recipient manifest in the caller's active typed
 // mutation so payload fields can never become delivery authority.
 func (eb *EventBus) PublishDirectInMutation(ctx context.Context, evt events.Event, recipients []string) error {
-	lease, err := eb.beginRuntimeWork(ctx)
+	ctx, lease, err := eb.beginRuntimeWork(ctx)
 	if err != nil {
 		return err
 	}
 	if lease != nil {
 		defer func() { _ = lease.Done() }()
-		ctx = bindWorkContext(ctx, lease, eb.workOwner)
 	}
 	requested := uniqueStrings(recipients)
 	if len(requested) == 0 {
@@ -708,13 +691,12 @@ func (eb *EventBus) DispatchPreparedPublish(ctx context.Context, prepared Prepar
 	if err != nil {
 		return err
 	}
-	lease, err := eb.beginRuntimeWork(dispatchCtx)
+	dispatchCtx, lease, err := eb.beginRuntimeWork(dispatchCtx)
 	if err != nil {
 		return errors.Join(err, prepared.publicationClaim.Release(dispatchCtx))
 	}
 	if lease != nil {
 		defer func() { _ = lease.Done() }()
-		dispatchCtx = bindWorkContext(dispatchCtx, lease, eb.workOwner)
 	}
 	return eb.dispatchPreparedPublish(dispatchCtx, prepared)
 }
@@ -730,13 +712,12 @@ func (eb *EventBus) DispatchPreparedPublishAndWait(ctx context.Context, prepared
 	if err != nil {
 		return err
 	}
-	lease, err := eb.beginRuntimeWork(dispatchCtx)
+	dispatchCtx, lease, err := eb.beginRuntimeWork(dispatchCtx)
 	if err != nil {
 		return errors.Join(err, prepared.publicationClaim.Release(dispatchCtx))
 	}
 	if lease != nil {
 		defer func() { _ = lease.Done() }()
-		dispatchCtx = bindWorkContext(dispatchCtx, lease, eb.workOwner)
 	}
 	group := newLocalDeliveryCompletionGroup()
 	waitCtx := ctx
@@ -1121,6 +1102,11 @@ func (eb *EventBus) AdmitBundleSourceFact(ctx context.Context) (context.Context,
 func (eb *EventBus) convergeStandaloneRuntimePlatformRun(ctx context.Context, evt events.Event) error {
 	if eb == nil || eb.store == nil {
 		return nil
+	}
+	var err error
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
 	}
 	if converger, ok := eb.store.(StandaloneRuntimePlatformRunConvergencePersistence); ok && converger != nil {
 		if err := converger.ConvergeStandaloneRuntimePlatformRun(ctx, evt); err != nil {
@@ -1529,20 +1515,15 @@ func (eb *EventBus) planExactDirectRoutePlan(ctx context.Context, evt events.Eve
 // recipient set. The recipient manifest still routes through the canonical
 // delivery policy so explicit delivery cannot bypass scoped-recipient rules.
 func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipients []string) error {
-	lease, err := eb.beginRuntimeWork(ctx)
+	ctx, lease, err := eb.beginRuntimeWork(ctx)
 	if err != nil {
 		return err
 	}
 	if lease != nil {
 		defer func() { _ = lease.Done() }()
-		ctx = bindWorkContext(ctx, lease, eb.workOwner)
 	}
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
-		return err
-	}
-	ctx, err = eb.admitBundleSourceFact(ctx)
-	if err != nil {
 		return err
 	}
 	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt, direct: true, directRecipients: uniqueStrings(recipients)})
@@ -1559,20 +1540,15 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 // agent routes. It is the closed public-replay boundary: current policy may
 // prove recipient availability but cannot replace route-owned facts.
 func (eb *EventBus) PublishDirectRoutes(ctx context.Context, evt events.Event, routes []events.DeliveryRoute) error {
-	lease, err := eb.beginRuntimeWork(ctx)
+	ctx, lease, err := eb.beginRuntimeWork(ctx)
 	if err != nil {
 		return err
 	}
 	if lease != nil {
 		defer func() { _ = lease.Done() }()
-		ctx = bindWorkContext(ctx, lease, eb.workOwner)
 	}
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
-		return err
-	}
-	ctx, err = eb.admitBundleSourceFact(ctx)
-	if err != nil {
 		return err
 	}
 	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{
@@ -1587,18 +1563,23 @@ func (eb *EventBus) PublishDirectRoutes(ctx context.Context, evt events.Event, r
 	return eb.dispatchPreparedPublish(ctx, prepared)
 }
 
-func (eb *EventBus) beginRuntimeWork(ctx context.Context) (*worklifetime.Lease, error) {
+func (eb *EventBus) beginRuntimeWork(ctx context.Context) (context.Context, *worklifetime.Lease, error) {
 	if eb == nil {
-		return nil, errors.New("event bus is required")
+		return ctx, nil, errors.New("event bus is required")
+	}
+	admittedCtx, err := eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return ctx, nil, err
 	}
 	if eb.workOwner == nil {
-		return nil, errors.New("event bus requires a process work occurrence")
+		return admittedCtx, nil, errors.New("event bus requires a process work occurrence")
 	}
-	lease, err := eb.workOwnerForContext(ctx).Begin(ctx)
+	owner := eb.workOwnerForContext(admittedCtx)
+	lease, err := owner.Begin(admittedCtx)
 	if err != nil {
-		return nil, fmt.Errorf("admit event bus work: %w", err)
+		return admittedCtx, nil, fmt.Errorf("admit event bus work: %w", err)
 	}
-	return lease, nil
+	return bindWorkContext(admittedCtx, lease, owner), lease, nil
 }
 
 func (eb *EventBus) workOwnerForContext(ctx context.Context) worklifetime.Occurrence {

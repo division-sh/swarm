@@ -10,12 +10,25 @@ import (
 // ConvergeDeliveryRunCompletion evaluates both standalone platform-run and
 // normal run completion after one exact delivery settlement.
 func (eb *EventBus) ConvergeDeliveryRunCompletion(ctx context.Context, evt events.Event) error {
+	if eb == nil {
+		return nil
+	}
+	var err error
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
+	}
 	return eb.convergeStandaloneRuntimePlatformRun(ctx, evt)
 }
 
 func (eb *EventBus) ConvergeNormalRunCompletionForEvent(ctx context.Context, eventID string) error {
 	if eb == nil || eb.store == nil {
 		return nil
+	}
+	var err error
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
 	}
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {

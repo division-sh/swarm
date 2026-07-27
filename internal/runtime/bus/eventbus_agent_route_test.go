@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
@@ -22,22 +25,55 @@ import (
 type exactHandoffProofStore struct {
 	InMemoryEventStore
 	runtimedelivery.Store
-	db       *sql.DB
-	adapter  *runtimedelivery.Adapter
-	mu       sync.Mutex
-	attempts int
-	failOnce bool
+	db          *sql.DB
+	adapter     *runtimedelivery.Adapter
+	mu          sync.Mutex
+	attempts    int
+	binds       int
+	failOnce    bool
+	handoffFact runtimecorrelation.BundleSourceFact
+	bindFact    runtimecorrelation.BundleSourceFact
 }
 
 func (s *exactHandoffProofStore) ProveHandoff(ctx context.Context, eventID string, route events.DeliveryRoute) (runtimedelivery.DurableHandoffProof, error) {
 	s.mu.Lock()
 	s.attempts++
+	s.handoffFact, _ = runtimecorrelation.BundleSourceFactFromContext(ctx)
 	fail := s.failOnce && s.attempts == 1
 	s.mu.Unlock()
 	if fail {
 		return runtimedelivery.DurableHandoffProof{}, errors.New("injected handoff proof failure")
 	}
 	return s.adapter.ProveHandoff(ctx, s.db, eventID, route)
+}
+
+func (s *exactHandoffProofStore) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (runtimedelivery.Snapshot, error) {
+	s.mu.Lock()
+	s.binds++
+	s.bindFact, _ = runtimecorrelation.BundleSourceFactFromContext(ctx)
+	s.mu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return runtimedelivery.Snapshot{}, err
+	}
+	ctx, err = runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectSQLite)
+	if err != nil {
+		_ = tx.Rollback()
+		return runtimedelivery.Snapshot{}, err
+	}
+	snapshot, err := s.adapter.BindAgentSession(ctx, tx, claim, sessionID)
+	if err != nil {
+		_ = tx.Rollback()
+		return runtimedelivery.Snapshot{}, err
+	}
+	if err := runtimeauthoractivity.Finalize(ctx); err != nil {
+		_ = tx.Rollback()
+		return runtimedelivery.Snapshot{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return runtimedelivery.Snapshot{}, err
+	}
+	return snapshot, nil
 }
 
 func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofStore {
@@ -122,6 +158,37 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 			completed_at TIMESTAMP,
 			PRIMARY KEY(delivery_id, claim_version)
 		)`,
+		`CREATE TABLE author_activity_order (
+			singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+			last_sequence BIGINT NOT NULL CHECK (last_sequence >= 0)
+		)`,
+		`CREATE TABLE author_activity_occurrences (
+			occurrence_id TEXT PRIMARY KEY,
+			sequence BIGINT NOT NULL UNIQUE CHECK (sequence > 0),
+			kind TEXT NOT NULL,
+			version INTEGER NOT NULL CHECK (version = 2),
+			transition TEXT NOT NULL,
+			source_owner TEXT NOT NULL,
+			source_identity TEXT NOT NULL,
+			dedup_key TEXT NOT NULL UNIQUE,
+			run_id TEXT,
+			entity_id TEXT,
+			agent_id TEXT,
+			flow_id TEXT,
+			scope_kind TEXT NOT NULL,
+			runtime_instance_id TEXT,
+			bundle_hash TEXT,
+			author_safe_summary TEXT,
+			projection TEXT NOT NULL DEFAULT '{}',
+			failure TEXT,
+			occurred_at TIMESTAMP NOT NULL
+		)`,
+		`CREATE TABLE agent_sessions (
+			session_id TEXT PRIMARY KEY,
+			run_id TEXT NOT NULL,
+			agent_id TEXT NOT NULL,
+			status TEXT NOT NULL
+		)`,
 	} {
 		if _, err := db.Exec(ddl); err != nil {
 			t.Fatalf("create exact handoff proof schema: %v", err)
@@ -152,6 +219,47 @@ func (s *exactHandoffProofStore) seed(t *testing.T, eventID, runID string, route
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit exact handoff transaction: %v", err)
 	}
+}
+
+func (s *exactHandoffProofStore) seedSession(t *testing.T, sessionID, runID, agentID string) {
+	t.Helper()
+	if _, err := s.db.Exec(
+		`INSERT INTO agent_sessions (session_id, run_id, agent_id, status) VALUES (?, ?, ?, 'active')`,
+		sessionID, runID, agentID,
+	); err != nil {
+		t.Fatalf("seed exact delivery agent session: %v", err)
+	}
+}
+
+func (s *exactHandoffProofStore) claim(t *testing.T, eventID, runID string, route events.DeliveryRoute) runtimedelivery.Claim {
+	t.Helper()
+	ctx := runtimeauthoractivity.WithScope(
+		context.Background(),
+		runtimeauthoractivity.BundleScope("exact-claim-runtime", "exact-claim-bundle"),
+	)
+	evt := eventtest.RuntimeControl(eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin exact delivery claim: %v", err)
+	}
+	ctx, err = runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectSQLite)
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("begin exact claim author activity: %v", err)
+	}
+	claimed, err := s.adapter.ClaimExact(ctx, tx, evt, route, runtimedelivery.DefaultLeaseTTL)
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("claim exact delivery: %v", err)
+	}
+	if err := runtimeauthoractivity.Finalize(ctx); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("finalize exact claim author activity: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit exact delivery claim: %v", err)
+	}
+	return claimed.Claim
 }
 
 func TestEventBusAgentRouteReplacementWaitsForExactDequeuedPredecessor(t *testing.T) {
@@ -338,6 +446,93 @@ func TestEventBusAgentRouteFailedHandoffRetainsCarrierForExactRetry(t *testing.T
 	store.mu.Unlock()
 	if attempts != 2 {
 		t.Fatalf("handoff proof attempts = %d, want exact fail-once retry", attempts)
+	}
+}
+
+func TestNoContextRouteCleanupCarriesImmutableBundleSourceToHandoff(t *testing.T) {
+	owned := sourceMutationFact(t, "9")
+	for _, tc := range []struct {
+		name           string
+		subscriberType string
+		cleanup        func(*EventBus, string, runtimeeffects.LifecycleToken, worklifetime.InternalSubscription) error
+	}{
+		{
+			name:           "agent route removal",
+			subscriberType: "agent",
+			cleanup: func(bus *EventBus, _ string, token runtimeeffects.LifecycleToken, _ worklifetime.InternalSubscription) error {
+				bus.RemoveAgentRoute(token)
+				return nil
+			},
+		},
+		{
+			name:           "internal natural completion",
+			subscriberType: "node",
+			cleanup: func(_ *EventBus, _ string, _ runtimeeffects.LifecycleToken, subscription worklifetime.InternalSubscription) error {
+				return subscription.Complete(false)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newExactHandoffProofStore(t, false)
+			bus := newSourceMutationProbeBusWithStore(t, store, owned, newSourceMutationProbeOwner())
+			subscriberID := "cleanup-" + strings.ReplaceAll(tc.name, " ", "-")
+			token := runtimeeffects.LifecycleToken{
+				RuntimeEpoch: 7,
+				AgentID:      subscriberID,
+				Generation:   1,
+			}
+			var subscription worklifetime.InternalSubscription
+			if tc.subscriberType == "agent" {
+				if ch := bus.ReplaceAgentRoute(
+					token,
+					testAgentSubscriptionAdmission(t, subscriberID, events.EventType("test.work")),
+				); ch == nil {
+					t.Fatal("install agent route")
+				}
+			} else {
+				var err error
+				subscription, err = bus.SubscribeInternal(context.Background(), subscriberID, events.EventType("test.work"))
+				if err != nil {
+					t.Fatalf("subscribe internal route: %v", err)
+				}
+			}
+
+			eventID, runID := uuid.NewString(), uuid.NewString()
+			route := events.DeliveryRoute{SubscriberType: tc.subscriberType, SubscriberID: subscriberID}
+			store.seed(t, eventID, runID, route)
+			evt := eventtest.RuntimeControl(
+				eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0,
+				runID, "", events.EventEnvelope{}, time.Now().UTC(),
+			)
+			if tc.subscriberType == "agent" {
+				if err := bus.deliverToAgents(context.Background(), evt, []string{subscriberID}); err != nil {
+					t.Fatalf("buffer agent delivery: %v", err)
+				}
+			} else {
+				if err := bus.deliverLiveRecipientsWithRoutes(
+					context.Background(),
+					evt,
+					[]RoutePlanLiveRecipient{{
+						RecipientID:       subscriberID,
+						SubscriberType:    routePlanSubscriberInternal,
+						PersistAsDelivery: false,
+						liveAuthority:     liveRecipientAuthorityIdentity,
+					}},
+					[]events.DeliveryRoute{route},
+				); err != nil {
+					t.Fatalf("buffer internal delivery: %v", err)
+				}
+			}
+			if err := tc.cleanup(bus, subscriberID, token, subscription); err != nil {
+				t.Fatalf("cleanup retained route: %v", err)
+			}
+			store.mu.Lock()
+			attempts, handoffFact := store.attempts, store.handoffFact
+			store.mu.Unlock()
+			if attempts != 1 || !owned.Matches(handoffFact) {
+				t.Fatalf("handoff proof = attempts:%d source:%#v, want exact immutable source", attempts, handoffFact)
+			}
+		})
 	}
 }
 
