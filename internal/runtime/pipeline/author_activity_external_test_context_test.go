@@ -112,6 +112,9 @@ func registerDifferentTestAuthorActivityEvents(t *testing.T, eventStore any, eve
 
 func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts runtimebus.EventBusOptions, differentEvents ...string) (*runtimebus.EventBus, error) {
 	t.Helper()
+	if opts.BundleSourceFact.Validate() != nil {
+		opts.BundleSourceFact = authorActivityTestBundleSourceFact
+	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = pipelineExternalTestWorkOwner(t)
 	}

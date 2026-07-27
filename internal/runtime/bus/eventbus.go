@@ -207,6 +207,9 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 	if opts.PipelineObligations == nil {
 		return nil, errors.New("durable event bus requires the pipeline obligation owner")
 	}
+	if err := opts.BundleSourceFact.Validate(); err != nil {
+		return nil, fmt.Errorf("durable event bus requires an immutable bundle source fact: %w", err)
+	}
 	return newEventBusWithOptions(store, opts)
 }
 
@@ -232,6 +235,11 @@ func NewEphemeralEventBusWithOptions(store EventStore, opts EventBusOptions) (*E
 }
 
 func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, error) {
+	if opts.PipelineObligations != nil {
+		if err := opts.BundleSourceFact.Validate(); err != nil {
+			return nil, fmt.Errorf("durable event bus requires an immutable bundle source fact: %w", err)
+		}
+	}
 	if store == nil {
 		store = InMemoryEventStore{}
 	}
@@ -551,6 +559,10 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 	if eb == nil {
 		return nil
 	}
+	cleanupCtx, err := eb.admitBundleSourceFact(context.Background())
+	if err != nil {
+		return err
+	}
 	eb.mu.Lock()
 	if eb.resetInProgress {
 		eb.mu.Unlock()
@@ -619,10 +631,10 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 	// handoff and settle their leases before erasing any in-memory owner map.
 	var retirementErr error
 	for _, route := range routes {
-		retirementErr = errors.Join(retirementErr, route.retireAndWait(context.Background(), eb.store))
+		retirementErr = errors.Join(retirementErr, route.retireAndWait(cleanupCtx, eb.store))
 	}
 	for _, handle := range internalHandles {
-		retirementErr = errors.Join(retirementErr, handle.retireAndWait(context.Background(), eb.store))
+		retirementErr = errors.Join(retirementErr, handle.retireAndWait(cleanupCtx, eb.store))
 	}
 	if retirementErr != nil {
 		return retirementErr
@@ -630,7 +642,7 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 	retirementSucceeded = true
 	var releaseErr error
 	for _, operation := range pendingOperations {
-		releaseErr = errors.Join(releaseErr, operation.publicationClaim.Release(context.Background()))
+		releaseErr = errors.Join(releaseErr, operation.publicationClaim.Release(cleanupCtx))
 	}
 	for _, operation := range pendingOperations {
 		eb.removePendingOutboxOperation(operation.intent.Event.ID(), operation.sequence)

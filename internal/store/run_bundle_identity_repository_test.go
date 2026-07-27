@@ -179,15 +179,25 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 			},
 		},
 		{
+			path: "internal/runtime/bus/eventbus.go",
+			required: []string{
+				"durable event bus requires an immutable bundle source fact",
+				"cleanupCtx, err := eb.admitBundleSourceFact(context.Background())",
+				"operation.publicationClaim.Release(cleanupCtx)",
+			},
+		},
+		{
 			path: "internal/runtime/bus/eventbus_publish.go",
 			required: []string{
 				"func (eb *EventBus) admitBundleSourceFact(ctx context.Context) (context.Context, error)",
-				"!hasOwnedFact && !hasContextFact",
+				"!hasOwnedFact && !eb.ephemeral",
 				"!sourceFact.Matches(contextFact)",
 				"func (eb *EventBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error)",
-				"func (eb *EventBus) admitPreparedPublish(ctx context.Context, prepared PreparedPublish) error",
+				"func (eb *EventBus) admitPreparedPublish(ctx context.Context, prepared PreparedPublish) (context.Context, error)",
 				"prepared.publicationClaim.bus != eb",
-				"if err := eb.admitPreparedPublish(ctx, prepared); err != nil",
+				"eb.admitBundleSourceFact(ctx)",
+				"eb.admitBundleSourceFact(dispatchCtx)",
+				"dispatchCtx, err := eb.admitPreparedPublish(ctx, prepared)",
 			},
 			prohibited: []string{
 				"func (eb *EventBus) WithBundleSourceFact",
@@ -203,6 +213,14 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 				"func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fallback runtimeengine.EmitIntent)",
 				"ctx, err = d.bus.admitBundleSourceFact(ctx)",
 				"dispatchCtx = runtimecorrelation.WithBundleSourceFact(dispatchCtx, sourceFact)",
+				"func (eb *EventBus) clearPendingOutboxOperation(ctx context.Context, eventID string) error",
+			},
+		},
+		{
+			path: "internal/runtime/bus/pipeline_publication_claim.go",
+			required: []string{
+				"ctx, err = eb.admitBundleSourceFact(ctx)",
+				"ctx, err = c.bus.admitBundleSourceFact(ctx)",
 			},
 		},
 		{
@@ -212,7 +230,14 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 				"func (eb *EventBus) SweepPipelineObligations(ctx context.Context, limit int)",
 				"func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtimepipelineobligation.ScanRequest, limit int)",
 				"func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, limit int)",
+				"func (eb *EventBus) closePipelineScanLocked(ctx context.Context, request runtimepipelineobligation.ScanRequest) error",
 				"ctx, err = eb.admitBundleSourceFact(ctx)",
+			},
+		},
+		{
+			path: "internal/runtime/runforkexecution/runtime_container.go",
+			required: []string{
+				"BundleSourceFact:            req.LoadedSource.BundleSourceFact",
 			},
 		},
 		{

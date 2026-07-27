@@ -40,7 +40,13 @@ func commitInboundPublicationTestEvent(t *testing.T, store runtimebus.EventStore
 	if admitted.RunDisposition() != events.AdmittedRunRequireActive {
 		return fmt.Errorf("standing inbound root disposition = %q, want require_active", admitted.RunDisposition())
 	}
-	eventBus, err := newStoreTestEventBus(t, store)
+	sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(mutation.Context())
+	if !ok {
+		return errors.New("inbound publication mutation bundle source fact is required")
+	}
+	eventBus, err := newStoreTestEventBus(t, store, runtimebus.EventBusOptions{
+		BundleSourceFact: sourceFact,
+	})
 	if err != nil {
 		return err
 	}

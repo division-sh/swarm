@@ -80,6 +80,9 @@ func newStoreTestEventBus(t *testing.T, selected runtimebus.EventStore, options 
 	if len(options) > 0 {
 		opts = options[0]
 	}
+	if opts.BundleSourceFact.Validate() != nil {
+		opts.BundleSourceFact = mustExternalStoreTestBundleSourceFact()
+	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = storeTestWorkOwner(t)
 	}
@@ -93,12 +96,17 @@ func newStoreTestEventBus(t *testing.T, selected runtimebus.EventStore, options 
 	return runtimebus.NewEventBusWithOptions(selected, opts)
 }
 
-func testAuthorActivityContext() context.Context {
-	bundleHash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
-	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+func mustExternalStoreTestBundleSourceFact() runtimecorrelation.BundleSourceFact {
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("a", 64))
 	if err != nil {
 		panic(err)
 	}
+	return fact
+}
+
+func testAuthorActivityContext() context.Context {
+	bundleHash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
+	fact := mustExternalStoreTestBundleSourceFact()
 	ctx := runtimecorrelation.WithBundleSourceFact(context.Background(), fact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		"11111111-1111-1111-1111-111111111111",
