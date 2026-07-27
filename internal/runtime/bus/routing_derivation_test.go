@@ -69,6 +69,8 @@ func TestEventBusFlowInstanceTemplateDerivesSubscriptionsFromHandlerKeys(t *test
 
 type routePersistenceTestStore struct {
 	routes           map[string]runtimebus.FlowInstanceRouteRecord
+	flowInstances    []runtimebus.ActiveFlowInstanceDescriptor
+	stagedRoutes     []runtimebus.FlowInstanceRouteRecord
 	deliveries       map[string][]string
 	upsertErr        error
 	deleteErr        error
@@ -76,6 +78,10 @@ type routePersistenceTestStore struct {
 	deleteCalls      []runtimeflowidentity.Route
 	upsertCalls      int
 	upsertAfterWrite bool
+}
+
+func (s *routePersistenceTestStore) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	return append([]runtimebus.ActiveFlowInstanceDescriptor(nil), s.flowInstances...), nil
 }
 
 func (s *routePersistenceTestStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
@@ -97,6 +103,7 @@ func (*routePersistenceTestStore) ListEventDeliveryRecipients(context.Context, s
 
 func (s *routePersistenceTestStore) UpsertFlowInstanceRoute(_ context.Context, route runtimebus.FlowInstanceRouteRecord) error {
 	s.upsertCalls++
+	s.stagedRoutes = append(s.stagedRoutes, route)
 	if s.routes == nil {
 		s.routes = map[string]runtimebus.FlowInstanceRouteRecord{}
 	}
@@ -189,6 +196,49 @@ func TestEventBusStageFlowInstanceRouteKeepsPublicationManifestInvisibleUntilRea
 	got := store.deliveries[after.ID()]
 	if len(got) != 1 || got[0] != "ceo-11111111-1111-4111-8111-111111111111" {
 		t.Fatalf("post-readiness delivery recipients = %#v, want exact instantiated agent", got)
+	}
+}
+
+func TestEventBusStageFlowInstanceRoutePersistsCompleteCrossInstanceObserverTopology(t *testing.T) {
+	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
+		WorkerMode:               "template",
+		ProducerMode:             "template",
+		ProducerStaticDescendant: true,
+		ObserveGrant:             "      observe:\n        - source: producer\n          events: [task.done]\n",
+	})
+	sourceIdentity := runtimeflowidentity.DeriveRoute("producer", "source-1")
+	consumerIdentity := runtimeflowidentity.DeriveRoute("worker", "consumer-1")
+	store := &routePersistenceTestStore{
+		flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
+			{InstanceID: sourceIdentity.InstanceID, FlowInstance: sourceIdentity.InstancePath, FlowTemplate: "producer"},
+			{InstanceID: consumerIdentity.InstanceID, FlowInstance: consumerIdentity.InstancePath, FlowTemplate: "worker"},
+			{InstanceID: "foreign-1", FlowInstance: "foreign/foreign-1", FlowTemplate: "foreign"},
+		},
+	}
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	stageCtx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), &sql.Tx{})
+	if err := eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{
+		Identity: sourceIdentity,
+	}); err != nil {
+		t.Fatalf("StageFlowInstanceRouteContext: %v", err)
+	}
+	var observerRouteFound bool
+	for _, route := range store.stagedRoutes {
+		if route.Identity == consumerIdentity &&
+			route.EventPattern == "producer/source-1/task.done" &&
+			route.SubscriberID == "worker-listener" {
+			observerRouteFound = true
+			break
+		}
+	}
+	if !observerRouteFound {
+		t.Fatalf("staged routes = %#v, want consumer-owned cross-instance observer route", store.stagedRoutes)
+	}
+	if eb.HasFlowInstanceRoute(sourceIdentity) || eb.HasFlowInstanceRoute(consumerIdentity) {
+		t.Fatal("complete staged topology became process-visible before readiness")
 	}
 }
 

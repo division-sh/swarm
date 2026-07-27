@@ -335,6 +335,20 @@ func (rt *RouteTable) HasFlowInstanceRoute(identity runtimeflowidentity.Route) b
 	return exists && flowInstanceRouteIdentityEqual(owner, identity)
 }
 
+func (rt *RouteTable) hasFlowInstanceTemplate(identity runtimeflowidentity.Route) bool {
+	if rt == nil {
+		return false
+	}
+	identity, err := normalizeFlowInstanceRouteIdentity(identity)
+	if err != nil {
+		return false
+	}
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	_, exists := rt.templates[identity.ScopeKey]
+	return exists
+}
+
 func (rt *RouteTable) flowInstanceRouteRemovalOwner(identity runtimeflowidentity.Route) (runtimeflowidentity.Route, bool, error) {
 	if rt == nil {
 		return runtimeflowidentity.Route{}, false, fmt.Errorf("route table is required")

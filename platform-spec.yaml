@@ -4535,7 +4535,11 @@ engine:
       - '5. Platform constructs paths: {template_id}/{instance_id}/{local_name}'
       - 6. Platform atomically creates the entity at initial_state, dormant initial timers, and one durable runtime-readiness
         plan containing the exact route, declared-agent revisions, run, and optional deterministic creation event occurrence
-      - 7. When creation participates in a selected mutation, it also persists the exact derived route rows in that mutation.
+      - 7. When creation participates in a selected mutation, it derives the complete active dynamic-instance topology from
+        selected-store descriptors materializable by the current EventBus semantic source and persists the exact route rows
+        for every affected owner in that mutation. This includes cross-instance observer routes owned by an already-active
+        consumer when the new instance is the observed source. Descriptors outside that semantic source remain under their
+        own route owner and MUST NOT be reinterpreted through the current bundle.
         Persisted route truth MUST remain absent from the process route table and recipient planning until readiness
         reconciliation publishes it.
       - 8. One idempotent reconciler keyed by exact `{run_id, instance_id}` reloads the current readiness row and lifecycle
@@ -4544,8 +4548,12 @@ engine:
         topology, then publishes and verifies the already-persisted route in process.
       - 10. After a fresh active/paused eligibility check, the reconciler records topology readiness and arms the dormant
         initial timers. The selected-store transition itself rejects terminal/inactive work.
-      - 11. After another fresh eligibility check, the reconciler publishes the deterministic creation-only event, when
-        declared, and records completion after exact event persistence.
+      - 11. After another fresh eligibility check, one selected-store operation locks the exact run and flow-instance
+        lifecycle rows, reloads the immutable readiness plan, appends the deterministic creation-only event through
+        EventBus `PublishInMutation`, and records `creation_event_emitted_at` in the same transaction. Dispatch occurs only
+        after commit. This operation linearizes with terminalization; when terminalization wins, neither event nor completion
+        exists and process topology is retired; when creation wins, event and completion commit together before the terminal
+        transition.
       - 12. Direct activation, selected-mutation post-commit activation, exact replay / EnsureFlowInstance, the joined
         manager automatic-retry loop, and startup all consume this same keyed reconciler. Post-commit failure signals that
         retry owner rather than abandoning durable pending work.
@@ -4567,7 +4575,11 @@ engine:
           reserved names.
         persisted_truth: Materialized `routing_rules.subscriber_id` rows store concrete rendered subscriber IDs. Route
           persistence, delivery planning, active-agent lookup, and runtime recovery consume that materialized route truth and
-          MUST NOT independently reinterpret authored subscriber templates.
+          MUST NOT independently reinterpret authored subscriber templates. Route staging MUST derive against every active
+          persisted dynamic-instance descriptor materializable by the current EventBus semantic source inside the selected
+          mutation and persist routes for every affected owner; deriving only the newly created instance is invalid because
+          cross-instance observers depend on both lifecycle owners. A descriptor not materializable by that semantic source
+          belongs to a different route owner and MUST NOT be interpreted through the current bundle.
         recovery: Startup recovery of active flow-instance routes MUST load one exact run-independent projection from the
           active `flow_instances` row identified by the persisted route's instance path. Dynamic instances additionally
           consume their exact `flow_instance_runtime_readiness` plan. The plan owns the creation run and expected declared
@@ -4596,8 +4608,9 @@ engine:
       auto_emit: Flow schemas may declare auto_emit_on_create. When the platform creates an instance, it automatically emits
         the declared event after the exact route and complete declared-agent topology are verified and initial timers are
         armed. Event ID, lineage, payload, execution mode, delivery context, and occurrence time belong to the durable
-        readiness plan. Publication exact-duplicate semantics plus a durable completion fact make replay exactly once.
-        Conflicting duplicates do not auto-emit. This bootstraps the flow without requiring an external trigger.
+        readiness plan. One selected-store operation atomically appends the admitted event and records its durable completion
+        under the locked run/instance lifecycle; publication dispatch is post-commit. Exact duplicate semantics make replay
+        exactly once. Conflicting duplicates do not auto-emit. This bootstraps the flow without requiring an external trigger.
     addressing:
       static_flows: '{flow_id}/{local_name} — one level, no instance segment'
       template_instances: '{template_id}/{instance_id}/{local_name} — extra segment for instance'
@@ -6561,8 +6574,10 @@ engine:
       consume one reconciler keyed by `{run_id, instance_id}`. A selected creation mutation persists its exact route rows but
       does not publish them into the process route table; EventBus recipient planning remains unaware of the route until the
       reconciler reloads current lifecycle eligibility, verifies all declared agents, publishes and verifies the persisted
-      route, records topology readiness, and arms initial timers. It then reloads eligibility before publishing the
-      deterministic creation-only event exactly once. Completion transitions are selected-store guarded to active,
+      route, records topology readiness, and arms initial timers. It then consumes one selected-store operation that locks the
+      exact run and instance lifecycle rows and atomically appends the deterministic creation-only event plus its completion
+      fact through EventBus `PublishInMutation`; dispatch is post-commit. Terminalization and creation therefore have one
+      linearized winner, never an event without completion. Completion transitions are selected-store guarded to active,
       nonterminated instances in running or paused runs. A failed or partial boundary remains durable pending work and signals
       the joined manager retry loop; startup finalization failure is boot-fatal, never degraded replay, and prevents global
       timer restoration through unverified topology. Startup's all-status readiness-key census suppresses generic restoration
@@ -13223,8 +13238,9 @@ platform_tables:
         automatic retry, and startup consume one idempotent reconciler keyed by exact `{run_id, instance_id}`. Route rows
         may be persisted before reconciliation but remain process-invisible. The reconciler reloads current lifecycle
         eligibility, reconciles and verifies the complete declared-agent revision set, publishes and verifies the persisted
-        route, records topology_ready_at, arms initial workflow timers, then publishes the deterministic creation-only event
-        exactly once before recording creation_event_emitted_at. Both completion writes require an active nonterminated
+        route, records topology_ready_at, and arms initial workflow timers. One final selected-store operation then locks the
+        exact run and instance lifecycle rows and atomically appends the deterministic creation-only event plus
+        creation_event_emitted_at before post-commit dispatch. Both completion writes require an active nonterminated
         instance in a running or paused run; a creation event completion without topology readiness is invalid. This table is
         platform lifecycle state, never application flow config. Fresh schemas only; no migration, inference, fallback, or
         compatibility reader is supported.
@@ -13919,14 +13935,15 @@ run_model:
       selected binding, frontier, static/dynamic topology, recipient, and persisted route-recovery proof. Active source
       timers remain fail-closed under #642. runtime.run_fork.selected_contract_deferred_work_admission is the one
       selected-fork capability owner for work that would outlive the ephemeral selected-fork container. It classifies
-      relevant timer history in the selected revision, selected semantic workflow-timer declarations, and selected semantic
-      timed-join declarations. Direct selected execution consumes this admission before materialization. Activation of an
+      relevant timer history in the selected revision, selected semantic workflow-timer declarations, selected semantic
+      timed-join declarations, connect-time template inputs with exact `resolution.mode: create`, and authored
+      `create_flow_instance` actions. Direct selected execution consumes this admission before materialization. Activation of an
       already materialized selected fork consumes it before delivery replay, state-only activation, event publication,
       workflow mutation, or runtime-container issuance. The admitted capability is carried through the selected execution
       admission and consumed again by every fork-local runtime-container construction; a changed selected source fails
       closed. Rejection by direct execution creates no fork run, binding, route, event, delivery, workflow state, lineage,
-      join, schedule, or timer row. Rejection during staged activation leaves the existing materialized fork and source rows
-      unchanged and creates no executable mutation. Source timer rows are never copied as executable truth, fired as source
+      join, schedule, timer, dynamic readiness, agent, or materialized route row. Rejection during staged activation leaves the
+      existing materialized fork and source rows unchanged and creates no executable mutation. Source timer rows are never copied as executable truth, fired as source
       work, or used as selected-fork suppressors. Agent-authored scheduling already fails closed because the selected
       executor has no scheduler, while boot/global schedules are not executed by the ephemeral container. Timer facts
       committed after the selected revision remain fail-closed. The
@@ -14318,17 +14335,19 @@ run_model:
         independently approved.'
       3d_selected_contract_timer_route_policy: 'For selected-contract mutating fork execution,
         runtime.run_fork.selected_contract_deferred_work_admission classifies source timer history, workflow-timer
-        declarations, and timed-join declarations as unsupported while the ephemeral selected-fork container has no
+        declarations, timed-join declarations, connect-time create resolution, and authored create_flow_instance actions as
+        unsupported while the ephemeral selected-fork container has no
         long-lived deferred-work owner. Direct execution rejects before materialization; staged activation rejects before
         delivery replay, state-only activation, publication, workflow mutation, or container issuance. The admission is
         carried through selected execution admission and every container construction. No rejected path may create
-        executable event, delivery, workflow, join, generic schedule, timer, lineage, or runtime-execution state. Agent
+        executable event, delivery, workflow, join, generic schedule, timer, dynamic readiness, agent, materialized route,
+        lineage, or runtime-execution state. Agent
         scheduling remains fail-closed without a selected scheduler; boot/global schedules are not executed by this
         container. Route history is projected as
         not_applicable or unknown_unversioned without querying current routing_rules. Generic execution preserves
         flow_route_history_unproven. Selected execution may clear unknown_unversioned only through matching selected
         frontier/binding/static-dynamic topology/recipient proof and persisted route recovery, before materialization,
-        publish, or activation. Feature-preserving timer reconstruction remains gated by #642.'
+        publish, or activation. Feature-preserving timer and dynamic-flow readiness ownership remains gated by #642.'
       3e_selected_contract_route_admission: 'For selected-contract mutating fork execution, selected route/subscription
         admission is evidence-only and non-mutating. It distinguishes frontier recipient admission from historical
         route reconstruction, carries unknown_unversioned as an unresolved requirement, and uses the selected contract

@@ -88,6 +88,13 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			wantCode:       selectedContractDeferredWorkOwnerUnavailable,
 			wantCapability: selectedContractDeferredWorkWorkflowJoinTimeout,
 		},
+		{
+			name:           "selected connect can create dynamic flow",
+			fixture:        "examples/routing/template-create-minted-key",
+			eventName:      "validation.triggered",
+			wantCode:       selectedContractDeferredWorkOwnerUnavailable,
+			wantCapability: selectedContractDeferredWorkDynamicFlowCreation,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
@@ -140,6 +147,7 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatusBefore); err != nil {
 				t.Fatalf("load source status before rejection: %v", err)
 			}
+			runtimeTopologyBefore := selectedContractDynamicRuntimeGlobalSnapshot(t, ctx, db)
 
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID:         sourceRunID,
@@ -165,6 +173,12 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			}
 
 			assertSelectedContractDeferredWorkRejectionHasNoForkMutation(t, ctx, db, sourceRunID)
+			runtimeTopologyAfter := selectedContractDynamicRuntimeGlobalSnapshot(t, ctx, db)
+			for fact, want := range runtimeTopologyBefore {
+				if got := runtimeTopologyAfter[fact]; got != want {
+					t.Fatalf("deferred-work rejection changed global %s from %d to %d", fact, want, got)
+				}
+			}
 			var sourceStatusAfter string
 			if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatusAfter); err != nil {
 				t.Fatalf("load source status after rejection: %v", err)
@@ -218,6 +232,12 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 			eventName:      "portfolio.setup",
 			stateOnly:      true,
 			wantCapability: selectedContractDeferredWorkWorkflowJoinTimeout,
+		},
+		{
+			name:           "delivery replay dynamic flow creation",
+			fixture:        "examples/routing/template-create-minted-key",
+			eventName:      "validation.triggered",
+			wantCapability: selectedContractDeferredWorkDynamicFlowCreation,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -329,6 +349,10 @@ func selectedForkExecutableMutationSnapshotForTest(t testing.TB, ctx context.Con
 		{name: "deliveries", query: `SELECT COUNT(*)::text FROM event_deliveries WHERE run_id = $1::uuid`},
 		{name: "entity_state", query: `SELECT COUNT(*)::text FROM entity_state WHERE run_id = $1::uuid`},
 		{name: "timers", query: `SELECT COUNT(*)::text FROM timers WHERE run_id = $1::uuid`},
+		{name: "readiness", query: `SELECT COUNT(*)::text FROM flow_instance_runtime_readiness WHERE run_id = $1::uuid`},
+		{name: "agents", query: `SELECT COUNT(*)::text FROM agents WHERE $1::uuid IS NOT NULL`},
+		{name: "routes", query: `SELECT COUNT(*)::text FROM routing_rules WHERE $1::uuid IS NOT NULL`},
+		{name: "flow_instances", query: `SELECT COUNT(*)::text FROM flow_instances WHERE $1::uuid IS NOT NULL`},
 		{name: "execution_lineage", query: `SELECT COUNT(*)::text FROM run_fork_selected_contract_executions WHERE fork_run_id = $1::uuid`},
 		{name: "runtime_executions", query: `SELECT COUNT(*)::text FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id = $1::uuid`},
 	} {
@@ -339,6 +363,25 @@ func selectedForkExecutableMutationSnapshotForTest(t testing.TB, ctx context.Con
 		snapshot[probe.name] = value
 	}
 	return snapshot
+}
+
+func selectedContractDynamicRuntimeGlobalSnapshot(t testing.TB, ctx context.Context, db *sql.DB) map[string]int {
+	t.Helper()
+	out := map[string]int{}
+	for _, table := range []string{
+		"agents",
+		"routing_rules",
+		"flow_instances",
+		"flow_instance_runtime_readiness",
+		"timers",
+	} {
+		var count int
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table).Scan(&count); err != nil {
+			t.Fatalf("count selected-contract dynamic runtime %s: %v", table, err)
+		}
+		out[table] = count
+	}
+	return out
 }
 
 func assertSelectedContractDeferredWorkRejectionHasNoForkMutation(t testing.TB, ctx context.Context, db *sql.DB, sourceRunID string) {
@@ -645,7 +688,7 @@ func TestSelectedContractPipelineConsumesExactMockConnectorResponseOwner(t *test
 	}
 }
 
-func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
+func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.TemplateCreateMintedKey)
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -706,9 +749,6 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 		WorkOwner:         workOwner,
 	}, pg)
 	t.Cleanup(func() { _ = manager.Shutdown() })
-	sourcePipeline := newSelectedContractPipeline(sourceBus, pg, loaded, SelectedContractAgentRuntimeOptions{
-		AgentManagerOptions: runtimemanager.AgentManagerOptions{WorkOwner: workOwner},
-	}, workflowStore, manager.ActivateFlowInstance)
 
 	sourceEventID := uuid.NewString()
 	payload := json.RawMessage(`{"candidate":"candidate-1"}`)
@@ -762,240 +802,16 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 			contractsRoot,
 		),
 	})
-	if err != nil {
-		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
+	failure, ok := runtimefailures.EnvelopeFromError(err)
+	if err == nil || !ok || failure.Class != runtimefailures.ClassDependencyUnavailable ||
+		failure.Detail.Code != selectedContractDeferredWorkOwnerUnavailable {
+		t.Fatalf("ExecuteSelectedContractRunFork result=%#v error=%v, want dynamic creation owner rejection", result, err)
 	}
-	if len(result.ForkEvents) != 1 {
-		t.Fatalf("fork events = %#v, want one", result.ForkEvents)
+	capabilities, ok := failure.Detail.Attributes["capabilities"].([]string)
+	if !ok || !slices.Contains(capabilities, selectedContractDeferredWorkDynamicFlowCreation) {
+		t.Fatalf("failure capabilities = %#v, want %q", failure.Detail.Attributes["capabilities"], selectedContractDeferredWorkDynamicFlowCreation)
 	}
-	forkEventID := result.ForkEvents[0].ForkEventID
-	var forkRequestedEventID string
-	if err := db.QueryRowContext(ctx, `
-		SELECT event_id::text
-		FROM events
-		WHERE run_id = $1::uuid
-		  AND event_name = 'producer/validation.requested'
-	`, result.Materialization.ForkRunID).Scan(&forkRequestedEventID); err != nil {
-		t.Fatalf("load fork request event: %v", err)
-	}
-	forkRoute := requireSyntheticProjectionRoute(t, pg, forkRequestedEventID, "validator-node")
-	forkKey := forkRoute.PayloadProjection.Fields()["validation_case_id"]
-	if _, err := uuid.Parse(forkKey); err != nil {
-		t.Fatalf("fork projection key = %q, want UUID: %v", forkKey, err)
-	}
-
-	// A forked source rejects ordinary post-terminal event production. Exercise
-	// the same canonical constructor on an independent active control run instead.
-	controlRunID := uuid.NewString()
-	controlBundleHash, controlBundleSource := loaded.BundleSourceFact.StorageValues()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', now(), $2, $3)`, controlRunID, controlBundleHash, controlBundleSource); err != nil {
-		t.Fatalf("seed control run: %v", err)
-	}
-	controlEventID := uuid.NewString()
-	controlEvent := eventtest.RunCreatingRootIngress(
-		controlEventID,
-		events.EventType(loaded.Source.ResolveFlowEventReference("producer", "validation.triggered")),
-		controlRunID,
-		"",
-		payload,
-		0,
-		controlRunID,
-		"",
-		events.EventEnvelope{},
-		time.Now().UTC(),
-	)
-	// The control run intentionally reuses the static producer declaration in
-	// a new run generation; authorize that exact generation rebind explicitly.
-	controlCtx := runtimepipeline.WithStandingGenerationRebind(runtimecorrelation.WithRunID(ctx, controlRunID))
-	controlPreflight, err := sourceBus.CheckPublishRecipientPlan(controlCtx, controlEvent)
-	if err != nil {
-		t.Fatalf("plan control create event: %v", err)
-	}
-	if controlPreflight.TargetFailure != "" || len(controlPreflight.DeliveryRoutes) == 0 {
-		t.Fatalf("control root preflight = failure:%s routes:%#v", controlPreflight.TargetFailure, controlPreflight.DeliveryRoutes)
-	}
-	commitRunForkTestEvent(t, controlCtx, pg, controlEvent, controlPreflight.DeliveryRoutes)
-	sourceBus.SetInterceptors(sourcePipeline)
-	if result, err := sourceBus.ReleaseRunQueue(controlCtx, controlRunID, 10); err != nil {
-		t.Fatalf("execute control delivery: %v", err)
-	} else if result.Settled != 1 {
-		t.Fatalf("executed control pipeline obligations = %d, want 1", result.Settled)
-	}
-	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	if err := sourceBus.WaitForQuiescence(waitCtx); err != nil {
-		t.Fatalf("wait for control delivery: %v", err)
-	}
-	var controlRequestedEventID string
-	if err := db.QueryRowContext(ctx, `
-		SELECT event_id::text
-		FROM events
-		WHERE run_id = $1::uuid
-		  AND event_name = 'producer/validation.requested'
-	`, controlRunID).Scan(&controlRequestedEventID); err != nil {
-		t.Fatalf("load control request event: %v", err)
-	}
-	controlRoute := requireSyntheticProjectionRoute(t, pg, controlRequestedEventID, "validator-node")
-	controlKey := controlRoute.PayloadProjection.Fields()["validation_case_id"]
-	if _, err := uuid.Parse(controlKey); err != nil {
-		t.Fatalf("control projection key = %q, want UUID: %v", controlKey, err)
-	}
-	if forkKey == controlKey || forkRoute.Target.FlowInstance == controlRoute.Target.FlowInstance {
-		t.Fatalf("fork reused control stamped identity: control=%s/%s fork=%s/%s", controlKey, controlRoute.Target.FlowInstance, forkKey, forkRoute.Target.FlowInstance)
-	}
-	var forkPayloadRaw string
-	if err := db.QueryRowContext(ctx, `SELECT payload::text FROM events WHERE event_id = $1::uuid`, forkEventID).Scan(&forkPayloadRaw); err != nil {
-		t.Fatalf("load fork event payload: %v", err)
-	}
-	var forkPayload map[string]any
-	if err := json.Unmarshal([]byte(forkPayloadRaw), &forkPayload); err != nil {
-		t.Fatalf("decode fork event payload: %v", err)
-	}
-	if _, exists := forkPayload["validation_case_id"]; exists {
-		t.Fatalf("fork event payload was mutated with route projection: %#v", forkPayload)
-	}
-	var downstreamPayloadRaw string
-	if err := db.QueryRowContext(ctx, `
-		SELECT payload::text
-		FROM events
-		WHERE run_id = $1::uuid
-		  AND event_name LIKE 'validator/%/validation.started'
-	`, result.Materialization.ForkRunID).Scan(&downstreamPayloadRaw); err != nil {
-		t.Fatalf("load fork downstream event: %v", err)
-	}
-	var downstreamPayload map[string]any
-	if err := json.Unmarshal([]byte(downstreamPayloadRaw), &downstreamPayload); err != nil {
-		t.Fatalf("decode fork downstream event: %v", err)
-	}
-	if downstreamPayload["validation_case_id"] != forkKey {
-		t.Fatalf("fork downstream payload = %#v, want fresh key %s", downstreamPayload, forkKey)
-	}
-}
-
-func requireSyntheticProjectionRoute(t *testing.T, pg *store.PostgresStore, eventID, subscriberID string) events.DeliveryRoute {
-	t.Helper()
-	routes, err := pg.ListEventDeliveryRoutes(context.Background(), eventID)
-	if err != nil {
-		t.Fatalf("ListEventDeliveryRoutes(%s): %v", eventID, err)
-	}
-	return requireSyntheticProjectionRouteFromRoutes(t, routes, subscriberID)
-}
-
-func requireSyntheticProjectionRouteFromRoutes(t *testing.T, routes []events.DeliveryRoute, subscriberID string) events.DeliveryRoute {
-	t.Helper()
-	for _, route := range routes {
-		if route.SubscriberType == "node" && route.SubscriberID == subscriberID && !route.PayloadProjection.Empty() {
-			return route
-		}
-	}
-	t.Fatalf("delivery routes = %#v, want projected node %s", routes, subscriberID)
-	return events.DeliveryRoute{}
-}
-
-func requireFreshSyntheticProjectionControl(t *testing.T, loaded LoadedSelectedContractSource) events.DeliveryRoute {
-	t.Helper()
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := runForkTestContext(t)
-	scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, loaded.BundleSourceFact.BundleHash())
-	if err != nil {
-		t.Fatalf("resolve control bundle scope: %v", err)
-	}
-	ctx = runtimeauthoractivity.WithScope(ctx, scope)
-	descriptors, err := swaruntime.AuthorActivityEventDescriptors(loaded.Source)
-	if err != nil {
-		t.Fatalf("project control source descriptors: %v", err)
-	}
-	lease, err := pg.RegisterAuthorActivityEventCatalog(scope, descriptors)
-	if err != nil {
-		t.Fatalf("register control source descriptors: %v", err)
-	}
-	t.Cleanup(lease.Release)
-
-	runID := uuid.NewString()
-	bundleHash, bundleSource := loaded.BundleSourceFact.StorageValues()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES ($1::uuid, 'running', $2, $3, now())
-	`, runID, bundleHash, bundleSource); err != nil {
-		t.Fatalf("seed control run: %v", err)
-	}
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	workOwner := testGatewayWorkOwner(t)
-	var manager *runtimemanager.AgentManager
-	var pipeline *runtimepipeline.PipelineCoordinator
-	controlBus, err := bus.NewEventBusWithOptions(pg, bus.EventBusOptions{
-		WorkOwner:           workOwner,
-		PipelineObligations: pg.PipelineObligations(),
-		ContractBundle:      loaded.Source,
-		InterceptorProvider: func() []bus.EventInterceptor {
-			if pipeline == nil {
-				return nil
-			}
-			return []bus.EventInterceptor{pipeline}
-		},
-		TemplateInstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
-			if manager == nil {
-				return errors.New("control lifecycle manager is not initialized")
-			}
-			return manager.ActivateFlowInstance(ctx, req)
-		},
-	})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions(control): %v", err)
-	}
-	manager = runtimemanager.NewAgentManagerWithOptions(controlBus, nil, runtimemanager.AgentManagerOptions{
-		SemanticSource:    loaded.Source,
-		WorkflowInstances: workflowStore,
-		WorkOwner:         workOwner,
-	}, pg)
-	t.Cleanup(func() { _ = manager.Shutdown() })
-	pipeline = newSelectedContractPipeline(controlBus, pg, loaded, SelectedContractAgentRuntimeOptions{
-		AgentManagerOptions: runtimemanager.AgentManagerOptions{WorkOwner: workOwner},
-	}, workflowStore, manager.ActivateFlowInstance)
-
-	controlEvent := eventtest.RunCreatingRootIngress(
-		uuid.NewString(),
-		events.EventType(loaded.Source.ResolveFlowEventReference("producer", "validation.triggered")),
-		runID,
-		"",
-		json.RawMessage(`{"candidate":"candidate-1"}`),
-		0,
-		runID,
-		"",
-		events.EventEnvelope{},
-		time.Now().UTC(),
-	)
-	controlCtx := runtimecorrelation.WithRunID(ctx, runID)
-	preflight, err := controlBus.CheckPublishRecipientPlan(controlCtx, controlEvent)
-	if err != nil {
-		t.Fatalf("plan control create event: %v", err)
-	}
-	if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) == 0 {
-		t.Fatalf("control root preflight = failure:%s routes:%#v", preflight.TargetFailure, preflight.DeliveryRoutes)
-	}
-	commitRunForkTestEvent(t, controlCtx, pg, controlEvent, preflight.DeliveryRoutes)
-	if result, err := controlBus.ReleaseRunQueue(controlCtx, runID, 10); err != nil {
-		t.Fatalf("execute control delivery: %v", err)
-	} else if result.Settled != 1 {
-		t.Fatalf("executed control pipeline obligations = %#v, want one settled", result)
-	}
-	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	if err := controlBus.WaitForQuiescence(waitCtx); err != nil {
-		t.Fatalf("wait for control delivery: %v", err)
-	}
-	var requestedEventID string
-	if err := db.QueryRowContext(ctx, `
-		SELECT event_id::text
-		FROM events
-		WHERE run_id = $1::uuid
-		  AND event_name = 'producer/validation.requested'
-	`, runID).Scan(&requestedEventID); err != nil {
-		t.Fatalf("load control request event: %v", err)
-	}
-	return requireSyntheticProjectionRoute(t, pg, requestedEventID, "validator-node")
+	assertSelectedContractDeferredWorkRejectionHasNoForkMutation(t, ctx, db, sourceRunID)
 }
 
 func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIdentity(t *testing.T) {

@@ -29,6 +29,12 @@ type workflowInitialMaterializationTestOwner struct {
 	effects int
 }
 
+type workflowCreationOccurrenceTestPublisher struct{}
+
+func (workflowCreationOccurrenceTestPublisher) PublishInMutation(context.Context, events.Event) error {
+	return nil
+}
+
 func (o *workflowInitialMaterializationTestOwner) ApplyWorkflowLifecycleEffects(_ context.Context, effects []runtimeworkflowlifecycle.Effect) error {
 	o.effects += len(effects)
 	return nil
@@ -237,8 +243,15 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if err := store.MarkDynamicFlowRuntimeTopologyReady(ctx, runID, instance.StorageRef, readyAt); err != nil {
 				t.Fatalf("mark topology ready: %v", err)
 			}
-			if err := store.MarkDynamicFlowRuntimeCreationEventEmitted(ctx, runID, instance.StorageRef, readyAt.Add(time.Second)); err != nil {
-				t.Fatalf("mark creation event emitted: %v", err)
+			creationEvent := workflowReadinessCreationEventForTest(t, plan)
+			if err := store.CommitDynamicFlowRuntimeCreationOccurrence(ctx, DynamicFlowRuntimeCreationOccurrenceRequest{
+				RunID:        runID,
+				InstancePath: instance.StorageRef,
+				Plan:         plan,
+				Event:        creationEvent,
+				OccurredAt:   readyAt.Add(time.Second),
+			}, workflowCreationOccurrenceTestPublisher{}); err != nil {
+				t.Fatalf("commit creation occurrence: %v", err)
 			}
 			items, err := store.ListDynamicFlowRuntimeReadiness(ctx)
 			if err != nil || len(items) != 1 {
@@ -336,6 +349,30 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			}
 		})
 	}
+}
+
+func workflowReadinessCreationEventForTest(t testing.TB, plan DynamicFlowRuntimeReadinessPlan) events.Event {
+	t.Helper()
+	creation := plan.CreationEvent
+	if creation == nil {
+		t.Fatal("creation event plan is required")
+	}
+	return eventtest.PersistedChildForProducer(
+		creation.EventID,
+		events.EventType(creation.EventType),
+		eventtest.Producer(events.EventProducerPlatform, "flow-instance-activator"),
+		"",
+		creation.Payload,
+		0,
+		creation.RunID,
+		creation.ParentEventID,
+		events.EnvelopeForSourceRoute(events.EventEnvelope{
+			EntityID: plan.Identity.EntityID, FlowInstance: plan.Identity.InstancePath,
+		}, events.RouteIdentity{
+			FlowID: plan.Identity.TemplateID, FlowInstance: plan.Identity.InstancePath, EntityID: plan.Identity.EntityID,
+		}),
+		creation.CreatedAt,
+	)
 }
 
 func testCreateFlowInstanceContext(trigger workflowTriggerContext) values.Context {

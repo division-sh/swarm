@@ -121,6 +121,7 @@ type flowActivationTestInstanceStore struct {
 	readiness        map[string]runtimepipeline.DynamicFlowRuntimeReadiness
 	creationMarkErr  error
 	creationMarked   func()
+	beforeCreation   func()
 }
 
 type flowActivationTestStore struct {
@@ -300,20 +301,35 @@ func (s *flowActivationTestInstanceStore) MarkDynamicFlowRuntimeTopologyReady(_ 
 	return nil
 }
 
-func (s *flowActivationTestInstanceStore) MarkDynamicFlowRuntimeCreationEventEmitted(_ context.Context, runID, instanceID string, emittedAt time.Time) error {
+func (s *flowActivationTestInstanceStore) CommitDynamicFlowRuntimeCreationOccurrence(
+	ctx context.Context,
+	req runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest,
+	publisher runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher,
+) error {
+	if s.beforeCreation != nil {
+		s.beforeCreation()
+	}
 	s.readinessMu.Lock()
 	if s.creationMarkErr != nil {
 		s.readinessMu.Unlock()
 		return s.creationMarkErr
 	}
-	key := flowActivationReadinessKey(runID, instanceID)
+	key := flowActivationReadinessKey(req.RunID, req.InstancePath)
 	item, ok := s.readiness[key]
 	if !ok || !item.Eligible() || item.TopologyReadyAt.IsZero() {
 		s.readinessMu.Unlock()
 		return fmt.Errorf("readiness not ready")
 	}
+	if !item.CreationEventEmittedAt.IsZero() {
+		s.readinessMu.Unlock()
+		return nil
+	}
+	if err := publisher.PublishInMutation(ctx, req.Event); err != nil {
+		s.readinessMu.Unlock()
+		return err
+	}
 	if item.CreationEventEmittedAt.IsZero() {
-		item.CreationEventEmittedAt = emittedAt
+		item.CreationEventEmittedAt = req.OccurredAt
 	}
 	s.readiness[key] = item
 	s.readinessMu.Unlock()
@@ -425,6 +441,10 @@ func (b *flowActivationTestBus) Publish(ctx context.Context, evt events.Event) e
 	b.published = append(b.published, evt)
 	b.publishedContexts = append(b.publishedContexts, events.DeliveryContextFromContext(ctx))
 	return nil
+}
+
+func (b *flowActivationTestBus) PublishInMutation(ctx context.Context, evt events.Event) error {
+	return b.Publish(ctx, evt)
 }
 
 func (*flowActivationTestBus) ResolveSubscribedRecipients(string) []string { return nil }
@@ -981,7 +1001,7 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 		{name: "direct"},
 		{name: "post_commit", postCommit: true},
 	} {
-		for _, boundary := range []string{"partial_agent", "extra_agent", "route", "arm", "creation_event", "completion_mark"} {
+		for _, boundary := range []string{"partial_agent", "extra_agent", "route", "arm", "creation_event", "creation_commit"} {
 			t.Run(mode.name+"/"+boundary, func(t *testing.T) {
 				routeStore := &flowActivationTestRouteStore{}
 				bus := &flowActivationTestBus{routeStore: routeStore}
@@ -1017,7 +1037,7 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 					instances.armInitialEntry = func(string) error { return errors.New("injected arm failure") }
 				case "creation_event":
 					bus.publishErr = errors.New("injected creation event failure")
-				case "completion_mark":
+				case "creation_commit":
 					instances.creationMarkErr = errors.New("injected completion mark failure")
 				}
 
@@ -1043,15 +1063,11 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 				} else if err == nil {
 					t.Fatal("direct activation succeeded across injected finalization failure")
 				}
-				wantPublishedBeforeRecovery := 0
-				if boundary == "completion_mark" {
-					wantPublishedBeforeRecovery = 1
-				}
-				if len(bus.published) != wantPublishedBeforeRecovery {
+				if len(bus.published) != 0 {
 					t.Fatalf(
 						"creation events before readiness recovery = %d, want %d",
 						len(bus.published),
-						wantPublishedBeforeRecovery,
+						0,
 					)
 				}
 				if bus.HasFlowInstanceRoute(req.Instance.Route()) {
@@ -1258,6 +1274,47 @@ func TestDynamicFlowRuntimeReadinessTerminalRaceRetiresProcessRoute(t *testing.T
 	}
 	if len(instances.armedEntries) != 0 || len(bus.published) != 0 {
 		t.Fatalf("terminal readiness side effects: armed=%#v published=%#v", instances.armedEntries, bus.published)
+	}
+}
+
+func TestDynamicFlowRuntimeReadinessTerminalBeforeCreationCommitRetiresMaterializedTopology(t *testing.T) {
+	instances := &flowActivationTestInstanceStore{creationMarkErr: errors.New("hold creation commit pending")}
+	agents := &flowActivationTestStore{}
+	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	am := newFlowActivationManager(t, bus, instances, agents)
+	bundle := testFlowBundleWithTwoAgents("task.started")
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	ctx := testAuthorActivityContext(context.Background())
+
+	if err := am.ActivateFlowInstance(ctx, req); err == nil {
+		t.Fatal("activation unexpectedly completed the creation occurrence")
+	}
+	instances.creationMarkErr = nil
+	instances.beforeCreation = func() {
+		instances.beforeCreation = nil
+		if err := instances.MarkTerminated(context.Background(), req.Instance.InstancePath, time.Now().UTC()); err != nil {
+			t.Fatalf("terminalize at creation boundary: %v", err)
+		}
+	}
+	err := am.reconcileDynamicFlowRuntimeReadiness(
+		ctx,
+		req.TriggerEvent.RunID(),
+		req.Instance.InstancePath,
+		semanticview.Wrap(bundle),
+	)
+	if err != nil {
+		t.Fatalf("terminal creation reconciliation: %v", err)
+	}
+	if bus.HasFlowInstanceRoute(req.Instance.Route()) {
+		t.Fatal("terminal creation boundary left a process-visible route")
+	}
+	if len(bus.published) != 0 {
+		t.Fatalf("terminal creation boundary published events: %#v", bus.published)
+	}
+	for _, agentID := range []string{"reviewer-inst-1", "writer-inst-1"} {
+		if _, ok := am.GetAgentConfig(agentID); ok {
+			t.Fatalf("terminal creation boundary left process agent %s", agentID)
+		}
 	}
 }
 

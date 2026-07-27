@@ -68,6 +68,13 @@ func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
 			wantCode:   selectedContractDeferredWorkOwnerUnavailable,
 			capability: selectedContractDeferredWorkWorkflowJoinTimeout,
 		},
+		{
+			name:       "authored dynamic flow creation",
+			plan:       basePlan,
+			source:     selectedDeferredWorkDynamicFlowActionTestSource(),
+			wantCode:   selectedContractDeferredWorkOwnerUnavailable,
+			capability: selectedContractDeferredWorkDynamicFlowCreation,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			admission, err := admitSelectedContractDeferredWork(tc.plan, tc.source)
@@ -87,6 +94,38 @@ func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
 			capabilities, ok := failure.Detail.Attributes["capabilities"].([]string)
 			if !ok || !containsSelectedDeferredWorkCapability(capabilities, tc.capability) {
 				t.Fatalf("capabilities = %#v, want %q", failure.Detail.Attributes["capabilities"], tc.capability)
+			}
+		})
+	}
+}
+
+func TestSelectedContractHandlerDynamicFlowCreationCapabilityMatrix(t *testing.T) {
+	create := runtimecontracts.ActionSpec{ID: "create_flow_instance"}
+	for _, tc := range []struct {
+		name    string
+		handler runtimecontracts.SystemNodeEventHandler
+		want    bool
+	}{
+		{name: "none"},
+		{name: "top_level_action", handler: runtimecontracts.SystemNodeEventHandler{Action: create}, want: true},
+		{name: "rules", handler: runtimecontracts.SystemNodeEventHandler{
+			Rules: []runtimecontracts.HandlerRuleEntry{{Action: create}},
+		}, want: true},
+		{name: "on_complete", handler: runtimecontracts.SystemNodeEventHandler{
+			OnComplete: []runtimecontracts.HandlerRuleEntry{{Action: create}},
+		}, want: true},
+		{name: "join_on_complete", handler: runtimecontracts.SystemNodeEventHandler{
+			Join: &runtimecontracts.JoinSpec{OnComplete: runtimecontracts.HandlerRuleEntry{Action: create}},
+		}, want: true},
+		{name: "join_timeout", handler: runtimecontracts.SystemNodeEventHandler{
+			Join: &runtimecontracts.JoinSpec{Timeout: runtimecontracts.JoinTimeoutSpec{
+				Outcome: runtimecontracts.HandlerRuleEntry{Action: create},
+			}},
+		}, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := selectedContractHandlerCreatesDynamicFlow(tc.handler); got != tc.want {
+				t.Fatalf("selectedContractHandlerCreatesDynamicFlow() = %t, want %t", got, tc.want)
 			}
 		})
 	}
@@ -119,6 +158,7 @@ func TestSelectedContractDeferredWorkAdmissionProductionConsumersStatic(t *testi
 		t.Fatal(err)
 	}
 	counts := map[string]int{}
+	activationCalls := map[string]int{}
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
@@ -132,6 +172,9 @@ func TestSelectedContractDeferredWorkAdmissionProductionConsumersStatic(t *testi
 			call, ok := node.(*ast.CallExpr)
 			if !ok {
 				return true
+			}
+			if selector, ok := call.Fun.(*ast.SelectorExpr); ok && selector.Sel.Name == "ActivateFlowInstance" {
+				activationCalls[name]++
 			}
 			ident, ok := call.Fun.(*ast.Ident)
 			if !ok {
@@ -158,6 +201,18 @@ func TestSelectedContractDeferredWorkAdmissionProductionConsumersStatic(t *testi
 		if got := counts[function]; got != want {
 			t.Fatalf("production %s call count = %d, want %d exact admitted entry points", function, got, want)
 		}
+	}
+	if len(activationCalls) != 1 || activationCalls["runtime_container.go"] != 2 {
+		t.Fatalf("selected dynamic activation consumers = %#v, want two fork-local container callbacks", activationCalls)
+	}
+	containerSource, err := os.ReadFile("runtime_container.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admissionIndex := strings.Index(string(containerSource), "req.DeferredWorkAdmission.validate")
+	activationIndex := strings.Index(string(containerSource), "TemplateInstanceActivator:")
+	if admissionIndex < 0 || activationIndex < 0 || admissionIndex >= activationIndex {
+		t.Fatal("fork-local dynamic activation is not structurally downstream of deferred-work admission")
 	}
 }
 
@@ -197,6 +252,23 @@ func selectedDeferredWorkTestSource(timers []runtimecontracts.WorkflowTimerContr
 			Version: "v1",
 			Timers:  timers,
 			Joins:   joins,
+		},
+	})
+}
+
+func selectedDeferredWorkDynamicFlowActionTestSource() semanticview.Source {
+	handler := runtimecontracts.SystemNodeEventHandler{
+		OnComplete: []runtimecontracts.HandlerRuleEntry{{
+			Action: runtimecontracts.ActionSpec{ID: "create_flow_instance"},
+		}},
+	}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:    "selected-workflow",
+			Version: "v1",
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"creator": {ID: "creator", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.ready": handler}},
 		},
 	})
 }

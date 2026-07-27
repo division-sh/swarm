@@ -506,21 +506,21 @@ func (eb *EventBus) StageFlowInstanceRouteContext(ctx context.Context, req FlowI
 	if !ok || persister == nil {
 		return errors.New("flow-instance route persistence is required")
 	}
+	descriptorLister, ok := eb.store.(ActiveFlowInstanceDescriptorLister)
+	if !ok || descriptorLister == nil {
+		return errors.New("flow-instance route staging requires active flow-instance descriptors")
+	}
 	req = req.Normalized()
-	expectedTable, err := DeriveRouteTable(table.source)
-	if err != nil {
-		return fmt.Errorf("derive persisted flow-instance route table: %w", err)
-	}
-	if err := expectedTable.AddFlowInstanceRoute(req); err != nil {
-		return err
-	}
-	expectedRoutes := expectedTable.MaterializedRoutes(req.Identity)
-	persistedRouteExact := func(readCtx context.Context) (bool, error) {
+	persistedRouteExact := func(
+		readCtx context.Context,
+		identity runtimeflowidentity.Route,
+		expectedRoutes []FlowInstanceRouteRecord,
+	) (bool, error) {
 		reader, ok := eb.store.(FlowInstanceRouteRecordReader)
 		if !ok || reader == nil {
 			return false, nil
 		}
-		actual, err := reader.ListFlowInstanceRouteRecords(readCtx, req.Identity)
+		actual, err := reader.ListFlowInstanceRouteRecords(readCtx, identity)
 		if err != nil {
 			return false, err
 		}
@@ -538,33 +538,51 @@ func (eb *EventBus) StageFlowInstanceRouteContext(ctx context.Context, req FlowI
 				return fmt.Errorf("derive persisted flow-instance route table: %w", err)
 			}
 		}
+		descriptors, err := descriptorLister.ListActiveFlowInstanceDescriptors(txctx)
+		if err != nil {
+			return fmt.Errorf("list active flow-instance route topology: %w", err)
+		}
+		identities := make([]runtimeflowidentity.Route, 0, len(descriptors)+1)
+		for _, descriptor := range descriptors {
+			descriptor = descriptor.Normalized()
+			identity := runtimeflowidentity.StoredRoute("", descriptor.InstanceID, descriptor.FlowInstance)
+			if identity == req.Identity {
+				continue
+			}
+			if !staged.hasFlowInstanceTemplate(identity) {
+				continue
+			}
+			if err := staged.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
+				Identity:            identity,
+				ActivationVariables: descriptor.AddressFields,
+			}); err != nil {
+				return fmt.Errorf("derive active flow-instance route %s: %w", identity.InstancePath, err)
+			}
+			identities = append(identities, identity)
+		}
 		if err := staged.AddFlowInstanceRoute(req); err != nil {
 			return err
 		}
-		routes := staged.MaterializedRoutes(req.Identity)
-		exact, err := persistedRouteExact(txctx)
-		if err != nil {
-			return err
-		}
-		if exact {
-			return nil
-		}
-		for _, route := range routes {
-			if err := persister.UpsertFlowInstanceRoute(txctx, route); err != nil {
+		identities = append(identities, req.Identity)
+		for _, identity := range identities {
+			routes := staged.MaterializedRoutes(identity)
+			exact, err := persistedRouteExact(txctx, identity, routes)
+			if err != nil {
 				return err
+			}
+			if exact {
+				continue
+			}
+			for _, route := range routes {
+				if err := persister.UpsertFlowInstanceRoute(txctx, route); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
 	}
 	if _, active := runtimepipeline.PipelineSQLTxFromContext(ctx); active {
 		return stage(ctx)
-	}
-	exact, err := persistedRouteExact(ctx)
-	if err != nil {
-		return err
-	}
-	if exact {
-		return nil
 	}
 	runner := eb.RuntimeMutationRunner()
 	if runner == nil {
