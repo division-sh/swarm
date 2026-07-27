@@ -1467,11 +1467,16 @@ func TestActivateFlowInstanceCanonicalStoreFinalizesIdenticalReplayWithoutDuplic
 	t.Cleanup(cleanup)
 	const runID = "cccccccc-cccc-cccc-cccc-cccccccccccc"
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+	sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	if !ok {
+		t.Fatal("canonical readiness test context missing bundle source fact")
+	}
+	bundleHash, bundleSource := sourceFact.StorageValues()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status)
-		VALUES ($1::uuid, 'running')
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', $2, $3)
 		ON CONFLICT (run_id) DO NOTHING
-	`, runID); err != nil {
+	`, runID, bundleHash, bundleSource); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 

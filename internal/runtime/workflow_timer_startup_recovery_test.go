@@ -61,11 +61,12 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-			insertRun := `INSERT INTO runs (run_id, status) VALUES (?, 'running')`
+			bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
+			insertRun := `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', ?, ?)`
 			if postgres {
-				insertRun = `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`
+				insertRun = `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, $3)`
 			}
-			if _, err := db.ExecContext(ctx, insertRun, runID); err != nil {
+			if _, err := db.ExecContext(ctx, insertRun, runID, bundleHash, bundleSource); err != nil {
 				t.Fatalf("seed active run: %v", err)
 			}
 
@@ -95,7 +96,6 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 					LLMRuntime:        workflowTimerStartupLLM{},
 					RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 					BundleSourceFact:  authorActivityTestBundleSourceFact,
-					BundleFingerprint: authorActivityTestBundleSourceFact.BundleFingerprint,
 					ProcessWorkOwner:  process,
 				},
 			})
@@ -194,11 +194,12 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-			insertRun := `INSERT INTO runs (run_id, status) VALUES (?, 'running')`
+			bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
+			insertRun := `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', ?, ?)`
 			if postgres {
-				insertRun = `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`
+				insertRun = `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, $3)`
 			}
-			if _, err := db.ExecContext(ctx, insertRun, runID); err != nil {
+			if _, err := db.ExecContext(ctx, insertRun, runID, bundleHash, bundleSource); err != nil {
 				t.Fatalf("seed active run: %v", err)
 			}
 
@@ -230,7 +231,6 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 						LLMRuntime:        workflowTimerStartupLLM{},
 						RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 						BundleSourceFact:  authorActivityTestBundleSourceFact,
-						BundleFingerprint: authorActivityTestBundleSourceFact.BundleFingerprint,
 						ProcessWorkOwner:  process,
 						BootProgress: func(event swarmruntime.BootProgressEvent) {
 							bootProgress = append(bootProgress, event)
