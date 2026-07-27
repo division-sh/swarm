@@ -767,6 +767,12 @@ func classifyWorkflowInstanceStoreSpecCallSite(site runtimeWriterCallSite) (runt
 		site.CallReceiver == "tx" {
 		return classActiveTxHelper, "dynamic flow readiness is inserted through the caller's selected workflow transaction", true
 	}
+	if site.Path == "internal/runtime/pipeline/workflow_initial_materialization.go" &&
+		site.Function == "insertWorkflowInitialMaterializationProjection" &&
+		site.UsesPipelineTxFromContext &&
+		site.CallReceiver == "tx" {
+		return classActiveTxHelper, "immutable workflow creation identity is inserted through the caller's selected workflow transaction", true
+	}
 	if site.Path != "internal/runtime/pipeline/workflow_instance_store.go" {
 		return "", "", false
 	}

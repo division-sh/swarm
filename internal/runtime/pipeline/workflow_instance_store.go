@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"database/sql/driver"
@@ -15,7 +14,6 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -93,28 +91,28 @@ type WorkflowTransitionRecord struct {
 }
 
 type workflowInstancePersistedProjection struct {
-	Fields      map[string]any
-	Gates       map[string]bool
-	Accumulator map[string]any
-	Config      map[string]any
-	Control     workflowInstancePersistedControl
+	Fields      map[string]any                   `json:"fields"`
+	Gates       map[string]bool                  `json:"gates"`
+	Accumulator map[string]any                   `json:"accumulator"`
+	Config      map[string]any                   `json:"config"`
+	Control     workflowInstancePersistedControl `json:"control"`
 }
 
 type workflowInstancePersistedControl struct {
-	StorageRef         string
-	Slug               string
-	Name               string
-	EntityType         string
-	InstanceID         string
-	FlowPath           string
-	InstanceKind       string
-	TemplateVersion    string
-	LastSourceEvent    string
-	Status             string
-	ParentFlowID       string
-	ParentFlowInstance string
-	ParentEntityID     string
-	TransitionHistory  []WorkflowTransitionRecord
+	StorageRef         string                     `json:"storage_ref"`
+	Slug               string                     `json:"slug"`
+	Name               string                     `json:"name"`
+	EntityType         string                     `json:"entity_type"`
+	InstanceID         string                     `json:"instance_id"`
+	FlowPath           string                     `json:"flow_path"`
+	InstanceKind       string                     `json:"instance_kind"`
+	TemplateVersion    string                     `json:"template_version"`
+	LastSourceEvent    string                     `json:"last_source_event"`
+	Status             string                     `json:"status"`
+	ParentFlowID       string                     `json:"parent_flow_id"`
+	ParentFlowInstance string                     `json:"parent_flow_instance"`
+	ParentEntityID     string                     `json:"parent_entity_id"`
+	TransitionHistory  []WorkflowTransitionRecord `json:"transition_history"`
 }
 
 type WorkflowInstanceStore struct {
@@ -368,24 +366,35 @@ func (s *WorkflowInstanceStore) MaterializeInitialEntry(ctx context.Context, ins
 	if err != nil {
 		return WorkflowInitialMaterializationUnknown, err
 	}
+	initialProjection, err := newWorkflowInitialMaterializationProjection(ctx, identity, normalized, occurredAt)
+	if err != nil {
+		return WorkflowInitialMaterializationUnknown, err
+	}
 	result := WorkflowInitialMaterializationUnknown
 	err = s.runInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
-		existing, found, err := s.Load(txctx, identity.RowID())
+		_, found, err := s.Load(txctx, identity.RowID())
 		if err != nil {
 			return err
 		}
 		if found {
+			initialEqual, err := s.workflowInitialMaterializationProjectionEqual(txctx, initialProjection)
+			if err != nil {
+				return err
+			}
 			readinessEqual, err := s.dynamicFlowRuntimeReadinessPlanEqual(txctx, identity.StorageRef, normalized.RuntimeReadiness)
 			if err != nil {
 				return err
 			}
-			if workflowInitialMaterializationEqual(existing, normalized, occurredAt) && readinessEqual {
+			if initialEqual && readinessEqual {
 				result = WorkflowInitialMaterializationAlreadyExists
 				return nil
 			}
 			return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "workflow-instance-lifecycle", "materialize_initial_entry", map[string]any{"flow_instance": identity.StorageRef})
 		}
 		if err := s.Create(txctx, normalized); err != nil {
+			return err
+		}
+		if err := s.insertWorkflowInitialMaterializationProjection(txctx, initialProjection); err != nil {
 			return err
 		}
 		if normalized.RuntimeReadiness != nil {
@@ -422,24 +431,6 @@ func (s *WorkflowInstanceStore) ArmInitialEntryTimers(ctx context.Context, insta
 		return fmt.Errorf("workflow initial timer activation requires instance identity")
 	}
 	return s.lifecycleOwner.ArmInitialEntryTimers(ctx, instanceID)
-}
-
-func workflowInitialMaterializationEqual(actual, expected WorkflowInstance, occurredAt time.Time) bool {
-	actualProjection, actualErr := workflowInstancePersistedProjectionFromInstance(actual, actual.StorageRef)
-	expectedProjection, expectedErr := workflowInstancePersistedProjectionFromInstance(expected, expected.StorageRef)
-	actualJSON, actualJSONErr := canonicaljson.Bytes(actualProjection)
-	expectedJSON, expectedJSONErr := canonicaljson.Bytes(expectedProjection)
-	return actualErr == nil &&
-		expectedErr == nil &&
-		actualJSONErr == nil &&
-		expectedJSONErr == nil &&
-		strings.TrimSpace(actual.StorageRef) == strings.TrimSpace(expected.StorageRef) &&
-		strings.TrimSpace(actual.WorkflowName) == strings.TrimSpace(expected.WorkflowName) &&
-		strings.TrimSpace(actual.WorkflowVersion) == strings.TrimSpace(expected.WorkflowVersion) &&
-		strings.TrimSpace(actual.CurrentState) == strings.TrimSpace(expected.CurrentState) &&
-		canonicalWorkflowInstancePersistedTime(actual.EnteredStageAt).Equal(canonicalWorkflowInstancePersistedTime(occurredAt)) &&
-		canonicalWorkflowInstancePersistedTime(actual.CreatedAt).Equal(canonicalWorkflowInstancePersistedTime(occurredAt)) &&
-		bytes.Equal(actualJSON, expectedJSON)
 }
 
 func canonicalWorkflowInstancePersistedTime(value time.Time) time.Time {

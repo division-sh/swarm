@@ -64,6 +64,7 @@ func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 		{Table: "conversation_fork_turn_completions", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteMixedRowPolicy, PredicateOwner: "conversation_fork_turn_completions.fork_turn_id -> conversation_fork_turns.fork_id -> conversation_forks.source_run_id", DeleteOrderGroup: 2},
 		{Table: "conversation_forks", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteMixedRowPolicy, PredicateOwner: "conversation_forks.source_run_id", DeleteOrderGroup: 3},
 		{Table: "entity_mutations", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "entity_mutations.run_id", DeleteOrderGroup: 3},
+		{Table: "workflow_instance_initial_materializations", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "workflow_instance_initial_materializations.run_id", DeleteOrderGroup: 2},
 		{Table: "entity_state", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "entity_state.run_id", DeleteOrderGroup: 3},
 		{Table: "flow_instance_runtime_readiness", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "flow_instance_runtime_readiness.run_id", DeleteOrderGroup: 3},
 		{Table: "timers", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteMixedRowPolicy, PredicateOwner: "timers.run_id|forked_from_run_id|forked_from_event_id -> events.run_id", DeleteOrderGroup: 3},
