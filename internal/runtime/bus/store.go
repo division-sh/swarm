@@ -118,6 +118,12 @@ type FlowInstanceRoutePersistence interface {
 	ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.Route, error)
 }
 
+// FlowInstanceRouteSetPersistence replaces one materialized route owner's
+// complete active record set inside the selected mutation.
+type FlowInstanceRouteSetPersistence interface {
+	ReplaceFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.Route, routes []FlowInstanceRouteRecord) error
+}
+
 type FlowInstanceRouteRecordReader interface {
 	ListFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.Route) ([]FlowInstanceRouteRecord, error)
 }
@@ -156,11 +162,14 @@ type ActiveAgentDescriptorLister interface {
 }
 
 type ActiveFlowInstanceDescriptor struct {
-	InstanceID    string
-	EntityID      string
-	FlowInstance  string
-	FlowTemplate  string
-	AddressFields map[string]string
+	InstanceID      string
+	EntityID        string
+	FlowInstance    string
+	FlowTemplate    string
+	BundleHash      string
+	BundleSource    string
+	WorkflowVersion string
+	AddressFields   map[string]string
 }
 
 func (d ActiveFlowInstanceDescriptor) Normalized() ActiveFlowInstanceDescriptor {
@@ -177,12 +186,22 @@ func (d ActiveFlowInstanceDescriptor) Normalized() ActiveFlowInstanceDescriptor 
 		entityID = runtimeflowidentity.EntityID(flowInstance)
 	}
 	return ActiveFlowInstanceDescriptor{
-		InstanceID:    instanceID,
-		EntityID:      entityID,
-		FlowInstance:  flowInstance,
-		FlowTemplate:  strings.TrimSpace(d.FlowTemplate),
-		AddressFields: normalizeDescriptorAddressFields(d.AddressFields),
+		InstanceID:      instanceID,
+		EntityID:        entityID,
+		FlowInstance:    flowInstance,
+		FlowTemplate:    strings.TrimSpace(d.FlowTemplate),
+		BundleHash:      strings.TrimSpace(d.BundleHash),
+		BundleSource:    strings.TrimSpace(d.BundleSource),
+		WorkflowVersion: strings.TrimSpace(d.WorkflowVersion),
+		AddressFields:   normalizeDescriptorAddressFields(d.AddressFields),
 	}
+}
+
+func (d ActiveFlowInstanceDescriptor) HasSemanticSource() bool {
+	d = d.Normalized()
+	return d.BundleHash != "" &&
+		(d.BundleSource == "persisted" || d.BundleSource == "ephemeral") &&
+		d.WorkflowVersion != ""
 }
 
 func (d ActiveFlowInstanceDescriptor) TargetDescriptor() ActiveTargetDescriptor {

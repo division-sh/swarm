@@ -4536,18 +4536,26 @@ engine:
       - 6. Platform atomically creates the entity at initial_state, dormant initial timers, and one durable runtime-readiness
         plan containing the exact route, declared-agent revisions, run, and optional deterministic creation event occurrence
       - 7. When creation participates in a selected mutation, it derives the complete active dynamic-instance topology from
-        selected-store descriptors materializable by the current EventBus semantic source and persists the exact route rows
-        for every affected owner in that mutation. This includes cross-instance observer routes owned by an already-active
-        consumer when the new instance is the observed source. Descriptors outside that semantic source remain under their
-        own route owner and MUST NOT be reinterpreted through the current bundle.
-        Persisted route truth MUST remain absent from the process route table and recipient planning until readiness
-        reconciliation publishes it.
+        selected-store descriptors carrying the exact creating-run semantic source coordinate
+        `{bundle_hash, bundle_source, workflow_version}`. It admits only descriptors matching the current EventBus source and
+        replaces the complete active route-row set for every affected owner in that mutation, where rows absent from the newly
+        derived set become inactive and expected rows are upserted. This includes cross-instance observer routes owned by an
+        already-active consumer when the new instance is the observed source. Missing-source descriptors fail closed;
+        descriptors from another source remain under their own route owner and MUST NOT be reinterpreted through the current
+        bundle. An unscoped descriptor read may support non-authoritative target description but cannot authorize route
+        persistence.
+        Persisted route truth MUST remain absent from the global process route table and independent recipient planning until
+        readiness reconciliation publishes it. The selected mutation's private route overlay consumes the same exact
+        topology so the triggering delivery can complete atomically; that overlay is not global publication authority.
       - 8. One idempotent reconciler keyed by exact `{run_id, instance_id}` reloads the current readiness row and lifecycle
         eligibility; captured callback snapshots are not authority.
       - 9. The reconciler coalesces concurrent attempts for that key, reconciles and verifies the complete declared-agent
         topology, then publishes and verifies the already-persisted route in process.
-      - 10. After a fresh active/paused eligibility check, the reconciler records topology readiness and arms the dormant
-        initial timers. The selected-store transition itself rejects terminal/inactive work.
+      - 10. After a fresh active/paused eligibility check, the reconciler arms the dormant initial timers, reloads
+        eligibility, and only then records topology readiness. `topology_ready_at` means the route, complete declared-agent
+        set, and initial timer family have all completed reconciliation; it is not merely a route/agent checkpoint. Any arm
+        failure leaves the row pending for automatic retry. The selected-store transition itself rejects terminal/inactive
+        work.
       - 11. After another fresh eligibility check, one selected-store operation locks the exact run and flow-instance
         lifecycle rows, reloads the immutable readiness plan, appends the deterministic creation-only event through
         EventBus `PublishInMutation`, and records `creation_event_emitted_at` in the same transaction. Dispatch occurs only
@@ -4576,10 +4584,15 @@ engine:
         persisted_truth: Materialized `routing_rules.subscriber_id` rows store concrete rendered subscriber IDs. Route
           persistence, delivery planning, active-agent lookup, and runtime recovery consume that materialized route truth and
           MUST NOT independently reinterpret authored subscriber templates. Route staging MUST derive against every active
-          persisted dynamic-instance descriptor materializable by the current EventBus semantic source inside the selected
-          mutation and persist routes for every affected owner; deriving only the newly created instance is invalid because
-          cross-instance observers depend on both lifecycle owners. A descriptor not materializable by that semantic source
-          belongs to a different route owner and MUST NOT be interpreted through the current bundle.
+          persisted dynamic-instance descriptor whose exact creating-run
+          `{bundle_hash, bundle_source, workflow_version}` matches the current EventBus semantic source inside the selected
+          mutation. It MUST replace the complete route set for every affected owner in that same mutation, including
+          inactivating previously active rows absent from the derived set; additive upsert is not an exact-set operation.
+          Creation and terminal source/consumer removal consume the same owner. Deriving only the newly created or removed
+          instance is invalid because cross-instance observers depend on both lifecycle owners. A missing-source descriptor
+          fails closed. A descriptor from another semantic source belongs to a different route owner and MUST NOT be
+          interpreted through the current bundle. Store-wide or run-unscoped descriptors may remain target-description facts,
+          but they cannot authorize persisted route derivation.
         recovery: Startup recovery of active flow-instance routes MUST load one exact run-independent projection from the
           active `flow_instances` row identified by the persisted route's instance path. Dynamic instances additionally
           consume their exact `flow_instance_runtime_readiness` plan. The plan owns the creation run and expected declared
@@ -4598,8 +4611,10 @@ engine:
           projections fail startup closed; terminal/inactive projections install, mark, arm, and emit nothing.
         process_visibility: Persisting `routing_rules` is not process publication. The process route table and EventBus
           recipient manifest MUST remain unaware of a dynamic route until the keyed readiness reconciler has verified every
-          declared agent. Any later route verification, timer-arm, creation-publication, or completion failure retires that
-          process route while leaving the durable readiness row pending for the same owner.
+          declared agent. The selected mutation that creates or terminates the route may use its private exact topology
+          overlay to complete that mutation's own delivery planning; the overlay never escapes rollback and is not a second
+          global route owner. Any later route verification, timer-arm, creation-publication, or completion failure retires
+          the process route while leaving the durable readiness row pending for the same owner.
         automatic_recovery: The existing generation-owned manager retry loop enumerates incomplete eligible readiness rows
           on both explicit post-commit signal and bounded periodic wakeup. It retries from a freshly loaded row, coalesces
           concurrent activation/Ensure/startup attempts by exact key, and never creates a second callback, scheduler, or
@@ -12817,10 +12832,13 @@ platform_tables:
         \ (materialized_from) WHERE materialized_from IS NOT NULL\n);"
       lifecycle:
         boot: Load contract subscriptions → INSERT pattern rows. Clear stale materialized rows from previous boot.
-        create_flow_instance: For each wildcard pattern matching the new instance path → INSERT materialized row with concrete
-          flow_instance and rendered subscriber_id using the dynamic_instance_lifecycle.route_materialization activation variable
-          set.
-        terminate_flow_instance: UPDATE materialized rows for this flow_instance → status = inactive.
+        create_flow_instance: In one selected mutation, project active dynamic-instance descriptors from the exact matching
+          `{bundle_hash, bundle_source, workflow_version}`, derive the complete topology including cross-instance observers,
+          and replace each affected flow_instance owner's active materialized set. Replacement inactivates rows absent from
+          the derived set and upserts expected rows with concrete flow_instance and rendered subscriber_id.
+        terminate_flow_instance: In the same selected mutation as terminal lifecycle truth, derive topology without the
+          terminal owner and exact-set replace every affected source/consumer owner plus the terminal owner's empty set.
+          Process route retirement is post-commit.
         event_dispatch: SELECT WHERE event_pattern matches AND status = active. Concrete rows (is_materialized) take priority
           over wildcards.
     mailbox:
@@ -13238,7 +13256,9 @@ platform_tables:
         automatic retry, and startup consume one idempotent reconciler keyed by exact `{run_id, instance_id}`. Route rows
         may be persisted before reconciliation but remain process-invisible. The reconciler reloads current lifecycle
         eligibility, reconciles and verifies the complete declared-agent revision set, publishes and verifies the persisted
-        route, records topology_ready_at, and arms initial workflow timers. One final selected-store operation then locks the
+        route, arms initial workflow timers, reloads lifecycle eligibility, and only then records `topology_ready_at`.
+        Therefore a non-null `topology_ready_at` is the completion coordinate for route, declared-agent, and initial-timer
+        reconciliation; any timer-arm failure leaves the row pending. One final selected-store operation then locks the
         exact run and instance lifecycle rows and atomically appends the deterministic creation-only event plus
         creation_event_emitted_at before post-commit dispatch. Both completion writes require an active nonterminated
         instance in a running or paused run; a creation event completion without topology readiness is invalid. This table is

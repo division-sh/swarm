@@ -252,6 +252,30 @@ func (s *sourceBoundaryProbeStore) DeleteFlowInstanceRoute(ctx context.Context, 
 	return nil
 }
 
+func (s *sourceBoundaryProbeStore) ReplaceFlowInstanceRouteRecords(
+	ctx context.Context,
+	identity runtimeflowidentity.Route,
+	routes []FlowInstanceRouteRecord,
+) error {
+	if len(routes) == 0 {
+		return s.DeleteFlowInstanceRoute(ctx, identity)
+	}
+	for _, route := range routes {
+		if err := s.UpsertFlowInstanceRoute(ctx, route); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (*sourceBoundaryProbeStore) ListActiveFlowInstanceDescriptors(context.Context) ([]ActiveFlowInstanceDescriptor, error) {
+	return nil, nil
+}
+
+func (*sourceBoundaryProbeStore) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
 func (s *sourceBoundaryProbeStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.Route, error) {
 	seen := map[runtimeflowidentity.Route]struct{}{}
 	for _, route := range s.routes {

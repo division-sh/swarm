@@ -76,12 +76,21 @@ type routePersistenceTestStore struct {
 	deleteErr        error
 	rollbackCalls    []string
 	deleteCalls      []runtimeflowidentity.Route
+	replaceCalls     []runtimeflowidentity.Route
 	upsertCalls      int
 	upsertAfterWrite bool
 }
 
 func (s *routePersistenceTestStore) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	return append([]runtimebus.ActiveFlowInstanceDescriptor(nil), s.flowInstances...), nil
+	out := append([]runtimebus.ActiveFlowInstanceDescriptor(nil), s.flowInstances...)
+	for idx := range out {
+		if out[idx].BundleHash == "" {
+			out[idx].BundleHash = authorActivityTestBundleHash
+			out[idx].BundleSource = authorActivityTestBundleSource
+			out[idx].WorkflowVersion = "1.0.0"
+		}
+	}
+	return out, nil
 }
 
 func (s *routePersistenceTestStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
@@ -116,6 +125,29 @@ func (s *routePersistenceTestStore) UpsertFlowInstanceRoute(_ context.Context, r
 		return s.upsertErr
 	}
 	return nil
+}
+
+func (s *routePersistenceTestStore) ReplaceFlowInstanceRouteRecords(
+	ctx context.Context,
+	identity runtimeflowidentity.Route,
+	routes []runtimebus.FlowInstanceRouteRecord,
+) error {
+	s.replaceCalls = append(s.replaceCalls, identity)
+	for key, route := range s.routes {
+		if route.Identity.InstancePath == identity.InstancePath {
+			delete(s.routes, key)
+		}
+	}
+	for _, route := range routes {
+		if err := s.UpsertFlowInstanceRoute(ctx, route); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *routePersistenceTestStore) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
 }
 
 func TestEventBusPublishPersistedFlowInstanceRouteDoesNotRewritePersistence(t *testing.T) {
@@ -242,6 +274,102 @@ func TestEventBusStageFlowInstanceRoutePersistsCompleteCrossInstanceObserverTopo
 	}
 }
 
+func TestEventBusExactFlowInstanceRouteTopologyRemovesObsoleteObserverRows(t *testing.T) {
+	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
+		WorkerMode:               "template",
+		ProducerMode:             "template",
+		ProducerStaticDescendant: true,
+		ObserveGrant:             "      observe:\n        - source: producer\n          events: [task.done]\n",
+	})
+	sourceIdentity := runtimeflowidentity.DeriveRoute("producer", "source-1")
+	consumerIdentity := runtimeflowidentity.DeriveRoute("worker", "consumer-1")
+	for _, removed := range []runtimeflowidentity.Route{sourceIdentity, consumerIdentity} {
+		t.Run(removed.ScopeKey, func(t *testing.T) {
+			store := &routePersistenceTestStore{
+				flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
+					{InstanceID: sourceIdentity.InstanceID, FlowInstance: sourceIdentity.InstancePath, FlowTemplate: "producer"},
+					{InstanceID: consumerIdentity.InstanceID, FlowInstance: consumerIdentity.InstancePath, FlowTemplate: "worker"},
+				},
+			}
+			eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			if err := eb.RouteTable().AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: sourceIdentity}); err != nil {
+				t.Fatalf("publish source route: %v", err)
+			}
+			if err := eb.RouteTable().AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: consumerIdentity}); err != nil {
+				t.Fatalf("publish consumer route: %v", err)
+			}
+			stageCtx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), &sql.Tx{})
+			if err := eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: sourceIdentity}); err != nil {
+				t.Fatalf("stage complete topology: %v", err)
+			}
+			if got := eb.RouteTable().Resolve("producer/source-1/task.done"); len(got) != 1 {
+				t.Fatalf("observer route before removal = %#v, want one", got)
+			}
+
+			remaining := store.flowInstances[:0]
+			for _, descriptor := range store.flowInstances {
+				if descriptor.FlowInstance != removed.InstancePath {
+					remaining = append(remaining, descriptor)
+				}
+			}
+			store.flowInstances = remaining
+			if err := eb.RemoveFlowInstanceRouteContext(context.Background(), removed); err != nil {
+				t.Fatalf("RemoveFlowInstanceRouteContext: %v", err)
+			}
+			if got := eb.RouteTable().Resolve("producer/source-1/task.done"); len(got) != 0 {
+				t.Fatalf("observer route after %s removal = %#v, want none", removed.ScopeKey, got)
+			}
+			for _, route := range store.routes {
+				if route.EventPattern == "producer/source-1/task.done" &&
+					route.SubscriberID == "worker-listener" {
+					t.Fatalf("obsolete observer row survived %s removal: %#v", removed.ScopeKey, route)
+				}
+			}
+		})
+	}
+}
+
+func TestEventBusStageFlowInstanceRouteExcludesForeignSemanticSourceDescriptors(t *testing.T) {
+	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
+		WorkerMode:   "template",
+		ProducerMode: "template",
+	})
+	current := runtimeflowidentity.DeriveRoute("producer", "current")
+	foreign := runtimeflowidentity.DeriveRoute("producer", "foreign")
+	store := &routePersistenceTestStore{
+		flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
+			{InstanceID: current.InstanceID, FlowInstance: current.InstancePath, FlowTemplate: "producer"},
+			{
+				InstanceID: foreign.InstanceID, FlowInstance: foreign.InstancePath, FlowTemplate: "producer",
+				BundleHash:   "bundle-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+				BundleSource: "ephemeral", WorkflowVersion: "1.0.0",
+			},
+		},
+	}
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	stageCtx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), &sql.Tx{})
+	if err := eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: current}); err != nil {
+		t.Fatalf("StageFlowInstanceRouteContext: %v", err)
+	}
+	for _, identity := range store.replaceCalls {
+		if identity.InstancePath == foreign.InstancePath {
+			t.Fatalf("foreign semantic-source owner was replaced: %#v", store.replaceCalls)
+		}
+	}
+	for _, route := range store.stagedRoutes {
+		if route.Identity.InstancePath == foreign.InstancePath ||
+			strings.Contains(route.EventPattern, foreign.InstancePath) {
+			t.Fatalf("foreign semantic-source route leaked into persisted topology: %#v", route)
+		}
+	}
+}
+
 func TestEventBusStageFlowInstanceRouteAcceptsExactEmptyRouteSet(t *testing.T) {
 	store := &routePersistenceTestStore{}
 	eb, err := newScopedTestEventBus(store)
@@ -322,8 +450,8 @@ func TestEventBusFlowInstanceRouteIdentityOwnerRejectsMismatchedExplicitPath(t *
 	if err := eb.RemoveFlowInstanceRoute(mismatched); err == nil || !strings.Contains(err.Error(), "is owned by scope") {
 		t.Fatalf("mismatched RemoveFlowInstanceRoute error = %v, want complete-owner conflict", err)
 	}
-	if len(store.deleteCalls) != 0 {
-		t.Fatalf("persistence delete calls = %#v, want none for rejected removal", store.deleteCalls)
+	if len(store.replaceCalls) != 0 {
+		t.Fatalf("persistence replacement calls = %#v, want none for rejected removal", store.replaceCalls)
 	}
 	if !eb.RouteTable().HasFlowInstanceRoute(installed) {
 		t.Fatal("installed identity disappeared after mismatched add/remove")
@@ -339,14 +467,14 @@ func TestEventBusFlowInstanceRouteIdentityOwnerRejectsMismatchedExplicitPath(t *
 	if err := eb.RemoveFlowInstanceRoute(normalizedRemoval); err != nil {
 		t.Fatalf("RemoveFlowInstanceRoute owner: %v", err)
 	}
-	if len(store.deleteCalls) != 1 || store.deleteCalls[0] != installed {
-		t.Fatalf("persistence delete calls = %#v, want one canonical owner", store.deleteCalls)
+	if len(store.replaceCalls) != 1 || store.replaceCalls[0] != installed {
+		t.Fatalf("persistence replacement calls = %#v, want one canonical owner", store.replaceCalls)
 	}
 	if err := eb.RemoveFlowInstanceRoute(normalizedRemoval); err != nil {
 		t.Fatalf("exact RemoveFlowInstanceRoute replay: %v", err)
 	}
-	if len(store.deleteCalls) != 1 {
-		t.Fatalf("persistence delete calls after absent replay = %#v, want no duplicate delete", store.deleteCalls)
+	if len(store.replaceCalls) != 2 {
+		t.Fatalf("persistence replacement calls after absent replay = %#v, want exact replay reconciliation", store.replaceCalls)
 	}
 }
 
@@ -592,6 +720,10 @@ func routeMaterializationConfigVarBundle() *runtimecontracts.WorkflowContractBun
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{operating}}
 	return &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:    "route-materialization",
+			Version: "1.0.0",
+		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{

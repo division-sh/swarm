@@ -64,7 +64,6 @@ type terminalFlowInstanceSideEffectPlan struct {
 	AgentIDs   []string
 	Route      runtimeflowidentity.Route
 	RunID      string
-	Remover    flowInstanceRouteContextRemover
 	FinalState string
 }
 
@@ -719,13 +718,16 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 	if runID == "" {
 		return fmt.Errorf("derived flow-instance route removal requires canonical run_id for %s", canonicalFlowPath)
 	}
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	if err := remover.RemoveFlowInstanceRouteContext(ctx, canonicalRoute); err != nil {
+		return fmt.Errorf("stage exact terminal flow-instance route topology %s: %w", canonicalFlowPath, err)
+	}
 	plan := terminalFlowInstanceSideEffectPlan{
 		EntityID:   entityID,
 		FlowPath:   canonicalFlowPath,
 		AgentIDs:   agentIDs,
 		Route:      canonicalRoute,
 		RunID:      runID,
-		Remover:    remover,
 		FinalState: req.FinalState,
 	}
 	if runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
@@ -747,13 +749,6 @@ func (am *AgentManager) applyTerminalFlowInstanceSideEffects(ctx context.Context
 	}
 	if len(agentErrs) > 0 {
 		return errors.Join(agentErrs...)
-	}
-	if plan.Remover == nil {
-		return fmt.Errorf("event bus does not support derived flow-instance route removal for %s", plan.FlowPath)
-	}
-	ctx = runtimecorrelation.WithRunID(ctx, plan.RunID)
-	if err := plan.Remover.RemoveFlowInstanceRouteContext(ctx, plan.Route); err != nil {
-		return fmt.Errorf("remove flow instance route %s: %w", plan.FlowPath, err)
 	}
 	return nil
 }

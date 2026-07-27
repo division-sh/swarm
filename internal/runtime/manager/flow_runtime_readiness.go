@@ -274,12 +274,17 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	} else if !eligible {
 		return nil
 	}
+	if err := am.workflowInstances.ArmInitialEntryTimers(ctx, readiness.InstancePath); err != nil {
+		return fmt.Errorf("arm initial workflow timers for %s: %w", readiness.InstancePath, err)
+	}
+	if eligible, err := am.dynamicFlowRuntimeReadinessStillEligible(ctx, key, plan); err != nil {
+		return err
+	} else if !eligible {
+		return nil
+	}
 	now := time.Now().UTC()
 	if err := am.workflowInstances.MarkDynamicFlowRuntimeTopologyReady(ctx, plan.RunID, readiness.InstancePath, now); err != nil {
 		return fmt.Errorf("record dynamic flow runtime readiness %s: %w", readiness.InstancePath, err)
-	}
-	if err := am.workflowInstances.ArmInitialEntryTimers(ctx, readiness.InstancePath); err != nil {
-		return fmt.Errorf("arm initial workflow timers for %s: %w", readiness.InstancePath, err)
 	}
 	fresh, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, key.instancePath)
 	if err != nil {

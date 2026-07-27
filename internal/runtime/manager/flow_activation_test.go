@@ -121,6 +121,7 @@ type flowActivationTestInstanceStore struct {
 	readiness        map[string]runtimepipeline.DynamicFlowRuntimeReadiness
 	creationMarkErr  error
 	creationMarked   func()
+	topologyMarked   func()
 	beforeCreation   func()
 }
 
@@ -298,6 +299,9 @@ func (s *flowActivationTestInstanceStore) MarkDynamicFlowRuntimeTopologyReady(_ 
 		item.TopologyReadyAt = readyAt
 	}
 	s.readiness[key] = item
+	if s.topologyMarked != nil {
+		s.topologyMarked()
+	}
 	return nil
 }
 
@@ -646,13 +650,23 @@ func (b *flowActivationTestBus) RemoveFlowInstanceRoute(identity runtimeflowiden
 }
 
 func (b *flowActivationTestBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity runtimeflowidentity.Route) error {
-	b.removedPairs = append(b.removedPairs, identity.ScopeKey+"/"+identity.InstanceID)
 	if b.removeErr != nil {
 		return b.removeErr
 	}
 	if b.routeStore != nil {
-		return b.routeStore.DeleteFlowInstanceRoute(ctx, identity)
+		if err := b.routeStore.DeleteFlowInstanceRoute(ctx, identity); err != nil {
+			return err
+		}
 	}
+	recordRemoval := func() {
+		b.removedPairs = append(b.removedPairs, identity.ScopeKey+"/"+identity.InstanceID)
+	}
+	if runtimepipeline.QueuePipelinePostCommitAction(ctx, func(context.Context) {
+		recordRemoval()
+	}) {
+		return nil
+	}
+	recordRemoval()
 	return nil
 }
 
@@ -1173,6 +1187,66 @@ func TestDynamicFlowRuntimeReadinessAutomaticRetryCompletesWithoutEnsureOrRestar
 	}
 	if armCalls != 2 || len(bus.published) != 1 {
 		t.Fatalf("automatic retry side effects: arms=%d published=%d, want 2/1", armCalls, len(bus.published))
+	}
+}
+
+func TestDynamicFlowRuntimeReadinessNoAutoEmitArmFailureRemainsPendingUntilAutomaticRetry(t *testing.T) {
+	completed := make(chan struct{}, 1)
+	instances := &flowActivationTestInstanceStore{
+		topologyMarked: func() {
+			select {
+			case completed <- struct{}{}:
+			default:
+			}
+		},
+	}
+	armCalls := 0
+	instances.armInitialEntry = func(string) error {
+		armCalls++
+		if armCalls == 1 {
+			return errors.New("injected first timer arm failure")
+		}
+		return nil
+	}
+	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	am := newFlowActivationManager(t, bus, instances)
+	bundle := testFlowBundle("")
+	am.semanticSource = semanticview.Wrap(bundle)
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+
+	if err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req); err == nil {
+		t.Fatal("ActivateFlowInstance succeeded across injected timer arm failure")
+	}
+	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(
+		context.Background(),
+		req.TriggerEvent.RunID(),
+		req.Instance.InstancePath,
+	)
+	if err != nil || !found || !readiness.Pending() || !readiness.TopologyReadyAt.IsZero() {
+		t.Fatalf("failed no-auto readiness: found=%v readiness=%#v err=%v", found, readiness, err)
+	}
+	if bus.HasFlowInstanceRoute(req.Instance.Route()) {
+		t.Fatal("failed no-auto readiness left process route published")
+	}
+
+	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+		t.Fatalf("Run automatic readiness owner: %v", err)
+	}
+	select {
+	case <-completed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("automatic no-auto readiness retry did not complete")
+	}
+	readiness, found, err = instances.LoadDynamicFlowRuntimeReadiness(
+		context.Background(),
+		req.TriggerEvent.RunID(),
+		req.Instance.InstancePath,
+	)
+	if err != nil || !found || readiness.Pending() || readiness.TopologyReadyAt.IsZero() {
+		t.Fatalf("completed no-auto readiness: found=%v readiness=%#v err=%v", found, readiness, err)
+	}
+	if armCalls != 2 || len(bus.published) != 0 {
+		t.Fatalf("no-auto retry side effects: arms=%d events=%d, want 2/0", armCalls, len(bus.published))
 	}
 }
 
@@ -2316,14 +2390,14 @@ func TestDeactivateFlowInstanceQueuesTerminalSideEffectsUntilPostCommitWhenAvail
 	if len(bus.removedPairs) != 0 {
 		t.Fatalf("removed routes before post-commit flush = %#v, want none", bus.removedPairs)
 	}
-	if got := routeStore.statusByPath["review/inst-1"]; got != "active" {
-		t.Fatalf("route status before post-commit flush = %q, want active", got)
+	if got := routeStore.statusByPath["review/inst-1"]; got != "inactive" {
+		t.Fatalf("route status before post-commit flush = %q, want transactionally inactive", got)
 	}
 	if len(instances.terminatedPaths) != 1 || instances.terminatedPaths[0] != "review/inst-1" {
 		t.Fatalf("flow instance terminal state = %#v, want committed owner entry", instances.terminatedPaths)
 	}
-	if len(postCommit) != 1 {
-		t.Fatalf("post-commit actions = %d, want 1", len(postCommit))
+	if len(postCommit) != 2 {
+		t.Fatalf("post-commit actions = %d, want route retirement and terminal side effects", len(postCommit))
 	}
 
 	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
@@ -2347,7 +2421,7 @@ func TestDeactivateFlowInstanceQueuesTerminalSideEffectsUntilPostCommitWhenAvail
 	}
 }
 
-func TestDeactivateFlowInstanceLogsPostCommitAgentFailureWithoutRouteRemoval(t *testing.T) {
+func TestDeactivateFlowInstanceLogsPostCommitAgentFailureAfterRouteRetirement(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
 	managerStore := &flowActivationTestStore{terminateErr: errors.New("agent terminate failed")}
@@ -2374,15 +2448,15 @@ func TestDeactivateFlowInstanceLogsPostCommitAgentFailureWithoutRouteRemoval(t *
 	if log.Failure == nil || log.Failure.Class != runtimefailures.ClassInternalFailure || log.Failure.Detail.Code != "unclassified_runtime_error" {
 		t.Fatalf("runtime log failure = %#v, want canonical internal failure", log.Failure)
 	}
-	if len(bus.removedPairs) != 0 {
-		t.Fatalf("removed routes after agent failure = %#v, want no route removal", bus.removedPairs)
+	if len(bus.removedPairs) != 1 || bus.removedPairs[0] != "review/inst-1" {
+		t.Fatalf("removed routes after agent failure = %#v, want committed route retirement", bus.removedPairs)
 	}
 	if len(instances.terminatedPaths) != 1 || instances.terminatedPaths[0] != "review/inst-1" {
 		t.Fatalf("flow terminal state = %#v, want preserved terminal transition", instances.terminatedPaths)
 	}
 }
 
-func TestDeactivateFlowInstanceLogsPostCommitRouteFailureAfterAgentTeardown(t *testing.T) {
+func TestDeactivateFlowInstanceFailsBeforePostCommitSideEffectsWhenRoutePersistenceFails(t *testing.T) {
 	bus := &flowActivationTestBus{removeErr: errors.New("route removal failed")}
 	instances := &flowActivationTestInstanceStore{}
 	managerStore := &flowActivationTestStore{}
@@ -2394,29 +2468,23 @@ func TestDeactivateFlowInstanceLogsPostCommitRouteFailureAfterAgentTeardown(t *t
 	}
 	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
 	ctx := withFlowActivationPostCommit(flowActivationRunContext(), &postCommit)
-	if err := am.DeactivateFlowInstance(ctx, "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
-		t.Fatalf("DeactivateFlowInstance returned pre-commit error: %v", err)
+	err := am.DeactivateFlowInstance(ctx, "review", "inst-1", "review/inst-1", "ent-1")
+	if err == nil || !strings.Contains(err.Error(), "stage exact terminal flow-instance route topology") {
+		t.Fatalf("DeactivateFlowInstance error = %v, want exact route persistence failure", err)
 	}
 
 	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-	if len(bus.runtimeLogs) != 1 {
-		t.Fatalf("runtime logs = %#v, want one post-commit failure log", bus.runtimeLogs)
+	if len(bus.runtimeLogs) != 0 {
+		t.Fatalf("runtime logs = %#v, want no post-commit side-effect failure", bus.runtimeLogs)
 	}
-	log := bus.runtimeLogs[0]
-	if log.Action != "terminal_flow_instance_side_effects_failed" || log.Level != "warn" {
-		t.Fatalf("runtime log = %#v, want warning terminal_flow_instance_side_effects_failed", log)
+	if len(managerStore.terminated) != 0 {
+		t.Fatalf("agent terminations after route failure = %#v, want none", managerStore.terminated)
 	}
-	if log.Failure == nil || log.Failure.Class != runtimefailures.ClassInternalFailure || log.Failure.Detail.Code != "unclassified_runtime_error" {
-		t.Fatalf("runtime log failure = %#v, want canonical internal failure", log.Failure)
+	if len(bus.removedPairs) != 0 {
+		t.Fatalf("process route retirements after route failure = %#v, want none", bus.removedPairs)
 	}
-	if len(managerStore.terminated) != 1 || managerStore.terminated[0] != "reviewer-inst-1" {
-		t.Fatalf("agent terminations after route failure = %#v, want reviewer-inst-1", managerStore.terminated)
-	}
-	if len(bus.removedPairs) != 1 || bus.removedPairs[0] != "review/inst-1" {
-		t.Fatalf("removed routes after route failure = %#v, want one route attempt", bus.removedPairs)
-	}
-	if len(instances.terminatedPaths) != 1 || instances.terminatedPaths[0] != "review/inst-1" {
-		t.Fatalf("flow terminal state = %#v, want preserved terminal transition", instances.terminatedPaths)
+	if len(postCommit) != 0 {
+		t.Fatalf("post-commit actions after route failure = %d, want none", len(postCommit))
 	}
 }
 
@@ -2586,13 +2654,18 @@ func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t
 			return err
 		}
 		if _, ok := am.GetAgentConfig("reviewer-inst-1"); !ok {
-			t.Fatal("flow agent was torn down before terminal transaction commit")
+			return errors.New("flow agent was torn down before terminal transaction commit")
 		}
 		if len(managerStore.terminated) != 0 || len(bus.unsubscribed) != 0 || len(bus.removedPairs) != 0 {
-			t.Fatalf("side effects before commit: terminated=%#v unsubscribed=%#v routes=%#v", managerStore.terminated, bus.unsubscribed, bus.removedPairs)
+			return fmt.Errorf(
+				"side effects before commit: terminated=%#v unsubscribed=%#v routes=%#v",
+				managerStore.terminated,
+				bus.unsubscribed,
+				bus.removedPairs,
+			)
 		}
-		if got := routeStore.statusByPath["review/inst-1"]; got != "active" {
-			t.Fatalf("route status before commit = %q, want active", got)
+		if got := routeStore.statusByPath["review/inst-1"]; got != "inactive" {
+			return fmt.Errorf("route status inside terminal mutation = %q, want inactive", got)
 		}
 		var externalStatus string
 		if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
@@ -2600,10 +2673,10 @@ func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t
 			FROM flow_instances
 			WHERE instance_id = $1
 		`, "review/inst-1").Scan(&externalStatus); err != nil {
-			t.Fatalf("external flow_instances status before commit: %v", err)
+			return fmt.Errorf("external flow_instances status before commit: %w", err)
 		}
 		if strings.TrimSpace(externalStatus) != "active" {
-			t.Fatalf("external flow_instances status before commit = %q, want active", externalStatus)
+			return fmt.Errorf("external flow_instances status before commit = %q, want active", externalStatus)
 		}
 		return nil
 	}); err != nil {

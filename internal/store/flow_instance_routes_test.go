@@ -202,6 +202,61 @@ func TestPostgresStoreUpsertFlowInstanceRouteUsesPipelineTransaction(t *testing.
 	}
 }
 
+func TestPostgresStoreReplaceFlowInstanceRouteRecordsIsExactAndTransactional(t *testing.T) {
+	ctx := testAuthorActivityContext()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := admitTestPostgresStore(t, db)
+	ensureFlowInstanceRouteTables(t, ctx, db)
+	identity := runtimeflowidentity.DeriveRoute("review", "inst-exact")
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		VALUES ($1, 'review', 'template', '{}'::jsonb, 'active', NOW())
+	`, identity.InstancePath); err != nil {
+		t.Fatalf("seed flow instance: %v", err)
+	}
+	ctx = seedFlowRouteTestAuthority(t, ctx, db, true, identity.InstancePath)
+	first := []runtimebus.FlowInstanceRouteRecord{
+		{
+			Identity: identity, EventPattern: "review/inst-exact/task.started",
+			SubscriberType: "agent", SubscriberID: "reviewer", SourceFlow: "review",
+		},
+		{
+			Identity: identity, EventPattern: "producer/source-1/task.done",
+			SubscriberType: "node", SubscriberID: "observer", SourceFlow: "review",
+		},
+	}
+	if err := pg.ReplaceFlowInstanceRouteRecords(ctx, identity, first); err != nil {
+		t.Fatalf("ReplaceFlowInstanceRouteRecords first: %v", err)
+	}
+	if got, err := pg.ListFlowInstanceRouteRecords(ctx, identity); err != nil || len(got) != 2 {
+		t.Fatalf("first exact route set: routes=%#v err=%v", got, err)
+	}
+	if err := pg.ReplaceFlowInstanceRouteRecords(ctx, identity, first[:1]); err != nil {
+		t.Fatalf("ReplaceFlowInstanceRouteRecords second: %v", err)
+	}
+	got, err := pg.ListFlowInstanceRouteRecords(ctx, identity)
+	if err != nil || len(got) != 1 || got[0].SubscriberID != "reviewer" {
+		t.Fatalf("second exact route set: routes=%#v err=%v", got, err)
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	if err := pg.ReplaceFlowInstanceRouteRecords(txctx, identity, nil); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("ReplaceFlowInstanceRouteRecords rollback mutation: %v", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	got, err = pg.ListFlowInstanceRouteRecords(ctx, identity)
+	if err != nil || len(got) != 1 || got[0].SubscriberID != "reviewer" {
+		t.Fatalf("route set after rollback: routes=%#v err=%v", got, err)
+	}
+}
+
 func TestSQLiteRuntimeStoreUpsertFlowInstanceRouteUsesPipelineTransaction(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
@@ -250,6 +305,59 @@ func TestSQLiteRuntimeStoreUpsertFlowInstanceRouteUsesPipelineTransaction(t *tes
 	}
 	if leaked != 0 {
 		t.Fatalf("sqlite routing_rules leaked after rollback = %d, want 0", leaked)
+	}
+}
+
+func TestSQLiteRuntimeStoreReplaceFlowInstanceRouteRecordsIsExactAndTransactional(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	identity := runtimeflowidentity.DeriveRoute("review", "inst-exact")
+	if _, err := store.DB.ExecContext(ctx, `
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		VALUES (?, 'review', 'template', '{}', 'active', ?)
+	`, identity.InstancePath, time.Now().UTC()); err != nil {
+		t.Fatalf("seed flow instance: %v", err)
+	}
+	ctx = seedFlowRouteTestAuthority(t, ctx, store.DB, false, identity.InstancePath)
+	first := []runtimebus.FlowInstanceRouteRecord{
+		{
+			Identity: identity, EventPattern: "review/inst-exact/task.started",
+			SubscriberType: "agent", SubscriberID: "reviewer", SourceFlow: "review",
+		},
+		{
+			Identity: identity, EventPattern: "producer/source-1/task.done",
+			SubscriberType: "node", SubscriberID: "observer", SourceFlow: "review",
+		},
+	}
+	if err := store.ReplaceFlowInstanceRouteRecords(ctx, identity, first); err != nil {
+		t.Fatalf("ReplaceFlowInstanceRouteRecords first: %v", err)
+	}
+	if got, err := store.ListFlowInstanceRouteRecords(ctx, identity); err != nil || len(got) != 2 {
+		t.Fatalf("first exact route set: routes=%#v err=%v", got, err)
+	}
+	if err := store.ReplaceFlowInstanceRouteRecords(ctx, identity, first[:1]); err != nil {
+		t.Fatalf("ReplaceFlowInstanceRouteRecords second: %v", err)
+	}
+	got, err := store.ListFlowInstanceRouteRecords(ctx, identity)
+	if err != nil || len(got) != 1 || got[0].SubscriberID != "reviewer" {
+		t.Fatalf("second exact route set: routes=%#v err=%v", got, err)
+	}
+
+	tx, err := store.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	if err := store.ReplaceFlowInstanceRouteRecords(txctx, identity, nil); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("ReplaceFlowInstanceRouteRecords rollback mutation: %v", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	got, err = store.ListFlowInstanceRouteRecords(ctx, identity)
+	if err != nil || len(got) != 1 || got[0].SubscriberID != "reviewer" {
+		t.Fatalf("route set after rollback: routes=%#v err=%v", got, err)
 	}
 }
 
@@ -597,6 +705,12 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(
 		t.Fatalf("seed runs: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
+		INSERT INTO flow_instance_runtime_readiness (run_id, instance_id, plan, created_at, updated_at)
+		VALUES ($1::uuid, 'component-scaffold/active', '{"workflow_version":"1.0.0"}'::jsonb, NOW(), NOW())
+	`, runID); err != nil {
+		t.Fatalf("seed flow-instance readiness: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
 		VALUES
 			('22222222-2222-4222-8222-222222222222', $1::uuid, 'component-scaffold/active', 'component', 'ready', '{"vertical_id":"v-active","weight":1.1234567}'::jsonb, NOW(), NOW()),
@@ -625,6 +739,11 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(
 	if got.FlowTemplate != "component-scaffold" {
 		t.Fatalf("FlowTemplate = %q, want component-scaffold", got.FlowTemplate)
 	}
+	if got.BundleHash != "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" ||
+		got.BundleSource != "ephemeral" ||
+		got.WorkflowVersion != "1.0.0" {
+		t.Fatalf("semantic source = %#v, want exact run bundle and workflow version", got)
+	}
 	if got.AddressFields["entity.vertical_id"] != "v-active" {
 		t.Fatalf("AddressFields[entity.vertical_id] = %q, want v-active", got.AddressFields["entity.vertical_id"])
 	}
@@ -633,45 +752,21 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(
 	}
 }
 
-func TestPostgresStoreListActiveFlowInstanceDescriptorsOmitsAddressFieldsWithoutRunScope(t *testing.T) {
+func TestPostgresStoreListActiveFlowInstanceDescriptorsAllowsUnscopedEmptyCensus(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	ensureFlowInstanceRouteTables(t, ctx, db)
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES ('component-scaffold/active', 'component-scaffold', 'template', '{}'::jsonb, 'active', NOW())
-	`); err != nil {
-		t.Fatalf("seed flow_instances: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ('44444444-4444-4444-8444-444444444444'::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`); err != nil {
-		t.Fatalf("seed runs: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
-		VALUES ('33333333-3333-4333-8333-333333333333', '44444444-4444-4444-8444-444444444444'::uuid, 'component-scaffold/active', 'component', 'ready', '{"vertical_id":"wrong-run"}'::jsonb, NOW(), NOW())
-	`); err != nil {
-		t.Fatalf("seed entity_state: %v", err)
-	}
-
 	descriptors, err := pg.ListActiveFlowInstanceDescriptors(ctx)
-	if err != nil {
-		t.Fatalf("ListActiveFlowInstanceDescriptors: %v", err)
-	}
-	if len(descriptors) != 1 {
-		t.Fatalf("descriptors = %#v, want exactly active template descriptor", descriptors)
-	}
-	if len(descriptors[0].AddressFields) != 0 {
-		t.Fatalf("AddressFields = %#v, want no run-scoped descriptor evidence without run_id", descriptors[0].AddressFields)
+	if err != nil || len(descriptors) != 0 {
+		t.Fatalf("unscoped descriptor census: descriptors=%#v err=%v", descriptors, err)
 	}
 }
 
 func TestPostgresStoreListActiveFlowInstanceDescriptorsReadsPipelineTransaction(t *testing.T) {
-	ctx := testAuthorActivityContext()
+	const runID = "11111111-1111-4111-8111-111111111111"
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	ensureFlowInstanceRouteTables(t, ctx, db)
@@ -682,10 +777,28 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsReadsPipelineTransaction(
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
+		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
+	`, runID); err != nil {
+		t.Fatalf("seed run in tx: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 		VALUES ('component-scaffold/uncommitted', 'component-scaffold', 'template', '{}'::jsonb, 'active', NOW())
 	`); err != nil {
 		t.Fatalf("seed flow_instances in tx: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO flow_instance_runtime_readiness (run_id, instance_id, plan, created_at, updated_at)
+		VALUES ($1::uuid, 'component-scaffold/uncommitted', '{"workflow_version":"1.0.0"}'::jsonb, NOW(), NOW())
+	`, runID); err != nil {
+		t.Fatalf("seed readiness in tx: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
+		VALUES ('22222222-2222-4222-8222-222222222222'::uuid, $1::uuid, 'component-scaffold/uncommitted', 'component', 'ready', '{}'::jsonb, NOW(), NOW())
+	`, runID); err != nil {
+		t.Fatalf("seed entity state in tx: %v", err)
 	}
 
 	descriptors, err := pg.ListActiveFlowInstanceDescriptors(runtimepipeline.WithPipelineSQLTxContext(ctx, tx))
