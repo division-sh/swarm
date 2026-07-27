@@ -344,6 +344,7 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		"EngineDispatcher":                       operationRetained,
 		"EngineOutbox":                           operationRetained,
 		"HasFlowInstanceRoute":                   operationPureRead,
+		"ListFlowInstanceRoutes":                 operationPureRead,
 		"LogRuntime":                             operationMutation,
 		"MarkDeliveryInProgress":                 operationMutation,
 		"OutboxSweeperActive":                    operationPureRead,
@@ -385,6 +386,7 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		"SweepPipelineObligations":               operationMutation,
 		"WaitForOutboxSweeper":                   operationMutation,
 		"WaitForQuiescence":                      operationMutation,
+		"VerifyFlowInstanceRoute":                operationPureRead,
 	}
 	found := map[string]bool{}
 	methodPattern := regexp.MustCompile(`func \([A-Za-z_][A-Za-z0-9_]* \*EventBus\) ([A-Z][A-Za-z0-9_]*)\(`)

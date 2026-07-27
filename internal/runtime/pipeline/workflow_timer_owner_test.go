@@ -1347,16 +1347,17 @@ func TestWorkflowTimerGlobalRestoreDefersStandingUntilRunScopedAdoptionOnBothSto
 			} else {
 				packageKey := "root"
 				flowID := "standing-workflow-timer"
+				sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+				if !ok {
+					t.Fatal("standing timer test context missing bundle source fact")
+				}
 				standing, err := store.ReconcileStandingService(ctx, StandingServiceCandidate{
 					ServiceID:  runtimeflowidentity.StandingServiceID(packageKey, flowID),
 					PackageKey: packageKey,
 					FlowID:     flowID,
 					InstanceID: flowID,
 					EntityID:   uuid.NewString(),
-					Source: runtimecorrelation.BundleSourceFact{
-						BundleHash:   "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-						BundleSource: "ephemeral",
-					},
+					Source:     sourceFact,
 				})
 				if err != nil {
 					t.Fatalf("reconcile standing service: %v", err)

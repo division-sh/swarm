@@ -211,18 +211,23 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			}
 
 			nextRunID := uuid.NewString()
+			sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+			if !ok {
+				t.Fatal("readiness test context missing bundle source fact")
+			}
+			bundleHash, bundleSource := sourceFact.StorageValues()
 			if store.isSQLite() {
 				if _, err := store.db.ExecContext(ctx, `UPDATE runs SET status = 'cancelled' WHERE run_id = ?`, runID); err != nil {
 					t.Fatalf("retire first readiness run: %v", err)
 				}
-				if _, err := store.db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, nextRunID, occurredAt.Add(time.Hour)); err != nil {
+				if _, err := store.db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, ?, ?)`, nextRunID, occurredAt.Add(time.Hour), bundleHash, bundleSource); err != nil {
 					t.Fatalf("seed successor readiness run: %v", err)
 				}
 			} else {
 				if _, err := store.db.ExecContext(ctx, `UPDATE runs SET status = 'cancelled' WHERE run_id = $1::uuid`, runID); err != nil {
 					t.Fatalf("retire first readiness run: %v", err)
 				}
-				if _, err := store.db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, nextRunID); err != nil {
+				if _, err := store.db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, $3)`, nextRunID, bundleHash, bundleSource); err != nil {
 					t.Fatalf("seed successor readiness run: %v", err)
 				}
 			}

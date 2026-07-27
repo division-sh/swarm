@@ -706,7 +706,7 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 		WorkOwner:         workOwner,
 	}, pg)
 	t.Cleanup(func() { _ = manager.Shutdown() })
-	_ = newSelectedContractPipeline(sourceBus, pg, loaded, SelectedContractAgentRuntimeOptions{
+	sourcePipeline := newSelectedContractPipeline(sourceBus, pg, loaded, SelectedContractAgentRuntimeOptions{
 		AgentManagerOptions: runtimemanager.AgentManagerOptions{WorkOwner: workOwner},
 	}, workflowStore, manager.ActivateFlowInstance)
 
@@ -804,7 +804,9 @@ func TestForkMintsFreshSyntheticCarryProjection(t *testing.T) {
 		events.EventEnvelope{},
 		time.Now().UTC(),
 	)
-	controlCtx := runtimecorrelation.WithRunID(ctx, controlRunID)
+	// The control run intentionally reuses the static producer declaration in
+	// a new run generation; authorize that exact generation rebind explicitly.
+	controlCtx := runtimepipeline.WithStandingGenerationRebind(runtimecorrelation.WithRunID(ctx, controlRunID))
 	controlPreflight, err := sourceBus.CheckPublishRecipientPlan(controlCtx, controlEvent)
 	if err != nil {
 		t.Fatalf("plan control create event: %v", err)
@@ -896,7 +898,7 @@ func requireFreshSyntheticProjectionControl(t *testing.T, loaded LoadedSelectedC
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
-	scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, loaded.BundleHash)
+	scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, loaded.BundleSourceFact.BundleHash())
 	if err != nil {
 		t.Fatalf("resolve control bundle scope: %v", err)
 	}
@@ -912,10 +914,11 @@ func requireFreshSyntheticProjectionControl(t *testing.T, loaded LoadedSelectedC
 	t.Cleanup(lease.Release)
 
 	runID := uuid.NewString()
+	bundleHash, bundleSource := loaded.BundleSourceFact.StorageValues()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
 		VALUES ($1::uuid, 'running', $2, $3, now())
-	`, runID, loaded.BundleHash, storerunlifecycle.BundleSourceEphemeral); err != nil {
+	`, runID, bundleHash, bundleSource); err != nil {
 		t.Fatalf("seed control run: %v", err)
 	}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)

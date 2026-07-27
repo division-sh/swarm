@@ -144,10 +144,15 @@ func insertTimerObligationProofRun(
 	runID, status string,
 ) {
 	t.Helper()
-	query := `INSERT INTO runs (run_id, status, started_at, ended_at) VALUES (?, ?, ?, ?)`
-	args := []any{runID, status, time.Now().UTC().Add(-time.Hour), time.Now().UTC()}
+	sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	if !ok {
+		t.Fatal("timer obligation proof context lacks bundle source fact")
+	}
+	bundleHash, bundleSource := sourceFact.StorageValues()
+	query := `INSERT INTO runs (run_id, status, started_at, ended_at, bundle_hash, bundle_source) VALUES (?, ?, ?, ?, ?, ?)`
+	args := []any{runID, status, time.Now().UTC().Add(-time.Hour), time.Now().UTC(), bundleHash, bundleSource}
 	if _, ok := selected.(*PostgresStore); ok {
-		query = `INSERT INTO runs (run_id, status, started_at, ended_at) VALUES ($1::uuid, $2, $3, $4)`
+		query = `INSERT INTO runs (run_id, status, started_at, ended_at, bundle_hash, bundle_source) VALUES ($1::uuid, $2, $3, $4, $5, $6)`
 	}
 	if _, err := db.ExecContext(ctx, query, args...); err != nil {
 		t.Fatalf("insert %s timer obligation run: %v", status, err)

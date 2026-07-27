@@ -25,7 +25,7 @@ func selectedScheduleStoreCases() []selectedScheduleStoreCase {
 		{name: "sqlite", open: func(t *testing.T) (runtimepipeline.SchedulePersistence, *sql.DB, context.Context) {
 			store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 			runID := uuid.NewString()
-			ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+			ctx := selectedScheduleTestContext(t, runID)
 			seedSQLiteScheduleRun(t, store, ctx, runID)
 			return store, store.DB, ctx
 		}},
@@ -33,7 +33,7 @@ func selectedScheduleStoreCases() []selectedScheduleStoreCase {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+			ctx := selectedScheduleTestContext(t, runID)
 			if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', now(), 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
 				t.Fatalf("seed PostgreSQL run: %v", err)
 			}
@@ -42,6 +42,18 @@ func selectedScheduleStoreCases() []selectedScheduleStoreCase {
 			return store, db, ctx
 		}},
 	}
+}
+
+func selectedScheduleTestContext(t *testing.T, runID string) context.Context {
+	t.Helper()
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+	if err != nil {
+		t.Fatalf("create selected schedule bundle source fact: %v", err)
+	}
+	return runtimecorrelation.WithBundleSourceFact(
+		runtimecorrelation.WithRunID(context.Background(), runID),
+		fact,
+	)
 }
 
 func TestGenericScheduleAPIsCannotInterpretWorkflowTimerFamilyOnBothStores(t *testing.T) {

@@ -14,7 +14,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/store"
