@@ -1268,30 +1268,41 @@ func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(
 		<-stageRelease
 		return nil
 	}
-	errs := make(chan error, 4)
+	leaderErr := make(chan error, 1)
 	go func() {
-		errs <- am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req)
+		leaderErr <- am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req)
 	}()
 	<-stageEntered
+
+	followerErrs := make(chan error, 3)
+	ensureCtx, cancelEnsure := context.WithCancel(testAuthorActivityContext(context.Background()))
+	pendingCtx, cancelPending := context.WithCancel(testAuthorActivityContext(context.Background()))
+	startupCtx, cancelStartup := context.WithCancel(testAuthorActivityContext(context.Background()))
 	go func() {
-		_, err := am.EnsureFlowInstance(testAuthorActivityContext(context.Background()), req)
-		errs <- err
+		_, err := am.EnsureFlowInstance(ensureCtx, req)
+		followerErrs <- err
 	}()
 	go func() {
-		errs <- am.reconcilePendingDynamicFlowRuntimeReadiness(
-			testAuthorActivityContext(context.Background()),
+		followerErrs <- am.reconcilePendingDynamicFlowRuntimeReadiness(
+			pendingCtx,
 			semanticview.Wrap(bundle),
 		)
 	}()
 	go func() {
-		_, err := am.HydrateForStartup(testAuthorActivityContext(context.Background()))
-		errs <- err
+		_, err := am.HydrateForStartup(startupCtx)
+		followerErrs <- err
 	}()
-	close(stageRelease)
-	for range 4 {
-		if err := <-errs; err != nil {
-			t.Fatalf("coalesced reconciliation: %v", err)
+	cancelEnsure()
+	cancelPending()
+	cancelStartup()
+	for range 3 {
+		if err := <-followerErrs; !errors.Is(err, context.Canceled) {
+			t.Fatalf("coalesced follower: %v, want context cancellation from in-flight attempt", err)
 		}
+	}
+	close(stageRelease)
+	if err := <-leaderErr; err != nil {
+		t.Fatalf("coalesced leader: %v", err)
 	}
 	if stageCalls.Load() != 1 || len(instances.armedEntries) != 1 || len(bus.published) != 1 {
 		t.Fatalf(
