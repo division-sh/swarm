@@ -67,6 +67,7 @@ type WorkflowInstancePersistence interface {
 	ArmInitialEntryTimers(ctx context.Context, instanceID string) error
 	LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID, instanceID string) (DynamicFlowRuntimeReadiness, bool, error)
 	ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]DynamicFlowRuntimeReadiness, error)
+	ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]DynamicFlowRuntimeReadinessKey, error)
 	MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, runID, instanceID string, readyAt time.Time) error
 	MarkDynamicFlowRuntimeCreationEventEmitted(ctx context.Context, runID, instanceID string, emittedAt time.Time) error
 	Upsert(ctx context.Context, instance WorkflowInstance) error

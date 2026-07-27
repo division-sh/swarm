@@ -4535,15 +4535,20 @@ engine:
       - '5. Platform constructs paths: {template_id}/{instance_id}/{local_name}'
       - 6. Platform atomically creates the entity at initial_state, dormant initial timers, and one durable runtime-readiness
         plan containing the exact route, declared-agent revisions, run, and optional deterministic creation event occurrence
-      - 7. When creation participates in a selected mutation, it also stages the exact route in that mutation so later
-        same-mutation publication can consume it; route process publication remains non-runnable topology
-      - 8. One idempotent readiness finalizer reconciles every declared agent and the exact route from that plan
-      - 9. The finalizer verifies the complete process-local and persisted route/agent topology
-      - 10. The finalizer records topology readiness and arms the dormant initial timers
-      - 11. The finalizer publishes the deterministic creation-only event, when declared, and records completion after
-        exact event persistence
-      - 12. Direct activation, selected-mutation post-commit activation, exact replay / EnsureFlowInstance, and startup all
-        consume this same finalizer
+      - 7. When creation participates in a selected mutation, it also persists the exact derived route rows in that mutation.
+        Persisted route truth MUST remain absent from the process route table and recipient planning until readiness
+        reconciliation publishes it.
+      - 8. One idempotent reconciler keyed by exact `{run_id, instance_id}` reloads the current readiness row and lifecycle
+        eligibility; captured callback snapshots are not authority.
+      - 9. The reconciler coalesces concurrent attempts for that key, reconciles and verifies the complete declared-agent
+        topology, then publishes and verifies the already-persisted route in process.
+      - 10. After a fresh active/paused eligibility check, the reconciler records topology readiness and arms the dormant
+        initial timers. The selected-store transition itself rejects terminal/inactive work.
+      - 11. After another fresh eligibility check, the reconciler publishes the deterministic creation-only event, when
+        declared, and records completion after exact event persistence.
+      - 12. Direct activation, selected-mutation post-commit activation, exact replay / EnsureFlowInstance, the joined
+        manager automatic-retry loop, and startup all consume this same keyed reconciler. Post-commit failure signals that
+        retry owner rather than abandoning durable pending work.
       parent_route:
         description: Full structural route from the child instance back to the creating parent.
         metadata_fields:
@@ -4571,10 +4576,23 @@ engine:
           route and declared-agent revisions, reconcile missing topology, and verify both process-local and persisted
           completeness before timers or creation events become runnable. JSON object key order or PostgreSQL JSONB
           normalization cannot manufacture lifecycle revision drift, while a changed fact must change the revision.
-          Recovery MUST enumerate both running and paused run generations because both remain active and recoverable, while
-          excluding every terminal run state. It MUST NOT read `entity_state`, synthesize or choose a run, infer readiness from
-          existing subsets, fall back to current-state loading, or re-render route subscribers from route identity alone.
-          Missing, inactive, terminated, malformed, version-drifted, or identity-mismatched projections fail startup closed.
+          Recovery MUST enumerate both running and paused run generations because both remain active and recoverable. A
+          separate all-status `{run_id, instance_id}` key census suppresses generic route restoration for every
+          readiness-owned path and retires crash-left process topology for terminal/inactive work only when no active
+          successor owns that path. Active successors reconcile before retired predecessors are considered. It MUST NOT read
+          `entity_state`, synthesize or choose a run, infer readiness from existing subsets, fall back to current-state
+          loading, re-render route subscribers from route identity alone, or publish a persisted route before the full
+          declared-agent set is verified. Missing, malformed, version-drifted, identity-mismatched, or changed-between-step
+          projections fail startup closed; terminal/inactive projections install, mark, arm, and emit nothing.
+        process_visibility: Persisting `routing_rules` is not process publication. The process route table and EventBus
+          recipient manifest MUST remain unaware of a dynamic route until the keyed readiness reconciler has verified every
+          declared agent. Any later route verification, timer-arm, creation-publication, or completion failure retires that
+          process route while leaving the durable readiness row pending for the same owner.
+        automatic_recovery: The existing generation-owned manager retry loop enumerates incomplete eligible readiness rows
+          on both explicit post-commit signal and bounded periodic wakeup. It retries from a freshly loaded row, coalesces
+          concurrent activation/Ensure/startup attempts by exact key, and never creates a second callback, scheduler, or
+          readiness ledger. A pending readiness row is startup-recoverable work even when no persisted agent, generic route,
+          selected-route recovery, or event receipt is otherwise present.
       auto_emit: Flow schemas may declare auto_emit_on_create. When the platform creates an instance, it automatically emits
         the declared event after the exact route and complete declared-agent topology are verified and initial timers are
         armed. Event ID, lineage, payload, execution mode, delivery context, and occurrence time belong to the durable
@@ -6539,16 +6557,20 @@ engine:
       runtime-readiness finalizer backed by `flow_instance_runtime_readiness`. Initial materialization atomically records an
       immutable `workflow_instance_initial_materializations` creation projection plus the desired exact route, complete
       declared-agent revision set, creation run, and optional creation-event occurrence. Direct
-      activation, selected-mutation post-commit finalization, exact replay / `EnsureFlowInstance`, and startup consume the same
-      owner. A selected creation mutation stages its exact route before any later same-mutation publication; this is an early
-      projection of the readiness plan, not a second readiness owner. The finalizer reconciles and verifies all declared
-      agents and the route in process and storage, records topology readiness, arms initial timers, then publishes the
-      deterministic creation-only event exactly once. A failed or partial boundary remains durable pending work; startup
-      finalization failure is boot-fatal, never degraded replay, and prevents global timer restoration through unverified
-      topology. Exact replay compares the immutable creation projection and immutable readiness plan; mutable current state,
-      fields, gates, accumulator, transition history, and readiness completion coordinates never participate in creation
-      identity. A missing or conflicting immutable creation projection fails closed. No best-effort completion callback chain,
-      subset inference, second wakeup owner, migration, or compatibility path exists.
+      activation, selected-mutation post-commit finalization, exact replay / `EnsureFlowInstance`, automatic retry, and startup
+      consume one reconciler keyed by `{run_id, instance_id}`. A selected creation mutation persists its exact route rows but
+      does not publish them into the process route table; EventBus recipient planning remains unaware of the route until the
+      reconciler reloads current lifecycle eligibility, verifies all declared agents, publishes and verifies the persisted
+      route, records topology readiness, and arms initial timers. It then reloads eligibility before publishing the
+      deterministic creation-only event exactly once. Completion transitions are selected-store guarded to active,
+      nonterminated instances in running or paused runs. A failed or partial boundary remains durable pending work and signals
+      the joined manager retry loop; startup finalization failure is boot-fatal, never degraded replay, and prevents global
+      timer restoration through unverified topology. Startup's all-status readiness-key census suppresses generic restoration
+      of readiness-owned routes and retires terminal crash-left process topology without overriding an active successor.
+      Exact replay compares the immutable creation projection and immutable readiness plan; mutable current state, fields,
+      gates, accumulator, transition history, and readiness completion coordinates never participate in creation identity. A
+      missing or conflicting immutable creation projection fails closed. No stale callback snapshot, best-effort completion
+      chain, subset inference, second wakeup owner, migration, or compatibility path exists.
     - 3. Leaving an owning stage, matching cancel_on, loop-generation supersession, run quiescence, or preservation cleanup
       may only monotonically cancel or delete the canonical row. Cancellation is in the same mutation as the causal lifecycle
       transition; the in-memory scheduler is updated only after commit. Registration and cancellation do not issue opposing
@@ -13197,12 +13219,15 @@ platform_tables:
     flow_instance_runtime_readiness:
       description: >-
         Durable run-generation-scoped desired runtime topology and creation occurrence for dynamic flow instances. The typed plan is written
-        atomically with initial workflow materialization. Activation replay, EnsureFlowInstance, and startup consume the
-        same idempotent finalizer: reconcile and verify the exact route and complete declared-agent revision set, record
-        topology_ready_at, arm initial workflow timers, then publish the deterministic creation-only event exactly once
-        before recording creation_event_emitted_at. A creation event completion without topology readiness is invalid.
-        This table is platform lifecycle state, never application flow config. Fresh schemas only; no migration,
-        inference, fallback, or compatibility reader is supported.
+        atomically with initial workflow materialization. Activation, post-commit signaling, EnsureFlowInstance/replay,
+        automatic retry, and startup consume one idempotent reconciler keyed by exact `{run_id, instance_id}`. Route rows
+        may be persisted before reconciliation but remain process-invisible. The reconciler reloads current lifecycle
+        eligibility, reconciles and verifies the complete declared-agent revision set, publishes and verifies the persisted
+        route, records topology_ready_at, arms initial workflow timers, then publishes the deterministic creation-only event
+        exactly once before recording creation_event_emitted_at. Both completion writes require an active nonterminated
+        instance in a running or paused run; a creation event completion without topology readiness is invalid. This table is
+        platform lifecycle state, never application flow config. Fresh schemas only; no migration, inference, fallback, or
+        compatibility reader is supported.
       ddl: |
         CREATE TABLE flow_instance_runtime_readiness (
             run_id                      UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
@@ -21894,11 +21919,13 @@ cli_specification:
             owner: internal/runtime
             ordering: >
               When persistent startup recovery is enabled, the runtime MUST hydrate persisted agent state and register
-              every admitted live agent receiver before it recovers any executable workflow-node delivery. The successful
-              agent-hydration boundary authorizes the initial node-delivery recovery pass, which in turn opens standing
-              node recovery and runnable workflow-timer restoration. A recovered node handler or due workflow timer
-              therefore observes the same receiver registry as post-readiness dispatch rather than treating an unhydrated
-              persisted agent as an absent recipient.
+              every admitted live agent receiver, reconcile every active dynamic-flow readiness key, retire terminal
+              crash-left dynamic topology, and restore only routes not owned by readiness before it recovers any executable
+              workflow-node delivery. Dynamic readiness reconciliation is boot-fatal and must finish before the successful
+              agent-hydration boundary authorizes the initial node-delivery recovery pass, which in turn opens standing node
+              recovery and runnable workflow-timer restoration. A recovered node handler or due workflow timer therefore
+              observes the same receiver registry as post-readiness dispatch rather than treating an unhydrated or partially
+              reconciled persisted agent as an absent recipient.
             failure_rule: >
               If persisted agent hydration fails, startup records the canonical degraded manager-recovery decision and
               MUST keep executable node-delivery recovery and workflow-timer activation closed. It MUST NOT claim, retry,

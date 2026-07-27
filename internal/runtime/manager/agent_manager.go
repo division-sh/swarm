@@ -70,6 +70,10 @@ type AgentManager struct {
 
 	deliveryLaneMu sync.Mutex
 	deliveryLanes  map[string]*claimedAttemptLane
+
+	dynamicFlowReadinessMu       sync.Mutex
+	dynamicFlowReadinessAttempts map[dynamicFlowRuntimeReadinessKey]*dynamicFlowRuntimeReadinessAttempt
+	dynamicFlowReadinessSignal   chan struct{}
 }
 
 var (
@@ -157,6 +161,8 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		deadLetterWindows:               make(map[string][]deadLetterEscalationSample),
 		deadLetterLastRaised:            make(map[string]time.Time),
 		deliveryLanes:                   make(map[string]*claimedAttemptLane),
+		dynamicFlowReadinessAttempts:    make(map[dynamicFlowRuntimeReadinessKey]*dynamicFlowRuntimeReadinessAttempt),
+		dynamicFlowReadinessSignal:      make(chan struct{}, 1),
 	}
 }
 

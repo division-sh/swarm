@@ -938,14 +938,14 @@ func (am *AgentManager) HydrateForStartup(ctx context.Context) (StartupReplaySum
 			return summary, fmt.Errorf("hydrate agent %s: %w", rec.Config.ID, err)
 		}
 	}
+	if err := am.reconcileDynamicFlowRuntimeReadinessForStartup(ctx); err != nil {
+		return summary, &dynamicFlowRuntimeReadinessFinalizationError{cause: err}
+	}
 	if err := am.restoreFlowInstanceRoutes(ctx); err != nil {
 		return summary, err
 	}
 	if err := am.restoreSelectedContractRouteRecoveries(ctx); err != nil {
 		return summary, err
-	}
-	if err := am.finalizeDynamicFlowRuntimeReadinessForStartup(ctx); err != nil {
-		return summary, &dynamicFlowRuntimeReadinessFinalizationError{cause: err}
 	}
 	return summary, nil
 }
@@ -973,6 +973,7 @@ type RecoverableStateSnapshot struct {
 	PersistedAgentCount                         int
 	PersistedFlowInstanceRouteCount             int
 	PersistedSelectedContractRouteRecoveryCount int
+	PendingDynamicFlowRuntimeReadinessCount     int
 	ReplayEligibleEventPresent                  bool
 }
 
@@ -980,6 +981,7 @@ func (s RecoverableStateSnapshot) HasRecoverableWork() bool {
 	return s.PersistedAgentCount > 0 ||
 		s.PersistedFlowInstanceRouteCount > 0 ||
 		s.PersistedSelectedContractRouteRecoveryCount > 0 ||
+		s.PendingDynamicFlowRuntimeReadinessCount > 0 ||
 		s.ReplayEligibleEventPresent
 }
 
@@ -994,6 +996,9 @@ func (s RecoverableStateSnapshot) Classes() []string {
 	if s.PersistedSelectedContractRouteRecoveryCount > 0 {
 		classes = append(classes, "selected-contract route recoveries")
 	}
+	if s.PendingDynamicFlowRuntimeReadinessCount > 0 {
+		classes = append(classes, "pending dynamic flow runtime readiness")
+	}
 	if s.ReplayEligibleEventPresent {
 		classes = append(classes, "events missing pipeline receipts")
 	}
@@ -1006,6 +1011,7 @@ func (s RecoverableStateSnapshot) Detail() map[string]any {
 		"persisted_agent_count":                            s.PersistedAgentCount,
 		"persisted_flow_instance_route_count":              s.PersistedFlowInstanceRouteCount,
 		"persisted_selected_contract_route_recovery_count": s.PersistedSelectedContractRouteRecoveryCount,
+		"pending_dynamic_flow_runtime_readiness_count":     s.PendingDynamicFlowRuntimeReadinessCount,
 		"replay_eligible_event_present":                    s.ReplayEligibleEventPresent,
 	}
 }
@@ -1014,6 +1020,17 @@ func (am *AgentManager) RecoverableStateSnapshot(ctx context.Context) (Recoverab
 	snapshot := RecoverableStateSnapshot{}
 	if am == nil {
 		return snapshot, nil
+	}
+	if am.workflowInstances != nil {
+		items, err := am.workflowInstances.ListDynamicFlowRuntimeReadiness(ctx)
+		if err != nil {
+			return RecoverableStateSnapshot{}, fmt.Errorf("list dynamic flow runtime readiness: %w", err)
+		}
+		for _, item := range items {
+			if item.Pending() {
+				snapshot.PendingDynamicFlowRuntimeReadinessCount++
+			}
+		}
 	}
 	if am.store != nil {
 		agents, err := am.store.LoadAgents(ctx)
@@ -1067,12 +1084,25 @@ func (am *AgentManager) restoreFlowInstanceRoutes(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list persisted flow instance routes: %w", err)
 	}
+	readinessPaths := map[string]struct{}{}
+	if am.workflowInstances != nil {
+		keys, err := am.workflowInstances.ListDynamicFlowRuntimeReadinessKeys(ctx)
+		if err != nil {
+			return fmt.Errorf("list dynamic flow runtime readiness route owners: %w", err)
+		}
+		for _, key := range keys {
+			readinessPaths[strings.Trim(strings.TrimSpace(key.InstancePath), "/")] = struct{}{}
+		}
+	}
 	for _, route := range routes {
+		if _, owned := readinessPaths[strings.Trim(strings.TrimSpace(route.InstancePath), "/")]; owned {
+			continue
+		}
 		req, err := am.restoredFlowInstanceRouteMaterializationRequest(ctx, route)
 		if err != nil {
 			return err
 		}
-		if err := restorer.RestorePersistedFlowInstanceRoute(req); err != nil {
+		if err := restorer.PublishPersistedFlowInstanceRoute(req); err != nil {
 			return fmt.Errorf("restore flow instance route %s/%s: %w", route.ScopeKey, route.InstanceID, err)
 		}
 	}
@@ -1102,7 +1132,7 @@ func (am *AgentManager) restoredFlowInstanceRouteMaterializationRequest(ctx cont
 }
 
 func (am *AgentManager) retryLoop(ctx context.Context) {
-	if am.store == nil {
+	if am.store == nil && am.workflowInstances == nil {
 		return
 	}
 	interval := am.retrySweepInterval
@@ -1115,18 +1145,33 @@ func (am *AgentManager) retryLoop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-am.dynamicFlowReadinessSignal:
+			am.runAutomaticRecoveryPass(ctx)
 		case <-ticker.C:
-			if err := am.replayPendingEvents(ctx); err != nil {
-				if am.bus != nil {
-					am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
-						Level:     "error",
-						Component: "agent-manager",
-						Action:    "retry_replay_failed",
-						Failure:   failureEnvelope(err, "agent-manager", "retry_replay"),
-					})
-				}
-			}
+			am.runAutomaticRecoveryPass(ctx)
 		}
+	}
+}
+
+func (am *AgentManager) runAutomaticRecoveryPass(ctx context.Context) {
+	if err := am.reconcilePendingDynamicFlowRuntimeReadiness(ctx, am.semanticSource); err != nil && am.bus != nil {
+		_ = am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+			Level:     "error",
+			Component: "agent-manager",
+			Action:    "dynamic_flow_runtime_readiness_retry_failed",
+			Failure:   failureEnvelope(err, "agent-manager", "dynamic_flow_runtime_readiness_retry"),
+		})
+	}
+	if am.store == nil {
+		return
+	}
+	if err := am.replayPendingEvents(ctx); err != nil && am.bus != nil {
+		_ = am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+			Level:     "error",
+			Component: "agent-manager",
+			Action:    "retry_replay_failed",
+			Failure:   failureEnvelope(err, "agent-manager", "retry_replay"),
+		})
 	}
 }
 

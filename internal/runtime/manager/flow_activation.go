@@ -29,6 +29,7 @@ type flowInstancePersistence interface {
 	ArmInitialEntryTimers(ctx context.Context, instanceID string) error
 	LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID, instanceID string) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
 	ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error)
+	ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadinessKey, error)
 	MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, runID, instanceID string, readyAt time.Time) error
 	MarkDynamicFlowRuntimeCreationEventEmitted(ctx context.Context, runID, instanceID string, emittedAt time.Time) error
 	MarkTerminated(ctx context.Context, storageRef string, terminatedAt time.Time) error
@@ -37,7 +38,7 @@ type flowInstancePersistence interface {
 }
 
 type flowInstanceRouteContextInstaller interface {
-	AddFlowInstanceRouteContext(context.Context, runtimebus.FlowInstanceRouteMaterializationRequest) error
+	StageFlowInstanceRouteContext(context.Context, runtimebus.FlowInstanceRouteMaterializationRequest) error
 }
 
 type flowInstanceRouteContextVerifier interface {
@@ -46,7 +47,11 @@ type flowInstanceRouteContextVerifier interface {
 }
 
 type persistedFlowInstanceRouteRestorer interface {
-	RestorePersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest) error
+	PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest) error
+}
+
+type publishedFlowInstanceRouteRetirer interface {
+	RetirePublishedFlowInstanceRoute(runtimeflowidentity.Route) error
 }
 
 type flowInstanceRouteContextRemover interface {
@@ -185,21 +190,16 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 			return fmt.Errorf("stage dynamic flow route %s: %w", flowPath, err)
 		}
 	}
-	readiness, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, autoEmitRunID, flowPath)
-	if err != nil {
-		return fmt.Errorf("load dynamic flow runtime readiness %s: %w", flowPath, err)
-	}
-	if !found {
-		return fmt.Errorf("dynamic flow runtime readiness not found for %s", flowPath)
-	}
 	finalizeAfterCommit := runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
 		postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(actionCtx))
-		if err := am.finalizeDynamicFlowRuntimeReadiness(postCommitCtx, readiness, req.ContractBundle); err != nil {
+		if err := am.reconcileDynamicFlowRuntimeReadiness(postCommitCtx, autoEmitRunID, flowPath, req.ContractBundle); err != nil {
 			am.logFlowInstanceActivationSideEffectFailure(req, "runtime_readiness_failed", "finalize_runtime_readiness", err)
+			am.signalDynamicFlowRuntimeReadiness()
 		}
 	})
 	if !finalizeAfterCommit {
-		if err := am.finalizeDynamicFlowRuntimeReadiness(ctx, readiness, req.ContractBundle); err != nil {
+		if err := am.reconcileDynamicFlowRuntimeReadiness(ctx, autoEmitRunID, flowPath, req.ContractBundle); err != nil {
+			am.signalDynamicFlowRuntimeReadiness()
 			return err
 		}
 	}
@@ -229,28 +229,23 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 	if err != nil {
 		return false, err
 	}
-	readiness, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, runID, instance.InstancePath)
-	if err != nil {
-		return false, err
-	}
-	if !found {
-		return false, fmt.Errorf("dynamic flow runtime readiness not found for %s", instance.InstancePath)
-	}
 	if _, transactional := runtimepipeline.PipelineSQLTxFromContext(ctx); transactional {
 		if err := am.installFlowInstanceRoute(ctx, req); err != nil {
 			return false, fmt.Errorf("stage dynamic flow route %s: %w", instance.InstancePath, err)
 		}
 		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
 			postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(actionCtx))
-			if err := am.finalizeDynamicFlowRuntimeReadiness(postCommitCtx, readiness, req.ContractBundle); err != nil {
+			if err := am.reconcileDynamicFlowRuntimeReadiness(postCommitCtx, runID, instance.InstancePath, req.ContractBundle); err != nil {
 				am.logFlowInstanceActivationSideEffectFailure(req, "runtime_readiness_failed", "finalize_runtime_readiness", err)
+				am.signalDynamicFlowRuntimeReadiness()
 			}
 		}) {
 			return false, fmt.Errorf("dynamic flow runtime readiness %s requires post-commit finalization owner", instance.InstancePath)
 		}
 		return false, nil
 	}
-	if err := am.finalizeDynamicFlowRuntimeReadiness(ctx, readiness, req.ContractBundle); err != nil {
+	if err := am.reconcileDynamicFlowRuntimeReadiness(ctx, runID, instance.InstancePath, req.ContractBundle); err != nil {
+		am.signalDynamicFlowRuntimeReadiness()
 		return false, err
 	}
 	return false, nil
@@ -314,7 +309,7 @@ func (am *AgentManager) installFlowInstanceRoute(ctx context.Context, req runtim
 	vars := flowActivationVars(req)
 	request := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: instance.Route(), ActivationVariables: vars}
 	if installer, ok := am.bus.(flowInstanceRouteContextInstaller); ok && installer != nil {
-		return installer.AddFlowInstanceRouteContext(ctx, request)
+		return installer.StageFlowInstanceRouteContext(ctx, request)
 	}
 	return fmt.Errorf("event bus does not support context-aware derived flow-instance routing for %s", instance.InstancePath)
 }

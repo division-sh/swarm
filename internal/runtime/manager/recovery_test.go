@@ -134,7 +134,7 @@ func (b *recoveryTestBus) ListFlowInstanceRoutes(context.Context) ([]runtimeflow
 func (b *recoveryTestBus) ListSelectedContractRouteRecoveryRecords(context.Context) ([]SelectedContractRouteRecoveryRecord, error) {
 	return append([]SelectedContractRouteRecoveryRecord(nil), b.selectedRouteRecoveries...), nil
 }
-func (b *recoveryTestBus) RestorePersistedFlowInstanceRoute(req runtimebus.FlowInstanceRouteMaterializationRequest) error {
+func (b *recoveryTestBus) PublishPersistedFlowInstanceRoute(req runtimebus.FlowInstanceRouteMaterializationRequest) error {
 	req = req.Normalized()
 	identity := req.Identity
 	b.restored = append(b.restored, identity.InstancePath)

@@ -50,8 +50,30 @@ type DynamicFlowRuntimeReadinessPlan struct {
 type DynamicFlowRuntimeReadiness struct {
 	InstancePath           string
 	Plan                   DynamicFlowRuntimeReadinessPlan
+	RunStatus              string
+	InstanceStatus         string
+	InstanceTerminatedAt   time.Time
 	TopologyReadyAt        time.Time
 	CreationEventEmittedAt time.Time
+}
+
+type DynamicFlowRuntimeReadinessKey struct {
+	RunID        string
+	InstancePath string
+}
+
+func (r DynamicFlowRuntimeReadiness) Eligible() bool {
+	runStatus := strings.ToLower(strings.TrimSpace(r.RunStatus))
+	return (runStatus == "running" || runStatus == "paused") &&
+		strings.EqualFold(strings.TrimSpace(r.InstanceStatus), "active") &&
+		r.InstanceTerminatedAt.IsZero()
+}
+
+func (r DynamicFlowRuntimeReadiness) Pending() bool {
+	if !r.Eligible() || r.TopologyReadyAt.IsZero() {
+		return r.Eligible()
+	}
+	return r.Plan.CreationEvent != nil && r.CreationEventEmittedAt.IsZero()
 }
 
 type dynamicFlowRuntimeReadinessTime struct {
@@ -284,24 +306,37 @@ func (s *WorkflowInstanceStore) LoadDynamicFlowRuntimeReadiness(
 		return DynamicFlowRuntimeReadiness{}, false, fmt.Errorf("dynamic flow runtime readiness requires instance path")
 	}
 	query := `
-		SELECT plan, topology_ready_at, creation_event_emitted_at
-		FROM flow_instance_runtime_readiness
-		WHERE run_id = $1::uuid AND instance_id = $2
+		SELECT readiness.plan, readiness.topology_ready_at, readiness.creation_event_emitted_at,
+		       run.status, instance.status, instance.terminated_at
+		FROM flow_instance_runtime_readiness AS readiness
+		JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
+		JOIN runs AS run ON run.run_id = readiness.run_id
+		WHERE readiness.run_id = $1::uuid AND readiness.instance_id = $2
 	`
 	if s.isSQLite() {
 		query = `
-			SELECT plan, topology_ready_at, creation_event_emitted_at
-			FROM flow_instance_runtime_readiness
-			WHERE run_id = ? AND instance_id = ?
+			SELECT readiness.plan, readiness.topology_ready_at, readiness.creation_event_emitted_at,
+			       run.status, instance.status, instance.terminated_at
+			FROM flow_instance_runtime_readiness AS readiness
+			JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
+			JOIN runs AS run ON run.run_id = readiness.run_id
+			WHERE readiness.run_id = ? AND readiness.instance_id = ?
 		`
 	}
 	var raw []byte
-	var topologyReadyAt, creationEventEmittedAt dynamicFlowRuntimeReadinessTime
+	var runStatus, instanceStatus string
+	var topologyReadyAt, creationEventEmittedAt, instanceTerminatedAt dynamicFlowRuntimeReadinessTime
 	var err error
 	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
-		err = tx.QueryRowContext(ctx, query, runID, instancePath).Scan(&raw, &topologyReadyAt, &creationEventEmittedAt)
+		err = tx.QueryRowContext(ctx, query, runID, instancePath).Scan(
+			&raw, &topologyReadyAt, &creationEventEmittedAt,
+			&runStatus, &instanceStatus, &instanceTerminatedAt,
+		)
 	} else {
-		err = dbQueryRowContext(ctx, s.db, query, runID, instancePath).Scan(&raw, &topologyReadyAt, &creationEventEmittedAt)
+		err = dbQueryRowContext(ctx, s.db, query, runID, instancePath).Scan(
+			&raw, &topologyReadyAt, &creationEventEmittedAt,
+			&runStatus, &instanceStatus, &instanceTerminatedAt,
+		)
 	}
 	if err == sql.ErrNoRows {
 		return DynamicFlowRuntimeReadiness{}, false, nil
@@ -309,7 +344,10 @@ func (s *WorkflowInstanceStore) LoadDynamicFlowRuntimeReadiness(
 	if err != nil {
 		return DynamicFlowRuntimeReadiness{}, false, fmt.Errorf("load dynamic flow runtime readiness %s: %w", instancePath, err)
 	}
-	item, err := decodeDynamicFlowRuntimeReadiness(runID, instancePath, raw, topologyReadyAt, creationEventEmittedAt)
+	item, err := decodeDynamicFlowRuntimeReadiness(
+		runID, instancePath, raw, runStatus, instanceStatus, instanceTerminatedAt,
+		topologyReadyAt, creationEventEmittedAt,
+	)
 	return item, err == nil, err
 }
 
@@ -318,7 +356,9 @@ func (s *WorkflowInstanceStore) ListDynamicFlowRuntimeReadiness(ctx context.Cont
 		return nil, fmt.Errorf("workflow instance store is required")
 	}
 	query := `
-		SELECT readiness.run_id::text, readiness.instance_id, readiness.plan, readiness.topology_ready_at, readiness.creation_event_emitted_at
+		SELECT readiness.run_id::text, readiness.instance_id, readiness.plan,
+		       readiness.topology_ready_at, readiness.creation_event_emitted_at,
+		       run.status, instance.status, instance.terminated_at
 		FROM flow_instance_runtime_readiness AS readiness
 		JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
 		JOIN runs AS run ON run.run_id = readiness.run_id
@@ -328,7 +368,9 @@ func (s *WorkflowInstanceStore) ListDynamicFlowRuntimeReadiness(ctx context.Cont
 	`
 	if s.isSQLite() {
 		query = `
-			SELECT readiness.run_id, readiness.instance_id, readiness.plan, readiness.topology_ready_at, readiness.creation_event_emitted_at
+			SELECT readiness.run_id, readiness.instance_id, readiness.plan,
+			       readiness.topology_ready_at, readiness.creation_event_emitted_at,
+			       run.status, instance.status, instance.terminated_at
 			FROM flow_instance_runtime_readiness AS readiness
 			JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
 			JOIN runs AS run ON run.run_id = readiness.run_id
@@ -346,11 +388,19 @@ func (s *WorkflowInstanceStore) ListDynamicFlowRuntimeReadiness(ctx context.Cont
 	for rows.Next() {
 		var runID, instancePath string
 		var raw []byte
-		var topologyReadyAt, creationEventEmittedAt dynamicFlowRuntimeReadinessTime
-		if err := rows.Scan(&runID, &instancePath, &raw, &topologyReadyAt, &creationEventEmittedAt); err != nil {
+		var runStatus, instanceStatus string
+		var topologyReadyAt, creationEventEmittedAt, instanceTerminatedAt dynamicFlowRuntimeReadinessTime
+		if err := rows.Scan(
+			&runID, &instancePath, &raw,
+			&topologyReadyAt, &creationEventEmittedAt,
+			&runStatus, &instanceStatus, &instanceTerminatedAt,
+		); err != nil {
 			return nil, err
 		}
-		item, err := decodeDynamicFlowRuntimeReadiness(runID, instancePath, raw, topologyReadyAt, creationEventEmittedAt)
+		item, err := decodeDynamicFlowRuntimeReadiness(
+			runID, instancePath, raw, runStatus, instanceStatus, instanceTerminatedAt,
+			topologyReadyAt, creationEventEmittedAt,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -359,10 +409,47 @@ func (s *WorkflowInstanceStore) ListDynamicFlowRuntimeReadiness(ctx context.Cont
 	return out, rows.Err()
 }
 
+func (s *WorkflowInstanceStore) ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]DynamicFlowRuntimeReadinessKey, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("workflow instance store is required")
+	}
+	query := `
+		SELECT run_id::text, instance_id
+		FROM flow_instance_runtime_readiness
+		ORDER BY run_id, instance_id
+	`
+	if s.isSQLite() {
+		query = `
+			SELECT run_id, instance_id
+			FROM flow_instance_runtime_readiness
+			ORDER BY run_id, instance_id
+		`
+	}
+	rows, err := dbQueryContext(ctx, s.db, query)
+	if err != nil {
+		return nil, fmt.Errorf("list dynamic flow runtime readiness keys: %w", err)
+	}
+	defer rows.Close()
+	var keys []DynamicFlowRuntimeReadinessKey
+	for rows.Next() {
+		var key DynamicFlowRuntimeReadinessKey
+		if err := rows.Scan(&key.RunID, &key.InstancePath); err != nil {
+			return nil, err
+		}
+		key.RunID = strings.TrimSpace(key.RunID)
+		key.InstancePath = strings.Trim(strings.TrimSpace(key.InstancePath), "/")
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
+}
+
 func decodeDynamicFlowRuntimeReadiness(
 	runID string,
 	instancePath string,
 	raw []byte,
+	runStatus string,
+	instanceStatus string,
+	instanceTerminatedAt dynamicFlowRuntimeReadinessTime,
 	topologyReadyAt dynamicFlowRuntimeReadinessTime,
 	creationEventEmittedAt dynamicFlowRuntimeReadinessTime,
 ) (DynamicFlowRuntimeReadiness, error) {
@@ -387,7 +474,15 @@ func decodeDynamicFlowRuntimeReadiness(
 	if normalized.Identity.InstancePath != strings.Trim(strings.TrimSpace(instancePath), "/") {
 		return DynamicFlowRuntimeReadiness{}, fmt.Errorf("dynamic flow runtime readiness identity mismatch for %s", instancePath)
 	}
-	item := DynamicFlowRuntimeReadiness{InstancePath: instancePath, Plan: normalized}
+	item := DynamicFlowRuntimeReadiness{
+		InstancePath:   instancePath,
+		Plan:           normalized,
+		RunStatus:      strings.TrimSpace(runStatus),
+		InstanceStatus: strings.TrimSpace(instanceStatus),
+	}
+	if instanceTerminatedAt.Valid {
+		item.InstanceTerminatedAt = instanceTerminatedAt.Time.UTC()
+	}
 	if topologyReadyAt.Valid {
 		item.TopologyReadyAt = topologyReadyAt.Time.UTC()
 	}
@@ -432,12 +527,32 @@ func (s *WorkflowInstanceStore) markDynamicFlowRuntimeReadiness(ctx context.Cont
 			if column == "creation_event_emitted_at" {
 				query += ` AND topology_ready_at IS NOT NULL`
 			}
+			query += `
+				AND EXISTS (
+					SELECT 1
+					FROM flow_instances AS instance
+					JOIN runs AS run ON run.run_id = flow_instance_runtime_readiness.run_id
+					WHERE instance.instance_id = flow_instance_runtime_readiness.instance_id
+					  AND LOWER(TRIM(instance.status)) = 'active'
+					  AND instance.terminated_at IS NULL
+					  AND LOWER(TRIM(run.status)) IN ('running', 'paused')
+				)`
 			result, err = tx.ExecContext(txctx, query, observedAt, observedAt, runID, instancePath)
 		} else {
 			query := `UPDATE flow_instance_runtime_readiness SET ` + column + ` = COALESCE(` + column + `, $1), updated_at = $1 WHERE run_id = $2::uuid AND instance_id = $3`
 			if column == "creation_event_emitted_at" {
 				query += ` AND topology_ready_at IS NOT NULL`
 			}
+			query += `
+				AND EXISTS (
+					SELECT 1
+					FROM flow_instances AS instance
+					JOIN runs AS run ON run.run_id = flow_instance_runtime_readiness.run_id
+					WHERE instance.instance_id = flow_instance_runtime_readiness.instance_id
+					  AND LOWER(BTRIM(instance.status)) = 'active'
+					  AND instance.terminated_at IS NULL
+					  AND LOWER(BTRIM(run.status)) IN ('running', 'paused')
+				)`
 			result, err = tx.ExecContext(txctx, query, observedAt, runID, instancePath)
 		}
 		if err != nil {

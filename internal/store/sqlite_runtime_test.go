@@ -533,10 +533,11 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 }
 
 type sqliteFlowActivationBus struct {
-	mu            sync.Mutex
-	runtimeLog    []runtimepipeline.RuntimeLogEntry
-	routeRequests []runtimebus.FlowInstanceRouteMaterializationRequest
-	published     []events.Event
+	mu             sync.Mutex
+	runtimeLog     []runtimepipeline.RuntimeLogEntry
+	stagedRequests []runtimebus.FlowInstanceRouteMaterializationRequest
+	routeRequests  []runtimebus.FlowInstanceRouteMaterializationRequest
+	published      []events.Event
 }
 
 func (*sqliteFlowActivationBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
@@ -633,11 +634,44 @@ func (b *sqliteFlowActivationBus) AddFlowInstanceRoute(req runtimebus.FlowInstan
 	return b.AddFlowInstanceRouteContext(context.Background(), req)
 }
 
-func (b *sqliteFlowActivationBus) AddFlowInstanceRouteContext(_ context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest) error {
+func (b *sqliteFlowActivationBus) StageFlowInstanceRouteContext(_ context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.routeRequests = append(b.routeRequests, req.Normalized())
+	b.stagedRequests = append(b.stagedRequests, req.Normalized())
 	return nil
+}
+
+func (b *sqliteFlowActivationBus) PublishPersistedFlowInstanceRoute(req runtimebus.FlowInstanceRouteMaterializationRequest) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	req = req.Normalized()
+	for _, existing := range b.routeRequests {
+		if existing.Identity == req.Identity {
+			return nil
+		}
+	}
+	b.routeRequests = append(b.routeRequests, req)
+	return nil
+}
+
+func (b *sqliteFlowActivationBus) RetirePublishedFlowInstanceRoute(identity runtimeflowidentity.Route) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	filtered := b.routeRequests[:0]
+	for _, req := range b.routeRequests {
+		if req.Identity != identity {
+			filtered = append(filtered, req)
+		}
+	}
+	b.routeRequests = filtered
+	return nil
+}
+
+func (b *sqliteFlowActivationBus) AddFlowInstanceRouteContext(_ context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest) error {
+	if err := b.StageFlowInstanceRouteContext(context.Background(), req); err != nil {
+		return err
+	}
+	return b.PublishPersistedFlowInstanceRoute(req)
 }
 
 func (b *sqliteFlowActivationBus) HasFlowInstanceRoute(identity runtimeflowidentity.Route) bool {
@@ -679,8 +713,8 @@ func (b *sqliteFlowActivationBus) routePaths() []string {
 func (b *sqliteFlowActivationBus) materializationRequests() []runtimebus.FlowInstanceRouteMaterializationRequest {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	out := make([]runtimebus.FlowInstanceRouteMaterializationRequest, len(b.routeRequests))
-	copy(out, b.routeRequests)
+	out := make([]runtimebus.FlowInstanceRouteMaterializationRequest, len(b.stagedRequests))
+	copy(out, b.stagedRequests)
 	return out
 }
 
