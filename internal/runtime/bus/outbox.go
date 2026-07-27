@@ -509,15 +509,21 @@ func (eb *EventBus) removePendingOutboxOperation(eventID string, sequence uint64
 	}
 }
 
-func (eb *EventBus) clearPendingOutboxOperation(eventID string) {
+func (eb *EventBus) clearPendingOutboxOperation(ctx context.Context, eventID string) error {
 	if eb == nil {
-		return
+		return nil
+	}
+	var err error
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
 	}
 	eb.mu.Lock()
 	operations := eb.pendingOutboxByID[strings.TrimSpace(eventID)]
 	delete(eb.pendingOutboxByID, strings.TrimSpace(eventID))
 	eb.mu.Unlock()
 	for _, operation := range operations {
-		operation.publicationClaim.releaseAndLog(context.Background())
+		err = errors.Join(err, operation.publicationClaim.Release(ctx))
 	}
+	return err
 }

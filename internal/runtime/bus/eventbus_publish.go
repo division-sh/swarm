@@ -395,21 +395,32 @@ func (p PreparedPublish) WithCommitOutcome(outcome EventAppendOutcome) (Prepared
 // AbandonPreparedPublish releases preparation-only process state when the
 // named durable operation does not commit or dispatch the prepared event.
 func (eb *EventBus) AbandonPreparedPublish(ctx context.Context, prepared PreparedPublish) error {
-	if err := eb.admitPreparedPublish(ctx, prepared); err != nil {
+	dispatchCtx, err := eb.admitPreparedPublish(ctx, prepared)
+	if err != nil {
 		return err
 	}
-	return prepared.publicationClaim.Release(ctx)
+	return prepared.publicationClaim.Release(dispatchCtx)
 }
 
-func (eb *EventBus) admitPreparedPublish(ctx context.Context, prepared PreparedPublish) error {
+func (eb *EventBus) admitPreparedPublish(ctx context.Context, prepared PreparedPublish) (context.Context, error) {
 	if prepared.publicationClaim == nil {
-		return errors.New("prepared publication claim is required")
+		return nil, errors.New("prepared publication claim is required")
 	}
 	if eb == nil || prepared.publicationClaim.bus != eb {
-		return errors.New("prepared publication belongs to a different event bus")
+		return nil, errors.New("prepared publication belongs to a different event bus")
 	}
-	_, err := eb.admitBundleSourceFact(preparedPublishDispatchContext(ctx, prepared))
-	return err
+	if _, err := eb.admitBundleSourceFact(ctx); err != nil {
+		return nil, fmt.Errorf("admit prepared publication caller: %w", err)
+	}
+	if prepared.dispatchContext == nil {
+		return nil, errors.New("prepared publication dispatch context is required")
+	}
+	dispatchCtx := preparedPublishDispatchContext(prepared)
+	dispatchCtx, err := eb.admitBundleSourceFact(dispatchCtx)
+	if err != nil {
+		return nil, fmt.Errorf("admit prepared publication owner context: %w", err)
+	}
+	return dispatchCtx, nil
 }
 
 // PrepareSelectedForkPublish performs canonical admission and route planning
@@ -664,7 +675,7 @@ func (eb *EventBus) PublishDirectInMutation(ctx context.Context, evt events.Even
 }
 
 func (eb *EventBus) queuePreparedPublishInMutation(ctx context.Context, prepared PreparedPublish) error {
-	if err := eb.admitPreparedPublish(ctx, prepared); err != nil {
+	if _, err := eb.admitPreparedPublish(ctx, prepared); err != nil {
 		return err
 	}
 	_, ok := CommitPublishTransactionFromContext(ctx)
@@ -693,42 +704,47 @@ func (eb *EventBus) queuePreparedPublishForActiveMutation(ctx context.Context, p
 // DispatchPreparedPublish consumes only the plan finalized by
 // PreparePublishInMutation. It never invokes route planning again.
 func (eb *EventBus) DispatchPreparedPublish(ctx context.Context, prepared PreparedPublish) (err error) {
-	if err := eb.admitPreparedPublish(ctx, prepared); err != nil {
+	dispatchCtx, err := eb.admitPreparedPublish(ctx, prepared)
+	if err != nil {
 		return err
 	}
-	lease, err := eb.beginRuntimeWork(ctx)
+	lease, err := eb.beginRuntimeWork(dispatchCtx)
 	if err != nil {
-		return errors.Join(err, prepared.publicationClaim.Release(preparedPublishDispatchContext(ctx, prepared)))
+		return errors.Join(err, prepared.publicationClaim.Release(dispatchCtx))
 	}
 	if lease != nil {
 		defer func() { _ = lease.Done() }()
-		ctx = bindWorkContext(ctx, lease, eb.workOwner)
+		dispatchCtx = bindWorkContext(dispatchCtx, lease, eb.workOwner)
 	}
-	return eb.dispatchPreparedPublish(ctx, prepared)
+	return eb.dispatchPreparedPublish(dispatchCtx, prepared)
 }
 
 // DispatchPreparedPublishAndWait dispatches one committed publish and joins
 // the complete local-delivery tree produced by its handlers. It is intended
 // for bounded runtimes that must finish their accepted story before retiring.
 func (eb *EventBus) DispatchPreparedPublishAndWait(ctx context.Context, prepared PreparedPublish) (err error) {
-	if err := eb.admitPreparedPublish(ctx, prepared); err != nil {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	dispatchCtx, err := eb.admitPreparedPublish(ctx, prepared)
+	if err != nil {
 		return err
 	}
-	lease, err := eb.beginRuntimeWork(ctx)
+	lease, err := eb.beginRuntimeWork(dispatchCtx)
 	if err != nil {
-		return errors.Join(err, prepared.publicationClaim.Release(preparedPublishDispatchContext(ctx, prepared)))
+		return errors.Join(err, prepared.publicationClaim.Release(dispatchCtx))
 	}
 	if lease != nil {
 		defer func() { _ = lease.Done() }()
-		ctx = bindWorkContext(ctx, lease, eb.workOwner)
+		dispatchCtx = bindWorkContext(dispatchCtx, lease, eb.workOwner)
 	}
 	group := newLocalDeliveryCompletionGroup()
 	waitCtx := ctx
-	ctx = withLocalDeliveryCompletionGroup(ctx, group)
+	dispatchCtx = withLocalDeliveryCompletionGroup(dispatchCtx, group)
 	if prepared.dispatchContext != nil {
 		prepared.dispatchContext = withLocalDeliveryCompletionGroup(prepared.dispatchContext, group)
 	}
-	return eb.dispatchPreparedPublishWithCompletion(ctx, prepared, func() error {
+	return eb.dispatchPreparedPublishWithCompletion(dispatchCtx, prepared, func() error {
 		group.releaseDispatch()
 		return group.wait(waitCtx)
 	})
@@ -739,17 +755,17 @@ func (eb *EventBus) dispatchPreparedPublish(ctx context.Context, prepared Prepar
 }
 
 func (eb *EventBus) dispatchPreparedPublishWithCompletion(ctx context.Context, prepared PreparedPublish, completion func() error) (err error) {
-	if err := eb.admitPreparedPublish(ctx, prepared); err != nil {
+	dispatchCtx, err := eb.admitPreparedPublish(ctx, prepared)
+	if err != nil {
 		return err
 	}
-	ctx = preparedPublishDispatchContext(ctx, prepared)
 	defer func() {
-		err = errors.Join(err, prepared.publicationClaim.Release(ctx))
+		err = errors.Join(err, prepared.publicationClaim.Release(dispatchCtx))
 	}()
 	if strings.TrimSpace(prepared.Event.ID()) == "" {
 		return errors.New("prepared event is required")
 	}
-	dispatchErr := eb.dispatchPreparedPublishBody(ctx, prepared)
+	dispatchErr := eb.dispatchPreparedPublishBody(dispatchCtx, prepared)
 	if completion == nil {
 		return dispatchErr
 	}
@@ -774,25 +790,20 @@ func (eb *EventBus) dispatchPreparedPublishBody(ctx context.Context, prepared Pr
 	return eb.completeCommittedPublishDispatch(ctx, prepared.Event, prepared.plan, prepared.publicationClaim)
 }
 
-func preparedPublishDispatchContext(ctx context.Context, prepared PreparedPublish) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if prepared.dispatchContext != nil {
-		return WithoutCommitPublishTransaction(runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(prepared.dispatchContext))))
-	}
-	return ctx
+func preparedPublishDispatchContext(prepared PreparedPublish) context.Context {
+	return WithoutCommitPublishTransaction(runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(prepared.dispatchContext))))
 }
 
 func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared PreparedPublish) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := eb.admitPreparedPublish(ctx, prepared); err != nil {
+	dispatchCtx, err := eb.admitPreparedPublish(ctx, prepared)
+	if err != nil {
 		return err
 	}
 	releaseOnFailure := func(err error) error {
-		return errors.Join(err, prepared.publicationClaim.Release(preparedPublishDispatchContext(ctx, prepared)))
+		return errors.Join(err, prepared.publicationClaim.Release(dispatchCtx))
 	}
 	if eb == nil || eb.workOwner == nil {
 		return releaseOnFailure(errors.New("asynchronous event dispatch requires a runtime work occurrence"))
@@ -800,13 +811,13 @@ func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared P
 	if strings.TrimSpace(prepared.Event.ID()) == "" {
 		return releaseOnFailure(errors.New("prepared event is required"))
 	}
-	owner := eb.workOwnerForContext(ctx)
-	admissionCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx)))
+	owner := eb.workOwnerForContext(dispatchCtx)
+	admissionCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(dispatchCtx)))
 	lease, err := owner.Begin(admissionCtx)
 	if err != nil {
 		return releaseOnFailure(fmt.Errorf("admit asynchronous event dispatch: %w", err))
 	}
-	dispatchCtx := lease.Context()
+	dispatchCtx = lease.Context()
 	go func() {
 		defer func() { _ = lease.Done() }()
 		if err := eb.dispatchPreparedPublish(bindWorkContext(dispatchCtx, lease, owner), prepared); err != nil {
@@ -1054,8 +1065,12 @@ func (eb *EventBus) admitBundleSourceFact(ctx context.Context) (context.Context,
 
 	contextFact, hasContextFact := runtimecorrelation.BundleSourceFactFromContext(ctx)
 	hasOwnedFact := sourceFact.Validate() == nil
-	if !hasOwnedFact && !hasContextFact {
+	if !hasOwnedFact && !eb.ephemeral {
 		return ctx, errors.New("event bus bundle source fact is required")
+	}
+	if !hasOwnedFact && !hasContextFact {
+		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
+		return ctx, nil
 	}
 	if hasOwnedFact && hasContextFact && !sourceFact.Matches(contextFact) {
 		return ctx, errors.New("event bus bundle source fact conflicts with publication context")
@@ -1699,7 +1714,9 @@ func (eb *EventBus) publishClaimedPipeline(ctx context.Context, evt events.Event
 	if err != nil {
 		return runtimepipelineobligation.Continue(), err
 	}
-	eb.clearPendingOutboxOperation(evt.ID())
+	if err := eb.clearPendingOutboxOperation(ctx, evt.ID()); err != nil {
+		return runtimepipelineobligation.Continue(), err
+	}
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return runtimepipelineobligation.Continue(), err

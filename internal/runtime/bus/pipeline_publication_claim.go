@@ -22,6 +22,11 @@ func (c *pipelinePublicationClaim) durable() bool {
 }
 
 func (eb *EventBus) claimPipelinePublication(ctx context.Context, eventID string) (*pipelinePublicationClaim, error) {
+	var err error
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if eb == nil || eb.pipelineObligations == nil {
 		if eb != nil && eb.ephemeral {
 			return &pipelinePublicationClaim{bus: eb, eventID: strings.TrimSpace(eventID)}, nil
@@ -37,18 +42,22 @@ func (eb *EventBus) claimPipelinePublication(ctx context.Context, eventID string
 }
 
 func (c *pipelinePublicationClaim) Release(ctx context.Context) error {
-	if c == nil || c.bus == nil || c.bus.pipelineObligations == nil {
-		if c != nil && c.bus != nil && c.bus.ephemeral {
-			c.released.CompareAndSwap(false, true)
-			return nil
-		}
+	if c == nil || c.bus == nil {
 		panic("pipeline publication claim owner is required")
+	}
+	var err error
+	ctx, err = c.bus.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
 	}
 	if !c.released.CompareAndSwap(false, true) {
 		return nil
 	}
-	if ctx == nil {
-		ctx = context.Background()
+	if c.bus.pipelineObligations == nil {
+		if c.bus.ephemeral {
+			return nil
+		}
+		panic("pipeline publication claim owner is required")
 	}
 	return c.bus.pipelineObligations.Release(context.WithoutCancel(ctx), c.claim)
 }
@@ -60,20 +69,22 @@ func (c *pipelinePublicationClaim) releaseAndLog(ctx context.Context) {
 }
 
 func (c *pipelinePublicationClaim) Settle(ctx context.Context, disposition runtimepipelineobligation.Disposition) error {
-	if c == nil || c.bus == nil || c.bus.pipelineObligations == nil {
-		if c != nil && c.bus != nil && c.bus.ephemeral {
-			if !c.released.CompareAndSwap(false, true) {
-				return runtimepipelineobligation.ErrStaleClaim
-			}
-			return nil
-		}
+	if c == nil || c.bus == nil {
 		return fmt.Errorf("pipeline publication claim owner is required")
+	}
+	var err error
+	ctx, err = c.bus.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
 	}
 	if !c.released.CompareAndSwap(false, true) {
 		return runtimepipelineobligation.ErrStaleClaim
 	}
-	if ctx == nil {
-		ctx = context.Background()
+	if c.bus.pipelineObligations == nil {
+		if c.bus.ephemeral {
+			return nil
+		}
+		return fmt.Errorf("pipeline publication claim owner is required")
 	}
 	if err := c.bus.pipelineObligations.Settle(ctx, c.claim, disposition); err != nil {
 		releaseErr := c.bus.pipelineObligations.Release(context.WithoutCancel(ctx), c.claim)
@@ -86,17 +97,22 @@ func (c *pipelinePublicationClaim) Settle(ctx context.Context, disposition runti
 }
 
 func (c *pipelinePublicationClaim) MarkDecisionProcessed(ctx context.Context) error {
-	if c == nil || c.bus == nil || c.bus.pipelineObligations == nil {
-		if c != nil && c.bus != nil && c.bus.ephemeral {
-			if c.released.Load() {
-				return runtimepipelineobligation.ErrStaleClaim
-			}
-			return nil
-		}
+	if c == nil || c.bus == nil {
 		return fmt.Errorf("pipeline publication claim owner is required")
+	}
+	var err error
+	ctx, err = c.bus.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
 	}
 	if c.released.Load() {
 		return runtimepipelineobligation.ErrStaleClaim
+	}
+	if c.bus.pipelineObligations == nil {
+		if c.bus.ephemeral {
+			return nil
+		}
+		return fmt.Errorf("pipeline publication claim owner is required")
 	}
 	return c.bus.pipelineObligations.MarkDecisionProcessed(ctx, c.claim)
 }

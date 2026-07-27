@@ -84,6 +84,9 @@ func newStoreTestEventBus(t *testing.T, store runtimebus.EventStore, options ...
 	if len(options) > 0 {
 		opts = options[0]
 	}
+	if opts.BundleSourceFact.Validate() != nil {
+		opts.BundleSourceFact = mustStoreTestEphemeralBundleSourceFact(authorActivityTestBundleHash)
+	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = storeTestWorkOwner(t)
 	}

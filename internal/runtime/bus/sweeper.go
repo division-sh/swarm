@@ -261,12 +261,17 @@ func (eb *EventBus) closePipelineScan(ctx context.Context, request runtimepipeli
 }
 
 func (eb *EventBus) closePipelineScanLocked(ctx context.Context, request runtimepipelineobligation.ScanRequest) error {
+	var err error
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
+	}
 	state := eb.pipelineScans[request]
 	if state == nil {
 		return nil
 	}
 	delete(eb.pipelineScans, request)
-	err := eb.pipelineObligations.CloseScan(ctx, state.cursor)
+	err = eb.pipelineObligations.CloseScan(ctx, state.cursor)
 	if errors.Is(err, runtimepipelineobligation.ErrStaleScan) {
 		return nil
 	}

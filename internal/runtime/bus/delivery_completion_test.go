@@ -84,7 +84,7 @@ func TestEventBusBundleSourceAdmissionAllowsContextOwnedSelectedForkBus(t *testi
 	}
 }
 
-func TestEventBusBundleSourceAdmissionRejectsMissingOwnerBeforeCommit(t *testing.T) {
+func TestExplicitEphemeralEventBusAllowsOwnerlessPublish(t *testing.T) {
 	store := &publishAndWaitCommitSpy{}
 	process := worklifetime.NewProcess()
 	runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
@@ -113,11 +113,11 @@ func TestEventBusBundleSourceAdmissionRejectsMissingOwnerBeforeCommit(t *testing
 	}
 
 	err = eb.Publish(context.Background(), completionTreeEvent("11111111-1111-4111-8111-111111111145", "custom.root"))
-	if err == nil || !strings.Contains(err.Error(), "bundle source fact is required") {
-		t.Fatalf("Publish error = %v, want missing bundle source fact", err)
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
 	}
-	if store.commitCalls != 0 {
-		t.Fatalf("commit calls = %d, want 0", store.commitCalls)
+	if store.commitCalls != 1 {
+		t.Fatalf("commit calls = %d, want 1", store.commitCalls)
 	}
 }
 

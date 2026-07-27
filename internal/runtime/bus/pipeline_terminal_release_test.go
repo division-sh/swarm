@@ -115,7 +115,10 @@ func TestPipelinePublicationReleaseIsTerminalAndImmediatelyReclaimable(t *testin
 			owner := newTerminalReleasePipelineOwner()
 			eventID := uuid.NewString()
 			owner.releaseError[eventID] = tc.failure
-			bus := &EventBus{pipelineObligations: owner}
+			bus := &EventBus{
+				pipelineObligations: owner,
+				bundleSourceFact:    sourceMutationFact(t, "9"),
+			}
 			claim, err := bus.claimPipelinePublication(context.Background(), eventID)
 			if err != nil {
 				t.Fatalf("claim publication: %v", err)
@@ -165,7 +168,10 @@ func TestPipelineOneShotTerminalSinksPropagateOrRecordCleanupEvidence(t *testing
 					if err != nil {
 						t.Fatalf("claim selected-fork publication: %v", err)
 					}
-					err = bus.AbandonPreparedPublish(context.Background(), PreparedPublish{publicationClaim: claim})
+					err = bus.AbandonPreparedPublish(context.Background(), PreparedPublish{
+						publicationClaim: claim,
+						dispatchContext:  context.Background(),
+					})
 					if err == nil || !strings.Contains(err.Error(), failureMode+" one-shot cleanup failure") {
 						t.Fatalf("abandon cleanup error = %v, want propagated evidence", err)
 					}
@@ -278,6 +284,7 @@ func TestPreparedDispatchAdmissionFailureTerminallyConsumesPublicationClaim(t *t
 						time.Now().UTC(),
 					),
 					publicationClaim: claim,
+					dispatchContext:  context.Background(),
 				}
 				if lifecycle == "fenced" {
 					if err := runtimeOwner.Fence(); err != nil {
@@ -366,7 +373,10 @@ func TestInvalidPreparedDispatchTerminallyConsumesAttachedPublicationClaim(t *te
 			cleanupFailure := "invalid prepared " + dispatch.name + " cleanup failure"
 			owner.releaseError[eventID] = func(int) error { return errors.New(cleanupFailure) }
 
-			err = dispatch.run(bus, context.Background(), PreparedPublish{publicationClaim: claim})
+			err = dispatch.run(bus, context.Background(), PreparedPublish{
+				publicationClaim: claim,
+				dispatchContext:  context.Background(),
+			})
 			if err == nil ||
 				!strings.Contains(err.Error(), "prepared event is required") ||
 				!strings.Contains(err.Error(), cleanupFailure) {
@@ -480,7 +490,9 @@ func TestRecoveredPublicationRejectsForeignSourceBeforePendingRelease(t *testing
 		t.Fatalf("pending operations = %d, want exact operation retained", pending)
 	}
 
-	bus.clearPendingOutboxOperation(eventID)
+	if err := bus.clearPendingOutboxOperation(context.Background(), eventID); err != nil {
+		t.Fatalf("clear pending outbox operation: %v", err)
+	}
 	if got := owner.releaseCalls[eventID]; got != 1 {
 		t.Fatalf("cleanup release calls = %d, want 1", got)
 	}
