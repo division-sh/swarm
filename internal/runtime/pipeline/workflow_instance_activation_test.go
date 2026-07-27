@@ -256,6 +256,24 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if err != nil || len(items) != 1 || items[0].Plan.RunID != nextRunID {
 				t.Fatalf("active generation readiness: items=%#v err=%v", items, err)
 			}
+			statusQuery := `UPDATE runs SET status = ? WHERE run_id = ?`
+			if !store.isSQLite() {
+				statusQuery = `UPDATE runs SET status = $1 WHERE run_id = $2::uuid`
+			}
+			if _, err := store.db.ExecContext(nextContext, statusQuery, "paused", nextRunID); err != nil {
+				t.Fatalf("pause successor readiness run: %v", err)
+			}
+			items, err = store.ListDynamicFlowRuntimeReadiness(nextContext)
+			if err != nil || len(items) != 1 || items[0].Plan.RunID != nextRunID {
+				t.Fatalf("paused generation readiness: items=%#v err=%v", items, err)
+			}
+			if _, err := store.db.ExecContext(nextContext, statusQuery, "cancelled", nextRunID); err != nil {
+				t.Fatalf("retire successor readiness run: %v", err)
+			}
+			items, err = store.ListDynamicFlowRuntimeReadiness(nextContext)
+			if err != nil || len(items) != 0 {
+				t.Fatalf("terminal generation readiness: items=%#v err=%v", items, err)
+			}
 
 			changed := plan
 			changed.Agents = append([]DynamicFlowRuntimeAgentExpectation(nil), plan.Agents...)

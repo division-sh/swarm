@@ -945,7 +945,7 @@ func (am *AgentManager) HydrateForStartup(ctx context.Context) (StartupReplaySum
 		return summary, err
 	}
 	if err := am.finalizeDynamicFlowRuntimeReadinessForStartup(ctx); err != nil {
-		return summary, fmt.Errorf("finalize dynamic flow runtime readiness: %w", err)
+		return summary, &dynamicFlowRuntimeReadinessFinalizationError{cause: err}
 	}
 	return summary, nil
 }

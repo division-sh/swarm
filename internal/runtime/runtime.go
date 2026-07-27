@@ -1456,6 +1456,10 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			startupRecoveryDecision.ManagerRecoveryAttempted = true
 			_, err := rt.Manager.HydrateForStartup(ctx)
 			if err != nil {
+				if runtimemanager.IsDynamicFlowRuntimeReadinessFinalizationError(err) {
+					rt.emitBootProgress(10, "manager_recovery_if_enabled", "FAILED", err.Error())
+					return fmt.Errorf("finalize dynamic flow runtime readiness during startup: %w", err)
+				}
 				agentHydrationSucceeded = false
 				workflowTimerRestoreReady = false
 				rt.recordStartupManagerRecoveryFailure(ctx, &startupRecoveryDecision, err)
