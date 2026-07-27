@@ -455,6 +455,18 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			updated_at TIMESTAMP,
 			PRIMARY KEY (run_id, entity_id)
 		)`,
+		`CREATE TABLE workflow_instance_initial_materializations (
+			run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+			entity_id TEXT NOT NULL,
+			instance_id TEXT NOT NULL REFERENCES flow_instances(instance_id) ON DELETE CASCADE,
+			projection_version INTEGER NOT NULL CHECK (projection_version = 1),
+			projection TEXT NOT NULL,
+			occurred_at TIMESTAMP NOT NULL,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (run_id, entity_id),
+			UNIQUE (run_id, instance_id),
+			FOREIGN KEY (run_id, entity_id) REFERENCES entity_state(run_id, entity_id) ON DELETE CASCADE
+		)`,
 		`CREATE TABLE timers (
 			timer_id TEXT PRIMARY KEY,
 			run_id TEXT,

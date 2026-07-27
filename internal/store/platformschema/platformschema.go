@@ -219,6 +219,8 @@ func platformTableOrder(name string) int {
 		return 41
 	case "entity_state":
 		return 50
+	case "workflow_instance_initial_materializations":
+		return 51
 	case "conversation_forks":
 		return 55
 	case "conversation_fork_snapshots":

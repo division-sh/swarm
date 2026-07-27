@@ -103,15 +103,39 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			if !persisted.EnteredStageAt.Equal(wantPersistedAt) || !persisted.CreatedAt.Equal(wantPersistedAt) {
 				t.Fatalf("persisted timestamps = entered %s created %s, want %s", persisted.EnteredStageAt, persisted.CreatedAt, wantPersistedAt)
 			}
+			progressed := persisted
+			progressed.CurrentState = "active"
+			progressed.EnteredStageAt = occurredAt.Add(time.Minute)
+			progressed.Metadata = cloneStringAnyMap(persisted.Metadata)
+			progressed.Metadata["priority"] = 9
+			progressed.Metadata["gates"] = map[string]any{"approved": true}
+			progressed.StateBuckets = map[string]any{"totals": map[string]any{"accepted": 4}}
+			progressed.TransitionHistory = append(progressed.TransitionHistory, WorkflowTransitionRecord{
+				TransitionID:   "activate",
+				From:           "pending",
+				To:             "active",
+				TriggerEventID: "event-2",
+				FiredAt:        occurredAt.Add(time.Minute),
+			})
+			if err := store.Upsert(ctx, progressed); err != nil {
+				t.Fatalf("persist legitimate workflow progress: %v", err)
+			}
 			replay, err := store.MaterializeInitialEntry(ctx, instance, occurredAt)
 			if err != nil {
-				t.Fatalf("replay MaterializeInitialEntry: %v", err)
+				t.Fatalf("replay initial creation after workflow progress: %v", err)
 			}
 			if replay != WorkflowInitialMaterializationAlreadyExists {
 				t.Fatalf("replay materialization = %d, want already exists", replay)
 			}
 			if owner.effects != 1 {
 				t.Fatalf("initial-entry effects = %d, want exactly 1", owner.effects)
+			}
+			afterReplay, found, err := store.Load(ctx, instance.StorageRef)
+			if err != nil || !found {
+				t.Fatalf("load progressed workflow after replay: found=%v err=%v", found, err)
+			}
+			if afterReplay.CurrentState != "active" || asInt(afterReplay.Metadata["priority"]) != 9 {
+				t.Fatalf("creation replay rewrote progressed workflow: %#v", afterReplay)
 			}
 
 			conflict := instance
@@ -120,6 +144,20 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 				t.Fatal("conflicting replay succeeded")
 			} else if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Class != runtimefailures.ClassConflictingDuplicate {
 				t.Fatalf("conflicting replay failure = %#v, want conflicting duplicate", failure)
+			}
+
+			runID := runtimecorrelation.RunIDFromContext(ctx)
+			deleteQuery := `DELETE FROM workflow_instance_initial_materializations WHERE run_id = ? AND instance_id = ?`
+			if !store.isSQLite() {
+				deleteQuery = `DELETE FROM workflow_instance_initial_materializations WHERE run_id = $1::uuid AND instance_id = $2`
+			}
+			if _, err := store.db.ExecContext(ctx, deleteQuery, runID, instance.StorageRef); err != nil {
+				t.Fatalf("remove immutable creation record: %v", err)
+			}
+			if _, err := store.MaterializeInitialEntry(ctx, instance, occurredAt); err == nil {
+				t.Fatal("creation replay inferred identity after immutable record was removed")
+			} else if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Class != runtimefailures.ClassConflictingDuplicate {
+				t.Fatalf("missing creation record failure = %#v, want conflicting duplicate", failure)
 			}
 		})
 	}

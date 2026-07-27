@@ -286,6 +286,12 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			SpecRef:        "platform-spec.yaml#platform_tables.tables.flow_instance_runtime_readiness",
 			Reason:         "dynamic flow runtime readiness is the private selected-store adapter for atomic plan persistence, exact replay, startup enumeration, and monotonic completion",
 		},
+		"internal/runtime/pipeline/workflow_initial_materialization.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2113,
+			SpecRef:        "platform-spec.yaml#platform_tables.tables.workflow_instance_initial_materializations",
+			Reason:         "immutable workflow creation identity is a private selected-store adapter consumed only by exact initial-materialization replay",
+		},
 		"internal/runtime/pipeline/workflow_instance_store_sqlite.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,

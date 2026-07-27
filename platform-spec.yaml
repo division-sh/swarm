@@ -6536,16 +6536,19 @@ engine:
       dormant and never registers a process-local wakeup itself. Every initial-entry caller must invoke the one named
       `ArmInitialEntryTimers` lifecycle operation only after the exact receiving runtime is ready. Existing pipeline routes
       queue that operation in their selected mutation's post-commit work. Dynamic instances have one durable, idempotent
-      runtime-readiness finalizer backed by `flow_instance_runtime_readiness`. Initial materialization atomically records the
-      desired exact route, complete declared-agent revision set, creation run, and optional creation-event occurrence. Direct
+      runtime-readiness finalizer backed by `flow_instance_runtime_readiness`. Initial materialization atomically records an
+      immutable `workflow_instance_initial_materializations` creation projection plus the desired exact route, complete
+      declared-agent revision set, creation run, and optional creation-event occurrence. Direct
       activation, selected-mutation post-commit finalization, exact replay / `EnsureFlowInstance`, and startup consume the same
       owner. A selected creation mutation stages its exact route before any later same-mutation publication; this is an early
       projection of the readiness plan, not a second readiness owner. The finalizer reconciles and verifies all declared
       agents and the route in process and storage, records topology readiness, arms initial timers, then publishes the
       deterministic creation-only event exactly once. A failed or partial boundary remains durable pending work; startup
       finalization failure is boot-fatal, never degraded replay, and prevents global timer restoration through unverified
-      topology. No best-effort completion callback chain, subset inference, second wakeup owner, migration, or compatibility
-      path exists.
+      topology. Exact replay compares the immutable creation projection and immutable readiness plan; mutable current state,
+      fields, gates, accumulator, transition history, and readiness completion coordinates never participate in creation
+      identity. A missing or conflicting immutable creation projection fails closed. No best-effort completion callback chain,
+      subset inference, second wakeup owner, migration, or compatibility path exists.
     - 3. Leaving an owning stage, matching cancel_on, loop-generation supersession, run quiescence, or preservation cleanup
       may only monotonically cancel or delete the canonical row. Cancellation is in the same mutation as the causal lifecycle
       transition; the in-memory scheduler is updated only after commit. Registration and cancellation do not issue opposing
@@ -11598,6 +11601,7 @@ platform_tables:
         - agent_sessions
         - entity_mutations
         - entity_state
+        - workflow_instance_initial_materializations
         - flow_instance_runtime_readiness
         - run_control_state
         - events
@@ -12552,6 +12556,27 @@ platform_tables:
         \ KEY (run_id, entity_id),\n    INDEX idx_entity_flow (run_id, flow_instance, current_state),\n\
         \    INDEX idx_entity_state (run_id, current_state),\n    INDEX idx_entity_type (run_id, entity_type),\n    INDEX\
         \ idx_entity_slug (run_id, slug) WHERE slug IS NOT NULL,\n    INDEX idx_entity_cross_run (entity_id)\n);"
+    workflow_instance_initial_materializations:
+      description: >-
+        Immutable run-generation-scoped creation identity for a workflow instance. The initial materialization transaction
+        inserts exactly one canonical projection of the original workflow, state, config, entity fields, gates, accumulator,
+        control facts, and exact occurrence coordinate. Exact replay compares this record together with the separately owned
+        immutable flow_instance_runtime_readiness plan. Later workflow progress never updates or reconstructs this record and
+        never participates in creation replay identity. A current entity without this record is invalid fresh-schema state and
+        fails closed; no migration, fallback, inference, or compatibility reader is supported.
+      ddl: |
+        CREATE TABLE workflow_instance_initial_materializations (
+            run_id             UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+            entity_id          UUID NOT NULL,
+            instance_id        TEXT NOT NULL REFERENCES flow_instances(instance_id) ON DELETE CASCADE,
+            projection_version INTEGER NOT NULL CHECK (projection_version = 1),
+            projection         JSONB NOT NULL,
+            occurred_at        TIMESTAMPTZ NOT NULL,
+            created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (run_id, entity_id),
+            UNIQUE (run_id, instance_id),
+            FOREIGN KEY (run_id, entity_id) REFERENCES entity_state(run_id, entity_id) ON DELETE CASCADE
+        );
     agents:
       description: 'Runtime agent registry. One row per agent instance under the current global agent_id identity model.
         agent_id remains the authored contract slug and current global live/runtime identity described by
