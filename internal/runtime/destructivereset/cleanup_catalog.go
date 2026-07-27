@@ -65,6 +65,7 @@ func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 		{Table: "conversation_forks", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteMixedRowPolicy, PredicateOwner: "conversation_forks.source_run_id", DeleteOrderGroup: 3},
 		{Table: "entity_mutations", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "entity_mutations.run_id", DeleteOrderGroup: 3},
 		{Table: "entity_state", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "entity_state.run_id", DeleteOrderGroup: 3},
+		{Table: "flow_instance_runtime_readiness", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "flow_instance_runtime_readiness.run_id", DeleteOrderGroup: 3},
 		{Table: "timers", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteMixedRowPolicy, PredicateOwner: "timers.run_id|forked_from_run_id|forked_from_event_id -> events.run_id", DeleteOrderGroup: 3},
 		{Table: "run_control_state", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "run_control_state.run_id", DeleteOrderGroup: 3},
 		{Table: "reply_contexts", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "reply_contexts.run_id", DeleteOrderGroup: 4},

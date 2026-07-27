@@ -215,6 +215,8 @@ func platformTableOrder(name string) int {
 		return 30
 	case "flow_instances":
 		return 40
+	case "flow_instance_runtime_readiness":
+		return 41
 	case "entity_state":
 		return 50
 	case "conversation_forks":

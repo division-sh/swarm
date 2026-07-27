@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -119,6 +120,144 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 				t.Fatal("conflicting replay succeeded")
 			} else if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Class != runtimefailures.ClassConflictingDuplicate {
 				t.Fatalf("conflicting replay failure = %#v, want conflicting duplicate", failure)
+			}
+		})
+	}
+}
+
+func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T) (*WorkflowInstanceStore, context.Context)
+	}{
+		{
+			name: "sqlite",
+			setup: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+				db := newSQLiteWorkflowInstanceStoreTestDB(t)
+				return newSQLiteWorkflowInstanceStoreForTest(t, db), sqliteExactOnceRunContext(t, db)
+			},
+		},
+		{
+			name: "postgres",
+			setup: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				return NewWorkflowInstanceStore(db), testPipelineRunContext(t, db)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.setup(t)
+			store.ConfigureWorkflowInstanceLifecycle(&workflowInitialMaterializationTestOwner{})
+			runID := runtimecorrelation.RunIDFromContext(ctx)
+			occurredAt := time.Date(2026, time.July, 26, 13, 0, 0, 123456000, time.UTC)
+			plan := DynamicFlowRuntimeReadinessPlan{
+				Identity: runtimeflowidentity.Instance{
+					TemplateID: "review", ScopeKey: "review", InstanceID: "inst-1",
+					InstancePath: "review/inst-1", EntityID: uuid.NewString(), HasStoredPath: true,
+				},
+				RunID:           runID,
+				WorkflowVersion: "1.0.0",
+				Agents: []DynamicFlowRuntimeAgentExpectation{
+					{AgentID: "reviewer-inst-1", ConfigRevision: strings.Repeat("a", 64)},
+					{AgentID: "writer-inst-1", ConfigRevision: strings.Repeat("b", 64)},
+				},
+				CreationEvent: &DynamicFlowRuntimeCreationEventPlan{
+					EventID: uuid.NewString(), EventType: "review/inst-1/review.created",
+					RunID: runID, ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live,
+					Payload: []byte(`{"name":"alpha"}`), CreatedAt: occurredAt,
+				},
+			}
+			instance := WorkflowInstance{
+				InstanceID: "inst-1", StorageRef: "review/inst-1", WorkflowName: "review",
+				WorkflowVersion: "1.0.0", RuntimeReadiness: &plan, CurrentState: "pending",
+				Config: map[string]any{"name": "alpha"},
+				Metadata: map[string]any{
+					"entity_id": plan.Identity.EntityID, "instance_id": "inst-1", "flow_path": "review/inst-1",
+				},
+			}
+
+			result, err := store.MaterializeInitialEntry(ctx, instance, occurredAt)
+			if err != nil || result != WorkflowInitialMaterializationCreated {
+				t.Fatalf("first materialization: result=%d err=%v", result, err)
+			}
+			readiness, found, err := store.LoadDynamicFlowRuntimeReadiness(ctx, runID, instance.StorageRef)
+			if err != nil || !found {
+				t.Fatalf("load readiness: found=%v err=%v", found, err)
+			}
+			if readiness.Plan.Identity.Route() != plan.Identity.Route() || len(readiness.Plan.Agents) != 2 {
+				t.Fatalf("readiness plan = %#v", readiness.Plan)
+			}
+			if !readiness.TopologyReadyAt.IsZero() || !readiness.CreationEventEmittedAt.IsZero() {
+				t.Fatalf("new readiness already completed: %#v", readiness)
+			}
+			result, err = store.MaterializeInitialEntry(ctx, instance, occurredAt)
+			if err != nil || result != WorkflowInitialMaterializationAlreadyExists {
+				t.Fatalf("exact replay: result=%d err=%v", result, err)
+			}
+			readyAt := occurredAt.Add(time.Second)
+			if err := store.MarkDynamicFlowRuntimeTopologyReady(ctx, runID, instance.StorageRef, readyAt); err != nil {
+				t.Fatalf("mark topology ready: %v", err)
+			}
+			if err := store.MarkDynamicFlowRuntimeCreationEventEmitted(ctx, runID, instance.StorageRef, readyAt.Add(time.Second)); err != nil {
+				t.Fatalf("mark creation event emitted: %v", err)
+			}
+			items, err := store.ListDynamicFlowRuntimeReadiness(ctx)
+			if err != nil || len(items) != 1 {
+				t.Fatalf("list readiness: items=%#v err=%v", items, err)
+			}
+			if items[0].TopologyReadyAt.IsZero() || items[0].CreationEventEmittedAt.IsZero() {
+				t.Fatalf("completed readiness = %#v", items[0])
+			}
+
+			nextRunID := uuid.NewString()
+			if store.isSQLite() {
+				if _, err := store.db.ExecContext(ctx, `UPDATE runs SET status = 'cancelled' WHERE run_id = ?`, runID); err != nil {
+					t.Fatalf("retire first readiness run: %v", err)
+				}
+				if _, err := store.db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, nextRunID, occurredAt.Add(time.Hour)); err != nil {
+					t.Fatalf("seed successor readiness run: %v", err)
+				}
+			} else {
+				if _, err := store.db.ExecContext(ctx, `UPDATE runs SET status = 'cancelled' WHERE run_id = $1::uuid`, runID); err != nil {
+					t.Fatalf("retire first readiness run: %v", err)
+				}
+				if _, err := store.db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, nextRunID); err != nil {
+					t.Fatalf("seed successor readiness run: %v", err)
+				}
+			}
+			nextPlan := plan
+			nextPlan.RunID = nextRunID
+			nextCreationEvent := *plan.CreationEvent
+			nextCreationEvent.EventID = uuid.NewString()
+			nextCreationEvent.RunID = nextRunID
+			nextCreationEvent.ParentEventID = uuid.NewString()
+			nextCreationEvent.CreatedAt = occurredAt.Add(time.Hour)
+			nextPlan.CreationEvent = &nextCreationEvent
+			nextInstance := instance
+			nextInstance.RuntimeReadiness = &nextPlan
+			nextContext := WithStandingGenerationRebind(runtimecorrelation.WithRunID(ctx, nextRunID))
+			result, err = store.MaterializeInitialEntry(nextContext, nextInstance, occurredAt.Add(time.Hour))
+			if err != nil || result != WorkflowInitialMaterializationCreated {
+				t.Fatalf("successor generation materialization: result=%d err=%v", result, err)
+			}
+			if prior, found, err := store.LoadDynamicFlowRuntimeReadiness(ctx, runID, instance.StorageRef); err != nil || !found || prior.CreationEventEmittedAt.IsZero() {
+				t.Fatalf("retired generation readiness changed: found=%v readiness=%#v err=%v", found, prior, err)
+			}
+			if successor, found, err := store.LoadDynamicFlowRuntimeReadiness(nextContext, nextRunID, instance.StorageRef); err != nil || !found || !successor.TopologyReadyAt.IsZero() {
+				t.Fatalf("successor generation readiness: found=%v readiness=%#v err=%v", found, successor, err)
+			}
+			items, err = store.ListDynamicFlowRuntimeReadiness(nextContext)
+			if err != nil || len(items) != 1 || items[0].Plan.RunID != nextRunID {
+				t.Fatalf("active generation readiness: items=%#v err=%v", items, err)
+			}
+
+			changed := plan
+			changed.Agents = append([]DynamicFlowRuntimeAgentExpectation(nil), plan.Agents...)
+			changed.Agents[0].ConfigRevision = strings.Repeat("c", 64)
+			instance.RuntimeReadiness = &changed
+			if _, err := store.MaterializeInitialEntry(ctx, instance, occurredAt); err == nil {
+				t.Fatal("changed readiness plan replay succeeded")
 			}
 		})
 	}

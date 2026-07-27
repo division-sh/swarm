@@ -118,6 +118,10 @@ type FlowInstanceRoutePersistence interface {
 	ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.Route, error)
 }
 
+type FlowInstanceRouteRecordReader interface {
+	ListFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.Route) ([]FlowInstanceRouteRecord, error)
+}
+
 type FlowInstanceRouteRollbackPersistence interface {
 	RollbackFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error
 }

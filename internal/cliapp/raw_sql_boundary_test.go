@@ -152,6 +152,12 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          2007,
 			Reason:         "agent lifecycle activation consumes the selected inbound/pipeline transaction context so process-local publication can be staged until commit",
 		},
+		"internal/runtime/manager/flow_activation.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2113,
+			SpecRef:        "platform-spec.yaml#engine.timer_model.dynamic_flow_runtime_readiness",
+			Reason:         "dynamic flow activation observes the selected pipeline transaction only to stage exact route publication and the canonical readiness finalizer after commit",
+		},
 		"internal/runtime/dbtx.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,
@@ -178,12 +184,6 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          2010,
 			SpecRef:        "platform-spec.yaml#platform_tables.author_activity_story",
 			Reason:         "author activity read is the canonical backend-neutral story occurrence reader",
-		},
-		"internal/runtime/manager/flow_activation.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1962,
-			SpecRef:        "platform-spec.yaml#tool_model.provider_trigger_adapters.pack_manifest_engine.provider_delivery_transaction",
-			Reason:         "flow activation observes the ambient selected-store transaction only to persist route authority in-unit and defer agent process startup until commit",
 		},
 		"internal/runtime/pipeline/activity_engine.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
@@ -279,6 +279,12 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          2064,
 			Reason:         "workflow instance route recovery is the run-independent read projection over exact active flow_instances identity and config",
+		},
+		"internal/runtime/pipeline/workflow_instance_readiness.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2113,
+			SpecRef:        "platform-spec.yaml#platform_tables.tables.flow_instance_runtime_readiness",
+			Reason:         "dynamic flow runtime readiness is the private selected-store adapter for atomic plan persistence, exact replay, startup enumeration, and monotonic completion",
 		},
 		"internal/runtime/pipeline/workflow_instance_store_sqlite.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
