@@ -96,7 +96,7 @@ func ensureBoundedStandingTarget(t *testing.T, ctx context.Context, persistence 
 		if err := selected.DB.QueryRowContext(ctx, `SELECT flow_instance FROM entity_state WHERE run_id = ? AND entity_id = ?`, runID, entityID).Scan(&flowInstance); err != nil {
 			t.Fatalf("load sqlite bounded provider flow instance: %v", err)
 		}
-		insertSQLiteStandingFixture(t, ctx, selected.DB, serviceID, packageKey, flowID, flowInstance, entityID, runID, bundleHash, bundleSource)
+		insertSQLiteStandingFixture(t, ctx, selected, serviceID, packageKey, flowID, flowInstance, entityID, runID, bundleHash, bundleSource)
 	default:
 		t.Fatalf("unsupported bounded provider persistence %T", persistence)
 	}
@@ -178,25 +178,29 @@ func insertPostgresStandingFixture(t *testing.T, ctx context.Context, db *sql.DB
 	}
 }
 
-func insertSQLiteStandingFixture(t *testing.T, ctx context.Context, db *sql.DB, serviceID, packageKey, flowID, instanceID, entityID, runID, bundleHash, bundleSource string) {
+func insertSQLiteStandingFixture(t *testing.T, ctx context.Context, selected *storepkg.SQLiteRuntimeStore, serviceID, packageKey, flowID, instanceID, entityID, runID, bundleHash, bundleSource string) {
 	t.Helper()
 	now := time.Now().UTC()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO standing_services (
-			service_id, package_key, flow_id, instance_id, entity_id, declaration_present,
-			operator_override, effective_state, current_bundle_hash, current_bundle_source,
-			revision_sequence, current_generation, current_run_id, publication_state,
-			publication_sequence, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, TRUE, 'none', 'active', ?, ?, 1, 1, ?, 'published', 1, ?, ?)
-		ON CONFLICT(service_id) DO NOTHING
-	`, serviceID, packageKey, flowID, instanceID, entityID, bundleHash, bundleSource, runID, now, now); err != nil {
+	err := selected.RunRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if _, err := tx.ExecContext(txctx, `
+			INSERT INTO standing_services (
+				service_id, package_key, flow_id, instance_id, entity_id, declaration_present,
+				operator_override, effective_state, current_bundle_hash, current_bundle_source,
+				revision_sequence, current_generation, current_run_id, publication_state,
+				publication_sequence, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, TRUE, 'none', 'active', ?, ?, 1, 1, ?, 'published', 1, ?, ?)
+			ON CONFLICT(service_id) DO NOTHING
+		`, serviceID, packageKey, flowID, instanceID, entityID, bundleHash, bundleSource, runID, now, now); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(txctx, `
+			INSERT INTO standing_service_generations (service_id, generation, run_id, created_at)
+			VALUES (?, 1, ?, ?)
+			ON CONFLICT(service_id, generation) DO NOTHING
+		`, serviceID, runID, now)
+		return err
+	})
+	if err != nil {
 		t.Fatalf("seed sqlite standing service: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO standing_service_generations (service_id, generation, run_id, created_at)
-		VALUES (?, 1, ?, ?)
-		ON CONFLICT(service_id, generation) DO NOTHING
-	`, serviceID, runID, now); err != nil {
-		t.Fatalf("seed sqlite standing generation: %v", err)
 	}
 }
