@@ -55,6 +55,8 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		BundleSourceFact:  authorActivityTestBundleSourceFact,
+		SemanticSource:    source,
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
 		DeliveryStore:     pg,
