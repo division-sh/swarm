@@ -42,8 +42,11 @@ func TestDynamicFlowRuntimeReadinessProductionConsumersStatic(t *testing.T) {
 		})
 	}
 	requireStaticReadinessCalls(t, calls, "reconcileDynamicFlowRuntimeReadiness", map[string]int{
+		"flow_runtime_readiness.go": 3,
+	})
+	requireStaticReadinessCalls(t, calls, "reconcileDynamicFlowRuntimeReadinessPlan", map[string]int{
 		"flow_activation.go":        4,
-		"flow_runtime_readiness.go": 4,
+		"flow_runtime_readiness.go": 1,
 	})
 	for _, ownerCall := range []string{
 		"LoadDynamicFlowRuntimeReadiness",

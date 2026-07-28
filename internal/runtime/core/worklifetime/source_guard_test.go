@@ -83,8 +83,8 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"owner_action|internal/runtime/bus/outbox.go|engineOutbox.WriteOutbox|83":                                            {asyncSiteCanonicalOwner, "outbox rollback claim release is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/manager/agent_manager.go|AgentManager.spawnAgentInternalForSourceWithTopology|364":    {asyncSiteCanonicalOwner, "agent registration post-commit work is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/manager/flow_activation.go|AgentManager.ActivateFlowInstance|197":                     {asyncSiteCanonicalOwner, "the one durable dynamic-runtime readiness finalizer is wrapped by an owner-bound post-commit action lease"},
-	"owner_action|internal/runtime/manager/flow_activation.go|AgentManager.EnsureFlowInstance|243":                       {asyncSiteCanonicalOwner, "exact replay and ensure consume the durable readiness finalizer after selected-mutation commit"},
-	"owner_action|internal/runtime/manager/flow_activation.go|AgentManager.deactivateFlowInstanceModelInMutation|763":    {asyncSiteCanonicalOwner, "flow deactivation post-commit work is wrapped by an owner-bound action lease"},
+	"owner_action|internal/runtime/manager/flow_activation.go|AgentManager.EnsureFlowInstance|244":                       {asyncSiteCanonicalOwner, "exact replay and ensure consume the durable readiness finalizer after selected-mutation commit"},
+	"owner_action|internal/runtime/manager/flow_activation.go|AgentManager.deactivateFlowInstanceModelInMutation|764":    {asyncSiteCanonicalOwner, "flow deactivation post-commit work is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/pipeline/activity_engine.go|pipelineActivityIntentWriter.WriteActivityIntents|113":    {asyncSiteCanonicalOwner, "activity intent logging is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/pipeline/coordinator.go|PipelineCoordinator.recordInterceptedEmitDeadLetters|704":     {asyncSiteCanonicalOwner, "dead-letter publication is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/pipeline/generic_schedule_lifecycle.go|PipelineCoordinator.cancelGenericSchedule|64":  {asyncSiteCanonicalOwner, "schedule cancellation is wrapped by an owner-bound action lease"},
@@ -96,7 +96,7 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 }
 
 func init() {
-	productionAsyncSiteLedger["owner_action|internal/runtime/manager/flow_runtime_readiness.go|AgentManager.ReconcileDynamicFlowRuntimeReadinessPlansForRun|280"] = asyncSiteLedgerEntry{
+	productionAsyncSiteLedger["owner_action|internal/runtime/manager/flow_runtime_readiness.go|AgentManager.ReconcileDynamicFlowRuntimeReadinessPlansForRun|281"] = asyncSiteLedgerEntry{
 		class: asyncSiteCanonicalOwner,
 		proof: "source revision queues each changed run-local readiness key for post-commit topology reconciliation",
 	}

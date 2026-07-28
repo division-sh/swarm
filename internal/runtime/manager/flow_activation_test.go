@@ -195,23 +195,24 @@ type flowActivationTestRouteStore struct {
 }
 
 type flowActivationTestInstanceStore struct {
-	readinessMu        sync.Mutex
-	creates            []runtimepipeline.WorkflowInstance
-	upserts            []runtimepipeline.WorkflowInstance
-	terminatedPaths    []string
-	terminatedAtSeen   []time.Time
-	byStorageRef       map[string]runtimepipeline.WorkflowInstance
-	routeLoads         []runtimeflowidentity.Route
-	materialization    runtimepipeline.WorkflowInitialMaterializationResult
-	armedEntries       []string
-	armInitialEntry    func(string) error
-	readiness          map[string]runtimepipeline.DynamicFlowRuntimeReadiness
-	creationMarkErr    error
-	creationMarked     func()
-	topologyMarked     func()
-	beforeTopologyMark func(runtimepipeline.DynamicFlowRuntimeReadinessPlan)
-	afterTopologyMark  func(runtimepipeline.DynamicFlowRuntimeReadinessPlan)
-	beforeCreation     func()
+	readinessMu             sync.Mutex
+	creates                 []runtimepipeline.WorkflowInstance
+	upserts                 []runtimepipeline.WorkflowInstance
+	terminatedPaths         []string
+	terminatedAtSeen        []time.Time
+	byStorageRef            map[string]runtimepipeline.WorkflowInstance
+	routeLoads              []runtimeflowidentity.Route
+	materialization         runtimepipeline.WorkflowInitialMaterializationResult
+	armedEntries            []string
+	armInitialEntry         func(string) error
+	readiness               map[string]runtimepipeline.DynamicFlowRuntimeReadiness
+	creationMarkErr         error
+	creationMarked          func()
+	topologyMarked          func()
+	beforeTopologyMark      func(runtimepipeline.DynamicFlowRuntimeReadinessPlan)
+	afterTopologyMark       func(runtimepipeline.DynamicFlowRuntimeReadinessPlan)
+	beforeCreation          func()
+	respectReadinessContext bool
 }
 
 func (s *flowActivationTestInstanceStore) RunPipelineMutation(ctx context.Context, fn func(context.Context) error) error {
@@ -385,7 +386,12 @@ func flowActivationReadinessKey(runID, instanceID string) string {
 	return strings.TrimSpace(runID) + "\x00" + strings.TrimSpace(instanceID)
 }
 
-func (s *flowActivationTestInstanceStore) LoadDynamicFlowRuntimeReadiness(_ context.Context, runID, instanceID string) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error) {
+func (s *flowActivationTestInstanceStore) LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID, instanceID string) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error) {
+	if s.respectReadinessContext {
+		if err := ctx.Err(); err != nil {
+			return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, err
+		}
+	}
 	s.readinessMu.Lock()
 	defer s.readinessMu.Unlock()
 	item, ok := s.readiness[flowActivationReadinessKey(runID, instanceID)]
@@ -1466,26 +1472,48 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsConcurrentPlanRevision(t *testing
 }
 
 func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T) {
-	instances := &flowActivationTestInstanceStore{}
+	instances := &flowActivationTestInstanceStore{respectReadinessContext: true}
 	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
 	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle("")
 	am.semanticSource = semanticview.Wrap(bundle)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	intermediateBundle := testFlowBundle("")
+	intermediateBundle.Semantics.Version = "v-post-cas-intermediate"
+	intermediateSource := semanticview.Wrap(intermediateBundle)
 	revisedBundle := testFlowBundle("")
-	revisedBundle.Semantics.Version = "v-post-cas-revision"
+	revisedBundle.Semantics.Version = "v-post-cas-current"
 	revisedSource := semanticview.Wrap(revisedBundle)
 	successorErr := make(chan error, 1)
 	key, err := newDynamicFlowRuntimeReadinessKey(req.TriggerEvent.RunID(), req.Instance.InstancePath)
 	if err != nil {
 		t.Fatalf("readiness key: %v", err)
 	}
+	activationCtx, cancelActivation := context.WithCancel(testAuthorActivityContext(context.Background()))
+	defer cancelActivation()
+	successorCtx := testAuthorActivityContext(context.Background())
 
 	var revisionErr error
+	var staleErr error
 	instances.afterTopologyMark = func(completed runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
-		revised := completed
-		revised.WorkflowVersion = revisedBundle.WorkflowVersion()
+		intermediate := completed
+		intermediate.WorkflowVersion = intermediateBundle.WorkflowVersion()
 		changed, err := instances.ReconcileDynamicFlowRuntimeReadinessPlan(
+			context.Background(),
+			intermediate,
+			time.Now().UTC(),
+		)
+		if err != nil {
+			revisionErr = err
+			return
+		}
+		if !changed {
+			revisionErr = errors.New("post-CAS intermediate readiness plan was not revised")
+			return
+		}
+		revised := intermediate
+		revised.WorkflowVersion = revisedBundle.WorkflowVersion()
+		changed, err = instances.ReconcileDynamicFlowRuntimeReadinessPlan(
 			context.Background(),
 			revised,
 			time.Now().UTC(),
@@ -1499,10 +1527,9 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 			return
 		}
 		go func() {
-			successorErr <- am.reconcileDynamicFlowRuntimeReadiness(
-				testAuthorActivityContext(context.Background()),
-				req.TriggerEvent.RunID(),
-				req.Instance.InstancePath,
+			successorErr <- am.reconcileDynamicFlowRuntimeReadinessPlan(
+				successorCtx,
+				revised,
 				revisedSource,
 			)
 		}()
@@ -1523,14 +1550,23 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 			}
 			runtime.Gosched()
 		}
+		staleErr = am.reconcileDynamicFlowRuntimeReadinessPlan(
+			testAuthorActivityContext(context.Background()),
+			intermediate,
+			intermediateSource,
+		)
+		cancelActivation()
 	}
 
-	err = am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req)
+	err = am.ActivateFlowInstance(activationCtx, req)
 	if revisionErr != nil {
 		t.Fatalf("inject post-CAS readiness revision: %v", revisionErr)
 	}
+	if !errors.Is(staleErr, errDynamicFlowRuntimeReadinessPlanStale) {
+		t.Fatalf("delayed intermediate plan error = %v, want stale-plan rejection", staleErr)
+	}
 	if err != nil {
-		t.Fatalf("ActivateFlowInstance with queued revised-plan successor: %v", err)
+		t.Fatalf("ActivateFlowInstance with canceled predecessor and queued revised-plan successor: %v", err)
 	}
 	if err := <-successorErr; err != nil {
 		t.Fatalf("post-CAS revised-plan successor: %v", err)

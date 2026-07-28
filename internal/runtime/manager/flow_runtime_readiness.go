@@ -52,9 +52,14 @@ type dynamicFlowRuntimeReadinessAttempt struct {
 	err                 error
 	planCoordinate      string
 	successorRequired   bool
+	successorContext    context.Context
 	successorSource     semanticview.Source
 	successorCoordinate string
 }
+
+var errDynamicFlowRuntimeReadinessPlanStale = errors.New(
+	"dynamic flow runtime readiness declared plan is stale",
+)
 
 func newDynamicFlowRuntimeReadinessKey(runID, instancePath string) (dynamicFlowRuntimeReadinessKey, error) {
 	key := dynamicFlowRuntimeReadinessKey{
@@ -124,33 +129,33 @@ func (am *AgentManager) reconcileEnsuredDynamicFlowRuntimeReadinessPlan(
 	ctx context.Context,
 	req runtimepipeline.FlowInstanceActivationRequest,
 	runID string,
-) error {
+) (runtimepipeline.DynamicFlowRuntimeReadinessPlan, error) {
 	templateID := strings.TrimSpace(req.Instance.TemplateID)
 	scope, ok := semanticview.FlowScopeByID(req.ContractBundle, templateID)
 	if !ok {
-		return fmt.Errorf("flow contract view not found: %s", templateID)
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("flow contract view not found: %s", templateID)
 	}
 	schema, ok := req.ContractBundle.FlowSchemaByID(templateID)
 	if !ok {
-		return fmt.Errorf("flow schema not found: %s", templateID)
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("flow schema not found: %s", templateID)
 	}
 	agentRecords, err := am.flowInstanceAgentRecords(req, schema, scope)
 	if err != nil {
-		return err
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, err
 	}
 	occurredAt := req.OccurredAt.UTC()
 	if !req.TriggerEvent.CreatedAt().IsZero() {
 		occurredAt = req.TriggerEvent.CreatedAt().UTC()
 	}
 	if occurredAt.IsZero() {
-		return fmt.Errorf("flow readiness reconciliation requires an exact occurrence time")
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("flow readiness reconciliation requires an exact occurrence time")
 	}
 	current, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, runID, req.Instance.InstancePath)
 	if err != nil {
-		return err
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, err
 	}
 	if !found {
-		return fmt.Errorf("dynamic flow runtime readiness not found for %s", req.Instance.InstancePath)
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("dynamic flow runtime readiness not found for %s", req.Instance.InstancePath)
 	}
 	expected := current.Plan
 	expected.Identity = req.Instance
@@ -159,7 +164,7 @@ func (am *AgentManager) reconcileEnsuredDynamicFlowRuntimeReadinessPlan(
 	for _, record := range agentRecords {
 		revision, err := lifecycleConfigRevision(record)
 		if err != nil {
-			return fmt.Errorf("derive dynamic flow agent revision %s: %w", record.Config.ID, err)
+			return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("derive dynamic flow agent revision %s: %w", record.Config.ID, err)
 		}
 		expected.Agents = append(expected.Agents, runtimepipeline.DynamicFlowRuntimeAgentExpectation{
 			AgentID: record.Config.ID, ConfigRevision: revision,
@@ -174,12 +179,12 @@ func (am *AgentManager) reconcileEnsuredDynamicFlowRuntimeReadinessPlan(
 		req.Config,
 	)
 	if err != nil {
-		return fmt.Errorf("rebuild dynamic flow creation plan %s: %w", req.Instance.InstancePath, err)
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("rebuild dynamic flow creation plan %s: %w", req.Instance.InstancePath, err)
 	}
 	if _, err := am.workflowInstances.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, expected, occurredAt); err != nil {
-		return fmt.Errorf("reconcile dynamic flow runtime readiness plan %s: %w", req.Instance.InstancePath, err)
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("reconcile dynamic flow runtime readiness plan %s: %w", req.Instance.InstancePath, err)
 	}
-	return nil
+	return expected, nil
 }
 
 // ReconcileDynamicFlowRuntimeReadinessPlansForRun advances every active
@@ -265,15 +270,11 @@ func (am *AgentManager) ReconcileDynamicFlowRuntimeReadinessPlansForRun(
 		if !changed {
 			continue
 		}
-		key, err := newDynamicFlowRuntimeReadinessKey(runID, item.InstancePath)
-		if err != nil {
-			return err
-		}
 		reconcile := func(actionCtx context.Context) {
 			postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(
 				runtimepipeline.WithoutPipelineSQLTxContext(actionCtx),
 			)
-			if err := am.reconcileDynamicFlowRuntimeReadiness(postCommitCtx, key.runID, key.instancePath, source); err != nil {
+			if err := am.reconcileDynamicFlowRuntimeReadinessPlan(postCommitCtx, expected, source); err != nil {
 				am.signalDynamicFlowRuntimeReadiness()
 			}
 		}
@@ -341,21 +342,70 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadiness(
 	if am == nil || am.workflowInstances == nil {
 		return fmt.Errorf("dynamic flow runtime readiness reconciler requires manager and workflow store")
 	}
+	if source == nil {
+		return fmt.Errorf("dynamic flow runtime readiness reconciler requires semantic source")
+	}
 	key, err := newDynamicFlowRuntimeReadinessKey(runID, instancePath)
 	if err != nil {
 		return err
 	}
-	planCoordinate, err := am.dynamicFlowRuntimeReadinessPlanCoordinate(ctx, key)
+	readiness, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, key.instancePath)
 	if err != nil {
 		return err
 	}
+	planCoordinate := "missing"
+	if found {
+		planCoordinate, err = dynamicFlowRuntimeReadinessPlanCoordinate(readiness.Plan)
+		if err != nil {
+			return err
+		}
+	}
+	return am.reconcileDeclaredDynamicFlowRuntimeReadiness(ctx, key, planCoordinate, source)
+}
+
+func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessPlan(
+	ctx context.Context,
+	plan runtimepipeline.DynamicFlowRuntimeReadinessPlan,
+	source semanticview.Source,
+) error {
+	normalized, err := plan.Normalized()
+	if err != nil {
+		return err
+	}
+	key, err := newDynamicFlowRuntimeReadinessKey(normalized.RunID, normalized.Identity.InstancePath)
+	if err != nil {
+		return err
+	}
+	planCoordinate, err := dynamicFlowRuntimeReadinessPlanCoordinate(normalized)
+	if err != nil {
+		return err
+	}
+	return am.reconcileDeclaredDynamicFlowRuntimeReadiness(ctx, key, planCoordinate, source)
+}
+
+func (am *AgentManager) reconcileDeclaredDynamicFlowRuntimeReadiness(
+	ctx context.Context,
+	key dynamicFlowRuntimeReadinessKey,
+	planCoordinate string,
+	source semanticview.Source,
+) error {
 	am.dynamicFlowReadinessMu.Lock()
+	currentCoordinate, err := am.loadDynamicFlowRuntimeReadinessPlanCoordinate(ctx, key)
+	if err != nil {
+		am.dynamicFlowReadinessMu.Unlock()
+		return err
+	}
+	if currentCoordinate != planCoordinate {
+		am.dynamicFlowReadinessMu.Unlock()
+		return errDynamicFlowRuntimeReadinessPlanStale
+	}
 	if am.dynamicFlowReadinessAttempts == nil {
 		am.dynamicFlowReadinessAttempts = make(map[dynamicFlowRuntimeReadinessKey]*dynamicFlowRuntimeReadinessAttempt)
 	}
 	if attempt := am.dynamicFlowReadinessAttempts[key]; attempt != nil {
 		if planCoordinate != attempt.planCoordinate {
 			attempt.successorRequired = true
+			attempt.successorContext = ctx
 			attempt.successorSource = source
 			attempt.successorCoordinate = planCoordinate
 		}
@@ -374,15 +424,18 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadiness(
 	am.dynamicFlowReadinessAttempts[key] = attempt
 	am.dynamicFlowReadinessMu.Unlock()
 
+	currentContext := ctx
 	currentSource := source
 	for {
-		attemptErr := am.reconcileDynamicFlowRuntimeReadinessOnce(ctx, key, currentSource)
+		attemptErr := am.reconcileDynamicFlowRuntimeReadinessOnce(currentContext, key, currentSource)
 		am.dynamicFlowReadinessMu.Lock()
 		attempt.err = attemptErr
 		if attempt.successorRequired {
+			currentContext = attempt.successorContext
 			currentSource = attempt.successorSource
 			attempt.planCoordinate = attempt.successorCoordinate
 			attempt.successorRequired = false
+			attempt.successorContext = nil
 			attempt.successorSource = nil
 			attempt.successorCoordinate = ""
 			am.dynamicFlowReadinessMu.Unlock()
@@ -395,7 +448,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadiness(
 	}
 }
 
-func (am *AgentManager) dynamicFlowRuntimeReadinessPlanCoordinate(
+func (am *AgentManager) loadDynamicFlowRuntimeReadinessPlanCoordinate(
 	ctx context.Context,
 	key dynamicFlowRuntimeReadinessKey,
 ) (string, error) {
@@ -406,13 +459,23 @@ func (am *AgentManager) dynamicFlowRuntimeReadinessPlanCoordinate(
 	if !found {
 		return "missing", nil
 	}
-	normalized, err := readiness.Plan.Normalized()
+	return dynamicFlowRuntimeReadinessPlanCoordinate(readiness.Plan)
+}
+
+func dynamicFlowRuntimeReadinessPlanCoordinate(
+	plan runtimepipeline.DynamicFlowRuntimeReadinessPlan,
+) (string, error) {
+	normalized, err := plan.Normalized()
 	if err != nil {
 		return "", err
 	}
 	encoded, err := canonicaljson.Bytes(normalized)
 	if err != nil {
-		return "", fmt.Errorf("encode dynamic flow runtime readiness plan coordinate %s: %w", key.instancePath, err)
+		return "", fmt.Errorf(
+			"encode dynamic flow runtime readiness plan coordinate %s: %w",
+			normalized.Identity.InstancePath,
+			err,
+		)
 	}
 	return string(encoded), nil
 }
