@@ -6613,15 +6613,20 @@ engine:
       queue that operation in their selected mutation's post-commit work. Dynamic instances have one durable, idempotent
       runtime-readiness finalizer backed by `flow_instance_runtime_readiness`. Initial materialization atomically records an
       immutable `workflow_instance_initial_materializations` creation projection plus the desired exact route, complete
-      declared-agent revision set, creation run, and optional creation-event occurrence. Direct
+      declared-agent revision set, creation run, exact normalized
+      `{bundle_hash, bundle_source, workflow_version}` semantic-source coordinate, and optional creation-event occurrence.
+      `bundle_hash` and `bundle_source` come only from the canonical `BundleSourceFact`; changing any member of the source
+      coordinate changes the version-2 readiness plan and clears topology readiness even when projected agents and creation
+      facts compare equal. Direct
       activation, selected-mutation post-commit finalization, exact replay / `EnsureFlowInstance`, automatic retry, and startup
       consume one reconciler keyed by `{run_id, instance_id}`. A selected creation mutation persists its exact route rows but
       does not publish them into the process route table; EventBus recipient planning remains unaware of the route until the
       reconciler reloads current lifecycle eligibility, verifies all declared agents, publishes and verifies the persisted
       route, arms initial timers, and records topology readiness. It then reloads the exact plan and non-null readiness
       coordinate before accepting the process topology. Every revision-producing callback carries the exact normalized plan
-      committed by its selected mutation. Keyed admission serializes comparison of that declared coordinate against the
-      current durable plan; a delayed stale callback is rejected and cannot replace or join a newer queued successor. A newer
+      committed by its selected mutation and the matching typed context source fact. Callback admission rejects a
+      hash/provenance/version mismatch before coalescing. Keyed admission serializes comparison of that declared coordinate
+      against the current durable plan; a delayed stale callback is rejected and cannot replace or join a newer queued successor. A newer
       plan queued during an active keyed attempt is a mandatory successor, retains its own live operation context and semantic
       source, and completes before the owner releases waiters or returns success; it never inherits or joins the predecessor
       request result.
@@ -13315,7 +13320,10 @@ platform_tables:
         instance in a running or paused run. Every changed desired plan clears topology_ready_at, including after the
         immutable creation occurrence was emitted, so revised agent/route/timer topology remains pending until the exact
         keyed reconciler converges it again. While one eligible row owns an instance, its canonical plan is the sole desired
-        declared-agent topology owner. One selected-store agent-topology admission covers lifecycle first execution,
+        declared-agent topology owner. The fresh version-2 plan requires exact normalized `bundle_hash`, `bundle_source`,
+        and `workflow_version`; the first two are decoded from `BundleSourceFact`. Any member change invalidates
+        `topology_ready_at`, participates in the canonical plan fingerprint and completion compare-and-set, and queues
+        reconciliation. One selected-store agent-topology admission covers lifecycle first execution,
         duplicate/stored-result replay, raw agent projection writes, config/path/status rewrites, replacement, and
         terminalization. It locks and matches the exact `{run_id, instance_id, canonical plan fingerprint}`, desired
         membership or absence, and declared config revision before any write or replay return. Authorized replay remains
@@ -13326,8 +13334,10 @@ platform_tables:
         against the exact normalized plan that was reconciled; a concurrent source revision leaves its new plan pending
         and rejects completion by the stale attempt. After that compare-and-set, the reconciler reloads and accepts
         completion only while the exact plan still matches and `topology_ready_at` remains non-null. The keyed
-        reconciliation owner admits a revision callback only when its declared exact committed plan equals the current
-        durable plan under owner serialization. A delayed stale callback cannot overwrite a queued current successor. The
+        reconciliation owner first requires the callback context/EventBus source fact and semantic source to match the
+        plan's exact `{bundle_hash, bundle_source, workflow_version}` coordinate, then admits the callback only when its
+        declared exact committed plan equals the current durable plan under owner serialization. A delayed stale callback
+        cannot overwrite or join a queued current successor. The
         owner records a newer durable plan as a mandatory successor with that caller's live context and semantic source, and
         completes that successor before releasing any waiter or returning success; no post-CAS revision may join an older
         successful result or inherit a canceled predecessor request context. A pending

@@ -195,12 +195,19 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			store.ConfigureWorkflowInstanceLifecycle(&workflowInitialMaterializationTestOwner{})
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			occurredAt := time.Date(2026, time.July, 26, 13, 0, 0, 123456000, time.UTC)
+			sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+			if !ok {
+				t.Fatal("initial readiness context is missing bundle source fact")
+			}
+			bundleHash, bundleSource := sourceFact.StorageValues()
 			plan := DynamicFlowRuntimeReadinessPlan{
 				Identity: runtimeflowidentity.Instance{
 					TemplateID: "review", ScopeKey: "review", InstanceID: "inst-1",
 					InstancePath: "review/inst-1", EntityID: uuid.NewString(), HasStoredPath: true,
 				},
 				RunID:           runID,
+				BundleHash:      bundleHash,
+				BundleSource:    bundleSource,
 				WorkflowVersion: "1.0.0",
 				Agents: []DynamicFlowRuntimeAgentExpectation{
 					{AgentID: "reviewer-inst-1", ConfigRevision: strings.Repeat("a", 64)},
@@ -260,17 +267,29 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if items[0].TopologyReadyAt.IsZero() || items[0].CreationEventEmittedAt.IsZero() {
 				t.Fatalf("completed readiness = %#v", items[0])
 			}
-			revisedPlan := plan
-			revisedPlan.WorkflowVersion = "1.0.1"
-			reconciled, err := store.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, revisedPlan, readyAt.Add(2*time.Second))
-			if err != nil || !reconciled {
-				t.Fatalf("reconcile revised readiness plan: changed=%v err=%v", reconciled, err)
+			revisedSourceFact, err := runtimecorrelation.NewPersistedBundleSourceFact(
+				"bundle-v1:sha256:" + strings.Repeat("c", 64),
+			)
+			if err != nil {
+				t.Fatalf("revised bundle source fact: %v", err)
 			}
-			revised, found, err := store.LoadDynamicFlowRuntimeReadiness(ctx, runID, instance.StorageRef)
+			revisedCtx := runtimecorrelation.WithBundleSourceFact(ctx, revisedSourceFact)
+			revisedPlan := plan
+			revisedPlan.BundleHash, revisedPlan.BundleSource = revisedSourceFact.StorageValues()
+			reconciled, err := store.ReconcileDynamicFlowRuntimeReadinessPlan(revisedCtx, revisedPlan, readyAt.Add(2*time.Second))
+			if err != nil || !reconciled {
+				t.Fatalf("reconcile same-version revised-source readiness plan: changed=%v err=%v", reconciled, err)
+			}
+			revised, found, err := store.LoadDynamicFlowRuntimeReadiness(revisedCtx, runID, instance.StorageRef)
 			if err != nil || !found {
 				t.Fatalf("load revised readiness: found=%v err=%v", found, err)
 			}
-			if revised.Plan.WorkflowVersion != "1.0.1" || !revised.TopologyReadyAt.IsZero() || revised.CreationEventEmittedAt.IsZero() || !revised.Pending() {
+			if revised.Plan.WorkflowVersion != plan.WorkflowVersion ||
+				revised.Plan.BundleHash != revisedPlan.BundleHash ||
+				revised.Plan.BundleSource != revisedPlan.BundleSource ||
+				!revised.TopologyReadyAt.IsZero() ||
+				revised.CreationEventEmittedAt.IsZero() ||
+				!revised.Pending() {
 				t.Fatalf("revised readiness = %#v", revised)
 			}
 			conflictingCreation := revisedPlan
@@ -280,17 +299,20 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if _, err := store.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, conflictingCreation, readyAt.Add(3*time.Second)); err == nil {
 				t.Fatal("revised readiness replaced an emitted creation occurrence")
 			}
-			if err := store.MarkDynamicFlowRuntimeTopologyReady(ctx, plan, readyAt.Add(4*time.Second)); err == nil {
+			if err := store.MarkDynamicFlowRuntimeTopologyReady(revisedCtx, plan, readyAt.Add(4*time.Second)); err == nil {
 				t.Fatal("stale topology plan marked revised readiness complete")
 			}
-			stillRevised, found, err := store.LoadDynamicFlowRuntimeReadiness(ctx, runID, instance.StorageRef)
+			stillRevised, found, err := store.LoadDynamicFlowRuntimeReadiness(revisedCtx, runID, instance.StorageRef)
 			if err != nil || !found {
 				t.Fatalf("load readiness after stale topology completion: found=%v err=%v", found, err)
 			}
-			if stillRevised.Plan.WorkflowVersion != revisedPlan.WorkflowVersion || !stillRevised.TopologyReadyAt.IsZero() {
+			if stillRevised.Plan.BundleHash != revisedPlan.BundleHash ||
+				stillRevised.Plan.BundleSource != revisedPlan.BundleSource ||
+				stillRevised.Plan.WorkflowVersion != revisedPlan.WorkflowVersion ||
+				!stillRevised.TopologyReadyAt.IsZero() {
 				t.Fatalf("stale topology completion changed revised readiness: %#v", stillRevised)
 			}
-			if err := store.MarkDynamicFlowRuntimeTopologyReady(ctx, revisedPlan, readyAt.Add(4*time.Second)); err != nil {
+			if err := store.MarkDynamicFlowRuntimeTopologyReady(revisedCtx, revisedPlan, readyAt.Add(4*time.Second)); err != nil {
 				t.Fatalf("mark revised topology ready: %v", err)
 			}
 
@@ -315,11 +337,11 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 				t.Fatalf("mark no-auto topology ready: %v", err)
 			}
 			revisedNoAutoPlan := noAutoPlan
-			revisedNoAutoPlan.WorkflowVersion = "1.0.1"
-			if changed, err := store.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, revisedNoAutoPlan, readyAt.Add(5*time.Second)); err != nil || !changed {
+			revisedNoAutoPlan.BundleHash, revisedNoAutoPlan.BundleSource = revisedSourceFact.StorageValues()
+			if changed, err := store.ReconcileDynamicFlowRuntimeReadinessPlan(revisedCtx, revisedNoAutoPlan, readyAt.Add(5*time.Second)); err != nil || !changed {
 				t.Fatalf("reconcile revised no-auto readiness: changed=%v err=%v", changed, err)
 			}
-			revisedNoAuto, found, err := store.LoadDynamicFlowRuntimeReadiness(ctx, runID, noAutoInstance.StorageRef)
+			revisedNoAuto, found, err := store.LoadDynamicFlowRuntimeReadiness(revisedCtx, runID, noAutoInstance.StorageRef)
 			if err != nil || !found {
 				t.Fatalf("load revised no-auto readiness: found=%v err=%v", found, err)
 			}
@@ -328,11 +350,6 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			}
 
 			nextRunID := uuid.NewString()
-			sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
-			if !ok {
-				t.Fatal("readiness test context missing bundle source fact")
-			}
-			bundleHash, bundleSource := sourceFact.StorageValues()
 			if store.isSQLite() {
 				if _, err := store.db.ExecContext(ctx, `UPDATE runs SET status = 'cancelled' WHERE run_id = ?`, runID); err != nil {
 					t.Fatalf("retire first readiness run: %v", err)

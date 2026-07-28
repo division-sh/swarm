@@ -61,6 +61,10 @@ var errDynamicFlowRuntimeReadinessPlanStale = errors.New(
 	"dynamic flow runtime readiness declared plan is stale",
 )
 
+var errDynamicFlowRuntimeReadinessSourceStale = errors.New(
+	"dynamic flow runtime readiness callback source is stale",
+)
+
 func newDynamicFlowRuntimeReadinessKey(runID, instancePath string) (dynamicFlowRuntimeReadinessKey, error) {
 	key := dynamicFlowRuntimeReadinessKey{
 		runID:        strings.TrimSpace(runID),
@@ -159,6 +163,10 @@ func (am *AgentManager) reconcileEnsuredDynamicFlowRuntimeReadinessPlan(
 	}
 	expected := current.Plan
 	expected.Identity = req.Instance
+	expected.BundleHash, expected.BundleSource, err = dynamicFlowRuntimeReadinessSourceCoordinate(ctx)
+	if err != nil {
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, err
+	}
 	expected.WorkflowVersion = strings.TrimSpace(req.ContractBundle.WorkflowVersion())
 	expected.Agents = make([]runtimepipeline.DynamicFlowRuntimeAgentExpectation, 0, len(agentRecords))
 	for _, record := range agentRecords {
@@ -211,6 +219,10 @@ func (am *AgentManager) ReconcileDynamicFlowRuntimeReadinessPlansForRun(
 	if _, transactional := runtimepipeline.PipelineSQLTxFromContext(ctx); !transactional {
 		return fmt.Errorf("run-scoped dynamic flow runtime readiness reconciliation requires selected mutation")
 	}
+	bundleHash, bundleSource, err := dynamicFlowRuntimeReadinessSourceCoordinate(ctx)
+	if err != nil {
+		return err
+	}
 	items, err := am.workflowInstances.ListDynamicFlowRuntimeReadiness(ctx)
 	if err != nil {
 		return err
@@ -241,6 +253,8 @@ func (am *AgentManager) ReconcileDynamicFlowRuntimeReadinessPlansForRun(
 		}
 		expected := item.Plan
 		expected.Identity = projection.Identity
+		expected.BundleHash = bundleHash
+		expected.BundleSource = bundleSource
 		expected.WorkflowVersion = strings.TrimSpace(source.WorkflowVersion())
 		expected.Agents = make([]runtimepipeline.DynamicFlowRuntimeAgentExpectation, 0, len(records))
 		for _, record := range records {
@@ -355,6 +369,9 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadiness(
 	}
 	planCoordinate := "missing"
 	if found {
+		if err := validateDynamicFlowRuntimeReadinessCallbackSource(ctx, readiness.Plan, source); err != nil {
+			return err
+		}
 		planCoordinate, err = dynamicFlowRuntimeReadinessPlanCoordinate(readiness.Plan)
 		if err != nil {
 			return err
@@ -372,6 +389,9 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessPlan(
 	if err != nil {
 		return err
 	}
+	if err := validateDynamicFlowRuntimeReadinessCallbackSource(ctx, normalized, source); err != nil {
+		return err
+	}
 	key, err := newDynamicFlowRuntimeReadinessKey(normalized.RunID, normalized.Identity.InstancePath)
 	if err != nil {
 		return err
@@ -381,6 +401,51 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessPlan(
 		return err
 	}
 	return am.reconcileDeclaredDynamicFlowRuntimeReadiness(ctx, key, planCoordinate, source)
+}
+
+func dynamicFlowRuntimeReadinessSourceCoordinate(ctx context.Context) (string, string, error) {
+	sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	if !ok {
+		return "", "", fmt.Errorf("dynamic flow runtime readiness requires exact bundle source fact")
+	}
+	if err := sourceFact.Validate(); err != nil {
+		return "", "", fmt.Errorf("dynamic flow runtime readiness bundle source fact: %w", err)
+	}
+	bundleHash, bundleSource := sourceFact.StorageValues()
+	return bundleHash, bundleSource, nil
+}
+
+func validateDynamicFlowRuntimeReadinessCallbackSource(
+	ctx context.Context,
+	plan runtimepipeline.DynamicFlowRuntimeReadinessPlan,
+	source semanticview.Source,
+) error {
+	bundleHash, bundleSource, err := dynamicFlowRuntimeReadinessSourceCoordinate(ctx)
+	if err != nil {
+		return err
+	}
+	if bundleHash != plan.BundleHash || bundleSource != plan.BundleSource {
+		return fmt.Errorf(
+			"%w: declared=%s/%s active=%s/%s",
+			errDynamicFlowRuntimeReadinessSourceStale,
+			plan.BundleHash,
+			plan.BundleSource,
+			bundleHash,
+			bundleSource,
+		)
+	}
+	if source == nil {
+		return fmt.Errorf("dynamic flow runtime readiness reconciler requires semantic source")
+	}
+	if strings.TrimSpace(source.WorkflowVersion()) != plan.WorkflowVersion {
+		return fmt.Errorf(
+			"dynamic flow runtime readiness %s workflow version changed: persisted=%s active=%s",
+			plan.Identity.InstancePath,
+			plan.WorkflowVersion,
+			strings.TrimSpace(source.WorkflowVersion()),
+		)
+	}
+	return nil
 }
 
 func (am *AgentManager) reconcileDeclaredDynamicFlowRuntimeReadiness(
