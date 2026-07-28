@@ -122,8 +122,15 @@ func connectSourceRouteMatchesEndpoint(endpoint ConnectRoutePlanEndpoint, source
 	}
 	if endpoint.Root {
 		// Root ownership has no child flow identity to agree with. Entity-only
-		// lineage is compatible, but any flow evidence names a non-root source.
-		return source.FlowID == "" && source.FlowInstance == ""
+		// lineage is compatible. The package-root flow also stamps its own
+		// identity on emissions (flow_id = root flow name, flow_instance =
+		// run id): evidence whose instance ref resolves to the root semantic
+		// scope still names the package root, not a child flow.
+		if source.FlowID == "" && source.FlowInstance == "" {
+			return true
+		}
+		return source.FlowInstance != "" &&
+			runtimeflowidentity.SemanticScopeFromFlowInstanceRef(source.FlowInstance) == ""
 	}
 
 	sourcePath := strings.Trim(strings.TrimSpace(endpoint.FlowPath), "/")
