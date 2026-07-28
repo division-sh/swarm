@@ -139,7 +139,28 @@ type AgentLifecycleTransition struct {
 	RunMode            AgentRunMode
 	Agent              *PersistedAgent
 	Subordinate        sessions.LifecycleMutationPlan
+	DynamicTopology    *DynamicAgentTopologyMutation
 	Now                time.Time
+}
+
+type DynamicAgentTopologyMutation struct {
+	runID           string
+	instancePath    string
+	planFingerprint string
+	desiredPresent  bool
+}
+
+func (m DynamicAgentTopologyMutation) AuthorityFacts() (runID, instancePath, planFingerprint string, desiredPresent bool) {
+	return m.runID, m.instancePath, m.planFingerprint, m.desiredPresent
+}
+
+type AgentLifecycleState struct {
+	AgentID        string
+	RuntimeEpoch   int64
+	Generation     uint64
+	Phase          AgentLifecyclePhase
+	ConfigRevision string
+	RunMode        AgentRunMode
 }
 
 type AgentLifecycleTransitionResult struct {
@@ -160,6 +181,10 @@ type AgentLifecycleTransitionResult struct {
 
 type AgentLifecyclePersistence interface {
 	CommitAgentLifecycleTransition(context.Context, AgentLifecycleTransition) (AgentLifecycleTransitionResult, error)
+}
+
+type AgentLifecycleStateReader interface {
+	LoadAgentLifecycleState(context.Context, string) (AgentLifecycleState, bool, error)
 }
 
 type AgentLifecycleDiagnostic struct {

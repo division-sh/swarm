@@ -31,9 +31,95 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+func TestRebuildPendingDynamicFlowRuntimeCreationEventPlanUsesRevisedCanonicalSchema(t *testing.T) {
+	sourceV2 := notifyallchildren.LoadSource(t, notifyallchildren.Options{
+		AgentTopologyRevision: 2,
+		AutoEmitOnCreate:      true,
+		AutoEmitEventRevision: 2,
+	})
+	schemaV2, ok := sourceV2.FlowSchemaByID(notifyallchildren.ChildFlowID)
+	if !ok {
+		t.Fatal("revised account schema is missing")
+	}
+	identity := runtimeflowidentity.Instance{
+		TemplateID:    notifyallchildren.ChildFlowID,
+		ScopeKey:      notifyallchildren.ChildFlowID,
+		InstanceID:    "acct-1",
+		InstancePath:  "account/acct-1",
+		EntityID:      uuid.NewString(),
+		HasStoredPath: true,
+	}
+	occurredAt := time.Date(2026, time.July, 27, 22, 0, 0, 0, time.UTC)
+	current := &runtimepipeline.DynamicFlowRuntimeCreationEventPlan{
+		EventID: uuid.NewString(), EventType: "account/acct-1/account.created",
+		RunID: uuid.NewString(), ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live,
+		Payload: []byte(`{"account_id":"acct-1"}`), CreatedAt: occurredAt,
+	}
+	revised, err := rebuildPendingDynamicFlowRuntimeCreationEventPlan(
+		current,
+		false,
+		sourceV2,
+		schemaV2,
+		identity,
+		map[string]any{"account_id": "acct-1"},
+	)
+	if err != nil {
+		t.Fatalf("rebuild pending creation plan: %v", err)
+	}
+	if revised == nil || !strings.HasSuffix(revised.EventType, "/account.revised") {
+		t.Fatalf("revised creation event = %#v", revised)
+	}
+	if revised.EventID == current.EventID {
+		t.Fatal("revised creation event reused stale event identity")
+	}
+	if revised.RunID != current.RunID || revised.ParentEventID != current.ParentEventID ||
+		revised.ExecutionMode != current.ExecutionMode || !revised.CreatedAt.Equal(current.CreatedAt) {
+		t.Fatalf("revised creation lineage changed: current=%#v revised=%#v", current, revised)
+	}
+
+	sourceNoAuto := notifyallchildren.LoadSource(t, notifyallchildren.Options{AgentTopologyRevision: 2})
+	schemaNoAuto, ok := sourceNoAuto.FlowSchemaByID(notifyallchildren.ChildFlowID)
+	if !ok {
+		t.Fatal("no-auto account schema is missing")
+	}
+	removed, err := rebuildPendingDynamicFlowRuntimeCreationEventPlan(
+		current,
+		false,
+		sourceNoAuto,
+		schemaNoAuto,
+		identity,
+		map[string]any{"account_id": "acct-1"},
+	)
+	if err != nil || removed != nil {
+		t.Fatalf("removed auto-emit plan = %#v err=%v", removed, err)
+	}
+	if _, err := rebuildPendingDynamicFlowRuntimeCreationEventPlan(
+		nil,
+		false,
+		sourceV2,
+		schemaV2,
+		identity,
+		map[string]any{"account_id": "acct-1"},
+	); err == nil {
+		t.Fatal("introduced auto-emit without persisted lineage")
+	}
+	preserved, err := rebuildPendingDynamicFlowRuntimeCreationEventPlan(
+		current,
+		true,
+		sourceV2,
+		schemaV2,
+		identity,
+		map[string]any{"account_id": "acct-1"},
+	)
+	if err != nil || preserved != current {
+		t.Fatalf("emitted creation plan was not preserved: plan=%#v err=%v", preserved, err)
+	}
+}
 
 type flowActivationRouteStore interface {
 	UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error

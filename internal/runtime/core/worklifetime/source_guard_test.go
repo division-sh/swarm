@@ -28,8 +28,8 @@ type asyncSiteLedgerEntry struct {
 var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"after_func|internal/apiv1/handler.go|webSocketSession.run|426":                                                      {asyncSiteCanonicalOwner, "session lease cancellation closes the socket and the owned subscription joins before release"},
 	"after_func|internal/runtime/core/worklifetime/worklifetime.go|gate.beginClass|105":                                  {asyncSiteCanonicalOwner, "the canonical gate binds lease cancellation to its typed occurrence"},
-	"after_func|internal/runtime/manager/lifecycle_coordinator.go|agentLifecycleCoordinator.acquireExecution|925":        {asyncSiteCanonicalOwner, "the exact agent generation cancels and joins the acquired execution lease"},
-	"after_func|internal/runtime/manager/runtime.go|AgentManager.launchExecutionLoop|1739":                               {asyncSiteCanonicalOwner, "the exact agent-generation cancellation is bridged into the pre-admitted Manager lease and joined with that loop"},
+	"after_func|internal/runtime/manager/lifecycle_coordinator.go|agentLifecycleCoordinator.acquireExecution|1046":       {asyncSiteCanonicalOwner, "the exact agent generation cancels and joins the acquired execution lease"},
+	"after_func|internal/runtime/manager/runtime.go|AgentManager.launchExecutionLoop|1752":                               {asyncSiteCanonicalOwner, "the exact agent-generation cancellation is bridged into the pre-admitted Manager lease and joined with that loop"},
 	"go|cmd/swarm-test-postgres/main.go|run|74":                                                                          {asyncSiteSynchronousJoin, "the test harness joins command completion through its result channel"},
 	"go|internal/apiv1/handler.go|webSocketSession.run|435":                                                              {asyncSiteCanonicalOwner, "the process-owned websocket session settles after the writer goroutine exits"},
 	"go|internal/apiv1/operator_conversation_fork.go|executeConversationForkChatWithHeartbeat|268":                       {asyncSiteCanonicalOwner, "the operation heartbeat has a typed lease and is canceled and joined by the enclosing call"},
@@ -52,7 +52,7 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"go|internal/runtime/manager/runtime.go|AgentManager.Run|768":                                                        {asyncSiteCanonicalOwner, "the retry loop acquires the Manager run occurrence before launch and publishes settlement"},
 	"go|internal/runtime/manager/runtime.go|AgentManager.ShutdownWithOptions|148":                                        {asyncSiteCanonicalOwner, "the pre-reserved outer-runtime executor joins the fenced Manager generation and settles before shutdown returns"},
 	"go|internal/runtime/manager/runtime.go|AgentManager.executePreparedDirectiveOperation|574":                          {asyncSiteCanonicalOwner, "the directive heartbeat owns a lease and is canceled and joined by the directive operation"},
-	"go|internal/runtime/manager/runtime.go|AgentManager.launchExecutionLoop|1737":                                       {asyncSiteCanonicalOwner, "the pre-admitted Manager generation and exact agent generation jointly own and join the execution loop"},
+	"go|internal/runtime/manager/runtime.go|AgentManager.launchExecutionLoop|1750":                                       {asyncSiteCanonicalOwner, "the pre-admitted Manager generation and exact agent generation jointly own and join the execution loop"},
 	"go|internal/runtime/manager/runtime.go|AgentManager.resetRuntimeState|1405":                                         {asyncSiteCanonicalOwner, "the pre-reserved outer-runtime executor joins the fenced Manager generation before reset cleanup"},
 	"go|internal/runtime/manager/runtime.go|AgentManager.startShutdownWatcher|819":                                       {asyncSiteCanonicalOwner, "the pre-reserved outer-runtime executor completes the retained transition after all accepted Manager work settles"},
 	"go|internal/runtime/mcp/client.go|newStdioRPCClient|417":                                                            {asyncSiteSynchronousJoin, "the stdio client read loop is canceled and joined by client close"},
@@ -81,7 +81,7 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"owner_action|internal/runtime/bus/outbox.go|engineDispatcher.DispatchPostCommit|169":                                {asyncSiteCanonicalOwner, "post-commit engine dispatch is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/bus/outbox.go|engineOutbox.WriteOutbox|118":                                           {asyncSiteCanonicalOwner, "outbox post-commit dispatch is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/bus/outbox.go|engineOutbox.WriteOutbox|83":                                            {asyncSiteCanonicalOwner, "outbox rollback claim release is wrapped by an owner-bound action lease"},
-	"owner_action|internal/runtime/manager/agent_manager.go|AgentManager.spawnAgentInternalForSource|354":                {asyncSiteCanonicalOwner, "agent registration post-commit work is wrapped by an owner-bound action lease"},
+	"owner_action|internal/runtime/manager/agent_manager.go|AgentManager.spawnAgentInternalForSourceWithTopology|364":    {asyncSiteCanonicalOwner, "agent registration post-commit work is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/manager/flow_activation.go|AgentManager.ActivateFlowInstance|197":                     {asyncSiteCanonicalOwner, "the one durable dynamic-runtime readiness finalizer is wrapped by an owner-bound post-commit action lease"},
 	"owner_action|internal/runtime/manager/flow_activation.go|AgentManager.EnsureFlowInstance|243":                       {asyncSiteCanonicalOwner, "exact replay and ensure consume the durable readiness finalizer after selected-mutation commit"},
 	"owner_action|internal/runtime/manager/flow_activation.go|AgentManager.deactivateFlowInstanceModelInMutation|763":    {asyncSiteCanonicalOwner, "flow deactivation post-commit work is wrapped by an owner-bound action lease"},
@@ -96,7 +96,7 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 }
 
 func init() {
-	productionAsyncSiteLedger["owner_action|internal/runtime/manager/flow_runtime_readiness.go|AgentManager.ReconcileDynamicFlowRuntimeReadinessPlansForRun|253"] = asyncSiteLedgerEntry{
+	productionAsyncSiteLedger["owner_action|internal/runtime/manager/flow_runtime_readiness.go|AgentManager.ReconcileDynamicFlowRuntimeReadinessPlansForRun|276"] = asyncSiteLedgerEntry{
 		class: asyncSiteCanonicalOwner,
 		proof: "source revision queues each changed run-local readiness key for post-commit topology reconciliation",
 	}

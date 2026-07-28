@@ -17,8 +17,68 @@ import (
 
 var _ runtimemanager.AgentLifecyclePersistence = (*PostgresStore)(nil)
 var _ runtimemanager.AgentLifecyclePersistence = (*SQLiteRuntimeStore)(nil)
+var _ runtimemanager.AgentLifecycleStateReader = (*PostgresStore)(nil)
+var _ runtimemanager.AgentLifecycleStateReader = (*SQLiteRuntimeStore)(nil)
 var _ runtimemanager.AgentLifecycleDiagnosticPersistence = (*PostgresStore)(nil)
 var _ runtimemanager.AgentLifecycleDiagnosticPersistence = (*SQLiteRuntimeStore)(nil)
+
+func (s *PostgresStore) LoadAgentLifecycleState(
+	ctx context.Context,
+	agentID string,
+) (runtimemanager.AgentLifecycleState, bool, error) {
+	var state runtimemanager.AgentLifecycleState
+	var generation int64
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT agent_id, lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase,
+		       lifecycle_config_revision, lifecycle_run_mode
+		FROM agents
+		WHERE agent_id = $1
+	`, strings.TrimSpace(agentID)).Scan(
+		&state.AgentID,
+		&state.RuntimeEpoch,
+		&generation,
+		&state.Phase,
+		&state.ConfigRevision,
+		&state.RunMode,
+	)
+	if err == sql.ErrNoRows {
+		return runtimemanager.AgentLifecycleState{}, false, nil
+	}
+	if err != nil {
+		return runtimemanager.AgentLifecycleState{}, false, err
+	}
+	state.Generation = uint64(generation)
+	return state, true, nil
+}
+
+func (s *SQLiteRuntimeStore) LoadAgentLifecycleState(
+	ctx context.Context,
+	agentID string,
+) (runtimemanager.AgentLifecycleState, bool, error) {
+	var state runtimemanager.AgentLifecycleState
+	var generation int64
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT agent_id, lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase,
+		       lifecycle_config_revision, lifecycle_run_mode
+		FROM agents
+		WHERE agent_id = ?
+	`, strings.TrimSpace(agentID)).Scan(
+		&state.AgentID,
+		&state.RuntimeEpoch,
+		&generation,
+		&state.Phase,
+		&state.ConfigRevision,
+		&state.RunMode,
+	)
+	if err == sql.ErrNoRows {
+		return runtimemanager.AgentLifecycleState{}, false, nil
+	}
+	if err != nil {
+		return runtimemanager.AgentLifecycleState{}, false, err
+	}
+	state.Generation = uint64(generation)
+	return state, true, nil
+}
 
 func (s *PostgresStore) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]runtimemanager.AgentLifecycleDiagnostic, error) {
 	if limit <= 0 {
@@ -112,6 +172,9 @@ func (s *PostgresStore) CommitAgentLifecycleTransition(ctx context.Context, req 
 		if err != nil {
 			return err
 		}
+		if err := authorizePostgresDynamicAgentTopologyMutation(txctx, tx, req); err != nil {
+			return err
+		}
 		if err := validateLifecycleExpectation(req, previous, exists); err != nil {
 			return err
 		}
@@ -150,6 +213,9 @@ func (s *SQLiteRuntimeStore) CommitAgentLifecycleTransition(ctx context.Context,
 		}
 		previous, exists, err := loadSQLiteLifecycleCell(txctx, tx, req.AgentID)
 		if err != nil {
+			return err
+		}
+		if err := authorizeSQLiteDynamicAgentTopologyMutation(txctx, tx, req); err != nil {
 			return err
 		}
 		if err := validateLifecycleExpectation(req, previous, exists); err != nil {
