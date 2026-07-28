@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -29,6 +30,11 @@ type workflowInitialMaterializationTestOwner struct {
 	effects int
 }
 
+type concurrentWorkflowInitialMaterializationTestOwner struct {
+	mu      sync.Mutex
+	effects int
+}
+
 type workflowCreationOccurrenceTestPublisher struct{}
 
 func (workflowCreationOccurrenceTestPublisher) PublishInMutation(context.Context, events.Event) error {
@@ -40,7 +46,24 @@ func (o *workflowInitialMaterializationTestOwner) ApplyWorkflowLifecycleEffects(
 	return nil
 }
 
+func (o *concurrentWorkflowInitialMaterializationTestOwner) ApplyWorkflowLifecycleEffects(_ context.Context, effects []runtimeworkflowlifecycle.Effect) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.effects += len(effects)
+	return nil
+}
+
+func (o *concurrentWorkflowInitialMaterializationTestOwner) effectCount() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.effects
+}
+
 func (*workflowInitialMaterializationTestOwner) ArmInitialEntryTimers(context.Context, string) error {
+	return nil
+}
+
+func (*concurrentWorkflowInitialMaterializationTestOwner) ArmInitialEntryTimers(context.Context, string) error {
 	return nil
 }
 
@@ -166,6 +189,112 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 				t.Fatalf("missing creation record failure = %#v, want conflicting duplicate", failure)
 			}
 		})
+	}
+}
+
+func TestWorkflowInitialMaterializationConcurrentExactReplayPostgres(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	db.SetMaxOpenConns(6)
+	db.SetMaxIdleConns(6)
+	ctx, cancel := context.WithTimeout(testPipelineRunContext(t, db), 10*time.Second)
+	defer cancel()
+	store := NewWorkflowInstanceStore(db)
+	owner := &concurrentWorkflowInitialMaterializationTestOwner{}
+	store.ConfigureWorkflowInstanceLifecycle(owner)
+	occurredAt := time.Date(2026, time.July, 28, 14, 0, 0, 123456000, time.UTC)
+	const storageRef = "review/inst-1"
+	newInstance := func() WorkflowInstance {
+		return WorkflowInstance{
+			InstanceID:      "inst-1",
+			StorageRef:      storageRef,
+			WorkflowName:    "review",
+			WorkflowVersion: "1.0.0",
+			CurrentState:    "pending",
+			Config:          map[string]any{"attempt_limit": 3},
+			Metadata: map[string]any{
+				"instance_id": "inst-1",
+				"flow_path":   storageRef,
+			},
+		}
+	}
+
+	lockTx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin instance lock transaction: %v", err)
+	}
+	defer lockTx.Rollback()
+	if _, err := lockTx.ExecContext(ctx,
+		`SELECT pg_advisory_xact_lock(hashtext($1))`,
+		"workflow-instance:"+storageRef,
+	); err != nil {
+		t.Fatalf("hold instance lock: %v", err)
+	}
+
+	type materializationResult struct {
+		result WorkflowInitialMaterializationResult
+		err    error
+	}
+	results := make(chan materializationResult, 2)
+	for range 2 {
+		go func() {
+			result, err := store.MaterializeInitialEntry(ctx, newInstance(), occurredAt)
+			results <- materializationResult{result: result, err: err}
+		}()
+	}
+	waitForWorkflowInstanceAdvisoryWaiters(t, ctx, db, 1)
+	if err := lockTx.Commit(); err != nil {
+		t.Fatalf("release instance lock: %v", err)
+	}
+
+	counts := map[WorkflowInitialMaterializationResult]int{}
+	for range 2 {
+		select {
+		case got := <-results:
+			if got.err != nil {
+				t.Fatalf("concurrent exact materialization: %v", got.err)
+			}
+			counts[got.result]++
+		case <-ctx.Done():
+			t.Fatalf("concurrent exact materialization did not finish: %v", context.Cause(ctx))
+		}
+	}
+	if counts[WorkflowInitialMaterializationCreated] != 1 ||
+		counts[WorkflowInitialMaterializationAlreadyExists] != 1 {
+		t.Fatalf("concurrent materialization dispositions = %#v, want one created and one exact replay", counts)
+	}
+	if got := owner.effectCount(); got != 1 {
+		t.Fatalf("concurrent initial-entry effects = %d, want exactly 1", got)
+	}
+}
+
+func waitForWorkflowInstanceAdvisoryWaiters(t *testing.T, ctx context.Context, db interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, want int) {
+	t.Helper()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var waiting int
+		if err := db.QueryRowContext(ctx, `
+			SELECT COUNT(*)
+			FROM pg_stat_activity
+			WHERE datname = current_database()
+			  AND pid <> pg_backend_pid()
+			  AND wait_event_type = 'Lock'
+			  AND wait_event = 'advisory'
+			  AND query LIKE '%pg_advisory_xact_lock%'
+		`).Scan(&waiting); err != nil {
+			t.Fatalf("inspect workflow-instance lock waiters: %v", err)
+		}
+		if waiting >= want {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			t.Fatalf("workflow-instance lock waiters = %d, want at least %d: %v", waiting, want, context.Cause(ctx))
+		}
 	}
 }
 
