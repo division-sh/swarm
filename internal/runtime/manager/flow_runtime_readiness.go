@@ -497,6 +497,17 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		_ = am.retireDynamicFlowProcessTopology(key.instancePath)
 		return nil
 	}
+	current, err := dynamicFlowRuntimeReadinessPlanMatches(fresh.Plan, plan)
+	if err != nil {
+		return fmt.Errorf("verify completed dynamic flow runtime readiness %s: %w", readiness.InstancePath, err)
+	}
+	if !current || fresh.TopologyReadyAt.IsZero() {
+		retireErr := am.retireDynamicFlowProcessTopology(key.instancePath)
+		return errors.Join(
+			fmt.Errorf("dynamic flow runtime readiness changed after topology completion for %s", readiness.InstancePath),
+			retireErr,
+		)
+	}
 	if plan.CreationEvent == nil || !fresh.CreationEventEmittedAt.IsZero() {
 		published = false
 		return nil
@@ -559,19 +570,30 @@ func (am *AgentManager) dynamicFlowRuntimeReadinessStillEligible(
 		_ = am.retireDynamicFlowProcessTopology(key.instancePath)
 		return false, fmt.Errorf("dynamic flow runtime readiness identity changed for %s", key.instancePath)
 	}
-	actualJSON, err := canonicaljson.Bytes(fresh.Plan)
+	current, err := dynamicFlowRuntimeReadinessPlanMatches(fresh.Plan, expected)
 	if err != nil {
-		return false, fmt.Errorf("encode current dynamic flow runtime readiness %s: %w", key.instancePath, err)
+		return false, fmt.Errorf("compare dynamic flow runtime readiness plan %s: %w", key.instancePath, err)
 	}
-	expectedJSON, err := canonicaljson.Bytes(expected)
-	if err != nil {
-		return false, fmt.Errorf("encode expected dynamic flow runtime readiness %s: %w", key.instancePath, err)
-	}
-	if string(actualJSON) != string(expectedJSON) {
+	if !current {
 		_ = am.retireDynamicFlowProcessTopology(key.instancePath)
 		return false, fmt.Errorf("dynamic flow runtime readiness plan changed for %s", key.instancePath)
 	}
 	return true, nil
+}
+
+func dynamicFlowRuntimeReadinessPlanMatches(
+	actual runtimepipeline.DynamicFlowRuntimeReadinessPlan,
+	expected runtimepipeline.DynamicFlowRuntimeReadinessPlan,
+) (bool, error) {
+	actualJSON, err := canonicaljson.Bytes(actual)
+	if err != nil {
+		return false, fmt.Errorf("encode current plan: %w", err)
+	}
+	expectedJSON, err := canonicaljson.Bytes(expected)
+	if err != nil {
+		return false, fmt.Errorf("encode expected plan: %w", err)
+	}
+	return string(actualJSON) == string(expectedJSON), nil
 }
 
 func (am *AgentManager) publishPersistedDynamicFlowRoute(req runtimebus.FlowInstanceRouteMaterializationRequest) error {
