@@ -240,7 +240,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 				t.Fatalf("exact replay: result=%d err=%v", result, err)
 			}
 			readyAt := occurredAt.Add(time.Second)
-			if err := store.MarkDynamicFlowRuntimeTopologyReady(ctx, runID, instance.StorageRef, readyAt); err != nil {
+			if err := store.MarkDynamicFlowRuntimeTopologyReady(ctx, plan, readyAt); err != nil {
 				t.Fatalf("mark topology ready: %v", err)
 			}
 			creationEvent := workflowReadinessCreationEventForTest(t, plan)
@@ -280,7 +280,17 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if _, err := store.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, conflictingCreation, readyAt.Add(3*time.Second)); err == nil {
 				t.Fatal("revised readiness replaced an emitted creation occurrence")
 			}
-			if err := store.MarkDynamicFlowRuntimeTopologyReady(ctx, runID, instance.StorageRef, readyAt.Add(4*time.Second)); err != nil {
+			if err := store.MarkDynamicFlowRuntimeTopologyReady(ctx, plan, readyAt.Add(4*time.Second)); err == nil {
+				t.Fatal("stale topology plan marked revised readiness complete")
+			}
+			stillRevised, found, err := store.LoadDynamicFlowRuntimeReadiness(ctx, runID, instance.StorageRef)
+			if err != nil || !found {
+				t.Fatalf("load readiness after stale topology completion: found=%v err=%v", found, err)
+			}
+			if stillRevised.Plan.WorkflowVersion != revisedPlan.WorkflowVersion || !stillRevised.TopologyReadyAt.IsZero() {
+				t.Fatalf("stale topology completion changed revised readiness: %#v", stillRevised)
+			}
+			if err := store.MarkDynamicFlowRuntimeTopologyReady(ctx, revisedPlan, readyAt.Add(4*time.Second)); err != nil {
 				t.Fatalf("mark revised topology ready: %v", err)
 			}
 
@@ -301,7 +311,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if result, err := store.MaterializeInitialEntry(ctx, noAutoInstance, occurredAt); err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("no-auto materialization: result=%d err=%v", result, err)
 			}
-			if err := store.MarkDynamicFlowRuntimeTopologyReady(ctx, runID, noAutoInstance.StorageRef, readyAt); err != nil {
+			if err := store.MarkDynamicFlowRuntimeTopologyReady(ctx, noAutoPlan, readyAt); err != nil {
 				t.Fatalf("mark no-auto topology ready: %v", err)
 			}
 			revisedNoAutoPlan := noAutoPlan
@@ -379,7 +389,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if _, err := store.db.ExecContext(nextContext, statusQuery, "cancelled", nextRunID); err != nil {
 				t.Fatalf("retire successor readiness run: %v", err)
 			}
-			if err := store.MarkDynamicFlowRuntimeTopologyReady(nextContext, nextRunID, instance.StorageRef, occurredAt.Add(2*time.Hour)); err == nil {
+			if err := store.MarkDynamicFlowRuntimeTopologyReady(nextContext, nextPlan, occurredAt.Add(2*time.Hour)); err == nil {
 				t.Fatal("terminal successor accepted topology completion")
 			}
 			if successor, found, err := store.LoadDynamicFlowRuntimeReadiness(nextContext, nextRunID, instance.StorageRef); err != nil || !found {

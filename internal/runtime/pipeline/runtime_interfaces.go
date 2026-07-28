@@ -69,7 +69,7 @@ type WorkflowInstancePersistence interface {
 	LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID, instanceID string) (DynamicFlowRuntimeReadiness, bool, error)
 	ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]DynamicFlowRuntimeReadiness, error)
 	ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]DynamicFlowRuntimeReadinessKey, error)
-	MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, runID, instanceID string, readyAt time.Time) error
+	MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error
 	CommitDynamicFlowRuntimeCreationOccurrence(context.Context, DynamicFlowRuntimeCreationOccurrenceRequest, DynamicFlowRuntimeCreationOccurrencePublisher) error
 	Upsert(ctx context.Context, instance WorkflowInstance) error
 	MarkTerminated(ctx context.Context, instanceID string, terminatedAt time.Time) error

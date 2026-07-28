@@ -358,7 +358,11 @@ func (s *startupReadinessFinalizationStore) ListDynamicFlowRuntimeReadinessKeys(
 	return keys, nil
 }
 
-func (*startupReadinessFinalizationStore) MarkDynamicFlowRuntimeTopologyReady(context.Context, string, string, time.Time) error {
+func (*startupReadinessFinalizationStore) MarkDynamicFlowRuntimeTopologyReady(
+	context.Context,
+	runtimepipeline.DynamicFlowRuntimeReadinessPlan,
+	time.Time,
+) error {
 	return errors.New("unexpected readiness topology completion")
 }
 

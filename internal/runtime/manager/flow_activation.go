@@ -31,7 +31,7 @@ type flowInstancePersistence interface {
 	LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID, instanceID string) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
 	ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error)
 	ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadinessKey, error)
-	MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, runID, instanceID string, readyAt time.Time) error
+	MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error
 	CommitDynamicFlowRuntimeCreationOccurrence(context.Context, runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest, runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher) error
 	MarkTerminated(ctx context.Context, storageRef string, terminatedAt time.Time) error
 	Load(ctx context.Context, instanceID string) (runtimepipeline.WorkflowInstance, bool, error)
