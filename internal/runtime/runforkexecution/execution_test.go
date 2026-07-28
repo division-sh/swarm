@@ -133,8 +133,10 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			if test.seedSourceTimer {
 				sourceTimerID = uuid.NewString()
 				ref := timeridentity.WorkflowTimerActivationRef{
-					ActivationID: sourceTimerID,
-					Declaration:  "test-node.check_timer",
+					ActivationID:        sourceTimerID,
+					Declaration:         "test-node.check_timer",
+					DeclarationRevision: "sha256:test-node-check-timer",
+					Cause:               timeridentity.WorkflowTimerActivationCauseInitial,
 				}
 				if _, err := db.ExecContext(ctx, `
 					INSERT INTO timers (

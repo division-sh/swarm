@@ -28,8 +28,10 @@ func TestWorkflowTimerWakeupReplacementUsesOneCanonicalSchedulerProjection(t *te
 
 	dueAt := canonicalWorkflowTimerTime(time.Now().Add(100 * time.Millisecond))
 	ref := timeridentity.WorkflowTimerActivationRef{
-		ActivationID: timeridentity.WorkflowTimerActivationID("workflow-timer-replacement"),
-		Declaration:  "review.expiry",
+		ActivationID:        timeridentity.WorkflowTimerActivationID("workflow-timer-replacement"),
+		Declaration:         "review.expiry",
+		DeclarationRevision: "sha256:review-expiry",
+		Cause:               timeridentity.WorkflowTimerActivationCauseInitial,
 	}
 	wakeup := WorkflowTimerWakeup{
 		family: workflowTimerActivationWakeup,
@@ -156,8 +158,10 @@ func TestWorkflowTimerWakeupRollbackRestoresPredecessorLifecycleBinding(t *testi
 
 	dueAt := canonicalWorkflowTimerTime(time.Now().Add(100 * time.Millisecond))
 	ref := timeridentity.WorkflowTimerActivationRef{
-		ActivationID: timeridentity.WorkflowTimerActivationID("workflow-timer-rollback"),
-		Declaration:  "review.expiry",
+		ActivationID:        timeridentity.WorkflowTimerActivationID("workflow-timer-rollback"),
+		Declaration:         "review.expiry",
+		DeclarationRevision: "sha256:review-expiry",
+		Cause:               timeridentity.WorkflowTimerActivationCauseInitial,
 	}
 	wakeup := WorkflowTimerWakeup{
 		family: workflowTimerActivationWakeup,
@@ -205,8 +209,10 @@ func TestWorkflowTimerSchedulerBindingFailsClosed(t *testing.T) {
 		family: workflowTimerActivationWakeup,
 		occurrence: timeridentity.WorkflowTimerOccurrenceRef{
 			Activation: timeridentity.WorkflowTimerActivationRef{
-				ActivationID: timeridentity.WorkflowTimerActivationID("workflow-timer-binding"),
-				Declaration:  "review.expiry",
+				ActivationID:        timeridentity.WorkflowTimerActivationID("workflow-timer-binding"),
+				Declaration:         "review.expiry",
+				DeclarationRevision: "sha256:review-expiry",
+				Cause:               timeridentity.WorkflowTimerActivationCauseInitial,
 			},
 			DueAt: dueAt,
 		},

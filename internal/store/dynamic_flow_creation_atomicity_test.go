@@ -55,6 +55,10 @@ func (dynamicFlowCreationAtomicityLifecycle) ArmInitialEntryTimers(context.Conte
 	return nil
 }
 
+func (dynamicFlowCreationAtomicityLifecycle) ReconcileInitialEntryTimers(context.Context, string) error {
+	return nil
+}
+
 func (dynamicFlowCreationAtomicityLifecycle) RetireInitialEntryTimerWakeups(context.Context, string) error {
 	return nil
 }

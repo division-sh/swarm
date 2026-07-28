@@ -11,8 +11,10 @@ import (
 func TestWorkflowTimerActivationAndOccurrenceIdentityAreCanonical(t *testing.T) {
 	activationID := WorkflowTimerActivationID("run-1", "entity-1", "review/one", "review.expiry", "", "initial", "", "", "", "", "waiting")
 	ref := WorkflowTimerActivationRef{
-		ActivationID: activationID,
-		Declaration:  "review.expiry",
+		ActivationID:        activationID,
+		Declaration:         "review.expiry",
+		DeclarationRevision: "sha256:revision",
+		Cause:               WorkflowTimerActivationCauseInitial,
 		Generation: attemptgeneration.Generation{
 			LoopID: "revision", RevisionField: "revision_id", RevisionID: "rev-1", Attempt: 2,
 		},
@@ -42,12 +44,20 @@ func TestWorkflowTimerActivationAndOccurrenceIdentityAreCanonical(t *testing.T) 
 
 func TestWorkflowTimerIdentityRejectsNonCanonicalOrUnknownFields(t *testing.T) {
 	activationID := WorkflowTimerActivationID("run-1", "entity-1")
-	valid := WorkflowTimerActivationRef{ActivationID: activationID, Declaration: "timer"}.TaskID()
+	valid := WorkflowTimerActivationRef{
+		ActivationID:        activationID,
+		Declaration:         "timer",
+		DeclarationRevision: "sha256:revision",
+		Cause:               WorkflowTimerActivationCauseInitial,
+	}.TaskID()
 	if _, ok := ParseWorkflowTimerActivationTaskID(" " + valid); ok {
 		t.Fatal("non-canonical whitespace-wrapped activation identity was accepted")
 	}
 	if _, ok := ParseWorkflowTimerActivationTaskID(valid + "junk"); ok {
 		t.Fatal("activation identity with trailing data was accepted")
+	}
+	if _, ok := ParseWorkflowTimerActivationTaskID(strings.Replace(valid, "workflow_timer:v2:", "workflow_timer:v1:", 1)); ok {
+		t.Fatal("unsupported version-1 activation identity was accepted")
 	}
 	if _, ok := ParseWorkflowTimerActivationTaskID(WorkflowTimerActivationTaskPrefix() + strings.TrimPrefix(valid, WorkflowTimerActivationTaskPrefix()) + "="); ok {
 		t.Fatal("non-canonical base64 activation identity was accepted")

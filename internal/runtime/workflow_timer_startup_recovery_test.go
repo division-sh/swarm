@@ -140,8 +140,10 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 
 			occurrence := timeridentity.WorkflowTimerOccurrenceRef{
 				Activation: timeridentity.WorkflowTimerActivationRef{
-					ActivationID: uuid.NewString(),
-					Declaration:  "generic.opaque",
+					ActivationID:        uuid.NewString(),
+					Declaration:         "generic.opaque",
+					DeclarationRevision: "sha256:generic-opaque",
+					Cause:               timeridentity.WorkflowTimerActivationCauseInitial,
 				},
 				DueAt: time.Now().UTC().Add(50 * time.Millisecond).Truncate(time.Microsecond),
 			}.Normalize()

@@ -1154,7 +1154,7 @@ func (am *AgentManager) retryLoop(ctx context.Context) {
 }
 
 func (am *AgentManager) runAutomaticRecoveryPass(ctx context.Context) {
-	if err := am.reconcilePendingDynamicFlowRuntimeReadiness(ctx, am.semanticSource); err != nil && am.bus != nil {
+	if err := am.reconcilePendingDynamicFlowRuntimeReadiness(ctx); err != nil && am.bus != nil {
 		_ = am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 			Level:     "error",
 			Component: "agent-manager",

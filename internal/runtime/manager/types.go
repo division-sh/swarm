@@ -12,6 +12,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -217,6 +218,7 @@ type StrategicContext = json.RawMessage
 
 type AgentManagerOptions struct {
 	BaseContext                    context.Context
+	BundleSourceFact               runtimecorrelation.BundleSourceFact
 	LifecycleStore                 AgentLifecyclePersistence
 	DeliveryStore                  runtimedelivery.Store
 	TestLifecycleProbe             runtimelifecycleprobe.Observer

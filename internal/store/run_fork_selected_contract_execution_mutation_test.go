@@ -682,8 +682,10 @@ func TestSelectedContractExecutionMaterializationRejectsActiveTimerBeforeMutatio
 	eventID := uuid.NewString()
 	sourceTimerID := uuid.NewString()
 	sourceRef := timeridentity.WorkflowTimerActivationRef{
-		ActivationID: sourceTimerID,
-		Declaration:  "selected-timer",
+		ActivationID:        sourceTimerID,
+		Declaration:         "selected-timer",
+		DeclarationRevision: "sha256:selected-timer",
+		Cause:               timeridentity.WorkflowTimerActivationCauseInitial,
 	}
 	at := time.Unix(1700002500, 0).UTC()
 	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)

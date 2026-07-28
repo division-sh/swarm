@@ -196,6 +196,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 	if len(req.AgentRuntime.Records) == 0 {
 		manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 			BaseContext:       context.WithoutCancel(ctx),
+			BundleSourceFact:  req.LoadedSource.BundleSourceFact,
 			SemanticSource:    req.LoadedSource.Source,
 			WorkflowInstances: workflowStore,
 			DeliveryStore:     req.Store,
@@ -309,6 +310,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	if managerOptions.SemanticSource == nil {
 		managerOptions.SemanticSource = source
 	}
+	managerOptions.BundleSourceFact = req.LoadedSource.BundleSourceFact
 	managerOptions.WorkflowInstances = workflowStore
 	if managerOptions.PromptResolver == nil {
 		managerOptions.PromptResolver = promptResolver
