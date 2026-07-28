@@ -1463,6 +1463,10 @@ func (rt *Runtime) Start(ctx context.Context) error {
 				agentHydrationSucceeded = false
 				workflowTimerRestoreReady = false
 				rt.recordStartupManagerRecoveryFailure(ctx, &startupRecoveryDecision, err)
+				if !startupRecoverySnapshot.InspectionComplete || startupRecoverySnapshot.StartupBlockingWorkflowTimers > 0 {
+					rt.emitBootProgress(10, "manager_recovery_if_enabled", "FAILED", err.Error())
+					return fmt.Errorf("hydrate manager before workflow timer restoration: %w", err)
+				}
 			} else {
 				recovered = append(recovered, "agent state")
 			}

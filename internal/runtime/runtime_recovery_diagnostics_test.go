@@ -1404,7 +1404,7 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 	}
 }
 
-func TestRuntimeStart_RecoveryInspectionFailureDoesNotBlockRecoveryEnabledStartup(t *testing.T) {
+func TestRuntimeStart_RecoveryInspectionAndManagerHydrationFailureIsBootFatal(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
@@ -1426,32 +1426,12 @@ func TestRuntimeStart_RecoveryInspectionFailureDoesNotBlockRecoveryEnabledStartu
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	if err := rt.Start(ctx); err != nil {
-		t.Fatalf("Start: %v", err)
+	err = rt.Start(ctx)
+	if err == nil || !strings.Contains(err.Error(), "hydrate manager before workflow timer restoration") {
+		t.Fatalf("Start error = %v, want fail-closed manager hydration gate", err)
 	}
-	defer func() {
-		if err := rt.Shutdown(); err != nil {
-			t.Fatalf("Shutdown: %v", err)
-		}
-	}()
-
-	level, _, failure, detail := latestStartupRecoveryDecisionLog(t, db)
-	if level != "error" {
-		t.Fatalf("log level = %q, want error", level)
-	}
-	requireFailureCode(t, failure, "startup_manager_recovery_failed")
-	if got := detailString(detail["decision_outcome"]); got != "degraded" {
-		t.Fatalf("decision_outcome = %q, want degraded", got)
-	}
-	if got := detailString(detail["decision_reason_code"]); got != string(startupRecoveryReasonRecoverFailed) {
-		t.Fatalf("decision_reason_code = %q, want %q", got, startupRecoveryReasonRecoverFailed)
-	}
-	if got := detailBool(detail["recovery_inspection_complete"]); got {
-		t.Fatalf("recovery_inspection_complete = %#v, want false", detail["recovery_inspection_complete"])
-	}
-	requireNestedFailureCode(t, detail, "recovery_inspection_failure", "startup_recovery_inspection_failed")
-	if !detailBool(detail["manager_recovery_attempted"]) {
-		t.Fatalf("manager_recovery_attempted = %#v, want true", detail["manager_recovery_attempted"])
+	if err := rt.Shutdown(); err != nil {
+		t.Fatalf("Shutdown: %v", err)
 	}
 }
 

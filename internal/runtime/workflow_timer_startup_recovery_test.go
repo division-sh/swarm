@@ -3,7 +3,9 @@ package runtime_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,8 +32,28 @@ type workflowTimerStartupStore interface {
 	runtimepipeline.RuntimeMutationRunner
 	runtimepipeline.SchedulePersistence
 	runtimedelivery.Store
+	runtimemanager.AgentLifecyclePersistence
 	runtimemanager.ManagerPersistence
 	PipelineObligations() runtimepipelineobligation.Store
+}
+
+type workflowTimerStartupFlakyManagerStore struct {
+	workflowTimerStartupStore
+
+	mu     sync.Mutex
+	loads  int
+	failAt int
+}
+
+func (s *workflowTimerStartupFlakyManagerStore) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
+	s.mu.Lock()
+	s.loads++
+	load := s.loads
+	s.mu.Unlock()
+	if load == s.failAt {
+		return nil, errors.New("transient manager hydration failure")
+	}
+	return s.workflowTimerStartupStore.LoadAgents(ctx)
 }
 
 func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOnBothStores(t *testing.T) {
@@ -162,6 +184,130 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 					t.Fatalf("generic occurrence-shaped fire did not publish and complete: events=%d active=%#v", eventCount, active)
 				}
 				time.Sleep(20 * time.Millisecond)
+			}
+		})
+	}
+}
+
+func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersOnBothStores(t *testing.T) {
+	for _, backend := range []struct {
+		name string
+		open func(*testing.T) (*sql.DB, workflowTimerStartupStore, *runtimepipeline.WorkflowInstanceStore, bool)
+	}{
+		{
+			name: "sqlite",
+			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, *runtimepipeline.WorkflowInstanceStore, bool) {
+				selected := storetest.StartSQLiteRuntimeStore(t)
+				return selected.DB, selected, runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(selected.DB, selected), false
+			},
+		},
+		{
+			name: "postgres",
+			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, *runtimepipeline.WorkflowInstanceStore, bool) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				selected := storetest.AdmitPostgresRuntimeStore(t, db)
+				return db, selected, runtimepipeline.NewWorkflowInstanceStore(db), true
+			},
+		},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
+			db, selected, workflowStore, postgres := backend.open(t)
+			runID := uuid.NewString()
+			entityID := uuid.NewString()
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
+			insertRun := `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', ?, ?)`
+			if postgres {
+				insertRun = `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, $3)`
+			}
+			if _, err := db.ExecContext(ctx, insertRun, runID, bundleHash, bundleSource); err != nil {
+				t.Fatalf("seed active run: %v", err)
+			}
+
+			source := semanticview.Wrap(workflowTimerStartupRecoveryBundle())
+			module := newRuntimeTestWorkflowModule(t, source)
+			runtimeDB := db
+			if !postgres {
+				runtimeDB = nil
+			}
+			newRuntime := func(managerStore runtimemanager.ManagerPersistence) (*swarmruntime.Runtime, *worklifetime.Process) {
+				process := worklifetime.NewProcess()
+				rt, err := swarmruntime.NewRuntime(ctx, swarmruntime.RuntimeDeps{
+					Config: &config.Config{
+						Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
+						LLM:     config.LLMConfig{Backend: "anthropic"},
+					},
+					Stores: swarmruntime.Stores{
+						SQLDB:               runtimeDB,
+						EventStore:          selected,
+						PipelineStore:       workflowStore,
+						ManagerStore:        managerStore,
+						DeliveryStore:       selected,
+						PipelineObligations: selected.PipelineObligations(),
+					},
+					Options: swarmruntime.RuntimeOptions{
+						SelfCheck:         false,
+						WorkflowModule:    module,
+						LLMRuntime:        workflowTimerStartupLLM{},
+						RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+						BundleSourceFact:  authorActivityTestBundleSourceFact,
+						ProcessWorkOwner:  process,
+					},
+				})
+				if err != nil {
+					t.Fatalf("NewRuntime: %v", err)
+				}
+				return rt, process
+			}
+			shutdown := func(label string, rt *swarmruntime.Runtime, process *worklifetime.Process) {
+				t.Helper()
+				if err := rt.Shutdown(); err != nil {
+					t.Fatalf("shutdown %s runtime: %v", label, err)
+				}
+				joinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if _, err := process.Join(joinCtx); err != nil {
+					t.Fatalf("join %s process owner: %v", label, err)
+				}
+			}
+
+			seedRuntime, seedProcess := newRuntime(selected)
+			seedCtx := worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence())
+			result, err := workflowStore.MaterializeInitialEntry(seedCtx, runtimepipeline.WorkflowInstance{
+				InstanceID:      entityID,
+				StorageRef:      entityID,
+				WorkflowName:    "workflow-timer-startup",
+				WorkflowVersion: "1",
+				CurrentState:    "waiting",
+				Metadata:        map[string]any{"run_id": runID},
+			}, time.Now().UTC())
+			if err != nil {
+				t.Fatalf("materialize workflow timer before restart: %v", err)
+			}
+			if result != runtimepipeline.WorkflowInitialMaterializationCreated {
+				t.Fatalf("initial materialization result = %v, want created", result)
+			}
+			shutdown("seed", seedRuntime, seedProcess)
+
+			flakyManagerStore := &workflowTimerStartupFlakyManagerStore{
+				workflowTimerStartupStore: selected,
+				failAt:                    2,
+			}
+			restarted, restartedProcess := newRuntime(flakyManagerStore)
+			err = restarted.Start(ctx)
+			if err == nil || !strings.Contains(err.Error(), "hydrate manager before workflow timer restoration") {
+				shutdown("unexpected successful restart", restarted, restartedProcess)
+				t.Fatalf("Start error = %v, want workflow-timer hydration gate failure", err)
+			}
+			shutdown("failed restart", restarted, restartedProcess)
+
+			instance, found, err := workflowStore.Load(ctx, entityID)
+			if err != nil {
+				t.Fatalf("load workflow instance after failed restart: %v", err)
+			}
+			if !found || instance.CurrentState != "waiting" {
+				t.Fatalf("workflow instance after failed restart = found:%v state:%q, want durable waiting state", found, instance.CurrentState)
 			}
 		})
 	}

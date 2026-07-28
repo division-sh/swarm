@@ -36,12 +36,13 @@ const (
 )
 
 type startupRecoverySnapshot struct {
-	RecoveryOnStartup        bool
-	InspectionComplete       bool
-	StartupBlockingTimers    int
-	StandingTimerObligations int
-	TimerObligations         runtimetimerobligation.Snapshot
-	Manager                  runtimemanager.RecoverableStateSnapshot
+	RecoveryOnStartup             bool
+	InspectionComplete            bool
+	StartupBlockingTimers         int
+	StartupBlockingWorkflowTimers int
+	StandingTimerObligations      int
+	TimerObligations              runtimetimerobligation.Snapshot
+	Manager                       runtimemanager.RecoverableStateSnapshot
 }
 
 func (s startupRecoverySnapshot) HasRecoverableWork() bool {
@@ -76,6 +77,7 @@ func (s startupRecoverySnapshot) Detail() map[string]any {
 	}
 	if s.InspectionComplete {
 		detail["startup_blocking_timer_count"] = s.StartupBlockingTimers
+		detail["startup_blocking_workflow_timer_count"] = s.StartupBlockingWorkflowTimers
 		detail["standing_timer_obligation_count"] = s.StandingTimerObligations
 		detail["timer_obligations"] = s.TimerObligations
 		detail["recoverable_work_present"] = s.HasRecoverableWork()
@@ -256,6 +258,13 @@ func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context, observedA
 			if recoverable == 0 {
 				continue
 			}
+			workflowTimers := 0
+			for _, family := range run.Families {
+				if family.Family == runtimetimerobligation.FamilyWorkflowTimer {
+					workflowTimers = family.RecoverableCount
+					break
+				}
+			}
 			intrinsic := false
 			if rt.Stores.PipelineStore != nil {
 				intrinsic, err = rt.Stores.PipelineStore.StandingRunUsesIntrinsicRecovery(ctx, run.RunID)
@@ -269,6 +278,7 @@ func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context, observedA
 				continue
 			}
 			snapshot.StartupBlockingTimers += recoverable
+			snapshot.StartupBlockingWorkflowTimers += workflowTimers
 		}
 	}
 	if rt.Manager != nil {
