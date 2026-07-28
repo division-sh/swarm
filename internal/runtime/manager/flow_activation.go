@@ -161,6 +161,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		return err
 	}
 	readinessPlan, err := am.buildDynamicFlowRuntimeReadinessPlan(
+		ctx,
 		req,
 		agentRecords,
 		schema,
@@ -361,15 +362,22 @@ func flowInstanceActivationMetadata(instance runtimeflowidentity.Instance, flowE
 var dynamicFlowCreationEventNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.dynamic-flow.creation-event.v1"))
 
 func (am *AgentManager) buildDynamicFlowRuntimeReadinessPlan(
+	ctx context.Context,
 	req runtimepipeline.FlowInstanceActivationRequest,
 	agentRecords []PersistedAgent,
 	schema runtimecontracts.FlowSchemaDocument,
 	lineage events.EventLineage,
 	occurredAt time.Time,
 ) (runtimepipeline.DynamicFlowRuntimeReadinessPlan, error) {
+	bundleHash, bundleSource, err := dynamicFlowRuntimeReadinessSourceCoordinate(ctx)
+	if err != nil {
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, err
+	}
 	plan := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 		Identity:        req.Instance,
 		RunID:           strings.TrimSpace(lineage.RunID),
+		BundleHash:      bundleHash,
+		BundleSource:    bundleSource,
 		WorkflowVersion: strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
 		Agents:          make([]runtimepipeline.DynamicFlowRuntimeAgentExpectation, 0, len(agentRecords)),
 	}

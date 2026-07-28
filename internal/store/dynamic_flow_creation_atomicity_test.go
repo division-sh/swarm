@@ -198,7 +198,8 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 		InstancePath: "review/inst-1", EntityID: uuid.NewString(), HasStoredPath: true,
 	}
 	plan := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-		Identity: identity, RunID: runID, WorkflowVersion: "1.0.0",
+		Identity: identity, RunID: runID,
+		BundleHash: bundleHash, BundleSource: bundleSource, WorkflowVersion: "1.0.0",
 		CreationEvent: &runtimepipeline.DynamicFlowRuntimeCreationEventPlan{
 			EventID: uuid.NewString(), EventType: "review/inst-1/task.started",
 			RunID: runID, ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live,

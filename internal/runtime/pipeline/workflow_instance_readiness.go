@@ -18,7 +18,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const dynamicFlowRuntimeReadinessVersion = 1
+const dynamicFlowRuntimeReadinessVersion = 2
 
 type DynamicFlowRuntimeAgentExpectation struct {
 	AgentID        string `json:"agent_id"`
@@ -54,6 +54,8 @@ type DynamicFlowRuntimeReadinessPlan struct {
 	Version         int                                  `json:"version"`
 	Identity        runtimeflowidentity.Instance         `json:"identity"`
 	RunID           string                               `json:"run_id"`
+	BundleHash      string                               `json:"bundle_hash"`
+	BundleSource    string                               `json:"bundle_source"`
 	WorkflowVersion string                               `json:"workflow_version"`
 	Agents          []DynamicFlowRuntimeAgentExpectation `json:"agents"`
 	CreationEvent   *DynamicFlowRuntimeCreationEventPlan `json:"creation_event,omitempty"`
@@ -159,6 +161,11 @@ func (p DynamicFlowRuntimeReadinessPlan) Normalized() (DynamicFlowRuntimeReadine
 	p.Version = dynamicFlowRuntimeReadinessVersion
 	p.RunID = strings.TrimSpace(p.RunID)
 	p.WorkflowVersion = strings.TrimSpace(p.WorkflowVersion)
+	sourceFact, err := runtimecorrelation.DecodeBundleSourceFact(p.BundleHash, p.BundleSource)
+	if err != nil {
+		return DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("dynamic flow runtime readiness bundle source: %w", err)
+	}
+	p.BundleHash, p.BundleSource = sourceFact.StorageValues()
 	p.Identity.TemplateID = strings.TrimSpace(p.Identity.TemplateID)
 	p.Identity.ScopeKey = strings.Trim(strings.TrimSpace(p.Identity.ScopeKey), "/")
 	p.Identity.InstanceID = strings.Trim(strings.TrimSpace(p.Identity.InstanceID), "/")

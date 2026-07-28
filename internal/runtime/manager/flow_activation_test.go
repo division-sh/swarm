@@ -1478,12 +1478,20 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	bundle := testFlowBundle("")
 	am.semanticSource = semanticview.Wrap(bundle)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	intermediateBundle := testFlowBundle("")
-	intermediateBundle.Semantics.Version = "v-post-cas-intermediate"
-	intermediateSource := semanticview.Wrap(intermediateBundle)
-	revisedBundle := testFlowBundle("")
-	revisedBundle.Semantics.Version = "v-post-cas-current"
-	revisedSource := semanticview.Wrap(revisedBundle)
+	intermediateSource := semanticview.Wrap(bundle)
+	revisedSource := semanticview.Wrap(bundle)
+	intermediateFact, err := runtimecorrelation.NewEphemeralBundleSourceFact(
+		"bundle-v1:sha256:" + strings.Repeat("b", 64),
+	)
+	if err != nil {
+		t.Fatalf("intermediate bundle source fact: %v", err)
+	}
+	revisedFact, err := runtimecorrelation.NewPersistedBundleSourceFact(
+		"bundle-v1:sha256:" + strings.Repeat("c", 64),
+	)
+	if err != nil {
+		t.Fatalf("revised bundle source fact: %v", err)
+	}
 	successorErr := make(chan error, 1)
 	key, err := newDynamicFlowRuntimeReadinessKey(req.TriggerEvent.RunID(), req.Instance.InstancePath)
 	if err != nil {
@@ -1491,15 +1499,23 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	}
 	activationCtx, cancelActivation := context.WithCancel(testAuthorActivityContext(context.Background()))
 	defer cancelActivation()
-	successorCtx := testAuthorActivityContext(context.Background())
+	intermediateCtx := runtimecorrelation.WithBundleSourceFact(
+		testAuthorActivityContext(context.Background()),
+		intermediateFact,
+	)
+	successorCtx := runtimecorrelation.WithBundleSourceFact(
+		testAuthorActivityContext(context.Background()),
+		revisedFact,
+	)
 
 	var revisionErr error
 	var staleErr error
+	var staleSourceErr error
 	instances.afterTopologyMark = func(completed runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
 		intermediate := completed
-		intermediate.WorkflowVersion = intermediateBundle.WorkflowVersion()
+		intermediate.BundleHash, intermediate.BundleSource = intermediateFact.StorageValues()
 		changed, err := instances.ReconcileDynamicFlowRuntimeReadinessPlan(
-			context.Background(),
+			intermediateCtx,
 			intermediate,
 			time.Now().UTC(),
 		)
@@ -1512,9 +1528,9 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 			return
 		}
 		revised := intermediate
-		revised.WorkflowVersion = revisedBundle.WorkflowVersion()
+		revised.BundleHash, revised.BundleSource = revisedFact.StorageValues()
 		changed, err = instances.ReconcileDynamicFlowRuntimeReadinessPlan(
-			context.Background(),
+			successorCtx,
 			revised,
 			time.Now().UTC(),
 		)
@@ -1550,8 +1566,13 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 			}
 			runtime.Gosched()
 		}
+		staleSourceErr = am.reconcileDynamicFlowRuntimeReadinessPlan(
+			intermediateCtx,
+			revised,
+			revisedSource,
+		)
 		staleErr = am.reconcileDynamicFlowRuntimeReadinessPlan(
-			testAuthorActivityContext(context.Background()),
+			intermediateCtx,
 			intermediate,
 			intermediateSource,
 		)
@@ -1564,6 +1585,9 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	}
 	if !errors.Is(staleErr, errDynamicFlowRuntimeReadinessPlanStale) {
 		t.Fatalf("delayed intermediate plan error = %v, want stale-plan rejection", staleErr)
+	}
+	if !errors.Is(staleSourceErr, errDynamicFlowRuntimeReadinessSourceStale) {
+		t.Fatalf("previous-source callback error = %v, want stale-source rejection", staleSourceErr)
 	}
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance with canceled predecessor and queued revised-plan successor: %v", err)
@@ -1579,7 +1603,10 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	if loadErr != nil || !found {
 		t.Fatalf("load post-CAS revised readiness: found=%v err=%v", found, loadErr)
 	}
-	if readiness.Plan.WorkflowVersion != strings.TrimSpace(revisedBundle.WorkflowVersion()) ||
+	revisedHash, revisedBundleSource := revisedFact.StorageValues()
+	if readiness.Plan.WorkflowVersion != strings.TrimSpace(bundle.WorkflowVersion()) ||
+		readiness.Plan.BundleHash != revisedHash ||
+		readiness.Plan.BundleSource != revisedBundleSource ||
 		readiness.TopologyReadyAt.IsZero() ||
 		readiness.Pending() {
 		t.Fatalf("post-CAS revised readiness successor did not complete: %#v", readiness)
@@ -1589,6 +1616,85 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	}
 	if _, ok := am.GetAgentConfig("reviewer-inst-1"); !ok {
 		t.Fatal("post-CAS revised topology agent was not published")
+	}
+}
+
+func TestDynamicFlowRuntimeReadinessSameVersionSourceReplacementQueuesExactPlan(t *testing.T) {
+	instances := &flowActivationTestInstanceStore{}
+	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	am := newFlowActivationManager(t, bus, instances)
+	bundle := testFlowBundle("")
+	source := semanticview.Wrap(bundle)
+	am.semanticSource = source
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	initialCtx := testAuthorActivityContext(context.Background())
+	if err := am.ActivateFlowInstance(initialCtx, req); err != nil {
+		t.Fatalf("activate initial source: %v", err)
+	}
+	initial, found, err := instances.LoadDynamicFlowRuntimeReadiness(
+		initialCtx,
+		req.TriggerEvent.RunID(),
+		req.Instance.InstancePath,
+	)
+	if err != nil || !found || initial.TopologyReadyAt.IsZero() {
+		t.Fatalf("initial readiness: found=%v err=%v readiness=%#v", found, err, initial)
+	}
+
+	revisedFact, err := runtimecorrelation.NewPersistedBundleSourceFact(
+		"bundle-v1:sha256:" + strings.Repeat("d", 64),
+	)
+	if err != nil {
+		t.Fatalf("revised bundle source fact: %v", err)
+	}
+	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
+	revisedCtx := runtimecorrelation.WithRunID(
+		runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(context.Background()), revisedFact),
+		req.TriggerEvent.RunID(),
+	)
+	revisedCtx = worklifetime.WithOccurrence(revisedCtx, am.workOwner)
+	revisedCtx = runtimepipeline.WithPipelineSQLTxContext(revisedCtx, &sql.Tx{})
+	revisedCtx = withFlowActivationPostCommit(revisedCtx, &postCommit)
+	if err := am.ReconcileDynamicFlowRuntimeReadinessPlansForRun(
+		revisedCtx,
+		source,
+		time.Now().UTC(),
+	); err != nil {
+		t.Fatalf("reconcile same-version revised source: %v", err)
+	}
+	if len(postCommit) != 1 {
+		t.Fatalf("same-version revised source queued %d readiness actions, want 1", len(postCommit))
+	}
+	pending, found, err := instances.LoadDynamicFlowRuntimeReadiness(
+		revisedCtx,
+		req.TriggerEvent.RunID(),
+		req.Instance.InstancePath,
+	)
+	if err != nil || !found {
+		t.Fatalf("load pending revised source: found=%v err=%v", found, err)
+	}
+	revisedHash, revisedSource := revisedFact.StorageValues()
+	if pending.Plan.WorkflowVersion != initial.Plan.WorkflowVersion ||
+		pending.Plan.BundleHash != revisedHash ||
+		pending.Plan.BundleSource != revisedSource ||
+		!pending.TopologyReadyAt.IsZero() ||
+		!pending.Pending() {
+		t.Fatalf("same-version revised source did not invalidate readiness: %#v", pending)
+	}
+
+	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	completed, found, err := instances.LoadDynamicFlowRuntimeReadiness(
+		revisedCtx,
+		req.TriggerEvent.RunID(),
+		req.Instance.InstancePath,
+	)
+	if err != nil || !found {
+		t.Fatalf("load completed revised source: found=%v err=%v", found, err)
+	}
+	if completed.Plan.BundleHash != revisedHash ||
+		completed.Plan.BundleSource != revisedSource ||
+		completed.TopologyReadyAt.IsZero() ||
+		completed.Pending() {
+		t.Fatalf("same-version revised source did not recomplete exact plan: %#v", completed)
 	}
 }
 
@@ -1808,13 +1914,14 @@ func TestDynamicFlowRuntimeReadinessTerminalBeforeCreationCommitRetiresMateriali
 func TestRecoverableStateSnapshotIncludesReadinessOnlyPendingWork(t *testing.T) {
 	runID := uuid.NewString()
 	path := "review/inst-1"
+	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
 	instances := &flowActivationTestInstanceStore{
 		readiness: map[string]runtimepipeline.DynamicFlowRuntimeReadiness{
 			flowActivationReadinessKey(runID, path): {
 				InstancePath: path,
 				RunStatus:    "running", InstanceStatus: "active",
 				Plan: runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-					Version: 1, RunID: runID, WorkflowVersion: "1.0.0",
+					RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource, WorkflowVersion: "1.0.0",
 					Identity: runtimeflowidentity.Instance{
 						TemplateID: "review", ScopeKey: "review", InstanceID: "inst-1",
 						InstancePath: path, EntityID: uuid.NewString(), HasStoredPath: true,
@@ -1887,10 +1994,11 @@ func TestHydrateForStartupFinalizesIncompleteDynamicFlowRuntimeReadiness(t *test
 func TestHydrateForStartupRetiresTerminalDynamicFlowProcessTopology(t *testing.T) {
 	bundle := testFlowBundle("")
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
 	plan, err := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-		Version:  1,
 		Identity: req.Instance,
-		RunID:    req.TriggerEvent.RunID(), WorkflowVersion: bundle.WorkflowVersion(),
+		RunID:    req.TriggerEvent.RunID(), BundleHash: bundleHash, BundleSource: bundleSource,
+		WorkflowVersion: bundle.WorkflowVersion(),
 		Agents: []runtimepipeline.DynamicFlowRuntimeAgentExpectation{{
 			AgentID: "reviewer-inst-1", ConfigRevision: strings.Repeat("a", 64),
 		}},

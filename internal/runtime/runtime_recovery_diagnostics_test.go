@@ -18,6 +18,7 @@ import (
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -1358,6 +1359,11 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 		t.Fatalf("retire constructed manager before readiness failure replacement: %v", err)
 	}
 	runID := eventtest.UUID("startup-readiness-fatal-run")
+	sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	if !ok {
+		t.Fatal("startup readiness context requires bundle source fact")
+	}
+	bundleHash, bundleSource := sourceFact.StorageValues()
 	readinessStore := &startupReadinessFinalizationStore{items: []runtimepipeline.DynamicFlowRuntimeReadiness{{
 		InstancePath:   "review/inst-1",
 		RunStatus:      "running",
@@ -1369,6 +1375,8 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 				HasStoredPath: true,
 			},
 			RunID:           runID,
+			BundleHash:      bundleHash,
+			BundleSource:    bundleSource,
 			WorkflowVersion: activeWorkflowVersion + "-changed",
 		},
 	}}}
