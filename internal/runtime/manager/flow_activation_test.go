@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1471,11 +1472,19 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	bundle := testFlowBundle("")
 	am.semanticSource = semanticview.Wrap(bundle)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	revisedBundle := testFlowBundle("")
+	revisedBundle.Semantics.Version = "v-post-cas-revision"
+	revisedSource := semanticview.Wrap(revisedBundle)
+	successorErr := make(chan error, 1)
+	key, err := newDynamicFlowRuntimeReadinessKey(req.TriggerEvent.RunID(), req.Instance.InstancePath)
+	if err != nil {
+		t.Fatalf("readiness key: %v", err)
+	}
 
 	var revisionErr error
 	instances.afterTopologyMark = func(completed runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
 		revised := completed
-		revised.WorkflowVersion += "-post-cas-revision"
+		revised.WorkflowVersion = revisedBundle.WorkflowVersion()
 		changed, err := instances.ReconcileDynamicFlowRuntimeReadinessPlan(
 			context.Background(),
 			revised,
@@ -1487,15 +1496,44 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 		}
 		if !changed {
 			revisionErr = errors.New("post-CAS readiness plan was not revised")
+			return
+		}
+		go func() {
+			successorErr <- am.reconcileDynamicFlowRuntimeReadiness(
+				testAuthorActivityContext(context.Background()),
+				req.TriggerEvent.RunID(),
+				req.Instance.InstancePath,
+				revisedSource,
+			)
+		}()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			am.dynamicFlowReadinessMu.Lock()
+			attempt := am.dynamicFlowReadinessAttempts[key]
+			successorQueued := attempt != nil &&
+				attempt.successorRequired &&
+				attempt.successorCoordinate != attempt.planCoordinate
+			am.dynamicFlowReadinessMu.Unlock()
+			if successorQueued {
+				break
+			}
+			if time.Now().After(deadline) {
+				revisionErr = errors.New("post-CAS readiness successor was not queued")
+				return
+			}
+			runtime.Gosched()
 		}
 	}
 
-	err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req)
+	err = am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req)
 	if revisionErr != nil {
 		t.Fatalf("inject post-CAS readiness revision: %v", revisionErr)
 	}
-	if err == nil || !strings.Contains(err.Error(), "changed after topology completion") {
-		t.Fatalf("ActivateFlowInstance error = %v, want post-CAS topology completion rejection", err)
+	if err != nil {
+		t.Fatalf("ActivateFlowInstance with queued revised-plan successor: %v", err)
+	}
+	if err := <-successorErr; err != nil {
+		t.Fatalf("post-CAS revised-plan successor: %v", err)
 	}
 	readiness, found, loadErr := instances.LoadDynamicFlowRuntimeReadiness(
 		context.Background(),
@@ -1505,16 +1543,16 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	if loadErr != nil || !found {
 		t.Fatalf("load post-CAS revised readiness: found=%v err=%v", found, loadErr)
 	}
-	if readiness.Plan.WorkflowVersion == strings.TrimSpace(bundle.WorkflowVersion()) ||
-		!readiness.TopologyReadyAt.IsZero() ||
-		!readiness.Pending() {
-		t.Fatalf("post-CAS revised readiness was falsely completed: %#v", readiness)
+	if readiness.Plan.WorkflowVersion != strings.TrimSpace(revisedBundle.WorkflowVersion()) ||
+		readiness.TopologyReadyAt.IsZero() ||
+		readiness.Pending() {
+		t.Fatalf("post-CAS revised readiness successor did not complete: %#v", readiness)
 	}
-	if bus.HasFlowInstanceRoute(req.Instance.Route()) {
-		t.Fatal("post-CAS stale topology left its process route published")
+	if !bus.HasFlowInstanceRoute(req.Instance.Route()) {
+		t.Fatal("post-CAS revised topology route was not published")
 	}
-	if _, ok := am.GetAgentConfig("reviewer-inst-1"); ok {
-		t.Fatal("post-CAS stale topology left its process agent published")
+	if _, ok := am.GetAgentConfig("reviewer-inst-1"); !ok {
+		t.Fatal("post-CAS revised topology agent was not published")
 	}
 }
 
