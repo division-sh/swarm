@@ -48,8 +48,12 @@ type dynamicFlowRuntimeReadinessKey struct {
 }
 
 type dynamicFlowRuntimeReadinessAttempt struct {
-	done chan struct{}
-	err  error
+	done                chan struct{}
+	err                 error
+	planCoordinate      string
+	successorRequired   bool
+	successorSource     semanticview.Source
+	successorCoordinate string
 }
 
 func newDynamicFlowRuntimeReadinessKey(runID, instancePath string) (dynamicFlowRuntimeReadinessKey, error) {
@@ -341,11 +345,20 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadiness(
 	if err != nil {
 		return err
 	}
+	planCoordinate, err := am.dynamicFlowRuntimeReadinessPlanCoordinate(ctx, key)
+	if err != nil {
+		return err
+	}
 	am.dynamicFlowReadinessMu.Lock()
 	if am.dynamicFlowReadinessAttempts == nil {
 		am.dynamicFlowReadinessAttempts = make(map[dynamicFlowRuntimeReadinessKey]*dynamicFlowRuntimeReadinessAttempt)
 	}
 	if attempt := am.dynamicFlowReadinessAttempts[key]; attempt != nil {
+		if planCoordinate != attempt.planCoordinate {
+			attempt.successorRequired = true
+			attempt.successorSource = source
+			attempt.successorCoordinate = planCoordinate
+		}
 		am.dynamicFlowReadinessMu.Unlock()
 		select {
 		case <-ctx.Done():
@@ -354,16 +367,54 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadiness(
 			return attempt.err
 		}
 	}
-	attempt := &dynamicFlowRuntimeReadinessAttempt{done: make(chan struct{})}
+	attempt := &dynamicFlowRuntimeReadinessAttempt{
+		done:           make(chan struct{}),
+		planCoordinate: planCoordinate,
+	}
 	am.dynamicFlowReadinessAttempts[key] = attempt
 	am.dynamicFlowReadinessMu.Unlock()
 
-	attempt.err = am.reconcileDynamicFlowRuntimeReadinessOnce(ctx, key, source)
-	close(attempt.done)
-	am.dynamicFlowReadinessMu.Lock()
-	delete(am.dynamicFlowReadinessAttempts, key)
-	am.dynamicFlowReadinessMu.Unlock()
-	return attempt.err
+	currentSource := source
+	for {
+		attemptErr := am.reconcileDynamicFlowRuntimeReadinessOnce(ctx, key, currentSource)
+		am.dynamicFlowReadinessMu.Lock()
+		attempt.err = attemptErr
+		if attempt.successorRequired {
+			currentSource = attempt.successorSource
+			attempt.planCoordinate = attempt.successorCoordinate
+			attempt.successorRequired = false
+			attempt.successorSource = nil
+			attempt.successorCoordinate = ""
+			am.dynamicFlowReadinessMu.Unlock()
+			continue
+		}
+		delete(am.dynamicFlowReadinessAttempts, key)
+		close(attempt.done)
+		am.dynamicFlowReadinessMu.Unlock()
+		return attemptErr
+	}
+}
+
+func (am *AgentManager) dynamicFlowRuntimeReadinessPlanCoordinate(
+	ctx context.Context,
+	key dynamicFlowRuntimeReadinessKey,
+) (string, error) {
+	readiness, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, key.instancePath)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "missing", nil
+	}
+	normalized, err := readiness.Plan.Normalized()
+	if err != nil {
+		return "", err
+	}
+	encoded, err := canonicaljson.Bytes(normalized)
+	if err != nil {
+		return "", fmt.Errorf("encode dynamic flow runtime readiness plan coordinate %s: %w", key.instancePath, err)
+	}
+	return string(encoded), nil
 }
 
 func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
