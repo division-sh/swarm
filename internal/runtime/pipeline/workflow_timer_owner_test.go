@@ -73,6 +73,159 @@ func TestWorkflowTimerLifecycleOneShotExactCompletionOnBothStores(t *testing.T) 
 	}
 }
 
+func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			createdAt := canonicalWorkflowTimerTime(time.Now().UTC())
+			entityID := uuid.NewString()
+			sourceA := semanticview.Wrap(workflowTimerSourceRevisionBundle(false))
+			ownerA := pipelineTestWorkOwner(t)
+			schedulerA := newWorkflowTimerTestScheduler(t, ownerA)
+			pcA := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+				Module:         &pipelineFixtureWorkflowModule{source: sourceA},
+				WorkflowStore:  store,
+				WorkOwner:      ownerA,
+				TimerScheduler: schedulerA,
+			})
+			result, err := store.MaterializeInitialEntry(ctx, WorkflowInstance{
+				InstanceID: entityID, StorageRef: entityID,
+				WorkflowName: "workflow-timer-source-revision", WorkflowVersion: "1.0.0",
+				CurrentState: "waiting", CreatedAt: createdAt,
+				Metadata: map[string]any{"run_id": runtimecorrelation.RunIDFromContext(ctx)},
+			}, createdAt)
+			if err != nil || result != WorkflowInitialMaterializationCreated {
+				t.Fatalf("materialize source A: result=%v err=%v", result, err)
+			}
+			if err := store.ArmInitialEntryTimers(ctx, entityID); err != nil {
+				t.Fatalf("arm source A: %v", err)
+			}
+			sourceARows := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
+			if len(sourceARows) != 3 {
+				t.Fatalf("source A active timers = %d, want 3: %#v", len(sourceARows), sourceARows)
+			}
+			if active, draining := workflowTimerScheduledCounts(schedulerA); active != 3 || draining != 0 {
+				t.Fatalf("source A process wakeups = %d/%d, want 3/0", active, draining)
+			}
+			sourceAByDeclaration := workflowTimerActivationsByDeclaration(sourceARows)
+			stopCtx, cancelStop := context.WithTimeout(context.Background(), time.Second)
+			if err := pcA.workflowTimers.stop(stopCtx); err != nil {
+				cancelStop()
+				t.Fatalf("stop source A lifecycle: %v", err)
+			}
+			cancelStop()
+
+			sourceB := semanticview.Wrap(workflowTimerSourceRevisionBundle(true))
+			ownerB := pipelineTestWorkOwner(t)
+			schedulerB := newWorkflowTimerTestScheduler(t, ownerB)
+			pcB := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+				Module:         &pipelineFixtureWorkflowModule{source: sourceB},
+				WorkflowStore:  store,
+				WorkOwner:      ownerB,
+				TimerScheduler: schedulerB,
+			})
+			cancelledCtx, cancel := context.WithCancel(ctx)
+			cancel()
+			if err := store.ReconcileInitialEntryTimers(cancelledCtx, entityID); err == nil {
+				t.Fatal("cancelled source revision unexpectedly committed")
+			}
+			if active := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true); len(active) != 3 {
+				t.Fatalf("cancelled source revision changed active timers: %#v", active)
+			}
+			if err := store.ReconcileInitialEntryTimers(ctx, entityID); err != nil {
+				t.Fatalf("reconcile source B: %v", err)
+			}
+			if err := store.ReconcileInitialEntryTimers(ctx, entityID); err != nil {
+				t.Fatalf("replay source B reconciliation: %v", err)
+			}
+
+			allRows := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, false)
+			activeRows := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
+			if len(allRows) != 5 || len(activeRows) != 3 {
+				t.Fatalf("source B timer rows all/active = %d/%d, want 5/3: %#v", len(allRows), len(activeRows), allRows)
+			}
+			activeByDeclaration := workflowTimerActivationsByDeclaration(activeRows)
+			if activeByDeclaration["waiting.keep"].Ref != sourceAByDeclaration["waiting.keep"].Ref {
+				t.Fatal("unchanged declaration did not preserve its exact activation")
+			}
+			if _, found := activeByDeclaration["waiting.removed"]; found {
+				t.Fatal("removed declaration remains active")
+			}
+			if activeByDeclaration["waiting.changed"].Ref == sourceAByDeclaration["waiting.changed"].Ref {
+				t.Fatal("changed declaration reused its stale activation identity")
+			}
+			if activeByDeclaration["waiting.added"].Ref.ActivationID == "" {
+				t.Fatal("added declaration has no active activation")
+			}
+			if activeByDeclaration["waiting.changed"].EventType != "timer.changed.v2" ||
+				!activeByDeclaration["waiting.changed"].FireAt.Equal(createdAt.Add(2*time.Hour)) {
+				t.Fatalf("changed declaration facts = %#v", activeByDeclaration["waiting.changed"])
+			}
+			for _, declaration := range []string{"waiting.changed", "waiting.removed"} {
+				old := sourceAByDeclaration[declaration]
+				persisted := loadWorkflowTimerOwnerActivation(t, store, ctx, old.Ref.ActivationID)
+				if persisted.Status != workflowTimerStatusCancelled {
+					t.Fatalf("old %s status = %q, want cancelled", declaration, persisted.Status)
+				}
+			}
+			if active, draining := workflowTimerScheduledCounts(schedulerB); active != 3 || draining != 0 {
+				t.Fatalf("source B process wakeups = %d/%d, want 3/0", active, draining)
+			}
+
+			stale := sourceAByDeclaration["waiting.changed"]
+			if err := pcB.workflowTimers.ReconcileWakeup(ctx, stale.Ref); err != nil {
+				t.Fatalf("retire stale source A wakeup: %v", err)
+			}
+			staleEvent := eventtest.RuntimeControl(
+				timeridentity.WorkflowTimerOccurrenceEventID(stale.occurrence()),
+				events.EventType(stale.EventType),
+				"runtime.workflow_timer",
+				stale.occurrence().TaskID(),
+				stale.Payload,
+				0,
+				stale.RunID,
+				"",
+				events.EventEnvelope{EntityID: stale.EntityID, FlowInstance: stale.FlowInstance},
+				stale.FireAt,
+			)
+			if _, _, recognized, err := pcB.workflowTimers.AuthorizeAcceptedEvent(ctx, staleEvent); err == nil || !recognized {
+				t.Fatalf("stale source A event authorization recognized=%v err=%v, want rejection", recognized, err)
+			}
+
+			stopCtx, cancelStop = context.WithTimeout(context.Background(), time.Second)
+			if err := pcB.workflowTimers.stop(stopCtx); err != nil {
+				cancelStop()
+				t.Fatalf("stop source B lifecycle: %v", err)
+			}
+			cancelStop()
+			ownerRestarted := pipelineTestWorkOwner(t)
+			schedulerRestarted := newWorkflowTimerTestScheduler(t, ownerRestarted)
+			pcRestarted := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+				Module:         &pipelineFixtureWorkflowModule{source: sourceB},
+				WorkflowStore:  store,
+				WorkOwner:      ownerRestarted,
+				TimerScheduler: schedulerRestarted,
+			})
+			if err := pcRestarted.workflowTimers.Restore(ctx); err != nil {
+				t.Fatalf("restore source B lifecycle: %v", err)
+			}
+			if active, draining := workflowTimerScheduledCounts(schedulerRestarted); active != 3 || draining != 0 {
+				t.Fatalf("restored source B wakeups = %d/%d, want 3/0", active, draining)
+			}
+		})
+	}
+}
+
+func workflowTimerActivationsByDeclaration(
+	activations []WorkflowTimerActivation,
+) map[string]WorkflowTimerActivation {
+	byDeclaration := make(map[string]WorkflowTimerActivation, len(activations))
+	for _, activation := range activations {
+		byDeclaration[activation.Ref.Declaration] = activation
+	}
+	return byDeclaration
+}
+
 func TestAcceptedWorkflowTimerEventRoutingMatrixOnBothStores(t *testing.T) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
@@ -675,12 +828,16 @@ func TestWorkflowTimerLifecycleInitialAndEventEntrancesDoNotDuplicateOnBothStore
 			if len(activations) != 1 {
 				t.Fatalf("active event timer activations = %d, want 1", len(activations))
 			}
-			want := workflowTimerActivationForCause(
+			want, err := workflowTimerActivationForCause(
+				semanticview.Wrap(bundle),
 				runtimecorrelation.RunIDFromContext(ctx), entityID, entityID, bundle.Semantics.Timers[0],
 				activations[0].Ref.Generation,
 				workflowTimerCause{Kind: workflowTimerCauseEvent, EventID: eventID, EventType: "work.created", OccurredAt: createdAt, FromState: "waiting", ToState: "waiting"},
 				time.Hour,
 			)
+			if err != nil {
+				t.Fatalf("derive expected workflow timer activation: %v", err)
+			}
 			if activations[0].Ref != want.Ref {
 				t.Fatalf("event activation ref = %#v, want %#v", activations[0].Ref, want.Ref)
 			}
@@ -1854,6 +2011,31 @@ func workflowTimerOwnerBundleWithDelay(recurring bool, delay string) *runtimecon
 			ID: "waiting.timeout", Stage: "waiting", StageOwned: true, Owner: "runtime",
 			Event: "timer.timeout", StartOn: "state:waiting", Delay: delay, Recurring: recurring,
 		}},
+	}}
+}
+
+func workflowTimerSourceRevisionBundle(revised bool) *runtimecontracts.WorkflowContractBundle {
+	timer := func(id, event, delay string) runtimecontracts.WorkflowTimerContract {
+		return runtimecontracts.WorkflowTimerContract{
+			ID: id, Stage: "waiting", StageOwned: true, Owner: "runtime",
+			Event: event, StartOn: "state:waiting", Delay: delay,
+		}
+	}
+	timers := []runtimecontracts.WorkflowTimerContract{
+		timer("waiting.keep", "timer.keep", "1h"),
+		timer("waiting.changed", "timer.changed.v1", "1h"),
+		timer("waiting.removed", "timer.removed", "1h"),
+	}
+	if revised {
+		timers = []runtimecontracts.WorkflowTimerContract{
+			timer("waiting.keep", "timer.keep", "1h"),
+			timer("waiting.changed", "timer.changed.v2", "2h"),
+			timer("waiting.added", "timer.added", "30m"),
+		}
+	}
+	return &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+		Name: "workflow-timer-source-revision", Version: "1.0.0", InitialStage: "waiting",
+		Timers: timers,
 	}}
 }
 

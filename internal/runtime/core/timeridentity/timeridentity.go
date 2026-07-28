@@ -35,30 +35,49 @@ const (
 	timerHandlePayloadKey                             = "timer_handle"
 	joinTimeoutTaskPrefix                             = "join_timeout:"
 	joinCompleteTaskPrefix                            = "join_complete:"
-	workflowTimerActivationTaskPrefix                 = "workflow_timer:v1:"
-	workflowTimerOccurrenceTaskPrefix                 = "workflow_timer_occurrence:v1:"
+	workflowTimerActivationTaskPrefix                 = "workflow_timer:v2:"
+	workflowTimerOccurrenceTaskPrefix                 = "workflow_timer_occurrence:v2:"
 )
 
-var workflowTimerIdentityNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.workflow-timer.identity.v1"))
+var workflowTimerIdentityNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.workflow-timer.identity.v2"))
 
 // WorkflowTimerActivationRef is the typed durable identity stored in
 // timers.timer_name. It is deliberately independent from fire_payload.
 type WorkflowTimerActivationRef struct {
-	ActivationID string                       `json:"activation_id"`
-	Declaration  string                       `json:"declaration"`
-	Generation   attemptgeneration.Generation `json:"generation,omitempty"`
+	ActivationID        string                       `json:"activation_id"`
+	Declaration         string                       `json:"declaration"`
+	DeclarationRevision string                       `json:"declaration_revision"`
+	Cause               WorkflowTimerActivationCause `json:"cause"`
+	Generation          attemptgeneration.Generation `json:"generation,omitempty"`
 }
+
+type WorkflowTimerActivationCause string
+
+const (
+	WorkflowTimerActivationCauseInitial    WorkflowTimerActivationCause = "initial_stage"
+	WorkflowTimerActivationCauseEvent      WorkflowTimerActivationCause = "event"
+	WorkflowTimerActivationCauseTransition WorkflowTimerActivationCause = "transition"
+)
 
 func (r WorkflowTimerActivationRef) Normalize() WorkflowTimerActivationRef {
 	r.ActivationID = strings.TrimSpace(r.ActivationID)
 	r.Declaration = strings.TrimSpace(r.Declaration)
+	r.DeclarationRevision = strings.TrimSpace(r.DeclarationRevision)
+	r.Cause = WorkflowTimerActivationCause(strings.TrimSpace(string(r.Cause)))
 	r.Generation = r.Generation.Normalize()
 	return r
 }
 
 func (r WorkflowTimerActivationRef) Valid() bool {
 	r = r.Normalize()
-	if r.ActivationID == "" || r.Declaration == "" {
+	if r.ActivationID == "" || r.Declaration == "" || r.DeclarationRevision == "" {
+		return false
+	}
+	switch r.Cause {
+	case WorkflowTimerActivationCauseInitial,
+		WorkflowTimerActivationCauseEvent,
+		WorkflowTimerActivationCauseTransition:
+	default:
 		return false
 	}
 	_, err := uuid.Parse(r.ActivationID)

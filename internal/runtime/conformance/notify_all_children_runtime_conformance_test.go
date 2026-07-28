@@ -285,7 +285,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 		defer mutations.Done()
 		<-start
 		sourceRevisionErr <- runtimeV2.workflow.RunPipelineMutation(reconcileCtx, func(txctx context.Context) error {
-			return runtimeV2.manager.ReconcileDynamicFlowRuntimeReadinessPlansForRun(txctx, sourceV2, time.Now().UTC())
+			return runtimeV2.manager.ReconcileDynamicFlowRuntimeReadinessPlansForRun(txctx, time.Now().UTC())
 		})
 	}()
 	go func() {
@@ -464,7 +464,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	if err := runtimeV4.workflow.RunPipelineMutation(
 		worklifetime.WithOccurrence(ctx, runtimeV4.workOwner),
 		func(txctx context.Context) error {
-			return runtimeV4.manager.ReconcileDynamicFlowRuntimeReadinessPlansForRun(txctx, sourceV3, time.Now().UTC())
+			return runtimeV4.manager.ReconcileDynamicFlowRuntimeReadinessPlansForRun(txctx, time.Now().UTC())
 		},
 	); err != nil {
 		t.Fatalf("reconcile reintroduced source: %v", err)
@@ -1027,6 +1027,8 @@ func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, d
 		workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, sqliteStore)
 	}
 	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, nil, runtimemanager.AgentManagerOptions{
+		BaseContext:       testAuthorActivityContext(context.Background()),
+		BundleSourceFact:  authorActivityTestBundleSourceFact,
 		WorkflowInstances: workflowStore,
 		WorkOwner:         workOwner,
 		DeliveryStore:     backend,

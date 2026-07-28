@@ -64,8 +64,10 @@ func TestGenericScheduleAPIsCannotInterpretWorkflowTimerFamilyOnBothStores(t *te
 			entityID := uuid.NewString()
 			activationID := uuid.NewString()
 			ref := timeridentity.WorkflowTimerActivationRef{
-				ActivationID: activationID,
-				Declaration:  "waiting.timeout",
+				ActivationID:        activationID,
+				Declaration:         "waiting.timeout",
+				DeclarationRevision: "sha256:waiting-timeout",
+				Cause:               timeridentity.WorkflowTimerActivationCauseInitial,
 			}.Normalize()
 			fireAt := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond)
 			genericTaskID := "workflowXtimer:v1:payload-key-collision"
@@ -151,8 +153,10 @@ func TestGenericScheduleAPIsCannotInterpretWorkflowTimerFamilyOnBothStores(t *te
 func TestGenericScheduleIdentityDoesNotInferWorkflowTimerFamilyOnBothStores(t *testing.T) {
 	reserved := timeridentity.WorkflowTimerActivationTaskPrefix() + "malformed"
 	activation := timeridentity.WorkflowTimerActivationRef{
-		ActivationID: uuid.NewString(),
-		Declaration:  "waiting.timeout",
+		ActivationID:        uuid.NewString(),
+		Declaration:         "waiting.timeout",
+		DeclarationRevision: "sha256:waiting-timeout",
+		Cause:               timeridentity.WorkflowTimerActivationCauseInitial,
 	}.Normalize()
 	occurrence := timeridentity.WorkflowTimerOccurrenceRef{
 		Activation: activation,
@@ -302,8 +306,10 @@ func newWorkflowTimerDDLProofRow(runID string) workflowTimerDDLProofRow {
 	timerID := uuid.NewString()
 	createdAt := time.Now().UTC().Truncate(time.Microsecond)
 	ref := timeridentity.WorkflowTimerActivationRef{
-		ActivationID: timerID,
-		Declaration:  "waiting.timeout",
+		ActivationID:        timerID,
+		Declaration:         "waiting.timeout",
+		DeclarationRevision: "sha256:waiting-timeout",
+		Cause:               timeridentity.WorkflowTimerActivationCauseInitial,
 	}
 	return workflowTimerDDLProofRow{
 		timerID:      timerID,

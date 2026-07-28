@@ -173,6 +173,9 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	manager := ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		BaseContext:       ctx,
+		BundleSourceFact:  authorActivityTestBundleSourceFact,
+		SemanticSource:    source,
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
@@ -264,6 +267,9 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	manager := ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		BaseContext:       ctx,
+		BundleSourceFact:  authorActivityTestBundleSourceFact,
+		SemanticSource:    source,
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
@@ -359,6 +365,9 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 		PipelineObligations: pg.PipelineObligations(),
 	})
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		BaseContext:       ctx,
+		BundleSourceFact:  authorActivityTestBundleSourceFact,
+		SemanticSource:    source,
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
@@ -422,6 +431,9 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 	}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	manager := ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		BaseContext:       ctx,
+		BundleSourceFact:  authorActivityTestBundleSourceFact,
+		SemanticSource:    source,
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
@@ -527,6 +539,9 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 	}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	manager := ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		BaseContext:       ctx,
+		BundleSourceFact:  authorActivityTestBundleSourceFact,
+		SemanticSource:    source,
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
@@ -907,6 +922,9 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 					WorkflowStore: workflowStore,
 				})
 				manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+					BaseContext:       ctx,
+					BundleSourceFact:  providerRollbackBundleSourceFact(),
+					SemanticSource:    source,
 					WorkOwner:         workOwner,
 					WorkflowInstances: workflowStore,
 				}))

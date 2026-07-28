@@ -37,6 +37,7 @@ type AgentManager struct {
 	testLifecycleProbe              runtimelifecycleprobe.Observer
 	sessions                        sessions.Registry
 	semanticSource                  semanticview.Source
+	semanticReadinessSource         dynamicFlowRuntimeReadinessSource
 	promptResolver                  runtimecontracts.PromptResolver
 	budget                          BudgetGuard
 	resetRuntimeOwnedState          func()
@@ -74,6 +75,8 @@ type AgentManager struct {
 	dynamicFlowReadinessMu       sync.Mutex
 	dynamicFlowReadinessAttempts map[dynamicFlowRuntimeReadinessKey]*dynamicFlowRuntimeReadinessAttempt
 	dynamicFlowReadinessSignal   chan struct{}
+
+	testAfterDynamicFlowReadinessAdmission func()
 }
 
 var (
@@ -129,14 +132,17 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		_ = lifecycle.prepareRunOwner(opts.BaseContext, opts.WorkOwner)
 	}
 	return &AgentManager{
-		bus:                             bus,
-		factory:                         factory,
-		store:                           store,
-		deliveryStore:                   opts.DeliveryStore,
-		testLifecycleProbe:              opts.TestLifecycleProbe,
-		workspaces:                      opts.Workspaces,
-		sessions:                        opts.Sessions,
-		semanticSource:                  opts.SemanticSource,
+		bus:                bus,
+		factory:            factory,
+		store:              store,
+		deliveryStore:      opts.DeliveryStore,
+		testLifecycleProbe: opts.TestLifecycleProbe,
+		workspaces:         opts.Workspaces,
+		sessions:           opts.Sessions,
+		semanticSource:     opts.SemanticSource,
+		semanticReadinessSource: dynamicFlowRuntimeReadinessSource{
+			fact: opts.BundleSourceFact, source: opts.SemanticSource,
+		},
 		promptResolver:                  opts.PromptResolver,
 		workflowInstances:               opts.WorkflowInstances,
 		workOwner:                       opts.WorkOwner,

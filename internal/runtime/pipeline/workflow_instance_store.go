@@ -149,6 +149,7 @@ type RuntimeMutationRunner interface {
 type workflowInstanceLifecycleOwner interface {
 	ApplyWorkflowLifecycleEffects(context.Context, []runtimeworkflowlifecycle.Effect) error
 	ArmInitialEntryTimers(context.Context, string) error
+	ReconcileInitialEntryTimers(context.Context, string) error
 	RetireInitialEntryTimerWakeups(context.Context, string) error
 }
 
@@ -463,6 +464,24 @@ func (s *WorkflowInstanceStore) ArmInitialEntryTimers(ctx context.Context, insta
 		return fmt.Errorf("workflow initial timer activation requires instance identity")
 	}
 	return s.lifecycleOwner.ArmInitialEntryTimers(ctx, instanceID)
+}
+
+// ReconcileInitialEntryTimers mutates the durable initial-entry declaration
+// set and projects exactly the committed successor set.
+func (s *WorkflowInstanceStore) ReconcileInitialEntryTimers(ctx context.Context, instanceID string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("workflow instance lifecycle store is required")
+	}
+	if s.lifecycleOwner == nil {
+		return fmt.Errorf("workflow instance lifecycle owner is required")
+	}
+	instanceID = strings.TrimSpace(instanceID)
+	if instanceID == "" {
+		return fmt.Errorf("workflow initial timer reconciliation requires instance identity")
+	}
+	return s.RunPipelineMutation(ctx, func(txctx context.Context) error {
+		return s.lifecycleOwner.ReconcileInitialEntryTimers(txctx, instanceID)
+	})
 }
 
 // RetireInitialEntryTimerWakeups withdraws and joins the exact process-local

@@ -323,6 +323,10 @@ func (*startupReadinessFinalizationStore) ArmInitialEntryTimers(context.Context,
 	return errors.New("unexpected readiness timer arm")
 }
 
+func (*startupReadinessFinalizationStore) ReconcileInitialEntryTimers(context.Context, string) error {
+	return errors.New("unexpected readiness timer reconciliation")
+}
+
 func (*startupReadinessFinalizationStore) RetireInitialEntryTimerWakeups(context.Context, string) error {
 	return errors.New("unexpected readiness timer retirement")
 }
@@ -1388,6 +1392,7 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 		return startupManagerReplayRuntimeAgent{id: cfg.ID}, nil
 	}, runtimemanager.AgentManagerOptions{
 		BaseContext:                    ctx,
+		BundleSourceFact:               sourceFact,
 		LifecycleStore:                 managerStore,
 		DeliveryStore:                  deliveryStore,
 		SemanticSource:                 module.SemanticSource(),

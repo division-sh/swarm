@@ -1184,6 +1184,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	}
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, factory, runtimemanager.AgentManagerOptions{
 		BaseContext:            rt.authorActivityContext(context.Background()),
+		BundleSourceFact:       rt.Options.BundleSourceFact,
 		LifecycleStore:         lifecycleStore,
 		DeliveryStore:          stores.DeliveryStore,
 		TestLifecycleProbe:     opts.TestLifecycleProbe,

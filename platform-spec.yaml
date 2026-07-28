@@ -4570,11 +4570,14 @@ engine:
         those operations fail at the selected-store mutation boundary unless they carry the exact current readiness-plan
         authority. Recovery adopts the exact persisted generation before any retire or replace transition; it cannot infer a
         local generation, keep a removed process agent, or patch an old config.
-      - 10. After a fresh active/paused eligibility check, the reconciler arms the dormant initial timers, reloads
-        eligibility, and only then records topology readiness. `topology_ready_at` means the route, complete declared-agent
-        set, and initial timer family have all completed reconciliation; it is not merely a route/agent checkpoint. Any arm
-        failure leaves the row pending for automatic retry. The selected-store transition itself rejects terminal/inactive
-        work.
+      - 10. After a fresh active/paused eligibility check, the reconciler transactionally reconciles the exact initial timer
+        declaration set for its admitted source revision, projects the committed active set, reloads eligibility, and only
+        then records topology readiness. The selected-store operation preserves unchanged exact activations, monotonically
+        cancels changed and removed activations, and inserts changed and added successors. Stale wakeups and accepted timer
+        events from a prior declaration revision fail closed before publication or workflow handling. `topology_ready_at`
+        means the route, complete declared-agent set, and initial timer family have all completed reconciliation; it is not
+        merely a route/agent checkpoint. Any reconciliation failure leaves the row pending for automatic retry. The
+        selected-store transition itself rejects terminal/inactive work.
       - 11. After another fresh eligibility check, one selected-store operation locks the exact run and flow-instance
         lifecycle rows, reloads the immutable readiness plan, appends the deterministic creation-only event through
         EventBus `PublishInMutation`, and records `creation_event_emitted_at` in the same transaction. Dispatch occurs only
@@ -6613,7 +6616,11 @@ engine:
       coordinate without an explicit reschedule operation. Initial-entry materialization commits those durable timer rows
       dormant and never registers a process-local wakeup itself. Every initial-entry caller must invoke the one named
       `ArmInitialEntryTimers` lifecycle operation only after the exact receiving runtime is ready. Existing pipeline routes
-      queue that operation in their selected mutation's post-commit work. Dynamic instances have one durable, idempotent
+      queue that operation in their selected mutation's post-commit work. The strict version-2 activation identity also
+      contains one typed activation cause and a canonical declaration revision over every execution-bearing declaration
+      fact, including the policy-rendered delay. A missing or unknown cause/revision and every version-1 serialization fail
+      closed; fresh stores only, with no migration or compatibility decoder.
+      Dynamic instances have one durable, idempotent
       runtime-readiness finalizer backed by `flow_instance_runtime_readiness`. Initial materialization atomically records an
       immutable `workflow_instance_initial_materializations` creation projection plus the desired exact route, complete
       declared-agent revision set, creation run, exact normalized
@@ -6625,14 +6632,21 @@ engine:
       consume one reconciler keyed by `{run_id, instance_id}`. A selected creation mutation persists its exact route rows but
       does not publish them into the process route table; EventBus recipient planning remains unaware of the route until the
       reconciler reloads current lifecycle eligibility, verifies all declared agents, publishes and verifies the persisted
-      route, arms initial timers, and records topology readiness. It then reloads the exact plan and non-null readiness
-      coordinate before accepting the process topology. Every revision-producing callback carries the exact normalized plan
-      committed by its selected mutation and the matching typed context source fact. Callback admission rejects a
-      hash/provenance/version mismatch before coalescing. Keyed admission serializes comparison of that declared coordinate
-      against the current durable plan; a delayed stale callback is rejected and cannot replace or join a newer queued successor. A newer
-      plan queued during an active keyed attempt is a mandatory successor, retains its own live operation context and semantic
-      source, and completes before the owner releases waiters or returns success; it never inherits or joins the predecessor
-      request result.
+      route, reconciles the exact initial timer declaration set, and records topology readiness. Initial timer reconciliation
+      is one selected-store operation in which unchanged declarations preserve their exact activation, changed and removed
+      declarations monotonically cancel their old activation, and added or changed declarations insert the exact successor
+      before post-commit wakeup projection. It never mutates event- or transition-caused activations. It then reloads the
+      exact plan and non-null readiness coordinate before accepting the process topology. Every revision-producing callback
+      carries the exact normalized plan committed by its selected mutation and one private admitted source capability
+      containing the manager-owned semantic source plus matching typed context source fact. Callback admission rejects a
+      hash/provenance/version mismatch or a semantic source other than the manager-owned loaded source before coalescing.
+      The final execution reload consumes that same admitted capability and compares the reloaded plan with its exact
+      `{bundle_hash, bundle_source, workflow_version}` coordinate before retiring a route, interpreting topology, reconciling
+      timers, or emitting an event; it cannot reload the newest semantic source after admission. Keyed admission serializes
+      comparison of that declared coordinate against the current durable plan; a delayed stale callback is rejected and
+      cannot replace or join a newer queued successor. A newer plan queued during an active keyed attempt is a mandatory
+      successor, retains its own live operation context and admitted source capability, and completes before the owner
+      releases waiters or returns success; it never inherits or joins the predecessor request result.
       A changed desired plan always clears topology readiness, while preserving any immutable creation occurrence completion, so emitted and no-auto rows both remain selected for
       automatic retry until revised topology converges. It then consumes one selected-store operation that locks the
       exact run and instance lifecycle rows and atomically appends the deterministic creation-only event plus its completion
@@ -13324,7 +13338,8 @@ platform_tables:
         automatic retry, and startup consume one idempotent reconciler keyed by exact `{run_id, instance_id}`. Route rows
         may be persisted before reconciliation but remain process-invisible. The reconciler reloads current lifecycle
         eligibility, reconciles and verifies the complete declared-agent revision set, publishes and verifies the persisted
-        route, arms initial workflow timers, reloads lifecycle eligibility, and only then records `topology_ready_at`.
+        route, transactionally reconciles the exact initial workflow-timer declaration set for the admitted source revision,
+        projects the committed active set, reloads lifecycle eligibility, and only then records `topology_ready_at`.
         Therefore a non-null `topology_ready_at` is the completion coordinate for route, declared-agent, and initial-timer
         reconciliation; any timer-arm failure leaves the row pending. One final selected-store operation then locks the
         exact run and instance lifecycle rows and atomically appends the deterministic creation-only event plus
@@ -13335,7 +13350,12 @@ platform_tables:
         declared-agent topology owner. The fresh version-2 plan requires exact normalized `bundle_hash`, `bundle_source`,
         and `workflow_version`; the first two are decoded from `BundleSourceFact`. Any member change invalidates
         `topology_ready_at`, participates in the canonical plan fingerprint and completion compare-and-set, and queues
-        reconciliation. One selected-store agent-topology admission covers lifecycle first execution,
+        reconciliation. The strict workflow-timer activation reference carries one typed activation cause and a canonical
+        declaration revision over every execution-bearing declaration fact. Source revision reconciliation preserves exact
+        unchanged activations, cancels changed and removed initial-entry activations, and inserts changed and added
+        successors; event- and transition-caused activations remain outside that operation. A stale activation from a prior
+        declaration revision cannot register, fire, or authorize an accepted event. One selected-store agent-topology
+        admission covers lifecycle first execution,
         duplicate/stored-result replay, raw agent projection writes, config/path/status rewrites, replacement, and
         terminalization. It locks and matches the exact `{run_id, instance_id, canonical plan fingerprint}`, desired
         membership or absence, and declared config revision before any write or replay return. Authorized replay remains
@@ -13346,11 +13366,13 @@ platform_tables:
         against the exact normalized plan that was reconciled; a concurrent source revision leaves its new plan pending
         and rejects completion by the stale attempt. After that compare-and-set, the reconciler reloads and accepts
         completion only while the exact plan still matches and `topology_ready_at` remains non-null. The keyed
-        reconciliation owner first requires the callback context/EventBus source fact and semantic source to match the
-        plan's exact `{bundle_hash, bundle_source, workflow_version}` coordinate, then admits the callback only when its
-        declared exact committed plan equals the current durable plan under owner serialization. A delayed stale callback
-        cannot overwrite or join a queued current successor. The
-        owner records a newer durable plan as a mandatory successor with that caller's live context and semantic source, and
+        reconciliation owner first requires the callback context/EventBus source fact and manager-owned semantic source to
+        match the plan's exact `{bundle_hash, bundle_source, workflow_version}` coordinate. It admits one private capability
+        containing that complete source authority only when the declared exact committed plan equals the current durable
+        plan under owner serialization. Final execution carries that same capability across the durable reload and validates
+        the reloaded coordinate before route retirement or semantic interpretation; it cannot fetch or infer a newer source
+        after admission. A delayed stale callback cannot overwrite or join a queued current successor. The owner records a
+        newer durable plan as a mandatory successor with that caller's live context and admitted source capability, and
         completes that successor before releasing any waiter or returning success; no post-CAS revision may join an older
         successful result or inherit a canceled predecessor request context. A pending
         creation occurrence is rebuilt from revised
@@ -13377,7 +13399,8 @@ platform_tables:
         and run_id NULL, used for boot-start workflow timers and platform-level work (periodic scans, health checks,
         digest compilation).
         For run/entity-scoped workflow timers, task_type=workflow_timer is the sole row-family discriminator. Within that
-        selected family, timer_name carries the strict versioned WorkflowTimerLifecycle activation serialization and
+        selected family, timer_name carries the strict version-2 WorkflowTimerLifecycle activation serialization, including
+        one typed activation cause and canonical declaration revision, and
         timer_id is that activation ID. fire_payload carries business input only; it must not carry workflow
         activation, occurrence, generation, status, or reconstruction authority. fire_at is the current persisted occurrence
         coordinate. One-shot completion changes status to fired; recurring completion keeps status active and advances fire_at

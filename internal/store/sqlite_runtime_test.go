@@ -424,6 +424,9 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 	bundle := sqliteFlowActivationBundle()
 	configureSQLiteFlowActivationLifecycle(t, sqliteStore, workflowStore, bus, bundle)
 	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		BaseContext:       ctx,
+		BundleSourceFact:  mustStoreTestEphemeralBundleSourceFact(authorActivityTestBundleHash),
+		SemanticSource:    semanticview.Wrap(bundle),
 		WorkflowInstances: workflowStore,
 		LLMBackend:        "anthropic",
 		LifecycleStore:    sqliteStore,
@@ -469,6 +472,9 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 	bundle := sqliteFlowActivationBundle()
 	configureSQLiteFlowActivationLifecycle(t, sqliteStore, workflowStore, bus, bundle)
 	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		BaseContext:       ctx,
+		BundleSourceFact:  mustStoreTestEphemeralBundleSourceFact(authorActivityTestBundleHash),
+		SemanticSource:    semanticview.Wrap(bundle),
 		WorkflowInstances: workflowStore,
 		LLMBackend:        "anthropic",
 		LifecycleStore:    sqliteStore,

@@ -193,6 +193,9 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 		}
 	}
 	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, nil, runtimemanager.AgentManagerOptions{
+		BaseContext:       testAuthorActivityContext(context.Background()),
+		BundleSourceFact:  authorActivityTestBundleSourceFact,
+		SemanticSource:    source,
 		WorkflowInstances: workflowStore,
 		WorkOwner:         workOwner,
 		DeliveryStore:     backend,

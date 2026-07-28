@@ -67,6 +67,14 @@ func (*concurrentWorkflowInitialMaterializationTestOwner) ArmInitialEntryTimers(
 	return nil
 }
 
+func (*workflowInitialMaterializationTestOwner) ReconcileInitialEntryTimers(context.Context, string) error {
+	return nil
+}
+
+func (*concurrentWorkflowInitialMaterializationTestOwner) ReconcileInitialEntryTimers(context.Context, string) error {
+	return nil
+}
+
 func (*workflowInitialMaterializationTestOwner) RetireInitialEntryTimerWakeups(context.Context, string) error {
 	return nil
 }

@@ -48,13 +48,24 @@ type dynamicFlowRuntimeReadinessKey struct {
 }
 
 type dynamicFlowRuntimeReadinessAttempt struct {
-	done                chan struct{}
-	err                 error
-	planCoordinate      string
-	successorRequired   bool
-	successorContext    context.Context
-	successorSource     semanticview.Source
-	successorCoordinate string
+	done              chan struct{}
+	err               error
+	planCoordinate    string
+	successorRequired bool
+	successor         *dynamicFlowRuntimeReadinessAdmission
+}
+
+type dynamicFlowRuntimeReadinessSource struct {
+	fact   runtimecorrelation.BundleSourceFact
+	source semanticview.Source
+}
+
+type dynamicFlowRuntimeReadinessAdmission struct {
+	ctx            context.Context
+	key            dynamicFlowRuntimeReadinessKey
+	plan           runtimepipeline.DynamicFlowRuntimeReadinessPlan
+	planCoordinate string
+	source         dynamicFlowRuntimeReadinessSource
 }
 
 var errDynamicFlowRuntimeReadinessPlanStale = errors.New(
@@ -89,7 +100,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessForStartup(ctx conte
 	activePaths := make(map[string]struct{}, len(active))
 	for _, item := range active {
 		activePaths[item.InstancePath] = struct{}{}
-		if err := am.reconcileDynamicFlowRuntimeReadiness(ctx, item.Plan.RunID, item.InstancePath, am.semanticSource); err != nil {
+		if err := am.reconcileDynamicFlowRuntimeReadiness(ctx, item.Plan.RunID, item.InstancePath); err != nil {
 			return fmt.Errorf("finalize dynamic flow runtime readiness %s: %w", item.InstancePath, err)
 		}
 	}
@@ -101,17 +112,14 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessForStartup(ctx conte
 		if _, hasActiveSuccessor := activePaths[key.InstancePath]; hasActiveSuccessor {
 			continue
 		}
-		if err := am.reconcileDynamicFlowRuntimeReadiness(ctx, key.RunID, key.InstancePath, am.semanticSource); err != nil {
+		if err := am.reconcileDynamicFlowRuntimeReadiness(ctx, key.RunID, key.InstancePath); err != nil {
 			return fmt.Errorf("finalize dynamic flow runtime readiness %s: %w", key.InstancePath, err)
 		}
 	}
 	return nil
 }
 
-func (am *AgentManager) reconcilePendingDynamicFlowRuntimeReadiness(
-	ctx context.Context,
-	source semanticview.Source,
-) error {
+func (am *AgentManager) reconcilePendingDynamicFlowRuntimeReadiness(ctx context.Context) error {
 	if am == nil || am.workflowInstances == nil {
 		return nil
 	}
@@ -124,7 +132,7 @@ func (am *AgentManager) reconcilePendingDynamicFlowRuntimeReadiness(
 		if !item.Pending() {
 			continue
 		}
-		if err := am.reconcileDynamicFlowRuntimeReadiness(ctx, item.Plan.RunID, item.InstancePath, source); err != nil {
+		if err := am.reconcileDynamicFlowRuntimeReadiness(ctx, item.Plan.RunID, item.InstancePath); err != nil {
 			reconcileErrs = append(reconcileErrs, fmt.Errorf("%s: %w", item.InstancePath, err))
 		}
 	}
@@ -201,15 +209,16 @@ func (am *AgentManager) reconcileEnsuredDynamicFlowRuntimeReadinessPlan(
 // readiness owner in the selected run before revised routes are derived.
 func (am *AgentManager) ReconcileDynamicFlowRuntimeReadinessPlansForRun(
 	ctx context.Context,
-	source semanticview.Source,
 	observedAt time.Time,
 ) error {
 	if am == nil || am.workflowInstances == nil {
 		return fmt.Errorf("dynamic flow runtime readiness reconciler requires manager and workflow store")
 	}
-	if source == nil || strings.TrimSpace(source.WorkflowVersion()) == "" {
-		return fmt.Errorf("dynamic flow runtime readiness reconciler requires semantic source")
+	admittedSource, err := am.dynamicFlowRuntimeReadinessSource(ctx)
+	if err != nil {
+		return err
 	}
+	source := admittedSource.source
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
 	if runID == "" {
 		return fmt.Errorf("dynamic flow runtime readiness reconciliation requires exact run_id")
@@ -221,10 +230,7 @@ func (am *AgentManager) ReconcileDynamicFlowRuntimeReadinessPlansForRun(
 	if _, transactional := runtimepipeline.PipelineSQLTxFromContext(ctx); !transactional {
 		return fmt.Errorf("run-scoped dynamic flow runtime readiness reconciliation requires selected mutation")
 	}
-	bundleHash, bundleSource, err := dynamicFlowRuntimeReadinessSourceCoordinate(ctx)
-	if err != nil {
-		return err
-	}
+	bundleHash, bundleSource := admittedSource.fact.StorageValues()
 	items, err := am.workflowInstances.ListDynamicFlowRuntimeReadiness(ctx)
 	if err != nil {
 		return err
@@ -353,13 +359,9 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadiness(
 	ctx context.Context,
 	runID string,
 	instancePath string,
-	source semanticview.Source,
 ) error {
 	if am == nil || am.workflowInstances == nil {
 		return fmt.Errorf("dynamic flow runtime readiness reconciler requires manager and workflow store")
-	}
-	if source == nil {
-		return fmt.Errorf("dynamic flow runtime readiness reconciler requires semantic source")
 	}
 	key, err := newDynamicFlowRuntimeReadinessKey(runID, instancePath)
 	if err != nil {
@@ -370,16 +372,27 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadiness(
 		return err
 	}
 	planCoordinate := "missing"
+	var plan runtimepipeline.DynamicFlowRuntimeReadinessPlan
+	admittedSource, err := am.dynamicFlowRuntimeReadinessSource(ctx)
+	if err != nil {
+		return err
+	}
 	if found {
-		if err := validateDynamicFlowRuntimeReadinessCallbackSource(ctx, readiness.Plan, source); err != nil {
+		plan, err = readiness.Plan.Normalized()
+		if err != nil {
 			return err
 		}
-		planCoordinate, err = dynamicFlowRuntimeReadinessPlanCoordinate(readiness.Plan)
+		if err := validateDynamicFlowRuntimeReadinessCallbackSource(plan, admittedSource); err != nil {
+			return err
+		}
+		planCoordinate, err = dynamicFlowRuntimeReadinessPlanCoordinate(plan)
 		if err != nil {
 			return err
 		}
 	}
-	return am.reconcileDeclaredDynamicFlowRuntimeReadiness(ctx, key, planCoordinate, source)
+	return am.reconcileDeclaredDynamicFlowRuntimeReadiness(dynamicFlowRuntimeReadinessAdmission{
+		ctx: ctx, key: key, plan: plan, planCoordinate: planCoordinate, source: admittedSource,
+	})
 }
 
 func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessPlan(
@@ -391,7 +404,11 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessPlan(
 	if err != nil {
 		return err
 	}
-	if err := validateDynamicFlowRuntimeReadinessCallbackSource(ctx, normalized, source); err != nil {
+	admittedSource, err := am.dynamicFlowRuntimeReadinessSource(ctx, source)
+	if err != nil {
+		return err
+	}
+	if err := validateDynamicFlowRuntimeReadinessCallbackSource(normalized, admittedSource); err != nil {
 		return err
 	}
 	key, err := newDynamicFlowRuntimeReadinessKey(normalized.RunID, normalized.Identity.InstancePath)
@@ -402,7 +419,71 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessPlan(
 	if err != nil {
 		return err
 	}
-	return am.reconcileDeclaredDynamicFlowRuntimeReadiness(ctx, key, planCoordinate, source)
+	return am.reconcileDeclaredDynamicFlowRuntimeReadiness(dynamicFlowRuntimeReadinessAdmission{
+		ctx: ctx, key: key, plan: normalized, planCoordinate: planCoordinate, source: admittedSource,
+	})
+}
+
+func (am *AgentManager) dynamicFlowRuntimeReadinessSource(
+	ctx context.Context,
+	candidates ...semanticview.Source,
+) (dynamicFlowRuntimeReadinessSource, error) {
+	if am == nil {
+		return dynamicFlowRuntimeReadinessSource{}, fmt.Errorf(
+			"dynamic flow runtime readiness requires manager",
+		)
+	}
+	owned := am.semanticReadinessSource
+	if owned.source == nil || !sameLoadedDynamicFlowSemanticSource(am.semanticSource, owned.source) {
+		return dynamicFlowRuntimeReadinessSource{}, fmt.Errorf(
+			"dynamic flow runtime readiness requires the manager-owned semantic source",
+		)
+	}
+	if len(candidates) > 0 && !sameLoadedDynamicFlowSemanticSource(owned.source, candidates[0]) {
+		return dynamicFlowRuntimeReadinessSource{}, fmt.Errorf(
+			"%w: callback semantic source is not the manager-owned loaded source",
+			errDynamicFlowRuntimeReadinessSourceStale,
+		)
+	}
+	if err := owned.fact.Validate(); err != nil {
+		return dynamicFlowRuntimeReadinessSource{}, fmt.Errorf(
+			"dynamic flow runtime readiness manager source fact: %w",
+			err,
+		)
+	}
+	sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	if !ok {
+		return dynamicFlowRuntimeReadinessSource{}, fmt.Errorf(
+			"dynamic flow runtime readiness requires exact bundle source fact",
+		)
+	}
+	if !sourceFact.Matches(owned.fact) {
+		declaredHash, declaredSource := owned.fact.StorageValues()
+		activeHash, activeSource := sourceFact.StorageValues()
+		return dynamicFlowRuntimeReadinessSource{}, fmt.Errorf(
+			"%w: declared=%s/%s active=%s/%s",
+			errDynamicFlowRuntimeReadinessSourceStale,
+			declaredHash,
+			declaredSource,
+			activeHash,
+			activeSource,
+		)
+	}
+	if strings.TrimSpace(owned.source.WorkflowVersion()) == "" {
+		return dynamicFlowRuntimeReadinessSource{}, fmt.Errorf(
+			"dynamic flow runtime readiness manager source requires workflow version",
+		)
+	}
+	return owned, nil
+}
+
+func sameLoadedDynamicFlowSemanticSource(left, right semanticview.Source) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	leftBundle, leftOK := semanticview.Bundle(left)
+	rightBundle, rightOK := semanticview.Bundle(right)
+	return leftOK && rightOK && leftBundle == rightBundle
 }
 
 func dynamicFlowRuntimeReadinessSourceCoordinate(ctx context.Context) (string, string, error) {
@@ -418,14 +499,10 @@ func dynamicFlowRuntimeReadinessSourceCoordinate(ctx context.Context) (string, s
 }
 
 func validateDynamicFlowRuntimeReadinessCallbackSource(
-	ctx context.Context,
 	plan runtimepipeline.DynamicFlowRuntimeReadinessPlan,
-	source semanticview.Source,
+	source dynamicFlowRuntimeReadinessSource,
 ) error {
-	bundleHash, bundleSource, err := dynamicFlowRuntimeReadinessSourceCoordinate(ctx)
-	if err != nil {
-		return err
-	}
+	bundleHash, bundleSource := source.fact.StorageValues()
 	if bundleHash != plan.BundleHash || bundleSource != plan.BundleSource {
 		return fmt.Errorf(
 			"%w: declared=%s/%s active=%s/%s",
@@ -436,79 +513,74 @@ func validateDynamicFlowRuntimeReadinessCallbackSource(
 			bundleSource,
 		)
 	}
-	if source == nil {
+	if source.source == nil {
 		return fmt.Errorf("dynamic flow runtime readiness reconciler requires semantic source")
 	}
-	if strings.TrimSpace(source.WorkflowVersion()) != plan.WorkflowVersion {
+	if strings.TrimSpace(source.source.WorkflowVersion()) != plan.WorkflowVersion {
 		return fmt.Errorf(
 			"dynamic flow runtime readiness %s workflow version changed: persisted=%s active=%s",
 			plan.Identity.InstancePath,
 			plan.WorkflowVersion,
-			strings.TrimSpace(source.WorkflowVersion()),
+			strings.TrimSpace(source.source.WorkflowVersion()),
 		)
 	}
 	return nil
 }
 
 func (am *AgentManager) reconcileDeclaredDynamicFlowRuntimeReadiness(
-	ctx context.Context,
-	key dynamicFlowRuntimeReadinessKey,
-	planCoordinate string,
-	source semanticview.Source,
+	admission dynamicFlowRuntimeReadinessAdmission,
 ) error {
 	am.dynamicFlowReadinessMu.Lock()
-	currentCoordinate, err := am.loadDynamicFlowRuntimeReadinessPlanCoordinate(ctx, key)
+	currentCoordinate, err := am.loadDynamicFlowRuntimeReadinessPlanCoordinate(admission.ctx, admission.key)
 	if err != nil {
 		am.dynamicFlowReadinessMu.Unlock()
 		return err
 	}
-	if currentCoordinate != planCoordinate {
+	if currentCoordinate != admission.planCoordinate {
 		am.dynamicFlowReadinessMu.Unlock()
 		return errDynamicFlowRuntimeReadinessPlanStale
 	}
 	if am.dynamicFlowReadinessAttempts == nil {
 		am.dynamicFlowReadinessAttempts = make(map[dynamicFlowRuntimeReadinessKey]*dynamicFlowRuntimeReadinessAttempt)
 	}
-	if attempt := am.dynamicFlowReadinessAttempts[key]; attempt != nil {
-		if planCoordinate != attempt.planCoordinate {
+	if attempt := am.dynamicFlowReadinessAttempts[admission.key]; attempt != nil {
+		if admission.planCoordinate != attempt.planCoordinate {
 			attempt.successorRequired = true
-			attempt.successorContext = ctx
-			attempt.successorSource = source
-			attempt.successorCoordinate = planCoordinate
+			successor := admission
+			attempt.successor = &successor
 		}
 		am.dynamicFlowReadinessMu.Unlock()
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-admission.ctx.Done():
+			return admission.ctx.Err()
 		case <-attempt.done:
 			return attempt.err
 		}
 	}
 	attempt := &dynamicFlowRuntimeReadinessAttempt{
 		done:           make(chan struct{}),
-		planCoordinate: planCoordinate,
+		planCoordinate: admission.planCoordinate,
 	}
-	am.dynamicFlowReadinessAttempts[key] = attempt
+	am.dynamicFlowReadinessAttempts[admission.key] = attempt
 	am.dynamicFlowReadinessMu.Unlock()
 
-	currentContext := ctx
-	currentSource := source
+	if am.testAfterDynamicFlowReadinessAdmission != nil {
+		am.testAfterDynamicFlowReadinessAdmission()
+	}
+	current := admission
 	for {
-		attemptErr := am.reconcileDynamicFlowRuntimeReadinessOnce(currentContext, key, currentSource)
+		attemptErr := am.reconcileDynamicFlowRuntimeReadinessOnce(current)
 		am.dynamicFlowReadinessMu.Lock()
 		attempt.err = attemptErr
 		if attempt.successorRequired {
-			currentContext = attempt.successorContext
-			currentSource = attempt.successorSource
-			attempt.planCoordinate = attempt.successorCoordinate
+			current = *attempt.successor
+			attempt.planCoordinate = current.planCoordinate
 			attempt.successorRequired = false
-			attempt.successorContext = nil
-			attempt.successorSource = nil
-			attempt.successorCoordinate = ""
+			attempt.successor = nil
 			am.dynamicFlowReadinessMu.Unlock()
 			continue
 		}
-		delete(am.dynamicFlowReadinessAttempts, key)
+		delete(am.dynamicFlowReadinessAttempts, admission.key)
 		close(attempt.done)
 		am.dynamicFlowReadinessMu.Unlock()
 		return attemptErr
@@ -548,10 +620,11 @@ func dynamicFlowRuntimeReadinessPlanCoordinate(
 }
 
 func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
-	ctx context.Context,
-	key dynamicFlowRuntimeReadinessKey,
-	source semanticview.Source,
+	admission dynamicFlowRuntimeReadinessAdmission,
 ) (retErr error) {
+	ctx := admission.ctx
+	key := admission.key
+	source := admission.source.source
 	if source == nil {
 		return fmt.Errorf("dynamic flow runtime readiness reconciler requires semantic source")
 	}
@@ -565,6 +638,16 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	}
 	plan, err := readiness.Plan.Normalized()
 	if err != nil {
+		return err
+	}
+	currentCoordinate, err := dynamicFlowRuntimeReadinessPlanCoordinate(plan)
+	if err != nil {
+		return err
+	}
+	if currentCoordinate != admission.planCoordinate {
+		return errDynamicFlowRuntimeReadinessPlanStale
+	}
+	if err := validateDynamicFlowRuntimeReadinessCallbackSource(plan, admission.source); err != nil {
 		return err
 	}
 	if err := am.retirePublishedDynamicFlowRoute(plan.Identity.Route()); err != nil {
@@ -687,8 +770,8 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		return nil
 	}
 	wakeupsArmed = true
-	if err := am.workflowInstances.ArmInitialEntryTimers(ctx, readiness.InstancePath); err != nil {
-		return fmt.Errorf("arm initial workflow timers for %s: %w", readiness.InstancePath, err)
+	if err := am.workflowInstances.ReconcileInitialEntryTimers(ctx, readiness.InstancePath); err != nil {
+		return fmt.Errorf("reconcile initial workflow timers for %s: %w", readiness.InstancePath, err)
 	}
 	if eligible, err := am.dynamicFlowRuntimeReadinessStillEligible(ctx, key, plan); err != nil {
 		return err
