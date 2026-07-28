@@ -194,21 +194,22 @@ type flowActivationTestRouteStore struct {
 }
 
 type flowActivationTestInstanceStore struct {
-	readinessMu      sync.Mutex
-	creates          []runtimepipeline.WorkflowInstance
-	upserts          []runtimepipeline.WorkflowInstance
-	terminatedPaths  []string
-	terminatedAtSeen []time.Time
-	byStorageRef     map[string]runtimepipeline.WorkflowInstance
-	routeLoads       []runtimeflowidentity.Route
-	materialization  runtimepipeline.WorkflowInitialMaterializationResult
-	armedEntries     []string
-	armInitialEntry  func(string) error
-	readiness        map[string]runtimepipeline.DynamicFlowRuntimeReadiness
-	creationMarkErr  error
-	creationMarked   func()
-	topologyMarked   func()
-	beforeCreation   func()
+	readinessMu        sync.Mutex
+	creates            []runtimepipeline.WorkflowInstance
+	upserts            []runtimepipeline.WorkflowInstance
+	terminatedPaths    []string
+	terminatedAtSeen   []time.Time
+	byStorageRef       map[string]runtimepipeline.WorkflowInstance
+	routeLoads         []runtimeflowidentity.Route
+	materialization    runtimepipeline.WorkflowInitialMaterializationResult
+	armedEntries       []string
+	armInitialEntry    func(string) error
+	readiness          map[string]runtimepipeline.DynamicFlowRuntimeReadiness
+	creationMarkErr    error
+	creationMarked     func()
+	topologyMarked     func()
+	beforeTopologyMark func(runtimepipeline.DynamicFlowRuntimeReadinessPlan)
+	beforeCreation     func()
 }
 
 func (s *flowActivationTestInstanceStore) RunPipelineMutation(ctx context.Context, fn func(context.Context) error) error {
@@ -460,13 +461,36 @@ func (s *flowActivationTestInstanceStore) ListDynamicFlowRuntimeReadinessKeys(co
 	return keys, nil
 }
 
-func (s *flowActivationTestInstanceStore) MarkDynamicFlowRuntimeTopologyReady(_ context.Context, runID, instanceID string, readyAt time.Time) error {
+func (s *flowActivationTestInstanceStore) MarkDynamicFlowRuntimeTopologyReady(
+	_ context.Context,
+	expected runtimepipeline.DynamicFlowRuntimeReadinessPlan,
+	readyAt time.Time,
+) error {
+	normalized, err := expected.Normalized()
+	if err != nil {
+		return err
+	}
+	if hook := s.beforeTopologyMark; hook != nil {
+		s.beforeTopologyMark = nil
+		hook(normalized)
+	}
 	s.readinessMu.Lock()
 	defer s.readinessMu.Unlock()
-	key := flowActivationReadinessKey(runID, instanceID)
+	key := flowActivationReadinessKey(normalized.RunID, normalized.Identity.InstancePath)
 	item, ok := s.readiness[key]
 	if !ok || !item.Eligible() {
 		return fmt.Errorf("readiness not found")
+	}
+	actualJSON, err := json.Marshal(item.Plan)
+	if err != nil {
+		return err
+	}
+	expectedJSON, err := json.Marshal(normalized)
+	if err != nil {
+		return err
+	}
+	if string(actualJSON) != string(expectedJSON) {
+		return fmt.Errorf("readiness plan changed")
 	}
 	if item.TopologyReadyAt.IsZero() {
 		item.TopologyReadyAt = readyAt
@@ -1377,6 +1401,57 @@ func TestDynamicFlowRuntimeReadinessAutomaticRetryCompletesWithoutEnsureOrRestar
 	}
 	if armCalls != 2 || len(bus.published) != 1 {
 		t.Fatalf("automatic retry side effects: arms=%d published=%d, want 2/1", armCalls, len(bus.published))
+	}
+}
+
+func TestDynamicFlowRuntimeTopologyReadyRejectsConcurrentPlanRevision(t *testing.T) {
+	instances := &flowActivationTestInstanceStore{}
+	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	am := newFlowActivationManager(t, bus, instances)
+	bundle := testFlowBundle("")
+	am.semanticSource = semanticview.Wrap(bundle)
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+
+	var revisionErr error
+	instances.beforeTopologyMark = func(expected runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
+		revised := expected
+		revised.WorkflowVersion += "-concurrent-revision"
+		changed, err := instances.ReconcileDynamicFlowRuntimeReadinessPlan(
+			context.Background(),
+			revised,
+			time.Now().UTC(),
+		)
+		if err != nil {
+			revisionErr = err
+			return
+		}
+		if !changed {
+			revisionErr = errors.New("concurrent readiness plan was not revised")
+		}
+	}
+
+	err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req)
+	if revisionErr != nil {
+		t.Fatalf("inject concurrent readiness revision: %v", revisionErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "readiness plan changed") {
+		t.Fatalf("ActivateFlowInstance error = %v, want exact-plan topology completion rejection", err)
+	}
+	readiness, found, loadErr := instances.LoadDynamicFlowRuntimeReadiness(
+		context.Background(),
+		req.TriggerEvent.RunID(),
+		req.Instance.InstancePath,
+	)
+	if loadErr != nil || !found {
+		t.Fatalf("load concurrently revised readiness: found=%v err=%v", found, loadErr)
+	}
+	if readiness.Plan.WorkflowVersion == strings.TrimSpace(bundle.WorkflowVersion()) ||
+		!readiness.TopologyReadyAt.IsZero() ||
+		!readiness.Pending() {
+		t.Fatalf("concurrently revised readiness was falsely completed: %#v", readiness)
+	}
+	if bus.HasFlowInstanceRoute(req.Instance.Route()) {
+		t.Fatal("stale topology attempt left its process route published")
 	}
 }
 

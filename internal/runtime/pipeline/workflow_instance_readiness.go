@@ -623,8 +623,27 @@ func decodeDynamicFlowRuntimeReadiness(
 	return item, nil
 }
 
-func (s *WorkflowInstanceStore) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, runID, instancePath string, readyAt time.Time) error {
-	return s.markDynamicFlowRuntimeReadiness(ctx, runID, instancePath, "topology_ready_at", readyAt)
+func (s *WorkflowInstanceStore) MarkDynamicFlowRuntimeTopologyReady(
+	ctx context.Context,
+	expected DynamicFlowRuntimeReadinessPlan,
+	readyAt time.Time,
+) error {
+	normalized, err := expected.Normalized()
+	if err != nil {
+		return fmt.Errorf("normalize dynamic flow runtime topology readiness plan: %w", err)
+	}
+	expectedJSON, err := canonicaljson.Bytes(normalized)
+	if err != nil {
+		return fmt.Errorf("encode dynamic flow runtime topology readiness plan: %w", err)
+	}
+	return s.markDynamicFlowRuntimeReadiness(
+		ctx,
+		normalized.RunID,
+		normalized.Identity.InstancePath,
+		"topology_ready_at",
+		expectedJSON,
+		readyAt,
+	)
 }
 
 func (s *WorkflowInstanceStore) CommitDynamicFlowRuntimeCreationOccurrence(
@@ -694,7 +713,7 @@ func (s *WorkflowInstanceStore) CommitDynamicFlowRuntimeCreationOccurrence(
 		if err := publisher.PublishInMutation(txctx, req.Event); err != nil {
 			return fmt.Errorf("append dynamic flow runtime creation occurrence: %w", err)
 		}
-		if err := s.markDynamicFlowRuntimeReadiness(txctx, runID, instancePath, "creation_event_emitted_at", occurredAt); err != nil {
+		if err := s.markDynamicFlowRuntimeReadiness(txctx, runID, instancePath, "creation_event_emitted_at", nil, occurredAt); err != nil {
 			return fmt.Errorf("mark dynamic flow runtime creation occurrence complete: %w", err)
 		}
 		return nil
@@ -750,7 +769,14 @@ func (s *WorkflowInstanceStore) lockDynamicFlowRuntimeCreationEligibility(
 	return nil
 }
 
-func (s *WorkflowInstanceStore) markDynamicFlowRuntimeReadiness(ctx context.Context, runID, instancePath, column string, observedAt time.Time) error {
+func (s *WorkflowInstanceStore) markDynamicFlowRuntimeReadiness(
+	ctx context.Context,
+	runID string,
+	instancePath string,
+	column string,
+	expectedPlan []byte,
+	observedAt time.Time,
+) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("workflow instance store is required")
 	}
@@ -771,6 +797,11 @@ func (s *WorkflowInstanceStore) markDynamicFlowRuntimeReadiness(ctx context.Cont
 		var err error
 		if s.isSQLite() {
 			query := `UPDATE flow_instance_runtime_readiness SET ` + column + ` = COALESCE(` + column + `, ?), updated_at = ? WHERE run_id = ? AND instance_id = ?`
+			args := []any{observedAt, observedAt, runID, instancePath}
+			if len(expectedPlan) != 0 {
+				query += ` AND plan = ?`
+				args = append(args, expectedPlan)
+			}
 			if column == "creation_event_emitted_at" {
 				query += ` AND topology_ready_at IS NOT NULL`
 			}
@@ -784,9 +815,14 @@ func (s *WorkflowInstanceStore) markDynamicFlowRuntimeReadiness(ctx context.Cont
 					  AND instance.terminated_at IS NULL
 					  AND LOWER(TRIM(run.status)) IN ('running', 'paused')
 				)`
-			result, err = tx.ExecContext(txctx, query, observedAt, observedAt, runID, instancePath)
+			result, err = tx.ExecContext(txctx, query, args...)
 		} else {
 			query := `UPDATE flow_instance_runtime_readiness SET ` + column + ` = COALESCE(` + column + `, $1), updated_at = $1 WHERE run_id = $2::uuid AND instance_id = $3`
+			args := []any{observedAt, runID, instancePath}
+			if len(expectedPlan) != 0 {
+				query += ` AND plan = $4::jsonb`
+				args = append(args, expectedPlan)
+			}
 			if column == "creation_event_emitted_at" {
 				query += ` AND topology_ready_at IS NOT NULL`
 			}
@@ -800,7 +836,7 @@ func (s *WorkflowInstanceStore) markDynamicFlowRuntimeReadiness(ctx context.Cont
 					  AND instance.terminated_at IS NULL
 					  AND LOWER(BTRIM(run.status)) IN ('running', 'paused')
 				)`
-			result, err = tx.ExecContext(txctx, query, observedAt, runID, instancePath)
+			result, err = tx.ExecContext(txctx, query, args...)
 		}
 		if err != nil {
 			return err
