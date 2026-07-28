@@ -4572,9 +4572,12 @@ engine:
         local generation, keep a removed process agent, or patch an old config.
       - 10. After a fresh active/paused eligibility check, the reconciler transactionally reconciles the exact initial timer
         declaration set for its admitted source revision, projects the committed active set, reloads eligibility, and only
-        then records topology readiness. The selected-store operation preserves unchanged exact activations, monotonically
-        cancels changed and removed activations, and inserts changed and added successors. Stale wakeups and accepted timer
-        events from a prior declaration revision fail closed before publication or workflow handling. `topology_ready_at`
+        then records topology readiness. While the instance remains at its initial-entry stage, the selected-store operation
+        preserves unchanged exact activations, monotonically cancels changed and removed activations, and inserts changed and
+        added successors. Once the instance has progressed beyond that stage, it preserves unchanged initial-caused
+        activations, cancels changed or removed ones, and does not retroactively arm changed or newly added declarations after
+        their initial-entry causal edge has passed. Stale wakeups and accepted timer events from a prior declaration revision
+        fail closed before publication or workflow handling. `topology_ready_at`
         means the route, complete declared-agent set, and initial timer family have all completed reconciliation; it is not
         merely a route/agent checkpoint. Any reconciliation failure leaves the row pending for automatic retry. The
         selected-store transition itself rejects terminal/inactive work.
@@ -6596,8 +6599,12 @@ engine:
       complete typed from/to/transition identity. Timer, join, and gate reactions consume those effects in order and do
       not reconstruct empty-string transitions or choose local clocks. A workflow timer activation is derived only from
       one of those exact persisted initial-entry or accepted-event causes. Its deterministic activation ID includes run,
-      entity, flow instance, declaration, loop generation, and exact causal identity. `timers.task_type=workflow_timer`
-      is the sole workflow row-family discriminator. Inside that already-selected family, `timer_name` carries the
+      entity, flow instance, declaration, loop generation, and exact causal identity. Declarations are selected through
+      the persisted instance owner before any activation or cancellation decision, where an empty declaration `flow_id` belongs
+      only to the root instance whose `workflow_name` equals the semantic source workflow name, and a nonempty `flow_id`
+      belongs only to an instance with that exact `workflow_name`. Declaration IDs are local to that owner; global ID
+      lookup cannot authorize creation, wakeup, fire, restore, or accepted-event handling.
+      `timers.task_type=workflow_timer` is the sole workflow row-family discriminator. Inside that already-selected family, `timer_name` carries the
       versioned typed activation serialization; `fire_payload` carries
       business input only and is never interpreted as lifecycle identity. Replaying that exact cause compares immutable
       activation facts against the existing row and converges on its current active, fired, or cancelled state without
@@ -6627,15 +6634,19 @@ engine:
       `{bundle_hash, bundle_source, workflow_version}` semantic-source coordinate, and optional creation-event occurrence.
       `bundle_hash` and `bundle_source` come only from the canonical `BundleSourceFact`; changing any member of the source
       coordinate changes the version-2 readiness plan and clears topology readiness even when projected agents and creation
-      facts compare equal. Direct
-      activation, selected-mutation post-commit finalization, exact replay / `EnsureFlowInstance`, automatic retry, and startup
+      facts compare equal. Direct activation and exact replay / `EnsureFlowInstance` first admit the request source against
+      both the manager-owned loaded semantic source and the exact context `BundleSourceFact`, before reading request-carried
+      scope, schema, agent, route, workflow-version, or timer facts and before any durable or process mutation. They consume
+      only the admitted manager-owned source after that boundary. Selected-mutation post-commit finalization, automatic retry, and startup
       consume one reconciler keyed by `{run_id, instance_id}`. A selected creation mutation persists its exact route rows but
       does not publish them into the process route table; EventBus recipient planning remains unaware of the route until the
       reconciler reloads current lifecycle eligibility, verifies all declared agents, publishes and verifies the persisted
       route, reconciles the exact initial timer declaration set, and records topology readiness. Initial timer reconciliation
-      is one selected-store operation in which unchanged declarations preserve their exact activation, changed and removed
-      declarations monotonically cancel their old activation, and added or changed declarations insert the exact successor
-      before post-commit wakeup projection. It never mutates event- or transition-caused activations. It then reloads the
+      is one selected-store operation. While the instance remains at initial entry, unchanged declarations preserve their
+      exact activation, changed and removed declarations monotonically cancel their old activation, and added or changed
+      declarations insert the exact successor before post-commit wakeup projection. After the instance progresses,
+      unchanged initial-caused activations remain active, changed or removed activations are canceled, and changed or added
+      declarations are not retroactively armed. It never mutates event- or transition-caused activations. It then reloads the
       exact plan and non-null readiness coordinate before accepting the process topology. Every revision-producing callback
       carries the exact normalized plan committed by its selected mutation and one private admitted source capability
       containing the manager-owned semantic source plus matching typed context source fact. Callback admission rejects a
@@ -6658,7 +6669,8 @@ engine:
       of readiness-owned routes and retires terminal crash-left process topology without overriding an active successor.
       If reconciliation exits after arming the durable active timer set but before accepting the exact completed readiness
       readback and creation occurrence, it reloads that same durable set through WorkflowTimerLifecycle, retires and joins
-      every process-local wakeup, and leaves the durable timer rows active for exact retry. Route retirement without matching
+      only process-local wakeups whose typed activation cause is `initial_stage`, and leaves every durable timer row active
+      for exact retry. Event- and transition-caused wakeups on the same instance remain projected. Route retirement without matching
       timer-projection retirement, terminal timer mutation as compensation, and unjoined rearm are prohibited. Exact replay
       compares the immutable creation projection and immutable readiness plan; mutable current state, fields,
       gates, accumulator, transition history, and readiness completion coordinates never participate in creation identity. A
@@ -13351,9 +13363,11 @@ platform_tables:
         and `workflow_version`; the first two are decoded from `BundleSourceFact`. Any member change invalidates
         `topology_ready_at`, participates in the canonical plan fingerprint and completion compare-and-set, and queues
         reconciliation. The strict workflow-timer activation reference carries one typed activation cause and a canonical
-        declaration revision over every execution-bearing declaration fact. Source revision reconciliation preserves exact
-        unchanged activations, cancels changed and removed initial-entry activations, and inserts changed and added
-        successors; event- and transition-caused activations remain outside that operation. A stale activation from a prior
+        declaration revision over every execution-bearing declaration fact. While the instance remains at initial entry,
+        source revision reconciliation preserves exact unchanged activations, cancels changed and removed initial-entry
+        activations, and inserts changed and added successors. After progress it preserves unchanged initial-caused
+        activations, cancels changed and removed ones, and does not retroactively insert changed or added declarations;
+        event- and transition-caused activations remain outside that operation. A stale activation from a prior
         declaration revision cannot register, fire, or authorize an accepted event. One selected-store agent-topology
         admission covers lifecycle first execution,
         duplicate/stored-result replay, raw agent projection writes, config/path/status rewrites, replacement, and

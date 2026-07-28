@@ -27,7 +27,10 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 	if source == nil {
 		return true, false, fmt.Errorf("workflow timer event requires semantic source")
 	}
-	timer, ok := source.WorkflowTimerByID(activation.Ref.Declaration)
+	timer, ok, err := pc.workflowTimers.workflowTimerDeclarationForActivation(ctx, activation)
+	if err != nil {
+		return true, false, err
+	}
 	if !ok {
 		return true, false, fmt.Errorf("workflow timer declaration %s is unavailable", activation.Ref.Declaration)
 	}
