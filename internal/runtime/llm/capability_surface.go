@@ -160,6 +160,20 @@ func managedCapabilityPlan(ctx context.Context, runtime Runtime, runtimeMode str
 		capability, found := capabilities.Capability(nativeName)
 		if !found {
 			capability = toolcapabilities.Capability{Name: nativeName, Visible: true, Callable: true, AuthorizationClass: "provider_native"}
+		} else if nativeCapabilityProviderNative(NativeToolCapabilitiesForRuntime(runtime), nativeName) && (!capability.Visible || !capability.Callable) {
+			// The selected runtime serves this capability provider-natively
+			// (e.g. Claude CLI WebSearch/WebFetch). The executor reports the
+			// platform fallback surface as hidden, but the planned provider
+			// surface must expose the capability through its provider_builtin
+			// bindings or the startup probe records a delivery mismatch.
+			capability = toolcapabilities.Capability{
+				Name:               nativeName,
+				Kind:               capability.Kind,
+				Visible:            true,
+				Callable:           true,
+				ContextRequirement: capability.ContextRequirement,
+				AuthorizationClass: "provider_native",
+			}
 		}
 		planned = append(planned, managedcapabilities.PlannedTool{
 			Name:           nativeName,
@@ -185,6 +199,19 @@ func managedCapabilityPlan(ctx context.Context, runtime Runtime, runtimeMode str
 		return surface, nil
 	}
 	return surface, nil
+}
+
+func nativeCapabilityProviderNative(caps NativeToolCapabilities, name string) bool {
+	switch strings.TrimSpace(name) {
+	case "bash":
+		return caps.Bash
+	case "web_search":
+		return caps.WebSearch
+	case "read_file", "write_file":
+		return caps.FileIO
+	default:
+		return false
+	}
 }
 
 func managedCapabilityBindings(contract ProviderContract, actor models.AgentConfig, name string) []managedcapabilities.DeliveryBinding {
@@ -308,7 +335,11 @@ func ObserveCLIResponseCapabilitySurface(surface managedcapabilities.Surface, re
 
 func ValidateCLIProviderCapabilitySurface(surface managedcapabilities.Surface, response *Response) error {
 	if surface.HasMismatch() {
-		return fmt.Errorf("provider-visible capability surface contains typed delivery mismatch")
+		details := make([]string, 0, len(surface.Mismatches))
+		for _, mismatch := range surface.Mismatches {
+			details = append(details, fmt.Sprintf("%s/%s: %s (%s)", mismatch.BindingKind, mismatch.ExactName, mismatch.Kind, mismatch.Detail))
+		}
+		return fmt.Errorf("provider-visible capability surface contains typed delivery mismatch: %s", strings.Join(details, "; "))
 	}
 	expected := surface.PlannedBindingNames(managedcapabilities.BindingProviderBuiltin)
 	actual := exactCLIProviderVisibleTools(response)

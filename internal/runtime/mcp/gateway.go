@@ -787,15 +787,6 @@ func (g *Gateway) toolCatalogInContext(ctx context.Context, actor models.AgentCo
 			}
 		}
 	}
-	if g.hooks.EmitToolsForActor != nil {
-		for _, def := range g.hooks.EmitToolsForActor(actor) {
-			name := normalizeGatewayToolName(def.Name)
-			if name != "" {
-				def.Name = name
-				catalog[name] = def
-			}
-		}
-	}
 	if g.hooks.EmitTools != nil {
 		role := strings.TrimSpace(actor.Role)
 		if role != "" {
@@ -805,6 +796,20 @@ func (g *Gateway) toolCatalogInContext(ctx context.Context, actor models.AgentCo
 					def.Name = name
 					catalog[name] = def
 				}
+			}
+		}
+	}
+	// Actor-specific emit definitions are the most precise generation surface
+	// (they honor the actor's emit_events list and flow-scoped event schemas),
+	// so they are applied last and win over role-derived definitions. The
+	// capability planner hashes the actor-generated definition; serving a
+	// role-generated variant here would fail definition identity validation.
+	if g.hooks.EmitToolsForActor != nil {
+		for _, def := range g.hooks.EmitToolsForActor(actor) {
+			name := normalizeGatewayToolName(def.Name)
+			if name != "" {
+				def.Name = name
+				catalog[name] = def
 			}
 		}
 	}
