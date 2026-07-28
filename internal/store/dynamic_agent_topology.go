@@ -25,12 +25,22 @@ type dynamicAgentTopologyPlan struct {
 	} `json:"agents"`
 }
 
+type agentTopologyMutation struct {
+	agentID           string
+	operation         string
+	configRevision    string
+	candidateFlowPath string
+	desiredPresent    bool
+	changesDesiredSet bool
+	authority         *runtimemanager.DynamicAgentTopologyMutation
+}
+
 func authorizePostgresDynamicAgentTopologyMutation(
 	ctx context.Context,
 	tx *sql.Tx,
 	req runtimemanager.AgentLifecycleTransition,
 ) error {
-	return authorizeDynamicAgentTopologyMutation(ctx, tx, req, false)
+	return authorizeAgentTopologyMutation(ctx, tx, lifecycleAgentTopologyMutation(req), false)
 }
 
 func authorizeSQLiteDynamicAgentTopologyMutation(
@@ -38,19 +48,60 @@ func authorizeSQLiteDynamicAgentTopologyMutation(
 	tx *sql.Tx,
 	req runtimemanager.AgentLifecycleTransition,
 ) error {
-	return authorizeDynamicAgentTopologyMutation(ctx, tx, req, true)
+	return authorizeAgentTopologyMutation(ctx, tx, lifecycleAgentTopologyMutation(req), true)
 }
 
-func authorizeDynamicAgentTopologyMutation(
+func authorizePostgresRawAgentTopologyMutation(
 	ctx context.Context,
 	tx *sql.Tx,
-	req runtimemanager.AgentLifecycleTransition,
+	rec runtimemanager.PersistedAgent,
+) error {
+	return authorizeAgentTopologyMutation(ctx, tx, rawAgentTopologyMutation(rec), false)
+}
+
+func authorizeSQLiteRawAgentTopologyMutation(
+	ctx context.Context,
+	tx *sql.Tx,
+	rec runtimemanager.PersistedAgent,
+) error {
+	return authorizeAgentTopologyMutation(ctx, tx, rawAgentTopologyMutation(rec), true)
+}
+
+func lifecycleAgentTopologyMutation(req runtimemanager.AgentLifecycleTransition) agentTopologyMutation {
+	mutation := agentTopologyMutation{
+		agentID:           strings.TrimSpace(req.AgentID),
+		operation:         strings.TrimSpace(req.OperationKind),
+		configRevision:    strings.TrimSpace(req.ConfigRevision),
+		desiredPresent:    req.TargetPhase != runtimemanager.AgentLifecycleTerminated,
+		changesDesiredSet: req.Agent != nil || req.TargetPhase == runtimemanager.AgentLifecycleTerminated,
+		authority:         req.DynamicTopology,
+	}
+	if req.Agent != nil {
+		mutation.candidateFlowPath = strings.Trim(req.Agent.Config.CanonicalFlowPath(), "/")
+	}
+	return mutation
+}
+
+func rawAgentTopologyMutation(rec runtimemanager.PersistedAgent) agentTopologyMutation {
+	return agentTopologyMutation{
+		agentID:           strings.TrimSpace(rec.Config.ID),
+		operation:         "raw_upsert",
+		candidateFlowPath: strings.Trim(rec.Config.CanonicalFlowPath(), "/"),
+		desiredPresent:    !strings.EqualFold(strings.TrimSpace(rec.Status), "terminated"),
+		changesDesiredSet: true,
+	}
+}
+
+func authorizeAgentTopologyMutation(
+	ctx context.Context,
+	tx *sql.Tx,
+	mutation agentTopologyMutation,
 	sqlite bool,
 ) error {
-	if !lifecycleTransitionChangesDesiredAgentTopology(req) {
+	if !mutation.changesDesiredSet {
 		return nil
 	}
-	paths, err := lifecycleTransitionFlowPaths(ctx, tx, req, sqlite)
+	paths, err := agentTopologyMutationFlowPaths(ctx, tx, mutation, sqlite)
 	if err != nil {
 		return err
 	}
@@ -62,36 +113,36 @@ func authorizeDynamicAgentTopologyMutation(
 		}
 		owners = append(owners, items...)
 	}
-	declaringOwners, err := loadDynamicAgentTopologyOwnersForAgent(ctx, tx, req.AgentID, sqlite)
+	declaringOwners, err := loadDynamicAgentTopologyOwnersForAgent(ctx, tx, mutation.agentID, sqlite)
 	if err != nil {
 		return err
 	}
 	owners = uniqueDynamicAgentTopologyOwners(append(owners, declaringOwners...))
 	if len(owners) == 0 {
-		if req.DynamicTopology != nil {
-			return dynamicAgentTopologyConflict(req, "readiness_owner_missing", nil)
+		if mutation.authority != nil {
+			return dynamicAgentTopologyConflict(mutation, "readiness_owner_missing", nil)
 		}
 		return nil
 	}
 	if len(owners) != 1 {
-		return dynamicAgentTopologyConflict(req, "readiness_owner_ambiguous", owners)
+		return dynamicAgentTopologyConflict(mutation, "readiness_owner_ambiguous", owners)
 	}
 	owner := owners[0]
-	authority := req.DynamicTopology
+	authority := mutation.authority
 	if authority == nil {
-		return dynamicAgentTopologyConflict(req, "readiness_owner_required", owners)
+		return dynamicAgentTopologyConflict(mutation, "readiness_owner_required", owners)
 	}
 	runID, instancePath, planFingerprint, desiredPresent := authority.AuthorityFacts()
 	if strings.TrimSpace(runID) != owner.runID ||
 		strings.Trim(strings.TrimSpace(instancePath), "/") != owner.instancePath {
-		return dynamicAgentTopologyConflict(req, "readiness_owner_mismatch", owners)
+		return dynamicAgentTopologyConflict(mutation, "readiness_owner_mismatch", owners)
 	}
 	fingerprint, err := canonicaljson.HashRaw(owner.plan)
 	if err != nil {
 		return fmt.Errorf("hash dynamic agent topology readiness plan: %w", err)
 	}
 	if strings.TrimSpace(planFingerprint) != fingerprint {
-		return dynamicAgentTopologyConflict(req, "readiness_plan_changed", owners)
+		return dynamicAgentTopologyConflict(mutation, "readiness_plan_changed", owners)
 	}
 	var plan dynamicAgentTopologyPlan
 	if err := canonicaljson.DecodeInto(owner.plan, &plan); err != nil {
@@ -99,20 +150,23 @@ func authorizeDynamicAgentTopologyMutation(
 	}
 	var desiredRevision string
 	for _, agent := range plan.Agents {
-		if strings.TrimSpace(agent.AgentID) != req.AgentID {
+		if strings.TrimSpace(agent.AgentID) != mutation.agentID {
 			continue
 		}
 		if desiredRevision != "" {
-			return dynamicAgentTopologyConflict(req, "readiness_agent_duplicated", owners)
+			return dynamicAgentTopologyConflict(mutation, "readiness_agent_duplicated", owners)
 		}
 		desiredRevision = strings.TrimSpace(agent.ConfigRevision)
 	}
-	if desiredPresent {
-		if desiredRevision == "" || desiredRevision != strings.TrimSpace(req.ConfigRevision) {
-			return dynamicAgentTopologyConflict(req, "readiness_agent_revision_mismatch", owners)
+	if desiredPresent != mutation.desiredPresent {
+		return dynamicAgentTopologyConflict(mutation, "readiness_desired_state_mismatch", owners)
+	}
+	if mutation.desiredPresent {
+		if desiredRevision == "" || desiredRevision != mutation.configRevision {
+			return dynamicAgentTopologyConflict(mutation, "readiness_agent_revision_mismatch", owners)
 		}
 	} else if desiredRevision != "" {
-		return dynamicAgentTopologyConflict(req, "readiness_agent_still_declared", owners)
+		return dynamicAgentTopologyConflict(mutation, "readiness_agent_still_declared", owners)
 	}
 	return nil
 }
@@ -135,32 +189,22 @@ func uniqueDynamicAgentTopologyOwners(owners []dynamicAgentTopologyOwner) []dyna
 	return out
 }
 
-func lifecycleTransitionChangesDesiredAgentTopology(req runtimemanager.AgentLifecycleTransition) bool {
-	if req.Agent != nil {
-		return true
-	}
-	return req.TargetPhase == runtimemanager.AgentLifecycleTerminated &&
-		strings.EqualFold(strings.TrimSpace(req.Trigger), "teardown")
-}
-
-func lifecycleTransitionFlowPaths(
+func agentTopologyMutationFlowPaths(
 	ctx context.Context,
 	tx *sql.Tx,
-	req runtimemanager.AgentLifecycleTransition,
+	mutation agentTopologyMutation,
 	sqlite bool,
 ) ([]string, error) {
 	paths := map[string]struct{}{}
-	if req.Agent != nil {
-		if path := strings.Trim(req.Agent.Config.CanonicalFlowPath(), "/"); path != "" {
-			paths[path] = struct{}{}
-		}
+	if mutation.candidateFlowPath != "" {
+		paths[mutation.candidateFlowPath] = struct{}{}
 	}
 	var current sql.NullString
 	query := `SELECT flow_instance FROM agents WHERE agent_id = $1`
 	if sqlite {
 		query = `SELECT flow_instance FROM agents WHERE agent_id = ?`
 	}
-	err := tx.QueryRowContext(ctx, query, req.AgentID).Scan(&current)
+	err := tx.QueryRowContext(ctx, query, mutation.agentID).Scan(&current)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
@@ -283,7 +327,7 @@ func loadDynamicAgentTopologyOwnersForAgent(
 }
 
 func dynamicAgentTopologyConflict(
-	req runtimemanager.AgentLifecycleTransition,
+	mutation agentTopologyMutation,
 	reason string,
 	owners []dynamicAgentTopologyOwner,
 ) error {
@@ -297,9 +341,9 @@ func dynamicAgentTopologyConflict(
 		runtimefailures.ClassLifecycleConflict,
 		"dynamic_agent_topology_owned_by_readiness",
 		"agent-lifecycle-store",
-		req.OperationKind,
+		mutation.operation,
 		map[string]any{
-			"agent_id": req.AgentID, "reason": reason,
+			"agent_id": mutation.agentID, "reason": reason,
 			"owner_run_id": ownerRunID, "owner_instance_path": ownerInstancePath,
 		},
 	)

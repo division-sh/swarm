@@ -236,6 +236,26 @@ func lifecycleRequestHash(parts ...string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+func lifecycleTopologyIdentity(topology *DynamicAgentTopologyMutation) string {
+	if topology == nil {
+		return ""
+	}
+	runID, instancePath, planFingerprint, desiredPresent := topology.AuthorityFacts()
+	return strings.Join([]string{
+		strings.TrimSpace(runID),
+		strings.Trim(strings.TrimSpace(instancePath), "/"),
+		strings.TrimSpace(planFingerprint),
+		strconv.FormatBool(desiredPresent),
+	}, "\x00")
+}
+
+func lifecycleRequestHashWithTopology(topology *DynamicAgentTopologyMutation, parts ...string) string {
+	if identity := lifecycleTopologyIdentity(topology); identity != "" {
+		parts = append(parts, identity)
+	}
+	return lifecycleRequestHash(parts...)
+}
+
 func normalizedLifecycleSubordinate(plan runtimesessions.LifecycleMutationPlan) (runtimesessions.LifecycleMutationPlan, string, error) {
 	normalized, err := plan.Normalize()
 	if err != nil {
@@ -248,7 +268,7 @@ func normalizedLifecycleSubordinate(plan runtimesessions.LifecycleMutationPlan) 
 	return normalized, string(raw), nil
 }
 
-func lifecycleReconfigureOperationID(agentID string, epoch int64, generation uint64, phase AgentLifecyclePhase, revision, planIdentity string) string {
+func lifecycleReconfigureOperationID(agentID string, epoch int64, generation uint64, phase AgentLifecyclePhase, revision, planIdentity string, topology *DynamicAgentTopologyMutation) string {
 	parts := []string{
 		"agent-lifecycle-reconfigure-occurrence-v1",
 		strings.TrimSpace(agentID),
@@ -257,6 +277,9 @@ func lifecycleReconfigureOperationID(agentID string, epoch int64, generation uin
 		string(phase),
 		strings.TrimSpace(revision),
 		planIdentity,
+	}
+	if identity := lifecycleTopologyIdentity(topology); identity != "" {
+		parts = append(parts, identity)
 	}
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.Join(parts, "\x00"))).String()
 }
@@ -271,14 +294,8 @@ func lifecycleReintroductionOperationID(agentID string, epoch int64, generation 
 		strings.TrimSpace(revision),
 		planIdentity,
 	}
-	if topology != nil {
-		runID, instancePath, planFingerprint, desiredPresent := topology.AuthorityFacts()
-		parts = append(parts,
-			strings.TrimSpace(runID),
-			strings.Trim(strings.TrimSpace(instancePath), "/"),
-			strings.TrimSpace(planFingerprint),
-			strconv.FormatBool(desiredPresent),
-		)
+	if identity := lifecycleTopologyIdentity(topology); identity != "" {
+		parts = append(parts, identity)
 	}
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.Join(parts, "\x00"))).String()
 }
@@ -347,7 +364,7 @@ func (c *agentLifecycleCoordinator) registerExecutionWithTopology(
 		return err
 	}
 	operationID := uuid.NewString()
-	requestHash := lifecycleRequestHash("spawn", agentID, revision, planHash)
+	requestHash := lifecycleRequestHashWithTopology(topology, "spawn", agentID, revision, planHash)
 	if persist && c.store != nil {
 		previous, terminated, err := c.terminatedLifecycleState(ctx, agentID, existingCell)
 		if err != nil {
@@ -372,7 +389,7 @@ func (c *agentLifecycleCoordinator) registerExecutionWithTopology(
 			)
 			epoch = runtimebus.CurrentRuntimeEpoch()
 			generation = previous.Generation + 1
-			requestHash = lifecycleRequestHash("restart", agentID, revision, planHash)
+			requestHash = lifecycleRequestHashWithTopology(topology, "restart", agentID, revision, planHash)
 			transition = AgentLifecycleTransition{
 				OperationID: operationID, OperationKind: "restart", AgentID: agentID, Trigger: "restart",
 				RequestHash:   requestHash,
@@ -456,7 +473,7 @@ func (c *agentLifecycleCoordinator) persistRegistrationWithTopology(
 		)
 		return c.store.CommitAgentLifecycleTransition(ctx, AgentLifecycleTransition{
 			OperationID: operationID, OperationKind: "restart", AgentID: agentID, Trigger: "restart",
-			RequestHash:   lifecycleRequestHash("restart", agentID, revision, planHash),
+			RequestHash:   lifecycleRequestHashWithTopology(topology, "restart", agentID, revision, planHash),
 			ExpectedEpoch: previous.RuntimeEpoch, ExpectedGeneration: previous.Generation, ExpectedPhase: previous.Phase,
 			TargetEpoch: runtimebus.CurrentRuntimeEpoch(), TargetGeneration: previous.Generation + 1,
 			TargetPhase: AgentLifecycleRegistered, ConfigRevision: revision, RunMode: AgentRunModeStopped,
@@ -465,7 +482,7 @@ func (c *agentLifecycleCoordinator) persistRegistrationWithTopology(
 	}
 	return c.store.CommitAgentLifecycleTransition(ctx, AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "spawn", AgentID: agentID, Trigger: "spawn",
-		RequestHash: lifecycleRequestHash("spawn", agentID, revision, planHash), TargetEpoch: epoch,
+		RequestHash: lifecycleRequestHashWithTopology(topology, "spawn", agentID, revision, planHash), TargetEpoch: epoch,
 		TargetGeneration: generation, TargetPhase: AgentLifecycleRegistered,
 		ConfigRevision: revision, RunMode: AgentRunModeStopped, Agent: &rec, Subordinate: plan,
 		DynamicTopology: topology, Now: time.Now().UTC(),
@@ -1119,7 +1136,7 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(ctx context.Context, agent
 	}
 	if operationID == "" {
 		if trigger == "reconfigure" {
-			operationID = lifecycleReconfigureOperationID(agentID, previousEpoch, previousGeneration, previousPhase, revision, planHash)
+			operationID = lifecycleReconfigureOperationID(agentID, previousEpoch, previousGeneration, previousPhase, revision, planHash, topology)
 		} else {
 			operationID = uuid.NewString()
 		}
@@ -1131,7 +1148,7 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(ctx context.Context, agent
 		targetMode = AgentRunModeStopped
 	}
 	now := time.Now().UTC()
-	requestHash := lifecycleRequestHash(trigger, agentID, revision, planHash)
+	requestHash := lifecycleRequestHashWithTopology(topology, trigger, agentID, revision, planHash)
 	result := AgentLifecycleTransitionResult{
 		OperationID: operationID, AgentID: agentID,
 		PreviousEpoch: previousEpoch, RuntimeEpoch: nextEpoch,
@@ -1429,7 +1446,7 @@ func (c *agentLifecycleCoordinator) terminateWithTopology(ctx context.Context, a
 	}
 	operationID := uuid.NewString()
 	now := time.Now().UTC()
-	requestHash := lifecycleRequestHash(trigger, agentID, revision, planHash)
+	requestHash := lifecycleRequestHashWithTopology(topology, trigger, agentID, revision, planHash)
 	if c.store != nil {
 		result, err := c.store.CommitAgentLifecycleTransition(context.WithoutCancel(ctx), AgentLifecycleTransition{
 			OperationID: operationID, OperationKind: trigger, RequestHash: requestHash,

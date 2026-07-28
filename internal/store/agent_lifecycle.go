@@ -163,16 +163,15 @@ func (s *PostgresStore) CommitAgentLifecycleTransition(ctx context.Context, req 
 		if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "swarm:agent-lifecycle:"+req.AgentID); err != nil {
 			return err
 		}
-		var ok bool
-		var err error
-		if result, ok, err = loadPostgresLifecycleOperationResult(txctx, tx, req); err != nil || ok {
-			return err
-		}
 		previous, exists, err := loadPostgresLifecycleCell(txctx, tx, req.AgentID)
 		if err != nil {
 			return err
 		}
 		if err := authorizePostgresDynamicAgentTopologyMutation(txctx, tx, req); err != nil {
+			return err
+		}
+		var ok bool
+		if result, ok, err = loadPostgresLifecycleOperationResult(txctx, tx, req); err != nil || ok {
 			return err
 		}
 		if err := validateLifecycleExpectation(req, previous, exists); err != nil {
@@ -205,17 +204,16 @@ func (s *SQLiteRuntimeStore) CommitAgentLifecycleTransition(ctx context.Context,
 	}
 	var result runtimemanager.AgentLifecycleTransitionResult
 	err = s.runAuthorActivityMutation(ctx, "sqlite commit agent lifecycle transition", func(txctx context.Context, tx *sql.Tx) error {
-		var ok bool
-		var err error
-		result, ok, err = loadSQLiteLifecycleOperationResult(txctx, tx, req)
-		if err != nil || ok {
-			return err
-		}
 		previous, exists, err := loadSQLiteLifecycleCell(txctx, tx, req.AgentID)
 		if err != nil {
 			return err
 		}
 		if err := authorizeSQLiteDynamicAgentTopologyMutation(txctx, tx, req); err != nil {
+			return err
+		}
+		var ok bool
+		result, ok, err = loadSQLiteLifecycleOperationResult(txctx, tx, req)
+		if err != nil || ok {
 			return err
 		}
 		if err := validateLifecycleExpectation(req, previous, exists); err != nil {
