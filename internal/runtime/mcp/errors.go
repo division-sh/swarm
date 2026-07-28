@@ -41,7 +41,17 @@ func (e *ProtocolError) Error() string {
 	if e == nil {
 		return ""
 	}
-	return strings.TrimSpace(e.Payload.Code + ": " + e.Payload.Message)
+	msg := strings.TrimSpace(e.Payload.Code + ": " + e.Payload.Message)
+	if op := strings.TrimSpace(e.Payload.Operation); op != "" {
+		msg += " (operation " + op
+		if len(e.Payload.Detail) > 0 {
+			if encoded, err := json.Marshal(e.Payload.Detail); err == nil {
+				msg += ", detail " + string(encoded)
+			}
+		}
+		msg += ")"
+	}
+	return msg
 }
 
 func (e *ProtocolError) Unwrap() error {

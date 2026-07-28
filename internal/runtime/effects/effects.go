@@ -451,7 +451,16 @@ func managedEffectCapabilitySurface(ctx context.Context, authority Authority) (m
 		normalActorID := strings.TrimSpace(authority.Normal.AgentID)
 		if !admission.AuthorizesNormal() || surface.Authority.ExecutionKind != managedcapabilities.ExecutionNormalAgent ||
 			surface.Authority.ExecutionAuthorityID != admission.ExecutionAuthorityID || surface.ActorID != normalActorID {
-			return managedcapabilities.Surface{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_effect_execution_authority_mismatch", "external-effects", "authorize_attempt", map[string]any{"authority_kind": authority.Kind, "surface_id": surface.ID})
+			return managedcapabilities.Surface{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_effect_execution_authority_mismatch", "external-effects", "authorize_attempt", map[string]any{
+				"authority_kind":                   authority.Kind,
+				"surface_id":                       surface.ID,
+				"admission_authorizes_normal":      admission.AuthorizesNormal(),
+				"surface_execution_kind":           string(surface.Authority.ExecutionKind),
+				"surface_execution_authority_id":   surface.Authority.ExecutionAuthorityID,
+				"admission_execution_authority_id": admission.ExecutionAuthorityID,
+				"surface_actor_id":                 surface.ActorID,
+				"authority_normal_agent_id":        normalActorID,
+			})
 		}
 		if strings.TrimSpace(authority.Target.AgentID) != normalActorID {
 			return managedcapabilities.Surface{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_effect_turn_identity_mismatch", "external-effects", "authorize_attempt", map[string]any{"authority_kind": authority.Kind, "surface_id": surface.ID})

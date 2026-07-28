@@ -1864,6 +1864,16 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 func agentDeliveryExecutionContext(deliveryCtx, loopCtx context.Context, token runtimeeffects.LifecycleToken, deliveryOwner worklifetime.Occurrence) context.Context {
 	ctx := worklifetime.WithOccurrence(deliveryCtx, deliveryOwner)
 	ctx = runtimeeffects.WithLifecycleToken(ctx, token)
+	// A delivery context can inherit the emitting actor's effect authority
+	// (for example the upstream agent whose emission produced this delivery).
+	// The acting agent's lifecycle token is the only valid authority root for
+	// this turn, so shadow any foreign inherited authority and let the effect
+	// layer re-derive it from the token.
+	if authority, ok := runtimeeffects.AuthorityFromContext(ctx); ok {
+		if authority.Kind != runtimeeffects.AuthorityNormalAgent || strings.TrimSpace(authority.Normal.AgentID) != strings.TrimSpace(token.AgentID) {
+			ctx = runtimeeffects.WithAuthority(ctx, runtimeeffects.Authority{})
+		}
+	}
 	if controller, found := runtimeeffects.ControllerFromContext(loopCtx); found {
 		ctx = runtimeeffects.WithController(ctx, controller)
 	}
