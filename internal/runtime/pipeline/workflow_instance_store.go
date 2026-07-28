@@ -377,22 +377,29 @@ func (s *WorkflowInstanceStore) MaterializeInitialEntry(ctx context.Context, ins
 			return err
 		}
 		if found {
-			initialEqual, err := s.workflowInitialMaterializationProjectionEqual(txctx, initialProjection)
+			equal, err := s.workflowInitialMaterializationEqual(txctx, identity.StorageRef, initialProjection, normalized.RuntimeReadiness)
 			if err != nil {
 				return err
 			}
-			readinessEqual, err := s.dynamicFlowRuntimeReadinessPlanEqual(txctx, identity.StorageRef, normalized.RuntimeReadiness)
-			if err != nil {
-				return err
-			}
-			if initialEqual && readinessEqual {
+			if equal {
 				result = WorkflowInitialMaterializationAlreadyExists
 				return nil
 			}
 			return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "workflow-instance-lifecycle", "materialize_initial_entry", map[string]any{"flow_instance": identity.StorageRef})
 		}
 		if err := s.Create(txctx, normalized); err != nil {
-			return err
+			if !workflowInstanceAlreadyExists(err) {
+				return err
+			}
+			equal, replayErr := s.workflowInitialMaterializationEqual(txctx, identity.StorageRef, initialProjection, normalized.RuntimeReadiness)
+			if replayErr != nil {
+				return replayErr
+			}
+			if !equal {
+				return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "workflow-instance-lifecycle", "materialize_initial_entry", map[string]any{"flow_instance": identity.StorageRef})
+			}
+			result = WorkflowInitialMaterializationAlreadyExists
+			return nil
 		}
 		if err := s.insertWorkflowInitialMaterializationProjection(txctx, initialProjection); err != nil {
 			return err
@@ -415,6 +422,30 @@ func (s *WorkflowInstanceStore) MaterializeInitialEntry(ctx context.Context, ins
 		return WorkflowInitialMaterializationUnknown, fmt.Errorf("workflow initial materialization completed without a disposition")
 	}
 	return result, nil
+}
+
+func (s *WorkflowInstanceStore) workflowInitialMaterializationEqual(
+	ctx context.Context,
+	instancePath string,
+	initialProjection workflowInitialMaterializationProjection,
+	readinessPlan *DynamicFlowRuntimeReadinessPlan,
+) (bool, error) {
+	initialEqual, err := s.workflowInitialMaterializationProjectionEqual(ctx, initialProjection)
+	if err != nil {
+		return false, err
+	}
+	readinessEqual, err := s.dynamicFlowRuntimeReadinessPlanEqual(ctx, instancePath, readinessPlan)
+	if err != nil {
+		return false, err
+	}
+	return initialEqual && readinessEqual, nil
+}
+
+func workflowInstanceAlreadyExists(err error) bool {
+	failure, ok := runtimefailures.As(err)
+	return ok &&
+		failure.Failure.Class == runtimefailures.ClassConflictingDuplicate &&
+		failure.Failure.Detail.Code == "flow_instance_already_exists"
 }
 
 // ArmInitialEntryTimers projects the durable initial-entry timer facts only

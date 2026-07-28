@@ -6641,8 +6641,10 @@ engine:
       of readiness-owned routes and retires terminal crash-left process topology without overriding an active successor.
       Exact replay compares the immutable creation projection and immutable readiness plan; mutable current state, fields,
       gates, accumulator, transition history, and readiness completion coordinates never participate in creation identity. A
-      missing or conflicting immutable creation projection fails closed. No stale callback snapshot, best-effort completion
-      chain, subset inference, second wakeup owner, migration, or compatibility path exists.
+      concurrent create conflict is rechecked under the same instance-serialized transaction and returns exact replay only
+      when both immutable projections match. A missing or conflicting immutable creation projection fails closed. No stale
+      callback snapshot, best-effort completion chain, subset inference, second wakeup owner, migration, or compatibility
+      path exists.
     - 3. Leaving an owning stage, matching cancel_on, loop-generation supersession, run quiescence, or preservation cleanup
       may only monotonically cancel or delete the canonical row. Cancellation is in the same mutation as the causal lifecycle
       transition; the in-memory scheduler is updated only after commit. Registration and cancellation do not issue opposing
