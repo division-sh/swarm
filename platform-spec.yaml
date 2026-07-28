@@ -6619,8 +6619,12 @@ engine:
       does not publish them into the process route table; EventBus recipient planning remains unaware of the route until the
       reconciler reloads current lifecycle eligibility, verifies all declared agents, publishes and verifies the persisted
       route, arms initial timers, and records topology readiness. It then reloads the exact plan and non-null readiness
-      coordinate before accepting the process topology. A newer plan queued during an active keyed attempt is a mandatory
-      successor that completes before the owner releases waiters or returns success; it never joins the predecessor result.
+      coordinate before accepting the process topology. Every revision-producing callback carries the exact normalized plan
+      committed by its selected mutation. Keyed admission serializes comparison of that declared coordinate against the
+      current durable plan; a delayed stale callback is rejected and cannot replace or join a newer queued successor. A newer
+      plan queued during an active keyed attempt is a mandatory successor, retains its own live operation context and semantic
+      source, and completes before the owner releases waiters or returns success; it never inherits or joins the predecessor
+      request result.
       A changed desired plan always clears topology readiness, while preserving any immutable creation occurrence completion, so emitted and no-auto rows both remain selected for
       automatic retry until revised topology converges. It then consumes one selected-store operation that locks the
       exact run and instance lifecycle rows and atomically appends the deterministic creation-only event plus its completion
@@ -13322,8 +13326,11 @@ platform_tables:
         against the exact normalized plan that was reconciled; a concurrent source revision leaves its new plan pending
         and rejects completion by the stale attempt. After that compare-and-set, the reconciler reloads and accepts
         completion only while the exact plan still matches and `topology_ready_at` remains non-null. The keyed
-        reconciliation owner records a newer durable plan as a mandatory successor and completes that successor before
-        releasing any waiter or returning success; no post-CAS revision may join an older successful result. A pending
+        reconciliation owner admits a revision callback only when its declared exact committed plan equals the current
+        durable plan under owner serialization. A delayed stale callback cannot overwrite a queued current successor. The
+        owner records a newer durable plan as a mandatory successor with that caller's live context and semantic source, and
+        completes that successor before releasing any waiter or returning success; no post-CAS revision may join an older
+        successful result or inherit a canceled predecessor request context. A pending
         creation occurrence is rebuilt from revised
         schema/config plus its persisted trigger lineage,
         while an emitted occurrence is immutable and introduction without lineage is rejected. This table is

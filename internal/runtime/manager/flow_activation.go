@@ -196,13 +196,13 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	}
 	finalizeAfterCommit := runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
 		postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(actionCtx))
-		if err := am.reconcileDynamicFlowRuntimeReadiness(postCommitCtx, autoEmitRunID, flowPath, req.ContractBundle); err != nil {
+		if err := am.reconcileDynamicFlowRuntimeReadinessPlan(postCommitCtx, readinessPlan, req.ContractBundle); err != nil {
 			am.logFlowInstanceActivationSideEffectFailure(req, "runtime_readiness_failed", "finalize_runtime_readiness", err)
 			am.signalDynamicFlowRuntimeReadiness()
 		}
 	})
 	if !finalizeAfterCommit {
-		if err := am.reconcileDynamicFlowRuntimeReadiness(ctx, autoEmitRunID, flowPath, req.ContractBundle); err != nil {
+		if err := am.reconcileDynamicFlowRuntimeReadinessPlan(ctx, readinessPlan, req.ContractBundle); err != nil {
 			am.signalDynamicFlowRuntimeReadiness()
 			return err
 		}
@@ -233,7 +233,8 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 	if err != nil {
 		return false, err
 	}
-	if err := am.reconcileEnsuredDynamicFlowRuntimeReadinessPlan(ctx, req, runID); err != nil {
+	readinessPlan, err := am.reconcileEnsuredDynamicFlowRuntimeReadinessPlan(ctx, req, runID)
+	if err != nil {
 		return false, err
 	}
 	if _, transactional := runtimepipeline.PipelineSQLTxFromContext(ctx); transactional {
@@ -242,7 +243,7 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 		}
 		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
 			postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(actionCtx))
-			if err := am.reconcileDynamicFlowRuntimeReadiness(postCommitCtx, runID, instance.InstancePath, req.ContractBundle); err != nil {
+			if err := am.reconcileDynamicFlowRuntimeReadinessPlan(postCommitCtx, readinessPlan, req.ContractBundle); err != nil {
 				am.logFlowInstanceActivationSideEffectFailure(req, "runtime_readiness_failed", "finalize_runtime_readiness", err)
 				am.signalDynamicFlowRuntimeReadiness()
 			}
@@ -251,7 +252,7 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 		}
 		return false, nil
 	}
-	if err := am.reconcileDynamicFlowRuntimeReadiness(ctx, runID, instance.InstancePath, req.ContractBundle); err != nil {
+	if err := am.reconcileDynamicFlowRuntimeReadinessPlan(ctx, readinessPlan, req.ContractBundle); err != nil {
 		am.signalDynamicFlowRuntimeReadiness()
 		return false, err
 	}
