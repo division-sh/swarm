@@ -94,6 +94,11 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	if am.workflowInstances == nil {
 		return fmt.Errorf("workflow instance store is required")
 	}
+	admittedSource, err := am.dynamicFlowRuntimeReadinessSource(ctx, req.ContractBundle)
+	if err != nil {
+		return err
+	}
+	req.ContractBundle = admittedSource.source
 	instance := req.Instance
 	templateID := strings.TrimSpace(instance.TemplateID)
 	instanceID := strings.TrimSpace(instance.InstanceID)
@@ -217,6 +222,14 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 	if am == nil || am.workflowInstances == nil {
 		return false, fmt.Errorf("workflow instance store is required")
 	}
+	if req.ContractBundle == nil {
+		return false, fmt.Errorf("contract bundle is required")
+	}
+	admittedSource, err := am.dynamicFlowRuntimeReadinessSource(ctx, req.ContractBundle)
+	if err != nil {
+		return false, err
+	}
+	req.ContractBundle = admittedSource.source
 	instance := req.Instance
 	stored, exists, err := am.workflowInstances.Load(ctx, instance.InstancePath)
 	if err != nil {

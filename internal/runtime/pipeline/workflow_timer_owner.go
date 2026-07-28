@@ -194,7 +194,7 @@ func (l *WorkflowTimerLifecycle) reconcile(ctx context.Context, entityID, curren
 	}
 	activeByDeclaration := map[string]WorkflowTimerActivation{}
 	for _, activation := range active {
-		declaration, found := source.WorkflowTimerByID(activation.Ref.Declaration)
+		declaration, found := workflowTimerDeclarationForInstance(source, instance, activation.Ref.Declaration)
 		if !found {
 			return fmt.Errorf("active workflow timer %s references unknown declaration %s", activation.Ref.ActivationID, activation.Ref.Declaration)
 		}
@@ -227,7 +227,7 @@ func (l *WorkflowTimerLifecycle) reconcile(ctx context.Context, entityID, curren
 	if err != nil {
 		return err
 	}
-	for _, declaration := range source.WorkflowTimers() {
+	for _, declaration := range workflowTimerDeclarationsForInstance(source, instance) {
 		if !workflowTimerShouldStartOnTransition(declaration, currentState, nextState, cause.EventType) {
 			continue
 		}
@@ -325,13 +325,14 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 		return err
 	}
 
-	desired := map[string]WorkflowTimerActivation{}
 	currentState := strings.TrimSpace(instance.CurrentState)
 	initialState := strings.TrimSpace(workflowInitialStateForFlow(source, instance.WorkflowName))
 	if initialState == "" {
 		initialState = strings.TrimSpace(source.WorkflowInitialStage())
 	}
-	if currentState == initialState {
+	initialEntryOpen := currentState == initialState
+	desired := map[string]WorkflowTimerActivation{}
+	if initialEntryOpen {
 		generation, _, err := workflowLoopGenerationForStage(source, &instance, currentState)
 		if err != nil {
 			return err
@@ -345,7 +346,7 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 		if err := cause.validateForActivation(); err != nil {
 			return err
 		}
-		for _, declaration := range source.WorkflowTimers() {
+		for _, declaration := range workflowTimerDeclarationsForInstance(source, instance) {
 			if !workflowTimerShouldStartOnTransition(declaration, "", currentState, cause.EventType) {
 				continue
 			}
@@ -378,6 +379,54 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 			continue
 		}
 		expected, keep := desired[activation.Ref.ActivationID]
+		if !keep && !initialEntryOpen {
+			// Source revisions are prospective after the initial-entry edge has passed.
+			declaration, found := workflowTimerDeclarationForInstance(
+				source,
+				instance,
+				activation.Ref.Declaration,
+			)
+			if found &&
+				workflowTimerShouldStartOnTransition(
+					declaration,
+					"",
+					initialState,
+					"state:"+initialState,
+				) {
+				if err := validateWorkflowTimerTopology(source, declaration); err != nil {
+					return err
+				}
+				interval := workflowTimerDuration(
+					declaration,
+					workflowTimerPolicy(source, declaration.FlowID),
+				)
+				if interval <= 0 {
+					return fmt.Errorf(
+						"workflow timer %s has no executable positive delay",
+						declaration.ID,
+					)
+				}
+				expected, err = workflowTimerActivationForCause(
+					source,
+					runID,
+					entityID,
+					instance.StorageRef,
+					declaration,
+					activation.Ref.Generation,
+					workflowTimerCause{
+						Kind:       workflowTimerCauseInitial,
+						EventType:  "state:" + initialState,
+						OccurredAt: activation.CreatedAt,
+						ToState:    initialState,
+					},
+					interval,
+				)
+				if err != nil {
+					return err
+				}
+				keep = expected.Ref == activation.Ref
+			}
+		}
 		if keep {
 			if err := requireSameWorkflowTimerActivationFacts(activation, expected); err != nil {
 				return err
@@ -461,7 +510,13 @@ func (l *WorkflowTimerLifecycle) initialEntryTimerActivations(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	return active, nil
+	initial := make([]WorkflowTimerActivation, 0, len(active))
+	for _, activation := range active {
+		if activation.Ref.Cause == timeridentity.WorkflowTimerActivationCauseInitial {
+			initial = append(initial, activation)
+		}
+	}
+	return initial, nil
 }
 
 func validateWorkflowTimerTopology(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract) error {
@@ -690,7 +745,7 @@ func (l *WorkflowTimerLifecycle) ReconcileWakeup(ctx context.Context, ref timeri
 	if !found || activation.Ref != ref || activation.Status != workflowTimerStatusActive {
 		return l.retireWakeup(ref)
 	}
-	current, err := l.workflowTimerActivationDeclarationCurrent(activation)
+	current, err := l.workflowTimerActivationDeclarationCurrent(ctx, activation)
 	if err != nil {
 		return err
 	}
@@ -771,7 +826,7 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 	if !found {
 		return WorkflowTimerFireTerminal, false, nil
 	}
-	current, err := l.workflowTimerActivationDeclarationCurrent(hint)
+	current, err := l.workflowTimerActivationDeclarationCurrent(ctx, hint)
 	if err != nil {
 		return WorkflowTimerFireRetry, false, err
 	}
@@ -896,7 +951,7 @@ func (l *WorkflowTimerLifecycle) AuthorizeAcceptedEvent(ctx context.Context, evt
 	if !found || activation.Ref != occurrence.Activation {
 		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf("accepted workflow timer activation is missing or mismatched")
 	}
-	current, err := l.workflowTimerActivationDeclarationCurrent(activation)
+	current, err := l.workflowTimerActivationDeclarationCurrent(ctx, activation)
 	if err != nil {
 		return WorkflowTimerActivation{}, occurrence, true, err
 	}
@@ -919,20 +974,96 @@ func (l *WorkflowTimerLifecycle) AuthorizeAcceptedEvent(ctx context.Context, evt
 }
 
 func (l *WorkflowTimerLifecycle) workflowTimerActivationDeclarationCurrent(
+	ctx context.Context,
 	activation WorkflowTimerActivation,
 ) (bool, error) {
-	if l == nil || l.source == nil {
-		return false, fmt.Errorf("workflow timer declaration validation requires semantic source")
-	}
-	declaration, found := l.source.WorkflowTimerByID(activation.Ref.Declaration)
-	if !found {
-		return false, nil
+	declaration, found, err := l.workflowTimerDeclarationForActivation(ctx, activation)
+	if err != nil || !found {
+		return false, err
 	}
 	revision, err := workflowTimerDeclarationRevision(l.source, declaration)
 	if err != nil {
 		return false, err
 	}
 	return revision == activation.Ref.DeclarationRevision, nil
+}
+
+func (l *WorkflowTimerLifecycle) workflowTimerDeclarationForActivation(
+	ctx context.Context,
+	activation WorkflowTimerActivation,
+) (runtimecontracts.WorkflowTimerContract, bool, error) {
+	if l == nil || l.source == nil {
+		return runtimecontracts.WorkflowTimerContract{}, false, fmt.Errorf(
+			"workflow timer declaration validation requires semantic source",
+		)
+	}
+	store := l.store()
+	if store == nil || !store.Enabled() {
+		return runtimecontracts.WorkflowTimerContract{}, false, fmt.Errorf(
+			"workflow timer declaration validation requires workflow store",
+		)
+	}
+	instanceID := strings.Trim(strings.TrimSpace(activation.FlowInstance), "/")
+	if instanceID == "" {
+		instanceID = strings.TrimSpace(activation.EntityID)
+	}
+	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(activation.RunID))
+	instance, found, err := store.Load(ctx, instanceID)
+	if err != nil || !found {
+		return runtimecontracts.WorkflowTimerContract{}, false, err
+	}
+	declaration, found := workflowTimerDeclarationForInstance(l.source, instance, activation.Ref.Declaration)
+	if !found {
+		return runtimecontracts.WorkflowTimerContract{}, false, nil
+	}
+	return declaration, true, nil
+}
+
+func workflowTimerDeclarationsForInstance(
+	source semanticview.Source,
+	instance WorkflowInstance,
+) []runtimecontracts.WorkflowTimerContract {
+	if source == nil {
+		return nil
+	}
+	workflowName := strings.TrimSpace(instance.WorkflowName)
+	declarations := make([]runtimecontracts.WorkflowTimerContract, 0)
+	for _, declaration := range source.WorkflowTimers() {
+		if workflowTimerDeclarationOwnedByInstance(source, workflowName, declaration.FlowID) {
+			declarations = append(declarations, declaration)
+		}
+	}
+	return declarations
+}
+
+func workflowTimerDeclarationOwnedByInstance(
+	source semanticview.Source,
+	workflowName string,
+	declarationFlowID string,
+) bool {
+	if source == nil {
+		return false
+	}
+	workflowName = strings.TrimSpace(workflowName)
+	declarationFlowID = strings.TrimSpace(declarationFlowID)
+	if declarationFlowID == workflowName {
+		return true
+	}
+	return declarationFlowID == "" && workflowName == strings.TrimSpace(source.WorkflowName())
+}
+
+func workflowTimerDeclarationForInstance(
+	source semanticview.Source,
+	instance WorkflowInstance,
+	declarationID string,
+) (runtimecontracts.WorkflowTimerContract, bool) {
+	declarationID = strings.TrimSpace(declarationID)
+	for _, declaration := range workflowTimerDeclarationsForInstance(source, instance) {
+		if strings.TrimSpace(declaration.ID) == declarationID {
+			return declaration, true
+		}
+	}
+	return runtimecontracts.WorkflowTimerContract{}, false
 }
 
 func workflowTimerOccurrenceAccepted(activation WorkflowTimerActivation, occurrence timeridentity.WorkflowTimerOccurrenceRef) bool {

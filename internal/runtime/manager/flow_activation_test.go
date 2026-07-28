@@ -1734,6 +1734,94 @@ func TestDynamicFlowRuntimeReadinessRejectsCurrentFactWithOldSemanticSource(t *t
 	}
 }
 
+func TestFlowActivationRejectsForeignSemanticSourceBeforeAnyMutation(t *testing.T) {
+	for _, operation := range []string{"activate", "ensure"} {
+		for _, transactional := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/transactional=%t", operation, transactional), func(t *testing.T) {
+				instances := &flowActivationTestInstanceStore{}
+				agents := &flowActivationTestStore{}
+				bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+				manager := newFlowActivationManager(t, bus, instances, agents)
+				currentBundle := testFlowBundle("")
+				foreignBundle := testFlowBundle("")
+				foreignBundle.FlowTree.ByID["review"].Agents["editor"] = runtimecontracts.AgentRegistryEntry{
+					ID: "editor-{instance_id}", Type: "generic", Role: "editor",
+				}
+				setFlowActivationManagerSemanticSource(manager, semanticview.Wrap(currentBundle))
+				ctx := testAuthorActivityContext(context.Background())
+				currentReq := testActivationRequest(
+					currentBundle,
+					"review",
+					"inst-1",
+					"ent-1",
+					"review/inst-1",
+				)
+				if operation == "ensure" {
+					if err := activateFlowInstanceForTest(manager, ctx, currentReq); err != nil {
+						t.Fatalf("seed current source: %v", err)
+					}
+				}
+
+				creates := len(instances.creates)
+				readiness := len(instances.readiness)
+				upserts := len(agents.upserts)
+				armed := len(instances.armedEntries)
+				published := len(bus.published)
+				addedPaths := len(bus.addedPaths)
+				postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
+				attemptCtx := ctx
+				if transactional {
+					attemptCtx = runtimepipeline.WithPipelineSQLTxContext(attemptCtx, &sql.Tx{})
+					attemptCtx = withFlowActivationPostCommit(attemptCtx, &postCommit)
+				}
+				foreignReq := testActivationRequest(
+					foreignBundle,
+					"review",
+					"inst-1",
+					"ent-1",
+					"review/inst-1",
+				)
+				var err error
+				switch operation {
+				case "activate":
+					err = manager.ActivateFlowInstance(attemptCtx, foreignReq)
+				case "ensure":
+					_, err = manager.EnsureFlowInstance(attemptCtx, foreignReq)
+				default:
+					t.Fatalf("unsupported operation %q", operation)
+				}
+				if !errors.Is(err, errDynamicFlowRuntimeReadinessSourceStale) {
+					t.Fatalf("foreign semantic source error = %v, want stale-source rejection", err)
+				}
+				if len(instances.creates) != creates ||
+					len(instances.readiness) != readiness ||
+					len(agents.upserts) != upserts ||
+					len(instances.armedEntries) != armed ||
+					len(bus.published) != published ||
+					len(bus.addedPaths) != addedPaths ||
+					len(postCommit) != 0 {
+					t.Fatalf(
+						"foreign source crossed mutation boundary: creates=%d/%d readiness=%d/%d upserts=%d/%d arms=%d/%d events=%d/%d routes=%d/%d post_commit=%d",
+						len(instances.creates),
+						creates,
+						len(instances.readiness),
+						readiness,
+						len(agents.upserts),
+						upserts,
+						len(instances.armedEntries),
+						armed,
+						len(bus.published),
+						published,
+						len(bus.addedPaths),
+						addedPaths,
+						len(postCommit),
+					)
+				}
+			})
+		}
+	}
+}
+
 func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{respectReadinessContext: true}
 	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
