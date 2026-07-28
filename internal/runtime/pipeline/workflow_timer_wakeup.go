@@ -13,6 +13,7 @@ type workflowTimerWakeupFamily uint8
 
 const workflowTimerActivationWakeup workflowTimerWakeupFamily = 1
 const workflowTimerTaskFamily = "workflow_timer"
+const workflowTimerWakeupCallbackTimeout = 10 * time.Second
 
 var errWorkflowTimerSchedulerRequired = errors.New("workflow timer scheduler is required for active wakeup reconciliation")
 
@@ -80,9 +81,12 @@ func (l *WorkflowTimerLifecycle) registerWakeup(ctx context.Context, wakeup Work
 }
 
 func (l *WorkflowTimerLifecycle) handleWakeup(ctx context.Context, wakeup WorkflowTimerWakeup) {
-	outcome, recurrenceCommitted, err := l.fireWakeup(ctx, wakeup)
+	callbackCtx, cancel := context.WithTimeout(ctx, l.wakeupCallbackTimeout)
+	defer cancel()
+
+	outcome, recurrenceCommitted, err := l.fireWakeup(callbackCtx, wakeup)
 	if err != nil {
-		l.logFailure(ctx, "workflow_timer_fire_failed", wakeup.Occurrence().Activation, err)
+		l.logFailure(callbackCtx, "workflow_timer_fire_failed", wakeup.Occurrence().Activation, err)
 	}
 	if outcome == WorkflowTimerFireRetry {
 		l.startWakeupRecovery(wakeup.Occurrence().Activation)
@@ -90,8 +94,8 @@ func (l *WorkflowTimerLifecycle) handleWakeup(ctx context.Context, wakeup Workfl
 	}
 	if outcome == WorkflowTimerFireCommitted && recurrenceCommitted {
 		ref := wakeup.Occurrence().Activation
-		if err := l.ReconcileWakeup(ownerActionAdmissionContext(ctx), ref); err != nil {
-			l.logFailure(ctx, "workflow_timer_recurrence_reconcile_failed", ref, err)
+		if err := l.ReconcileWakeup(ownerActionAdmissionContext(callbackCtx), ref); err != nil {
+			l.logFailure(callbackCtx, "workflow_timer_recurrence_reconcile_failed", ref, err)
 			l.startWakeupRecovery(ref)
 		}
 	}

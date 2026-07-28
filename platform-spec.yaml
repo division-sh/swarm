@@ -6660,7 +6660,10 @@ engine:
       WorkflowTimerLifecycle; parked rollback dispatches through the predecessor scheduler binding, while replacement rebind
       transfers only wakeup facts and dispatches through the successor scheduler binding. Reconciliation or restore of an
       active workflow activation without a bound Scheduler fails closed; absence of process-local projection ownership is
-      never reported as successful recovery.
+      never reported as successful recovery. Every workflow-timer callback derives one bounded 10-second context from its
+      scheduler lease before loading or mutating selected-store state. Publication, completion, and immediate
+      re-registration retain that bound; timeout falls back to lifecycle-owned recovery, so lifecycle stop and scheduler
+      shutdown can always join an already-firing callback.
     - 5. Fire publication and row completion occur in one selected database transaction. The event ID is deterministic from
       activation ID plus persisted due coordinate. A one-shot row becomes fired. A recurring row remains active and atomically
       advances `fire_at` by its persisted positive recurrence interval; therefore retries of one occurrence reuse its ID while

@@ -97,7 +97,8 @@ type WorkflowTimerLifecycle struct {
 	recovering   map[string]chan struct{}
 	stopped      bool
 
-	testAfterWakeupLoad func()
+	wakeupCallbackTimeout time.Duration
+	testAfterWakeupLoad   func()
 }
 
 func newWorkflowTimerLifecycle(store *WorkflowInstanceStore, source semanticview.Source, bus Bus, workOwner worklifetime.Occurrence, scheduler *Scheduler) *WorkflowTimerLifecycle {
@@ -107,14 +108,15 @@ func newWorkflowTimerLifecycle(store *WorkflowInstanceStore, source semanticview
 	recoveryCtx, cancel := context.WithCancel(context.Background())
 	publisher, _ := bus.(workflowGateMutationPublisher)
 	lifecycle := &WorkflowTimerLifecycle{
-		storeOwner:  store,
-		source:      source,
-		publisher:   publisher,
-		logger:      bus,
-		workOwner:   workOwner,
-		recoveryCtx: recoveryCtx,
-		cancel:      cancel,
-		recovering:  make(map[string]chan struct{}),
+		storeOwner:            store,
+		source:                source,
+		publisher:             publisher,
+		logger:                bus,
+		workOwner:             workOwner,
+		recoveryCtx:           recoveryCtx,
+		cancel:                cancel,
+		recovering:            make(map[string]chan struct{}),
+		wakeupCallbackTimeout: workflowTimerWakeupCallbackTimeout,
 	}
 	if scheduler != nil {
 		if err := lifecycle.bindScheduler(scheduler); err != nil {
@@ -617,7 +619,7 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 		return nil
 	})
 	if err != nil {
-		recoveryCtx := withoutSQLTxContext(context.WithoutCancel(ctx))
+		recoveryCtx := withoutSQLTxContext(ctx)
 		if registerErr := l.reconcileWakeupImmediately(recoveryCtx, occurrence.Activation); registerErr != nil {
 			l.logFailure(recoveryCtx, "workflow_timer_register_failed", occurrence.Activation, registerErr)
 			l.startWakeupRecovery(occurrence.Activation)

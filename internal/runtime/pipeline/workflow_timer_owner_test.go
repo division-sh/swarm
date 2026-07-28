@@ -1545,6 +1545,59 @@ func TestWorkflowTimerLifecycleSchedulerRetryPreservesOccurrenceOnBothStores(t *
 	}
 }
 
+func TestWorkflowTimerLifecycleWakeupDeadlineJoinsShutdownOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			publishStarted := make(chan struct{})
+			publishSettled := make(chan struct{})
+			var publishOnce sync.Once
+			bus := &recordingPipelineBus{}
+			bus.publishInMutationHook = func(callbackCtx context.Context, _ events.Event) error {
+				publishOnce.Do(func() { close(publishStarted) })
+				if _, ok := callbackCtx.Deadline(); !ok {
+					return errors.New("workflow timer publication context has no deadline")
+				}
+				<-callbackCtx.Done()
+				close(publishSettled)
+				return callbackCtx.Err()
+			}
+			pc, _, activation := seedWorkflowTimerOwnerActivationAt(
+				t, store, ctx, bus, false, "1ms", time.Now().Add(-time.Hour), false,
+			)
+			pc.workflowTimers.wakeupCallbackTimeout = 50 * time.Millisecond
+			pc.workflowTimers.workOwner = pipelineTestWorkOwner(t)
+			if err := pc.workflowTimers.bindScheduler(newWorkflowTimerTestScheduler(t, pc.workflowTimers.workOwner)); err != nil {
+				t.Fatalf("bind workflow timer scheduler: %v", err)
+			}
+			if err := pc.workflowTimers.ReconcileWakeup(ctx, activation.Ref); err != nil {
+				t.Fatalf("register due workflow timer wakeup: %v", err)
+			}
+			select {
+			case <-publishStarted:
+			case <-time.After(time.Second):
+				t.Fatal("workflow timer publication did not start")
+			}
+
+			stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := pc.StopWorkflowTimerLifecycle(stopCtx); err != nil {
+				t.Fatalf("stop workflow timer lifecycle with stalled publication: %v", err)
+			}
+			select {
+			case <-publishSettled:
+			default:
+				t.Fatal("workflow timer lifecycle stopped before the bounded publication settled")
+			}
+			waitForWorkflowTimerSchedulerEmpty(t, pc.workflowTimers.scheduler)
+			persisted := loadWorkflowTimerOwnerActivation(t, store, ctx, activation.Ref.ActivationID)
+			if persisted.Status != workflowTimerStatusActive {
+				t.Fatalf("timed-out workflow timer status = %q, want active for durable recovery", persisted.Status)
+			}
+		})
+	}
+}
+
 type failOnceWorkflowTimerBus struct {
 	*recordingPipelineBus
 	failures atomic.Int32
