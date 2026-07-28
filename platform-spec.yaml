@@ -22056,7 +22056,11 @@ cli_specification:
               If persisted agent hydration fails, startup records the canonical degraded manager-recovery decision and
               MUST keep executable node-delivery recovery and workflow-timer activation closed. It MUST NOT claim, retry,
               settle, dead-letter, or publish recovered work against a partially hydrated receiver registry. No timer,
-              polling loop, or later maintenance pass may bypass that gate.
+              polling loop, or later maintenance pass may bypass that gate. Startup MUST fail closed instead of entering
+              the degraded running state when timer-obligation inspection is incomplete or when that inspection reports
+              any recoverable runtime-owned workflow timer, because no later manager recovery path owns restoration of a
+              timer withheld at this boundary. Degraded running remains permitted only when complete inspection proves
+              that no runtime-owned workflow timer restoration is being withheld.
           - step: 11
             name: schedule_restoration
             owner: internal/runtime
