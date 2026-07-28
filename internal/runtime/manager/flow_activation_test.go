@@ -205,8 +205,12 @@ type flowActivationTestInstanceStore struct {
 	materialization         runtimepipeline.WorkflowInitialMaterializationResult
 	armedEntries            []string
 	armInitialEntry         func(string) error
+	retiredTimerEntries     []string
+	retireInitialEntry      func(string) error
 	readiness               map[string]runtimepipeline.DynamicFlowRuntimeReadiness
+	readinessLoadErr        error
 	creationMarkErr         error
+	topologyMarkErr         error
 	creationMarked          func()
 	topologyMarked          func()
 	beforeTopologyMark      func(runtimepipeline.DynamicFlowRuntimeReadinessPlan)
@@ -382,6 +386,15 @@ func (s *flowActivationTestInstanceStore) ArmInitialEntryTimers(_ context.Contex
 	return nil
 }
 
+func (s *flowActivationTestInstanceStore) RetireInitialEntryTimerWakeups(_ context.Context, instanceID string) error {
+	instanceID = strings.TrimSpace(instanceID)
+	s.retiredTimerEntries = append(s.retiredTimerEntries, instanceID)
+	if s.retireInitialEntry != nil {
+		return s.retireInitialEntry(instanceID)
+	}
+	return nil
+}
+
 func flowActivationReadinessKey(runID, instanceID string) string {
 	return strings.TrimSpace(runID) + "\x00" + strings.TrimSpace(instanceID)
 }
@@ -391,6 +404,11 @@ func (s *flowActivationTestInstanceStore) LoadDynamicFlowRuntimeReadiness(ctx co
 		if err := ctx.Err(); err != nil {
 			return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, err
 		}
+	}
+	if s.readinessLoadErr != nil {
+		err := s.readinessLoadErr
+		s.readinessLoadErr = nil
+		return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, err
 	}
 	s.readinessMu.Lock()
 	defer s.readinessMu.Unlock()
@@ -477,6 +495,9 @@ func (s *flowActivationTestInstanceStore) MarkDynamicFlowRuntimeTopologyReady(
 	normalized, err := expected.Normalized()
 	if err != nil {
 		return err
+	}
+	if s.topologyMarkErr != nil {
+		return s.topologyMarkErr
 	}
 	if hook := s.beforeTopologyMark; hook != nil {
 		s.beforeTopologyMark = nil
@@ -1259,7 +1280,15 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 		{name: "direct"},
 		{name: "post_commit", postCommit: true},
 	} {
-		for _, boundary := range []string{"partial_agent", "route", "arm", "creation_event", "creation_commit"} {
+		for _, boundary := range []string{
+			"partial_agent",
+			"route",
+			"arm",
+			"topology_mark",
+			"topology_reload",
+			"creation_event",
+			"creation_commit",
+		} {
 			t.Run(mode.name+"/"+boundary, func(t *testing.T) {
 				routeStore := &flowActivationTestRouteStore{}
 				bus := &flowActivationTestBus{routeStore: routeStore}
@@ -1288,6 +1317,12 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 					bus.addErr = errors.New("injected route failure")
 				case "arm":
 					instances.armInitialEntry = func(string) error { return errors.New("injected arm failure") }
+				case "topology_mark":
+					instances.topologyMarkErr = errors.New("injected topology mark failure")
+				case "topology_reload":
+					instances.afterTopologyMark = func(runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
+						instances.readinessLoadErr = errors.New("injected topology readback failure")
+					}
 				case "creation_event":
 					bus.publishErr = errors.New("injected creation event failure")
 				case "creation_commit":
@@ -1326,6 +1361,20 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 				if bus.HasFlowInstanceRoute(req.Instance.Route()) {
 					t.Fatal("failed readiness attempt left the route process-visible")
 				}
+				wantTimerRetirements := 0
+				switch boundary {
+				case "arm", "topology_mark", "topology_reload", "creation_event", "creation_commit":
+					wantTimerRetirements = 1
+				}
+				if got := len(instances.retiredTimerEntries); got != wantTimerRetirements {
+					t.Fatalf(
+						"timer projection retirements after %s failure = %d, want %d: %#v",
+						boundary,
+						got,
+						wantTimerRetirements,
+						instances.retiredTimerEntries,
+					)
+				}
 				if boundary == "partial_agent" && len(agentStore.upserts) != 1 {
 					t.Fatalf("partial agent registrations = %d, want one", len(agentStore.upserts))
 				}
@@ -1333,6 +1382,8 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 				agentStore.failAgentID = ""
 				bus.addErr = nil
 				instances.armInitialEntry = nil
+				instances.topologyMarkErr = nil
+				instances.readinessLoadErr = nil
 				bus.publishErr = nil
 				instances.creationMarkErr = nil
 				if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {

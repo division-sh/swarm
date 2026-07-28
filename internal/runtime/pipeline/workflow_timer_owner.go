@@ -266,27 +266,7 @@ func (l *WorkflowTimerLifecycle) reconcile(ctx context.Context, entityID, curren
 }
 
 func (l *WorkflowTimerLifecycle) ArmInitialEntryTimers(ctx context.Context, instanceID string) error {
-	store := l.store()
-	if store == nil || !store.Enabled() {
-		return nil
-	}
-	instanceID = strings.TrimSpace(instanceID)
-	if instanceID == "" {
-		return fmt.Errorf("workflow initial timer activation requires instance identity")
-	}
-	instance, found, err := store.Load(ctx, instanceID)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return fmt.Errorf("workflow initial timer activation instance %s is missing", instanceID)
-	}
-	entityID := workflowTimerCanonicalEntityID(instance, instanceID)
-	runID := workflowTimerRunID(ctx, instance)
-	if entityID == "" || runID == "" {
-		return fmt.Errorf("workflow initial timer activation requires exact run and entity identity")
-	}
-	active, err := store.listWorkflowTimerActivations(ctx, runID, entityID, true)
+	active, err := l.initialEntryTimerActivations(ctx, instanceID)
 	if err != nil {
 		return err
 	}
@@ -296,6 +276,52 @@ func (l *WorkflowTimerLifecycle) ArmInitialEntryTimers(ctx context.Context, inst
 		}
 	}
 	return nil
+}
+
+func (l *WorkflowTimerLifecycle) RetireInitialEntryTimerWakeups(ctx context.Context, instanceID string) error {
+	active, err := l.initialEntryTimerActivations(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	refs := make([]timeridentity.WorkflowTimerActivationRef, 0, len(active))
+	for _, activation := range active {
+		refs = append(refs, activation.Ref)
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	if l.scheduler == nil {
+		return errWorkflowTimerSchedulerRequired
+	}
+	return l.scheduler.retireWorkflowTimerWakeups(ctx, refs)
+}
+
+func (l *WorkflowTimerLifecycle) initialEntryTimerActivations(ctx context.Context, instanceID string) ([]WorkflowTimerActivation, error) {
+	store := l.store()
+	if store == nil || !store.Enabled() {
+		return nil, nil
+	}
+	instanceID = strings.TrimSpace(instanceID)
+	if instanceID == "" {
+		return nil, fmt.Errorf("workflow initial timer activation requires instance identity")
+	}
+	instance, found, err := store.Load(ctx, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, fmt.Errorf("workflow initial timer activation instance %s is missing", instanceID)
+	}
+	entityID := workflowTimerCanonicalEntityID(instance, instanceID)
+	runID := workflowTimerRunID(ctx, instance)
+	if entityID == "" || runID == "" {
+		return nil, fmt.Errorf("workflow initial timer activation requires exact run and entity identity")
+	}
+	active, err := store.listWorkflowTimerActivations(ctx, runID, entityID, true)
+	if err != nil {
+		return nil, err
+	}
+	return active, nil
 }
 
 func validateWorkflowTimerTopology(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract) error {

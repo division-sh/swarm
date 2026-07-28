@@ -1459,6 +1459,52 @@ func TestWorkflowTimerInitialEntryStaysDormantUntilExplicitArmOnBothStores(t *te
 	}
 }
 
+func TestWorkflowTimerInitialWakeupRetirementJoinsAndRearmsOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			pc, entityID, activation := seedWorkflowTimerOwnerActivationAt(
+				t,
+				store,
+				ctx,
+				&recordingPipelineBus{},
+				false,
+				"1h",
+				time.Now(),
+				false,
+			)
+			pc.workflowTimers.workOwner = pipelineTestWorkOwner(t)
+			if err := pc.workflowTimers.bindScheduler(newWorkflowTimerTestScheduler(t, pc.workflowTimers.workOwner)); err != nil {
+				t.Fatalf("bind workflow timer scheduler: %v", err)
+			}
+			if err := store.ArmInitialEntryTimers(ctx, entityID); err != nil {
+				t.Fatalf("arm initial workflow timer: %v", err)
+			}
+			waitForWorkflowTimerCondition(t, time.Second, func() bool {
+				active, draining := workflowTimerScheduledCounts(pc.workflowTimers.scheduler)
+				return active == 1 && draining == 0
+			}, "initial workflow timer wakeup")
+
+			if err := store.RetireInitialEntryTimerWakeups(ctx, entityID); err != nil {
+				t.Fatalf("retire initial workflow timer wakeup: %v", err)
+			}
+			waitForWorkflowTimerSchedulerEmpty(t, pc.workflowTimers.scheduler)
+			persisted := loadWorkflowTimerOwnerActivation(t, store, ctx, activation.Ref.ActivationID)
+			if persisted.Status != workflowTimerStatusActive {
+				t.Fatalf("retired wakeup durable status = %q, want active", persisted.Status)
+			}
+
+			if err := store.ArmInitialEntryTimers(ctx, entityID); err != nil {
+				t.Fatalf("rearm initial workflow timer: %v", err)
+			}
+			waitForWorkflowTimerCondition(t, time.Second, func() bool {
+				active, draining := workflowTimerScheduledCounts(pc.workflowTimers.scheduler)
+				return active == 1 && draining == 0
+			}, "rearmed workflow timer wakeup")
+		})
+	}
+}
+
 func waitForWorkflowTimerCondition(t *testing.T, timeout time.Duration, condition func() bool, description string) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)

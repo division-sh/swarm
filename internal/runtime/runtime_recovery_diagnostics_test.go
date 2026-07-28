@@ -323,6 +323,10 @@ func (*startupReadinessFinalizationStore) ArmInitialEntryTimers(context.Context,
 	return errors.New("unexpected readiness timer arm")
 }
 
+func (*startupReadinessFinalizationStore) RetireInitialEntryTimerWakeups(context.Context, string) error {
+	return errors.New("unexpected readiness timer retirement")
+}
+
 func (*startupReadinessFinalizationStore) ReconcileDynamicFlowRuntimeReadinessPlan(
 	context.Context,
 	runtimepipeline.DynamicFlowRuntimeReadinessPlan,

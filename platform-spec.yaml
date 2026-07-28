@@ -6639,7 +6639,11 @@ engine:
       the joined manager retry loop; startup finalization failure is boot-fatal, never degraded replay, and prevents global
       timer restoration through unverified topology. Startup's all-status readiness-key census suppresses generic restoration
       of readiness-owned routes and retires terminal crash-left process topology without overriding an active successor.
-      Exact replay compares the immutable creation projection and immutable readiness plan; mutable current state, fields,
+      If reconciliation exits after arming the durable active timer set but before accepting the exact completed readiness
+      readback and creation occurrence, it reloads that same durable set through WorkflowTimerLifecycle, retires and joins
+      every process-local wakeup, and leaves the durable timer rows active for exact retry. Route retirement without matching
+      timer-projection retirement, terminal timer mutation as compensation, and unjoined rearm are prohibited. Exact replay
+      compares the immutable creation projection and immutable readiness plan; mutable current state, fields,
       gates, accumulator, transition history, and readiness completion coordinates never participate in creation identity. A
       concurrent create conflict is rechecked under the same instance-serialized transaction and returns exact replay only
       when both immutable projections match. A missing or conflicting immutable creation projection fails closed. No stale
