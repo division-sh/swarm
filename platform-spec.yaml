@@ -6618,8 +6618,9 @@ engine:
       consume one reconciler keyed by `{run_id, instance_id}`. A selected creation mutation persists its exact route rows but
       does not publish them into the process route table; EventBus recipient planning remains unaware of the route until the
       reconciler reloads current lifecycle eligibility, verifies all declared agents, publishes and verifies the persisted
-      route, arms initial timers, and records topology readiness. A changed desired plan always clears topology readiness,
-      while preserving any immutable creation occurrence completion, so emitted and no-auto rows both remain selected for
+      route, arms initial timers, and records topology readiness. It then reloads the exact plan and non-null readiness
+      coordinate before accepting the process topology; a post-CAS revision retires the stale topology and remains pending.
+      A changed desired plan always clears topology readiness, while preserving any immutable creation occurrence completion, so emitted and no-auto rows both remain selected for
       automatic retry until revised topology converges. It then consumes one selected-store operation that locks the
       exact run and instance lifecycle rows and atomically appends the deterministic creation-only event plus its completion
       fact through EventBus `PublishInMutation`; dispatch is post-commit. Terminalization and creation therefore have one
@@ -13318,7 +13319,9 @@ platform_tables:
         considered. Terminal topology change is classified from the typed target phase, never trigger or operation-kind
         labels. Generic and raw agent mutations fail closed. Topology completion is one selected-store compare-and-set
         against the exact normalized plan that was reconciled; a concurrent source revision leaves its new plan pending
-        and rejects completion by the stale attempt. A pending creation occurrence is rebuilt from revised
+        and rejects completion by the stale attempt. After that compare-and-set, the reconciler reloads and accepts
+        completion only while the exact plan still matches and `topology_ready_at` remains non-null; a revision in the
+        post-CAS window retires the stale process topology and leaves the revised plan pending. A pending creation occurrence is rebuilt from revised
         schema/config plus its persisted trigger lineage,
         while an emitted occurrence is immutable and introduction without lineage is rejected. This table is
         platform lifecycle state, never application flow config. Fresh schemas only; no migration, inference, fallback, or

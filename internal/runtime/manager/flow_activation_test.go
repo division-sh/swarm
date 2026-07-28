@@ -209,6 +209,7 @@ type flowActivationTestInstanceStore struct {
 	creationMarked     func()
 	topologyMarked     func()
 	beforeTopologyMark func(runtimepipeline.DynamicFlowRuntimeReadinessPlan)
+	afterTopologyMark  func(runtimepipeline.DynamicFlowRuntimeReadinessPlan)
 	beforeCreation     func()
 }
 
@@ -475,29 +476,37 @@ func (s *flowActivationTestInstanceStore) MarkDynamicFlowRuntimeTopologyReady(
 		hook(normalized)
 	}
 	s.readinessMu.Lock()
-	defer s.readinessMu.Unlock()
 	key := flowActivationReadinessKey(normalized.RunID, normalized.Identity.InstancePath)
 	item, ok := s.readiness[key]
 	if !ok || !item.Eligible() {
+		s.readinessMu.Unlock()
 		return fmt.Errorf("readiness not found")
 	}
 	actualJSON, err := json.Marshal(item.Plan)
 	if err != nil {
+		s.readinessMu.Unlock()
 		return err
 	}
 	expectedJSON, err := json.Marshal(normalized)
 	if err != nil {
+		s.readinessMu.Unlock()
 		return err
 	}
 	if string(actualJSON) != string(expectedJSON) {
+		s.readinessMu.Unlock()
 		return fmt.Errorf("readiness plan changed")
 	}
 	if item.TopologyReadyAt.IsZero() {
 		item.TopologyReadyAt = readyAt
 	}
 	s.readiness[key] = item
+	s.readinessMu.Unlock()
 	if s.topologyMarked != nil {
 		s.topologyMarked()
+	}
+	if hook := s.afterTopologyMark; hook != nil {
+		s.afterTopologyMark = nil
+		hook(normalized)
 	}
 	return nil
 }
@@ -1452,6 +1461,60 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsConcurrentPlanRevision(t *testing
 	}
 	if bus.HasFlowInstanceRoute(req.Instance.Route()) {
 		t.Fatal("stale topology attempt left its process route published")
+	}
+}
+
+func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T) {
+	instances := &flowActivationTestInstanceStore{}
+	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	am := newFlowActivationManager(t, bus, instances)
+	bundle := testFlowBundle("")
+	am.semanticSource = semanticview.Wrap(bundle)
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+
+	var revisionErr error
+	instances.afterTopologyMark = func(completed runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
+		revised := completed
+		revised.WorkflowVersion += "-post-cas-revision"
+		changed, err := instances.ReconcileDynamicFlowRuntimeReadinessPlan(
+			context.Background(),
+			revised,
+			time.Now().UTC(),
+		)
+		if err != nil {
+			revisionErr = err
+			return
+		}
+		if !changed {
+			revisionErr = errors.New("post-CAS readiness plan was not revised")
+		}
+	}
+
+	err := am.ActivateFlowInstance(testAuthorActivityContext(context.Background()), req)
+	if revisionErr != nil {
+		t.Fatalf("inject post-CAS readiness revision: %v", revisionErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "changed after topology completion") {
+		t.Fatalf("ActivateFlowInstance error = %v, want post-CAS topology completion rejection", err)
+	}
+	readiness, found, loadErr := instances.LoadDynamicFlowRuntimeReadiness(
+		context.Background(),
+		req.TriggerEvent.RunID(),
+		req.Instance.InstancePath,
+	)
+	if loadErr != nil || !found {
+		t.Fatalf("load post-CAS revised readiness: found=%v err=%v", found, loadErr)
+	}
+	if readiness.Plan.WorkflowVersion == strings.TrimSpace(bundle.WorkflowVersion()) ||
+		!readiness.TopologyReadyAt.IsZero() ||
+		!readiness.Pending() {
+		t.Fatalf("post-CAS revised readiness was falsely completed: %#v", readiness)
+	}
+	if bus.HasFlowInstanceRoute(req.Instance.Route()) {
+		t.Fatal("post-CAS stale topology left its process route published")
+	}
+	if _, ok := am.GetAgentConfig("reviewer-inst-1"); ok {
+		t.Fatal("post-CAS stale topology left its process agent published")
 	}
 }
 
