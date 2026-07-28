@@ -270,7 +270,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if err != nil || !found {
 				t.Fatalf("load revised readiness: found=%v err=%v", found, err)
 			}
-			if revised.Plan.WorkflowVersion != "1.0.1" || revised.TopologyReadyAt.IsZero() || revised.CreationEventEmittedAt.IsZero() {
+			if revised.Plan.WorkflowVersion != "1.0.1" || !revised.TopologyReadyAt.IsZero() || revised.CreationEventEmittedAt.IsZero() || !revised.Pending() {
 				t.Fatalf("revised readiness = %#v", revised)
 			}
 			conflictingCreation := revisedPlan
@@ -282,6 +282,39 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			}
 			if err := store.MarkDynamicFlowRuntimeTopologyReady(ctx, runID, instance.StorageRef, readyAt.Add(4*time.Second)); err != nil {
 				t.Fatalf("mark revised topology ready: %v", err)
+			}
+
+			noAutoPlan := plan
+			noAutoPlan.Identity = runtimeflowidentity.Instance{
+				TemplateID: "review", ScopeKey: "review", InstanceID: "inst-no-auto",
+				InstancePath: "review/inst-no-auto", EntityID: uuid.NewString(), HasStoredPath: true,
+			}
+			noAutoPlan.CreationEvent = nil
+			noAutoInstance := instance
+			noAutoInstance.InstanceID = noAutoPlan.Identity.InstanceID
+			noAutoInstance.StorageRef = noAutoPlan.Identity.InstancePath
+			noAutoInstance.RuntimeReadiness = &noAutoPlan
+			noAutoInstance.Metadata = map[string]any{
+				"entity_id": noAutoPlan.Identity.EntityID, "instance_id": noAutoPlan.Identity.InstanceID,
+				"flow_path": noAutoPlan.Identity.InstancePath,
+			}
+			if result, err := store.MaterializeInitialEntry(ctx, noAutoInstance, occurredAt); err != nil || result != WorkflowInitialMaterializationCreated {
+				t.Fatalf("no-auto materialization: result=%d err=%v", result, err)
+			}
+			if err := store.MarkDynamicFlowRuntimeTopologyReady(ctx, runID, noAutoInstance.StorageRef, readyAt); err != nil {
+				t.Fatalf("mark no-auto topology ready: %v", err)
+			}
+			revisedNoAutoPlan := noAutoPlan
+			revisedNoAutoPlan.WorkflowVersion = "1.0.1"
+			if changed, err := store.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, revisedNoAutoPlan, readyAt.Add(5*time.Second)); err != nil || !changed {
+				t.Fatalf("reconcile revised no-auto readiness: changed=%v err=%v", changed, err)
+			}
+			revisedNoAuto, found, err := store.LoadDynamicFlowRuntimeReadiness(ctx, runID, noAutoInstance.StorageRef)
+			if err != nil || !found {
+				t.Fatalf("load revised no-auto readiness: found=%v err=%v", found, err)
+			}
+			if !revisedNoAuto.TopologyReadyAt.IsZero() || !revisedNoAuto.CreationEventEmittedAt.IsZero() || !revisedNoAuto.Pending() {
+				t.Fatalf("revised no-auto readiness = %#v", revisedNoAuto)
 			}
 
 			nextRunID := uuid.NewString()
@@ -359,7 +392,11 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 				t.Fatalf("terminal generation readiness: items=%#v err=%v", items, err)
 			}
 			keys, err := store.ListDynamicFlowRuntimeReadinessKeys(nextContext)
-			if err != nil || len(keys) != 2 || keys[0].InstancePath != instance.StorageRef || keys[1].InstancePath != instance.StorageRef {
+			keyCounts := map[string]int{}
+			for _, key := range keys {
+				keyCounts[key.InstancePath]++
+			}
+			if err != nil || len(keys) != 3 || keyCounts[instance.StorageRef] != 2 || keyCounts[noAutoInstance.StorageRef] != 1 {
 				t.Fatalf("readiness route owners: keys=%#v err=%v", keys, err)
 			}
 

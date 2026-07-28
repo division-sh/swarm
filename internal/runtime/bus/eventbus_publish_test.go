@@ -579,6 +579,12 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	`, runtimeflowidentity.EntityID(instanceRoute.InstancePath), eventBusTestRunID, instanceRoute.InstancePath); err != nil {
 		t.Fatalf("seed account entity state: %v", err)
 	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO flow_instance_runtime_readiness (run_id, instance_id, plan, created_at, updated_at)
+		VALUES ($1::uuid, $2, jsonb_build_object('workflow_version', $3::text), NOW(), NOW())
+	`, eventBusTestRunID, instanceRoute.InstancePath, source.WorkflowVersion()); err != nil {
+		t.Fatalf("seed account readiness owner: %v", err)
+	}
 
 	var pc *runtimepipeline.PipelineCoordinator
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{

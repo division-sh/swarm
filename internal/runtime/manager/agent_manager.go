@@ -309,13 +309,22 @@ func (am *AgentManager) SpawnEphemeralClone(baseAgentID, cloneAgentID string) er
 }
 
 func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAgent, persist bool) error {
+	return am.spawnAgentInternalForSource(ctx, rec, persist, am.semanticSource)
+}
+
+func (am *AgentManager) spawnAgentInternalForSource(
+	ctx context.Context,
+	rec PersistedAgent,
+	persist bool,
+	source semanticview.Source,
+) error {
 	if strings.TrimSpace(rec.Config.LLMBackend) == "" {
 		rec.Config.LLMBackend = am.llmBackend
 	}
 	if err := am.resolveAgentModel(&rec.Config); err != nil {
 		return err
 	}
-	subscriptionAdmission, err := admitAgentConfigSubscriptions(am.semanticSource, &rec.Config, nil)
+	subscriptionAdmission, err := admitAgentConfigSubscriptions(source, &rec.Config, nil)
 	if err != nil {
 		return err
 	}
@@ -395,6 +404,22 @@ func (am *AgentManager) publishCommittedAgent(ctx context.Context, rec Persisted
 		}
 	}
 	return nil
+}
+
+func (am *AgentManager) adoptPersistedAgentForLifecycle(
+	ctx context.Context,
+	source semanticview.Source,
+	rec PersistedAgent,
+) error {
+	subscriptionAdmission, err := admitAgentConfigSubscriptions(source, &rec.Config, nil)
+	if err != nil {
+		return err
+	}
+	agent, err := am.buildAgent(rec.Config)
+	if err != nil {
+		return err
+	}
+	return am.lifecycle.registerExecution(ctx, rec, false, agent, subscriptionAdmission)
 }
 
 func (am *AgentManager) resolveAgentModel(cfg *models.AgentConfig) error {
@@ -510,20 +535,42 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 	return nil
 }
 
-func (am *AgentManager) TeardownAgent(agentID string) error {
+func (am *AgentManager) reconfigureAgentExact(
+	ctx context.Context,
+	source semanticview.Source,
+	agentID string,
+	cfg models.AgentConfig,
+) error {
+	result, err := am.replaceExecutionConfig(ctx, agentID, "reconfigure", "", &cfg, source, true)
+	if err != nil {
+		return err
+	}
+	if result.transitioned && am.lifecycle.store == nil && am.store != nil {
+		rec := PersistedAgent{Config: result.config, Status: "active", HiredBy: "reconfigure"}
+		if err := am.store.UpsertAgent(ctx, rec); err != nil {
+			return fmt.Errorf("persist reconfigured agent %s: %w", agentID, err)
+		}
+	}
+	return nil
+}
+
+func (am *AgentManager) teardownAgent(ctx context.Context, agentID, trigger string) error {
 	if strings.TrimSpace(agentID) == "" {
 		return errors.New("agentID is required")
 	}
+	if err := am.lifecycle.terminate(ctx, agentID, trigger, AgentLifecycleTerminated); err != nil {
+		return err
+	}
+	_ = am.projectLifecycleDiagnostics(context.WithoutCancel(ctx))
+	return nil
+}
+
+func (am *AgentManager) TeardownAgent(agentID string) error {
 	_, exists := am.lifecycle.executionSnapshot(agentID)
 	if !exists {
 		return fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
 	}
-	if err := am.lifecycle.terminate(am.runtimeContext(), agentID, "teardown", AgentLifecycleTerminated); err != nil {
-		return err
-	}
-	_ = am.projectLifecycleDiagnostics(context.Background())
-
-	return nil
+	return am.teardownAgent(am.runtimeContext(), agentID, "teardown")
 }
 
 func reconfigureSessionMutationPlan(current, updated models.AgentConfig) sessions.LifecycleMutationPlan {

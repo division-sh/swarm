@@ -31,6 +31,8 @@ type Options struct {
 	ProducerBroadcast           bool
 	ObjectMembership            bool
 	UndeclaredPayloadMembership bool
+	AgentTopologyRevision       int
+	AutoEmitOnCreate            bool
 }
 
 func LoadBundle(t testing.TB, opts Options) *runtimecontracts.WorkflowContractBundle {
@@ -71,6 +73,9 @@ func WriteVariant(t testing.TB, opts Options) string {
 	ownerNodes := filepath.Join(root, "flows", OwnerFlowID, "nodes.yaml")
 	ownerEntities := filepath.Join(root, "flows", OwnerFlowID, "entities.yaml")
 	ownerTypes := filepath.Join(root, "flows", OwnerFlowID, "types.yaml")
+	accountAgents := filepath.Join(root, "flows", ChildFlowID, "agents.yaml")
+	accountEvents := filepath.Join(root, "flows", ChildFlowID, "events.yaml")
+	accountSchema := filepath.Join(root, "flows", ChildFlowID, "schema.yaml")
 	if opts.OmitConnect {
 		replaceFile(t, packageFile, `  - from: portfolio.account_notify_requested
     to: account.account_notify_requested
@@ -122,6 +127,71 @@ func WriteVariant(t testing.TB, opts Options) string {
 		replaceFile(t, ownerNodes, "        items_from: entity.account_ids\n", `        items_from: payload.account_ids
         identity: account_id
 `)
+	}
+	if opts.AutoEmitOnCreate {
+		replaceFile(t, accountEvents, `account.notify.requested:
+`, `account.created:
+  account_id: text
+  template_instance_key: text
+  template_instance_on_missing: text
+  template_instance_on_conflict: text
+  template_instance_source_event: text
+  required: [account_id]
+account.notify.requested:
+`)
+		replaceFile(t, accountSchema, `states: [active]
+`, `states: [active]
+auto_emit_on_create:
+  event: account.created
+`)
+		replaceFile(t, accountSchema, `  outputs:
+    events: []
+`, `  outputs:
+    events:
+      - name: account_created
+        event: account.created
+        key: account_id
+        carries: [account_id]
+`)
+	}
+	switch opts.AgentTopologyRevision {
+	case 0:
+	case 1:
+		replaceFile(t, accountAgents, "{}\n", `reader:
+  id: account-reader-{instance_id}
+  type: generic
+  role: reader-v1
+  model: regular
+  subscriptions:
+    - account.registered
+retired:
+  id: account-retired-{instance_id}
+  type: generic
+  role: retired
+  model: regular
+  subscriptions:
+    - account.notify.requested
+`)
+	case 2:
+		replaceFile(t, packageFile, `version: "1.0.0"`, `version: "2.0.0"`)
+		replaceFile(t, accountAgents, "{}\n", `reader:
+  id: account-reader-{instance_id}
+  type: generic
+  role: reader-v2
+  model: regular
+  subscriptions:
+    - account.registered
+    - account.notify.requested
+writer:
+  id: account-writer-{instance_id}
+  type: generic
+  role: writer
+  model: regular
+  subscriptions:
+    - account.notify.requested
+`)
+	default:
+		t.Fatalf("unsupported agent topology revision %d", opts.AgentTopologyRevision)
 	}
 	return root
 }

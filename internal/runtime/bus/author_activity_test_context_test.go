@@ -18,6 +18,22 @@ const authorActivityTestBundleSource = "ephemeral"
 
 var authorActivityTestBundleSourceFact = mustAuthorActivityTestBundleSourceFact()
 
+func exactAuthorActivityFlowInstanceDescriptors(in []ActiveFlowInstanceDescriptor, workflowVersion string) []ActiveFlowInstanceDescriptor {
+	out := append([]ActiveFlowInstanceDescriptor(nil), in...)
+	for idx := range out {
+		if strings.TrimSpace(out[idx].BundleHash) == "" {
+			out[idx].BundleHash = authorActivityTestBundleHash
+		}
+		if strings.TrimSpace(out[idx].BundleSource) == "" {
+			out[idx].BundleSource = authorActivityTestBundleSource
+		}
+		if strings.TrimSpace(out[idx].WorkflowVersion) == "" {
+			out[idx].WorkflowVersion = strings.TrimSpace(workflowVersion)
+		}
+	}
+	return out
+}
+
 func mustAuthorActivityTestBundleSourceFact() runtimecorrelation.BundleSourceFact {
 	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(authorActivityTestBundleHash)
 	if err != nil {

@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -32,6 +33,8 @@ import (
 type notifyAllChildrenStore interface {
 	runtimebus.EventStore
 	runtimedelivery.Store
+	runtimemanager.ManagerPersistence
+	runtimemanager.AgentLifecyclePersistence
 	ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error)
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
 	ListFlowInstanceRouteRecords(context.Context, runtimeflowidentity.Route) ([]runtimebus.FlowInstanceRouteRecord, error)
@@ -41,6 +44,8 @@ type notifyAllChildrenStore interface {
 type failingNotifyAllChildrenPostgresStore struct {
 	*store.PostgresStore
 	failExactRouteReplacement atomic.Bool
+	failNextRouteReplacement  atomic.Bool
+	transientRouteFailures    atomic.Int32
 }
 
 func (s *failingNotifyAllChildrenPostgresStore) ReplaceFlowInstanceRouteRecords(
@@ -48,6 +53,10 @@ func (s *failingNotifyAllChildrenPostgresStore) ReplaceFlowInstanceRouteRecords(
 	identity runtimeflowidentity.Route,
 	routes []runtimebus.FlowInstanceRouteRecord,
 ) error {
+	if s.failNextRouteReplacement.Swap(false) {
+		s.transientRouteFailures.Add(1)
+		return fmt.Errorf("injected transient postgres exact route replacement failure")
+	}
 	if s.failExactRouteReplacement.Load() {
 		return fmt.Errorf("injected postgres exact route replacement failure")
 	}
@@ -57,6 +66,8 @@ func (s *failingNotifyAllChildrenPostgresStore) ReplaceFlowInstanceRouteRecords(
 type failingNotifyAllChildrenSQLiteStore struct {
 	*store.SQLiteRuntimeStore
 	failExactRouteReplacement atomic.Bool
+	failNextRouteReplacement  atomic.Bool
+	transientRouteFailures    atomic.Int32
 }
 
 func (s *failingNotifyAllChildrenSQLiteStore) ReplaceFlowInstanceRouteRecords(
@@ -64,6 +75,10 @@ func (s *failingNotifyAllChildrenSQLiteStore) ReplaceFlowInstanceRouteRecords(
 	identity runtimeflowidentity.Route,
 	routes []runtimebus.FlowInstanceRouteRecord,
 ) error {
+	if s.failNextRouteReplacement.Swap(false) {
+		s.transientRouteFailures.Add(1)
+		return fmt.Errorf("injected transient sqlite exact route replacement failure")
+	}
 	if s.failExactRouteReplacement.Load() {
 		return fmt.Errorf("injected sqlite exact route replacement failure")
 	}
@@ -75,6 +90,184 @@ type notifyAllChildrenRuntime struct {
 	diagnostics *fanInBarrierDiagnosticBus
 	manager     *runtimemanager.AgentManager
 	pipeline    *runtimepipeline.PipelineCoordinator
+	workflow    *runtimepipeline.WorkflowInstanceStore
+	workOwner   *worklifetime.RuntimeOccurrence
+}
+
+func TestDynamicFlowSourceRevisionConvergesExactAgentSetAndFencesPredecessorsOnBothBackends(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T) (notifyAllChildrenStore, *sql.DB, func(), func() int32)
+	}{
+		{
+			name: "postgres",
+			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB, func(), func() int32) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				selected := &failingNotifyAllChildrenPostgresStore{
+					PostgresStore: storetest.AdmitPostgresRuntimeStore(t, db),
+				}
+				return selected, db,
+					func() { selected.failNextRouteReplacement.Store(true) },
+					selected.transientRouteFailures.Load
+			},
+		},
+		{
+			name: "sqlite",
+			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB, func(), func() int32) {
+				base := storetest.StartSQLiteRuntimeStore(t)
+				selected := &failingNotifyAllChildrenSQLiteStore{SQLiteRuntimeStore: base}
+				return selected, base.DB,
+					func() { selected.failNextRouteReplacement.Store(true) },
+					selected.transientRouteFailures.Load
+			},
+		},
+	} {
+		for _, mode := range []struct {
+			name     string
+			autoEmit bool
+		}{
+			{name: "no_auto_emit"},
+			{name: "emitted_creation", autoEmit: true},
+		} {
+			t.Run(tc.name+"/"+mode.name, func(t *testing.T) {
+				selected, db, failNextRouteReplacement, transientRouteFailures := tc.setup(t)
+				proveDynamicFlowSourceRevisionConvergence(
+					t,
+					selected,
+					db,
+					failNextRouteReplacement,
+					transientRouteFailures,
+					mode.autoEmit,
+				)
+			})
+		}
+	}
+}
+
+func proveDynamicFlowSourceRevisionConvergence(
+	t *testing.T,
+	selected notifyAllChildrenStore,
+	db *sql.DB,
+	failNextRouteReplacement func(),
+	transientRouteFailures func() int32,
+	autoEmit bool,
+) {
+	t.Helper()
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+	sourceV1 := notifyallchildren.LoadSource(t, notifyallchildren.Options{
+		AgentTopologyRevision: 1,
+		AutoEmitOnCreate:      autoEmit,
+	})
+	scopeV1, ok := semanticview.FlowScopeByID(sourceV1, notifyallchildren.ChildFlowID)
+	if !ok || len(scopeV1.Agents) != 2 {
+		t.Fatalf("v1 account agent contract = %#v found=%t, want reader/retired", scopeV1.Agents, ok)
+	}
+	runtimeV1 := newNotifyAllChildrenRuntime(t, selected, db, sourceV1, time.Now)
+	if err := runtimeV1.manager.Run(managedConformanceExecutionContext(t, ctx, "dynamic-flow-source-v1")); err != nil {
+		t.Fatalf("run v1 manager: %v", err)
+	}
+
+	publishNotifyAllChildrenEvent(t, ctx, runtimeV1.bus, sourceV1, runID, "portfolio.opened", map[string]any{
+		"portfolio_id": "portfolio-main",
+	})
+	publishNotifyAllChildrenEvent(t, ctx, runtimeV1.bus, sourceV1, runID, "portfolio.account.register.requested", map[string]any{
+		"portfolio_id": "portfolio-main",
+		"account_id":   "acct-revision",
+	})
+	descriptor, ok := notifyAllChildrenAccountDescriptors(t, ctx, selected)["acct-revision"]
+	if !ok {
+		t.Fatal("created account descriptor is missing")
+	}
+	if _, err := runtimeV1.manager.HydrateForStartup(ctx); err != nil {
+		t.Fatalf("finalize v1 readiness through startup owner: %v", err)
+	}
+	initialReadiness := waitNotifyAllChildrenRuntimeReadiness(t, ctx, runtimeV1.workflow, runID, descriptor.FlowInstance)
+	if got := !initialReadiness.CreationEventEmittedAt.IsZero(); got != autoEmit {
+		t.Fatalf("initial creation completion = %t, want %t", got, autoEmit)
+	}
+	instanceID := descriptor.InstanceID
+	readerID := "account-reader-" + instanceID
+	retiredID := "account-retired-" + instanceID
+	writerID := "account-writer-" + instanceID
+	v1Agents := loadNotifyAllChildrenAgentsByID(t, ctx, selected)
+	if v1Agents[readerID].Config.Role != "reader-v1" || v1Agents[retiredID].Config.Role != "retired" {
+		t.Fatalf("v1 dynamic agents = %#v", v1Agents)
+	}
+	readerGenerationV1 := v1Agents[readerID].LifecycleGeneration
+
+	sourceV2 := notifyallchildren.LoadSource(t, notifyallchildren.Options{
+		AgentTopologyRevision: 2,
+		AutoEmitOnCreate:      autoEmit,
+	})
+	scopeV2, ok := semanticview.FlowScopeByID(sourceV2, notifyallchildren.ChildFlowID)
+	if !ok || len(scopeV2.Agents) != 2 {
+		t.Fatalf("v2 account agent contract = %#v found=%t, want reader/writer", scopeV2.Agents, ok)
+	}
+	if _, found := scopeV2.Agents["retired"]; found {
+		t.Fatalf("v2 account contract retained removed agent: %#v", scopeV2.Agents)
+	}
+	runtimeV2 := newNotifyAllChildrenRuntime(t, selected, db, sourceV2, time.Now)
+	if err := runtimeV2.manager.Run(managedConformanceExecutionContext(t, ctx, "dynamic-flow-source-v2")); err != nil {
+		t.Fatalf("run v2 manager: %v", err)
+	}
+	reconcileCtx := worklifetime.WithOccurrence(ctx, runtimeV2.workOwner)
+	failNextRouteReplacement()
+	if err := runtimeV2.workflow.RunPipelineMutation(reconcileCtx, func(txctx context.Context) error {
+		return runtimeV2.manager.ReconcileDynamicFlowRuntimeReadinessPlansForRun(txctx, sourceV2, time.Now().UTC())
+	}); err != nil {
+		t.Fatalf("reconcile revised source: %v", err)
+	}
+	revisedReadiness := waitNotifyAllChildrenRuntimeReadiness(t, ctx, runtimeV2.workflow, runID, descriptor.FlowInstance)
+	if failures := transientRouteFailures(); failures != 1 {
+		t.Fatalf("transient revised-route failures = %d, want exactly one automatic-retry trigger", failures)
+	}
+
+	v2Agents := loadNotifyAllChildrenAgentsByID(t, ctx, selected)
+	if _, found := v2Agents[retiredID]; found {
+		t.Fatalf("removed agent %s remains active: %#v", retiredID, v2Agents[retiredID])
+	}
+	reader := v2Agents[readerID]
+	if reader.Config.Role != "reader-v2" || reader.LifecycleGeneration <= readerGenerationV1 {
+		t.Fatalf("changed reader = %#v, want reader-v2 generation after %d", reader, readerGenerationV1)
+	}
+	if writer := v2Agents[writerID]; writer.Config.Role != "writer" || writer.LifecycleGeneration == 0 {
+		t.Fatalf("added writer = %#v", writer)
+	}
+	if _, ok := runtimeV2.manager.GetAgentConfig(retiredID); ok {
+		t.Fatalf("removed agent %s remains process-visible", retiredID)
+	}
+	if cfg, ok := runtimeV2.manager.GetAgentConfig(readerID); !ok || cfg.Role != "reader-v2" {
+		t.Fatalf("changed reader process config = %#v found=%t", cfg, ok)
+	}
+	if cfg, ok := runtimeV2.manager.GetAgentConfig(writerID); !ok || cfg.Role != "writer" {
+		t.Fatalf("added writer process config = %#v found=%t", cfg, ok)
+	}
+	if revisedReadiness.Plan.WorkflowVersion != sourceV2.WorkflowVersion() {
+		t.Fatalf("revised runtime readiness = %#v", revisedReadiness)
+	}
+	if revisedReadiness.CreationEventEmittedAt != initialReadiness.CreationEventEmittedAt {
+		t.Fatalf("creation completion changed across source revision: before=%s after=%s", initialReadiness.CreationEventEmittedAt, revisedReadiness.CreationEventEmittedAt)
+	}
+	staleMutation := v1Agents[readerID].Config
+	staleMutation.Role = "stale-predecessor-write"
+	if err := runtimeV1.manager.ReconfigureAgent(readerID, staleMutation); err == nil {
+		t.Fatal("stale predecessor generation mutated after successor convergence")
+	}
+
+	runtimeV3 := newNotifyAllChildrenRuntime(t, selected, db, sourceV2, time.Now)
+	if _, err := runtimeV3.manager.HydrateForStartup(ctx); err != nil {
+		t.Fatalf("restart hydration: %v", err)
+	}
+	for _, agentID := range []string{readerID, writerID} {
+		if _, ok := runtimeV3.manager.GetAgentConfig(agentID); !ok {
+			t.Fatalf("restart omitted exact active agent %s", agentID)
+		}
+	}
+	if _, ok := runtimeV3.manager.GetAgentConfig(retiredID); ok {
+		t.Fatalf("restart resurrected removed agent %s", retiredID)
+	}
 }
 
 func TestDynamicFlowTerminalizationAndRouteReplacementRollbackTogetherOnBothBackends(t *testing.T) {
@@ -396,7 +589,9 @@ func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, d
 		WorkflowInstances: workflowStore,
 		WorkOwner:         workOwner,
 		DeliveryStore:     backend,
-	}))
+		LifecycleStore:    backend,
+		SemanticSource:    source,
+	}, backend))
 	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
 	if err != nil {
 		t.Fatalf("LoadWorkflowDefinition: %v", err)
@@ -421,7 +616,52 @@ func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, d
 		TestEngineEmitNow: engineNow,
 		WorkOwner:         workOwner,
 	})
-	return notifyAllChildrenRuntime{bus: eventBus, diagnostics: diagnosticBus, manager: manager, pipeline: coordinator}
+	return notifyAllChildrenRuntime{
+		bus: eventBus, diagnostics: diagnosticBus, manager: manager, pipeline: coordinator,
+		workflow: workflowStore, workOwner: workOwner,
+	}
+}
+
+func loadNotifyAllChildrenAgentsByID(
+	t testing.TB,
+	ctx context.Context,
+	selected notifyAllChildrenStore,
+) map[string]runtimemanager.PersistedAgent {
+	t.Helper()
+	agents, err := selected.LoadAgents(ctx)
+	if err != nil {
+		t.Fatalf("LoadAgents: %v", err)
+	}
+	out := make(map[string]runtimemanager.PersistedAgent, len(agents))
+	for _, agent := range agents {
+		out[strings.TrimSpace(agent.Config.ID)] = agent
+	}
+	return out
+}
+
+func waitNotifyAllChildrenRuntimeReadiness(
+	t testing.TB,
+	ctx context.Context,
+	workflow *runtimepipeline.WorkflowInstanceStore,
+	runID string,
+	instancePath string,
+) runtimepipeline.DynamicFlowRuntimeReadiness {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var (
+		last  runtimepipeline.DynamicFlowRuntimeReadiness
+		found bool
+		err   error
+	)
+	for time.Now().Before(deadline) {
+		last, found, err = workflow.LoadDynamicFlowRuntimeReadiness(ctx, runID, instancePath)
+		if err == nil && found && !last.TopologyReadyAt.IsZero() {
+			return last
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("runtime readiness did not converge: found=%v readiness=%#v err=%v", found, last, err)
+	return runtimepipeline.DynamicFlowRuntimeReadiness{}
 }
 
 func loadNotifyAllChildrenFlowInstanceStatus(

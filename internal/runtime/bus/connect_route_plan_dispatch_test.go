@@ -596,7 +596,7 @@ func runConnectRoutePlanCommitScope(ctx context.Context, transaction CommitPubli
 
 func (s *connectRoutePlanDescriptorStore) ListActiveFlowInstanceDescriptors(context.Context) ([]ActiveFlowInstanceDescriptor, error) {
 	s.flowInstanceDescriptorCalls++
-	return append([]ActiveFlowInstanceDescriptor(nil), s.flowInstances...), nil
+	return exactAuthorActivityFlowInstanceDescriptors(s.flowInstances, "1.0.0"), nil
 }
 
 func (s *connectRoutePlanLifecycleStore) Activate(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
@@ -630,7 +630,7 @@ func (s *connectRoutePlanConcurrentLifecycleStore) ListActiveFlowInstanceDescrip
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.flowInstanceDescriptorCalls++
-	return append([]ActiveFlowInstanceDescriptor(nil), s.flowInstances...), nil
+	return exactAuthorActivityFlowInstanceDescriptors(s.flowInstances, "1.0.0"), nil
 }
 
 func (s *connectRoutePlanConcurrentLifecycleStore) Activate(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
@@ -3803,6 +3803,7 @@ func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []run
 		},
 		FlowSchemas: flowSchemas,
 		Semantics: runtimecontracts.WorkflowSemanticView{
+			Version:             "1.0.0",
 			Name:                workflowName,
 			FlowInputs:          flowInputs,
 			FlowOutputs:         flowOutputs,

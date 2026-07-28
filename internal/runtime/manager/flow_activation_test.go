@@ -168,6 +168,7 @@ func (s *flowActivationTestInstanceStore) RunPipelineMutation(ctx context.Contex
 type flowActivationTestStore struct {
 	upserts      []PersistedAgent
 	terminated   []string
+	terminal     map[string]bool
 	terminateErr error
 	failAgentID  string
 }
@@ -343,9 +344,7 @@ func (s *flowActivationTestInstanceStore) ReconcileDynamicFlowRuntimeReadinessPl
 		}
 	}
 	current.Plan = normalized
-	if current.CreationEventEmittedAt.IsZero() {
-		current.TopologyReadyAt = time.Time{}
-	}
+	current.TopologyReadyAt = time.Time{}
 	s.readiness[key] = current
 	return true, nil
 }
@@ -489,11 +488,30 @@ func (s *flowActivationTestInstanceStore) LoadRouteRecoveryProjection(_ context.
 
 func (s *flowActivationTestStore) UpsertAgent(_ context.Context, rec PersistedAgent) error {
 	s.upserts = append(s.upserts, rec)
+	if s.terminal != nil {
+		delete(s.terminal, strings.TrimSpace(rec.Config.ID))
+	}
 	return nil
 }
 
 func (s *flowActivationTestStore) LoadAgents(context.Context) ([]PersistedAgent, error) {
-	return append([]PersistedAgent(nil), s.upserts...), nil
+	latest := make(map[string]PersistedAgent, len(s.upserts))
+	order := make([]string, 0, len(s.upserts))
+	for _, rec := range s.upserts {
+		id := strings.TrimSpace(rec.Config.ID)
+		if _, found := latest[id]; !found {
+			order = append(order, id)
+		}
+		latest[id] = rec
+	}
+	out := make([]PersistedAgent, 0, len(latest))
+	for _, id := range order {
+		if s.terminal[id] {
+			continue
+		}
+		out = append(out, latest[id])
+	}
+	return out, nil
 }
 func (s *flowActivationTestStore) CommitAgentLifecycleTransition(_ context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
 	if req.TargetPhase == AgentLifecycleTerminated {
@@ -501,10 +519,22 @@ func (s *flowActivationTestStore) CommitAgentLifecycleTransition(_ context.Conte
 			return AgentLifecycleTransitionResult{}, s.terminateErr
 		}
 		s.terminated = append(s.terminated, strings.TrimSpace(req.AgentID))
+		if s.terminal == nil {
+			s.terminal = map[string]bool{}
+		}
+		s.terminal[strings.TrimSpace(req.AgentID)] = true
 	} else if strings.TrimSpace(req.AgentID) == strings.TrimSpace(s.failAgentID) {
 		return AgentLifecycleTransitionResult{}, errors.New("injected agent registration failure")
 	} else if req.Agent != nil {
-		s.upserts = append(s.upserts, *req.Agent)
+		rec := *req.Agent
+		rec.LifecycleEpoch = req.TargetEpoch
+		rec.LifecycleGeneration = req.TargetGeneration
+		rec.LifecyclePhase = req.TargetPhase
+		rec.LifecycleRunMode = req.RunMode
+		s.upserts = append(s.upserts, rec)
+		if s.terminal != nil {
+			delete(s.terminal, strings.TrimSpace(req.AgentID))
+		}
 	}
 	return AgentLifecycleTransitionResult{
 		OperationID: req.OperationID, TransitionID: uuid.NewString(), AgentID: req.AgentID,
@@ -1103,7 +1133,7 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 		{name: "direct"},
 		{name: "post_commit", postCommit: true},
 	} {
-		for _, boundary := range []string{"partial_agent", "extra_agent", "route", "arm", "creation_event", "creation_commit"} {
+		for _, boundary := range []string{"partial_agent", "route", "arm", "creation_event", "creation_commit"} {
 			t.Run(mode.name+"/"+boundary, func(t *testing.T) {
 				routeStore := &flowActivationTestRouteStore{}
 				bus := &flowActivationTestBus{routeStore: routeStore}
@@ -1125,11 +1155,6 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 				switch boundary {
 				case "partial_agent":
 					agentStore.failAgentID = "writer-inst-1"
-				case "extra_agent":
-					agentStore.upserts = append(agentStore.upserts, PersistedAgent{
-						Config: models.AgentConfig{ID: "stale-inst-1", FlowPath: "review/inst-1"},
-						Status: "active",
-					})
 				case "route":
 					if mode.postCommit {
 						break
@@ -1180,15 +1205,6 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 				}
 
 				agentStore.failAgentID = ""
-				if boundary == "extra_agent" {
-					filtered := agentStore.upserts[:0]
-					for _, rec := range agentStore.upserts {
-						if rec.Config.ID != "stale-inst-1" {
-							filtered = append(filtered, rec)
-						}
-					}
-					agentStore.upserts = filtered
-				}
 				bus.addErr = nil
 				instances.armInitialEntry = nil
 				bus.publishErr = nil
@@ -1676,6 +1692,13 @@ func TestEnsureFlowInstanceReconcilesRevisedSemanticSourceIntoReadinessOwner(t *
 
 	revisedBundle := testFlowBundleWithTwoAgents("")
 	revisedBundle.Semantics.Version = "v-revised"
+	delete(revisedBundle.FlowTree.ByID["review"].Agents, "reviewer")
+	writer := revisedBundle.FlowTree.ByID["review"].Agents["writer"]
+	writer.Role = "writer-v2"
+	revisedBundle.FlowTree.ByID["review"].Agents["writer"] = writer
+	revisedBundle.FlowTree.ByID["review"].Agents["editor"] = runtimecontracts.AgentRegistryEntry{
+		ID: "editor-{instance_id}", Type: "generic", Role: "editor", Subscriptions: []string{"task.started"},
+	}
 	revisedReq := testActivationRequest(revisedBundle, "review", "inst-1", "ent-1", "review/inst-1")
 	restarted := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances, agents)
 	restarted.semanticSource = semanticview.Wrap(revisedBundle)
@@ -1694,6 +1717,25 @@ func TestEnsureFlowInstanceReconcilesRevisedSemanticSourceIntoReadinessOwner(t *
 	}
 	if readiness.Plan.WorkflowVersion != "v-revised" || readiness.TopologyReadyAt.IsZero() {
 		t.Fatalf("revised readiness = %#v", readiness)
+	}
+	if _, ok := restarted.GetAgentConfig("reviewer-inst-1"); ok {
+		t.Fatal("removed reviewer remains process-visible")
+	}
+	if cfg, ok := restarted.GetAgentConfig("writer-inst-1"); !ok || cfg.Role != "writer-v2" {
+		t.Fatalf("changed writer config = %#v found=%t", cfg, ok)
+	}
+	if cfg, ok := restarted.GetAgentConfig("editor-inst-1"); !ok || cfg.Role != "editor" {
+		t.Fatalf("added editor config = %#v found=%t", cfg, ok)
+	}
+	if len(agents.terminated) != 1 || agents.terminated[0] != "reviewer-inst-1" {
+		t.Fatalf("retired agents = %#v, want reviewer-inst-1", agents.terminated)
+	}
+	persisted, err := agents.LoadAgents(ctx)
+	if err != nil {
+		t.Fatalf("LoadAgents after source revision: %v", err)
+	}
+	if len(persisted) != 2 {
+		t.Fatalf("persisted revised agent set = %#v, want writer/editor", persisted)
 	}
 }
 

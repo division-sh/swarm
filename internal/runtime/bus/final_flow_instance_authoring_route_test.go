@@ -26,7 +26,7 @@ type finalFlowInstanceAuthoringLifecycleStore struct {
 
 func (s *finalFlowInstanceAuthoringLifecycleStore) ListActiveFlowInstanceDescriptors(context.Context) ([]ActiveFlowInstanceDescriptor, error) {
 	s.flowInstanceDescriptorCalls++
-	return append([]ActiveFlowInstanceDescriptor(nil), s.flowInstances...), nil
+	return exactAuthorActivityFlowInstanceDescriptors(s.flowInstances, "1.0.0"), nil
 }
 
 func (s *finalFlowInstanceAuthoringLifecycleStore) Activate(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
