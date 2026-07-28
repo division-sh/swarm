@@ -12170,7 +12170,11 @@ platform_tables:
         operation bound to the predecessor epoch/generation/phase, desired config revision,
         subordinate-session plan, and exact readiness-plan authority. It advances to a higher
         generation by CAS; row reset, deletion, generation reuse, fallback, and compatibility
-        adoption are forbidden.
+        adoption are forbidden. A dynamic readiness-owned reconfigure or restart binds the
+        exact readiness authority into both operation identity and request identity. Before
+        either first execution or stored-result replay, the selected store revalidates the
+        current locked topology owner; replay authority is never inherited from the original
+        commit.
       ddl: |
         CREATE TABLE agent_lifecycle_operations (
             operation_id       UUID PRIMARY KEY,
@@ -13305,9 +13309,15 @@ platform_tables:
         instance in a running or paused run. Every changed desired plan clears topology_ready_at, including after the
         immutable creation occurrence was emitted, so revised agent/route/timer topology remains pending until the exact
         keyed reconciler converges it again. While one eligible row owns an instance, its canonical plan is the sole desired
-        declared-agent topology owner. Every add/change/remove lifecycle transition must lock and match that exact
-        `{run_id, instance_id, canonical plan fingerprint}` in the same selected-store transaction; generic agent mutations
-        fail closed. A pending creation occurrence is rebuilt from revised schema/config plus its persisted trigger lineage,
+        declared-agent topology owner. One selected-store agent-topology admission covers lifecycle first execution,
+        duplicate/stored-result replay, raw agent projection writes, config/path/status rewrites, replacement, and
+        terminalization. It locks and matches the exact `{run_id, instance_id, canonical plan fingerprint}`, desired
+        membership or absence, and declared config revision before any write or replay return. Authorized replay remains
+        idempotent only while that current owner is unchanged; missing authority or stale authority after source revision
+        fails before durable or process publication. Candidate and current paths plus declared agent identity are all
+        considered. Terminal topology change is classified from the typed target phase, never trigger or operation-kind
+        labels. Generic and raw agent mutations fail closed. A pending creation occurrence is rebuilt from revised
+        schema/config plus its persisted trigger lineage,
         while an emitted occurrence is immutable and introduction without lineage is rejected. This table is
         platform lifecycle state, never application flow config. Fresh schemas only; no migration, inference, fallback, or
         compatibility reader is supported.
@@ -31211,7 +31221,7 @@ agent_lifecycle_authority:
       - Commit the lifecycle cell, immutable transition fact, durable operation outcome, and diagnostic outbox atomically.
       - Fence the predecessor generation before cancellation and await its generation-aware release before starting a successor loop.
       - Persistence failure leaves the prior process-local owner unchanged and cannot be acknowledged as success.
-    replay: Repeating one operation_id returns its stored outcome and never cancels, restarts, rotates, or advances generation again.
+    replay: Repeating one operation_id first revalidates any current declaration-owned topology authority under the same selected-store serialization used by first execution, then returns its stored outcome without cancelling, restarting, rotating, or advancing generation again. A stale or authority-free replay cannot publish durable or process state.
     generation: A new create/replace/destroy transition advances exactly one generation; self-release conditionally changes phase without advancing generation.
     runtime_shutdown_reset:
       owner: one retained runtime lifecycle transition in the AgentManager lifecycle coordinator
@@ -31245,7 +31255,7 @@ agent_lifecycle_authority:
     diagnostic: Success requires durable transition outcome and durable outbox enqueue; immediate projection is non-authoritative.
   reconfigure:
     candidate_derivation: The canonical per-agent decision point encloses the authoritative current-config read, partial-patch merge, validation and agent build, subordinate-plan derivation, durable lifecycle/config/session commit, and process-local agent/config projection. A candidate or subordinate plan derived before that serialization point is invalid; concurrent partial patches execute in one serial order against the predecessor committed by the prior decision.
-    operation_identity: After per-agent serialization, derive one stable operation id from the agent id, authoritative expected lifecycle occurrence (runtime epoch, generation, and phase), candidate config revision, and normalized subordinate plan. Retry while that expected occurrence remains current reuses the id; the same candidate and plan after any intervening committed generation is a distinct operation. A candidate whose revision already equals the authoritative current cell is a no-op and creates no lifecycle operation.
+    operation_identity: After per-agent serialization, derive one stable operation id from the agent id, authoritative expected lifecycle occurrence (runtime epoch, generation, and phase), candidate config revision, normalized subordinate plan, and exact dynamic readiness authority when present. Retry while that expected occurrence and authority remain current reuses the id; the same candidate and plan after any intervening committed generation or readiness-plan revision is a distinct operation. A candidate whose revision already equals the authoritative current cell is a no-op and creates no lifecycle operation.
     session_rotation: Rotation consumes the same operation identity and is idempotent, so persistence retry never rotates twice.
   recovery:
     rule: Recovery hydrates only durable non-terminal cells and projects pending diagnostic outbox rows through the runtime log owner before marking them projected; projection failure leaves the row pending and never repeats the lifecycle transition.
@@ -31255,6 +31265,7 @@ agent_lifecycle_authority:
     other_ordering: Startup preservation cleanup completes before runtime contexts start; manager ResetAll runs only after lifecycle shutdown; fork discard runs only after the fork-local runtime has shut down. Selected-store compatibility migration and backfill paths do not exist.
   forbidden:
     - direct lifecycle map writes outside the coordinator
+    - raw agents-table mutation that bypasses selected-store topology admission
     - parallel AgentManager agent/config execution maps or map-read-then-token-refresh execution
     - caller-selected Agent or subscription slices passed into lifecycle transition helpers
     - generic agent-ID Subscribe/Unsubscribe from AgentManager

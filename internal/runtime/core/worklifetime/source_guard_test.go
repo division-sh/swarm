@@ -28,7 +28,7 @@ type asyncSiteLedgerEntry struct {
 var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"after_func|internal/apiv1/handler.go|webSocketSession.run|426":                                                      {asyncSiteCanonicalOwner, "session lease cancellation closes the socket and the owned subscription joins before release"},
 	"after_func|internal/runtime/core/worklifetime/worklifetime.go|gate.beginClass|105":                                  {asyncSiteCanonicalOwner, "the canonical gate binds lease cancellation to its typed occurrence"},
-	"after_func|internal/runtime/manager/lifecycle_coordinator.go|agentLifecycleCoordinator.acquireExecution|1046":       {asyncSiteCanonicalOwner, "the exact agent generation cancels and joins the acquired execution lease"},
+	"after_func|internal/runtime/manager/lifecycle_coordinator.go|agentLifecycleCoordinator.acquireExecution|1063":       {asyncSiteCanonicalOwner, "the exact agent generation cancels and joins the acquired execution lease"},
 	"after_func|internal/runtime/manager/runtime.go|AgentManager.launchExecutionLoop|1752":                               {asyncSiteCanonicalOwner, "the exact agent-generation cancellation is bridged into the pre-admitted Manager lease and joined with that loop"},
 	"go|cmd/swarm-test-postgres/main.go|run|74":                                                                          {asyncSiteSynchronousJoin, "the test harness joins command completion through its result channel"},
 	"go|internal/apiv1/handler.go|webSocketSession.run|435":                                                              {asyncSiteCanonicalOwner, "the process-owned websocket session settles after the writer goroutine exits"},

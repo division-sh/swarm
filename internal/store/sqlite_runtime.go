@@ -246,6 +246,9 @@ func (s *SQLiteRuntimeStore) UpsertAgent(ctx context.Context, rec runtimemanager
 		startedAt = time.Now().UTC()
 	}
 	if err := s.runRuntimeMutation(ctx, "sqlite agent upsert", func(txctx context.Context, tx *sql.Tx) error {
+		if err := authorizeSQLiteRawAgentTopologyMutation(txctx, tx, rec); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(txctx, `
 			INSERT INTO agents (
 				agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source,

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -33,7 +34,15 @@ func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.Pers
 	if !rec.StartedAt.IsZero() {
 		startedAt = rec.StartedAt
 	}
-	return s.upsertAgentSpec(ctx, rec, projection, startedAt)
+	return s.runAuthorActivityMutation(ctx, "postgres agent upsert", func(txctx context.Context, tx *sql.Tx) error {
+		if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "swarm:agent-lifecycle:"+projection.AgentID); err != nil {
+			return err
+		}
+		if err := authorizePostgresRawAgentTopologyMutation(txctx, tx, rec); err != nil {
+			return err
+		}
+		return s.upsertAgentSpec(txctx, tx, rec, projection, startedAt)
+	})
 }
 
 func (s *PostgresStore) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
@@ -43,7 +52,7 @@ func (s *PostgresStore) LoadAgents(ctx context.Context) ([]runtimemanager.Persis
 	return s.loadAgentsSpec(ctx)
 }
 
-func (s *PostgresStore) upsertAgentSpec(ctx context.Context, rec runtimemanager.PersistedAgent, projection persistedAgentProjection, startedAt any) error {
+func (s *PostgresStore) upsertAgentSpec(ctx context.Context, tx *sql.Tx, rec runtimemanager.PersistedAgent, projection persistedAgentProjection, startedAt any) error {
 	const q = `
 		INSERT INTO agents (
 			agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source,
@@ -73,7 +82,7 @@ func (s *PostgresStore) upsertAgentSpec(ctx context.Context, rec runtimemanager.
 			status = EXCLUDED.status,
 			last_active_at = now()
 	`
-	_, err := s.DB.ExecContext(ctx, q,
+	_, err := tx.ExecContext(ctx, q,
 		projection.AgentID,
 		projection.FlowInstance,
 		projection.Role,
