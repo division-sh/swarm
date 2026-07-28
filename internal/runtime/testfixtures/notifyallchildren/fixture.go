@@ -33,6 +33,7 @@ type Options struct {
 	UndeclaredPayloadMembership bool
 	AgentTopologyRevision       int
 	AutoEmitOnCreate            bool
+	AutoEmitEventRevision       int
 }
 
 func LoadBundle(t testing.TB, opts Options) *runtimecontracts.WorkflowContractBundle {
@@ -154,6 +155,13 @@ auto_emit_on_create:
         carries: [account_id]
 `)
 	}
+	if opts.AutoEmitEventRevision == 2 {
+		replaceFile(t, accountEvents, "account.created", "account.revised")
+		replaceFile(t, accountSchema, "account.created", "account.revised")
+		replaceFile(t, accountSchema, "account.created", "account.revised")
+	} else if opts.AutoEmitEventRevision != 0 && opts.AutoEmitEventRevision != 1 {
+		t.Fatalf("unsupported auto-emit event revision %d", opts.AutoEmitEventRevision)
+	}
 	switch opts.AgentTopologyRevision {
 	case 0:
 	case 1:
@@ -186,6 +194,31 @@ writer:
   id: account-writer-{instance_id}
   type: generic
   role: writer
+  model: regular
+  subscriptions:
+    - account.notify.requested
+`)
+	case 3:
+		replaceFile(t, packageFile, `version: "1.0.0"`, `version: "3.0.0"`)
+		replaceFile(t, accountAgents, "{}\n", `reader:
+  id: account-reader-{instance_id}
+  type: generic
+  role: reader-v3
+  model: regular
+  subscriptions:
+    - account.registered
+    - account.notify.requested
+writer:
+  id: account-writer-{instance_id}
+  type: generic
+  role: writer
+  model: regular
+  subscriptions:
+    - account.notify.requested
+retired:
+  id: account-retired-{instance_id}
+  type: generic
+  role: returned
   model: regular
   subscriptions:
     - account.notify.requested

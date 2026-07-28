@@ -318,6 +318,16 @@ func (am *AgentManager) spawnAgentInternalForSource(
 	persist bool,
 	source semanticview.Source,
 ) error {
+	return am.spawnAgentInternalForSourceWithTopology(ctx, rec, persist, source, nil)
+}
+
+func (am *AgentManager) spawnAgentInternalForSourceWithTopology(
+	ctx context.Context,
+	rec PersistedAgent,
+	persist bool,
+	source semanticview.Source,
+	topology *DynamicAgentTopologyMutation,
+) error {
 	if strings.TrimSpace(rec.Config.LLMBackend) == "" {
 		rec.Config.LLMBackend = am.llmBackend
 	}
@@ -347,7 +357,7 @@ func (am *AgentManager) spawnAgentInternalForSource(
 			if am.lifecycle == nil || am.lifecycle.store == nil {
 				return fmt.Errorf("transactional agent registration requires lifecycle persistence")
 			}
-			result, err := am.lifecycle.persistRegistration(ctx, rec)
+			result, err := am.lifecycle.persistRegistrationWithTopology(ctx, rec, topology)
 			if err != nil {
 				return err
 			}
@@ -366,7 +376,7 @@ func (am *AgentManager) spawnAgentInternalForSource(
 			return nil
 		}
 	}
-	if err := am.lifecycle.registerExecution(ctx, rec, persist, a, subscriptionAdmission); err != nil {
+	if err := am.lifecycle.registerExecutionWithTopology(ctx, rec, persist, a, subscriptionAdmission, topology); err != nil {
 		return err
 	}
 	if persist && am.lifecycle.store == nil && am.store != nil {
@@ -541,7 +551,17 @@ func (am *AgentManager) reconfigureAgentExact(
 	agentID string,
 	cfg models.AgentConfig,
 ) error {
-	result, err := am.replaceExecutionConfig(ctx, agentID, "reconfigure", "", &cfg, source, true)
+	return am.reconfigureAgentExactWithTopology(ctx, source, agentID, cfg, nil)
+}
+
+func (am *AgentManager) reconfigureAgentExactWithTopology(
+	ctx context.Context,
+	source semanticview.Source,
+	agentID string,
+	cfg models.AgentConfig,
+	topology *DynamicAgentTopologyMutation,
+) error {
+	result, err := am.replaceExecutionConfigWithTopology(ctx, agentID, "reconfigure", "", &cfg, source, true, topology)
 	if err != nil {
 		return err
 	}
@@ -555,10 +575,19 @@ func (am *AgentManager) reconfigureAgentExact(
 }
 
 func (am *AgentManager) teardownAgent(ctx context.Context, agentID, trigger string) error {
+	return am.teardownAgentWithTopology(ctx, agentID, trigger, nil)
+}
+
+func (am *AgentManager) teardownAgentWithTopology(
+	ctx context.Context,
+	agentID string,
+	trigger string,
+	topology *DynamicAgentTopologyMutation,
+) error {
 	if strings.TrimSpace(agentID) == "" {
 		return errors.New("agentID is required")
 	}
-	if err := am.lifecycle.terminate(ctx, agentID, trigger, AgentLifecycleTerminated); err != nil {
+	if err := am.lifecycle.terminateWithTopology(ctx, agentID, trigger, AgentLifecycleTerminated, topology); err != nil {
 		return err
 	}
 	_ = am.projectLifecycleDiagnostics(context.WithoutCancel(ctx))

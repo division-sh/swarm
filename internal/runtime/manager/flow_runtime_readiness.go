@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -160,6 +161,17 @@ func (am *AgentManager) reconcileEnsuredDynamicFlowRuntimeReadinessPlan(
 			AgentID: record.Config.ID, ConfigRevision: revision,
 		})
 	}
+	expected.CreationEvent, err = rebuildPendingDynamicFlowRuntimeCreationEventPlan(
+		current.Plan.CreationEvent,
+		!current.CreationEventEmittedAt.IsZero(),
+		req.ContractBundle,
+		schema,
+		req.Instance,
+		req.Config,
+	)
+	if err != nil {
+		return fmt.Errorf("rebuild dynamic flow creation plan %s: %w", req.Instance.InstancePath, err)
+	}
 	if _, err := am.workflowInstances.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, expected, occurredAt); err != nil {
 		return fmt.Errorf("reconcile dynamic flow runtime readiness plan %s: %w", req.Instance.InstancePath, err)
 	}
@@ -231,6 +243,17 @@ func (am *AgentManager) ReconcileDynamicFlowRuntimeReadinessPlansForRun(
 				AgentID: record.Config.ID, ConfigRevision: revision,
 			})
 		}
+		expected.CreationEvent, err = rebuildPendingDynamicFlowRuntimeCreationEventPlan(
+			item.Plan.CreationEvent,
+			!item.CreationEventEmittedAt.IsZero(),
+			source,
+			schema,
+			projection.Identity,
+			projection.Config,
+		)
+		if err != nil {
+			return fmt.Errorf("rebuild dynamic flow creation plan %s: %w", item.InstancePath, err)
+		}
 		changed, err := am.workflowInstances.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, expected, observedAt)
 		if err != nil {
 			return fmt.Errorf("reconcile dynamic flow runtime readiness plan %s: %w", item.InstancePath, err)
@@ -255,6 +278,44 @@ func (am *AgentManager) ReconcileDynamicFlowRuntimeReadinessPlansForRun(
 		}
 	}
 	return nil
+}
+
+func rebuildPendingDynamicFlowRuntimeCreationEventPlan(
+	current *runtimepipeline.DynamicFlowRuntimeCreationEventPlan,
+	emitted bool,
+	source semanticview.Source,
+	schema runtimecontracts.FlowSchemaDocument,
+	identity runtimeflowidentity.Instance,
+	config map[string]any,
+) (*runtimepipeline.DynamicFlowRuntimeCreationEventPlan, error) {
+	if emitted {
+		return current, nil
+	}
+	autoEmit := strings.TrimSpace(schema.AutoEmitOnCreate.Event)
+	if current == nil {
+		if autoEmit != "" {
+			return nil, fmt.Errorf(
+				"cannot introduce auto-emit %s without persisted trigger lineage",
+				autoEmit,
+			)
+		}
+		return nil, nil
+	}
+	return buildDynamicFlowRuntimeCreationEventPlan(
+		source,
+		schema,
+		identity.TemplateID,
+		identity.InstancePath,
+		identity.EntityID,
+		events.EventLineage{
+			RunID:         current.RunID,
+			ParentEventID: current.ParentEventID,
+			ExecutionMode: current.ExecutionMode,
+		},
+		config,
+		current.DeliveryContext,
+		current.CreatedAt,
+	)
 }
 
 func (am *AgentManager) signalDynamicFlowRuntimeReadiness() {
@@ -373,7 +434,11 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	if err != nil {
 		return fmt.Errorf("load dynamic flow agents for %s: %w", readiness.InstancePath, err)
 	}
-	if err := am.reconcileDynamicFlowAgentSet(ctx, source, readiness.InstancePath, records, persistedAgents); err != nil {
+	topologyAuthority, err := dynamicFlowAgentTopologyAuthority(plan)
+	if err != nil {
+		return fmt.Errorf("authorize dynamic flow agent topology for %s: %w", readiness.InstancePath, err)
+	}
+	if err := am.reconcileDynamicFlowAgentSet(ctx, source, readiness.InstancePath, records, persistedAgents, topologyAuthority); err != nil {
 		return fmt.Errorf("reconcile dynamic flow agent set for %s: %w", readiness.InstancePath, err)
 	}
 	if err := am.verifyDynamicFlowAgents(ctx, readiness.InstancePath, records); err != nil {
@@ -566,6 +631,7 @@ func (am *AgentManager) reconcileDynamicFlowAgentSet(
 	instancePath string,
 	expected []PersistedAgent,
 	persisted map[string]PersistedAgent,
+	topologyAuthority DynamicAgentTopologyMutation,
 ) error {
 	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
 	expectedIDs := make(map[string]struct{}, len(expected))
@@ -601,13 +667,17 @@ func (am *AgentManager) reconcileDynamicFlowAgentSet(
 				return fmt.Errorf("adopt removed dynamic flow agent %s: %w", id, err)
 			}
 		}
-		if err := am.teardownAgent(ctx, id, "teardown"); err != nil {
+		removeAuthority := topologyAuthority
+		removeAuthority.desiredPresent = false
+		if err := am.teardownAgentWithTopology(ctx, id, "teardown", &removeAuthority); err != nil {
 			return fmt.Errorf("retire removed dynamic flow agent %s: %w", id, err)
 		}
 		delete(persisted, id)
 	}
 	for _, rec := range expected {
-		if err := am.reconcileDynamicFlowAgent(ctx, source, rec, persisted[strings.TrimSpace(rec.Config.ID)]); err != nil {
+		presentAuthority := topologyAuthority
+		presentAuthority.desiredPresent = true
+		if err := am.reconcileDynamicFlowAgent(ctx, source, rec, persisted[strings.TrimSpace(rec.Config.ID)], &presentAuthority); err != nil {
 			return fmt.Errorf("reconcile dynamic flow agent %s: %w", rec.Config.ID, err)
 		}
 	}
@@ -619,6 +689,7 @@ func (am *AgentManager) reconcileDynamicFlowAgent(
 	source semanticview.Source,
 	rec PersistedAgent,
 	persisted PersistedAgent,
+	topology *DynamicAgentTopologyMutation,
 ) error {
 	expectedRevision, err := lifecycleConfigRevision(rec)
 	if err != nil {
@@ -660,9 +731,21 @@ func (am *AgentManager) reconcileDynamicFlowAgent(
 		if actualRevision == expectedRevision {
 			return nil
 		}
-		return am.reconfigureAgentExact(ctx, source, rec.Config.ID, rec.Config)
+		return am.reconfigureAgentExactWithTopology(ctx, source, rec.Config.ID, rec.Config, topology)
 	}
-	return am.spawnAgentInternalForSource(ctx, rec, true, source)
+	return am.spawnAgentInternalForSourceWithTopology(ctx, rec, true, source, topology)
+}
+
+func dynamicFlowAgentTopologyAuthority(plan runtimepipeline.DynamicFlowRuntimeReadinessPlan) (DynamicAgentTopologyMutation, error) {
+	fingerprint, err := canonicaljson.Hash(plan)
+	if err != nil {
+		return DynamicAgentTopologyMutation{}, err
+	}
+	return DynamicAgentTopologyMutation{
+		runID:           strings.TrimSpace(plan.RunID),
+		instancePath:    strings.Trim(strings.TrimSpace(plan.Identity.InstancePath), "/"),
+		planFingerprint: fingerprint,
+	}, nil
 }
 
 func (am *AgentManager) verifyDynamicFlowAgents(ctx context.Context, instancePath string, expected []PersistedAgent) error {

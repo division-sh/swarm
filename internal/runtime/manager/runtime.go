@@ -1551,6 +1551,19 @@ func (am *AgentManager) replaceExecutionConfig(
 	source semanticview.Source,
 	exact bool,
 ) (replaceExecutionResult, error) {
+	return am.replaceExecutionConfigWithTopology(parent, agentID, trigger, operationID, patch, source, exact, nil)
+}
+
+func (am *AgentManager) replaceExecutionConfigWithTopology(
+	parent context.Context,
+	agentID string,
+	trigger string,
+	operationID string,
+	patch *runtimeactors.AgentConfig,
+	source semanticview.Source,
+	exact bool,
+	topology *DynamicAgentTopologyMutation,
+) (replaceExecutionResult, error) {
 	am.lifecycle.executionPublishMu.Lock()
 	defer am.lifecycle.executionPublishMu.Unlock()
 	cell, err := am.lifecycle.lockAgentOperation(agentID)
@@ -1667,7 +1680,7 @@ func (am *AgentManager) replaceExecutionConfig(
 		}
 		return cleanupErr
 	}
-	loopCtx, token, done, err := am.lifecycle.replaceLoopLocked(parent, strings.TrimSpace(agentID), trigger, operationID, rec, subordinate, cell, proposedToken)
+	loopCtx, token, done, err := am.lifecycle.replaceLoopLocked(parent, strings.TrimSpace(agentID), trigger, operationID, rec, subordinate, topology, cell, proposedToken)
 	if err != nil {
 		return replaceExecutionResult{}, errors.Join(err, cleanupPrepared())
 	}

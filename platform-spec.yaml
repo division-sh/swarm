@@ -4543,9 +4543,12 @@ engine:
         Missing, partial, malformed, wrong-run, or nonmatching source coordinates fail closed before any exact route owner is
         replaced. When an active run's source revision changes, one run-scoped readiness reconciler must advance every active
         `{run_id, instance_id}` plan from the revised semantic source and its exact persisted route projection before any route
-        derivation in that selected mutation. It preserves an already emitted creation occurrence, clears topology readiness
-        for every changed desired plan, and queues each changed key for post-commit reconciliation; no per-route source repair
-        is permitted. It
+        derivation in that selected mutation. For an un-emitted creation occurrence it re-derives event identity, type,
+        validated payload, and delivery projection from the revised schema and persisted trigger lineage; removal of
+        `auto_emit_on_create` removes that pending occurrence, while introducing one without persisted trigger lineage fails
+        before readiness mutation. An already emitted creation occurrence is immutable. The reconciler clears topology
+        readiness for every changed desired plan and queues each changed key for post-commit reconciliation; no per-route or
+        stale-creation-plan repair is permitted. It
         admits only descriptors matching the current EventBus source and
         replaces the complete active route-row set for every affected owner in that mutation, where rows absent from the newly
         derived set become inactive and expected rows are upserted. This includes cross-instance observer routes owned by an
@@ -4560,8 +4563,13 @@ engine:
         topology, then publishes and verifies the already-persisted route in process. The desired agent set is exact.
         agents absent from the revised plan are retired through the canonical generation lifecycle, retained agents whose
         canonical config revision changed are exactly replaced through that lifecycle, and newly declared agents are
-        admitted and persisted through it. Recovery adopts the exact persisted generation before any retire or replace
-        transition; it cannot infer a local generation, keep a removed process agent, or patch an old config.
+        admitted and persisted through it. A declared agent ID that was previously terminated advances by exact CAS from the
+        terminated predecessor to a higher registered/running successor generation; it never deletes, resets, or reuses the
+        predecessor lifecycle cell. The readiness plan is the sole desired-set writer for its active dynamic instance.
+        Generic hire cannot add an agent to that instance, and generic fire/reconfigure cannot mutate a declared agent;
+        those operations fail at the selected-store mutation boundary unless they carry the exact current readiness-plan
+        authority. Recovery adopts the exact persisted generation before any retire or replace transition; it cannot infer a
+        local generation, keep a removed process agent, or patch an old config.
       - 10. After a fresh active/paused eligibility check, the reconciler arms the dormant initial timers, reloads
         eligibility, and only then records topology readiness. `topology_ready_at` means the route, complete declared-agent
         set, and initial timer family have all completed reconciliation; it is not merely a route/agent checkpoint. Any arm
@@ -4623,7 +4631,8 @@ engine:
           `entity_state`, synthesize or choose a run, infer readiness from existing subsets, fall back to current-state
           loading, re-render route subscribers from route identity alone, or publish a persisted route before the full
           declared-agent set is verified. Revised-source recovery uses the same exact add/change/remove generation lifecycle
-          as live replacement, and a stale predecessor generation cannot mutate its successor. Missing, malformed,
+          as live replacement, including terminated-to-successor reintroduction; a stale predecessor generation or generic
+          desired-topology mutation cannot mutate its successor. Missing, malformed,
           version-drifted, identity-mismatched, or changed-between-step projections fail startup closed;
           terminal/inactive projections install, mark, arm, and emit nothing.
         process_visibility: Persisting `routing_rules` is not process publication. The process route table and EventBus
@@ -4642,7 +4651,10 @@ engine:
         armed. Event ID, lineage, payload, execution mode, delivery context, and occurrence time belong to the durable
         readiness plan. One selected-store operation atomically appends the admitted event and records its durable completion
         under the locked run/instance lifecycle; publication dispatch is post-commit. Exact duplicate semantics make replay
-        exactly once. Conflicting duplicates do not auto-emit. This bootstraps the flow without requiring an external trigger.
+        exactly once. Before that completion, source revision rebuilds the occurrence only from the revised schema, persisted
+        instance config, and the plan's exact trigger lineage. It never republishes stale event type/schema/payload facts and
+        never invents lineage for a newly introduced auto-emit. Conflicting duplicates do not auto-emit. This bootstraps the
+        flow without requiring an external trigger.
     addressing:
       static_flows: '{flow_id}/{local_name} — one level, no instance segment'
       template_instances: '{template_id}/{instance_id}/{local_name} — extra segment for instance'
@@ -12154,6 +12166,11 @@ platform_tables:
         reconfigure, teardown, stop, self-release, and failure transitions. The selected
         store commits the authoritative agents lifecycle cell, immutable transition fact,
         operation outcome, API projection when applicable, and diagnostic outbox atomically.
+        Reintroducing a terminated readiness-owned agent ID is a deterministic `restart`
+        operation bound to the predecessor epoch/generation/phase, desired config revision,
+        subordinate-session plan, and exact readiness-plan authority. It advances to a higher
+        generation by CAS; row reset, deletion, generation reuse, fallback, and compatibility
+        adoption are forbidden.
       ddl: |
         CREATE TABLE agent_lifecycle_operations (
             operation_id       UUID PRIMARY KEY,
@@ -13287,7 +13304,11 @@ platform_tables:
         creation_event_emitted_at before post-commit dispatch. Both completion writes require an active nonterminated
         instance in a running or paused run. Every changed desired plan clears topology_ready_at, including after the
         immutable creation occurrence was emitted, so revised agent/route/timer topology remains pending until the exact
-        keyed reconciler converges it again. This table is
+        keyed reconciler converges it again. While one eligible row owns an instance, its canonical plan is the sole desired
+        declared-agent topology owner. Every add/change/remove lifecycle transition must lock and match that exact
+        `{run_id, instance_id, canonical plan fingerprint}` in the same selected-store transaction; generic agent mutations
+        fail closed. A pending creation occurrence is rebuilt from revised schema/config plus its persisted trigger lineage,
+        while an emitted occurrence is immutable and introduction without lineage is rejected. This table is
         platform lifecycle state, never application flow config. Fresh schemas only; no migration, inference, fallback, or
         compatibility reader is supported.
       ddl: |
