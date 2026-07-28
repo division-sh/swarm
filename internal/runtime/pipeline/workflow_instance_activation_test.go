@@ -67,6 +67,14 @@ func (*concurrentWorkflowInitialMaterializationTestOwner) ArmInitialEntryTimers(
 	return nil
 }
 
+func (*workflowInitialMaterializationTestOwner) RetireInitialEntryTimerWakeups(context.Context, string) error {
+	return nil
+}
+
+func (*concurrentWorkflowInitialMaterializationTestOwner) RetireInitialEntryTimerWakeups(context.Context, string) error {
+	return nil
+}
+
 func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffectsSQLitePostgres(t *testing.T) {
 	for _, tc := range []struct {
 		name  string

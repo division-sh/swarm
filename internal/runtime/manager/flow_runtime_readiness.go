@@ -65,6 +65,8 @@ var errDynamicFlowRuntimeReadinessSourceStale = errors.New(
 	"dynamic flow runtime readiness callback source is stale",
 )
 
+const dynamicFlowRuntimeReadinessCleanupTimeout = 10 * time.Second
+
 func newDynamicFlowRuntimeReadinessKey(runID, instancePath string) (dynamicFlowRuntimeReadinessKey, error) {
 	key := dynamicFlowRuntimeReadinessKey{
 		runID:        strings.TrimSpace(runID),
@@ -643,9 +645,37 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		return fmt.Errorf("publish dynamic flow route %s: %w", readiness.InstancePath, err)
 	}
 	published := true
+	wakeupsArmed := false
+	readinessAccepted := false
 	defer func() {
+		if wakeupsArmed && !readinessAccepted {
+			cleanupCtx, cancel := context.WithTimeout(
+				context.WithoutCancel(ctx),
+				dynamicFlowRuntimeReadinessCleanupTimeout,
+			)
+			retireErr := am.workflowInstances.RetireInitialEntryTimerWakeups(
+				cleanupCtx,
+				readiness.InstancePath,
+			)
+			cancel()
+			if retireErr != nil {
+				retErr = errors.Join(
+					retErr,
+					fmt.Errorf(
+						"retire incomplete dynamic flow workflow timers %s: %w",
+						readiness.InstancePath,
+						retireErr,
+					),
+				)
+			}
+		}
 		if published && retErr != nil {
-			_ = am.retirePublishedDynamicFlowRoute(plan.Identity.Route())
+			if retireErr := am.retirePublishedDynamicFlowRoute(plan.Identity.Route()); retireErr != nil {
+				retErr = errors.Join(
+					retErr,
+					fmt.Errorf("retire incomplete dynamic flow route %s: %w", readiness.InstancePath, retireErr),
+				)
+			}
 		}
 	}()
 	if err := am.verifyDynamicFlowRoute(ctx, plan.Identity.Route()); err != nil {
@@ -656,6 +686,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	} else if !eligible {
 		return nil
 	}
+	wakeupsArmed = true
 	if err := am.workflowInstances.ArmInitialEntryTimers(ctx, readiness.InstancePath); err != nil {
 		return fmt.Errorf("arm initial workflow timers for %s: %w", readiness.InstancePath, err)
 	}
@@ -688,6 +719,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		)
 	}
 	if plan.CreationEvent == nil || !fresh.CreationEventEmittedAt.IsZero() {
+		readinessAccepted = true
 		published = false
 		return nil
 	}
@@ -729,6 +761,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		}
 		return fmt.Errorf("commit dynamic flow creation occurrence %s: %w", readiness.InstancePath, err)
 	}
+	readinessAccepted = true
 	published = false
 	return nil
 }

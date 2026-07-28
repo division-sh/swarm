@@ -149,6 +149,7 @@ type RuntimeMutationRunner interface {
 type workflowInstanceLifecycleOwner interface {
 	ApplyWorkflowLifecycleEffects(context.Context, []runtimeworkflowlifecycle.Effect) error
 	ArmInitialEntryTimers(context.Context, string) error
+	RetireInitialEntryTimerWakeups(context.Context, string) error
 }
 
 type WorkflowInstanceFieldSelector struct {
@@ -462,6 +463,22 @@ func (s *WorkflowInstanceStore) ArmInitialEntryTimers(ctx context.Context, insta
 		return fmt.Errorf("workflow initial timer activation requires instance identity")
 	}
 	return s.lifecycleOwner.ArmInitialEntryTimers(ctx, instanceID)
+}
+
+// RetireInitialEntryTimerWakeups withdraws and joins the exact process-local
+// projections for the durable active set. It does not mutate timer status.
+func (s *WorkflowInstanceStore) RetireInitialEntryTimerWakeups(ctx context.Context, instanceID string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("workflow instance lifecycle store is required")
+	}
+	if s.lifecycleOwner == nil {
+		return fmt.Errorf("workflow instance lifecycle owner is required")
+	}
+	instanceID = strings.TrimSpace(instanceID)
+	if instanceID == "" {
+		return fmt.Errorf("workflow initial timer retirement requires instance identity")
+	}
+	return s.lifecycleOwner.RetireInitialEntryTimerWakeups(ctx, instanceID)
 }
 
 func canonicalWorkflowInstancePersistedTime(value time.Time) time.Time {

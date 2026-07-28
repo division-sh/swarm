@@ -459,6 +459,85 @@ func (s *Scheduler) cancelWorkflowTimerWakeup(ref timeridentity.WorkflowTimerAct
 	return nil
 }
 
+func (s *Scheduler) retireWorkflowTimerWakeups(
+	ctx context.Context,
+	refs []timeridentity.WorkflowTimerActivationRef,
+) error {
+	if s == nil {
+		return errWorkflowTimerSchedulerRequired
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	keys := make([]string, 0, len(refs))
+	seen := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		ref = ref.Normalize()
+		if !ref.Valid() || ref.ActivationID == "" {
+			return errors.New("workflow timer retirement requires exact activation identity")
+		}
+		key := workflowTimerTaskFamily + "|" + ref.ActivationID
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+
+	s.mu.Lock()
+	for _, key := range keys {
+		if _, reserved := s.reservations[key]; reserved {
+			s.mu.Unlock()
+			return errors.New("workflow timer key is reserved by a standing replacement transition")
+		}
+		if task := s.tasks[key]; task != nil && task.projection.kind != scheduledProjectionWorkflowTimer {
+			s.mu.Unlock()
+			return errors.New("workflow timer key is owned by a different scheduled projection")
+		}
+	}
+	draining := make([]*scheduledTask, 0, len(keys))
+	for task := range s.draining {
+		if task == nil {
+			continue
+		}
+		if _, selected := seen[task.projection.key()]; !selected {
+			continue
+		}
+		if task.projection.kind != scheduledProjectionWorkflowTimer {
+			s.mu.Unlock()
+			return errors.New("workflow timer key is draining a different scheduled projection")
+		}
+		draining = append(draining, task)
+	}
+	done := make([]<-chan struct{}, 0, len(keys))
+	joined := make(map[*scheduledTask]struct{}, len(keys))
+	for _, key := range keys {
+		task := s.tasks[key]
+		if task == nil {
+			continue
+		}
+		s.retireTaskLocked(key, task)
+		done = append(done, task.done)
+		joined[task] = struct{}{}
+	}
+	for _, task := range draining {
+		if _, alreadyJoined := joined[task]; alreadyJoined {
+			continue
+		}
+		done = append(done, task.done)
+	}
+	s.mu.Unlock()
+
+	for _, taskDone := range done {
+		select {
+		case <-taskDone:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
 func (s *Scheduler) stopWorkflowTimerWakeups(ctx context.Context) error {
 	if s == nil {
 		return nil

@@ -126,3 +126,11 @@ func (o pipelineWorkflowLifecycleOwner) ArmInitialEntryTimers(ctx context.Contex
 	}
 	return pc.workflowTimers.ArmInitialEntryTimers(ctx, instanceID)
 }
+
+func (o pipelineWorkflowLifecycleOwner) RetireInitialEntryTimerWakeups(ctx context.Context, instanceID string) error {
+	pc := o.coordinator
+	if pc == nil || pc.workflowTimers == nil {
+		return fmt.Errorf("workflow timer lifecycle owner is unavailable")
+	}
+	return pc.workflowTimers.RetireInitialEntryTimerWakeups(ctx, instanceID)
+}

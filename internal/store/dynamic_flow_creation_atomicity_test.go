@@ -55,6 +55,10 @@ func (dynamicFlowCreationAtomicityLifecycle) ArmInitialEntryTimers(context.Conte
 	return nil
 }
 
+func (dynamicFlowCreationAtomicityLifecycle) RetireInitialEntryTimerWakeups(context.Context, string) error {
+	return nil
+}
+
 type blockingDynamicFlowCreationPublisher struct {
 	delegate runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher
 	entered  chan struct{}
