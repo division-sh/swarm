@@ -4607,6 +4607,9 @@ engine:
           `{bundle_hash, bundle_source, workflow_version}` matches the current EventBus semantic source inside the selected
           mutation. It MUST replace the complete route set for every affected owner in that same mutation, including
           inactivating previously active rows absent from the derived set; additive upsert is not an exact-set operation.
+          Descriptor `flow_template` is an authored template ID. Route scope is the semantic full template path; exact-set
+          derivation MUST resolve that scope through the current semantic route-template registry and compare the resulting
+          template ID. Direct equality between a nested scope path and template ID is invalid.
           Creation and terminal source/consumer removal consume the same owner. Deriving only the newly created or removed
           instance is invalid because cross-instance observers depend on both lifecycle owners. A missing-source descriptor
           fails closed. The coordinate exists only through the exact current-run readiness row; current-run query context,

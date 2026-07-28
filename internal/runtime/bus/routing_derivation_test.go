@@ -1220,6 +1220,7 @@ func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *test
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{Version: "1.0.0"},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -1248,5 +1249,43 @@ func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *test
 	}
 	if routes[0].SourceFlow != "child/grandchild" {
 		t.Fatalf("SourceFlow = %q, want child/grandchild", routes[0].SourceFlow)
+	}
+
+	store := &routePersistenceTestStore{flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{{
+		InstanceID:    identity.InstanceID,
+		FlowInstance:  identity.InstancePath,
+		FlowTemplate:  "grandchild",
+		AddressFields: map[string]string{"entity.account_id": "acct-1"},
+	}}}
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	second := runtimeflowidentity.DeriveRoute("child/grandchild", "inst-2")
+	stageCtx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), &sql.Tx{})
+	if err := eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{
+		Identity: second,
+	}); err != nil {
+		t.Fatalf("stage second nested template instance: %v", err)
+	}
+	replaced := map[runtimeflowidentity.Route]bool{}
+	for _, route := range store.replaceCalls {
+		replaced[route] = true
+	}
+	if !replaced[identity] || !replaced[second] {
+		t.Fatalf("replaced nested route owners = %#v, want existing %s and included %s", store.replaceCalls, identity.InstancePath, second.InstancePath)
+	}
+
+	store.flowInstances[0].FlowTemplate = "child"
+	store.replaceCalls = nil
+	store.stagedRoutes = nil
+	err = eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{
+		Identity: second,
+	})
+	if err == nil || !strings.Contains(err.Error(), "template child does not match route template grandchild") {
+		t.Fatalf("mismatched nested descriptor error = %v, want exact template mapping rejection", err)
+	}
+	if len(store.replaceCalls) != 0 || len(store.stagedRoutes) != 0 {
+		t.Fatalf("mismatched nested descriptor mutated routes: replacements=%#v staged=%#v", store.replaceCalls, store.stagedRoutes)
 	}
 }

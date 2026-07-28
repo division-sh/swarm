@@ -521,16 +521,18 @@ func (eb *EventBus) deriveFlowInstanceRouteTopology(
 		if identity == exclude || (include != nil && identity == include.Identity) {
 			continue
 		}
-		if descriptor.FlowTemplate != identity.ScopeKey {
+		templateID, found := staged.flowInstanceTemplateID(identity)
+		if !found {
+			continue
+		}
+		if descriptor.FlowTemplate != templateID {
 			return nil, nil, fmt.Errorf(
-				"active flow-instance descriptor %s template %s does not match route scope %s",
+				"active flow-instance descriptor %s template %s does not match route template %s for scope %s",
 				identity.InstancePath,
 				descriptor.FlowTemplate,
+				templateID,
 				identity.ScopeKey,
 			)
-		}
-		if !staged.hasFlowInstanceTemplate(identity) {
-			continue
 		}
 		if err := staged.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
 			Identity:            identity,
