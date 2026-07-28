@@ -378,7 +378,7 @@ func (s *WorkflowInstanceStore) ReconcileDynamicFlowRuntimeReadinessPlan(
 			result, err := tx.ExecContext(txctx, `
 				UPDATE flow_instance_runtime_readiness
 				SET plan = ?,
-				    topology_ready_at = CASE WHEN creation_event_emitted_at IS NULL THEN NULL ELSE topology_ready_at END,
+				    topology_ready_at = NULL,
 				    updated_at = ?
 				WHERE run_id = ? AND instance_id = ?
 			`, expectedJSON, observedAt, normalized.RunID, instancePath)
@@ -396,7 +396,7 @@ func (s *WorkflowInstanceStore) ReconcileDynamicFlowRuntimeReadinessPlan(
 			result, err := tx.ExecContext(txctx, `
 				UPDATE flow_instance_runtime_readiness
 				SET plan = $1::jsonb,
-				    topology_ready_at = CASE WHEN creation_event_emitted_at IS NULL THEN NULL ELSE topology_ready_at END,
+				    topology_ready_at = NULL,
 				    updated_at = $2
 				WHERE run_id = $3::uuid AND instance_id = $4
 			`, expectedJSON, observedAt, normalized.RunID, instancePath)
@@ -618,9 +618,6 @@ func decodeDynamicFlowRuntimeReadiness(
 		item.TopologyReadyAt = topologyReadyAt.Time.UTC()
 	}
 	if creationEventEmittedAt.Valid {
-		if item.TopologyReadyAt.IsZero() {
-			return DynamicFlowRuntimeReadiness{}, fmt.Errorf("dynamic flow runtime readiness %s emitted creation event before topology readiness", instancePath)
-		}
 		item.CreationEventEmittedAt = creationEventEmittedAt.Time.UTC()
 	}
 	return item, nil

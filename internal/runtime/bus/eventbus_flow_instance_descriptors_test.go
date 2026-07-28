@@ -5,7 +5,9 @@ import (
 	"testing"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type activeFlowInstanceDescriptorStore struct {
@@ -24,6 +26,7 @@ func (s *activeFlowInstanceDescriptorStore) ListActiveFlowInstanceDescriptors(co
 
 func TestEventBusPinRoutingDescriptorsIncludeActiveDynamicFlowInstances(t *testing.T) {
 	const flowInstance = "component-scaffold/aaaaaaaa-1111-4111-8111-aaaaaaaa1111"
+	const workflowVersion = "v-test"
 	eb, err := newScopedTestEventBus(&activeFlowInstanceDescriptorStore{
 		agents: []runtimebus.ActiveAgentDescriptor{{
 			AgentID:      "service-owner",
@@ -33,7 +36,13 @@ func TestEventBusPinRoutingDescriptorsIncludeActiveDynamicFlowInstances(t *testi
 		flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{{
 			FlowInstance: flowInstance,
 			FlowTemplate: "component-scaffold",
+			BundleHash:   authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource,
+			WorkflowVersion: workflowVersion,
 		}},
+	}, runtimebus.EventBusOptions{
+		ContractBundle: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+			Semantics: runtimecontracts.WorkflowSemanticView{Version: workflowVersion},
+		}),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)

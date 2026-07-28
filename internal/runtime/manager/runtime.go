@@ -1539,6 +1539,18 @@ type replaceExecutionResult struct {
 }
 
 func (am *AgentManager) replaceExecution(parent context.Context, agentID, trigger, operationID string, patch *runtimeactors.AgentConfig) (replaceExecutionResult, error) {
+	return am.replaceExecutionConfig(parent, agentID, trigger, operationID, patch, am.semanticSource, false)
+}
+
+func (am *AgentManager) replaceExecutionConfig(
+	parent context.Context,
+	agentID string,
+	trigger string,
+	operationID string,
+	patch *runtimeactors.AgentConfig,
+	source semanticview.Source,
+	exact bool,
+) (replaceExecutionResult, error) {
 	am.lifecycle.executionPublishMu.Lock()
 	defer am.lifecycle.executionPublishMu.Unlock()
 	cell, err := am.lifecycle.lockAgentOperation(agentID)
@@ -1567,7 +1579,10 @@ func (am *AgentManager) replaceExecution(parent context.Context, agentID, trigge
 	var rec *PersistedAgent
 	subordinate := sessions.LifecycleMutationPlan{}
 	if patch != nil {
-		updated := mergeAgentConfig(current.Config, *patch)
+		updated := *patch
+		if !exact {
+			updated = mergeAgentConfig(current.Config, *patch)
+		}
 		if updated.ID == "" {
 			updated.ID = strings.TrimSpace(agentID)
 		}
@@ -1577,7 +1592,7 @@ func (am *AgentManager) replaceExecution(parent context.Context, agentID, trigge
 		if err := am.resolveAgentModel(&updated); err != nil {
 			return replaceExecutionResult{}, err
 		}
-		subscriptionAdmission, err := admitAgentConfigSubscriptions(am.semanticSource, &updated, nil)
+		subscriptionAdmission, err := admitAgentConfigSubscriptions(source, &updated, nil)
 		if err != nil {
 			return replaceExecutionResult{}, err
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -372,13 +373,8 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	if err != nil {
 		return fmt.Errorf("load dynamic flow agents for %s: %w", readiness.InstancePath, err)
 	}
-	if err := am.rejectUnexpectedDynamicFlowAgents(readiness.InstancePath, records, persistedAgents); err != nil {
-		return err
-	}
-	for _, rec := range records {
-		if err := am.reconcileDynamicFlowAgent(ctx, rec, persistedAgents[strings.TrimSpace(rec.Config.ID)]); err != nil {
-			return fmt.Errorf("reconcile dynamic flow agent %s: %w", rec.Config.ID, err)
-		}
+	if err := am.reconcileDynamicFlowAgentSet(ctx, source, readiness.InstancePath, records, persistedAgents); err != nil {
+		return fmt.Errorf("reconcile dynamic flow agent set for %s: %w", readiness.InstancePath, err)
 	}
 	if err := am.verifyDynamicFlowAgents(ctx, readiness.InstancePath, records); err != nil {
 		return fmt.Errorf("verify dynamic flow agents for %s: %w", readiness.InstancePath, err)
@@ -564,64 +560,109 @@ func (am *AgentManager) loadDynamicFlowPersistedAgents(ctx context.Context, inst
 	return persistedByID, nil
 }
 
-func (am *AgentManager) rejectUnexpectedDynamicFlowAgents(
+func (am *AgentManager) reconcileDynamicFlowAgentSet(
+	ctx context.Context,
+	source semanticview.Source,
 	instancePath string,
 	expected []PersistedAgent,
 	persisted map[string]PersistedAgent,
 ) error {
+	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
 	expectedIDs := make(map[string]struct{}, len(expected))
 	for _, rec := range expected {
 		expectedIDs[strings.TrimSpace(rec.Config.ID)] = struct{}{}
 	}
+	removedIDs := make(map[string]struct{})
 	for id := range persisted {
 		if _, ok := expectedIDs[id]; !ok {
-			return fmt.Errorf("dynamic flow runtime readiness %s has unexpected persisted agent %s", instancePath, id)
+			removedIDs[id] = struct{}{}
 		}
 	}
 	for _, cfg := range am.ListAgentConfigs() {
-		if strings.Trim(strings.TrimSpace(cfg.FlowPath), "/") != strings.Trim(strings.TrimSpace(instancePath), "/") {
+		if strings.Trim(strings.TrimSpace(cfg.FlowPath), "/") != instancePath {
 			continue
 		}
 		if _, ok := expectedIDs[strings.TrimSpace(cfg.ID)]; !ok {
-			return fmt.Errorf("dynamic flow runtime readiness %s has unexpected process agent %s", instancePath, cfg.ID)
+			removedIDs[strings.TrimSpace(cfg.ID)] = struct{}{}
+		}
+	}
+	orderedRemoved := make([]string, 0, len(removedIDs))
+	for id := range removedIDs {
+		orderedRemoved = append(orderedRemoved, id)
+	}
+	sort.Strings(orderedRemoved)
+	for _, id := range orderedRemoved {
+		if _, live := am.GetAgentConfig(id); !live {
+			stored, found := persisted[id]
+			if !found {
+				return fmt.Errorf("removed dynamic flow agent %s has neither process nor durable lifecycle owner", id)
+			}
+			if err := am.adoptPersistedAgentForLifecycle(ctx, source, stored); err != nil {
+				return fmt.Errorf("adopt removed dynamic flow agent %s: %w", id, err)
+			}
+		}
+		if err := am.teardownAgent(ctx, id, "teardown"); err != nil {
+			return fmt.Errorf("retire removed dynamic flow agent %s: %w", id, err)
+		}
+		delete(persisted, id)
+	}
+	for _, rec := range expected {
+		if err := am.reconcileDynamicFlowAgent(ctx, source, rec, persisted[strings.TrimSpace(rec.Config.ID)]); err != nil {
+			return fmt.Errorf("reconcile dynamic flow agent %s: %w", rec.Config.ID, err)
 		}
 	}
 	return nil
 }
 
-func (am *AgentManager) reconcileDynamicFlowAgent(ctx context.Context, rec PersistedAgent, persisted PersistedAgent) error {
+func (am *AgentManager) reconcileDynamicFlowAgent(
+	ctx context.Context,
+	source semanticview.Source,
+	rec PersistedAgent,
+	persisted PersistedAgent,
+) error {
 	expectedRevision, err := lifecycleConfigRevision(rec)
 	if err != nil {
 		return err
 	}
 	existing, live := am.GetAgentConfig(rec.Config.ID)
+	actualRevision := ""
 	if live {
-		actualRevision, err := lifecycleConfigRevision(PersistedAgent{Config: existing})
+		actualRevision, err = lifecycleConfigRevision(PersistedAgent{Config: existing})
 		if err != nil {
 			return err
-		}
-		if actualRevision != expectedRevision {
-			return fmt.Errorf("agent %s config revision changed: expected=%s actual=%s", rec.Config.ID, expectedRevision, actualRevision)
 		}
 	}
 	persistedID := strings.TrimSpace(persisted.Config.ID)
+	persistedRevision := ""
 	if persistedID != "" {
-		persistedRevision, err := lifecycleConfigRevision(persisted)
+		persistedRevision, err = lifecycleConfigRevision(persisted)
 		if err != nil {
 			return err
 		}
-		if persistedID != strings.TrimSpace(rec.Config.ID) || persistedRevision != expectedRevision {
-			return fmt.Errorf("agent %s persisted config revision changed", rec.Config.ID)
+		if persistedID != strings.TrimSpace(rec.Config.ID) {
+			return fmt.Errorf("agent %s persisted identity changed", rec.Config.ID)
 		}
-		if live {
-			return nil
-		}
-		return am.spawnAgentInternal(ctx, persisted, false)
 	}
-	if live {
+	if live && persistedID == "" {
 		return fmt.Errorf("agent %s is process-ready without durable registration", rec.Config.ID)
 	}
-	return am.spawnAgentInternal(ctx, rec, true)
+	if live && actualRevision != persistedRevision {
+		return fmt.Errorf("agent %s process and durable revisions disagree", rec.Config.ID)
+	}
+	if !live && persistedID != "" {
+		if err := am.adoptPersistedAgentForLifecycle(ctx, source, persisted); err != nil {
+			return fmt.Errorf("adopt persisted agent %s: %w", rec.Config.ID, err)
+		}
+		live = true
+		actualRevision = persistedRevision
+	}
+	if live {
+		if actualRevision == expectedRevision {
+			return nil
+		}
+		return am.reconfigureAgentExact(ctx, source, rec.Config.ID, rec.Config)
+	}
+	return am.spawnAgentInternalForSource(ctx, rec, true, source)
 }
 
 func (am *AgentManager) verifyDynamicFlowAgents(ctx context.Context, instancePath string, expected []PersistedAgent) error {

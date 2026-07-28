@@ -396,7 +396,7 @@ func (eb *EventBus) activeTargetDescriptors(ctx context.Context) ([]ActiveTarget
 	if !flowOK {
 		return out, agentsOK || len(out) > 0, nil
 	}
-	flowDescriptors, err := lister.ListActiveFlowInstanceDescriptors(ctx)
+	flowDescriptors, err := eb.activeFlowInstanceDescriptorsForSemanticSource(ctx, lister)
 	if err != nil {
 		return nil, true, err
 	}

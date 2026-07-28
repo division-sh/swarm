@@ -3,11 +3,14 @@ package store_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -125,6 +128,48 @@ func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenance
 					eventBus, err := newStoreTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
 					if err != nil {
 						t.Fatalf("NewEventBusWithOptions: %v", err)
+					}
+					for _, resolution := range []struct {
+						name       string
+						localEvent string
+					}{
+						{name: "select", localEvent: "account.notify.requested"},
+						{name: "select-or-create", localEvent: "account.registered"},
+					} {
+						raw, err := json.Marshal(map[string]any{
+							"account_id": "existing",
+							"command":    "inspect",
+						})
+						if err != nil {
+							t.Fatalf("marshal %s event: %v", resolution.name, err)
+						}
+						evt := eventtest.RunCreatingRootIngress(
+							uuid.NewString(),
+							events.EventType(source.ResolveFlowEventReference(notifyallchildren.OwnerFlowID, resolution.localEvent)),
+							notifyallchildren.OwnerFlowID,
+							"",
+							raw,
+							0,
+							runID,
+							"",
+							events.EventEnvelope{},
+							time.Now().UTC(),
+						)
+						_, pinErr := eventBus.CheckPublishRecipientPlan(ctx, evt)
+						if tc.wantError != "" {
+							if pinErr == nil || !strings.Contains(pinErr.Error(), tc.wantError) {
+								t.Fatalf("%s source admission error = %v, want %q", resolution.name, pinErr, tc.wantError)
+							}
+						} else if pinErr != nil {
+							t.Fatalf("%s exact source admission: %v", resolution.name, pinErr)
+						}
+						afterPin, readErr := selected.ListFlowInstanceRouteRecords(ctx, identity)
+						if readErr != nil {
+							t.Fatalf("read exact route set after %s pin: %v", resolution.name, readErr)
+						}
+						if !reflect.DeepEqual(afterPin, before) {
+							t.Fatalf("%s pin mutated route state: before=%#v after=%#v", resolution.name, before, afterPin)
+						}
 					}
 					err = eventBus.StageFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
 						Identity: identity,

@@ -155,7 +155,7 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			store := &templateFlowPilotMemoryStore{flowInstances: tc.flowInstances}
+			store := &templateFlowPilotMemoryStore{source: source, flowInstances: tc.flowInstances}
 			bus, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
 				ContractBundle: source,
 				TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
@@ -204,12 +204,20 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 
 type templateFlowPilotMemoryStore struct {
 	runtimebus.InMemoryEventStore
+	source         semanticview.Source
 	flowInstances  []runtimebus.ActiveFlowInstanceDescriptor
 	deliveryRoutes map[string][]events.DeliveryRoute
 }
 
 func (s *templateFlowPilotMemoryStore) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	return append([]runtimebus.ActiveFlowInstanceDescriptor(nil), s.flowInstances...), nil
+	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
+	descriptors := append([]runtimebus.ActiveFlowInstanceDescriptor(nil), s.flowInstances...)
+	for i := range descriptors {
+		descriptors[i].BundleHash = bundleHash
+		descriptors[i].BundleSource = bundleSource
+		descriptors[i].WorkflowVersion = s.source.WorkflowVersion()
+	}
+	return descriptors, nil
 }
 
 func (s *templateFlowPilotMemoryStore) InsertEventDeliveryRoutes(_ context.Context, eventID string, routes []events.DeliveryRoute) error {

@@ -512,7 +512,20 @@ type fanOutPinRouteMemoryStore struct {
 }
 
 func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	return append([]runtimebus.ActiveFlowInstanceDescriptor(nil), s.flowInstances...), nil
+	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
+	descriptors := append([]runtimebus.ActiveFlowInstanceDescriptor(nil), s.flowInstances...)
+	for i := range descriptors {
+		if descriptors[i].BundleHash == "" {
+			descriptors[i].BundleHash = bundleHash
+		}
+		if descriptors[i].BundleSource == "" {
+			descriptors[i].BundleSource = bundleSource
+		}
+		if descriptors[i].WorkflowVersion == "" {
+			descriptors[i].WorkflowVersion = "1.0.0"
+		}
+	}
+	return descriptors, nil
 }
 
 func (s *fanOutPinRouteMemoryStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
