@@ -13,6 +13,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
@@ -24,6 +25,36 @@ type runtimeTestWorkFixture struct {
 
 var runtimeTestWorkFixtures sync.Map
 var runtimeTestEventBusOwners sync.Map
+
+type runtimeTestCandidateOwner struct{}
+
+type runtimeTestCandidateRegistration struct{}
+
+func (runtimeTestCandidateOwner) ListCompletionCandidates(
+	context.Context,
+	runtimerunlifecycle.CandidateScope,
+	runtimerunlifecycle.CandidateCursor,
+	int,
+) (runtimerunlifecycle.CandidatePage, error) {
+	return runtimerunlifecycle.CandidatePage{Exhausted: true}, nil
+}
+
+func (runtimeTestCandidateOwner) ExecuteCompletionCandidate(
+	context.Context,
+	runtimerunlifecycle.Candidate,
+	runtimerunlifecycle.TerminalCatalog,
+) (runtimerunlifecycle.CompletionResult, error) {
+	return runtimerunlifecycle.CompletionResult{}, errors.New("unexpected runtime test completion candidate")
+}
+
+func (runtimeTestCandidateOwner) RegisterCompletionCandidateSink(
+	runtimerunlifecycle.CandidateScope,
+	runtimerunlifecycle.CandidateSink,
+) (runtimerunlifecycle.CandidateRegistration, error) {
+	return runtimeTestCandidateRegistration{}, nil
+}
+
+func (runtimeTestCandidateRegistration) Release() {}
 
 func runtimeTestProcessWorkOwner(t testing.TB) *worklifetime.Process {
 	t.Helper()
@@ -152,6 +183,13 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps) (
 	}
 	if deps.Options.ProcessWorkOwner == nil {
 		deps.Options.ProcessWorkOwner = runtimeTestProcessWorkOwner(t)
+	}
+	if deps.Stores.SQLDB != nil && deps.Stores.RunLifecycleCandidates == nil {
+		if candidates, ok := deps.Stores.EventStore.(runtimerunlifecycle.CandidateOwner); ok {
+			deps.Stores.RunLifecycleCandidates = candidates
+		} else {
+			deps.Stores.RunLifecycleCandidates = runtimeTestCandidateOwner{}
+		}
 	}
 	if deps.Stores.PipelineObligations == nil {
 		if provider, ok := deps.Stores.EventStore.(interface {

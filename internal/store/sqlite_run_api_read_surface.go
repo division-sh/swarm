@@ -10,8 +10,8 @@ import (
 	"time"
 
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -40,9 +40,6 @@ WHERE r.run_id = ?
 	if err != nil {
 		return RunHeader{}, err
 	}
-	if strings.TrimSpace(header.TriggerEventID) == "" || strings.TrimSpace(header.TriggerEventType) == "" {
-		return RunHeader{}, fmt.Errorf("run %s is missing trigger event identity", runID)
-	}
 	return header, nil
 }
 
@@ -52,7 +49,7 @@ func (s *SQLiteRuntimeStore) ListRunHeaders(ctx context.Context, opts RunHeaderL
 	}
 	opts = defaultRunHeaderListOptions(opts)
 	args := make([]any, 0, 6)
-	where := []string{"(NULLIF(r.trigger_event_id, '') IS NOT NULL OR EXISTS (SELECT 1 FROM events e WHERE e.run_id = r.run_id))"}
+	where := []string{"1 = 1"}
 	if opts.Status != "" {
 		args = append(args, opts.Status)
 		where = append(where, "lower(r.status) = ?")
@@ -93,9 +90,6 @@ LIMIT ?
 		if err != nil {
 			return nil, "", err
 		}
-		if strings.TrimSpace(header.TriggerEventID) == "" || strings.TrimSpace(header.TriggerEventType) == "" {
-			return nil, "", fmt.Errorf("run %s is missing trigger event identity", header.RunID)
-		}
 		headers = append(headers, header)
 	}
 	if err := rows.Err(); err != nil {
@@ -118,14 +112,16 @@ func (s *SQLiteRuntimeStore) LoadRunDebugReport(ctx context.Context, runID strin
 	report := RunDebugReport{
 		RunID:          header.RunID,
 		RunTableStatus: header.Status,
-		RootEventID:    header.TriggerEventID,
-		RootEventType:  header.TriggerEventType,
 		Failure:        runtimefailures.CloneEnvelope(header.Failure),
 		ControlReason:  header.ControlReason,
 		StartedAt:      header.StartedAt,
 		EndedAt:        header.EndedAt,
 		EventCount:     header.EventCount,
 		EntityCount:    header.EntityCount,
+	}
+	if header.Origin.Kind() == runtimerunlifecycle.OriginEvent {
+		report.RootEventID = header.Origin.EventID()
+		report.RootEventType = header.Origin.EventType()
 	}
 	if lastEventAt, ok, err := s.sqliteRunLastEventAt(ctx, header.RunID); err != nil {
 		return RunDebugReport{}, err
@@ -244,25 +240,27 @@ func sqliteRunHeaderSelectSQL() string {
 SELECT
 	r.run_id,
 	lower(COALESCE(r.status, '')),
-	COALESCE(NULLIF(r.trigger_event_type, ''), (
-		SELECT e.event_name
-		FROM events e
-		WHERE e.run_id = r.run_id
-		ORDER BY e.created_at ASC, e.event_id ASC
-		LIMIT 1
-	), ''),
-	COALESCE(NULLIF(r.trigger_event_id, ''), (
-		SELECT e.event_id
-		FROM events e
-		WHERE e.run_id = r.run_id
-		ORDER BY e.created_at ASC, e.event_id ASC
-		LIMIT 1
-	), ''),
+	COALESCE(r.bundle_hash, ''),
+	COALESCE(r.bundle_source, ''),
+	COALESCE(r.origin_kind, ''),
+	COALESCE(r.trigger_event_id, ''),
+	COALESCE(r.trigger_event_type, ''),
+	COALESCE(r.origin_service_id, ''),
+	COALESCE(r.origin_generation, 0),
+	COALESCE(r.forked_from_run_id, ''),
+	COALESCE(r.forked_from_event_id, ''),
+	(SELECT COUNT(*) FROM standing_service_generations ssg WHERE ssg.run_id = r.run_id),
+	(
+		SELECT COUNT(*)
+		FROM standing_service_generations ssg
+		WHERE ssg.run_id = r.run_id
+		  AND ssg.service_id = r.origin_service_id
+		  AND ssg.generation = r.origin_generation
+	),
 	COALESCE((SELECT COUNT(DISTINCT es.entity_id) FROM entity_state es WHERE es.run_id = r.run_id), 0),
 	COALESCE(NULLIF(r.event_count, 0), (SELECT COUNT(*) FROM events e WHERE e.run_id = r.run_id), 0),
 	r.started_at,
 	r.ended_at,
-	COALESCE(r.forked_from_run_id, ''),
 	COALESCE(r.continued_as_run_id, ''),
 	r.failure,
 	COALESCE(rc.reason, '')
@@ -275,16 +273,28 @@ func scanSQLiteRunHeader(row runHeaderScanner) (RunHeader, error) {
 	var header RunHeader
 	var startedRaw, endedRaw any
 	var failureRaw any
+	var bundleHash, bundleSource string
+	var originKind, eventID, eventType, serviceID, sourceRunID, sourceEventID string
+	var generation int64
+	var standingRelationCount, matchingStandingRelationCount int
 	if err := row.Scan(
 		&header.RunID,
 		&header.Status,
-		&header.TriggerEventType,
-		&header.TriggerEventID,
+		&bundleHash,
+		&bundleSource,
+		&originKind,
+		&eventID,
+		&eventType,
+		&serviceID,
+		&generation,
+		&sourceRunID,
+		&sourceEventID,
+		&standingRelationCount,
+		&matchingStandingRelationCount,
 		&header.EntityCount,
 		&header.EventCount,
 		&startedRaw,
 		&endedRaw,
-		&header.ForkedFromRunID,
 		&header.ContinuedAsRunID,
 		&failureRaw,
 		&header.ControlReason,
@@ -304,9 +314,17 @@ func scanSQLiteRunHeader(row runHeaderScanner) (RunHeader, error) {
 		header.EndedAt = &endedAt
 	}
 	header.Status = strings.ToLower(strings.TrimSpace(header.Status))
-	header.TriggerEventType = strings.TrimSpace(header.TriggerEventType)
-	header.TriggerEventID = strings.TrimSpace(header.TriggerEventID)
-	header.ForkedFromRunID = strings.TrimSpace(header.ForkedFromRunID)
+	header.Origin, err = runtimerunlifecycle.DecodeRunOrigin(
+		originKind, eventID, eventType, serviceID, generation, sourceRunID, sourceEventID,
+	)
+	if err != nil {
+		return RunHeader{}, fmt.Errorf("run %s origin: %w", header.RunID, err)
+	}
+	if err := validateRunHeaderStandingRelation(
+		header.RunID, header.Origin, standingRelationCount, matchingStandingRelationCount,
+	); err != nil {
+		return RunHeader{}, err
+	}
 	header.ContinuedAsRunID = strings.TrimSpace(header.ContinuedAsRunID)
 	header.ControlReason = strings.TrimSpace(header.ControlReason)
 	failure, err := decodeStoredFailure(failureRaw)
@@ -314,8 +332,8 @@ func scanSQLiteRunHeader(row runHeaderScanner) (RunHeader, error) {
 		return RunHeader{}, err
 	}
 	header.Failure = failure
-	if err := storerunlifecycle.ValidateStatusFailure(header.Status, header.Failure); err != nil {
-		return RunHeader{}, fmt.Errorf("run %s terminal evidence: %w", header.RunID, err)
+	if err := validateRunHeaderLifecycle(header, bundleHash, bundleSource); err != nil {
+		return RunHeader{}, err
 	}
 	return header, nil
 }

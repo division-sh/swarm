@@ -61,7 +61,7 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 		WorkflowInstances: workflowStore,
 	}))
 
-	evt := eventtest.RunCreatingRootIngress(
+	evt := eventtest.ExistingRunRootIngress(
 		"99999999-9999-4999-8999-999999999952",
 		events.EventType("producer/account.ready"),
 		"producer",
@@ -69,7 +69,6 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 		json.RawMessage(`{"account_id":"acct-1","score":"91","decision":"approved"}`),
 		0,
 		templateInstanceDeliveryRunID,
-		"",
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
 			FlowID: "producer", FlowInstance: "producer", EntityID: "88888888-8888-4888-8888-888888888888",
 		}),
@@ -168,7 +167,7 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			evt := eventtest.RunCreatingRootIngress(
+			evt := eventtest.ExistingRunRootIngress(
 				"99999999-9999-4999-8999-999999999953",
 				events.EventType("producer/account.ready"),
 				"producer",
@@ -176,7 +175,6 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 				tc.payload,
 				0,
 				templateInstanceDeliveryRunID,
-				"",
 				events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
 					FlowID: "producer", FlowInstance: "producer", EntityID: "88888888-8888-4888-8888-888888888888",
 				}),

@@ -12,6 +12,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -232,15 +233,7 @@ func insertRunForkReplayDelivery(ctx context.Context, tx *sql.Tx, lineage runFor
 }
 
 func syncRunForkReplayEventCount(ctx context.Context, tx *sql.Tx, forkRunID string) error {
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE runs
-		SET event_count = (
-			SELECT COUNT(*)::integer
-			FROM events
-			WHERE run_id = $1::uuid
-		)
-		WHERE run_id = $1::uuid
-	`, forkRunID); err != nil {
+	if err := runtimerunlifecycle.SyncCounters(ctx, forkRunID); err != nil {
 		return fmt.Errorf("sync fork replay event count: %w", err)
 	}
 	return nil

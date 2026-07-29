@@ -4,62 +4,67 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"testing"
 	"time"
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
 type forkedPipelineBackend struct {
-	db       *sql.DB
-	store    *WorkflowInstanceStore
-	ctx      context.Context
-	runID    string
-	sqlite   bool
-	frozenAt time.Time
+	db             *sql.DB
+	store          *WorkflowInstanceStore
+	runner         *recordingRuntimeMutationRunner
+	ctx            context.Context
+	runID          string
+	continuedRunID string
+	sqlite         bool
+	frozenAt       time.Time
 }
 
 func newForkedPipelineBackend(t *testing.T, backend string) forkedPipelineBackend {
 	t.Helper()
 	runID := uuid.NewString()
+	continuedRunID := uuid.NewString()
 	frozenAt := time.Now().UTC().Truncate(time.Microsecond)
 	if backend == "sqlite" {
 		db := newSQLiteWorkflowInstanceStoreTestDB(t)
 		store := newSQLiteWorkflowInstanceStoreForTest(t, db)
-		ensurePipelineTestRun(t, store, runID)
+		runlifecyclefixture.RequireSQLite(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+			RunID: runID, StartedAt: frozenAt.Add(-time.Hour),
+		})
+		runlifecyclefixture.RequireSQLite(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+			RunID: continuedRunID, StartedAt: frozenAt,
+		})
 		return forkedPipelineBackend{
 			db: db, store: store, ctx: runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID),
-			runID: runID, sqlite: true, frozenAt: frozenAt,
+			runner: &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectSQLite},
+			runID:  runID, continuedRunID: continuedRunID, sqlite: true, frozenAt: frozenAt,
 		}
 	}
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, frozenAt.Add(-time.Hour)); err != nil {
-		t.Fatal(err)
-	}
+	runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: frozenAt.Add(-time.Hour)})
+	runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: continuedRunID, StartedAt: frozenAt})
 	return forkedPipelineBackend{
-		db: db, store: NewWorkflowInstanceStore(db), ctx: runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID),
-		runID: runID, frozenAt: frozenAt,
+		db: db, store: newPostgresWorkflowInstanceStoreForTest(db), ctx: runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID),
+		runner: &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectPostgres},
+		runID:  runID, continuedRunID: continuedRunID, frozenAt: frozenAt,
 	}
 }
 
 func (b forkedPipelineBackend) freeze(t *testing.T) {
 	t.Helper()
-	if b.sqlite {
-		if _, err := b.db.ExecContext(context.Background(), `UPDATE runs SET status = 'forked' WHERE run_id = ?`, b.runID); err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
-	continuedRunID := uuid.NewString()
-	if _, err := b.db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, continuedRunID, b.frozenAt); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := b.db.ExecContext(context.Background(), `UPDATE runs SET status = 'forked', ended_at = $2, continued_as_run_id = $3::uuid WHERE run_id = $1::uuid`, b.runID, b.frozenAt, continuedRunID); err != nil {
+	if err := b.runner.RunRuntimeMutationContext(b.ctx, func(txctx context.Context) error {
+		_, _, err := storerunlifecycle.ForkSource(txctx, storerunlifecycle.ForkSourceRequest{
+			RunID: b.runID, ContinuedAsRunID: b.continuedRunID, EndedAt: b.frozenAt,
+		})
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 }

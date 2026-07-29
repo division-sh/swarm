@@ -15,6 +15,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -497,8 +498,9 @@ func validateEventPublication(ctx context.Context, opts OperatorReadOptions, par
 		if err != nil {
 			return params, err
 		}
-		status := strings.TrimSpace(strings.ToLower(header.Status))
-		if status != "running" && status != "paused" {
+		status := strings.TrimSpace(header.Status)
+		state, stateErr := runtimerunlifecycle.ParseState(status)
+		if stateErr != nil || !state.Active() {
 			return params, NewApplicationError(RunAlreadyTerminalCode, false, map[string]any{
 				"run_id":         params.RunID,
 				"current_status": status,

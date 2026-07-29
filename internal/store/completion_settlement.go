@@ -54,8 +54,14 @@ func (s *PostgresStore) SettleCompletion(ctx context.Context, attempt runtimeeff
 		if _, err := tx.ExecContext(txctx, `DELETE FROM runtime_effect_budget_reservations WHERE attempt_id=$1::uuid`, attempt.AttemptID); err != nil {
 			return fmt.Errorf("release completion budget reservations: %w", err)
 		}
-		if err := settleExternalAttemptPostgres(txctx, tx, attemptSettlement.Settlement); err != nil {
+		changed, err := settleExternalAttemptPostgres(txctx, tx, attemptSettlement.Settlement)
+		if err != nil {
 			return err
+		}
+		if changed && strings.TrimSpace(attempt.Authority.Target.RunID) != "" {
+			if _, err := s.requestCompletionCandidateTx(txctx, tx, attempt.Authority.Target.RunID, nil); err != nil {
+				return err
+			}
 		}
 		return recordExternalEffectStory(txctx, externalEffectStorySourceFromAttempt(attempt), attemptSettlement.Settlement.State, attemptSettlement.Settlement.Failure, attemptSettlement.Now.UTC())
 	})
@@ -103,8 +109,14 @@ func (s *SQLiteRuntimeStore) SettleCompletion(ctx context.Context, attempt runti
 		if _, err := tx.ExecContext(txctx, `DELETE FROM runtime_effect_budget_reservations WHERE attempt_id=?`, attempt.AttemptID); err != nil {
 			return fmt.Errorf("release sqlite completion budget reservations: %w", err)
 		}
-		if err := settleExternalAttemptSQLiteTx(txctx, tx, attemptSettlement.Settlement); err != nil {
+		changed, err := settleExternalAttemptSQLiteTx(txctx, tx, attemptSettlement.Settlement)
+		if err != nil {
 			return err
+		}
+		if changed && strings.TrimSpace(attempt.Authority.Target.RunID) != "" {
+			if _, err := s.requestCompletionCandidateTx(txctx, tx, attempt.Authority.Target.RunID, nil); err != nil {
+				return err
+			}
 		}
 		return recordExternalEffectStory(txctx, externalEffectStorySourceFromAttempt(attempt), attemptSettlement.Settlement.State, attemptSettlement.Settlement.Failure, attemptSettlement.Now.UTC())
 	})

@@ -18,6 +18,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -59,12 +60,14 @@ func TestAgentDiagnoseExactDeliveryPaginationParity(t *testing.T) {
 
 			now := time.Now().UTC().Add(-time.Minute)
 			runID := uuid.NewString()
-			runQuery := `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
 			if sqlite {
-				runQuery = `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
-			}
-			if _, err := db.ExecContext(ctx, runQuery, runID, now.Add(-time.Minute)); err != nil {
-				t.Fatalf("seed diagnosis run: %v", err)
+				runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+					RunID: runID, StartedAt: now.Add(-time.Minute),
+				})
+			} else {
+				runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+					RunID: runID, StartedAt: now.Add(-time.Minute),
+				})
 			}
 			agentID := "diagnose-agent"
 			if err := selected.UpsertAgent(ctx, runtimemanager.PersistedAgent{

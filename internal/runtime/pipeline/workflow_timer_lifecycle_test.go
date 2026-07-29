@@ -96,7 +96,7 @@ func newTimerLifecycleCoordinator(t *testing.T, bus Bus, db *sql.DB, module Work
 		opts.TimerScheduler = NewSchedulerWithWorkOwner(pipelineTestWorkOwner(t))
 		opts.TimerScheduleStore = store
 	}
-	return NewPipelineCoordinatorWithOptions(bus, db, opts)
+	return newPostgresPipelineCoordinatorForTest(bus, db, opts)
 }
 
 func stageTimerLifecycleBundle() *runtimecontracts.WorkflowContractBundle {
@@ -205,7 +205,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
+	pc := newPostgresPipelineCoordinatorForTest(noopPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: module,
 	})
 	if pc == nil {
@@ -282,7 +282,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
+	pc := newPostgresPipelineCoordinatorForTest(noopPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: module,
 	})
 	if pc == nil {
@@ -388,7 +388,7 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	bus := &recordingPipelineBus{}
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := newPostgresPipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Module: module,
 	})
 	if pc == nil {
@@ -447,7 +447,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 	t.Cleanup(cleanup)
 
 	bus := &recordingPipelineBus{}
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := newPostgresPipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Module: module,
 	})
 	if pc == nil {
@@ -539,7 +539,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRo
 	t.Cleanup(cleanup)
 
 	bus := &recordingPipelineBus{}
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := newPostgresPipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Module: module,
 	})
 	if pc == nil {
@@ -630,7 +630,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectInsideOuterSQLTxDo
 	t.Cleanup(cleanup)
 
 	bus := &recordingPipelineBus{}
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := newPostgresPipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Module: module,
 	})
 	if pc == nil {

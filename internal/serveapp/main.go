@@ -45,6 +45,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunforkadmission "github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
@@ -121,6 +122,7 @@ type storeBundle struct {
 	RuntimeBlocker               string
 	SchemaBootstrapper           store.SchemaBootstrapper
 	EventStore                   runtimebus.EventStore
+	RunLifecycleCandidates       runtimerunlifecycle.CandidateOwner
 	PipelineStore                *runtimepipeline.WorkflowInstanceStore
 	SessionRegistry              sessions.Registry
 	ConversationStore            runtimellm.ConversationPersistence
@@ -287,6 +289,7 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, cfg *config.Config) st
 		RuntimeLogStore:             pg,
 		SchemaBootstrapper:          pg,
 		EventStore:                  pg,
+		RunLifecycleCandidates:      pg,
 		PipelineStore:               runtimepipeline.NewWorkflowInstanceStore(pg.DB),
 		SessionRegistry:             pg,
 		ConversationStore:           pg,
@@ -1940,6 +1943,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			RuntimeLogStore:             sqliteStore,
 			SchemaBootstrapper:          sqliteStore,
 			EventStore:                  sqliteStore,
+			RunLifecycleCandidates:      sqliteStore,
 			PipelineStore:               runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore),
 			SessionRegistry:             sqliteStore,
 			ConversationStore:           sqliteStore,

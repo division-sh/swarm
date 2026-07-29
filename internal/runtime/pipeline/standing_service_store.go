@@ -13,8 +13,8 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -140,13 +140,6 @@ type standingServiceRow struct {
 	RunControlReason   string
 }
 
-func (s *WorkflowInstanceStore) standingDialect() storerunlifecycle.Dialect {
-	if s.isSQLite() {
-		return storerunlifecycle.DialectSQLite
-	}
-	return storerunlifecycle.DialectPostgres
-}
-
 func (s *WorkflowInstanceStore) requireStandingRunSourceTx(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -158,9 +151,9 @@ func (s *WorkflowInstanceStore) requireStandingRunSourceTx(
 		err  error
 	)
 	if requireActive {
-		fact, err = storerunlifecycle.RequireActiveSource(ctx, tx, current.RunID, s.standingDialect())
+		fact, err = runtimerunlifecycle.RequireActiveSource(ctx, current.RunID)
 	} else {
-		fact, err = storerunlifecycle.RequirePresentSource(ctx, tx, current.RunID, s.standingDialect())
+		fact, err = runtimerunlifecycle.RequirePresentSource(ctx, current.RunID)
 	}
 	if err != nil {
 		return runtimecorrelation.BundleSourceFact{}, err
@@ -476,7 +469,11 @@ func (s *WorkflowInstanceStore) ResetStandingService(ctx context.Context, operat
 			return err
 		}
 		now := time.Now().UTC()
-		if current.RunStatus == "running" || current.RunStatus == "paused" {
+		currentState, err := runtimerunlifecycle.ParseState(current.RunStatus)
+		if err != nil {
+			return err
+		}
+		if currentState.Active() {
 			if err := s.quiesceStandingRunTx(txctx, tx, current.RunID, current.BundleHash, "standing_reset", "cancelled", now); err != nil {
 				return err
 			}
@@ -486,7 +483,13 @@ func (s *WorkflowInstanceStore) ResetStandingService(ctx context.Context, operat
 		}
 		nextGeneration := current.Generation + 1
 		nextRunID := runtimeflowidentity.StandingGenerationRunID(current.ServiceID, nextGeneration)
-		if err := storerunlifecycle.CreateActive(txctx, tx, s.standingDialect(), nextRunID, source, now); err != nil {
+		origin, err := runtimerunlifecycle.StandingGenerationRunOrigin(current.ServiceID, nextGeneration)
+		if err != nil {
+			return err
+		}
+		if _, err := runtimerunlifecycle.Create(txctx, runtimerunlifecycle.CreateRequest{
+			RunID: nextRunID, Origin: origin, Source: source, StartedAt: now,
+		}); err != nil {
 			return err
 		}
 		effectiveState := "active"
@@ -534,10 +537,14 @@ func (s *WorkflowInstanceStore) reconcileStandingServiceTx(ctx context.Context, 
 	if current.PackageKey != candidate.PackageKey || current.FlowID != candidate.FlowID || current.InstanceID != candidate.InstanceID || current.EntityID != candidate.EntityID {
 		return StandingServiceReconciliation{}, fmt.Errorf("standing service identity conflict for %s", candidate.ServiceID)
 	}
-	switch current.RunStatus {
-	case "running", "paused":
+	currentState, err := runtimerunlifecycle.ParseState(current.RunStatus)
+	if err != nil {
+		return StandingServiceReconciliation{}, err
+	}
+	switch {
+	case currentState.Active():
 		return s.resumeStandingServiceTx(ctx, tx, current, candidate)
-	case "cancelled":
+	case currentState == runtimerunlifecycle.StateCancelled:
 		if current.RunControlReason != standingRestartAbandonReason {
 			return StandingServiceReconciliation{}, standingResetRequiredError(current, "cancelled standing generation is not owned by restart abandonment")
 		}
@@ -802,7 +809,13 @@ func (s *WorkflowInstanceStore) createStandingServiceTx(ctx context.Context, tx 
 	generation := int64(1)
 	runID := runtimeflowidentity.StandingGenerationRunID(candidate.ServiceID, generation)
 	now := time.Now().UTC()
-	if err := storerunlifecycle.CreateActive(ctx, tx, s.standingDialect(), runID, candidate.Source, now); err != nil {
+	origin, err := runtimerunlifecycle.StandingGenerationRunOrigin(candidate.ServiceID, generation)
+	if err != nil {
+		return StandingServiceReconciliation{}, err
+	}
+	if _, err := runtimerunlifecycle.Create(ctx, runtimerunlifecycle.CreateRequest{
+		RunID: runID, Origin: origin, Source: candidate.Source, StartedAt: now,
+	}); err != nil {
 		return StandingServiceReconciliation{}, err
 	}
 	bundleHash, bundleSource := candidate.Source.StorageValues()
@@ -866,7 +879,9 @@ func (s *WorkflowInstanceStore) resumeStandingServiceTx(ctx context.Context, tx 
 	revisionSequence := current.RevisionSequence
 	if transition == "revised" {
 		revisionSequence++
-		if err := storerunlifecycle.ReviseBundleIdentity(ctx, tx, s.standingDialect(), current.RunID, candidate.Source); err != nil {
+		if _, err := runtimerunlifecycle.ReviseSource(ctx, runtimerunlifecycle.SourceRevisionRequest{
+			RunID: current.RunID, Source: candidate.Source,
+		}); err != nil {
 			return StandingServiceReconciliation{}, err
 		}
 	}
@@ -913,7 +928,13 @@ func (s *WorkflowInstanceStore) repairStandingServiceTx(ctx context.Context, tx 
 	nextGeneration := current.Generation + 1
 	nextRunID := runtimeflowidentity.StandingGenerationRunID(candidate.ServiceID, nextGeneration)
 	now := time.Now().UTC()
-	if err := storerunlifecycle.CreateActive(ctx, tx, s.standingDialect(), nextRunID, candidate.Source, now); err != nil {
+	origin, err := runtimerunlifecycle.StandingGenerationRunOrigin(candidate.ServiceID, nextGeneration)
+	if err != nil {
+		return StandingServiceReconciliation{}, err
+	}
+	if _, err := runtimerunlifecycle.Create(ctx, runtimerunlifecycle.CreateRequest{
+		RunID: nextRunID, Origin: origin, Source: candidate.Source, StartedAt: now,
+	}); err != nil {
 		return StandingServiceReconciliation{}, err
 	}
 	bundleHash, bundleSource := candidate.Source.StorageValues()
@@ -965,7 +986,11 @@ func (s *WorkflowInstanceStore) repairStandingServiceTx(ctx context.Context, tx 
 }
 
 func (s *WorkflowInstanceStore) orphanStandingServiceTx(ctx context.Context, tx *sql.Tx, current standingServiceRow) (StandingServiceReconciliation, error) {
-	if current.RunStatus != "running" && current.RunStatus != "paused" {
+	currentState, err := runtimerunlifecycle.ParseState(current.RunStatus)
+	if err != nil {
+		return StandingServiceReconciliation{}, err
+	}
+	if !currentState.Active() {
 		return StandingServiceReconciliation{}, standingResetRequiredError(current, "removed declaration points at a terminal generation")
 	}
 	now := time.Now().UTC()
@@ -975,7 +1000,7 @@ func (s *WorkflowInstanceStore) orphanStandingServiceTx(ctx context.Context, tx 
 	if err := s.setStandingRunPausedTx(ctx, tx, current.RunID, "standing_declaration_removed", "runtime", now); err != nil {
 		return StandingServiceReconciliation{}, err
 	}
-	var err error
+	err = nil
 	if s.isSQLite() {
 		_, err = tx.ExecContext(ctx, `UPDATE standing_services SET declaration_present = FALSE, effective_state = 'orphaned', publication_state = 'pending', updated_at = ? WHERE service_id = ?`, now, current.ServiceID)
 	} else {
@@ -1080,14 +1105,17 @@ func (s *WorkflowInstanceStore) quiesceStandingRunTx(ctx context.Context, tx *sq
 }
 
 func (s *WorkflowInstanceStore) setStandingRunPausedTx(ctx context.Context, tx *sql.Tx, runID, reason, actor string, now time.Time) error {
-	if s.isSQLite() {
-		if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = 'paused', ended_at = NULL, failure = NULL WHERE run_id = ? AND status IN ('running', 'paused')`, runID); err != nil {
-			return err
-		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, updated_at, paused_at, stopped_at) VALUES (?, 'paused', ?, ?, ?, ?, NULL) ON CONFLICT(run_id) DO UPDATE SET control_status = 'paused', reason = excluded.reason, controlled_by = excluded.controlled_by, updated_at = excluded.updated_at, paused_at = COALESCE(run_control_state.paused_at, excluded.paused_at), stopped_at = NULL`, runID, reason, actor, now, now)
+	if s.runLifecycle == nil {
+		return errors.New("standing run pause requires run lifecycle owner")
+	}
+	if _, err := s.runLifecycle.TransitionActiveRun(ctx, runtimerunlifecycle.ActiveTransitionRequest{
+		RunID: runID,
+		State: runtimerunlifecycle.StatePaused,
+	}); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = 'paused', ended_at = NULL, failure = NULL WHERE run_id = $1::uuid AND status IN ('running', 'paused')`, runID); err != nil {
+	if s.isSQLite() {
+		_, err := tx.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, updated_at, paused_at, stopped_at) VALUES (?, 'paused', ?, ?, ?, ?, NULL) ON CONFLICT(run_id) DO UPDATE SET control_status = 'paused', reason = excluded.reason, controlled_by = excluded.controlled_by, updated_at = excluded.updated_at, paused_at = COALESCE(run_control_state.paused_at, excluded.paused_at), stopped_at = NULL`, runID, reason, actor, now, now)
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, updated_at, paused_at, stopped_at) VALUES ($1::uuid, 'paused', $2, $3, $4, $4, NULL) ON CONFLICT(run_id) DO UPDATE SET control_status = 'paused', reason = EXCLUDED.reason, controlled_by = EXCLUDED.controlled_by, updated_at = EXCLUDED.updated_at, paused_at = COALESCE(run_control_state.paused_at, EXCLUDED.paused_at), stopped_at = NULL`, runID, reason, actor, now)
@@ -1095,43 +1123,36 @@ func (s *WorkflowInstanceStore) setStandingRunPausedTx(ctx context.Context, tx *
 }
 
 func (s *WorkflowInstanceStore) setStandingRunRunningTx(ctx context.Context, tx *sql.Tx, runID, reason, actor string, now time.Time) error {
+	if s.runLifecycle == nil {
+		return errors.New("standing run resume requires run lifecycle owner")
+	}
+	if _, err := s.runLifecycle.TransitionActiveRun(ctx, runtimerunlifecycle.ActiveTransitionRequest{
+		RunID: runID,
+		State: runtimerunlifecycle.StateRunning,
+	}); err != nil {
+		return err
+	}
 	if s.isSQLite() {
-		result, err := tx.ExecContext(ctx, `UPDATE runs SET status = 'running', ended_at = NULL, failure = NULL WHERE run_id = ? AND status = 'paused'`, runID)
-		if err != nil {
-			return err
-		}
-		if count, _ := result.RowsAffected(); count == 0 {
-			var status string
-			if err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = ?`, runID).Scan(&status); err != nil || status != "running" {
-				return fmt.Errorf("standing run %s cannot resume from status %s", runID, status)
-			}
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, updated_at, paused_at, stopped_at) VALUES (?, 'running', ?, ?, ?, NULL, NULL) ON CONFLICT(run_id) DO UPDATE SET control_status = 'running', reason = excluded.reason, controlled_by = excluded.controlled_by, updated_at = excluded.updated_at, paused_at = NULL, stopped_at = NULL`, runID, reason, actor, now)
+		_, err := tx.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, updated_at, paused_at, stopped_at) VALUES (?, 'running', ?, ?, ?, NULL, NULL) ON CONFLICT(run_id) DO UPDATE SET control_status = 'running', reason = excluded.reason, controlled_by = excluded.controlled_by, updated_at = excluded.updated_at, paused_at = NULL, stopped_at = NULL`, runID, reason, actor, now)
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE runs SET status = 'running', ended_at = NULL, failure = NULL WHERE run_id = $1::uuid AND status = 'paused'`, runID)
-	if err != nil {
-		return err
-	}
-	if count, _ := result.RowsAffected(); count == 0 {
-		var status string
-		if err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, runID).Scan(&status); err != nil || status != "running" {
-			return fmt.Errorf("standing run %s cannot resume from status %s", runID, status)
-		}
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, updated_at, paused_at, stopped_at) VALUES ($1::uuid, 'running', $2, $3, $4, NULL, NULL) ON CONFLICT(run_id) DO UPDATE SET control_status = 'running', reason = EXCLUDED.reason, controlled_by = EXCLUDED.controlled_by, updated_at = EXCLUDED.updated_at, paused_at = NULL, stopped_at = NULL`, runID, reason, actor, now)
+	_, err := tx.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, updated_at, paused_at, stopped_at) VALUES ($1::uuid, 'running', $2, $3, $4, NULL, NULL) ON CONFLICT(run_id) DO UPDATE SET control_status = 'running', reason = EXCLUDED.reason, controlled_by = EXCLUDED.controlled_by, updated_at = EXCLUDED.updated_at, paused_at = NULL, stopped_at = NULL`, runID, reason, actor, now)
 	return err
 }
 
 func (s *WorkflowInstanceStore) setStandingRunCancelledTx(ctx context.Context, tx *sql.Tx, runID, reason, actor string, now time.Time) error {
-	if s.isSQLite() {
-		if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = 'cancelled', failure = NULL, ended_at = COALESCE(ended_at, ?) WHERE run_id = ? AND status IN ('running', 'paused')`, now, runID); err != nil {
-			return err
-		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, updated_at, paused_at, stopped_at) VALUES (?, 'stopped', ?, ?, ?, NULL, ?) ON CONFLICT(run_id) DO UPDATE SET control_status = 'stopped', reason = excluded.reason, controlled_by = excluded.controlled_by, updated_at = excluded.updated_at, paused_at = NULL, stopped_at = excluded.stopped_at`, runID, reason, actor, now, now)
+	if s.runLifecycle == nil {
+		return errors.New("standing run cancellation requires run lifecycle owner")
+	}
+	if _, _, err := s.runLifecycle.MarkTerminalRun(ctx, runtimerunlifecycle.TerminalRequest{
+		RunID:   runID,
+		State:   runtimerunlifecycle.StateCancelled,
+		EndedAt: now.UTC(),
+	}); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = 'cancelled', failure = NULL, ended_at = COALESCE(ended_at, $2) WHERE run_id = $1::uuid AND status IN ('running', 'paused')`, runID, now); err != nil {
+	if s.isSQLite() {
+		_, err := tx.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, updated_at, paused_at, stopped_at) VALUES (?, 'stopped', ?, ?, ?, NULL, ?) ON CONFLICT(run_id) DO UPDATE SET control_status = 'stopped', reason = excluded.reason, controlled_by = excluded.controlled_by, updated_at = excluded.updated_at, paused_at = NULL, stopped_at = excluded.stopped_at`, runID, reason, actor, now, now)
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, updated_at, paused_at, stopped_at) VALUES ($1::uuid, 'stopped', $2, $3, $4, NULL, $4) ON CONFLICT(run_id) DO UPDATE SET control_status = 'stopped', reason = EXCLUDED.reason, controlled_by = EXCLUDED.controlled_by, updated_at = EXCLUDED.updated_at, paused_at = NULL, stopped_at = EXCLUDED.stopped_at`, runID, reason, actor, now)

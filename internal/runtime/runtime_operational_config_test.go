@@ -162,6 +162,32 @@ func TestNewRuntimeValidatesInboundPublicationIntegrityBeforeWiringGateway(t *te
 	}
 }
 
+func TestNewRuntimeBuildsRunLifecycleExecutorFromTypedOwnerWithoutRawSQLCapability(t *testing.T) {
+	rt, err := newScopedTestRuntime(
+		t,
+		testAuthorActivityContext(context.Background()),
+		RuntimeDeps{
+			Config: testOperationalRuntimeConfig(),
+			Stores: Stores{
+				RunLifecycleCandidates: runtimeTestCandidateOwner{},
+			},
+			Options: RuntimeOptions{
+				WorkflowModule: loadRuntimeOwnershipWorkflowModule(t),
+				LLMRuntime:     noopLLMRuntime{},
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	if rt.Stores.SQLDB != nil {
+		t.Fatalf("raw runtime SQL capability = %#v, want nil", rt.Stores.SQLDB)
+	}
+	if rt.runLifecycleExecutor == nil {
+		t.Fatal("typed run lifecycle candidate owner did not construct the runtime executor")
+	}
+}
+
 func TestNewRuntimeRejectsInvalidArtifactRootEnv(t *testing.T) {
 	t.Setenv("SWARM_ARTIFACT_ROOT", "/data/swarm/artifacts")
 	_, db, cleanup := testutil.StartPostgres(t)

@@ -13,7 +13,6 @@ import (
 	"time"
 
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -74,10 +73,10 @@ func (s *PostgresStore) RecordRunForkSelectedContractRouteRecovery(ctx context.C
 		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("begin selected-contract route recovery: %w", err)
 	}
 	defer tx.Rollback()
-	if err := storerunlifecycle.RequireActive(ctx, tx, record.SourceRunID, storerunlifecycle.DialectPostgres); err != nil {
+	if err := requirePostgresRunActive(ctx, tx, record.SourceRunID); err != nil {
 		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("admit selected-contract route recovery source: %w", err)
 	}
-	if err := storerunlifecycle.RequireActive(ctx, tx, record.ForkRunID, storerunlifecycle.DialectPostgres); err != nil {
+	if err := requirePostgresRunActive(ctx, tx, record.ForkRunID); err != nil {
 		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("admit selected-contract route recovery fork: %w", err)
 	}
 	if err := insertRunForkSelectedContractRouteRecovery(ctx, tx, record); err != nil {

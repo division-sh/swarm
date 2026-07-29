@@ -455,6 +455,21 @@ type RunSummary struct {
 	ActiveDeliveryIDs []string
 }
 
+func (s RunSummary) Validate() error {
+	if strings.TrimSpace(s.RunID) == "" {
+		return fmt.Errorf("delivery run summary requires run_id")
+	}
+	for _, count := range []int{s.Total, s.Pending, s.InProgress, s.RetryScheduled, s.Delivered, s.DeadLetter} {
+		if count < 0 {
+			return fmt.Errorf("delivery run summary counts cannot be negative")
+		}
+	}
+	if s.Pending+s.InProgress+s.RetryScheduled+s.Delivered+s.DeadLetter != s.Total {
+		return fmt.Errorf("delivery run summary counts do not cover total")
+	}
+	return nil
+}
+
 type Terminalization struct {
 	Previous Snapshot
 	Current  Snapshot

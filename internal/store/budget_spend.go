@@ -9,7 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -38,7 +37,7 @@ func (s *PostgresStore) RecordSpend(ctx context.Context, rec budgetspend.SpendRe
 		if err != nil {
 			return err
 		}
-		if err := storerunlifecycle.RequireActive(ctx, tx, runID, storerunlifecycle.DialectPostgres); err != nil {
+		if err := requirePostgresRunActive(ctx, tx, runID); err != nil {
 			return err
 		}
 		var exists bool
@@ -91,7 +90,7 @@ func (s *PostgresStore) ListBudgetProjectionTargets(ctx context.Context, termina
 		SELECT es.run_id::text, es.entity_id::text
 		FROM entity_state es
 		JOIN runs run ON run.run_id = es.run_id
-		WHERE run.status IN ('running', 'paused')
+		WHERE run.status IN (`+runLifecycleActiveStateSQLValues+`)
 		  AND NOT (es.current_state = ANY($1::text[]))
 		ORDER BY es.run_id::text ASC, es.created_at ASC, es.entity_id::text ASC
 	`, pq.Array(normalizeBudgetTerminalStates(terminalStates)))
@@ -162,7 +161,7 @@ func (s *SQLiteRuntimeStore) RecordSpend(ctx context.Context, rec budgetspend.Sp
 			if err != nil {
 				return err
 			}
-			if err := storerunlifecycle.RequireActive(txctx, tx, runID, storerunlifecycle.DialectSQLite); err != nil {
+			if err := requireSQLiteRunActive(txctx, tx, runID); err != nil {
 				return err
 			}
 			var exists bool
@@ -215,7 +214,7 @@ func (s *SQLiteRuntimeStore) ListBudgetProjectionTargets(ctx context.Context, te
 		SELECT es.run_id, es.entity_id
 		FROM entity_state es
 		JOIN runs run ON run.run_id = es.run_id
-		WHERE run.status IN ('running', 'paused')
+		WHERE run.status IN (` + runLifecycleActiveStateSQLValues + `)
 	`
 	states := normalizeBudgetTerminalStates(terminalStates)
 	if len(states) > 0 {

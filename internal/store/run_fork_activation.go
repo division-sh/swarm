@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,12 +11,13 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
 const (
-	RunForkActivatedStatus    = "running"
-	RunForkSourceFrozenStatus = "forked"
+	RunForkActivatedStatus    = string(runtimerunlifecycle.StateRunning)
+	RunForkSourceFrozenStatus = string(runtimerunlifecycle.StateForked)
 )
 
 type RunForkActivateRequest struct {
@@ -89,7 +91,7 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 	if err != nil {
 		return RunForkActivation{}, err
 	}
-	ctx = storyctx
+	ctx = s.bindRunLifecycleMutation(storyctx, tx)
 
 	lineage, err := loadRunForkActivationLineage(ctx, tx, forkRunID)
 	if err != nil {
@@ -111,7 +113,8 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 		result.RepeatedActivationFailed = lineage.ForkStatus == RunForkActivatedStatus
 		return result, fmt.Errorf("fork activation requires materialized fork status %q; got %q", RunForkMaterializedStatus, lineage.ForkStatus)
 	}
-	if lineage.SourceRunStatus != "running" && lineage.SourceRunStatus != "paused" {
+	sourceState, sourceStateErr := runtimerunlifecycle.ParseState(lineage.SourceRunStatus)
+	if sourceStateErr != nil || !sourceState.Active() {
 		return result, fmt.Errorf("fork activation requires source run status running or paused before freeze; got %q", lineage.SourceRunStatus)
 	}
 	if len(lineage.EntityIDs) == 0 {
@@ -171,7 +174,7 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 			return result, err
 		}
 	}
-	if err := applyRunForkSourceFreeze(ctx, tx, lineage, now, req.ConfirmSourceFreeze); err != nil {
+	if err := s.applyRunForkSourceFreeze(ctx, tx, lineage, now, req.ConfirmSourceFreeze); err != nil {
 		return result, err
 	}
 	if err := commitRunForkAuthorActivityTransaction(ctx, tx); err != nil {
@@ -190,38 +193,21 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 	return result, nil
 }
 
-func recordRunForkActivationAuthorActivity(ctx context.Context, lineage runForkActivationLineage, now time.Time, sourceFrozen bool) error {
-	occurrences := []struct {
-		runID, transition, parentRunID, forkRunID string
-	}{{runID: lineage.ForkRunID, transition: "fork_started", parentRunID: lineage.SourceRunID}}
-	if sourceFrozen {
-		occurrences = append(occurrences, struct {
-			runID, transition, parentRunID, forkRunID string
-		}{runID: lineage.SourceRunID, transition: "forked", forkRunID: lineage.ForkRunID})
+func recordRunForkActivationAuthorActivity(ctx context.Context, lineage runForkActivationLineage, now time.Time) error {
+	occurrenceScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, lineage.ForkBundleHash)
+	if err != nil {
+		return fmt.Errorf("record run fork activation target scope: %w", err)
 	}
-	for _, occurrence := range occurrences {
-		bundleHash := lineage.ForkBundleHash
-		if occurrence.runID == lineage.SourceRunID {
-			bundleHash = lineage.SourceBundleHash
-		}
-		occurrenceScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, bundleHash)
-		if err != nil {
-			return fmt.Errorf("record run fork activation source scope: %w", err)
-		}
-		transitionID := uuid.NewString()
-		if err := runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
-			Kind: runtimeauthoractivity.KindRunLifecycle, Transition: occurrence.transition,
-			SourceOwner: "runs", SourceIdentity: transitionID, DedupKey: "run-transition:" + transitionID,
-			OccurredAt: now.UTC(), RunID: occurrence.runID, Scope: occurrenceScope,
-			Projection: runtimeauthoractivity.Projection{
-				SubjectType: "run", SubjectID: occurrence.runID, ParentRunID: occurrence.parentRunID,
-				ForkRunID: occurrence.forkRunID, TriggerEventType: lineage.ForkEventName,
-			},
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
+	identity := lineage.ForkRunID + ":fork_started"
+	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+		Kind: runtimeauthoractivity.KindRunLifecycle, Transition: "fork_started",
+		SourceOwner: "runs", SourceIdentity: identity, DedupKey: "run-transition:" + identity,
+		OccurredAt: now.UTC(), RunID: lineage.ForkRunID, Scope: occurrenceScope,
+		Projection: runtimeauthoractivity.Projection{
+			SubjectType: "run", SubjectID: lineage.ForkRunID, ParentRunID: lineage.SourceRunID,
+			TriggerEventType: lineage.ForkEventName,
+		},
+	})
 }
 
 func commitRunForkAuthorActivityTransaction(ctx context.Context, tx *sql.Tx) error {
@@ -279,51 +265,54 @@ func requireRunForkHistoricalReplayExecution(
 }
 
 func loadRunForkActivationLineage(ctx context.Context, tx *sql.Tx, forkRunID string) (runForkActivationLineage, error) {
-	var lineage runForkActivationLineage
+	snapshot, err := loadPostgresRunLifecycleSnapshot(ctx, tx, forkRunID, true)
+	if err != nil {
+		if errors.Is(err, runtimerunlifecycle.ErrRunNotFound) {
+			return runForkActivationLineage{}, fmt.Errorf("fork run %s not found", forkRunID)
+		}
+		return runForkActivationLineage{}, fmt.Errorf("load fork activation lifecycle: %w", err)
+	}
+	if snapshot.Origin.Kind() != runtimerunlifecycle.OriginForkMaterialization {
+		return runForkActivationLineage{}, fmt.Errorf(
+			"fork activation requires fork materialization origin; run %s has %s",
+			forkRunID,
+			snapshot.Origin.Kind(),
+		)
+	}
+	lineage := runForkActivationLineage{
+		ForkRunID:      snapshot.RunID,
+		ForkStatus:     string(snapshot.State),
+		ForkBundleHash: snapshot.BundleHash,
+		SourceRunID:    snapshot.Origin.SourceRunID(),
+		ForkEventID:    snapshot.Origin.SourceEventID(),
+	}
 	var forkEventTime sql.NullTime
-	err := tx.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 		SELECT
-			f.run_id::text,
-			COALESCE(f.status, ''),
-			COALESCE(f.bundle_hash, ''),
-			COALESCE(f.forked_from_run_id::text, ''),
-			COALESCE(s.bundle_hash, ''),
-			COALESCE(f.forked_from_event_id::text, ''),
 			COALESCE(s.status, ''),
+			COALESCE(s.bundle_hash, ''),
 			COALESCE(e.event_name, ''),
 			e.created_at
-		FROM runs f
-		LEFT JOIN runs s ON s.run_id = f.forked_from_run_id
-		LEFT JOIN events e ON e.run_id = f.forked_from_run_id AND e.event_id = f.forked_from_event_id
-		WHERE f.run_id = $1::uuid
-		FOR UPDATE OF f
-	`, forkRunID).Scan(
-		&lineage.ForkRunID,
-		&lineage.ForkStatus,
-		&lineage.ForkBundleHash,
-		&lineage.SourceRunID,
-		&lineage.SourceBundleHash,
-		&lineage.ForkEventID,
+		FROM runs s
+		LEFT JOIN events e ON e.run_id = s.run_id AND e.event_id = $2::uuid
+		WHERE s.run_id = $1::uuid
+		FOR UPDATE OF s
+	`, lineage.SourceRunID, lineage.ForkEventID).Scan(
 		&lineage.SourceRunStatus,
+		&lineage.SourceBundleHash,
 		&lineage.ForkEventName,
 		&forkEventTime,
 	)
 	if err == sql.ErrNoRows {
-		return runForkActivationLineage{}, fmt.Errorf("fork run %s not found", forkRunID)
+		return runForkActivationLineage{}, fmt.Errorf("fork activation requires source run")
 	}
 	if err != nil {
 		return runForkActivationLineage{}, fmt.Errorf("load fork activation lineage: %w", err)
-	}
-	if lineage.SourceRunID == "" || lineage.ForkEventID == "" {
-		return runForkActivationLineage{}, fmt.Errorf("fork activation requires fork lineage")
 	}
 	if lineage.SourceRunStatus == "" || !forkEventTime.Valid {
 		return runForkActivationLineage{}, fmt.Errorf("fork activation requires source run and fork point event")
 	}
 	lineage.ForkEventTime = forkEventTime.Time
-	if err := tx.QueryRowContext(ctx, `SELECT status, COALESCE(bundle_hash, '') FROM runs WHERE run_id = $1::uuid FOR UPDATE`, lineage.SourceRunID).Scan(&lineage.SourceRunStatus, &lineage.SourceBundleHash); err != nil {
-		return runForkActivationLineage{}, fmt.Errorf("lock source run: %w", err)
-	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT entity_id::text, COALESCE(flow_instance, '')
 		FROM entity_state

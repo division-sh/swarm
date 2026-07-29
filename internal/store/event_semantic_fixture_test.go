@@ -55,9 +55,9 @@ func commitSemanticEventFixtureWithRoutes(ctx context.Context, store any, event 
 }
 
 func commitSemanticParentFixture(ctx context.Context, store any, runID, parentEventID string, createdAt time.Time) error {
-	parent := eventtest.RunCreatingRootIngress(
+	parent := eventtest.ExistingRunRootIngress(
 		parentEventID, "test.fixture_parent", "fixture", "", []byte(`{}`), 0,
-		runID, "", events.EventEnvelope{}, createdAt,
+		runID, events.EventEnvelope{}, createdAt,
 	)
 	if err := commitSemanticEventFixture(ctx, store, parent); err != nil {
 		return err
@@ -74,9 +74,9 @@ func commitSemanticParentFixture(ctx context.Context, store any, runID, parentEv
 }
 
 func commitSemanticParentFixtureTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, runID, parentEventID string, createdAt time.Time) error {
-	parent := eventtest.RunCreatingRootIngress(
+	parent := eventtest.ExistingRunRootIngress(
 		parentEventID, "test.fixture_parent", "fixture", "", []byte(`{}`), 0,
-		runID, "", events.EventEnvelope{}, createdAt,
+		runID, events.EventEnvelope{}, createdAt,
 	)
 	if err := commitSemanticEventFixtureTx(ctx, store, tx, parent); err != nil {
 		return err

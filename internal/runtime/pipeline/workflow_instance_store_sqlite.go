@@ -16,8 +16,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -118,7 +118,15 @@ func (s *WorkflowInstanceStore) selectActiveByFieldsSQLite(ctx context.Context, 
 		return nil, err
 	}
 	var active bool
-	if err := dbQueryRowContext(ctx, s.db, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = ? AND status IN ('running', 'paused'))`, runID).Scan(&active); err != nil {
+	activeStates := runtimerunlifecycle.ActiveStates()
+	if err := dbQueryRowContext(
+		ctx,
+		s.db,
+		`SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = ? AND status IN (?, ?))`,
+		runID,
+		string(activeStates[0]),
+		string(activeStates[1]),
+	).Scan(&active); err != nil {
 		return nil, err
 	}
 	if !active {
@@ -390,6 +398,9 @@ func (s *WorkflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 		}); err != nil {
 			return err
 		}
+		if !createOnly || standingGenerationRebindAllowed(txctx) {
+			return s.requestRunCompletionCandidate(txctx, runID)
+		}
 		return nil
 	})
 }
@@ -580,7 +591,7 @@ func insertSQLiteEntityStateDiff(ctx context.Context, tx *sql.Tx, entityID strin
 	if err != nil {
 		return err
 	}
-	if err := storerunlifecycle.RequireActive(ctx, tx, runID, storerunlifecycle.DialectSQLite); err != nil {
+	if err := runtimerunlifecycle.RequireActive(ctx, runID); err != nil {
 		return err
 	}
 	for _, rec := range records {
@@ -605,7 +616,7 @@ func insertSQLiteWorkflowCreateEntityInitialValueMutations(
 	if err != nil {
 		return runtimemutationlog.EntityStateProjection{}, err
 	}
-	if err := storerunlifecycle.RequireActive(ctx, tx, runID, storerunlifecycle.DialectSQLite); err != nil {
+	if err := runtimerunlifecycle.RequireActive(ctx, runID); err != nil {
 		return runtimemutationlog.EntityStateProjection{}, err
 	}
 	adjusted := runtimemutationlog.EntityStateProjection{

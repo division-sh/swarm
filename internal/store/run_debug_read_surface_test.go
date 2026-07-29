@@ -15,6 +15,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -61,14 +62,15 @@ func TestRunDebugReadSurface_ListRunDebugRuns_UsesCanonicalRunScope(t *testing.T
 	newerEntityB := uuid.NewString()
 	now := time.Unix(1700000000, 0).UTC()
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, ended_at, bundle_hash, bundle_source)
-		VALUES
-			($1::uuid, 'completed', $3, $4, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),
-			($2::uuid, 'running', $5, NULL, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, olderRunID, newerRunID, now.Add(-2*time.Hour), now.Add(-90*time.Minute), now.Add(-1*time.Hour)); err != nil {
-		t.Fatalf("seed runs: %v", err)
-	}
+	runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
+		RunID: olderRunID, State: "completed",
+		BundleHash:   "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		BundleSource: "ephemeral",
+		StartedAt:    now.Add(-2 * time.Hour), EndedAt: now.Add(-90 * time.Minute),
+	})
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+		RunID: newerRunID, StartedAt: now.Add(-time.Hour),
+	})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, olderEventID, olderRunID, "scan.requested", events.EventProducerAgent, "test", "", "", now.Add(-119*time.Minute))
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, uuid.NewString(), olderRunID, "scan.completed", events.EventProducerAgent, "test", "", "", now.Add(-91*time.Minute))
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, newerEventID, newerRunID, "scan.requested", events.EventProducerAgent, "test", "", "", now.Add(-59*time.Minute))
@@ -111,15 +113,17 @@ func TestRunDebugReadSurface_ResolveLatestRunDebugRunID_UsesLatestPersistedRun(t
 	olderRunID := uuid.NewString()
 	emptyRunID := uuid.NewString()
 	now := time.Unix(1700000000, 0).UTC()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES
-			($1::uuid, 'running', $4, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),
-			($2::uuid, 'completed', $5, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),
-			($3::uuid, 'running', $6, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, targetRunID, olderRunID, emptyRunID, now, now.Add(-1*time.Hour), now.Add(1*time.Hour)); err != nil {
-		t.Fatalf("seed runs: %v", err)
-	}
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+		RunID: targetRunID, StartedAt: now,
+	})
+	runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
+		RunID: olderRunID, State: "completed",
+		BundleHash:   "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		BundleSource: "ephemeral", StartedAt: now.Add(-time.Hour),
+	})
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+		RunID: emptyRunID, StartedAt: now.Add(time.Hour),
+	})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, uuid.NewString(), targetRunID, "scan.corpus_file_requested", events.EventProducerAgent, "builder", "", "", now.Add(time.Second))
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, uuid.NewString(), olderRunID, "scan.requested", events.EventProducerAgent, "builder", "", "", now.Add(-59*time.Minute))
 
@@ -147,12 +151,7 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 	now := time.Unix(1700000000, 0).UTC()
 
 	for _, runID := range []string{targetRunID, otherRunID} {
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-			VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-		`, runID, now.Add(-5*time.Minute)); err != nil {
-			t.Fatalf("seed run %s: %v", runID, err)
-		}
+		requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now.Add(-5 * time.Minute)})
 	}
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, targetEventID, targetRunID, "scan.requested", events.EventProducerAgent, "test", targetEntityID, "", now.Add(-4*time.Minute))
 	targetEvent := loadPostgresDeliveryFixtureEvent(t, ctx, db, targetEventID)
@@ -270,13 +269,10 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 	directiveEvidenceEventID := uuid.NewString()
 	now := time.Now().UTC()
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES
-			($1::uuid, 'running', $3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),
-			($2::uuid, 'running', $3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, blockedRunID, readyRunID, now.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed runs: %v", err)
+	for _, runID := range []string{blockedRunID, readyRunID} {
+		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+			RunID: runID, StartedAt: now.Add(-time.Minute),
+		})
 	}
 	activeEvent := eventtest.PersistedRuntimeControlForProducer(
 		activeEventID, events.EventType("quiescence.active_delivery"), eventtest.Producer(events.EventProducerPlatform, "test"), "", []byte(`{}`), 0,
@@ -374,12 +370,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	projectedInstanceID := uuid.NewString()
 	now := time.Unix(1700000400, 0).UTC()
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, now.Add(-5*time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now.Add(-5 * time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", now)
 	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
 	seedRunDebugAgent(t, pg, ctx, "agent-source", entityID, agentmemory.Authored(true), "flow-a")
@@ -496,12 +487,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 	base := time.Unix(1700000450, 0).UTC()
 	since := base.Add(time.Second)
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, base.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", base)
 	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
 	seedRunDebugAgent(t, pg, ctx, "agent-late", entityID, agentmemory.Authored(true), "flow-a")
@@ -575,12 +561,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 	entityID := uuid.NewString()
 	now := time.Unix(1700000500, 0).UTC()
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, now.Add(-5*time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now.Add(-5 * time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "task.started", events.EventProducerPlatform, "builder", entityID, "", now)
 	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
 	seedRunDebugAgent(t, pg, ctx, "agent-task", entityID, agentmemory.PlatformDefault(), "")

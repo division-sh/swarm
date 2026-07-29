@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -471,7 +473,7 @@ func newActivityBoringCoordinator(t *testing.T, db *sql.DB, kind activityBoringS
 	bus := &persistingActivityBoringBus{appendEvent: func(ctx context.Context, evt events.Event) error {
 		return appendActivityBoringEvent(ctx, db, kind, evt)
 	}}
-	store := NewWorkflowInstanceStore(db)
+	store := newPostgresWorkflowInstanceStoreForTest(db)
 	if kind == activityBoringStoreSQLite {
 		store = newSQLiteWorkflowInstanceStoreForTest(t, db)
 	}
@@ -508,7 +510,7 @@ func newActivityBoringFullFlowCoordinator(t *testing.T, db *sql.DB, kind activit
 		},
 		handleActivityRequests: handleActivityRequests,
 	}
-	store := NewWorkflowInstanceStore(db)
+	store := newPostgresWorkflowInstanceStoreForTest(db)
 	if kind == activityBoringStoreSQLite {
 		store = newSQLiteWorkflowInstanceStoreForTest(t, db)
 	}
@@ -825,27 +827,40 @@ func appendActivityBoringEvent(ctx context.Context, db *sql.DB, kind activityBor
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
-	var dialect runtimeauthoractivity.Dialect
+	source, err := runtimecorrelation.NewEphemeralBundleSourceFact(
+		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+	)
+	if err != nil {
+		return err
+	}
+	var (
+		dialect        runtimeauthoractivity.Dialect
+		fixtureDialect runlifecyclefixture.Dialect
+	)
 	switch kind {
 	case activityBoringStoreSQLite:
 		dialect = runtimeauthoractivity.DialectSQLite
-		if _, err := execer.ExecContext(ctx, `
-			INSERT OR IGNORE INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-			VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-		`, runID, createdAt); err != nil {
-			return err
-		}
+		fixtureDialect = runlifecyclefixture.DialectSQLite
 	case activityBoringStorePostgres:
 		dialect = runtimeauthoractivity.DialectPostgres
-		if _, err := execer.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-			VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-			ON CONFLICT (run_id) DO NOTHING
-		`, runID, createdAt); err != nil {
-			return err
-		}
+		fixtureDialect = runlifecyclefixture.DialectPostgres
 	default:
 		return nil
+	}
+	if _, ok := PipelineSQLTxFromContext(ctx); ok {
+		if _, err := runtimerunlifecycle.Create(ctx, runtimerunlifecycle.CreateRequest{
+			RunID:     runID,
+			Source:    source,
+			StartedAt: createdAt,
+		}); err != nil {
+			return err
+		}
+	} else if err := runlifecyclefixture.Materialize(ctx, db, fixtureDialect, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+		RunID:     runID,
+		Source:    source,
+		StartedAt: createdAt,
+	}); err != nil {
+		return err
 	}
 	return eventfixture.Insert(ctx, execer, dialect, evt)
 }

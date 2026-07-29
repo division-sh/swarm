@@ -89,6 +89,7 @@ func (s *PostgresStore) runPostgresRuntimeMutation(ctx context.Context, fn func(
 	postCommit := make([]runtimepipeline.OwnerAction, 0, 4)
 	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 4)
 	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx = s.bindRunLifecycleMutation(txctx, tx)
 	if eventCtx, ok := eventCommitterForPipelineContext(txctx, s); ok {
 		txctx = eventCtx
 	} else {
@@ -233,6 +234,7 @@ func (s *SQLiteRuntimeStore) runRuntimeMutationOnceLocked(ctx context.Context, f
 	postCommit := make([]runtimepipeline.OwnerAction, 0, 4)
 	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 4)
 	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx = s.bindRunLifecycleMutation(txctx, tx)
 	if eventCtx, ok := eventCommitterForPipelineContext(txctx, s); ok {
 		txctx = eventCtx
 	} else {

@@ -12,7 +12,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 type replyContextSQL interface {
@@ -44,12 +43,12 @@ func (s *PostgresStore) CreateReplyContext(ctx context.Context, record runtimere
 	return nil
 }
 
-func createPostgresReplyContext(ctx context.Context, db replyContextSQL, record runtimereplycontext.Record) error {
+func createPostgresReplyContext(ctx context.Context, db *sql.Tx, record runtimereplycontext.Record) error {
 	record = record.Normalized()
 	if err := record.Validate(); err != nil {
 		return err
 	}
-	if err := storerunlifecycle.RequireActive(ctx, db, record.RunID, storerunlifecycle.DialectPostgres); err != nil {
+	if err := requirePostgresRunActive(ctx, db, record.RunID); err != nil {
 		return fmt.Errorf("create reply context: %w", err)
 	}
 	origin, err := json.Marshal(record.Origin)
@@ -99,12 +98,12 @@ func (s *SQLiteRuntimeStore) CreateReplyContext(ctx context.Context, record runt
 	})
 }
 
-func createSQLiteReplyContextTx(ctx context.Context, db replyContextSQL, record runtimereplycontext.Record) error {
+func createSQLiteReplyContextTx(ctx context.Context, db *sql.Tx, record runtimereplycontext.Record) error {
 	record = record.Normalized()
 	if err := record.Validate(); err != nil {
 		return err
 	}
-	if err := storerunlifecycle.RequireActive(ctx, db, record.RunID, storerunlifecycle.DialectSQLite); err != nil {
+	if err := requireSQLiteRunActive(ctx, db, record.RunID); err != nil {
 		return fmt.Errorf("create sqlite reply context: %w", err)
 	}
 	origin, err := json.Marshal(record.Origin)
@@ -232,17 +231,19 @@ func (s *SQLiteRuntimeStore) ClaimReplyContext(ctx context.Context, id, replyEve
 	return record, outcome, err
 }
 
-func claimLoadedReplyContextTx(ctx context.Context, db replyContextSQL, record runtimereplycontext.Record, replyEventID string, postgres bool) (runtimereplycontext.Record, runtimereplycontext.ClaimOutcome, error) {
+func claimLoadedReplyContextTx(ctx context.Context, db *sql.Tx, record runtimereplycontext.Record, replyEventID string, postgres bool) (runtimereplycontext.Record, runtimereplycontext.ClaimOutcome, error) {
 	replyEventID = strings.TrimSpace(replyEventID)
 	if replyEventID == "" {
 		return runtimereplycontext.Record{}, "", fmt.Errorf("reply event id is required")
 	}
-	dialect := storerunlifecycle.DialectSQLite
+	var activeErr error
 	if postgres {
-		dialect = storerunlifecycle.DialectPostgres
+		activeErr = requirePostgresRunActive(ctx, db, record.RunID)
+	} else {
+		activeErr = requireSQLiteRunActive(ctx, db, record.RunID)
 	}
-	if err := storerunlifecycle.RequireActive(ctx, db, record.RunID, dialect); err != nil {
-		return runtimereplycontext.Record{}, "", fmt.Errorf("claim reply context: %w", err)
+	if activeErr != nil {
+		return runtimereplycontext.Record{}, "", fmt.Errorf("claim reply context: %w", activeErr)
 	}
 	if record.State == runtimereplycontext.StateTerminal {
 		if record.AcceptedReplyEventID == replyEventID {

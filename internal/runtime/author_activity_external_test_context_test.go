@@ -13,7 +13,9 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -25,6 +27,28 @@ var externalRuntimeTestEventBusOwners sync.Map
 
 type testAuthorActivityCatalogRegistrar interface {
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
+}
+
+type runtimeTestSelectedMutationOwner interface {
+	runtimepipeline.RuntimeMutationRunner
+	runtimerunlifecycle.OperationOwner
+}
+
+func configureRuntimeTestWorkflowStore(
+	t testing.TB,
+	workflowStore *runtimepipeline.WorkflowInstanceStore,
+	selected runtimeTestSelectedMutationOwner,
+) *runtimepipeline.WorkflowInstanceStore {
+	t.Helper()
+	if workflowStore == nil {
+		t.Fatal("runtime test workflow store is required")
+	}
+	if selected == nil {
+		t.Fatal("runtime test selected mutation owner is required")
+	}
+	workflowStore.ConfigureRuntimeMutationRunner(selected)
+	workflowStore.ConfigureRunLifecycle(selected)
+	return workflowStore
 }
 
 func testAuthorActivityContext(ctx context.Context) context.Context {

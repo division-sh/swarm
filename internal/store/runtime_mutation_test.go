@@ -13,7 +13,6 @@ import (
 
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/google/uuid"
 )
 
 func TestSQLiteRuntimeStore_RunRuntimeMutationRetriesBusyAndFlushesPostCommitOnce(t *testing.T) {
@@ -31,11 +30,8 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationRetriesBusyAndFlushesPostCommitOnc
 			_ = lockTx.Rollback()
 		}
 	})
-	if _, err := lockTx.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, uuid.NewString(), time.Now().UTC()); err != nil {
-		t.Fatalf("hold sqlite write lock: %v", err)
+	if err := writeRuntimeMutationTestMarker(ctx, lockTx); err != nil {
+		t.Fatalf("acquire sqlite write lock: %v", err)
 	}
 
 	busySeen := make(chan struct{})
@@ -54,10 +50,7 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationRetriesBusyAndFlushesPostCommitOnc
 			}) {
 				return errors.New("queue pipeline post-commit action")
 			}
-			_, err := tx.ExecContext(txctx, `
-				INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-				VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-			`, uuid.NewString(), time.Now().UTC())
+			err := writeRuntimeMutationTestMarker(txctx, tx)
 			if sqliteRuntimeMutationBusyError(err) {
 				closeBusy.Do(func() { close(busySeen) })
 			}
@@ -100,11 +93,8 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationStopsRetryOnContextDeadline(t *tes
 		t.Fatalf("begin locking tx: %v", err)
 	}
 	t.Cleanup(func() { _ = lockTx.Rollback() })
-	if _, err := lockTx.ExecContext(baseCtx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, uuid.NewString(), time.Now().UTC()); err != nil {
-		t.Fatalf("hold sqlite write lock: %v", err)
+	if err := writeRuntimeMutationTestMarker(baseCtx, lockTx); err != nil {
+		t.Fatalf("acquire sqlite write lock: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(baseCtx, 35*time.Millisecond)
@@ -112,11 +102,7 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationStopsRetryOnContextDeadline(t *tes
 	var attempts int32
 	err = store.RunRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		atomic.AddInt32(&attempts, 1)
-		_, err := tx.ExecContext(txctx, `
-			INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-			VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-		`, uuid.NewString(), time.Now().UTC())
-		return err
+		return writeRuntimeMutationTestMarker(txctx, tx)
 	})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("RunRuntimeMutation error = %v, want context deadline", err)
@@ -135,22 +121,15 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationContextDeadlineCapsDriverBusyTimeo
 		t.Fatalf("begin locking tx: %v", err)
 	}
 	t.Cleanup(func() { _ = lockTx.Rollback() })
-	if _, err := lockTx.ExecContext(baseCtx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, uuid.NewString(), time.Now().UTC()); err != nil {
-		t.Fatalf("hold sqlite write lock: %v", err)
+	if err := writeRuntimeMutationTestMarker(baseCtx, lockTx); err != nil {
+		t.Fatalf("acquire sqlite write lock: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(baseCtx, 80*time.Millisecond)
 	defer cancel()
 	start := time.Now()
 	err = store.RunRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		_, err := tx.ExecContext(txctx, `
-			INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-			VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-		`, uuid.NewString(), time.Now().UTC())
-		return err
+		return writeRuntimeMutationTestMarker(txctx, tx)
 	})
 	elapsed := time.Since(start)
 	if !errors.Is(err, context.DeadlineExceeded) {
@@ -196,20 +175,13 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationPostCommitCanReenterRuntimeMutatio
 	done := make(chan error, 1)
 	go func() {
 		done <- store.RunRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			if _, err := tx.ExecContext(txctx, `
-				INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-				VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-			`, uuid.NewString(), time.Now().UTC()); err != nil {
+			if err := writeRuntimeMutationTestMarker(txctx, tx); err != nil {
 				return err
 			}
 			if !runtimepipeline.QueuePipelinePostCommitAction(txctx, func(context.Context) {
 				innerCtx := runtimepipeline.WithoutPipelineSQLTxContext(ctx)
 				innerDone <- store.RunRuntimeMutation(innerCtx, func(innerTxCtx context.Context, innerTx *sql.Tx) error {
-					_, err := innerTx.ExecContext(innerTxCtx, `
-						INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-						VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-					`, uuid.NewString(), time.Now().UTC())
-					return err
+					return writeRuntimeMutationTestMarker(innerTxCtx, innerTx)
 				})
 			}) {
 				return errors.New("queue pipeline post-commit action")
@@ -303,4 +275,13 @@ func newSQLiteRuntimeMutationBusyStores(t *testing.T, busyTimeout time.Duration)
 		}
 	}
 	return store, lockStore
+}
+
+func writeRuntimeMutationTestMarker(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE runtime_store_metadata
+		SET created_at = created_at
+		WHERE id = 1
+	`)
+	return err
 }

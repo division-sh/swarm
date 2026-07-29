@@ -16,6 +16,10 @@ func TestRuntimeIngressStatePersistsTypedTransitions(t *testing.T) {
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	runID := eventtest.UUID("persisted-projection-run")
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		RunID: runID, StartedAt: now.Add(-time.Second),
+	})
 
 	state, err := pg.EnsureRuntimeIngressState(ctx, now)
 	if err != nil {
@@ -34,9 +38,9 @@ func TestRuntimeIngressStatePersistsTypedTransitions(t *testing.T) {
 	}
 	pausedAt := state.UpdatedAt
 	pausedEventID := "11111111-1111-1111-1111-111111111111"
-	if err := commitSemanticEventFixture(ctx, pg, eventtest.RunCreatingRootIngress(pausedEventID,
+	if err := commitSemanticEventFixture(ctx, pg, eventtest.RuntimeControl(pausedEventID,
 		events.EventType("platform.paused"),
-		"runtime", "", []byte(`{}`), 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, pausedAt)); err != nil {
+		"runtime", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, pausedAt)); err != nil {
 		t.Fatalf("AppendEvent(paused): %v", err)
 	}
 	if ok, err := pg.SetRuntimeIngressTransitionEvent(ctx, runtimeingress.StatusPaused, pausedEventID, pausedAt); err != nil {
@@ -78,9 +82,9 @@ func TestRuntimeIngressStatePersistsTypedTransitions(t *testing.T) {
 		t.Fatalf("state after stale event update = %#v", state)
 	}
 	runningEventID := "33333333-3333-3333-3333-333333333333"
-	if err := commitSemanticEventFixture(ctx, pg, eventtest.RunCreatingRootIngress(runningEventID,
+	if err := commitSemanticEventFixture(ctx, pg, eventtest.RuntimeControl(runningEventID,
 		events.EventType("platform.resumed"),
-		"runtime", "", []byte(`{}`), 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, runningAt)); err != nil {
+		"runtime", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, runningAt)); err != nil {
 		t.Fatalf("AppendEvent(running): %v", err)
 	}
 	if ok, err := pg.SetRuntimeIngressTransitionEvent(ctx, runtimeingress.StatusRunning, runningEventID, runningAt); err != nil {

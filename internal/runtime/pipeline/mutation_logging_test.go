@@ -19,7 +19,7 @@ func TestUpdateEntityState_LogsMutationRowForStateTransition(t *testing.T) {
 
 	entityID := uuid.NewString()
 	pc := &PipelineCoordinator{
-		workflowStore: NewWorkflowInstanceStore(db),
+		workflowStore: newPostgresWorkflowInstanceStoreForTest(db),
 		module: &previewWorkflowModule{
 			bundle: &runtimecontracts.WorkflowContractBundle{
 				Semantics: runtimecontracts.WorkflowSemanticView{
@@ -85,7 +85,7 @@ func TestUpdateEntityState_LogsMutationRowForStateTransition(t *testing.T) {
 
 func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLog(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	store := NewWorkflowInstanceStore(db)
+	store := newPostgresWorkflowInstanceStoreForTest(db)
 	entityID := uuid.NewString()
 
 	if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
@@ -151,7 +151,7 @@ func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLo
 
 func TestWorkflowInstanceStore_ReplaysContainedStateMapListProjection(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	store := NewWorkflowInstanceStore(db)
+	store := newPostgresWorkflowInstanceStoreForTest(db)
 	entityID := uuid.NewString()
 
 	if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
@@ -332,7 +332,7 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 
 func testMutationLoggingCoordinator(db *sql.DB) *PipelineCoordinator {
 	return &PipelineCoordinator{
-		workflowStore: NewWorkflowInstanceStore(db),
+		workflowStore: newPostgresWorkflowInstanceStoreForTest(db),
 		module: &previewWorkflowModule{
 			bundle: &runtimecontracts.WorkflowContractBundle{
 				Semantics: runtimecontracts.WorkflowSemanticView{

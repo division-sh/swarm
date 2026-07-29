@@ -21,6 +21,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const dashboardObservabilityBundleHash = "bundle-v1:sha256:dadadadadadadadadadadadadadadadadadadadadadadadadadadadadadadada"
+
 func canonicalRuntimeLogTestPayload(t *testing.T, component, action, code, message, agentID string) string {
 	t.Helper()
 	class := runtimefailures.ClassInternalFailure
@@ -53,14 +55,12 @@ func TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle(t *tes
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	reader := NewSQLObservabilityReader(db, pg)
-	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(uuid.NewString(), "dashboard-observability"))
+	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(uuid.NewString(), dashboardObservabilityBundleHash))
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	now := time.Unix(1700000000, 0).UTC()
 	event := eventtest.ExistingRunRootIngress(eventID, "task.completed", "runtime", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, runID,
 		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, now)
@@ -145,12 +145,10 @@ func TestSQLObservabilityReader_ListEvents_FiltersTypedSubscriberIdentity(t *tes
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	reader := NewSQLObservabilityReader(db, pg)
-	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(uuid.NewString(), "dashboard-observability"))
+	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(uuid.NewString(), dashboardObservabilityBundleHash))
 
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 
 	type deliverySeed struct {
 		subscriberType string
@@ -197,13 +195,11 @@ func TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows(t *testing.T)
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	reader := NewSQLObservabilityReader(db, pg)
-	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(uuid.NewString(), "dashboard-observability"))
+	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(uuid.NewString(), dashboardObservabilityBundleHash))
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	event := eventtest.ExistingRunRootIngress(eventID, "task.completed", "runtime", "", []byte(`{}`), 0, runID,
 		events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
 	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
@@ -256,9 +252,7 @@ func TestSQLObservabilityReader_EventIdentityDoesNotPromotePayloadEntity(t *test
 	payloadOnlyEventID := uuid.NewString()
 	canonicalEventID := uuid.NewString()
 	base := time.Unix(1700001200, 0).UTC()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base})
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
 		payloadOnlyEventID, runID, "task.payload_only", eventtest.Producer(events.EventProducerExternal, "agent-a"),
 		[]byte(`{"entity_id":"`+targetEntityID+`","marker":"payload-only"}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, base)

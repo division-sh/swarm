@@ -23,10 +23,6 @@ type activeRunDeliveryQuiescenceReader interface {
 	ActiveRunDeliveryQuiesced(ctx context.Context, eventID, subscriberType, subscriberID string) (string, bool, error)
 }
 
-type deliveryRunCompletionConverger interface {
-	ConvergeDeliveryRunCompletion(ctx context.Context, evt events.Event) error
-}
-
 func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt events.Event) error {
 	result := am.processEventDetailed(ctx, agent, evt)
 	return result.err
@@ -483,30 +479,11 @@ func (am *AgentManager) writeReceipt(ctx context.Context, evt events.Event, agen
 	}
 	am.logDeliveryLifecycle(postCtx, snapshot)
 	am.notifyTestDeliveryStatus(postCtx, evt, agentID, snapshot.Status)
-	am.convergeDeliveryRunCompletion(postCtx, evt, agentID)
 
 	if snapshot.Status == runtimedelivery.StatusDeadLetter {
 		am.maybeEscalateDeadLetter(postCtx, evt, agentID, snapshot)
 	}
 	return snapshot, nil
-}
-
-func (am *AgentManager) convergeDeliveryRunCompletion(ctx context.Context, evt events.Event, agentID string) {
-	if am == nil {
-		return
-	}
-	if converger, ok := am.bus.(deliveryRunCompletionConverger); ok && converger != nil {
-		if err := converger.ConvergeDeliveryRunCompletion(ctx, evt); err != nil && am.bus != nil {
-			am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
-				Level:     "error",
-				Component: "agent-manager",
-				Action:    "delivery_run_completion_failed",
-				EventID:   strings.TrimSpace(evt.ID()),
-				AgentID:   strings.TrimSpace(agentID),
-				Failure:   failureEnvelope(err, "agent-manager", "converge_delivery_run_completion"),
-			})
-		}
-	}
 }
 
 func (am *AgentManager) logDeliveryLifecycle(ctx context.Context, snapshot runtimedelivery.Snapshot) {

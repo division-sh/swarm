@@ -514,13 +514,12 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 		Runs: &fakeRunReadStore{
 			headers: map[string]store.RunHeader{
 				runID: {
-					RunID:            runID,
-					Status:           "running",
-					TriggerEventType: "scan.requested",
-					TriggerEventID:   eventID,
-					EntityCount:      1,
-					EventCount:       1,
-					StartedAt:        now.Add(-time.Hour),
+					RunID:       runID,
+					Status:      "running",
+					Origin:      mustEventRunOrigin(t, eventID, "scan.requested"),
+					EntityCount: 1,
+					EventCount:  1,
+					StartedAt:   now.Add(-time.Hour),
 				},
 			},
 			reports: map[string]store.RunDebugReport{

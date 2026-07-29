@@ -117,7 +117,7 @@ func TestPipelineCoordinatorInterceptDeliveryRouteRejectsAmbiguousConnectedInput
 		t.Fatal("connected-input collision source has no contract bundle")
 	}
 	bus := &recordingPipelineBus{}
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := newPostgresPipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		DeliveryStore: newPipelineTestDeliveryOwnerForDB(t, db),
 		Module: &previewWorkflowModule{
 			bundle: bundle,
@@ -265,7 +265,7 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 					},
 				},
 			}
-			pc := NewPipelineCoordinatorWithOptions(bus, workflowStore.db, PipelineCoordinatorOptions{
+			pc := newPostgresPipelineCoordinatorForTest(bus, workflowStore.db, PipelineCoordinatorOptions{
 				Module: &previewWorkflowModule{
 					bundle: bundle,
 					workflow: NewWorkflowDefinition("delivery-retry", []WorkflowStage{
@@ -365,7 +365,7 @@ func newDeliveryAuthorityCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordin
 			},
 		},
 	}
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := newPostgresPipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		DeliveryStore: newPipelineTestDeliveryOwnerForDB(t, db),
 		Module: &previewWorkflowModule{
 			bundle: bundle,

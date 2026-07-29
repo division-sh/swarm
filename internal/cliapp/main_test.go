@@ -22,12 +22,13 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/requiredagentsparentconnect"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/google/uuid"
 )
@@ -121,15 +122,24 @@ func seedRunStatusEntityState(t *testing.T, db *sql.DB, runID, entityID string) 
 	`, runID, entityID, now); err != nil {
 		t.Fatalf("seed run status entity_state: %v", err)
 	}
-	if err := storerunlifecycle.SyncCounts(context.Background(), db, runID); err != nil {
-		t.Fatalf("sync run status entity_count: %v", err)
-	}
 }
 
 func markRunStatusCompleted(t *testing.T, pg *store.PostgresStore, eventID string) {
 	t.Helper()
-	if err := pg.ConvergeNormalRunCompletion(context.Background(), eventID, []string{"ready"}, map[string][]string{"run-status-test": {"ready"}}); err != nil {
-		t.Fatalf("converge normal run completion: %v", err)
+	var runID, bundleHash string
+	if err := pg.DB.QueryRowContext(context.Background(), `
+		SELECT r.run_id::text, r.bundle_hash
+		FROM events e
+		JOIN runs r ON r.run_id = e.run_id
+		WHERE e.event_id = $1::uuid
+	`, eventID).Scan(&runID, &bundleHash); err != nil {
+		t.Fatalf("load completion candidate identity: %v", err)
+	}
+	if _, err := storetest.ExecuteRunCompletionCandidate(
+		context.Background(), pg, bundleHash, runID,
+		storerunlifecycle.NewTerminalCatalog([]string{"ready"}, map[string][]string{"run-status-test": {"ready"}}),
+	); err != nil {
+		t.Fatalf("execute normal run completion candidate: %v", err)
 	}
 }
 

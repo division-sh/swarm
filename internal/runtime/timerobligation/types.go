@@ -67,6 +67,40 @@ type RunObligations struct {
 	Families []FamilyObligation `json:"families"`
 }
 
+type RunSummary struct {
+	RunID      string
+	Active     int
+	Due        int
+	ObservedAt time.Time
+}
+
+func (s RunSummary) Validate() error {
+	if strings.TrimSpace(s.RunID) == "" {
+		return fmt.Errorf("timer run summary requires run_id")
+	}
+	if s.Active < 0 || s.Due < 0 || s.Due > s.Active {
+		return fmt.Errorf("timer run summary counts are invalid")
+	}
+	if s.ObservedAt.IsZero() {
+		return fmt.Errorf("timer run summary requires selected-store observation time")
+	}
+	return nil
+}
+
+func (s RunSummary) BlocksCompletion() bool {
+	return s.Active > 0
+}
+
+func (r RunObligations) Summary(observedAt time.Time) RunSummary {
+	total := r.Totals()
+	return RunSummary{
+		RunID:      r.RunID,
+		Active:     total.ActiveCount,
+		Due:        total.DueCount,
+		ObservedAt: observedAt.UTC(),
+	}
+}
+
 type Snapshot struct {
 	ObservedAt     time.Time          `json:"observed_at"`
 	GlobalFamilies []FamilyObligation `json:"global_families"`

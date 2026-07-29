@@ -20,12 +20,13 @@ import (
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/runbundle"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -113,7 +114,7 @@ func TestOperatorRuntimeContextManagerRejectsExistingRunSameHashDifferentSourceB
 	fixture := newOperatorRuntimeContextFixture(t)
 	handler := fixture.handler(t)
 	runID := uuid.NewString()
-	seedRuntimeContextRunBundle(t, fixture.db, runID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourceEphemeral)
+	seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourceEphemeral)
 
 	resp := rpcCall(t, handler, eventPublishExistingRunBody(runID, "", "idem-context-source-mismatch"))
 	assertRuntimeContextBundleError(t, resp, "event.publish", BundleDataIntegrityErrorCode, "runtime_source_fact_mismatch")
@@ -165,7 +166,15 @@ func TestOperatorRuntimeContextManagerRejectsExistingRunUnavailableSourceStates(
 			}
 			handler := fixture.handler(t)
 			runID := uuid.NewString()
-			seedRuntimeContextRunBundle(t, fixture.db, runID, tt.bundleHash, tt.bundleSource)
+			if tt.bundleSource == storerunlifecycle.BundleSourceDeleted ||
+				(tt.bundleSource == storerunlifecycle.BundleSourcePersisted && !tt.seedBundleRow) {
+				runlifecyclefixture.RequireCorruptPostgresSnapshot(t, context.Background(), fixture.db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
+					RunID: runID, State: string(storerunlifecycle.StateRunning),
+					BundleHash: tt.bundleHash, BundleSource: tt.bundleSource,
+				})
+			} else {
+				seedRuntimeContextRunBundle(t, fixture.pg, runID, tt.bundleHash, tt.bundleSource)
+			}
 			keyName := strings.ReplaceAll(tt.name, " ", "-")
 
 			calls := []struct {
@@ -215,7 +224,7 @@ func TestOperatorRuntimeContextManagerRejectsExistingRunRequestedHashMismatch(t 
 			fixture := newOperatorRuntimeContextFixture(t)
 			handler := fixture.handler(t)
 			runID := uuid.NewString()
-			seedRuntimeContextRunBundle(t, fixture.db, runID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourcePersisted)
+			seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourcePersisted)
 
 			resp := rpcCall(t, handler, tt.body(runID))
 			assertRuntimeContextBundleError(t, resp, tt.method, BundleMismatchCode, "")
@@ -236,7 +245,12 @@ func TestOperatorRuntimeContextManagerRoutesEventReplayByOriginalRunBundle(t *te
 	chSelected := runtimebustest.Subscribe(t, fixture.busB, "agent-a")
 	defer runtimebustest.Unsubscribe(fixture.busB, "agent-a")
 	original := seedReplayableOperatorEvent(t, ctx, fixture.pg, "triage.requested", []string{"agent-a"}, runtimedelivery.StatusDelivered)
-	seedRuntimeContextRunBundle(t, fixture.db, original.RunID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourcePersisted)
+	if _, err := storetest.ReviseRunSource(testAuthorActivityContext(context.Background()), fixture.pg, storerunlifecycle.SourceRevisionRequest{
+		RunID:  original.RunID,
+		Source: runtimeContextTestSourceFact(runtimeContextTestBundleHashB),
+	}); err != nil {
+		t.Fatalf("revise replay source run bundle: %v", err)
+	}
 
 	resp := rpcCall(t, handler, eventReplayBody(original.EventID, []string{"agent-a"}, "idem-context-event-replay"))
 	if resp.Error != nil {
@@ -273,7 +287,7 @@ func TestOperatorRuntimeContextManagerRoutesRunControlByStoredBundle(t *testing.
 
 	for _, method := range []string{"run.pause", "run.continue", "run.stop"} {
 		runID := uuid.NewString()
-		seedRuntimeContextRunBundle(t, fixture.db, runID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourcePersisted)
+		seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourcePersisted)
 		resp := rpcCall(t, handler, runControlBody(method, runID, "idem-context-"+method))
 		if resp.Error != nil {
 			t.Fatalf("%s error = %#v", method, resp.Error)
@@ -308,7 +322,7 @@ func TestOperatorRuntimeContextManagerRoutesAgentDirectiveByStoredBundle(t *test
 		}),
 	})
 	runID := uuid.NewString()
-	seedRuntimeContextRunBundle(t, fixture.db, runID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourcePersisted)
+	seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourcePersisted)
 
 	resp := rpcCall(t, handler, agentDirectiveBodyWithRun("agent-1", runID, "inspect context", "idem-context-agent-directive"))
 	if resp.Error != nil {
@@ -389,7 +403,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForDeactivatedBundle(t *testing
 	}
 
 	runID := uuid.NewString()
-	seedRuntimeContextRunBundle(t, fixture.db, runID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourcePersisted)
+	seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourcePersisted)
 	existing := rpcCall(t, handler, eventPublishBodyWithoutBundle(runID, "triage.requested", `{"topic":"existing-deactivated"}`, "", "idem-existing-deactivated-context"))
 	if existing.Error == nil {
 		t.Fatal("event.publish deactivated run context error = nil")
@@ -636,17 +650,13 @@ func (f operatorRuntimeContextFixture) handler(t *testing.T) *Handler {
 	})
 }
 
-func seedRuntimeContextRunBundle(t *testing.T, db *sql.DB, runID, bundleHash, bundleSource string) {
+func seedRuntimeContextRunBundle(t *testing.T, pg *store.PostgresStore, runID, bundleHash, bundleSource string) {
 	t.Helper()
-	if _, err := db.Exec(`
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, $3)
-		ON CONFLICT (run_id) DO UPDATE SET
-			bundle_hash = EXCLUDED.bundle_hash,
-			bundle_source = EXCLUDED.bundle_source
-	`, runID, strings.TrimSpace(bundleHash), strings.TrimSpace(bundleSource)); err != nil {
-		t.Fatalf("seed runtime context run bundle: %v", err)
-	}
+	storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
+		RunID:        runID,
+		BundleHash:   strings.TrimSpace(bundleHash),
+		BundleSource: strings.TrimSpace(bundleSource),
+	})
 }
 
 func runtimeContextManagerWithRuntimes(t *testing.T, fixture operatorRuntimeContextFixture, runtimeA, runtimeB *swruntime.Runtime) *swruntime.RuntimeContextManager {

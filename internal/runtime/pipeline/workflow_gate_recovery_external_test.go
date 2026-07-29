@@ -29,11 +29,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -77,6 +78,7 @@ type gateRecoveryStoreCase struct {
 	postgres      bool
 	db            *sql.DB
 	events        runtimebus.EventStore
+	lifecycle     runtimerunlifecycle.CandidateStore
 	cards         decisioncard.Store
 	workflowStore *runtimepipeline.WorkflowInstanceStore
 }
@@ -207,58 +209,6 @@ func (i *gateRecoveryCountingInterceptor) Intercept(ctx context.Context, evt eve
 	return i.delegate.Intercept(ctx, evt)
 }
 
-type failOncePostgresNormalRunConvergence struct {
-	*store.PostgresStore
-	calls atomic.Int32
-}
-
-func (s *failOncePostgresNormalRunConvergence) ConvergeNormalRunCompletion(ctx context.Context, eventID string, workflowTerminalStates []string, flowTerminalStates map[string][]string) error {
-	if s.calls.Add(1) == 1 {
-		return errors.New("planted normal run convergence failure")
-	}
-	return s.PostgresStore.ConvergeNormalRunCompletion(ctx, eventID, workflowTerminalStates, flowTerminalStates)
-}
-
-type failOnceSQLiteNormalRunConvergence struct {
-	*store.SQLiteRuntimeStore
-	calls atomic.Int32
-}
-
-func (s *failOnceSQLiteNormalRunConvergence) ConvergeNormalRunCompletion(ctx context.Context, eventID string, workflowTerminalStates []string, flowTerminalStates map[string][]string) error {
-	if s.calls.Add(1) == 1 {
-		return errors.New("planted normal run convergence failure")
-	}
-	return s.SQLiteRuntimeStore.ConvergeNormalRunCompletion(ctx, eventID, workflowTerminalStates, flowTerminalStates)
-}
-
-type selectivePostgresNormalRunConvergenceFailure struct {
-	*store.PostgresStore
-	eventID string
-	calls   atomic.Int32
-}
-
-func (s *selectivePostgresNormalRunConvergenceFailure) ConvergeNormalRunCompletion(ctx context.Context, eventID string, workflowTerminalStates []string, flowTerminalStates map[string][]string) error {
-	if eventID == s.eventID {
-		s.calls.Add(1)
-		return errors.New("planted persistent normal run convergence failure")
-	}
-	return s.PostgresStore.ConvergeNormalRunCompletion(ctx, eventID, workflowTerminalStates, flowTerminalStates)
-}
-
-type selectiveSQLiteNormalRunConvergenceFailure struct {
-	*store.SQLiteRuntimeStore
-	eventID string
-	calls   atomic.Int32
-}
-
-func (s *selectiveSQLiteNormalRunConvergenceFailure) ConvergeNormalRunCompletion(ctx context.Context, eventID string, workflowTerminalStates []string, flowTerminalStates map[string][]string) error {
-	if eventID == s.eventID {
-		s.calls.Add(1)
-		return errors.New("planted persistent normal run convergence failure")
-	}
-	return s.SQLiteRuntimeStore.ConvergeNormalRunCompletion(ctx, eventID, workflowTerminalStates, flowTerminalStates)
-}
-
 func (i gateRecoveryPoisonInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	if evt.ID() != i.poisonEventID {
 		return true, nil, runtimepipelineobligation.Continue(), nil
@@ -373,8 +323,8 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				t.Fatal(err)
 			}
 			const replyContextID = "reply-context-proposed-effect"
-			sourceEvent := eventtest.ForDelivery(eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-1",
-				[]byte(`{"chat_id":"support-room","text":"Exact frozen reply"}`), 0, runID, "",
+			sourceEvent := eventtest.ForDelivery(eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-1",
+				[]byte(`{"chat_id":"support-room","text":"Exact frozen reply"}`), 0, runID,
 				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()),
 				events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}},
 			)
@@ -521,8 +471,8 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 
 			routeWithoutDispatch := func(verdict, wantEvent string, fields map[string]any) {
 				t.Helper()
-				proposal := eventtest.ForDelivery(eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-1",
-					[]byte(`{"chat_id":"support-room","text":"Needs another operator outcome"}`), 0, runID, "",
+				proposal := eventtest.ForDelivery(eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-1",
+					[]byte(`{"chat_id":"support-room","text":"Needs another operator outcome"}`), 0, runID,
 					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()),
 					events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}},
 				)
@@ -604,8 +554,8 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					t.Fatal(err)
 				}
 				sourceEventID := uuid.NewString()
-				sourceEvent := eventtest.RunCreatingRootIngress(sourceEventID, events.EventType("support.reply_drafted"), "support-agent", "task-1",
-					[]byte(`{"chat_id":"support-room","text":"Exact approved text"}`), 0, runID, "",
+				sourceEvent := eventtest.ExistingRunRootIngress(sourceEventID, events.EventType("support.reply_drafted"), "support-agent", "task-1",
+					[]byte(`{"chat_id":"support-room","text":"Exact approved text"}`), 0, runID,
 					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), now)
 				storetest.CommitSemanticEvent(t, ctx, selected.events, sourceEvent)
 				requestEventID := activityidentity.RequestEventID(activityidentity.Fact{
@@ -782,8 +732,8 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			}
 			installProposedEffectCreateFailure(t, selected)
 
-			event := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-rollback",
-				[]byte(`{"chat_id":"support-room","text":"must roll back"}`), 0, runID, "",
+			event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-rollback",
+				[]byte(`{"chat_id":"support-room","text":"must roll back"}`), 0, runID,
 				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
 			route := seedProposedEffectProofDelivery(t, selected, event, "support")
 			forward, _, _, err := coordinator.Intercept(runtimedelivery.WithRoute(ctx, route), event)
@@ -942,203 +892,6 @@ func TestDecisionRouteStartupRecoveryQuarantinesPoisonAndContinuesOnBothStores(t
 			}
 		})
 	}
-}
-
-func TestDecisionRouteSettlementRetriesConvergenceWithoutReroutingOnBothStores(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		open func(*testing.T) gateRecoveryStoreCase
-	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
-		for _, recovery := range []string{"periodic", "startup"} {
-			t.Run(tc.name+"/"+recovery, func(t *testing.T) {
-				testDecisionRouteSettlementRetry(t, tc.open(t), recovery)
-			})
-		}
-	}
-}
-
-func TestDecisionRouteSettlementFailureDefersAndDoesNotStarveOnBothStores(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		open func(*testing.T) gateRecoveryStoreCase
-	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
-		for _, form := range []string{"synchronous", "acknowledged"} {
-			for _, recovery := range []string{"periodic", "startup"} {
-				t.Run(tc.name+"/"+form+"/"+recovery, func(t *testing.T) {
-					testDecisionRouteSettlementFailureFairness(t, tc.open(t), form, recovery)
-				})
-			}
-		}
-	}
-}
-
-func testDecisionRouteSettlementFailureFairness(t *testing.T, selected gateRecoveryStoreCase, form, recovery string) {
-	t.Helper()
-	ctx := testAuthorActivityContext(t, context.Background())
-	runID := uuid.NewString()
-	insertGateRecoveryRun(t, selected, runID)
-	failing := seedGateRecoveryForegroundRoute(t, selected, runID, time.Now().UTC().Add(-2*time.Minute))
-	valid := seedGateRecoveryForegroundRoute(t, selected, runID, time.Now().UTC().Add(-time.Minute))
-
-	var failingStore runtimebus.EventStore
-	var convergenceCalls *atomic.Int32
-	if selected.postgres {
-		wrapped := &selectivePostgresNormalRunConvergenceFailure{PostgresStore: selected.events.(*store.PostgresStore), eventID: failing.event.ID()}
-		failingStore = wrapped
-		convergenceCalls = &wrapped.calls
-	} else {
-		wrapped := &selectiveSQLiteNormalRunConvergenceFailure{SQLiteRuntimeStore: selected.events.(*store.SQLiteRuntimeStore), eventID: failing.event.ID()}
-		failingStore = wrapped
-		convergenceCalls = &wrapped.calls
-	}
-	bundle := gateRecoveryContractBundle()
-	bus, err := newScopedTestEventBus(t, failingStore, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
-		Module: gateRecoveryModule{source: semanticview.Wrap(bundle)}, WorkflowStore: selected.workflowStore,
-		DecisionCards: selected.cards, BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle),
-	})
-	counting := &gateRecoveryCountingInterceptor{delegate: coordinator}
-	bus.SetInterceptors(counting)
-
-	switch form {
-	case "synchronous":
-		if err := bus.Publish(ctx, failing.event); err != nil {
-			t.Fatalf("synchronous failing settlement: %v", err)
-		}
-	case "acknowledged":
-		if err := bus.PublishAcknowledged(ctx, failing.event); err != nil {
-			t.Fatalf("acknowledged failing settlement: %v", err)
-		}
-	}
-	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if err := bus.WaitForQuiescence(waitCtx); err != nil {
-		t.Fatalf("wait for %s failing settlement: %v", form, err)
-	}
-	assertGateRecoveryProcessedReceipt(t, selected, failing.event.ID())
-	assertGateRecoveryObligationStatus(t, selected, failing.event.ID(), "pending")
-	if got := counting.calls.Load(); got != 1 {
-		t.Fatalf("foreground route calls = %d, want 1", got)
-	}
-
-	persistGateRecoveryRouteEvent(t, selected, valid.event)
-	setGateRecoveryRouteAttempt(t, selected, failing.event.ID(), 0)
-	setGateRecoveryRouteAttempt(t, selected, valid.event.ID(), 0)
-	makeGateRecoveryRouteDue(t, selected, failing.event.ID(), time.Now().UTC().Add(-2*time.Second))
-	makeGateRecoveryRouteDue(t, selected, valid.event.ID(), time.Now().UTC().Add(-time.Second))
-
-	switch recovery {
-	case "periodic":
-		if _, err := bus.SweepPipelineObligations(ctx, 10); err != nil {
-			t.Fatalf("periodic settlement fairness: %v", err)
-		}
-	case "startup":
-		if err := runtimepipeline.NewRecoveryManagerWith(bus).Recover(ctx); err != nil {
-			t.Fatalf("startup settlement fairness: %v", err)
-		}
-	}
-
-	assertGateRecoveryProcessedReceipt(t, selected, failing.event.ID())
-	assertGateRecoveryObligationStatus(t, selected, failing.event.ID(), "pending")
-	assertGateRecoveryObligationAttempt(t, selected, failing.event.ID(), 1)
-	assertGateRecoveryProcessedReceipt(t, selected, valid.event.ID())
-	assertGateRecoveryObligationStatus(t, selected, valid.event.ID(), "completed")
-	if got := convergenceCalls.Load(); got != 2 {
-		t.Fatalf("failing route convergence calls after %s recovery = %d, want foreground plus one settlement attempt", recovery, got)
-	}
-	if got := counting.calls.Load(); got != 2 {
-		t.Fatalf("route calls after %s recovery = %d, want failing route once plus valid route once", recovery, got)
-	}
-}
-
-func testDecisionRouteSettlementRetry(t *testing.T, selected gateRecoveryStoreCase, recovery string) {
-	t.Helper()
-	ctx := testAuthorActivityContext(t, context.Background())
-	runID, entityID := uuid.NewString(), uuid.NewString()
-	insertGateRecoveryRun(t, selected, runID)
-	ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
-	bundle := gateRecoveryTerminalContractBundle()
-	setupBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	runtimepipeline.NewPipelineCoordinatorWithOptions(setupBus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
-		Module: gateRecoveryModule{source: semanticview.Wrap(bundle)}, WorkflowStore: selected.workflowStore,
-		DecisionCards: selected.cards, BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle),
-	})
-	at := time.Now().UTC().Add(-time.Minute)
-	if _, err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-		InstanceID: "launch/settlement-" + uuid.NewString(), StorageRef: entityID, WorkflowName: "launch", WorkflowVersion: "1",
-		CurrentState: "awaiting_review", EnteredStageAt: at,
-		Metadata: map[string]any{"entity_id": entityID, "run_id": runID},
-	}, at); err != nil {
-		t.Fatal(err)
-	}
-	items, _, err := selected.cards.ListDecisionCards(ctx, decisioncard.ListOptions{RunID: runID, Limit: 10})
-	if err != nil || len(items) != 1 {
-		t.Fatalf("settlement decision cards = %#v, %v", items, err)
-	}
-	card, err := selected.cards.GetDecisionCard(ctx, items[0].CardID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	eventID := uuid.NewString()
-	if err := selected.workflowStore.CommitDecision(ctx, card, eventID, at); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := selected.cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-		CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator", ObservedContentHash: card.CardContentHash,
-		DecisionEventID: eventID, Now: at,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	var failingStore runtimebus.EventStore
-	if selected.postgres {
-		failingStore = &failOncePostgresNormalRunConvergence{PostgresStore: selected.events.(*store.PostgresStore)}
-	} else {
-		failingStore = &failOnceSQLiteNormalRunConvergence{SQLiteRuntimeStore: selected.events.(*store.SQLiteRuntimeStore)}
-	}
-	bus, err := newScopedTestEventBus(t, failingStore, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
-		Module: gateRecoveryModule{source: semanticview.Wrap(bundle)}, WorkflowStore: selected.workflowStore,
-		DecisionCards: selected.cards, BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle),
-	})
-	counting := &gateRecoveryCountingInterceptor{delegate: coordinator}
-	bus.SetInterceptors(counting)
-	payload, _ := json.Marshal(map[string]any{"card_id": card.CardID})
-	evt := eventtest.RuntimeControl(eventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), recoveryStageAnchor(t, card).FlowInstance), at)
-	if err := bus.Publish(ctx, evt); err != nil {
-		t.Fatalf("foreground decision route: %v", err)
-	}
-	if got := counting.calls.Load(); got != 1 {
-		t.Fatalf("foreground route calls = %d, want 1", got)
-	}
-	assertGateRecoveryProcessedReceipt(t, selected, eventID)
-	assertGateRecoveryObligationStatus(t, selected, eventID, "pending")
-
-	makeGateRecoveryRouteDue(t, selected, eventID, time.Now().UTC().Add(-time.Second))
-	switch recovery {
-	case "periodic":
-		if _, err := bus.SweepPipelineObligations(ctx, 10); err != nil {
-			t.Fatalf("periodic settlement retry: %v", err)
-		}
-	case "startup":
-		if err := runtimepipeline.NewRecoveryManagerWith(bus).Recover(ctx); err != nil {
-			t.Fatalf("startup settlement retry: %v", err)
-		}
-	}
-	if got := counting.calls.Load(); got != 1 {
-		t.Fatalf("route calls after %s settlement = %d, want 1", recovery, got)
-	}
-	assertGateRecoveryObligationStatus(t, selected, eventID, "completed")
 }
 
 func TestDecisionRouteForegroundFailureQuarantinesOnBothStoresAndPublicationForms(t *testing.T) {
@@ -1398,6 +1151,22 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 		t.Fatal(err)
 	}
 	assertGateRecoveryActivation(t, tc.workflowStore, ctx, entityID, "completed", gateruntime.StatusRouted)
+	completion, err := storetest.ExecuteRunCompletionCandidate(
+		ctx,
+		tc.lifecycle,
+		gateRecoveryBundle,
+		runID,
+		runtimerunlifecycle.NewTerminalCatalog(
+			bundle.Semantics.TerminalStages,
+			map[string][]string{bundle.Semantics.Name: bundle.Semantics.TerminalStages},
+		),
+	)
+	if err != nil {
+		t.Fatalf("execute durable completion candidate: %v", err)
+	}
+	if completion.Outcome != runtimerunlifecycle.OutcomeTerminallyEligible {
+		t.Fatalf("durable completion outcome = %#v, want terminally eligible", completion)
+	}
 	var status string
 	query := `SELECT status FROM runs WHERE run_id = ?`
 	if tc.postgres {
@@ -1539,7 +1308,7 @@ func openSQLiteGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 	workflowStore.ConfigureDeliveryLifecycleStore(selected)
 	return gateRecoveryStoreCase{
 		name: "sqlite", db: selected.DB, events: selected, cards: selected,
-		workflowStore: workflowStore,
+		lifecycle: selected, workflowStore: workflowStore,
 	}
 }
 
@@ -1548,10 +1317,12 @@ func openPostgresGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 	t.Cleanup(cleanup)
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	workflowStore.ConfigureRuntimeMutationRunner(selected)
+	workflowStore.ConfigureRunLifecycle(selected)
 	workflowStore.ConfigureDeliveryLifecycleStore(selected)
 	return gateRecoveryStoreCase{
 		name: "postgres", postgres: true, db: db, events: selected, cards: selected,
-		workflowStore: workflowStore,
+		lifecycle: selected, workflowStore: workflowStore,
 	}
 }
 
@@ -1728,12 +1499,10 @@ func gateRecoveryTerminalContractBundle() *runtimecontracts.WorkflowContractBund
 
 func insertGateRecoveryRun(t *testing.T, tc gateRecoveryStoreCase, runID string) {
 	t.Helper()
-	query := `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
 	if tc.postgres {
-		query = `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
-	}
-	if _, err := tc.db.ExecContext(testAuthorActivityContext(t, context.Background()), query, runID); err != nil {
-		t.Fatalf("insert run: %v", err)
+		runlifecyclefixture.RequirePostgres(t, testAuthorActivityContext(t, context.Background()), tc.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
+	} else {
+		runlifecyclefixture.RequireSQLite(t, testAuthorActivityContext(t, context.Background()), tc.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
 	}
 }
 

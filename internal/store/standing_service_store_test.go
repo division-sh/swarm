@@ -12,6 +12,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -53,7 +54,9 @@ func TestSQLiteStandingServiceReconcileCreatesPublishesAndRepairsRestartAbandon(
 	`, created.RunID, entityID, "ingress/"+instanceID, time.Now().UTC(), time.Now().UTC(), time.Now().UTC()); err != nil {
 		t.Fatalf("seed entity state: %v", err)
 	}
-	if _, err := store.DB.ExecContext(ctx, `UPDATE runs SET status = 'cancelled', ended_at = ? WHERE run_id = ?`, time.Now().UTC(), created.RunID); err != nil {
+	if _, err := markRunTerminalStatusForTest(
+		ctx, store, created.RunID, string(runtimerunlifecycle.StateCancelled), nil, time.Now().UTC(),
+	); err != nil {
 		t.Fatalf("cancel standing run: %v", err)
 	}
 	if _, err := store.DB.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, stopped_at, updated_at) VALUES (?, 'stopped', 'server_restart_abandon', 'swarm.serve.abandon_active_runs', ?, ?)`, created.RunID, time.Now().UTC(), time.Now().UTC()); err != nil {
@@ -105,7 +108,9 @@ func TestSQLiteStandingServiceReconcileRejectsUnknownTerminalityWithCommand(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.DB.ExecContext(ctx, `UPDATE runs SET status = 'cancelled', ended_at = ? WHERE run_id = ?`, time.Now().UTC(), created.RunID); err != nil {
+	if _, err := markRunTerminalStatusForTest(
+		ctx, store, created.RunID, string(runtimerunlifecycle.StateCancelled), nil, time.Now().UTC(),
+	); err != nil {
 		t.Fatal(err)
 	}
 	_, err = workflowStore.ReconcileStandingService(ctx, candidate)
@@ -286,6 +291,7 @@ func TestPostgresStandingServiceReplacementIsScopedAndAtomic(t *testing.T) {
 	t.Cleanup(cleanup)
 	selected := admitTestPostgresStore(t, db)
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	workflowStore.ConfigureRuntimeMutationRunner(selected)
 	workflowStore.ConfigureDeliveryLifecycleStore(selected)
 	workflowStore.ConfigurePipelineObligationStore(selected.PipelineObligations())
 	testStandingServiceReplacementIsScopedAndAtomic(t, db, workflowStore)
@@ -370,6 +376,7 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	t.Cleanup(cleanup)
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	selected := admitTestPostgresStore(t, db)
+	workflowStore.ConfigureRuntimeMutationRunner(selected)
 	workflowStore.ConfigureDeliveryLifecycleStore(selected)
 	workflowStore.ConfigurePipelineObligationStore(selected.PipelineObligations())
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")

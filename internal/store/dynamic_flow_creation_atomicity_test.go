@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"strings"
 	"testing"
 	"time"
@@ -185,19 +186,9 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	sourceFact := mustExternalStoreTestBundleSourceFact()
 	bundleHash, bundleSource := sourceFact.StorageValues()
 	if sqlite {
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-			VALUES (?, 'running', ?, ?, ?)
-		`, runID, bundleHash, bundleSource, time.Now().UTC()); err != nil {
-			t.Fatalf("seed sqlite run: %v", err)
-		}
+		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: bundleHash, BundleSource: bundleSource})
 	} else {
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-			VALUES ($1::uuid, 'running', $2, $3, now())
-		`, runID, bundleHash, bundleSource); err != nil {
-			t.Fatalf("seed postgres run: %v", err)
-		}
+		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource})
 	}
 
 	occurredAt := time.Now().UTC().Truncate(time.Microsecond)
@@ -238,7 +229,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	parent := eventtest.RunCreatingRootIngress(
+	parent := eventtest.ExistingRunRootIngress(
 		plan.CreationEvent.ParentEventID,
 		events.EventType("test.dynamic_flow.triggered"),
 		"",
@@ -246,7 +237,6 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 		[]byte(`{"name":"alpha"}`),
 		0,
 		runID,
-		"",
 		events.EventEnvelope{},
 		occurredAt.Add(-time.Second),
 	)

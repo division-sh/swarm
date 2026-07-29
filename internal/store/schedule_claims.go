@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 func (s *PostgresStore) ClaimSchedule(ctx context.Context, sc runtimepipeline.Schedule) (bool, error) {
@@ -32,8 +32,8 @@ func (s *PostgresStore) ClaimSchedule(ctx context.Context, sc runtimepipeline.Sc
 		if conn == nil {
 			delete(s.scheduleClaimKeys, key)
 		} else if strings.TrimSpace(sc.RunID) != "" {
-			if err := storerunlifecycle.RequireActive(ctx, conn, sc.RunID, storerunlifecycle.DialectPostgres); err != nil {
-				if !errors.Is(err, storerunlifecycle.ErrRunNotActive) {
+			if err := requirePostgresRunActiveQuery(ctx, conn, sc.RunID); err != nil {
+				if !errors.Is(err, runtimerunlifecycle.ErrRunNotActive) {
 					return false, err
 				}
 				if _, unlockErr := conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, key); unlockErr != nil {
@@ -80,9 +80,9 @@ func (s *PostgresStore) ClaimSchedule(ctx context.Context, sc runtimepipeline.Sc
 		return false, nil
 	}
 	if strings.TrimSpace(sc.RunID) != "" {
-		if err := storerunlifecycle.RequireActive(ctx, conn, sc.RunID, storerunlifecycle.DialectPostgres); err != nil {
+		if err := requirePostgresRunActiveQuery(ctx, conn, sc.RunID); err != nil {
 			_, _ = conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, key)
-			if errors.Is(err, storerunlifecycle.ErrRunNotActive) {
+			if errors.Is(err, runtimerunlifecycle.ErrRunNotActive) {
 				return false, nil
 			}
 			return false, err
@@ -238,7 +238,7 @@ func scheduleActiveOnConn(ctx context.Context, conn *sql.Conn, sc runtimepipelin
 			  AND COALESCE(t.fire_payload->>'__schedule_task_id', '') = $6
 			  AND t.task_type IN ('timer', 'scheduled_task', 'deadline', 'global_recurring')
 			  AND t.status = 'active'
-			  AND (t.run_id IS NULL OR run.status IN ('running', 'paused'))
+			  AND (t.run_id IS NULL OR run.status IN (`+runLifecycleActiveStateSQLValues+`))
 		)
 	`), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID)).Scan(&active)
 	if err != nil {

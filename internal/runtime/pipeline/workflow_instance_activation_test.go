@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -100,7 +102,7 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			setup: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				return NewWorkflowInstanceStore(db), testPipelineRunContext(t, db)
+				return newPostgresWorkflowInstanceStoreForTest(db), testPipelineRunContext(t, db)
 			},
 		},
 	} {
@@ -215,7 +217,7 @@ func TestWorkflowInitialMaterializationConcurrentExactReplayPostgres(t *testing.
 	db.SetMaxIdleConns(6)
 	ctx, cancel := context.WithTimeout(testPipelineRunContext(t, db), 10*time.Second)
 	defer cancel()
-	store := NewWorkflowInstanceStore(db)
+	store := newPostgresWorkflowInstanceStoreForTest(db)
 	owner := &concurrentWorkflowInitialMaterializationTestOwner{}
 	store.ConfigureWorkflowInstanceLifecycle(owner)
 	occurredAt := time.Date(2026, time.July, 28, 14, 0, 0, 123456000, time.UTC)
@@ -331,7 +333,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			setup: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				return NewWorkflowInstanceStore(db), testPipelineRunContext(t, db)
+				return newPostgresWorkflowInstanceStoreForTest(db), testPipelineRunContext(t, db)
 			},
 		},
 	} {
@@ -495,20 +497,17 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			}
 
 			nextRunID := uuid.NewString()
+			transitionWorkflowActivationRunForTest(
+				t,
+				store,
+				ctx,
+				runID,
+				runtimerunlifecycle.StateCancelled,
+			)
 			if store.isSQLite() {
-				if _, err := store.db.ExecContext(ctx, `UPDATE runs SET status = 'cancelled' WHERE run_id = ?`, runID); err != nil {
-					t.Fatalf("retire first readiness run: %v", err)
-				}
-				if _, err := store.db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, ?, ?)`, nextRunID, occurredAt.Add(time.Hour), bundleHash, bundleSource); err != nil {
-					t.Fatalf("seed successor readiness run: %v", err)
-				}
+				runlifecyclefixture.RequireSQLite(t, ctx, store.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: nextRunID, StartedAt: occurredAt.Add(time.Hour), BundleHash: bundleHash, BundleSource: bundleSource})
 			} else {
-				if _, err := store.db.ExecContext(ctx, `UPDATE runs SET status = 'cancelled' WHERE run_id = $1::uuid`, runID); err != nil {
-					t.Fatalf("retire first readiness run: %v", err)
-				}
-				if _, err := store.db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, $3)`, nextRunID, bundleHash, bundleSource); err != nil {
-					t.Fatalf("seed successor readiness run: %v", err)
-				}
+				runlifecyclefixture.RequirePostgres(t, ctx, store.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: nextRunID, BundleHash: bundleHash, BundleSource: bundleSource})
 			}
 			nextPlan := plan
 			nextPlan.RunID = nextRunID
@@ -537,20 +536,24 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if err != nil || len(items) != 1 || items[0].Plan.RunID != nextRunID {
 				t.Fatalf("active generation readiness: items=%#v err=%v", items, err)
 			}
-			statusQuery := `UPDATE runs SET status = ? WHERE run_id = ?`
-			if !store.isSQLite() {
-				statusQuery = `UPDATE runs SET status = $1 WHERE run_id = $2::uuid`
-			}
-			if _, err := store.db.ExecContext(nextContext, statusQuery, "paused", nextRunID); err != nil {
-				t.Fatalf("pause successor readiness run: %v", err)
-			}
+			transitionWorkflowActivationRunForTest(
+				t,
+				store,
+				nextContext,
+				nextRunID,
+				runtimerunlifecycle.StatePaused,
+			)
 			items, err = store.ListDynamicFlowRuntimeReadiness(nextContext)
 			if err != nil || len(items) != 1 || items[0].Plan.RunID != nextRunID {
 				t.Fatalf("paused generation readiness: items=%#v err=%v", items, err)
 			}
-			if _, err := store.db.ExecContext(nextContext, statusQuery, "cancelled", nextRunID); err != nil {
-				t.Fatalf("retire successor readiness run: %v", err)
-			}
+			transitionWorkflowActivationRunForTest(
+				t,
+				store,
+				nextContext,
+				nextRunID,
+				runtimerunlifecycle.StateCancelled,
+			)
 			if err := store.MarkDynamicFlowRuntimeTopologyReady(nextContext, nextPlan, occurredAt.Add(2*time.Hour)); err == nil {
 				t.Fatal("terminal successor accepted topology completion")
 			}
@@ -580,6 +583,33 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 				t.Fatal("changed readiness plan replay succeeded")
 			}
 		})
+	}
+}
+
+func transitionWorkflowActivationRunForTest(
+	t *testing.T,
+	store *WorkflowInstanceStore,
+	ctx context.Context,
+	runID string,
+	state runtimerunlifecycle.State,
+) {
+	t.Helper()
+	if store == nil || store.runtimeMutation == nil {
+		t.Fatal("workflow activation run transition requires runtime mutation owner")
+	}
+	if err := store.runtimeMutation.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
+		if state == runtimerunlifecycle.StateCancelled {
+			_, _, err := runtimerunlifecycle.MarkTerminal(txctx, runtimerunlifecycle.TerminalRequest{
+				RunID: runID, State: state, EndedAt: time.Now().UTC(),
+			})
+			return err
+		}
+		_, err := runtimerunlifecycle.TransitionActive(txctx, runtimerunlifecycle.ActiveTransitionRequest{
+			RunID: runID, State: state,
+		})
+		return err
+	}); err != nil {
+		t.Fatalf("transition workflow activation run %s to %s: %v", runID, state, err)
 	}
 }
 
@@ -1307,7 +1337,7 @@ opco.ceo_ready:
 	pc := &PipelineCoordinator{
 		bus:            bus,
 		db:             db,
-		workflowStore:  NewWorkflowInstanceStore(db),
+		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
 		module:         staticSemanticWorkflowModule{source: source},
@@ -1387,7 +1417,7 @@ states: [initializing, ready]
 
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	workflowStore := NewWorkflowInstanceStore(db)
+	workflowStore := newPostgresWorkflowInstanceStoreForTest(db)
 	pc := &PipelineCoordinator{
 		bus:            &recordingPipelineBus{},
 		db:             db,

@@ -963,13 +963,9 @@ func seedDurableReplyConformanceRun(t *testing.T, ctx context.Context, backend d
 	t.Helper()
 	switch typed := backend.(type) {
 	case *store.PostgresStore:
-		if _, err := typed.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-			t.Fatalf("seed postgres reply conformance run: %v", err)
-		}
+		storetest.RequirePostgresRun(t, ctx, typed.DB, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	case *store.SQLiteRuntimeStore:
-		if _, err := typed.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-			t.Fatalf("seed sqlite reply conformance run: %v", err)
-		}
+		storetest.RequireSQLiteRun(t, ctx, typed.DB, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	default:
 		t.Fatalf("unsupported reply conformance backend %T", backend)
 	}
@@ -986,7 +982,7 @@ func replyConformanceEventForRun(eventType, id, runID, flowID, flowInstance stri
 		eventType = flowInstance + "/" + strings.TrimPrefix(eventType, flowID+"/")
 	}
 	raw, _ := json.Marshal(payload)
-	return eventtest.RunCreatingRootIngress(
+	return eventtest.ExistingRunRootIngress(
 		id,
 		events.EventType(eventType),
 		flowID,
@@ -994,7 +990,6 @@ func replyConformanceEventForRun(eventType, id, runID, flowID, flowInstance stri
 		raw,
 		0,
 		runID,
-		"",
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
 			FlowID:       flowID,
 			FlowInstance: flowInstance,

@@ -166,7 +166,8 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgres bool,
 			if _, err := tx.ExecContext(ctx, `DELETE FROM runtime_effect_budget_reservations WHERE attempt_id=$1::uuid`, attempt.AttemptID); err != nil {
 				return runtimeeffects.RecoverySummary{}, err
 			}
-			if err := settleExternalAttemptPostgres(ctx, tx, settlement.Settlement); err != nil {
+			_, err := settleExternalAttemptPostgres(ctx, tx, settlement.Settlement)
+			if err != nil {
 				return runtimeeffects.RecoverySummary{}, err
 			}
 		} else {
@@ -181,7 +182,8 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgres bool,
 			if _, err := tx.ExecContext(ctx, `DELETE FROM runtime_effect_budget_reservations WHERE attempt_id=?`, attempt.AttemptID); err != nil {
 				return runtimeeffects.RecoverySummary{}, err
 			}
-			if err := settleExternalAttemptSQLiteTx(ctx, tx, settlement.Settlement); err != nil {
+			_, err := settleExternalAttemptSQLiteTx(ctx, tx, settlement.Settlement)
+			if err != nil {
 				return runtimeeffects.RecoverySummary{}, err
 			}
 		}

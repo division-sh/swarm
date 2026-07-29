@@ -15,7 +15,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -385,13 +385,17 @@ func seedRunDispositionParent(t *testing.T, fixture authorActivityReceiptFixture
 
 func setRunDispositionFixtureStatus(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context, runID, status string) {
 	t.Helper()
-	query := `UPDATE runs SET status = ?, ended_at = ? WHERE run_id = ?`
-	args := []any{status, time.Date(2026, 7, 19, 19, 0, 0, 0, time.UTC), runID}
-	if fixture.dialect == "postgres" {
-		query = `UPDATE runs SET status = $2, ended_at = $3 WHERE run_id = $1::uuid`
-		args = []any{runID, status, time.Date(2026, 7, 19, 19, 0, 0, 0, time.UTC)}
+	if status != string(storerunlifecycle.StateCompleted) {
+		t.Fatalf("unsupported run disposition terminal fixture state %q", status)
 	}
-	if _, err := fixture.db.ExecContext(ctx, query, args...); err != nil {
+	if _, err := markRunTerminalStatusForTest(
+		ctx,
+		fixture.store,
+		runID,
+		string(storerunlifecycle.StateCancelled),
+		nil,
+		time.Date(2026, 7, 19, 19, 0, 0, 0, time.UTC),
+	); err != nil {
 		t.Fatalf("set run %s status %s: %v", runID, status, err)
 	}
 }

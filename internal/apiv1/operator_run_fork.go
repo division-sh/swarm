@@ -10,21 +10,17 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/runbundle"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
 const runForkIdempotencyTTL = 24 * time.Hour
 
 func activeRunStatus(raw string) bool {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "running", "paused":
-		return true
-	default:
-		return false
-	}
+	state, err := runtimerunlifecycle.ParseState(raw)
+	return err == nil && state.Active()
 }
 
 type RunForkAvailabilityStore interface {
@@ -225,13 +221,11 @@ func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, 
 }
 
 func validateRunForkExecutionResult(result RunForkExecutionResult) error {
-	status := strings.ToLower(strings.TrimSpace(result.SourceRunStatus))
-	switch status {
-	case "running", "paused", "completed", "failed", "cancelled", store.RunForkSourceFrozenStatus:
-	default:
+	status, err := runtimerunlifecycle.ParseState(result.SourceRunStatus)
+	if err != nil {
 		return fmt.Errorf("run.fork result has invalid source_run_status %q", result.SourceRunStatus)
 	}
-	if result.SourceFrozen != (status == store.RunForkSourceFrozenStatus) {
+	if result.SourceFrozen != (status == runtimerunlifecycle.StateForked) {
 		return fmt.Errorf("run.fork result source_frozen=%t contradicts source_run_status %q", result.SourceFrozen, result.SourceRunStatus)
 	}
 	return nil
@@ -348,11 +342,11 @@ func runForkError(sourceRunID, forkEventID string, err error) error {
 			"field":  "confirm_source_freeze",
 			"reason": "must be true when the selected fork freezes a running or paused source",
 		})
-	case errors.Is(err, storerunlifecycle.ErrRunNotActive):
+	case errors.Is(err, runtimerunlifecycle.ErrRunNotActive):
 		details := map[string]any{"run_id": strings.TrimSpace(sourceRunID)}
-		var inactive *storerunlifecycle.RunNotActiveError
+		var inactive *runtimerunlifecycle.RunNotActiveError
 		if errors.As(err, &inactive) {
-			details["current_status"] = strings.TrimSpace(inactive.Status)
+			details["current_status"] = string(inactive.State)
 		}
 		return NewApplicationError(RunAlreadyTerminalCode, false, details)
 	case strings.Contains(msg, UnsupportedBundleHashForkCode):

@@ -26,7 +26,7 @@ func (s *PostgresStore) CreateHumanTaskCard(ctx context.Context, card decisionca
 		}
 		return insertHumanTaskCard(ctx, tx, card, continuation, true)
 	}
-	return runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
+	return runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx) error {
 		if err := requireActiveDecisionRun(txctx, tx, card.RunID, true); err != nil {
 			return err
 		}
@@ -120,7 +120,14 @@ func (s *PostgresStore) CompleteHumanTaskOutcome(ctx context.Context, cardID, ev
 	if !ok || tx == nil {
 		return decisioncard.HumanTaskContinuation{}, fmt.Errorf("human-task outcome completion requires an active pipeline transaction")
 	}
-	return completeHumanTaskOutcome(ctx, tx, cardID, eventID, at, true)
+	continuation, changed, err := completeHumanTaskOutcome(ctx, tx, cardID, eventID, at, true)
+	if err != nil || !changed {
+		return continuation, err
+	}
+	if _, err := s.requestCompletionCandidateTx(ctx, tx, continuation.RunID, nil); err != nil {
+		return decisioncard.HumanTaskContinuation{}, err
+	}
+	return continuation, nil
 }
 
 func (s *SQLiteRuntimeStore) CompleteHumanTaskOutcome(ctx context.Context, cardID, eventID string, at time.Time) (decisioncard.HumanTaskContinuation, error) {
@@ -128,28 +135,35 @@ func (s *SQLiteRuntimeStore) CompleteHumanTaskOutcome(ctx context.Context, cardI
 	if !ok || tx == nil {
 		return decisioncard.HumanTaskContinuation{}, fmt.Errorf("human-task outcome completion requires an active pipeline transaction")
 	}
-	return completeHumanTaskOutcome(ctx, tx, cardID, eventID, at, false)
+	continuation, changed, err := completeHumanTaskOutcome(ctx, tx, cardID, eventID, at, false)
+	if err != nil || !changed {
+		return continuation, err
+	}
+	if _, err := s.requestCompletionCandidateTx(ctx, tx, continuation.RunID, nil); err != nil {
+		return decisioncard.HumanTaskContinuation{}, err
+	}
+	return continuation, nil
 }
 
-func completeHumanTaskOutcome(ctx context.Context, tx *sql.Tx, cardID, eventID string, at time.Time, postgres bool) (decisioncard.HumanTaskContinuation, error) {
+func completeHumanTaskOutcome(ctx context.Context, tx *sql.Tx, cardID, eventID string, at time.Time, postgres bool) (decisioncard.HumanTaskContinuation, bool, error) {
 	at = decisioncard.CanonicalTimestamp(at)
 	if at.IsZero() {
-		return decisioncard.HumanTaskContinuation{}, fmt.Errorf("human-task outcome completion requires an authoritative timestamp")
+		return decisioncard.HumanTaskContinuation{}, false, fmt.Errorf("human-task outcome completion requires an authoritative timestamp")
 	}
 	if err := requireActiveDecisionCardRun(ctx, tx, cardID, postgres); err != nil {
-		return decisioncard.HumanTaskContinuation{}, err
+		return decisioncard.HumanTaskContinuation{}, false, err
 	}
 	card, err := loadDecisionCard(ctx, tx, cardID, postgres, true)
 	if err != nil {
-		return decisioncard.HumanTaskContinuation{}, err
+		return decisioncard.HumanTaskContinuation{}, false, err
 	}
 	current, err := loadHumanTaskContinuation(ctx, tx, cardID, postgres, true)
 	if err != nil {
-		return decisioncard.HumanTaskContinuation{}, err
+		return decisioncard.HumanTaskContinuation{}, false, err
 	}
 	eventID = strings.TrimSpace(eventID)
 	if current.OutcomeEventID != eventID {
-		return decisioncard.HumanTaskContinuation{}, fmt.Errorf("human-task continuation does not authorize outcome %s", eventID)
+		return decisioncard.HumanTaskContinuation{}, false, fmt.Errorf("human-task continuation does not authorize outcome %s", eventID)
 	}
 	eventName := ""
 	switch {
@@ -160,19 +174,19 @@ func completeHumanTaskOutcome(ctx context.Context, tx *sql.Tx, cardID, eventID s
 	case card.Status == decisioncard.StatusExpired && current.State != decisioncard.HumanTaskContinuationDecisionCommitted:
 		eventName = "human_task.expired"
 	default:
-		return decisioncard.HumanTaskContinuation{}, fmt.Errorf("human-task card does not authorize outcome %s", eventID)
+		return decisioncard.HumanTaskContinuation{}, false, fmt.Errorf("human-task card does not authorize outcome %s", eventID)
 	}
 	if err := requireDecisionCardOutcomeEvent(ctx, tx, decisionCardOutcomeEvent{
 		eventID: decisioncard.HumanTaskOutcomeEventID(card.CardID, eventID), runID: current.RunID,
 		eventName: eventName, sourceEventID: eventID,
 	}, postgres); err != nil {
-		return decisioncard.HumanTaskContinuation{}, err
+		return decisioncard.HumanTaskContinuation{}, false, err
 	}
 	if current.State == decisioncard.HumanTaskContinuationOutcomeDispatched {
-		return current, nil
+		return current, false, nil
 	}
 	if current.State != decisioncard.HumanTaskContinuationDecisionCommitted && current.State != decisioncard.HumanTaskContinuationExpired {
-		return decisioncard.HumanTaskContinuation{}, fmt.Errorf("human-task continuation does not authorize outcome %s", eventID)
+		return decisioncard.HumanTaskContinuation{}, false, fmt.Errorf("human-task continuation does not authorize outcome %s", eventID)
 	}
 	query := `UPDATE human_task_continuations SET state = 'outcome_dispatched', updated_at = ? WHERE card_id = ? AND state IN ('decision_committed', 'expired') AND outcome_event_id = ?`
 	if postgres {
@@ -180,14 +194,14 @@ func completeHumanTaskOutcome(ctx context.Context, tx *sql.Tx, cardID, eventID s
 	}
 	result, err := tx.ExecContext(ctx, query, at, strings.TrimSpace(cardID), eventID)
 	if err != nil {
-		return decisioncard.HumanTaskContinuation{}, err
+		return decisioncard.HumanTaskContinuation{}, false, err
 	}
 	if rows, _ := result.RowsAffected(); rows != 1 {
-		return decisioncard.HumanTaskContinuation{}, fmt.Errorf("human-task outcome dispatch lost authority")
+		return decisioncard.HumanTaskContinuation{}, false, fmt.Errorf("human-task outcome dispatch lost authority")
 	}
 	current.State = decisioncard.HumanTaskContinuationOutcomeDispatched
 	current.UpdatedAt = at
-	return current, nil
+	return current, true, nil
 }
 
 func (s *PostgresStore) ExpireHumanTaskCardsInMutation(ctx context.Context, now time.Time, limit int) ([]events.Event, error) {
@@ -215,10 +229,10 @@ func expireHumanTaskCards(ctx context.Context, tx *sql.Tx, now time.Time, limit 
 		limit = 200
 	}
 	query := `SELECT h.card_id FROM human_task_continuations h JOIN decision_cards c ON c.card_id = h.card_id JOIN runs run ON run.run_id = h.run_id
-		WHERE h.state = 'pending' AND c.status = 'pending' AND run.status IN ('running', 'paused') AND h.deadline_at <= ? ORDER BY h.deadline_at, h.card_id LIMIT ?`
+		WHERE h.state = 'pending' AND c.status = 'pending' AND run.status IN (` + runLifecycleActiveStateSQLValues + `) AND h.deadline_at <= ? ORDER BY h.deadline_at, h.card_id LIMIT ?`
 	if postgres {
 		query = `SELECT h.card_id FROM human_task_continuations h JOIN decision_cards c ON c.card_id = h.card_id JOIN runs run ON run.run_id = h.run_id
-			WHERE h.state = 'pending' AND c.status = 'pending' AND run.status IN ('running', 'paused') AND h.deadline_at <= $1 ORDER BY h.deadline_at, h.card_id LIMIT $2 FOR UPDATE OF h, c, run SKIP LOCKED`
+			WHERE h.state = 'pending' AND c.status = 'pending' AND run.status IN (` + runLifecycleActiveStateSQLValues + `) AND h.deadline_at <= $1 ORDER BY h.deadline_at, h.card_id LIMIT $2 FOR UPDATE OF h, c, run SKIP LOCKED`
 	}
 	rows, err := tx.QueryContext(ctx, query, now, limit)
 	if err != nil {

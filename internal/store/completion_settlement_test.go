@@ -300,9 +300,7 @@ func newCompletionSettlementFixture(t *testing.T, store completionSettlementTest
 	flowInstance := "global"
 	leaseHolder := "completion-worker"
 	if sqlite {
-		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at, bundle_hash, bundle_source) VALUES (?,'running',?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, now); err != nil {
-			t.Fatalf("seed completion run: %v", err)
-		}
+		requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,flow_instance,role,model,llm_backend,memory_enabled,memory_source,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at) VALUES (?,?,'worker','regular','claude_cli',1,'authored','active',1,1,'running',?)`, agentID, flowInstance, now); err != nil {
 			t.Fatalf("seed completion agent: %v", err)
 		}
@@ -310,9 +308,7 @@ func newCompletionSettlementFixture(t *testing.T, store completionSettlementTest
 			t.Fatalf("seed completion session: %v", err)
 		}
 	} else {
-		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at, bundle_hash, bundle_source) VALUES ($1::uuid,'running',$2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, now); err != nil {
-			t.Fatalf("seed completion run: %v", err)
-		}
+		requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,flow_instance,role,model,llm_backend,memory_enabled,memory_source,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at) VALUES ($1,$2,'worker','regular','claude_cli',TRUE,'authored','active',1,1,'running',$3)`, agentID, flowInstance, now); err != nil {
 			t.Fatalf("seed completion agent: %v", err)
 		}

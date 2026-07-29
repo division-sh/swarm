@@ -13,6 +13,11 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTempl
 	const runID = "11111111-1111-4111-8111-111111111111"
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	source, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	if !ok {
+		t.Fatal("test context is missing bundle source fact")
+	}
+	_, bundleSource := source.StorageValues()
 
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
@@ -23,12 +28,10 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTempl
 	`); err != nil {
 		t.Fatalf("seed flow_instances: %v", err)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'), ('44444444-4444-4444-8444-444444444444', 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID); err != nil {
-		t.Fatalf("seed runs: %v", err)
-	}
+	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
+		RunID: "44444444-4444-4444-8444-444444444444",
+	})
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO flow_instance_runtime_readiness (run_id, instance_id, plan, created_at, updated_at)
 		VALUES (?, 'component-scaffold/active', '{"workflow_version":"1.0.0"}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
@@ -64,8 +67,8 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTempl
 	if got.FlowTemplate != "component-scaffold" {
 		t.Fatalf("FlowTemplate = %q, want component-scaffold", got.FlowTemplate)
 	}
-	if got.BundleHash != "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" ||
-		got.BundleSource != "ephemeral" ||
+	if got.BundleHash != source.BundleHash() ||
+		got.BundleSource != bundleSource ||
 		got.WorkflowVersion != "1.0.0" {
 		t.Fatalf("semantic source = %#v, want exact run bundle and workflow version", got)
 	}
@@ -91,18 +94,13 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsReadsPipelineTransac
 	const runID = "11111111-1111-4111-8111-111111111111"
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 
 	tx, err := sqliteStore.DB.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID); err != nil {
-		t.Fatalf("seed run in tx: %v", err)
-	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 		VALUES ('component-scaffold/uncommitted', 'component-scaffold', 'template', '{}', 'active', CURRENT_TIMESTAMP)

@@ -13,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -117,7 +116,7 @@ func (s *PostgresStore) SaveEntityField(ctx context.Context, update runtimetools
 	}
 	var revision int
 	err = s.runAuthorActivityMutation(ctx, "postgres entity field update", func(txctx context.Context, tx *sql.Tx) error {
-		if err := storerunlifecycle.RequireActive(txctx, tx, runID, storerunlifecycle.DialectPostgres); err != nil {
+		if err := requirePostgresRunActive(txctx, tx, runID); err != nil {
 			return err
 		}
 		pathArray := pq.Array(segments)
@@ -171,7 +170,7 @@ func (s *SQLiteRuntimeStore) SaveEntityField(ctx context.Context, update runtime
 	}
 	var revision int
 	if err := s.runAuthorActivityMutation(ctx, "sqlite entity field update", func(txctx context.Context, tx *sql.Tx) error {
-		if err := storerunlifecycle.RequireActive(txctx, tx, runID, storerunlifecycle.DialectSQLite); err != nil {
+		if err := requireSQLiteRunActive(txctx, tx, runID); err != nil {
 			return err
 		}
 		var fieldsRaw any
@@ -237,7 +236,7 @@ func (s *PostgresStore) CreateEntity(ctx context.Context, rec runtimetools.Entit
 		return err
 	}
 	return s.runAuthorActivityMutation(ctx, "postgres entity create", func(txctx context.Context, tx *sql.Tx) error {
-		if err := storerunlifecycle.RequireActive(txctx, tx, rec.RunID, storerunlifecycle.DialectPostgres); err != nil {
+		if err := requirePostgresRunActive(txctx, tx, rec.RunID); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(txctx, `
@@ -273,7 +272,7 @@ func (s *SQLiteRuntimeStore) CreateEntity(ctx context.Context, rec runtimetools.
 		return err
 	}
 	return s.runAuthorActivityMutation(ctx, "sqlite entity create", func(txctx context.Context, tx *sql.Tx) error {
-		if err := storerunlifecycle.RequireActive(txctx, tx, rec.RunID, storerunlifecycle.DialectSQLite); err != nil {
+		if err := requireSQLiteRunActive(txctx, tx, rec.RunID); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(txctx, `

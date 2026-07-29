@@ -49,9 +49,7 @@ func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.
 	ctx := storeTestWorkContext(t, testAuthorActivityContext())
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, "INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')", runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	bus, err := newStoreTestEventBus(t, pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)

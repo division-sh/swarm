@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -30,10 +31,11 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -149,9 +151,9 @@ func TestCommittedPublishDispatchDoesNotExposePublicationClaimConnection(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	event := eventtest.RunCreatingRootIngress(
+	event := eventtest.ExistingRunRootIngress(
 		uuid.NewString(), events.EventType("task.requested"), "provider", "", []byte(`{}`), 0,
-		eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC(),
+		eventBusTestRunID, events.EventEnvelope{}, time.Now().UTC(),
 	)
 	if err := bus.Publish(ctx, event); err != nil {
 		t.Fatal(err)
@@ -164,12 +166,11 @@ func TestCommittedPublishDispatchDoesNotExposePublicationClaimConnection(t *test
 func eventBusTestRunContext(t *testing.T, db *sql.DB) context.Context {
 	t.Helper()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), eventBusTestRunID)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, $3)
-		ON CONFLICT (run_id) DO NOTHING
-	`, eventBusTestRunID, authorActivityTestBundleHash, authorActivityTestBundleSource); err != nil {
-		t.Fatalf("seed event bus test run: %v", err)
+	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	if err := storetest.EnsureEphemeralRun(
+		ctx, selected, eventBusTestRunID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC),
+	); err != nil {
+		t.Fatalf("create event bus test run through lifecycle owner: %v", err)
 	}
 	return ctx
 }
@@ -179,10 +180,12 @@ func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerPostgres(t *tes
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
+	if err := storetest.EnsureEphemeralRun(ctx, pg, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("create run through lifecycle owner: %v", err)
 	}
-	if _, err := pg.MarkRunTerminal(ctx, runID, "cancelled", nil, time.Now().UTC()); err != nil {
+	if _, _, err := storetest.TerminalizeRun(ctx, pg, runtimerunlifecycle.TerminalRequest{
+		RunID: runID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
+	}); err != nil {
 		t.Fatalf("mark run cancelled: %v", err)
 	}
 	assertEventBusTerminalRunRefusal(t, pg, runID, "cancelled", func(eventID string) (string, int, int, error) {
@@ -205,10 +208,12 @@ func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerSQLite(t *testi
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, time.Now().UTC()); err != nil {
-		t.Fatalf("seed run: %v", err)
+	if err := storetest.EnsureEphemeralRun(ctx, sqliteStore, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("create run through lifecycle owner: %v", err)
 	}
-	if _, err := sqliteStore.MarkRunTerminal(ctx, runID, "cancelled", nil, time.Now().UTC()); err != nil {
+	if _, _, err := storetest.TerminalizeRun(ctx, sqliteStore, runtimerunlifecycle.TerminalRequest{
+		RunID: runID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
+	}); err != nil {
 		t.Fatalf("mark run cancelled: %v", err)
 	}
 	assertEventBusTerminalRunRefusal(t, sqliteStore, runID, "cancelled", func(eventID string) (string, int, int, error) {
@@ -243,8 +248,8 @@ func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
 	}
 	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
+	if err := storetest.EnsureEphemeralRun(ctx, pg, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("create run through lifecycle owner: %v", err)
 	}
 	evt := exactDuplicateEventBusEvent(runID)
 	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-original"}
@@ -277,7 +282,9 @@ func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
 		if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond); err != nil {
 			return err
 		}
-		_, err = pg.MarkRunTerminal(ctx, runID, "cancelled", nil, time.Now().UTC())
+		_, _, err = storetest.TerminalizeRun(ctx, pg, runtimerunlifecycle.TerminalRequest{
+			RunID: runID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
+		})
 		return err
 	})
 }
@@ -289,8 +296,8 @@ func TestEventBusExactDuplicateIsOperationNoOpSQLite(t *testing.T) {
 	}
 	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, time.Now().UTC()); err != nil {
-		t.Fatalf("seed run: %v", err)
+	if err := storetest.EnsureEphemeralRun(ctx, sqliteStore, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("create run through lifecycle owner: %v", err)
 	}
 	evt := exactDuplicateEventBusEvent(runID)
 	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-original"}
@@ -323,7 +330,9 @@ func TestEventBusExactDuplicateIsOperationNoOpSQLite(t *testing.T) {
 		if _, err := sqliteStore.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond); err != nil {
 			return err
 		}
-		_, err = sqliteStore.MarkRunTerminal(ctx, runID, "cancelled", nil, time.Now().UTC())
+		_, _, err = storetest.TerminalizeRun(ctx, sqliteStore, runtimerunlifecycle.TerminalRequest{
+			RunID: runID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
+		})
 		return err
 	})
 }
@@ -381,9 +390,9 @@ func assertEventBusExactDuplicateIsOperationNoOp(
 }
 
 func exactDuplicateEventBusEvent(runID string) events.Event {
-	return eventtest.RunCreatingRootIngress(
+	return eventtest.ExistingRunRootIngress(
 		uuid.NewString(), events.EventType("custom.exact_duplicate_noop"), "api.v1", "", []byte(`{"attempt":"duplicate"}`),
-		0, runID, "", events.EventEnvelope{}, time.Now().UTC().Truncate(time.Microsecond),
+		0, runID, events.EventEnvelope{}, time.Now().UTC().Truncate(time.Microsecond),
 	)
 }
 
@@ -625,7 +634,7 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	}
 	defer runtimebustest.Unsubscribe(eb, agentID)
 
-	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("producer/account.ready"), "producer", "", json.RawMessage(`{"account_id":"acct-agent"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	evt := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType("producer/account.ready"), "producer", "", json.RawMessage(`{"account_id":"acct-agent"}`), 0, eventBusTestRunID, events.EventEnvelope{}, time.Now().UTC())
 	plan, err := eb.CheckPublishRecipientPlan(ctx, evt)
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
@@ -1116,7 +1125,7 @@ func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *te
 	ch := runtimebustest.Subscribe(t, eb, agentID, events.EventType("custom.receipt_failure"))
 	defer runtimebustest.Unsubscribe(eb, agentID)
 
-	err = eb.Publish(ctx, eventtest.RunCreatingRootIngress(
+	err = eb.Publish(ctx, eventtest.ExistingRunRootIngress(
 		eventID,
 		events.EventType("custom.receipt_failure"),
 		"api.v1",
@@ -1124,7 +1133,6 @@ func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *te
 		[]byte(`{"entity_id":"21000000-0000-0000-0000-000000000012"}`),
 		0,
 		eventBusTestRunID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "21000000-0000-0000-0000-000000000012"),
 		time.Now().UTC(),
 	))
@@ -1160,65 +1168,6 @@ func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *te
 	}
 }
 
-func TestEventBusPublishTransactionalPostCommitCompletionFailureIsRecoverable(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	ctx := eventBusTestRunContext(t, db)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	failing := &failNormalRunCompletionStore{
-		PostgresStore: pg,
-		err:           errors.New("simulated normal-run completion failure"),
-	}
-	logger := &recordingLoggerHook{}
-	eb, err := newScopedTestEventBus(failing, runtimebus.EventBusOptions{Logger: logger})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-
-	agentID := "agent-post-commit-completion"
-	eventID := "21000000-0000-0000-0000-000000000021"
-	seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
-	ch := runtimebustest.Subscribe(t, eb, agentID, events.EventType("custom.completion_failure"))
-	defer runtimebustest.Unsubscribe(eb, agentID)
-
-	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
-		eventID,
-		events.EventType("custom.completion_failure"),
-		"api.v1",
-		"",
-		[]byte(`{"entity_id":"21000000-0000-0000-0000-000000000022"}`),
-		0,
-		eventBusTestRunID,
-		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "21000000-0000-0000-0000-000000000022"),
-		time.Now().UTC(),
-	)); err != nil {
-		t.Fatalf("Publish with post-commit completion failure: %v", err)
-	}
-	ok, err := pg.EventExists(ctx, eventID)
-	if err != nil {
-		t.Fatalf("EventExists: %v", err)
-	}
-	if !ok {
-		t.Fatalf("event %s was not persisted", eventID)
-	}
-	if got := countEventDeliveriesForEvent(t, ctx, db, eventID); got != 1 {
-		t.Fatalf("event deliveries = %d, want 1", got)
-	}
-	outcome, failure := loadPipelineReceiptOutcomeAndFailure(t, ctx, db, eventID)
-	if outcome != "success" || failure != nil {
-		t.Fatalf("pipeline receipt outcome=%q failure=%#v, want successful dispatch acknowledgement", outcome, failure)
-	}
-	if !hasRuntimeLogAction(logger.entries, "publish_post_commit_convergence_failed") {
-		t.Fatalf("logger entries = %#v, want publish_post_commit_convergence_failed", logger.entries)
-	}
-	got := requireBusEvent(t, ch, "post-commit completion failure delivery")
-	if got.ID() != eventID {
-		t.Fatalf("delivered event = %s, want %s", got.ID(), eventID)
-	}
-}
-
 type failStandalonePipelineReceiptOnceStore struct {
 	*store.PostgresStore
 	obligations runtimepipelineobligation.Store
@@ -1240,15 +1189,6 @@ func (s *failPipelineSettlementOnceStore) Settle(ctx context.Context, claim runt
 		return err
 	}
 	return s.Store.Settle(ctx, claim, disposition)
-}
-
-type failNormalRunCompletionStore struct {
-	*store.PostgresStore
-	err error
-}
-
-func (s *failNormalRunCompletionStore) ConvergeNormalRunCompletion(context.Context, string, []string, map[string][]string) error {
-	return s.err
 }
 
 func loadPipelineReceiptOutcomeAndFailure(t *testing.T, ctx context.Context, db *sql.DB, eventID string) (string, *runtimefailures.Envelope) {
@@ -1981,7 +1921,7 @@ func TestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes(t *
 
 	publishDone := make(chan error, 1)
 	go func() {
-		publishDone <- eb.PublishAcknowledged(ctx, eventtest.RunCreatingRootIngress(
+		publishDone <- eb.PublishAcknowledged(ctx, eventtest.ExistingRunRootIngress(
 			eventID,
 			events.EventType("task.completed"),
 			"api.v1",
@@ -1989,7 +1929,6 @@ func TestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes(t *
 			[]byte(`{"entity_id":"11111111-1111-1111-1111-111111111137"}`),
 			0,
 			eventBusTestRunID,
-			"",
 			events.EventEnvelope{EntityID: "11111111-1111-1111-1111-111111111137"},
 			time.Now().UTC()))
 	}()
@@ -2065,10 +2004,12 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			foregroundStore, siblingStore, db, runPlaceholder := tc.open(t)
+			foregroundStore, siblingStore, db, _ := tc.open(t)
 			runID, eventID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-			if _, err := db.ExecContext(context.Background(), "INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ("+runPlaceholder+", 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')", runID); err != nil {
-				t.Fatalf("insert run: %v", err)
+			if tc.name == "sqlite" {
+				runlifecyclefixture.RequireSQLite(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
+			} else {
+				runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
 			}
 			started := make(chan struct{}, 1)
 			release := make(chan struct{})
@@ -2084,8 +2025,8 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 			}
 			publishDone := make(chan error, 1)
 			go func() {
-				publishDone <- foreground.PublishAcknowledged(context.Background(), eventtest.RunCreatingRootIngress(
-					eventID, events.EventType("custom.shared_claim"), "test", "", []byte(`{}`), 0, runID, "",
+				publishDone <- foreground.PublishAcknowledged(context.Background(), eventtest.ExistingRunRootIngress(
+					eventID, events.EventType("custom.shared_claim"), "test", "", []byte(`{}`), 0, runID,
 					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()))
 			}()
 			requireSignalBefore(t, started, 5*time.Second, "foreground dispatch start")
@@ -2183,15 +2124,13 @@ func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing
 			for i := 0; i < poolSize; i++ {
 				eventIDs[i] = uuid.NewString()
 				runIDs[i] = uuid.NewString()
-				if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runIDs[i]); err != nil {
-					t.Fatalf("insert run: %v", err)
-				}
+				storetest.RequirePostgresRun(t, context.Background(), db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runIDs[i]})
 				eventID := eventIDs[i]
 				runID := runIDs[i]
 				go func() {
 					<-start
-					evt := eventtest.RunCreatingRootIngress(
-						eventID, events.EventType("custom.pool_saturation"), "test", "", []byte(`{}`), 0, runID, "",
+					evt := eventtest.ExistingRunRootIngress(
+						eventID, events.EventType("custom.pool_saturation"), "test", "", []byte(`{}`), 0, runID,
 						events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString()), time.Now().UTC(),
 					)
 					switch form {
@@ -2247,12 +2186,7 @@ func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
 			decisionRoute := surface == "decision_periodic"
 			for i := 0; i < poolSize; i++ {
 				runIDs[i] = uuid.NewString()
-				if _, err := db.ExecContext(context.Background(), `
-					INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-					VALUES ($1::uuid, 'running', $2, $3)
-				`, runIDs[i], authorActivityTestBundleHash, authorActivityTestBundleSource); err != nil {
-					t.Fatalf("insert run: %v", err)
-				}
+				runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runIDs[i], BundleHash: authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource})
 				eventIDs[i] = seedReplayPoolEvent(t, seedStore, runIDs[i], decisionRoute)
 			}
 			db.SetMaxOpenConns(poolSize)
@@ -2361,7 +2295,7 @@ func seedReplayPoolEvent(t *testing.T, selected *store.PostgresStore, runID stri
 		eventType = events.EventType("mailbox.card_decided")
 		payload = []byte(`{"card_id":"` + card.CardID + `"}`)
 	}
-	evt := eventtest.RunCreatingRootIngress(eventID, eventType, "test", "", payload, 0, runID, "",
+	evt := eventtest.ExistingRunRootIngress(eventID, eventType, "test", "", payload, 0, runID,
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
 	storetest.CommitSemanticEventWithRoutes(t, testAuthorActivityContext(context.Background()), selected, evt, nil, runtimepipelineobligation.ScopeSubscribed)
 	return eventID
@@ -2431,7 +2365,7 @@ func TestEventBusPublishTransactional_RunsInterceptorsAfterCommit(t *testing.T) 
 	}
 	ch := runtimebustest.Subscribe(t, eb, agentID, events.EventType("task.completed"))
 	defer runtimebustest.Unsubscribe(eb, agentID)
-	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
+	if err := eb.Publish(ctx, eventtest.ExistingRunRootIngress(
 		eventID,
 		events.EventType("task.completed"),
 		"api.v1",
@@ -2439,7 +2373,6 @@ func TestEventBusPublishTransactional_RunsInterceptorsAfterCommit(t *testing.T) 
 		[]byte(`{"entity_id":"11111111-1111-1111-1111-111111111114"}`),
 		0,
 		eventBusTestRunID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-1111-1111-111111111114"),
 		time.Now().UTC(),
 	)); err != nil {
@@ -2523,7 +2456,7 @@ func TestEventBusPublishTransactional_ReturnsPostCommitInterceptorErrorAndRecord
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	err = eb.Publish(ctx, eventtest.RunCreatingRootIngress(
+	err = eb.Publish(ctx, eventtest.ExistingRunRootIngress(
 		eventID,
 		events.EventType("task.failed"),
 		"",
@@ -2531,7 +2464,6 @@ func TestEventBusPublishTransactional_ReturnsPostCommitInterceptorErrorAndRecord
 		[]byte(`{"entity_id":"11111111-1111-1111-1111-111111111114"}`),
 		0,
 		eventBusTestRunID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-1111-1111-111111111114"),
 		time.Now().UTC(),
 	))
@@ -2903,6 +2835,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersis
 			if err := eb.Publish(ctx, tc.event(tc.eventID, tc.eventType)); err != nil {
 				t.Fatalf("Publish(%s): %v", tc.eventType, err)
 			}
+			executeStandaloneCompletionCandidate(t, ctx, db, pg, tc.eventID)
 
 			got := requireBusEvent(t, internal, "standalone platform event internal delivery")
 			if got.ID() != tc.eventID {
@@ -3009,9 +2942,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 			if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
 				t.Fatalf("SettleSuccess(%s): %v", tc.eventType, err)
 			}
-			if err := eb.ConvergeDeliveryRunCompletion(ctx, got); err != nil {
-				t.Fatalf("ConvergeDeliveryRunCompletion(%s): %v", tc.eventType, err)
-			}
+			executeStandaloneCompletionCandidate(t, ctx, db, pg, tc.eventID)
 
 			deliveryStatus, runStatus := loadAgentDeliveryForEvent(t, ctx, db, tc.eventID, agentID)
 			if deliveryStatus != "delivered" {
@@ -3021,6 +2952,26 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 				t.Fatalf("run status for %s = %q, want completed", tc.eventType, runStatus)
 			}
 		})
+	}
+}
+
+func executeStandaloneCompletionCandidate(t *testing.T, ctx context.Context, db *sql.DB, pg *store.PostgresStore, eventID string) {
+	t.Helper()
+	var candidate runtimerunlifecycle.Candidate
+	if err := db.QueryRowContext(ctx, `
+		SELECT r.run_id::text, r.bundle_hash, r.completion_revision, r.completion_due_at
+		FROM runs r
+		JOIN events e ON e.run_id = r.run_id
+		WHERE e.event_id = $1::uuid
+	`, eventID).Scan(&candidate.RunID, &candidate.BundleHash, &candidate.Revision, &candidate.DueAt); err != nil {
+		t.Fatalf("load standalone completion candidate: %v", err)
+	}
+	result, err := pg.ExecuteCompletionCandidate(ctx, candidate, runtimerunlifecycle.TerminalCatalog{})
+	if err != nil {
+		t.Fatalf("execute standalone completion candidate: %v", err)
+	}
+	if result.Outcome != runtimerunlifecycle.OutcomeTerminallyEligible {
+		t.Fatalf("standalone completion outcome = %s, want %s", result.Outcome, runtimerunlifecycle.OutcomeTerminallyEligible)
 	}
 }
 
@@ -3075,7 +3026,7 @@ func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
 	}
 
 	eventID := "21000000-0000-0000-0000-000000000001"
-	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
+	if err := eb.Publish(ctx, eventtest.ExistingRunRootIngress(
 		eventID,
 		eventType,
 		"api.v1",
@@ -3083,7 +3034,6 @@ func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
 		[]byte(`{"entity_id":"21000000-0000-0000-0000-000000000002"}`),
 		0,
 		eventBusTestRunID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "21000000-0000-0000-0000-000000000002"),
 		time.Now().UTC(),
 	)); err != nil {
@@ -3201,6 +3151,13 @@ func exactEventBusWorkflowFixtures(instances []runtimepipeline.WorkflowInstance)
 	return instances
 }
 
+func newEventBusWorkflowStore(db *sql.DB, selected *store.PostgresStore) *runtimepipeline.WorkflowInstanceStore {
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	workflowStore.ConfigureRuntimeMutationRunner(selected)
+	workflowStore.ConfigureRunLifecycle(selected)
+	return workflowStore
+}
+
 func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnects(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
@@ -3238,7 +3195,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 	const rootEntityID = "11111111-1111-1111-1111-111111111111"
 	childEntityID := runtimepipeline.FlowInstanceEntityID("child")
 	grandchildEntityID := runtimepipeline.FlowInstanceEntityID("child/grandchild")
-	store := runtimepipeline.NewWorkflowInstanceStore(db)
+	store := newEventBusWorkflowStore(db, pg)
 	ctx := eventBusTestRunContext(t, db)
 	for _, instance := range exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{
 		{
@@ -3274,7 +3231,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 		}
 	}
 
-	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
+	if err := eb.Publish(ctx, eventtest.ExistingRunRootIngress(
 		"11111111-2222-3333-4444-555555555555",
 		events.EventType("child/grandchild/micro.done"),
 		"cataloge2e",
@@ -3282,7 +3239,6 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 		[]byte(`{"entity_id":"`+grandchildEntityID+`"}`),
 		0,
 		eventBusTestRunID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, grandchildEntityID),
 		time.Now().UTC(),
 	)); err != nil {
@@ -3392,7 +3348,7 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 	if _, ok := any(pc).(runtimebus.DeliveryRouteInterceptor); !ok {
 		t.Fatal("PipelineCoordinator does not implement DeliveryRouteInterceptor")
 	}
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	workflowStore := newEventBusWorkflowStore(db, pg)
 	for _, instance := range exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{
 		{
 			InstanceID:      rootEntityID,
@@ -3416,7 +3372,7 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 
 	live := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType(eventType))
 	defer runtimebustest.Unsubscribe(eb, "workflow-runtime")
-	evt := eventtest.RunCreatingRootIngress(
+	evt := eventtest.ExistingRunRootIngress(
 		uuid.NewString(),
 		events.EventType(eventType),
 		"source",
@@ -3424,7 +3380,6 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 		[]byte(`{"entity_id":"`+rootEntityID+`"}`),
 		0,
 		eventBusTestRunID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID),
 		time.Now().UTC(),
 	)
@@ -3642,7 +3597,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 
 	const rootEntityID = "11111111-1111-1111-1111-111111111111"
 	ctx := eventBusTestRunContext(t, db)
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	workflowStore := newEventBusWorkflowStore(db, pg)
 	for _, instance := range exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{
 		{
 			InstanceID:      rootEntityID,
@@ -3673,7 +3628,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 			t.Fatalf("seed workflow instance %q: %v", instance.InstanceID, err)
 		}
 	}
-	rootConnectProbe := eventtest.RunCreatingRootIngress(
+	rootConnectProbe := eventtest.ExistingRunRootIngress(
 		"bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
 		events.EventType("step.begin"),
 		"cataloge2e",
@@ -3681,7 +3636,6 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		[]byte(`{"entity_id":"`+rootEntityID+`"}`),
 		0,
 		eventBusTestRunID,
-		"",
 		events.EnvelopeForEntityID(events.EnvelopeForFlowInstance(events.EventEnvelope{}, rootEntityID), rootEntityID),
 		time.Now().UTC(),
 	)
@@ -3698,15 +3652,15 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	childTarget := rootConnectPlan.DeliveryRoutes[0].Target.Normalized()
 	previewEnvelope := events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID)
 	previewEnvelope = events.EnvelopeForTargetRoute(previewEnvelope, childTarget)
-	previewEvent := eventtest.RunCreatingRootIngress(rootConnectProbe.ID(), events.EventType("step.begin"), "cataloge2e", "", []byte(`{"entity_id":"`+rootEntityID+`"}`), 0,
-		eventBusTestRunID, "", previewEnvelope, time.Now().UTC())
+	previewEvent := eventtest.ExistingRunRootIngress(rootConnectProbe.ID(), events.EventType("step.begin"), "cataloge2e", "", []byte(`{"entity_id":"`+rootEntityID+`"}`), 0,
+		eventBusTestRunID, previewEnvelope, time.Now().UTC())
 	if _, err := runtimepipeline.PreviewContractHandlerExecution(ctx, bundle, "child-relay", previewEvent, runtimepipeline.WorkflowState{
 		EntityID: childTarget.EntityID,
 		Stage:    "waiting",
 	}, nil); err != nil {
 		t.Fatalf("preview child connect delivery: %v", err)
 	}
-	grandchildConnectProbe := eventtest.RunCreatingRootIngress(
+	grandchildConnectProbe := eventtest.ExistingRunRootIngress(
 		"cccccccc-dddd-eeee-ffff-000000000000",
 		events.EventType("child/micro.start"),
 		"child-relay",
@@ -3714,7 +3668,6 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		nil,
 		0,
 		eventBusTestRunID,
-		"",
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, childTarget),
 		time.Now().UTC(),
 	)
@@ -3738,8 +3691,8 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		t.Fatalf("grandchild stored identity = %#v, want child/grandchild scope; instance=%#v", storedGrandchildIdentity, storedGrandchild)
 	}
 	grandchildPreviewEnvelope := events.EnvelopeForTargetRoute(events.EventEnvelope{}, grandchildTarget)
-	grandchildPreviewEvent := eventtest.RunCreatingRootIngress(grandchildConnectProbe.ID(), events.EventType("micro.start"), "child-relay", "", nil, 0,
-		eventBusTestRunID, "", grandchildPreviewEnvelope, time.Now().UTC())
+	grandchildPreviewEvent := eventtest.ExistingRunRootIngress(grandchildConnectProbe.ID(), events.EventType("micro.start"), "child-relay", "", nil, 0,
+		eventBusTestRunID, grandchildPreviewEnvelope, time.Now().UTC())
 	if _, err := runtimepipeline.PreviewContractHandlerExecution(ctx, bundle, "grandchild-worker", grandchildPreviewEvent, runtimepipeline.WorkflowState{
 		EntityID: grandchildTarget.EntityID,
 		Stage:    "ready",
@@ -3750,7 +3703,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	rootReturnEnvelope = events.EnvelopeForTargetRoute(rootReturnEnvelope, events.RouteIdentity{
 		EntityID: rootEntityID,
 	})
-	rootReturnProbe := eventtest.RunCreatingRootIngress(
+	rootReturnProbe := eventtest.ExistingRunRootIngress(
 		"dddddddd-eeee-ffff-0000-111111111111",
 		events.EventType("child/micro.relayed"),
 		"child-relay",
@@ -3758,7 +3711,6 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		nil,
 		0,
 		eventBusTestRunID,
-		"",
 		rootReturnEnvelope,
 		time.Now().UTC(),
 	)
@@ -3773,7 +3725,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		t.Fatalf("root return preflight subscriber = %q, want root-collector", got)
 	}
 
-	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
+	if err := eb.Publish(ctx, eventtest.ExistingRunRootIngress(
 		"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
 		events.EventType("pipeline.start"),
 		"cataloge2e",
@@ -3781,7 +3733,6 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		[]byte(`{"entity_id":"`+rootEntityID+`"}`),
 		0,
 		eventBusTestRunID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID),
 		time.Now().UTC(),
 	)); err != nil {
@@ -3911,7 +3862,7 @@ func TestEventBusPublish_GatedChildFlowCompletionWithoutSubjectLinkFailsClosed(t
 
 	const rootEntityID = "11111111-1111-1111-1111-111111111111"
 	ctx := eventBusTestRunContext(t, db)
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	workflowStore := newEventBusWorkflowStore(db, pg)
 	if err := workflowStore.Upsert(ctx, exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{{
 		InstanceID:      rootEntityID,
 		StorageRef:      rootEntityID,
@@ -3925,7 +3876,7 @@ func TestEventBusPublish_GatedChildFlowCompletionWithoutSubjectLinkFailsClosed(t
 		t.Fatalf("seed root instance: %v", err)
 	}
 
-	err = eb.Publish(ctx, eventtest.RunCreatingRootIngress(
+	err = eb.Publish(ctx, eventtest.ExistingRunRootIngress(
 		"11111111-2222-3333-4444-555555555555",
 		events.EventType("validate.requested"),
 		"cataloge2e",
@@ -3933,7 +3884,6 @@ func TestEventBusPublish_GatedChildFlowCompletionWithoutSubjectLinkFailsClosed(t
 		[]byte(`{"entity_id":"`+rootEntityID+`"}`),
 		0,
 		eventBusTestRunID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID),
 		time.Now().UTC(),
 	))

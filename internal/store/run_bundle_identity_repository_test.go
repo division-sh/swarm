@@ -19,8 +19,8 @@ var runInsertPattern = regexp.MustCompile(`(?is)INSERT\s+INTO\s+runs\s*\(([^)]*)
 func TestRepositoryRunCreationHasCanonicalOwnersOnly(t *testing.T) {
 	root := repositoryRootForBundleIdentityTest(t)
 	wantOwners := map[string]bool{
-		"internal/store/runlifecycle/fork.go":  false,
-		"internal/store/runlifecycle/owner.go": false,
+		"internal/store/run_lifecycle_mutation_adapter.go": false,
+		"internal/testutil/runlifecyclefixture/fixture.go": false,
 	}
 	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -78,7 +78,7 @@ func TestRepositoryRunInsertFixturesHaveExplicitCanonicalIdentity(t *testing.T) 
 			return nil
 		}
 		rel := repositoryRelativePath(t, root, path)
-		if rel == "internal/store/runlifecycle/fork.go" || rel == "internal/store/runlifecycle/owner.go" {
+		if rel == "internal/store/run_lifecycle_mutation_adapter.go" {
 			return nil
 		}
 		source := readRepositoryFile(t, path)
@@ -170,7 +170,7 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 		{
 			path: "internal/runtime/mutationlog/mutationlog.go",
 			required: []string{
-				"storerunlifecycle.RequireActiveSource",
+				"runtimerunlifecycle.RequireActiveSource",
 				"runFact.Matches(contextFact)",
 			},
 			prohibited: []string{
@@ -242,14 +242,6 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 				"func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtimepipelineobligation.ScanRequest, limit int)",
 				"func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, limit int)",
 				"func (eb *EventBus) closePipelineScanLocked(ctx context.Context, request runtimepipelineobligation.ScanRequest) error",
-				"ctx, err = eb.admitBundleSourceFact(ctx)",
-			},
-		},
-		{
-			path: "internal/runtime/bus/run_completion.go",
-			required: []string{
-				"func (eb *EventBus) ConvergeDeliveryRunCompletion(ctx context.Context, evt events.Event) error",
-				"func (eb *EventBus) ConvergeNormalRunCompletionForEvent(ctx context.Context, eventID string) error",
 				"ctx, err = eb.admitBundleSourceFact(ctx)",
 			},
 		},
@@ -336,8 +328,6 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		"AdmitBundleSourceFact":                  operationPureRead,
 		"CheckDirectRecipients":                  operationPureRead,
 		"CheckPublishRecipientPlan":              operationPureRead,
-		"ConvergeDeliveryRunCompletion":          operationMutation,
-		"ConvergeNormalRunCompletionForEvent":    operationMutation,
 		"DispatchPreparedPublish":                operationMutation,
 		"DispatchPreparedPublishAndWait":         operationMutation,
 		"DispatchPreparedPublishAsync":           operationMutation,
@@ -375,6 +365,7 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		"PublishPersistedFlowInstanceRoute":      operationMutation,
 		"RetirePublishedFlowInstanceRoute":       operationMutation,
 		"RouteTable":                             operationRetained,
+		"RunLifecycleCandidateOwner":             operationRetained,
 		"RuntimeMutationRunner":                  operationRetained,
 		"SetInterceptors":                        operationRetained,
 		"SetLoggerHook":                          operationRetained,
@@ -431,7 +422,6 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		guard    string
 	}{
 		{operationMutation, "internal/runtime/bus/eventbus_publish.go", "beginRuntimeWork", "admitBundleSourceFact(ctx)"},
-		{operationMutation, "internal/runtime/bus/eventbus_publish.go", "convergeStandaloneRuntimePlatformRun", "admitBundleSourceFact(ctx)"},
 		{operationMutation, "internal/runtime/bus/outbox.go", "dispatchPendingOutboxOperation", "admitBundleSourceFact(ctx)"},
 		{operationMutation, "internal/runtime/bus/outbox.go", "dispatchAndRecord", "admitBundleSourceFact(ctx)"},
 		{operationMutation, "internal/runtime/bus/outbox.go", "clearPendingOutboxOperation", "admitBundleSourceFact(ctx)"},

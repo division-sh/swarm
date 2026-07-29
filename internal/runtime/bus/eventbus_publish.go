@@ -759,13 +759,11 @@ func (eb *EventBus) dispatchPreparedPublishBody(ctx context.Context, prepared Pr
 	}
 	if prepared.targetFailure {
 		eb.logPublished(ctx, prepared.Event, 0)
-		eb.recordCommittedPublishConvergence(ctx, prepared.Event)
 		return nil
 	}
 	if prepared.dispatchQueued {
 		eb.logDispatchQueued(ctx, prepared.queueReason, prepared.Event, len(prepared.RecipientIDs()), prepared.direct, true)
 		eb.logPublished(ctx, prepared.Event, 0)
-		eb.recordCommittedPublishConvergence(ctx, prepared.Event)
 		return nil
 	}
 	return eb.completeCommittedPublishDispatch(ctx, prepared.Event, prepared.plan, prepared.publicationClaim)
@@ -880,19 +878,11 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 		if err := publicationClaim.MarkDecisionProcessed(ctx); err != nil {
 			return err
 		}
-		if err := eb.ConvergeNormalRunCompletionForEvent(ctx, evt.ID()); err != nil {
-			failure := eventBusDependencyFailure(err, "decision_route_convergence_failed", "converge_decision_route")
-			if settleErr := eb.settleCommittedPublish(ctx, publicationClaim, runtimepipelineobligation.Deferred("decision_route_convergence_failed", time.Now().UTC().Add(runtimepipelineobligation.DecisionRouteRetryDelay), failure)); settleErr != nil {
-				return errors.Join(err, settleErr)
-			}
-			return nil
-		}
-		return eb.settleCommittedPublish(ctx, publicationClaim, runtimepipelineobligation.Acknowledged("decision_route_converged"))
+		return eb.settleCommittedPublish(ctx, publicationClaim, runtimepipelineobligation.Acknowledged("decision_route_settled"))
 	}
 	if err := eb.settleCommittedPublish(ctx, publicationClaim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
 		return err
 	}
-	eb.recordCommittedPublishConvergence(ctx, evt)
 	return nil
 }
 
@@ -1097,41 +1087,6 @@ func (eb *EventBus) withAuthorActivityEventDescriptor(ctx context.Context, evt e
 
 func (eb *EventBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
 	return eb.admitBundleSourceFact(ctx)
-}
-
-func (eb *EventBus) convergeStandaloneRuntimePlatformRun(ctx context.Context, evt events.Event) error {
-	if eb == nil || eb.store == nil {
-		return nil
-	}
-	var err error
-	ctx, err = eb.admitBundleSourceFact(ctx)
-	if err != nil {
-		return err
-	}
-	if converger, ok := eb.store.(StandaloneRuntimePlatformRunConvergencePersistence); ok && converger != nil {
-		if err := converger.ConvergeStandaloneRuntimePlatformRun(ctx, evt); err != nil {
-			return err
-		}
-	}
-	return eb.ConvergeNormalRunCompletionForEvent(ctx, evt.ID())
-}
-
-func (eb *EventBus) recordCommittedPublishConvergence(ctx context.Context, evt events.Event) {
-	// Decision-route convergence is part of its durable settlement state machine.
-	// Sending a post-route failure through this generic path can overwrite a
-	// processed receipt and quarantine a verdict that already executed.
-	if evt.Type() == events.EventType("mailbox.card_decided") {
-		return
-	}
-	if err := eb.convergeStandaloneRuntimePlatformRun(ctx, evt); err != nil {
-		failureErr := runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "normal_run_completion_failed", "eventbus", "post_commit_convergence", map[string]any{
-			"event_id": evt.ID(), "event_type": string(evt.Type()),
-		}, err)
-		failure := runtimefailures.Normalize(failureErr, "eventbus", "post_commit_convergence")
-		eb.logRuntime(ctx, "error", "Post-commit publish convergence failed", "eventbus", "publish_post_commit_convergence_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, map[string]any{
-			"failure": failure,
-		}, &failure, 0)
-	}
 }
 
 func (eb *EventBus) runInterceptors(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {

@@ -14,9 +14,10 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 )
 
 func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T) {
@@ -367,12 +368,10 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeBundleSource(t *testing.T
 	assertRunBundleIdentity(t, db, newRunID, bootFact.BundleHash(), storerunlifecycle.BundleSourceEphemeral)
 
 	existingRunID := "00000000-0000-0000-0000-000000000755"
-	if _, err := db.Exec(`
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, $3)
-	`, existingRunID, bootFact.BundleHash(), storerunlifecycle.BundleSourceEphemeral); err != nil {
-		t.Fatalf("seed existing run: %v", err)
-	}
+	runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+		RunID:      existingRunID,
+		BundleHash: bootFact.BundleHash(),
+	})
 	explicit := rpcCall(t, handler, agentDirectiveBodyWithRun("agent-1", existingRunID, "existing run", "idem-directive-bundle-existing"))
 	if explicit.Error != nil {
 		t.Fatalf("existing-run directive error = %#v", explicit.Error)

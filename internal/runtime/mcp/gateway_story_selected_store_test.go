@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -294,12 +295,7 @@ func seedGatewayStoryRuntime(t *testing.T, selected gatewayStorySelectedStore, r
 	now := time.Now().UTC()
 	bundleHash, bundleSource := source.StorageValues()
 	if selected.postgres {
-		if _, err := selected.db.ExecContext(context.Background(), `
-			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-			VALUES ($1::uuid, 'running', $2, $3, $4)
-		`, runID, bundleHash, bundleSource, now); err != nil {
-			t.Fatalf("seed selected-store run: %v", err)
-		}
+		runlifecyclefixture.RequirePostgres(t, context.Background(), selected.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash, BundleSource: bundleSource})
 		if _, err := selected.db.ExecContext(context.Background(), `
 			INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, created_at)
 			VALUES ($1, 'story/instance-1', 'story-writer', 'regular', 'mock', FALSE, 'platform_default', 'active', 7, 3, 'running', $2)
@@ -308,12 +304,7 @@ func seedGatewayStoryRuntime(t *testing.T, selected gatewayStorySelectedStore, r
 		}
 		return
 	}
-	if _, err := selected.db.ExecContext(context.Background(), `
-			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-			VALUES (?, 'running', ?, ?, ?)
-		`, runID, bundleHash, bundleSource, now); err != nil {
-		t.Fatalf("seed selected-store run: %v", err)
-	}
+	runlifecyclefixture.RequireSQLite(t, context.Background(), selected.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash, BundleSource: bundleSource})
 	if _, err := selected.db.ExecContext(context.Background(), `
 			INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, created_at)
 			VALUES (?, 'story/instance-1', 'story-writer', 'regular', 'mock', 0, 'platform_default', 'active', 7, 3, 'running', ?)

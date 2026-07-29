@@ -25,11 +25,9 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 			now := time.Date(2026, 7, 14, 14, 0, 0, 0, time.UTC)
 			runID := uuid.NewString()
 			if backend == "postgres" {
-				if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-					t.Fatal(err)
-				}
-			} else if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-				t.Fatal(err)
+				storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+			} else {
+				storetest.RequireSQLiteRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 			}
 			card, continuation := newAPIHumanTaskAckLossCard(t, runID, now)
 			if err := humanStore.CreateHumanTaskCard(ctx, card, continuation); err != nil {
@@ -89,7 +87,9 @@ func newHumanTaskAckLossOwners(
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		return pg, pg, pg, pg, runtimepipeline.NewWorkflowInstanceStore(db), db
+		workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+		workflowStore.ConfigureRuntimeMutationRunner(pg)
+		return pg, pg, pg, pg, workflowStore, db
 	}
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)

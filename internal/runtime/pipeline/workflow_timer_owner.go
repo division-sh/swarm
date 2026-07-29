@@ -18,8 +18,8 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 type workflowTimerCauseKind string
@@ -850,7 +850,7 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 		}
 		activeRunID, err := store.requireActiveWorkflowRun(txctx, tx)
 		if err != nil {
-			if errors.Is(err, storerunlifecycle.ErrRunNotActive) {
+			if errors.Is(err, runtimerunlifecycle.ErrRunNotActive) {
 				terminal = true
 				terminalErr = err
 				return nil

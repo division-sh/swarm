@@ -368,9 +368,6 @@ func (eb *EventBus) processClaimedPipelineWork(ctx context.Context, work runtime
 	} else {
 		eb.logStartupRecoveryPipelineAftermath(ctx, work.Event, startupRecoveryPipelineReplayOutcomeReplayed, startupRecoveryPipelineReplayReasonReplayed, nil, recipients)
 	}
-	if err := eb.ConvergeNormalRunCompletionForEvent(ctx, work.Event.ID()); err != nil {
-		return true, false, err
-	}
 	return true, false, nil
 }
 
@@ -437,15 +434,7 @@ func startupRecoveryPipelineLogEntry(
 }
 
 func (eb *EventBus) settleClaimedDecisionRoute(ctx context.Context, work runtimepipelineobligation.ClaimedWork) error {
-	if err := eb.ConvergeNormalRunCompletionForEvent(ctx, work.Event.ID()); err != nil {
-		failure := eventBusDependencyFailure(err, "decision_route_convergence_failed", "converge_decision_route")
-		return eb.pipelineObligations.Settle(ctx, work.Claim, runtimepipelineobligation.Deferred(
-			"decision_route_convergence_failed",
-			time.Now().UTC().Add(runtimepipelineobligation.DecisionRouteRetryDelay),
-			failure,
-		))
-	}
-	return eb.pipelineObligations.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("decision_route_converged"))
+	return eb.pipelineObligations.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("decision_route_settled"))
 }
 
 func (eb *EventBus) ReleaseRuntimeIngressQueue(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error) {

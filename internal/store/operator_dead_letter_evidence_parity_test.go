@@ -9,11 +9,11 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -23,7 +23,8 @@ type operatorDeadLetterEvidenceStore interface {
 	LoadOperatorAgentDeliveryDiagnostics(context.Context, string, OperatorAgentDeliveryDiagnosticsOptions) (OperatorAgentDeliveryDiagnostics, error)
 	LoadOperatorEvent(context.Context, string) (OperatorEventFull, error)
 	LoadRunDebugReport(context.Context, string, RunDebugQueryOptions) (RunDebugReport, error)
-	MarkRunTerminal(context.Context, string, string, *runtimefailures.Envelope, time.Time) (runtimebus.RunLifecycleSnapshot, error)
+	runtimerunlifecycle.OperationOwner
+	RunRuntimeMutationContext(context.Context, func(context.Context) error) error
 }
 
 func TestOperatorDeadLetterEvidenceIsScopedToExactDeliveryParity(t *testing.T) {
@@ -149,7 +150,7 @@ func TestOperatorRunTerminalizationPreservesExactDeadLetterEvidenceParity(t *tes
 				t.Fatalf("claim terminalized delivery: %v", err)
 			}
 			removeFault := installRunTerminalizationDeadLetterFault(t, ctx, fixture, backend.name == "postgres")
-			if _, err := selected.MarkRunTerminal(ctx, runID, "cancelled", nil, now.Add(time.Second)); err == nil {
+			if _, err := markRunTerminalStatusForTest(ctx, selected, runID, "cancelled", nil, now.Add(time.Second)); err == nil {
 				t.Fatal("run cancellation succeeded while required terminalization evidence writer was faulted")
 			}
 			rolledBack, err := selected.Snapshot(ctx, claimed.Snapshot.DeliveryID)
@@ -171,7 +172,7 @@ func TestOperatorRunTerminalizationPreservesExactDeadLetterEvidenceParity(t *tes
 				t.Fatalf("run after faulted cancellation = %q, want running", runStatus)
 			}
 			removeFault()
-			terminal, err := selected.MarkRunTerminal(ctx, runID, "cancelled", nil, now.Add(time.Second))
+			terminal, err := markRunTerminalStatusForTest(ctx, selected, runID, "cancelled", nil, now.Add(time.Second))
 			if err != nil {
 				t.Fatalf("cancel run: %v", err)
 			}

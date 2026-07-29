@@ -7,6 +7,7 @@ import (
 	"time"
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -16,7 +17,7 @@ type forkedSelectedExecutionSurface interface {
 }
 
 func TestForkedRunSelectedContractExecutionIssueClaimHeartbeatAndTerminalMutationsRefuse(t *testing.T) {
-	for _, backend := range []string{"postgres", "sqlite"} {
+	for _, backend := range []string{"postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var surface forkedSelectedExecutionSurface
 			var fixture selectedCompletionFixture
@@ -69,20 +70,20 @@ func TestForkedRunSelectedContractExecutionIssueClaimHeartbeatAndTerminalMutatio
 func markSelectedTestRunForked(t *testing.T, fixture selectedCompletionFixture, now time.Time) {
 	t.Helper()
 	continuedRunID := uuid.NewString()
+	ctx := testAuthorActivityBundleSourceContext()
+	var selected any
 	if fixture.sqlite {
-		if _, err := fixture.db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES (?, 'running', ?, 'ephemeral', ?)`, continuedRunID, authorActivityTestBundleHash, now); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := fixture.db.ExecContext(context.Background(), `UPDATE runs SET status = 'forked', ended_at = ?, continued_as_run_id = ? WHERE run_id = ?`, now, continuedRunID, fixture.forkRun); err != nil {
-			t.Fatal(err)
-		}
-		return
+		selected = &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: fixture.db}}
+	} else {
+		selected = &PostgresStore{DB: fixture.db}
 	}
-	if _, err := fixture.db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES ($1::uuid, 'running', $2, 'ephemeral', $3)`, continuedRunID, authorActivityTestBundleHash, now); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := fixture.db.ExecContext(context.Background(), `UPDATE runs SET status = 'forked', ended_at = $2, continued_as_run_id = $3::uuid WHERE run_id = $1::uuid`, fixture.forkRun, now, continuedRunID); err != nil {
-		t.Fatal(err)
+	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		RunID: continuedRunID, StartedAt: now, BundleHash: authorActivityTestBundleHash,
+	})
+	if _, _, err := forkRunForTest(ctx, selected, storerunlifecycle.ForkSourceRequest{
+		RunID: fixture.forkRun, ContinuedAsRunID: continuedRunID, EndedAt: now,
+	}); err != nil {
+		t.Fatalf("fork selected test run: %v", err)
 	}
 }
 

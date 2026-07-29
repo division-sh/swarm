@@ -10,6 +10,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 type GateDecisionFence interface {
@@ -77,7 +78,8 @@ func (s *WorkflowInstanceStore) RequireGateRouteAdmitted(ctx context.Context, ru
 		}
 		return err
 	}
-	if strings.TrimSpace(status) != "running" {
+	state, stateErr := runtimerunlifecycle.ParseState(status)
+	if stateErr != nil || state != runtimerunlifecycle.StateRunning {
 		return fmt.Errorf("gate route run %s is not routable in status %s", runID, strings.TrimSpace(status))
 	}
 	return nil

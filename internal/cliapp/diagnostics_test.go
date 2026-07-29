@@ -139,7 +139,7 @@ func TestStatusUsesDiagnoseAndRunGet(t *testing.T) {
 			name:       "header only",
 			args:       []string{"run", "status", "run-1", "--no-diagnose"},
 			wantMethod: "run.get",
-			wantOutput: []string{"Run run-1  running", "trigger  scan.requested"},
+			wantOutput: []string{"Run run-1  running", "origin  event scan.requested (event-root)"},
 			notOutput:  "blocker",
 		},
 	} {
@@ -1816,13 +1816,16 @@ func newDiagnosticSuccessServer(t *testing.T, responder func(jsonRPCRequest, int
 
 func validDiagnosticRunHeader(runID string) map[string]any {
 	return map[string]any{
-		"run_id":             runID,
-		"status":             "running",
-		"trigger_event_type": "scan.requested",
-		"trigger_event_id":   "event-root",
-		"entity_count":       2,
-		"event_count":        3,
-		"started_at":         "2026-05-13T10:00:00Z",
+		"run_id": runID,
+		"status": "running",
+		"origin": map[string]any{
+			"kind":       "event",
+			"event_type": "scan.requested",
+			"event_id":   "event-root",
+		},
+		"entity_count": 2,
+		"event_count":  3,
+		"started_at":   "2026-05-13T10:00:00Z",
 	}
 }
 

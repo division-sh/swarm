@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -633,7 +634,7 @@ func newActivityJournalStoreForCase(t *testing.T, ctx context.Context, kind acti
 	}
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	return db, NewWorkflowInstanceStore(db), false
+	return db, newPostgresWorkflowInstanceStoreForTest(db), false
 }
 
 func testCompiledChannelActivityTool(url string) runtimecontracts.ToolSchemaEntry {
@@ -1021,7 +1022,7 @@ func TestPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentResponseP
 		{name: "postgres", store: func(t *testing.T, _ context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
-			return db, NewWorkflowInstanceStore(db), false
+			return db, newPostgresWorkflowInstanceStoreForTest(db), false
 		}},
 	}
 	for _, backend := range backends {
@@ -1097,7 +1098,7 @@ func TestPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndHTT
 		{name: "postgres", store: func(t *testing.T, _ context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
-			return db, NewWorkflowInstanceStore(db), false
+			return db, newPostgresWorkflowInstanceStoreForTest(db), false
 		}},
 	}
 	for _, backend := range backends {
@@ -1264,7 +1265,7 @@ func TestPipelineActivityRequestTelegramConnectorRoundTripThroughInboundDelivery
 			name: "postgres",
 			setup: func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
 				_, db, _ := testutil.StartPostgres(t)
-				return db, NewWorkflowInstanceStore(db), false
+				return db, newPostgresWorkflowInstanceStoreForTest(db), false
 			},
 		},
 	} {
@@ -1558,9 +1559,7 @@ func TestLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatch(t *t
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatal(err)
-	}
+	runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
 	runner := &activityCommitAckLossRunner{db: db}
 	store := NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
 	activation, entityID := seedLoopActivityInstance(t, store, ctx, "review")
@@ -1615,6 +1614,7 @@ func (r *activityCommitAckLossRunner) RunRuntimeMutationContext(ctx context.Cont
 	if err != nil {
 		return err
 	}
+	storyctx = bindTestRunLifecycleMutation(storyctx, tx, workflowStoreDialectSQLite)
 	if err := fn(storyctx); err != nil {
 		return err
 	}
@@ -2050,14 +2050,14 @@ func newSQLiteActivityJournalStore(t *testing.T, ctx context.Context) (*sql.DB, 
 func seedActivityRun(t *testing.T, db *sql.DB, sqlite bool, runID string) {
 	t.Helper()
 	if sqlite {
-		if _, err := db.Exec(`INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'ephemeral')`, runID, pipelineTestBundleHash); err != nil {
-			t.Fatalf("seed sqlite run: %v", err)
-		}
+		runlifecyclefixture.RequireSQLite(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+			RunID: runID, BundleHash: pipelineTestBundleHash,
+		})
 		return
 	}
-	if _, err := db.Exec(`INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'ephemeral')`, runID, pipelineTestBundleHash); err != nil {
-		t.Fatalf("seed postgres run: %v", err)
-	}
+	runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+		RunID: runID, BundleHash: pipelineTestBundleHash,
+	})
 }
 
 func createActivityJournalSQLiteSchema(t *testing.T, ctx context.Context, db *sql.DB) {
@@ -2067,7 +2067,20 @@ func createActivityJournalSQLiteSchema(t *testing.T, ctx context.Context, db *sq
 			run_id TEXT PRIMARY KEY,
 			status TEXT NOT NULL DEFAULT 'running',
 			bundle_hash TEXT NOT NULL,
-			bundle_source TEXT NOT NULL
+			bundle_source TEXT NOT NULL,
+			origin_kind TEXT NOT NULL,
+			trigger_event_id TEXT,
+			trigger_event_type TEXT,
+			origin_service_id TEXT,
+			origin_generation INTEGER,
+			forked_from_run_id TEXT,
+			forked_from_event_id TEXT,
+			continued_as_run_id TEXT,
+			event_count INTEGER NOT NULL DEFAULT 0,
+			entity_count INTEGER NOT NULL DEFAULT 0,
+			failure TEXT,
+			started_at TIMESTAMP NOT NULL,
+			ended_at TIMESTAMP
 		)`,
 		`CREATE TABLE activity_attempts (
 			request_event_id TEXT PRIMARY KEY,

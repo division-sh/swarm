@@ -13,7 +13,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -63,6 +63,11 @@ func TestSQLiteEntityStateDiffRequiresExistingCanonicalRunBeforeMutation(t *test
 	t.Cleanup(func() { _ = tx.Rollback() })
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+	ctx, err = runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectSQLite)
+	if err != nil {
+		t.Fatalf("begin author activity: %v", err)
+	}
+	ctx = bindTestRunLifecycleMutation(ctx, tx, workflowStoreDialectSQLite)
 	err = insertSQLiteEntityStateDiff(
 		ctx,
 		tx,
@@ -87,6 +92,11 @@ func TestSQLiteInitialValueMutationRequiresExistingCanonicalRunBeforeMutation(t 
 	t.Cleanup(func() { _ = tx.Rollback() })
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+	ctx, err = runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectSQLite)
+	if err != nil {
+		t.Fatalf("begin author activity: %v", err)
+	}
+	ctx = bindTestRunLifecycleMutation(ctx, tx, workflowStoreDialectSQLite)
 	_, err = insertSQLiteWorkflowCreateEntityInitialValueMutations(
 		ctx,
 		tx,
@@ -226,10 +236,15 @@ func TestSQLiteWorkflowInstanceStore_RunPipelineMutationUsesRuntimeMutationRunne
 		}) {
 			return errors.New("queue pipeline post-commit action")
 		}
-		_, err := tx.ExecContext(txctx, `
-			INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-			VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-		`, uuid.NewString(), time.Now().UTC())
+		source, err := runtimecorrelation.NewEphemeralBundleSourceFact(
+			"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		)
+		if err != nil {
+			return err
+		}
+		_, err = storerunlifecycle.Create(txctx, storerunlifecycle.CreateRequest{
+			RunID: uuid.NewString(), Source: source, StartedAt: time.Now().UTC(),
+		})
 		return err
 	})
 	if err != nil {
@@ -345,9 +360,10 @@ func TestWorkflowInstanceStore_RunPipelineMutationDoesNotRetryPostgresDialect(t 
 }
 
 type recordingRuntimeMutationRunner struct {
-	db    *sql.DB
-	mu    sync.Mutex
-	calls int32
+	db      *sql.DB
+	dialect workflowStoreDialect
+	mu      sync.Mutex
+	calls   int32
 }
 
 func (r *recordingRuntimeMutationRunner) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
@@ -368,11 +384,19 @@ func (r *recordingRuntimeMutationRunner) RunRuntimeMutationContext(ctx context.C
 	rollbackActions := make([]OwnerAction, 0, 4)
 	txctx := withPipelinePostCommitActions(WithPipelineSQLTxContext(ctx, tx), &postCommit)
 	txctx = withPipelineRollbackActions(txctx, &rollbackActions)
-	storyctx, err := runtimeauthoractivity.Begin(txctx, tx, runtimeauthoractivity.DialectSQLite)
+	dialect := r.dialect
+	authorDialect := runtimeauthoractivity.DialectSQLite
+	if dialect == workflowStoreDialectPostgres {
+		authorDialect = runtimeauthoractivity.DialectPostgres
+	} else {
+		dialect = workflowStoreDialectSQLite
+	}
+	storyctx, err := runtimeauthoractivity.Begin(txctx, tx, authorDialect)
 	if err != nil {
 		flushPipelineRollbackActions(rollbackActions)
 		return err
 	}
+	storyctx = bindTestRunLifecycleMutation(storyctx, tx, dialect)
 	if err := fn(storyctx); err != nil {
 		flushPipelineRollbackActions(rollbackActions)
 		return err
@@ -417,7 +441,19 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 				status TEXT,
 				bundle_hash TEXT,
 				bundle_source TEXT,
-				started_at TIMESTAMP
+				origin_kind TEXT NOT NULL,
+				trigger_event_id TEXT,
+				trigger_event_type TEXT,
+				origin_service_id TEXT,
+				origin_generation INTEGER,
+				forked_from_run_id TEXT,
+				forked_from_event_id TEXT,
+				continued_as_run_id TEXT,
+				event_count INTEGER NOT NULL DEFAULT 0,
+				entity_count INTEGER NOT NULL DEFAULT 0,
+				failure TEXT,
+				started_at TIMESTAMP NOT NULL,
+				ended_at TIMESTAMP
 		)`,
 		`CREATE TABLE flow_instances (
 			instance_id TEXT PRIMARY KEY,

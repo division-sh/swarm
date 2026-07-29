@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/eventrecord/sqlite"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 var (
@@ -56,7 +55,7 @@ func (s *PostgresStore) ClaimAgentDelivery(ctx context.Context, event events.Eve
 		if err != nil {
 			return err
 		}
-		if err := storerunlifecycle.RequireActive(txctx, tx, snapshot.RunID, storerunlifecycle.DialectPostgres); err != nil {
+		if err := requirePostgresRunActive(txctx, tx, snapshot.RunID); err != nil {
 			return err
 		}
 		claimed, err = postgresDeliveryAdapter.ClaimExact(txctx, tx, event, route, runtimedelivery.DefaultLeaseTTL)
@@ -75,7 +74,7 @@ func (s *SQLiteRuntimeStore) ClaimAgentDelivery(ctx context.Context, event event
 		if err != nil {
 			return err
 		}
-		if err := storerunlifecycle.RequireActive(txctx, tx, snapshot.RunID, storerunlifecycle.DialectSQLite); err != nil {
+		if err := requireSQLiteRunActive(txctx, tx, snapshot.RunID); err != nil {
 			return err
 		}
 		claimed, err = sqliteDeliveryAdapter.ClaimExact(txctx, tx, event, route, runtimedelivery.DefaultLeaseTTL)
@@ -94,7 +93,7 @@ func (s *PostgresStore) ClaimNodeDelivery(ctx context.Context, event events.Even
 		if err != nil {
 			return err
 		}
-		if err := storerunlifecycle.RequireActive(txctx, tx, snapshot.RunID, storerunlifecycle.DialectPostgres); err != nil {
+		if err := requirePostgresRunActive(txctx, tx, snapshot.RunID); err != nil {
 			return err
 		}
 		claimed, err = postgresDeliveryAdapter.ClaimExact(txctx, tx, event, route, runtimedelivery.DefaultLeaseTTL)
@@ -113,7 +112,7 @@ func (s *SQLiteRuntimeStore) ClaimNodeDelivery(ctx context.Context, event events
 		if err != nil {
 			return err
 		}
-		if err := storerunlifecycle.RequireActive(txctx, tx, snapshot.RunID, storerunlifecycle.DialectSQLite); err != nil {
+		if err := requireSQLiteRunActive(txctx, tx, snapshot.RunID); err != nil {
 			return err
 		}
 		claimed, err = sqliteDeliveryAdapter.ClaimExact(txctx, tx, event, route, runtimedelivery.DefaultLeaseTTL)
@@ -140,7 +139,7 @@ func (s *PostgresStore) ClaimAgentBacklog(ctx context.Context, agentID string, l
 		if err != nil {
 			return err
 		}
-		if err := requireActiveDeliveryCandidateRuns(txctx, tx, candidates, storerunlifecycle.DialectPostgres); err != nil {
+		if err := requireActiveDeliveryCandidateRuns(txctx, tx, candidates, true); err != nil {
 			return err
 		}
 		claims, err := postgresDeliveryAdapter.ClaimCandidates(txctx, tx, candidates, runtimedelivery.DefaultLeaseTTL)
@@ -160,7 +159,7 @@ func (s *SQLiteRuntimeStore) ClaimAgentBacklog(ctx context.Context, agentID stri
 		if err != nil {
 			return err
 		}
-		if err := requireActiveDeliveryCandidateRuns(txctx, tx, candidates, storerunlifecycle.DialectSQLite); err != nil {
+		if err := requireActiveDeliveryCandidateRuns(txctx, tx, candidates, false); err != nil {
 			return err
 		}
 		claims, err := sqliteDeliveryAdapter.ClaimCandidates(txctx, tx, candidates, runtimedelivery.DefaultLeaseTTL)
@@ -180,7 +179,7 @@ func (s *PostgresStore) ClaimNodeBacklog(ctx context.Context, nodeID string, lim
 		if err != nil {
 			return err
 		}
-		if err := requireActiveDeliveryCandidateRuns(txctx, tx, candidates, storerunlifecycle.DialectPostgres); err != nil {
+		if err := requireActiveDeliveryCandidateRuns(txctx, tx, candidates, true); err != nil {
 			return err
 		}
 		claims, err := postgresDeliveryAdapter.ClaimCandidates(txctx, tx, candidates, runtimedelivery.DefaultLeaseTTL)
@@ -200,7 +199,7 @@ func (s *SQLiteRuntimeStore) ClaimNodeBacklog(ctx context.Context, nodeID string
 		if err != nil {
 			return err
 		}
-		if err := requireActiveDeliveryCandidateRuns(txctx, tx, candidates, storerunlifecycle.DialectSQLite); err != nil {
+		if err := requireActiveDeliveryCandidateRuns(txctx, tx, candidates, false); err != nil {
 			return err
 		}
 		claims, err := sqliteDeliveryAdapter.ClaimCandidates(txctx, tx, candidates, runtimedelivery.DefaultLeaseTTL)
@@ -213,7 +212,7 @@ func (s *SQLiteRuntimeStore) ClaimNodeBacklog(ctx context.Context, nodeID string
 	return claimed, err
 }
 
-func requireActiveDeliveryCandidateRuns(ctx context.Context, tx *sql.Tx, candidates []runtimedelivery.ClaimCandidate, dialect storerunlifecycle.Dialect) error {
+func requireActiveDeliveryCandidateRuns(ctx context.Context, tx *sql.Tx, candidates []runtimedelivery.ClaimCandidate, postgres bool) error {
 	runSet := make(map[string]struct{}, len(candidates))
 	for _, candidate := range candidates {
 		runSet[candidate.RunID()] = struct{}{}
@@ -224,7 +223,13 @@ func requireActiveDeliveryCandidateRuns(ctx context.Context, tx *sql.Tx, candida
 	}
 	sort.Strings(runIDs)
 	for _, runID := range runIDs {
-		if err := storerunlifecycle.RequireActive(ctx, tx, runID, dialect); err != nil {
+		var err error
+		if postgres {
+			err = requirePostgresRunActive(ctx, tx, runID)
+		} else {
+			err = requireSQLiteRunActive(ctx, tx, runID)
+		}
+		if err != nil {
 			return err
 		}
 	}
@@ -233,7 +238,7 @@ func requireActiveDeliveryCandidateRuns(ctx context.Context, tx *sql.Tx, candida
 
 func (s *PostgresStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.Snapshot, error) {
 	return postgresDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx) (runtimedelivery.Snapshot, error) {
-		if err := storerunlifecycle.RequireActive(txctx, tx, claim.RunID(), storerunlifecycle.DialectPostgres); err != nil {
+		if err := requirePostgresRunActive(txctx, tx, claim.RunID()); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
 		return postgresDeliveryAdapter.RenewClaim(txctx, tx, claim, runtimedelivery.DefaultLeaseTTL)
@@ -242,7 +247,7 @@ func (s *PostgresStore) RenewClaim(ctx context.Context, claim runtimedelivery.Cl
 
 func (s *SQLiteRuntimeStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.Snapshot, error) {
 	return sqliteDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx) (runtimedelivery.Snapshot, error) {
-		if err := storerunlifecycle.RequireActive(txctx, tx, claim.RunID(), storerunlifecycle.DialectSQLite); err != nil {
+		if err := requireSQLiteRunActive(txctx, tx, claim.RunID()); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
 		return sqliteDeliveryAdapter.RenewClaim(txctx, tx, claim, runtimedelivery.DefaultLeaseTTL)
@@ -301,7 +306,7 @@ func deliveryExecutionFromRecord(record eventrecord.Record, claimed runtimedeliv
 
 func (s *PostgresStore) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (runtimedelivery.Snapshot, error) {
 	return postgresDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx) (runtimedelivery.Snapshot, error) {
-		if err := storerunlifecycle.RequireActive(txctx, tx, claim.RunID(), storerunlifecycle.DialectPostgres); err != nil {
+		if err := requirePostgresRunActive(txctx, tx, claim.RunID()); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
 		return postgresDeliveryAdapter.BindAgentSession(txctx, tx, claim, sessionID)
@@ -310,7 +315,7 @@ func (s *PostgresStore) BindAgentSession(ctx context.Context, claim runtimedeliv
 
 func (s *SQLiteRuntimeStore) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (runtimedelivery.Snapshot, error) {
 	return sqliteDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx) (runtimedelivery.Snapshot, error) {
-		if err := storerunlifecycle.RequireActive(txctx, tx, claim.RunID(), storerunlifecycle.DialectSQLite); err != nil {
+		if err := requireSQLiteRunActive(txctx, tx, claim.RunID()); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
 		return sqliteDeliveryAdapter.BindAgentSession(txctx, tx, claim, sessionID)
@@ -319,25 +324,39 @@ func (s *SQLiteRuntimeStore) BindAgentSession(ctx context.Context, claim runtime
 
 func (s *PostgresStore) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration) (runtimedelivery.Snapshot, error) {
 	return postgresDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx) (runtimedelivery.Snapshot, error) {
-		if err := storerunlifecycle.RequireActive(txctx, tx, claim.RunID(), storerunlifecycle.DialectPostgres); err != nil {
+		if err := requirePostgresRunActive(txctx, tx, claim.RunID()); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
-		return postgresDeliveryAdapter.SettleSuccess(txctx, tx, claim, sideEffects, duration)
+		snapshot, err := postgresDeliveryAdapter.SettleSuccess(txctx, tx, claim, sideEffects, duration)
+		if err != nil {
+			return runtimedelivery.Snapshot{}, err
+		}
+		if _, err := s.requestCompletionCandidateTx(txctx, tx, claim.RunID(), nil); err != nil {
+			return runtimedelivery.Snapshot{}, err
+		}
+		return snapshot, nil
 	})
 }
 
 func (s *SQLiteRuntimeStore) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration) (runtimedelivery.Snapshot, error) {
 	return sqliteDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx) (runtimedelivery.Snapshot, error) {
-		if err := storerunlifecycle.RequireActive(txctx, tx, claim.RunID(), storerunlifecycle.DialectSQLite); err != nil {
+		if err := requireSQLiteRunActive(txctx, tx, claim.RunID()); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
-		return sqliteDeliveryAdapter.SettleSuccess(txctx, tx, claim, sideEffects, duration)
+		snapshot, err := sqliteDeliveryAdapter.SettleSuccess(txctx, tx, claim, sideEffects, duration)
+		if err != nil {
+			return runtimedelivery.Snapshot{}, err
+		}
+		if _, err := s.requestCompletionCandidateTx(txctx, tx, claim.RunID(), nil); err != nil {
+			return runtimedelivery.Snapshot{}, err
+		}
+		return snapshot, nil
 	})
 }
 
 func (s *PostgresStore) SettleFailure(ctx context.Context, claim runtimedelivery.Claim, settlement runtimedelivery.Settlement) (runtimedelivery.Snapshot, error) {
 	return postgresDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx) (runtimedelivery.Snapshot, error) {
-		if err := storerunlifecycle.RequireActive(txctx, tx, claim.RunID(), storerunlifecycle.DialectPostgres); err != nil {
+		if err := requirePostgresRunActive(txctx, tx, claim.RunID()); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
 		snapshot, err := postgresDeliveryAdapter.SettleFailure(txctx, tx, claim, settlement)
@@ -358,13 +377,16 @@ func (s *PostgresStore) SettleFailure(ctx context.Context, claim runtimedelivery
 		if err := s.RecordDeadLetterTx(txctx, tx, diagnostic); err != nil {
 			return runtimedelivery.Snapshot{}, fmt.Errorf("commit terminal delivery diagnostic: %w", err)
 		}
+		if _, err := s.requestCompletionCandidateTx(txctx, tx, claim.RunID(), nil); err != nil {
+			return runtimedelivery.Snapshot{}, err
+		}
 		return snapshot, nil
 	})
 }
 
 func (s *SQLiteRuntimeStore) SettleFailure(ctx context.Context, claim runtimedelivery.Claim, settlement runtimedelivery.Settlement) (runtimedelivery.Snapshot, error) {
 	return sqliteDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx) (runtimedelivery.Snapshot, error) {
-		if err := storerunlifecycle.RequireActive(txctx, tx, claim.RunID(), storerunlifecycle.DialectSQLite); err != nil {
+		if err := requireSQLiteRunActive(txctx, tx, claim.RunID()); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
 		snapshot, err := sqliteDeliveryAdapter.SettleFailure(txctx, tx, claim, settlement)
@@ -384,6 +406,9 @@ func (s *SQLiteRuntimeStore) SettleFailure(ctx context.Context, claim runtimedel
 		}
 		if err := s.RecordDeadLetterTx(txctx, tx, diagnostic); err != nil {
 			return runtimedelivery.Snapshot{}, fmt.Errorf("commit terminal delivery diagnostic: %w", err)
+		}
+		if _, err := s.requestCompletionCandidateTx(txctx, tx, claim.RunID(), nil); err != nil {
+			return runtimedelivery.Snapshot{}, err
 		}
 		return snapshot, nil
 	})

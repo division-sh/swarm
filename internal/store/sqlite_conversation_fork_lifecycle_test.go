@@ -209,11 +209,13 @@ func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base 
 		turn2At:    base.Add(-1 * time.Minute),
 	}
 	ctx := testAuthorActivityContext()
+	requireRunFixtureForTest(t, ctx, s, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		RunID: source.runID, BundleHash: source.bundleHash, StartedAt: base.Add(-3 * time.Minute),
+	})
 	statements := []struct {
 		query string
 		args  []any
 	}{
-		{`INSERT INTO runs (run_id, status, bundle_hash, started_at, bundle_source) VALUES (?, 'running', ?, ?, 'ephemeral')`, []any{source.runID, source.bundleHash, base.Add(-3 * time.Minute)}},
 		{`INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source, runtime_descriptor) VALUES (?, ?, 'researcher', 'cheap', 1, 'authored', '{"type":"researcher","execution_mode":"live"}')`, []any{source.agentID, conversationForkSourceFlowInstance}},
 		{`INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status, created_at, updated_at) VALUES (?, ?, ?, ?, 1, 'authored', 'active', ?, ?)`, []any{source.sessionID, source.runID, source.agentID, conversationForkSourceFlowInstance, base.Add(-3 * time.Minute), base.Add(-3 * time.Minute)}},
 	}

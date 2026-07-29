@@ -14,7 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -57,7 +57,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 	assertCleanupTableResult(t, result, "runs", 2, 2)
 	assertCleanupTableResult(t, result, "events", 5, 5)
 	assertCleanupTableResult(t, result, "event_receipts", 1, 1)
-	assertCleanupTableResult(t, result, "dead_letters", 1, 1)
+	assertCleanupTableResult(t, result, "dead_letters", 2, 2)
 	assertCleanupTableResult(t, result, "timers", 3, 3)
 	assertCleanupTableResult(t, result, "conversation_forks", 1, 1)
 	assertCleanupTableResult(t, result, "human_task_continuations", 1, 1)
@@ -410,12 +410,11 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_IncludeBundlesRejectsOutOfPl
 	ctx := testAuthorActivityContext()
 	seedDestructiveResetBundleRows(t, ctx, pg)
 	outOfPlanRun := uuid.NewString()
-	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES ($1::uuid, 'completed', $2, $3, now())
-	`, outOfPlanRun, destructiveResetCleanupBundleHashA, storerunlifecycle.BundleSourcePersisted); err != nil {
-		t.Fatalf("seed out-of-plan persisted run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		RunID: outOfPlanRun, State: storerunlifecycle.StateCompleted,
+		BundleHash:   destructiveResetCleanupBundleHashA,
+		BundleSource: storerunlifecycle.BundleSourcePersisted,
+	})
 
 	now := time.Date(2026, 5, 16, 18, 40, 0, 0, time.UTC)
 	_, err = pg.ApplyDestructiveResetCleanup(ctx, destructivereset.CleanupRequest{
@@ -463,9 +462,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DoesNotDeleteRunsCreatedAfte
 	}
 	lateRun := uuid.NewString()
 	lateEvent := uuid.NewString()
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, lateRun); err != nil {
-		t.Fatalf("seed late run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: pg.DB}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: lateRun})
 	lateSemanticEvent := eventtest.PersistedProjectionForProducer(
 		lateEvent, events.EventType("late.event"), eventtest.Producer(events.EventProducerExternal, "cleanup-late-ingress"), "",
 		[]byte(`{}`), 0, lateRun, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
@@ -567,7 +564,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	lateRunID := uuid.NewString()
+	lateRunID := deterministicRunForkMaterializationID(runID, eventID)
 	preservedRunID := uuid.NewString()
 	lateMutationID := uuid.NewString()
 	activeSessionID := uuid.NewString()
@@ -580,17 +577,16 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source) VALUES ('agent-a', 'cleanup', 'operator', 'regular', TRUE, 'authored')`); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'completed', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, preservedRunID); err != nil {
-		t.Fatalf("seed preserved run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: pg.DB}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		RunID: preservedRunID, State: storerunlifecycle.StateCompleted,
+	})
+	registerTestAuthorActivityCatalog(t, pg)
 	cleanupSemanticEvent := eventtest.PersistedProjectionForProducer(
-		eventID, events.EventType("cleanup.event"), eventtest.Producer(events.EventProducerExternal, "cleanup-reference-ingress"), "",
-		[]byte(`{}`), 0, runID, "", events.EventEnvelope{EntityID: entityID, FlowInstance: "flow/a", Scope: events.EventScopeEntity}, time.Now().UTC(),
+		eventID, events.EventType("batch.contract"), eventtest.Producer(events.EventProducerExternal, "cleanup-reference-ingress"), "",
+		[]byte(`{}`), 0, runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
 	)
-	if err := insertCanonicalEventRecordFixture(ctx, pg, cleanupSemanticEvent); err != nil {
+	if err := commitSemanticEventFixture(ctx, pg, cleanupSemanticEvent); err != nil {
 		t.Fatalf("seed cleanup event: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
@@ -608,11 +604,16 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	`, predecessorSessionID, activeSessionID, preservedRunID); err != nil {
 		t.Fatalf("seed preserved predecessor session: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, forked_from_run_id, forked_from_event_id, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2::uuid, $3::uuid, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, lateRunID, runID, eventID); err != nil {
-		t.Fatalf("seed preserved late fork run: %v", err)
+	captureRunForkTestRevision(t, pg.DB, runID)
+	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{
+		SourceRunID: runID,
+		At:          eventID,
+	})
+	if err != nil {
+		t.Fatalf("materialize dependent fork: %v", err)
+	}
+	if materialized.ForkRunID != lateRunID {
+		t.Fatalf("dependent fork run_id = %s, want %s", materialized.ForkRunID, lateRunID)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO entity_mutations (mutation_id, run_id, entity_id, field, caused_by_event, writer_type, writer_id)
@@ -752,13 +753,8 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 	cleanupEventID := uuid.NewString()
 	preservedSourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
-	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES
-			($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),
-			($2::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),
-			($3::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, cleanupRunID, preservedSourceRunID, preservedForkRunID); err != nil {
-		t.Fatalf("seed runs: %v", err)
+	for _, runID := range []string{cleanupRunID, preservedSourceRunID, preservedForkRunID} {
+		requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	}
 	seededAt := time.Date(2026, 5, 16, 19, 0, 0, 0, time.UTC)
 	entityEnvelope := events.EventEnvelope{EntityID: entityID, FlowInstance: "flow/a", Scope: events.EventScopeEntity}
@@ -877,9 +873,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RollsBackOnUnknownForeignKey
 	t.Cleanup(func() { _ = pg.DB.Close() })
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: pg.DB}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	if _, err := pg.DB.ExecContext(ctx, `
 		CREATE TABLE cleanup_unknown_fk_probe (
 			probe_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1126,19 +1120,21 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	timerForkRun := uuid.NewString()
 	timerForkEvent := uuid.NewString()
 	humanTaskCardID := uuid.NewString()
+	seededAt := time.Date(2026, 5, 16, 18, 0, 0, 0, time.UTC)
 	if _, err := pg.DB.ExecContext(ctx, `CREATE TABLE generated_entity_fixture (entity_id UUID PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`); err != nil {
 		t.Fatalf("create generated entity fixture: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `CREATE TABLE generated_node_state_fixture (entity_id UUID NOT NULL, node_id TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(entity_id, node_id))`); err != nil {
 		t.Fatalf("create generated node fixture: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, trigger_event_id, trigger_event_type, bundle_hash, bundle_source) VALUES
-			($1::uuid, 'running', $3::uuid, 'source.event', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),
-			($2::uuid, 'running', $4::uuid, 'source.event', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runA, runB, sourceEvent, forkEvent); err != nil {
-		t.Fatalf("seed runs: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{
+		RunID: runA, Origin: semanticEventRunOriginForTest(t, sourceEvent, "source.event"),
+		StartedAt: seededAt.Add(-time.Hour),
+	})
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{
+		RunID: runB, Origin: semanticEventRunOriginForTest(t, forkEvent, "source.event"),
+		StartedAt: seededAt.Add(-time.Hour),
+	})
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO decision_cards (
 			card_id, run_id, anchor_kind, anchor, status, snapshot, card_content_hash,
@@ -1162,7 +1158,6 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	`, humanTaskCardID, runA); err != nil {
 		t.Fatalf("seed human-task continuation: %v", err)
 	}
-	seededAt := time.Date(2026, 5, 16, 18, 0, 0, 0, time.UTC)
 	entityEnvelope := events.EventEnvelope{EntityID: entityID, FlowInstance: "flow/a", Scope: events.EventScopeEntity}
 	sourceSemanticEvent := eventtest.PersistedProjectionForProducer(
 		sourceEvent, events.EventType("source.event"), eventtest.Producer(events.EventProducerExternal, "cleanup-ingress"), "",
@@ -1217,8 +1212,15 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	}); err != nil {
 		t.Fatalf("seed selected-contract fork event: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `UPDATE runs SET status = 'completed' WHERE run_id = $1::uuid`, runB); err != nil {
-		t.Fatalf("complete seeded fork run: %v", err)
+	if _, err := markRunTerminalStatusForTest(
+		ctx,
+		pg,
+		runB,
+		string(storerunlifecycle.StateCancelled),
+		nil,
+		seededAt.Add(6*time.Second),
+	); err != nil {
+		t.Fatalf("terminalize seeded fork run: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, side_effects) VALUES

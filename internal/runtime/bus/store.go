@@ -261,20 +261,6 @@ func normalizeDescriptorAddressFields(in map[string]string) map[string]string {
 	return out
 }
 
-// RunLifecyclePersistence owns explicit failed, cancelled, and forked
-// terminalization. Successful completion is owned by normal-run convergence.
-type RunLifecyclePersistence interface {
-	MarkRunTerminal(ctx context.Context, runID, status string, failure *runtimefailures.Envelope, endedAt time.Time) (RunLifecycleSnapshot, error)
-}
-
-type StandaloneRuntimePlatformRunConvergencePersistence interface {
-	ConvergeStandaloneRuntimePlatformRun(ctx context.Context, evt events.Event) error
-}
-
-type NormalRunCompletionConvergencePersistence interface {
-	ConvergeNormalRunCompletion(ctx context.Context, eventID string, workflowTerminalStates []string, flowTerminalStates map[string][]string) error
-}
-
 type RunLifecycleSnapshot struct {
 	RunID       string
 	Status      string

@@ -20,9 +20,11 @@ import (
 	"github.com/google/uuid"
 )
 
+const revisionSourceRouteBundleHash = "bundle-v1:sha256:abababababababababababababababababababababababababababababababab"
+
 func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverContext(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(uuid.NewString(), "runfork-admission"))
+	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(uuid.NewString(), revisionSourceRouteBundleHash))
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	runID := uuid.NewString()
 	pendingEventID := uuid.NewString()
@@ -33,12 +35,7 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 	sourceRoute := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: sourceEntityID}
 	targetRoute := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/inst-9", EntityID: targetEntityID}
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	envelope := events.EnvelopeForTargetRoute(events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute), targetRoute)
 	pendingEvent := eventtest.ExistingRunRootIngress(pendingEventID, "producer/inst-1/scan.requested", "producer-node", "", []byte(`{}`), 0, runID, envelope, at)
 	pendingRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "pending-source-node"}
@@ -106,7 +103,7 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 
 func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(uuid.NewString(), "runfork-admission"))
+	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(uuid.NewString(), revisionSourceRouteBundleHash))
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	type testCase struct {
 		name              string
@@ -203,9 +200,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			runID := uuid.NewString()
 			eventID := uuid.NewString()
 			at := time.Now().UTC()
-			if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, at.Add(-time.Minute)); err != nil {
-				t.Fatalf("seed run: %v", err)
-			}
+			storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 			if !tc.explicitSelector {
 				storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, uuid.NewString(), runID, "platform.precursor",
 					eventtest.Producer(events.EventProducerExternal, "platform"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at.Add(-time.Second))

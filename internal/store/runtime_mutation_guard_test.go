@@ -881,14 +881,14 @@ func sqliteActiveTxHelper(site runtimeWriterCallSite) bool {
 		switch site.Function {
 		case "sqliteLockAgentDeliveryTx", "sqliteEnsureActiveRunRow", "sqliteEnsureRunRow", "sqliteRequireRunRowPresent", "purgeExpiredSQLiteAPIIdempotency", "sqliteStoreAPIIdempotency",
 			"appendSQLiteMailboxV1DecisionEventTx", "normalizeSQLiteMailboxV1DecisionReplayResult",
-			"loadSQLiteMailboxV1RowTx", "sqliteMarkRunTerminalTx", "sqliteNormalRunCompletionRunReadyTx",
-			"sqliteNormalRunCompletionSessionLeasesSettledTx", "ensureSQLiteTaskConversationAuditRowTx":
+			"loadSQLiteMailboxV1RowTx", "ensureSQLiteTaskConversationAuditRowTx",
+			"finishBlockedSQLiteCandidate":
 			return true
 		}
 	}
 	switch site.Function {
 	case "sqliteEnsureActiveRunRow", "sqliteEnsureRunRow", "sqliteRequireRunRowPresent", "purgeExpiredSQLiteAPIIdempotency", "sqliteStoreAPIIdempotency",
-		"sqliteSyncRunCounts", "sqlitePauseRunControl", "sqliteContinueRunControl", "sqliteStopRunControl",
+		"sqlitePauseRunControl", "sqliteContinueRunControl", "sqliteStopRunControl",
 		"insertSQLiteEntityStateDiff":
 		return true
 	}
@@ -929,6 +929,30 @@ func runtimeWriterRules() []runtimeWriterRule {
 			kinds:          kinds(primitiveBegin),
 			classification: classDifferentConcept,
 			reason:         "typed runtime work-occurrence admission is process-local ownership, not a database transaction",
+		},
+		{
+			name:           "run lifecycle candidate work admission",
+			path:           rx(`^internal/(runtime/runlifecycle/executor|store/run_lifecycle_candidates)\.go$`),
+			kinds:          kinds(primitiveBegin),
+			classification: classDifferentConcept,
+			reason:         "typed completion-candidate admission owns process-local handoff work, not a database transaction",
+		},
+		{
+			name:           "private run lifecycle mutation adapter",
+			path:           rx(`^internal/store/run_lifecycle_mutation_adapter\.go$`),
+			receiver:       rx(`^(postgres|sqlite)RunLifecycleMutation$`),
+			kinds:          kinds(primitiveRead, primitiveWrite),
+			classification: classConsumesCanonical,
+			reason:         "private dialect adapter executes only under the bound canonical run lifecycle mutation owner",
+		},
+		{
+			name:           "blocked sqlite completion candidate mutation",
+			path:           rx(`^internal/store/run_lifecycle_candidates\.go$`),
+			function:       rx(`^finishBlockedSQLiteCandidate$`),
+			receiver:       rx(`^SQLiteRuntimeStore$`),
+			kinds:          kinds(primitiveWrite),
+			classification: classActiveTxHelper,
+			reason:         "blocked-candidate disposition writes only through the selected-store lifecycle transaction",
 		},
 		{
 			name:           "sealed event publication test transaction",

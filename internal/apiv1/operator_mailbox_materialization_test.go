@@ -20,6 +20,7 @@ func TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite(t *testing.T
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
+	storetest.RequireSQLiteRun(t, ctx, sqliteStore.DB, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	storetest.CommitSemanticEvent(t, ctx, sqliteStore, eventtest.PersistedProjection(
 		eventID,
 		"mailbox.review_requested",

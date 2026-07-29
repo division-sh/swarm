@@ -11,8 +11,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -40,12 +40,17 @@ func (s *PostgresStore) acquirePostgresLiveSession(ctx context.Context, identity
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
+		return nil, runtimellm.ConversationRecord{}, err
+	}
+	defer handoff.rollback()
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, runtimellm.ConversationRecord{}, fmt.Errorf("begin live session acquire: %w", err)
 	}
 	defer tx.Rollback()
-	if err := storerunlifecycle.RequireActive(ctx, tx, identity.RunID, storerunlifecycle.DialectPostgres); err != nil {
+	if err := requirePostgresRunActive(ctx, tx, identity.RunID); err != nil {
 		return nil, runtimellm.ConversationRecord{}, err
 	}
 	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.AgentID, "acquire_hydrate", false); err != nil {
@@ -75,7 +80,11 @@ func (s *PostgresStore) acquirePostgresLiveSession(ctx context.Context, identity
 		&current.retriesFrom, &current.leaseHolder, &current.leaseExpires,
 		&current.conversation, &current.runtimeState, &current.turnCount,
 	)
-	now := time.Now().UTC()
+	var now time.Time
+	if err := tx.QueryRowContext(ctx, `SELECT CURRENT_TIMESTAMP`).Scan(&now); err != nil {
+		return nil, runtimellm.ConversationRecord{}, fmt.Errorf("read selected-store session time: %w", err)
+	}
+	now = now.UTC()
 	if errors.Is(err, sql.ErrNoRows) {
 		current.sessionID = uuid.NewString()
 		current.status = "active"
@@ -111,6 +120,20 @@ func (s *PostgresStore) acquirePostgresLiveSession(ctx context.Context, identity
 	if err != nil {
 		return nil, runtimellm.ConversationRecord{}, err
 	}
+	nextWake, err := postgresRunSessionNextWakeTx(ctx, tx, identity.RunID, now)
+	if err != nil {
+		return nil, runtimellm.ConversationRecord{}, err
+	}
+	if nextWake == nil {
+		return nil, runtimellm.ConversationRecord{}, errors.New("acquired live session has no exact lease expiry")
+	}
+	request, err := requestPostgresCompletionCandidateTx(ctx, tx, identity.RunID, nextWake, false)
+	if err != nil {
+		return nil, runtimellm.ConversationRecord{}, err
+	}
+	if err := handoff.prepare(&s.runLifecycleSinks, request); err != nil {
+		return nil, runtimellm.ConversationRecord{}, err
+	}
 	lease := &runtimesessions.Lease{
 		SessionID: current.sessionID, ProviderSessionID: strings.TrimSpace(current.providerSessionID.String), Identity: identity,
 		RetryReason: strings.TrimSpace(current.retryReason.String), RetriesFromSessionID: strings.TrimSpace(current.retriesFrom.String),
@@ -118,6 +141,9 @@ func (s *PostgresStore) acquirePostgresLiveSession(ctx context.Context, identity
 	}
 	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return nil, runtimellm.ConversationRecord{}, fmt.Errorf("commit live session acquire: %w", err)
+	}
+	if err := handoff.commit(); err != nil {
+		return nil, runtimellm.ConversationRecord{}, err
 	}
 	return lease, record, nil
 }
@@ -133,12 +159,17 @@ func (s *PostgresStore) Release(ctx context.Context, lease *runtimesessions.Leas
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
+		return err
+	}
+	defer handoff.rollback()
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin live session release: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := storerunlifecycle.RequireActive(ctx, tx, identity.RunID, storerunlifecycle.DialectPostgres); err != nil {
+	if err := requirePostgresRunActive(ctx, tx, identity.RunID); err != nil {
 		return err
 	}
 	res, err := tx.ExecContext(ctx, `
@@ -151,10 +182,17 @@ func (s *PostgresStore) Release(ctx context.Context, lease *runtimesessions.Leas
 	if rows, _ := res.RowsAffected(); rows == 0 {
 		return fmt.Errorf("no active lease to release for agent=%s session=%s", identity.AgentID, lease.SessionID)
 	}
+	request, err := requestPostgresCompletionCandidateTx(ctx, tx, identity.RunID, nil, false)
+	if err != nil {
+		return err
+	}
+	if err := handoff.prepare(&s.runLifecycleSinks, request); err != nil {
+		return err
+	}
 	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return fmt.Errorf("commit live session release: %w", err)
 	}
-	return nil
+	return handoff.commit()
 }
 
 func (s *PostgresStore) Rotate(ctx context.Context, identity agentmemory.Identity, lockOwner string, rotation runtimesessions.RotationMetadata) (*runtimesessions.Lease, error) {
@@ -166,12 +204,17 @@ func (s *PostgresStore) Rotate(ctx context.Context, identity agentmemory.Identit
 	if lockOwner == "" {
 		return nil, errors.New("lockOwner is required")
 	}
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer handoff.rollback()
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	if err := storerunlifecycle.RequireActive(ctx, tx, identity.RunID, storerunlifecycle.DialectPostgres); err != nil {
+	if err := requirePostgresRunActive(ctx, tx, identity.RunID); err != nil {
 		return nil, err
 	}
 	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.AgentID, "rotate", false); err != nil {
@@ -201,7 +244,11 @@ func (s *PostgresStore) Rotate(ctx context.Context, identity agentmemory.Identit
 			return &runtimesessions.Lease{SessionID: currentID, Identity: identity, LockOwner: existingOwner.String, ExpiresAt: existingExpiry.Time}, nil
 		}
 	}
-	now := time.Now().UTC()
+	var now time.Time
+	if err := tx.QueryRowContext(ctx, `SELECT CURRENT_TIMESTAMP`).Scan(&now); err != nil {
+		return nil, fmt.Errorf("read selected-store session time: %w", err)
+	}
+	now = now.UTC()
 	if existingOwner.Valid && existingExpiry.Valid && existingExpiry.Time.After(now) && existingOwner.String != lockOwner {
 		return nil, runtimesessions.ErrSessionLeased
 	}
@@ -232,7 +279,24 @@ func (s *PostgresStore) Rotate(ctx context.Context, identity agentmemory.Identit
 	if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET successor_session_id=$2::uuid, updated_at=$3 WHERE session_id=$1::uuid AND status='terminated'`, currentID, newID, now); err != nil {
 		return nil, err
 	}
+	nextWake, err := postgresRunSessionNextWakeTx(ctx, tx, identity.RunID, now)
+	if err != nil {
+		return nil, err
+	}
+	if nextWake == nil {
+		return nil, errors.New("rotated live session has no exact lease expiry")
+	}
+	request, err := requestPostgresCompletionCandidateTx(ctx, tx, identity.RunID, nextWake, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := handoff.prepare(&s.runLifecycleSinks, request); err != nil {
+		return nil, err
+	}
 	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+		return nil, err
+	}
+	if err := handoff.commit(); err != nil {
 		return nil, err
 	}
 	return &runtimesessions.Lease{SessionID: newID, Identity: identity, RetryReason: retryReason, RetriesFromSessionID: currentID, LockOwner: lockOwner, ExpiresAt: expires}, nil
@@ -248,7 +312,7 @@ func (s *PostgresStore) IncrementTurn(ctx context.Context, identity agentmemory.
 		return err
 	}
 	defer tx.Rollback()
-	if err := storerunlifecycle.RequireActive(ctx, tx, identity.RunID, storerunlifecycle.DialectPostgres); err != nil {
+	if err := requirePostgresRunActive(ctx, tx, identity.RunID); err != nil {
 		return err
 	}
 	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.AgentID, "increment_turn", false); err != nil {
@@ -277,12 +341,17 @@ func (s *PostgresStore) AdoptSessionID(ctx context.Context, identity agentmemory
 	if lockOwner == "" || newSessionID == "" {
 		return errors.New("lockOwner and newSessionID are required")
 	}
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
+		return err
+	}
+	defer handoff.rollback()
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if err := storerunlifecycle.RequireActive(ctx, tx, identity.RunID, storerunlifecycle.DialectPostgres); err != nil {
+	if err := requirePostgresRunActive(ctx, tx, identity.RunID); err != nil {
 		return err
 	}
 	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.AgentID, "adopt_provider_session", false); err != nil {
@@ -294,17 +363,35 @@ func (s *PostgresStore) AdoptSessionID(ctx context.Context, identity agentmemory
 	if err := tx.QueryRowContext(ctx, `SELECT session_id::text, lease_holder, lease_expires_at FROM agent_sessions WHERE run_id=$1::uuid AND agent_id=$2 AND flow_instance=$3 AND status='active' ORDER BY created_at DESC LIMIT 1 FOR UPDATE`, identity.RunID, identity.AgentID, identity.FlowInstance).Scan(&sessionID, &owner, &expiry); err != nil {
 		return err
 	}
-	now := time.Now().UTC()
+	var now time.Time
+	if err := tx.QueryRowContext(ctx, `SELECT CURRENT_TIMESTAMP`).Scan(&now); err != nil {
+		return fmt.Errorf("read selected-store session time: %w", err)
+	}
+	now = now.UTC()
 	if owner.Valid && expiry.Valid && expiry.Time.After(now) && owner.String != lockOwner {
 		return runtimesessions.ErrSessionLeased
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET runtime_state=COALESCE(runtime_state,'{}'::jsonb)||jsonb_build_object('provider_session_id',$1::text), lease_holder=$2, lease_expires_at=$3, updated_at=$4 WHERE session_id=$5::uuid`, newSessionID, lockOwner, now.Add(s.postgresSessionLockTTL()), now, sessionID); err != nil {
 		return err
 	}
+	nextWake, err := postgresRunSessionNextWakeTx(ctx, tx, identity.RunID, now)
+	if err != nil {
+		return err
+	}
+	if nextWake == nil {
+		return errors.New("adopted live session has no exact lease expiry")
+	}
+	request, err := requestPostgresCompletionCandidateTx(ctx, tx, identity.RunID, nextWake, false)
+	if err != nil {
+		return err
+	}
+	if err := handoff.prepare(&s.runLifecycleSinks, request); err != nil {
+		return err
+	}
 	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return fmt.Errorf("commit live session provider adoption: %w", err)
 	}
-	return nil
+	return handoff.commit()
 }
 
 func (s *PostgresStore) ResetAll(metadata runtimesessions.ResetMetadata) (runtimesessions.ResetSummary, error) {
@@ -313,6 +400,11 @@ func (s *PostgresStore) ResetAll(metadata runtimesessions.ResetMetadata) (runtim
 	}
 	source := strings.TrimSpace(metadata.Source)
 	ctx := context.Background()
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
+		return runtimesessions.ResetSummary{}, err
+	}
+	defer handoff.rollback()
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return runtimesessions.ResetSummary{}, fmt.Errorf("begin reset postgres live sessions: %w", err)
@@ -350,11 +442,30 @@ func (s *PostgresStore) ResetAll(metadata runtimesessions.ResetMetadata) (runtim
 	if err := rows.Close(); err != nil {
 		return runtimesessions.ResetSummary{}, fmt.Errorf("close postgres live session reset: %w", err)
 	}
+	seenRuns := make(map[string]struct{}, len(summary.OrphanedSessions))
+	for _, disposition := range summary.OrphanedSessions {
+		if _, exists := seenRuns[disposition.RunID]; exists {
+			continue
+		}
+		seenRuns[disposition.RunID] = struct{}{}
+		request, err := requestPostgresCompletionCandidateTx(ctx, tx, disposition.RunID, nil, false)
+		if err != nil {
+			return runtimesessions.ResetSummary{}, err
+		}
+		if err := handoff.prepare(&s.runLifecycleSinks, request); err != nil {
+			return runtimesessions.ResetSummary{}, err
+		}
+	}
 	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return runtimesessions.ResetSummary{}, fmt.Errorf("commit postgres live session reset: %w", err)
 	}
+	if err := handoff.commit(); err != nil {
+		return runtimesessions.ResetSummary{}, err
+	}
 	return summary, nil
 }
+
+var _ runtimerunlifecycle.OperationOwner = (*PostgresStore)(nil)
 
 func (s *PostgresStore) postgresSessionLockTTL() time.Duration {
 	if s == nil || s.sessionLockTTL <= 0 {

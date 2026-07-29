@@ -2,6 +2,7 @@ package bus_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -116,6 +117,19 @@ type recordingRunRecoveryQueue struct {
 	results          []runtimepipelineobligation.SweepResult
 	errors           []error
 	cancelAfterFirst context.CancelFunc
+}
+
+type terminalRunRecoveryQueue struct {
+	result runtimepipelineobligation.SweepResult
+	err    error
+}
+
+func (q terminalRunRecoveryQueue) ReleaseRunQueue(
+	context.Context,
+	string,
+	int,
+) (runtimepipelineobligation.SweepResult, error) {
+	return q.result, q.err
 }
 
 func (q *recordingRunRecoveryQueue) ReleaseRunQueue(ctx context.Context, runID string, limit int) (runtimepipelineobligation.SweepResult, error) {
@@ -331,7 +345,7 @@ func TestIngressResumeDrainsPartialBatchesUntilExplicitTerminationOnSQLiteAndPos
 			if err != nil {
 				t.Fatalf("Resume: %v", err)
 			}
-			assertControllerContinuation(t, publisher.results, result.ReleasedCount)
+			assertSweepContinuation(t, publisher.results, result.ReleasedCount)
 			for _, event := range later {
 				if got := retryReleasePipelineReceiptCount(t, fixture, event.ID()); got != 1 {
 					t.Fatalf("later event %s pipeline receipts = %d, want 1", event.ID(), got)
@@ -342,7 +356,7 @@ func TestIngressResumeDrainsPartialBatchesUntilExplicitTerminationOnSQLiteAndPos
 	}
 }
 
-func TestRunContinueDrainsPartialBatchesUntilExplicitTerminationOnSQLiteAndPostgres(t *testing.T) {
+func TestRunControlContinueCommittedRecoveryOutcomeParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture, later := newControllerContinuationFixture(t, backend)
@@ -368,13 +382,84 @@ func TestRunContinueDrainsPartialBatchesUntilExplicitTerminationOnSQLiteAndPostg
 			if err != nil {
 				t.Fatalf("Continue: %v", err)
 			}
-			assertControllerContinuation(t, queue.results, result.ReleasedDeliveries)
+			assertRunControllerContinuation(t, queue.results, result.Recovery)
 			for _, event := range later {
 				if got := retryReleasePipelineReceiptCount(t, fixture, event.ID()); got != 1 {
 					t.Fatalf("later event %s pipeline receipts = %d, want 1", event.ID(), got)
 				}
 			}
 			assertRetryReleaseReplayable(t, fixture, fixture.event.ID())
+
+			if _, err := runStore.PauseRunControl(fixture.ctx, runtimeruncontrol.TransitionRequest{
+				RunID:        fixture.event.RunID(),
+				Reason:       "failed recovery proof",
+				ControlledBy: "test",
+				Now:          fixture.event.CreatedAt().Add(3 * time.Second),
+			}); err != nil {
+				t.Fatalf("PauseRunControl before failed recovery: %v", err)
+			}
+			recoveryErr := errors.New("injected immediate recovery failure")
+			failedController := runtimeruncontrol.NewController(
+				runStore,
+				terminalRunRecoveryQueue{
+					result: runtimepipelineobligation.SweepResult{Examined: 1},
+					err:    recoveryErr,
+				},
+				runtimeruncontrol.Options{ReleaseLimit: 2},
+			)
+			failedResult, err := failedController.Continue(
+				fixture.ctx,
+				runtimeruncontrol.TransitionRequest{
+					RunID:        fixture.event.RunID(),
+					Reason:       "failed recovery proof",
+					ControlledBy: "test",
+					Now:          fixture.event.CreatedAt().Add(4 * time.Second),
+				},
+			)
+			if err != nil {
+				t.Fatalf("Continue after committed transition: %v", err)
+			}
+			if failedResult.Recovery.Disposition != runtimeruncontrol.RecoveryFailed ||
+				!errors.Is(failedResult.Recovery.Err, recoveryErr) ||
+				failedResult.Recovery.Sweep.Examined != 1 {
+				t.Fatalf("failed post-commit recovery = %#v", failedResult.Recovery)
+			}
+			if blocked, err := runStore.RunDispatchBlocked(fixture.ctx, fixture.event.RunID()); err != nil || blocked {
+				t.Fatalf("committed continue after recovery failure: blocked=%v err=%v", blocked, err)
+			}
+
+			if _, err := runStore.PauseRunControl(fixture.ctx, runtimeruncontrol.TransitionRequest{
+				RunID:        fixture.event.RunID(),
+				Reason:       "cancelled recovery proof",
+				ControlledBy: "test",
+				Now:          fixture.event.CreatedAt().Add(5 * time.Second),
+			}); err != nil {
+				t.Fatalf("PauseRunControl before cancelled recovery: %v", err)
+			}
+			cancelledController := runtimeruncontrol.NewController(
+				runStore,
+				terminalRunRecoveryQueue{err: context.Canceled},
+				runtimeruncontrol.Options{ReleaseLimit: 2},
+			)
+			cancelledResult, err := cancelledController.Continue(
+				fixture.ctx,
+				runtimeruncontrol.TransitionRequest{
+					RunID:        fixture.event.RunID(),
+					Reason:       "cancelled recovery proof",
+					ControlledBy: "test",
+					Now:          fixture.event.CreatedAt().Add(6 * time.Second),
+				},
+			)
+			if err != nil {
+				t.Fatalf("Continue after cancelled immediate recovery: %v", err)
+			}
+			if cancelledResult.Recovery.Disposition != runtimeruncontrol.RecoveryCancelled ||
+				!errors.Is(cancelledResult.Recovery.Err, context.Canceled) {
+				t.Fatalf("cancelled post-commit recovery = %#v", cancelledResult.Recovery)
+			}
+			if blocked, err := runStore.RunDispatchBlocked(fixture.ctx, fixture.event.RunID()); err != nil || blocked {
+				t.Fatalf("committed continue after recovery cancellation: blocked=%v err=%v", blocked, err)
+			}
 		})
 	}
 }
@@ -448,8 +533,8 @@ func TestRunContinueProcessesOnlyTargetRunDecisionRoutesOnSQLiteAndPostgres(t *t
 			if err != nil {
 				t.Fatalf("Continue: %v", err)
 			}
-			if result.ReleasedDeliveries != 1 {
-				t.Fatalf("released pipeline obligations = %d with sweeps %#v and errors %v, want target decision route only", result.ReleasedDeliveries, queue.results, queue.errors)
+			if result.Recovery.Sweep.Settled != 1 {
+				t.Fatalf("released pipeline obligations = %d with sweeps %#v and errors %v, want target decision route only", result.Recovery.Sweep.Settled, queue.results, queue.errors)
 			}
 			if got := fixture.decisionObligationStatus(t, target.ID()); got != "completed" {
 				t.Fatalf("target decision route status = %q, want completed", got)
@@ -611,8 +696,10 @@ func TestControllerCancellationBetweenBatchesAbandonsCursorOnSQLiteAndPostgres(t
 					if err != nil {
 						t.Fatalf("Continue: %v", err)
 					}
-					if result.ReleasedDeliveries != 1 || len(queue.results) != 2 {
-						t.Fatalf("cancelled run continuation = released:%d results:%#v, want one settlement and explicit failed continuation", result.ReleasedDeliveries, queue.results)
+					if result.Recovery.Sweep.Settled != 1 ||
+						result.Recovery.Disposition != runtimeruncontrol.RecoveryCancelled ||
+						len(queue.results) != 2 {
+						t.Fatalf("cancelled run continuation = recovery:%#v results:%#v, want one settlement and explicit cancelled continuation", result.Recovery, queue.results)
 					}
 				}
 
@@ -652,7 +739,11 @@ func newControllerContinuationFixture(t *testing.T, backend string) (completeEve
 	return fixture, later
 }
 
-func assertControllerContinuation(t *testing.T, results []runtimepipelineobligation.SweepResult, settled int) {
+func assertSweepContinuation(
+	t *testing.T,
+	results []runtimepipelineobligation.SweepResult,
+	settled int,
+) {
 	t.Helper()
 	if settled != 2 {
 		t.Fatalf("controller settled = %d, want both later obligations", settled)
@@ -667,6 +758,21 @@ func assertControllerContinuation(t *testing.T, results []runtimepipelineobligat
 	last := results[len(results)-1]
 	if !last.Exhausted || !last.Blocked {
 		t.Fatalf("final controller batch = %#v, want explicit exhaustion with retained local blockage", last)
+	}
+}
+
+func assertRunControllerContinuation(
+	t *testing.T,
+	results []runtimepipelineobligation.SweepResult,
+	recovery runtimeruncontrol.PostCommitRecovery,
+) {
+	t.Helper()
+	assertSweepContinuation(t, results, recovery.Sweep.Settled)
+	if recovery.Disposition != runtimeruncontrol.RecoveryBlocked ||
+		!recovery.Sweep.Exhausted ||
+		!recovery.Sweep.Blocked ||
+		recovery.Err != nil {
+		t.Fatalf("controller recovery = %#v, want explicit exhausted blockage", recovery)
 	}
 }
 
@@ -767,7 +873,7 @@ func newRetryReleaseTestEvent(fixture completeEventDispatchFixture, createdAt ti
 
 func newRetryReleaseRunRoot(runID string, createdAt time.Time) events.Event {
 	entityID := uuid.NewString()
-	return eventtest.RunCreatingRootIngress(
+	return eventtest.ExistingRunRootIngress(
 		uuid.NewString(),
 		events.EventType("custom.replay.checked"),
 		"api.v1",
@@ -775,7 +881,6 @@ func newRetryReleaseRunRoot(runID string, createdAt time.Time) events.Event {
 		[]byte(`{"text":"later running run"}`),
 		0,
 		runID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 		createdAt.UTC().Truncate(time.Microsecond),
 	)

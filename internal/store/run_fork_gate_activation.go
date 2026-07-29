@@ -91,7 +91,7 @@ func materializeRunForkDecisionCards(ctx context.Context, tx *sql.Tx, forkRunID,
 				return fmt.Errorf("restore committed fork decision card: %w", err)
 			}
 		case gateruntime.StatusSuperseded:
-			if err := supersedeDecisionCardsForStage(ctx, tx, forkRunID, entityID, binding.Fork.ActivationID, binding.Fork.SupersededReason, now, true); err != nil {
+			if _, err := supersedeDecisionCardsForStage(ctx, tx, forkRunID, entityID, binding.Fork.ActivationID, binding.Fork.SupersededReason, now, true); err != nil {
 				return fmt.Errorf("restore superseded fork decision card: %w", err)
 			}
 		}

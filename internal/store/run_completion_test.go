@@ -31,12 +31,10 @@ func seedNormalRunCompletionFixture(t *testing.T, db *sql.DB, state, flowInstanc
 	if flowTemplate == "" {
 		flowTemplate = "example"
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', now(), 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{
+		RunID: runID, Origin: semanticEventRunOriginForTest(t, eventID, "example.started"),
+		StartedAt: time.Now().UTC(),
+	})
 	seedPostgresSemanticEventRecordFixture(
 		t, ctx, db, eventID, runID, events.EventType("example.started"),
 		events.EventProducerExternal, "test", entityID, flowInstance, time.Now().UTC(),
@@ -51,14 +49,6 @@ func seedNormalRunCompletionFixture(t *testing.T, db *sql.DB, state, flowInstanc
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit pipeline scope fixture: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		UPDATE runs
-		SET trigger_event_id = $2::uuid,
-		    trigger_event_type = 'example.started'
-		WHERE run_id = $1::uuid
-	`, runID, eventID); err != nil {
-		t.Fatalf("seed run trigger: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 			INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
@@ -120,7 +110,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_MarksCompletedWhenTerminalAnd
 	)); err != nil {
 		t.Fatalf("seed runtime log: %v", err)
 	}
-	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, map[string][]string{"review": []string{"done"}}); err != nil {
+	if err := executeRunCompletionCandidateForEvent(ctx, pg, fixture.EventID, []string{"done"}, map[string][]string{"review": []string{"done"}}); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion: %v", err)
 	}
 	assertRunCompletionStatus(t, db, fixture.RunID, "completed", true)
@@ -146,7 +136,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWithMissingPipelin
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	fixture := seedNormalRunCompletionFixture(t, db, "done", "", "")
-	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+	if err := executeRunCompletionCandidateForEvent(ctx, pg, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion: %v", err)
 	}
 	assertRunCompletionStatus(t, db, fixture.RunID, "running", false)
@@ -175,7 +165,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileDeliveryActiv
 	if err := acknowledgePipelineEventFixture(ctx, pg, fixture.EventID); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
-	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+	if err := executeRunCompletionCandidateForEvent(ctx, pg, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion active: %v", err)
 	}
 	assertRunCompletionStatus(t, db, fixture.RunID, "running", false)
@@ -183,7 +173,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileDeliveryActiv
 	if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
 		t.Fatalf("SettleSuccess: %v", err)
 	}
-	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+	if err := executeRunCompletionCandidateForEvent(ctx, pg, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion settled: %v", err)
 	}
 	assertRunCompletionStatus(t, db, fixture.RunID, "completed", true)
@@ -212,7 +202,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedUntilNodeDeliveryS
 	if err := acknowledgePipelineEventFixture(ctx, pg, fixture.EventID); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
-	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+	if err := executeRunCompletionCandidateForEvent(ctx, pg, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion active node: %v", err)
 	}
 	assertRunCompletionStatus(t, db, fixture.RunID, "running", false)
@@ -220,7 +210,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedUntilNodeDeliveryS
 	if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
 		t.Fatalf("settle node delivery: %v", err)
 	}
-	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+	if err := executeRunCompletionCandidateForEvent(ctx, pg, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion settled node: %v", err)
 	}
 	assertRunCompletionStatus(t, db, fixture.RunID, "completed", true)
@@ -246,7 +236,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileTimerActiveTh
 	`, timerID, fixture.RunID, fixture.EntityID); err != nil {
 		t.Fatalf("seed active timer: %v", err)
 	}
-	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+	if err := executeRunCompletionCandidateForEvent(ctx, pg, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion active timer: %v", err)
 	}
 	assertRunCompletionStatus(t, db, fixture.RunID, "running", false)
@@ -254,7 +244,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileTimerActiveTh
 	if _, err := db.ExecContext(ctx, `UPDATE timers SET status = 'fired', fired_at = now() WHERE timer_id = $1::uuid`, timerID); err != nil {
 		t.Fatalf("settle timer: %v", err)
 	}
-	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+	if err := executeRunCompletionCandidateForEvent(ctx, pg, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion settled timer: %v", err)
 	}
 	assertRunCompletionStatus(t, db, fixture.RunID, "completed", true)
@@ -295,7 +285,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileSessionLeaseA
 	`, sessionID, fixture.RunID); err != nil {
 		t.Fatalf("seed active session lease: %v", err)
 	}
-	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+	if err := executeRunCompletionCandidateForEvent(ctx, pg, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion active session: %v", err)
 	}
 	assertRunCompletionStatus(t, db, fixture.RunID, "running", false)
@@ -308,7 +298,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileSessionLeaseA
 	`, sessionID); err != nil {
 		t.Fatalf("release session lease: %v", err)
 	}
-	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+	if err := executeRunCompletionCandidateForEvent(ctx, pg, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion released session: %v", err)
 	}
 	assertRunCompletionStatus(t, db, fixture.RunID, "completed", true)
@@ -322,7 +312,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhenEntityNotTermi
 	if err := acknowledgePipelineEventFixture(ctx, pg, fixture.EventID); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
-	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+	if err := executeRunCompletionCandidateForEvent(ctx, pg, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion: %v", err)
 	}
 	assertRunCompletionStatus(t, db, fixture.RunID, "running", false)
@@ -330,7 +320,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhenEntityNotTermi
 	if _, err := db.ExecContext(ctx, `UPDATE entity_state SET current_state = 'done' WHERE run_id = $1::uuid`, fixture.RunID); err != nil {
 		t.Fatalf("advance entity terminal: %v", err)
 	}
-	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+	if err := executeRunCompletionCandidateForEvent(ctx, pg, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion terminal: %v", err)
 	}
 	assertRunCompletionStatus(t, db, fixture.RunID, "completed", true)

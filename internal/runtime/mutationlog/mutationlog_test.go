@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -289,25 +289,13 @@ func TestInsertRejectsMissingRunWithoutCreatingLifecycle(t *testing.T) {
 
 func insertMutationLogRecord(t *testing.T, ctx context.Context, db *sql.DB, record Record) error {
 	t.Helper()
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin mutation log transaction: %v", err)
-	}
-	defer tx.Rollback()
-	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
-	if err != nil {
+	return runlifecyclefixture.RunPostgresMutation(ctx, db, func(txctx context.Context, tx *sql.Tx) error {
+		if err := Insert(txctx, tx, record); err != nil {
+			return err
+		}
+		_, err := runforkrevision.CaptureCurrentTransaction(txctx, tx)
 		return err
-	}
-	if err := Insert(storyctx, tx, record); err != nil {
-		return err
-	}
-	if _, err := runforkrevision.CaptureCurrentTransaction(storyctx, tx); err != nil {
-		return err
-	}
-	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
-		return err
-	}
-	return tx.Commit()
+	})
 }
 
 func seedMutationLogBundleRow(t *testing.T, db *sql.DB, bundleHash string) {
@@ -323,18 +311,12 @@ func seedMutationLogBundleRow(t *testing.T, db *sql.DB, bundleHash string) {
 func seedMutationLogActiveRun(t *testing.T, db *sql.DB, runID string, sourceFact *runtimecorrelation.BundleSourceFact) {
 	t.Helper()
 	if sourceFact == nil {
-		if _, err := db.ExecContext(context.Background(), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-			t.Fatalf("seed active run: %v", err)
-		}
-		return
+		t.Fatal("seed active run requires exact bundle source fact")
 	}
-	bundleHash, bundleSource := sourceFact.StorageValues()
-	if _, err := db.ExecContext(context.Background(), `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, $3)
-	`, runID, bundleHash, bundleSource); err != nil {
-		t.Fatalf("seed active run with bundle source: %v", err)
-	}
+	runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+		RunID:  runID,
+		Source: *sourceFact,
+	})
 }
 
 func countMutationLogRunRows(t *testing.T, db *sql.DB, runID string) int {

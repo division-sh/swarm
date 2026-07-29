@@ -35,7 +35,7 @@ func TestActivityAttemptJournalSQLiteAndPostgres(t *testing.T) {
 			store: func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				return db, NewWorkflowInstanceStore(db), false
+				return db, newPostgresWorkflowInstanceStoreForTest(db), false
 			},
 		},
 	}
@@ -127,7 +127,7 @@ func TestActivityAttemptJournalPreservesReplyContextAcrossRestart(t *testing.T) 
 			store: func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				return db, NewWorkflowInstanceStore(db), false
+				return db, newPostgresWorkflowInstanceStoreForTest(db), false
 			},
 		},
 	}
@@ -145,7 +145,7 @@ func TestActivityAttemptJournalPreservesReplyContextAcrossRestart(t *testing.T) 
 			if _, inserted, err := journal.StartActivityAttempt(ctx, start); err != nil || !inserted {
 				t.Fatalf("StartActivityAttempt inserted=%v err=%v", inserted, err)
 			}
-			restarted := NewWorkflowInstanceStore(db)
+			restarted := newPostgresWorkflowInstanceStoreForTest(db)
 			if sqlite {
 				restarted = NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, &recordingRuntimeMutationRunner{db: db})
 			}

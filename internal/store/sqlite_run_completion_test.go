@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -91,7 +93,7 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionMarksCompletedAndIgnoresRu
 		t.Fatalf("seed sqlite runtime log: %v", err)
 	}
 
-	if err := store.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, nil); err != nil {
+	if err := executeRunCompletionCandidateForEvent(ctx, store, fixture.EventID, []string{"done"}, nil); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion: %v", err)
 	}
 	assertSQLiteRunCompletionStatus(t, store.DB, fixture.RunID, "completed", true)
@@ -116,25 +118,23 @@ func TestSQLiteRuntimeStoreMarkRunTerminalPreservesFailureAndRejectsConflict(t *
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, time.Now().UTC()); err != nil {
-		t.Fatalf("seed sqlite run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC()})
 	failure := testFailureEnvelope(runtimefailures.ClassInternalFailure, "run_quiescence_failed", nil)
-	snap, err := store.MarkRunTerminal(ctx, runID, "failed", &failure, time.Now().UTC())
+	snap, err := markRunTerminalStatusForTest(ctx, store, runID, "failed", &failure, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("MarkRunTerminal(failed): %v", err)
 	}
 	if snap.Failure == nil || !failureEnvelopesEqual(*snap.Failure, failure) {
 		t.Fatalf("snapshot failure = %#v, want %#v", snap.Failure, failure)
 	}
-	if _, err := store.MarkRunTerminal(ctx, runID, "failed", &failure, time.Now().UTC()); err != nil {
+	if _, err := markRunTerminalStatusForTest(ctx, store, runID, "failed", &failure, time.Now().UTC()); err != nil {
 		t.Fatalf("idempotent failed terminal write: %v", err)
 	}
 	conflicting := testFailureEnvelope(runtimefailures.ClassInternalFailure, "different_run_failure", nil)
-	if _, err := store.MarkRunTerminal(ctx, runID, "failed", &conflicting, time.Now().UTC()); err == nil {
+	if _, err := markRunTerminalStatusForTest(ctx, store, runID, "failed", &conflicting, time.Now().UTC()); err == nil {
 		t.Fatal("conflicting sqlite terminal write was accepted")
 	}
-	if _, err := store.MarkRunTerminal(ctx, uuid.NewString(), "failed", nil, time.Now().UTC()); err == nil {
+	if _, err := markRunTerminalStatusForTest(ctx, store, uuid.NewString(), "failed", nil, time.Now().UTC()); err == nil {
 		t.Fatal("failed sqlite terminal write without failure was accepted")
 	}
 }
@@ -147,12 +147,11 @@ func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 	eventEntityA := uuid.NewString()
 	eventEntityB := uuid.NewString()
 	currentEntity := uuid.NewString()
-	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, event_count, entity_count, started_at, bundle_hash, bundle_source)
-		VALUES (?, 'running', 99, 9, ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, now); err != nil {
-		t.Fatalf("seed sqlite run: %v", err)
-	}
+	runlifecyclefixture.RequireCorruptSQLiteSnapshot(t, ctx, store.DB, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
+		RunID: runID, State: "running",
+		BundleHash:   "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		BundleSource: "ephemeral", EventCount: 99, EntityCount: 9, StartedAt: now,
+	})
 	for _, fixture := range []struct {
 		id, name, entityID string
 		at                 time.Time
@@ -177,8 +176,10 @@ func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 		t.Fatalf("snapshot entity_count = %d, want entity_state count 1 despite stale run/event overcount", snap.EntityCount)
 	}
 
-	if err := sqliteSyncRunCounts(ctx, store.DB, runID); err != nil {
-		t.Fatalf("sqliteSyncRunCounts: %v", err)
+	if err := store.runAuthorActivityMutation(ctx, "test synchronize SQLite lifecycle counters", func(txctx context.Context, tx *sql.Tx) error {
+		return (sqliteRunLifecycleMutation{store: store, tx: tx}).SyncCounters(txctx, runID)
+	}); err != nil {
+		t.Fatalf("SyncCounters: %v", err)
 	}
 	var eventCount, entityCount int
 	if err := store.DB.QueryRowContext(ctx, `
@@ -205,7 +206,7 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionFailsClosedWhileDeliveryAc
 	if err := acknowledgePipelineEventFixture(ctx, store, fixture.EventID); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
-	if err := store.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, nil); err != nil {
+	if err := executeRunCompletionCandidateForEvent(ctx, store, fixture.EventID, []string{"done"}, nil); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion active: %v", err)
 	}
 	assertSQLiteRunCompletionStatus(t, store.DB, fixture.RunID, "running", false)
@@ -217,7 +218,7 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionFailsClosedWhileDeliveryAc
 	if _, err := store.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
 		t.Fatalf("settle sqlite active delivery: %v", err)
 	}
-	if err := store.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, nil); err != nil {
+	if err := executeRunCompletionCandidateForEvent(ctx, store, fixture.EventID, []string{"done"}, nil); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion settled: %v", err)
 	}
 	assertSQLiteRunCompletionStatus(t, store.DB, fixture.RunID, "completed", true)

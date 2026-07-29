@@ -894,8 +894,8 @@ func writeRunCommandTerminalSummary(out io.Writer, run diagnosticRunHeader) {
 	if out == nil {
 		return
 	}
-	fmt.Fprintf(out, "run terminal: run_id=%s status=%s trigger=%s event_count=%d entity_count=%d\n",
-		run.RunID, formatCLIHumanCode(cliHumanCodeRunStatus, run.Status), run.TriggerEventType, intValue(run.EventCount), intValue(run.EntityCount))
+	fmt.Fprintf(out, "run terminal: run_id=%s status=%s origin=%s event_count=%d entity_count=%d\n",
+		run.RunID, formatCLIHumanCode(cliHumanCodeRunStatus, run.Status), diagnosticRunOriginLabel(run.Origin), intValue(run.EventCount), intValue(run.EntityCount))
 	if run.Failure != nil {
 		fmt.Fprintf(out, "failure=%s/%s message=%s remediation=%s\n", run.Failure.Class, run.Failure.Detail.Code, run.Failure.Message, run.Failure.Remediation)
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"os"
 	"path/filepath"
 	"testing"
@@ -33,12 +34,7 @@ func TestExecuteWithPersistedComputeModuleReplayEvidenceLoadsAndFailsClosedOnSto
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES (?, 'running', ?, ?, ?)
-	`, runID, bundleHash, bundleSource, time.Now().UTC()); err != nil {
-		t.Fatalf("seed sqlite run: %v", err)
-	}
+	runlifecyclefixture.RequireSQLite(t, ctx, sqliteStore.DB, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: bundleHash, BundleSource: bundleSource})
 
 	source := computeModuleReplaySource(t)
 	exec := newComputeModuleReplayExecutor(t, source)

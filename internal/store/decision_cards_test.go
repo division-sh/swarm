@@ -813,7 +813,7 @@ func TestNormalRunCompletionDecisionGateAuthorityParity(t *testing.T) {
 					t.Fatalf("ConvergeNormalRunCompletion: %v", err)
 				}
 				assertDecisionCardCompletionBlockedState(t, ctx, cardStore, db, postgres, runID, entityID, card.CardID, beforeCard.Status, gateStatus, beforeChanges)
-				if _, err := markDecisionCardRunTerminal(ctx, cardStore, runID, "completed", now.Add(2*time.Minute)); err == nil || !strings.Contains(err.Error(), "normal run completion convergence") {
+				if _, err := markDecisionCardRunTerminal(ctx, cardStore, runID, "completed", now.Add(2*time.Minute)); err == nil || !strings.Contains(err.Error(), "requires failed or cancelled state") {
 					t.Fatalf("generic completed terminalization error = %v, want canonical convergence refusal", err)
 				}
 				assertDecisionCardCompletionBlockedState(t, ctx, cardStore, db, postgres, runID, entityID, card.CardID, beforeCard.Status, gateStatus, beforeChanges)
@@ -845,12 +845,12 @@ func TestNormalRunCompletionDecisionGateAuthorityParity(t *testing.T) {
 }
 
 func convergeDecisionCardRunCompletion(ctx context.Context, cards decisioncard.Store, eventID string) error {
-	flowTerminals := map[string][]string{"launch": {"done"}}
+	flowTerminals := map[string][]string{"launch/review": {"done"}}
 	switch selected := cards.(type) {
 	case *PostgresStore:
-		return selected.ConvergeNormalRunCompletion(ctx, eventID, []string{"done"}, flowTerminals)
+		return executeRunCompletionCandidateForEvent(ctx, selected, eventID, []string{"done"}, flowTerminals)
 	case *SQLiteRuntimeStore:
-		return selected.ConvergeNormalRunCompletion(ctx, eventID, []string{"done"}, flowTerminals)
+		return executeRunCompletionCandidateForEvent(ctx, selected, eventID, []string{"done"}, flowTerminals)
 	default:
 		return fmt.Errorf("unexpected decision card store %T", cards)
 	}
@@ -962,10 +962,10 @@ func markDecisionCardRunTerminalStatus(status string) func(context.Context, deci
 		failure := terminalEventAdmissionFailure(status)
 		switch selected := cards.(type) {
 		case *PostgresStore:
-			_, err := selected.MarkRunTerminal(ctx, runID, status, failure, now)
+			_, err := markRunTerminalStatusForTest(ctx, selected, runID, status, failure, now)
 			return err
 		case *SQLiteRuntimeStore:
-			_, err := selected.MarkRunTerminal(ctx, runID, status, failure, now)
+			_, err := markRunTerminalStatusForTest(ctx, selected, runID, status, failure, now)
 			return err
 		default:
 			return fmt.Errorf("unexpected decision card store %T", cards)
@@ -1225,7 +1225,7 @@ func appendDecisionCardChangeInStore(ctx context.Context, cards decisioncard.Sto
 	var err error
 	switch store := cards.(type) {
 	case *PostgresStore:
-		err = runPostgresDecisionCardMutation(ctx, store.DB, appendChange(true))
+		err = runPostgresDecisionCardMutation(ctx, store, appendChange(true))
 	case *SQLiteRuntimeStore:
 		err = store.runDecisionCardMutation(ctx, "test append decision card change", appendChange(false))
 	default:
@@ -1282,9 +1282,9 @@ func loadDecisionCardGateActivation(t *testing.T, db *sql.DB, postgres bool, run
 func markDecisionCardRunTerminal(ctx context.Context, cards decisioncard.Store, runID, status string, now time.Time) (any, error) {
 	switch store := cards.(type) {
 	case *PostgresStore:
-		return store.MarkRunTerminal(ctx, runID, status, nil, now)
+		return markRunTerminalStatusForTest(ctx, store, runID, status, nil, now)
 	case *SQLiteRuntimeStore:
-		return store.MarkRunTerminal(ctx, runID, status, nil, now)
+		return markRunTerminalStatusForTest(ctx, store, runID, status, nil, now)
 	default:
 		return nil, fmt.Errorf("unexpected decision card store %T", cards)
 	}
@@ -1426,16 +1426,16 @@ func decisionCardTestStore(t *testing.T, backend string) (decisioncard.Store, st
 			t.Fatalf("BootstrapSchema sqlite: %v", err)
 		}
 		registerTestAuthorActivityCatalog(t, store)
-		if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-			t.Fatalf("insert sqlite run: %v", err)
+		if err := ensureEphemeralRunForTest(ctx, store, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+			t.Fatalf("create sqlite run through lifecycle owner: %v", err)
 		}
 		return store, runID
 	case "postgres":
 		_, db, _ := testutil.StartPostgres(t)
 		store := newTestPostgresStore(t, db)
 		registerTestAuthorActivityCatalog(t, store)
-		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-			t.Fatalf("insert postgres run: %v", err)
+		if err := ensureEphemeralRunForTest(ctx, store, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+			t.Fatalf("create postgres run through lifecycle owner: %v", err)
 		}
 		return store, runID
 	default:

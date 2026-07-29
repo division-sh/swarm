@@ -74,6 +74,7 @@ func TestPostgresInboundPublicationOperationCommitsRetriesAndRollsBackAtomically
 	store := admitTestPostgresStore(t, db)
 	store.SetEventPayloadValidator(currentPlatformPayloadValidatorForStoreTest(t))
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	workflowStore.ConfigureRuntimeMutationRunner(store)
 	workflowStore.ConfigureDeliveryLifecycleStore(store)
 	workflowStore.ConfigurePipelineObligationStore(store.PipelineObligations())
 	runInboundPublicationOperationProof(t, db, false, store, workflowStore)

@@ -27,11 +27,9 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 	olderEventID := uuid.NewString()
 	newerEventID := uuid.NewString()
 	base := time.Unix(1700000000, 0).UTC()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
-	seedOperatorObservabilityEvent(t, ctx, pg, olderEventID, runID, "task.failed", events.EventProducerAgent, "agent-a", json.RawMessage(`{"entity_id":"`+entityID+`","n":1}`), entityID, base)
-	seedOperatorObservabilityEvent(t, ctx, pg, newerEventID, runID, "task.completed", events.EventProducerAgent, "agent-b", json.RawMessage(`{"entity_id":"`+entityID+`","n":2}`), entityID, base.Add(time.Minute))
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
+	seedOperatorObservabilityEvent(t, ctx, pg, olderEventID, runID, "task.failed", events.EventProducerExternal, "agent-a", json.RawMessage(`{"entity_id":"`+entityID+`","n":1}`), entityID, base)
+	seedOperatorObservabilityEvent(t, ctx, pg, newerEventID, runID, "task.completed", events.EventProducerExternal, "agent-b", json.RawMessage(`{"entity_id":"`+entityID+`","n":2}`), entityID, base.Add(time.Minute))
 	olderEvent := loadPostgresDeliveryFixtureEvent(t, ctx, db, olderEventID)
 	agentFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "retry_exhausted", nil)
 	nodeFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "node_failed", nil)
@@ -125,11 +123,9 @@ func TestOperatorObservabilityEventOwnerDoesNotPromotePayloadEntityIdentity(t *t
 	payloadOnlyEventID := uuid.NewString()
 	canonicalEventID := uuid.NewString()
 	base := time.Unix(1700001200, 0).UTC()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
-	seedOperatorObservabilityEvent(t, ctx, pg, payloadOnlyEventID, runID, "task.payload_only", events.EventProducerAgent, "agent-a", json.RawMessage(`{"entity_id":"`+targetEntityID+`","marker":"payload-only"}`), "", base)
-	seedOperatorObservabilityEvent(t, ctx, pg, canonicalEventID, runID, "task.canonical_entity", events.EventProducerAgent, "agent-b", json.RawMessage(`{"entity_id":"payload-business-value","marker":"canonical"}`), targetEntityID, base.Add(time.Second))
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
+	seedOperatorObservabilityEvent(t, ctx, pg, payloadOnlyEventID, runID, "task.payload_only", events.EventProducerExternal, "agent-a", json.RawMessage(`{"entity_id":"`+targetEntityID+`","marker":"payload-only"}`), "", base)
+	seedOperatorObservabilityEvent(t, ctx, pg, canonicalEventID, runID, "task.canonical_entity", events.EventProducerExternal, "agent-b", json.RawMessage(`{"entity_id":"payload-business-value","marker":"canonical"}`), targetEntityID, base.Add(time.Second))
 
 	filtered, err := pg.ListOperatorEvents(ctx, OperatorEventListOptions{
 		Filter: OperatorEventListFilter{EntityID: targetEntityID},
@@ -176,9 +172,7 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 
 	runID := uuid.NewString()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	insertLog := func(code string, createdAt time.Time) string {
 		t.Helper()
 		eventID := uuid.NewString()
@@ -307,9 +301,7 @@ func TestPostgresRuntimeLogSourceFilterUsesCanonicalAgentOrRuntime(t *testing.T)
 
 	runID := uuid.NewString()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	insertLog := func(message, details string, createdAt time.Time) string {
 		t.Helper()
 		eventID := uuid.NewString()
@@ -409,9 +401,7 @@ func TestOperatorRuntimeLogsFilterBySessionAndTimeWindow(t *testing.T) {
 
 	runID := uuid.NewString()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	insertLog := func(sessionID string, createdAt time.Time) string {
 		t.Helper()
 		eventID := uuid.NewString()
@@ -462,14 +452,12 @@ func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
 	runA := uuid.NewString()
 	runB := uuid.NewString()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES
-			($1::uuid, 'running', $2, 'persisted', $3),
-			($4::uuid, 'running', $5, 'persisted', $3)
-	`, runA, bundleA, base, runB, bundleB); err != nil {
-		t.Fatalf("seed runs: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		RunID: runA, BundleHash: bundleA, StartedAt: base,
+	})
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		RunID: runB, BundleHash: bundleB, StartedAt: base,
+	})
 	insertLog := func(runID, code string, createdAt time.Time) string {
 		t.Helper()
 		eventID := uuid.NewString()
@@ -535,9 +523,7 @@ func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
 
 	runID := uuid.NewString()
 	base := time.Unix(1700000300, 0).UTC()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	firstEvent := uuid.NewString()
 	secondEvent := uuid.NewString()
 	seedOperatorObservabilityEvent(t, ctx, pg, firstEvent, runID, "first.event", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), "", base)
@@ -614,9 +600,7 @@ func TestRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 	businessEvent := uuid.NewString()
 	runtimeLogEvent := uuid.NewString()
 	base := time.Unix(1700000600, 0).UTC()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	seedOperatorObservabilityEvent(t, ctx, pg, businessEvent, runID, "item.received", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), "", base)
 	seedOperatorRuntimeLog(t, ctx, pg, runtimeLogEvent, runID, "runtime", json.RawMessage(`{}`), base.Add(time.Millisecond))
 
@@ -648,9 +632,7 @@ func TestRunDebugTracePageTypedFilters(t *testing.T) {
 	secondEvent := uuid.NewString()
 	base := time.Unix(1700000400, 0).UTC()
 	until := base
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	seedOperatorObservabilityEvent(t, ctx, pg, firstEvent, runID, "first.event", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), entityOne, base)
 	seedOperatorObservabilityEvent(t, ctx, pg, secondEvent, runID, "second.event", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), entityTwo, base.Add(time.Second))
 	firstSnapshot := seedDeliveryStateFixture(t, ctx, pg, loadPostgresDeliveryFixtureEvent(t, ctx, db, firstEvent), events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-1"}, runtimedelivery.StateQueued, nil)
@@ -728,7 +710,7 @@ func seedOperatorObservabilityEvent(
 	if producerType == events.EventProducerPlatform {
 		event = eventtest.PersistedRuntimeControlForProducer(eventID, events.EventType(eventName), producer, "", payload, 0, runID, "", envelope, createdAt)
 	} else {
-		event = eventtest.RunCreatingRootIngress(eventID, events.EventType(eventName), producerID, "", payload, 0, runID, "", envelope, createdAt)
+		event = eventtest.PersistedProjectionForProducer(eventID, events.EventType(eventName), producer, "", payload, 0, runID, "", envelope, createdAt)
 	}
 	if err := commitSemanticEventFixture(ctx, pg, event); err != nil {
 		t.Fatalf("seed operator observability event %s: %v", eventName, err)

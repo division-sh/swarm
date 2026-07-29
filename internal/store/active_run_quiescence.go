@@ -14,8 +14,8 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/lib/pq"
 )
 
@@ -94,7 +94,7 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 	if err != nil {
 		return runtimerunquiescence.Result{}, err
 	}
-	ctx = storyctx
+	ctx = s.bindRunLifecycleMutation(storyctx, tx)
 
 	var runs []runtimerunquiescence.QuiescedRun
 	if req.AllActiveRuns {
@@ -174,11 +174,9 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 		if !activeRunQuiescenceRunStatusActive(run.Status) {
 			continue
 		}
-		if err := supersedeDecisionCardsForRun(ctx, tx, run.RunID, "run_quiesced", now, false, true); err != nil {
-			return runtimerunquiescence.Result{}, err
-		}
-		opts := runLifecycleOptions()
-		if _, err := storerunlifecycle.MarkTerminal(ctx, tx, run.RunID, "cancelled", nil, now, opts); err != nil {
+		if _, _, err := runtimerunlifecycle.MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
+			RunID: run.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: now,
+		}); err != nil {
 			return runtimerunquiescence.Result{}, fmt.Errorf("mark active run quiescence run terminal: %w", err)
 		}
 		if err := upsertActiveRunQuiescenceRunControlTx(ctx, tx, run.RunID, out.ReasonCode, out.ControlledBy, now); err != nil {
@@ -328,7 +326,9 @@ func (s *SQLiteRuntimeStore) ApplyActiveRunQuiescence(ctx context.Context, req r
 			if !activeRunQuiescenceRunStatusActive(run.Status) {
 				continue
 			}
-			if _, err := s.sqliteMarkRunTerminalTx(txctx, tx, run.RunID, "cancelled", nil, now); err != nil {
+			if _, _, err := runtimerunlifecycle.MarkTerminal(txctx, runtimerunlifecycle.TerminalRequest{
+				RunID: run.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: now,
+			}); err != nil {
 				return err
 			}
 			if err := sqliteUpsertActiveRunQuiescenceRunControlTx(txctx, tx, run.RunID, attemptOut.ReasonCode, attemptOut.ControlledBy, now); err != nil {
@@ -371,19 +371,15 @@ func quiescenceRunIDs(runs []runtimerunquiescence.QuiescedRun) []string {
 }
 
 func activeRunQuiescenceRunStatusActive(status string) bool {
-	switch strings.TrimSpace(strings.ToLower(status)) {
-	case "running", "paused":
-		return true
-	default:
-		return false
-	}
+	state, err := runtimerunlifecycle.ParseState(status)
+	return err == nil && state.Active()
 }
 
 func lockAllActiveQuiescenceRunsTx(ctx context.Context, tx *sql.Tx) ([]runtimerunquiescence.QuiescedRun, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT run_id::text, COALESCE(bundle_hash, ''), COALESCE(status, '')
 		FROM runs
-		WHERE lower(COALESCE(status, '')) IN ('running', 'paused')
+		WHERE status IN (`+runLifecycleActiveStateSQLValues+`)
 		  AND NOT EXISTS (
 			SELECT 1 FROM standing_services ss WHERE ss.current_run_id = runs.run_id
 		  )
@@ -570,20 +566,6 @@ func upsertActiveRunQuiescenceRunControlTx(ctx context.Context, tx *sql.Tx, runI
 			stopped_at = COALESCE(run_control_state.stopped_at, $4)
 	`, runID, reasonCode, controlledBy, at.UTC()); err != nil {
 		return fmt.Errorf("persist active run quiescence run control state: %w", err)
-	}
-	return nil
-}
-
-func sqliteMarkActiveRunQuiescenceRunTerminalTx(ctx context.Context, tx *sql.Tx, runID string, at time.Time) error {
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE runs
-		SET status = 'cancelled',
-		    failure = NULL,
-		    ended_at = COALESCE(ended_at, ?)
-		WHERE run_id = ?
-		  AND (status IN ('running', 'paused') OR status = 'cancelled')
-	`, at.UTC(), runID); err != nil {
-		return fmt.Errorf("mark sqlite active run quiescence run terminal: %w", err)
 	}
 	return nil
 }

@@ -14,7 +14,6 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 type flowInstanceDescriptorQueryer interface {
@@ -32,7 +31,7 @@ func runPostgresFlowInstanceRouteMutation(ctx context.Context, db *sql.DB, fn fu
 		return err
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		if err := storerunlifecycle.RequireActive(ctx, tx, runID, storerunlifecycle.DialectPostgres); err != nil {
+		if err := requirePostgresRunActive(ctx, tx, runID); err != nil {
 			return err
 		}
 		return fn(tx)
@@ -47,7 +46,7 @@ func runPostgresFlowInstanceRouteMutation(ctx context.Context, db *sql.DB, fn fu
 		return err
 	}
 	defer tx.Rollback()
-	if err := storerunlifecycle.RequireActive(ctx, tx, runID, storerunlifecycle.DialectPostgres); err != nil {
+	if err := requirePostgresRunActive(ctx, tx, runID); err != nil {
 		return err
 	}
 	if err := fn(tx); err != nil {
@@ -167,7 +166,7 @@ func (s *SQLiteRuntimeStore) UpsertFlowInstanceRoute(ctx context.Context, route 
 		if err != nil {
 			return err
 		}
-		if err := storerunlifecycle.RequireActive(txctx, tx, runID, storerunlifecycle.DialectSQLite); err != nil {
+		if err := requireSQLiteRunActive(txctx, tx, runID); err != nil {
 			return err
 		}
 		return upsertSQLiteFlowInstanceRoute(txctx, tx, route)
@@ -289,7 +288,7 @@ func (s *SQLiteRuntimeStore) ReplaceFlowInstanceRouteRecords(
 		if err != nil {
 			return err
 		}
-		if err := storerunlifecycle.RequireActive(txctx, tx, runID, storerunlifecycle.DialectSQLite); err != nil {
+		if err := requireSQLiteRunActive(txctx, tx, runID); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(txctx, `
@@ -394,7 +393,7 @@ func (s *SQLiteRuntimeStore) DeleteFlowInstanceRoute(ctx context.Context, identi
 		if err != nil {
 			return err
 		}
-		if err := storerunlifecycle.RequireActive(txctx, tx, runID, storerunlifecycle.DialectSQLite); err != nil {
+		if err := requireSQLiteRunActive(txctx, tx, runID); err != nil {
 			return err
 		}
 		var status string
@@ -453,7 +452,7 @@ func (s *SQLiteRuntimeStore) RollbackFlowInstanceRoute(ctx context.Context, iden
 		if err != nil {
 			return err
 		}
-		if err := storerunlifecycle.RequireActive(txctx, tx, runID, storerunlifecycle.DialectSQLite); err != nil {
+		if err := requireSQLiteRunActive(txctx, tx, runID); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(txctx, `

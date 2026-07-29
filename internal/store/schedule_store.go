@@ -14,7 +14,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 func (s *PostgresStore) ReadTimerObligations(ctx context.Context, scope runtimetimerobligation.Scope, observedAt time.Time) (runtimetimerobligation.Snapshot, error) {
@@ -165,7 +164,7 @@ func genericScheduleTimerName(sc runtimepipeline.Schedule) (string, error) {
 func (s *PostgresStore) upsertScheduleSpec(ctx context.Context, sc runtimepipeline.Schedule) error {
 	return s.runScheduleTransaction(ctx, "timer", func(tx *sql.Tx) error {
 		if strings.TrimSpace(sc.RunID) != "" {
-			if err := storerunlifecycle.RequireActive(ctx, tx, sc.RunID, storerunlifecycle.DialectPostgres); err != nil {
+			if err := requirePostgresRunActive(ctx, tx, sc.RunID); err != nil {
 				return err
 			}
 		}
@@ -278,7 +277,7 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 		WHERE t.status = 'active'
 		  AND t.owner_agent IS NOT NULL
 		  AND t.task_type IN ('timer', 'scheduled_task', 'deadline', 'global_recurring')
-		  AND (t.run_id IS NULL OR run.status IN ('running', 'paused'))
+		  AND (t.run_id IS NULL OR run.status IN (`+runLifecycleActiveStateSQLValues+`))
 		ORDER BY t.created_at ASC
 	`)
 	if err != nil {
@@ -385,7 +384,7 @@ func persistedScheduleMode(recurring bool, recurrenceCron, recurrenceInterval st
 func (s *PostgresStore) runScheduleMutation(ctx context.Context, runID, label string, mutate func(*sql.Tx) (bool, error)) error {
 	return s.runScheduleTransaction(ctx, label, func(tx *sql.Tx) error {
 		if strings.TrimSpace(runID) != "" {
-			if err := storerunlifecycle.RequireActive(ctx, tx, runID, storerunlifecycle.DialectPostgres); err != nil {
+			if err := requirePostgresRunActive(ctx, tx, runID); err != nil {
 				return err
 			}
 		}

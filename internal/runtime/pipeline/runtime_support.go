@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 )
 
@@ -435,6 +436,53 @@ func queuePipelinePostCommitAction(ctx context.Context, fn OwnerAction) bool {
 
 func QueuePipelinePostCommitAction(ctx context.Context, fn OwnerAction) bool {
 	return queuePipelinePostCommitAction(ctx, fn)
+}
+
+// QueuePipelinePostCommitHandoff binds one accepted work lease to exactly one
+// transaction outcome. Commit and rollback are mutually exclusive and settle
+// the lease only after the selected outcome has run.
+func QueuePipelinePostCommitHandoff(ctx context.Context, commit, rollback OwnerAction) bool {
+	if ctx == nil || commit == nil || rollback == nil {
+		return false
+	}
+	postCommit, commitOK := ctx.Value(pipelinePostCommitActionsKey{}).(*[]OwnerAction)
+	rollbackActions, rollbackOK := ctx.Value(pipelineRollbackActionsKey{}).(*[]OwnerAction)
+	owner, ownerOK := worklifetime.OccurrenceFromContext(ctx)
+	if !commitOK || postCommit == nil || !rollbackOK || rollbackActions == nil || !ownerOK {
+		return false
+	}
+	lease, err := owner.Begin(ownerActionAdmissionContext(ctx))
+	if err != nil {
+		return false
+	}
+	var once sync.Once
+	settle := func(action OwnerAction) {
+		once.Do(func() {
+			defer func() { _ = lease.Done() }()
+			action(lease.Context())
+		})
+	}
+	*postCommit = append(*postCommit, func(context.Context) { settle(commit) })
+	*rollbackActions = append(*rollbackActions, func(context.Context) { settle(rollback) })
+	return true
+}
+
+// QueueRunLifecycleCandidateHandoff is the closed post-commit handoff for one
+// already-reserved lifecycle candidate admission. Callers cannot supply
+// lifecycle callbacks or choose a different settlement policy.
+func QueueRunLifecycleCandidateHandoff(
+	ctx context.Context,
+	admission runtimerunlifecycle.CandidateAdmission,
+	candidate runtimerunlifecycle.Candidate,
+) bool {
+	if admission == nil {
+		return false
+	}
+	return QueuePipelinePostCommitHandoff(
+		ctx,
+		func(context.Context) { _ = admission.Submit(candidate) },
+		func(context.Context) { _ = admission.Cancel() },
+	)
 }
 
 func flushPipelinePostCommitActions(actions []OwnerAction) {

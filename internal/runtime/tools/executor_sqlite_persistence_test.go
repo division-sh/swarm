@@ -3,6 +3,7 @@ package tools_test
 import (
 	"context"
 	"encoding/json"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -337,13 +338,9 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 	now := time.Now().UTC().Truncate(time.Microsecond).Add(789 * time.Nanosecond)
 	switch typed := persistence.(type) {
 	case *store.PostgresStore:
-		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES ($1::uuid, 'running', $2, $3, $4)`, runID, authorActivityTestBundleHash, authorActivityTestBundleSource, now); err != nil {
-			t.Fatalf("seed postgres reply tool run: %v", err)
-		}
+		runlifecyclefixture.RequirePostgres(t, unmanagedToolTestContext(), typed.DB, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource})
 	case *store.SQLiteRuntimeStore:
-		if _, err := typed.DB.ExecContext(unmanagedToolTestContext(), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES (?, 'running', ?, ?, ?)`, runID, authorActivityTestBundleHash, authorActivityTestBundleSource, now); err != nil {
-			t.Fatalf("seed sqlite reply tool run: %v", err)
-		}
+		runlifecyclefixture.RequireSQLite(t, unmanagedToolTestContext(), typed.DB, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource})
 	default:
 		t.Fatalf("unsupported reply tool store %T", persistence)
 	}
@@ -429,11 +426,5 @@ func newSQLiteRuntimeToolStoreForTest(t *testing.T) *store.SQLiteRuntimeStore {
 
 func ensureSQLiteEntityToolTestRun(t *testing.T, sqliteStore *store.SQLiteRuntimeStore) {
 	t.Helper()
-	if _, err := sqliteStore.DB.ExecContext(unmanagedToolTestContext(), `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES (?, 'running', ?, ?, ?)
-		ON CONFLICT(run_id) DO NOTHING
-	`, entityToolTestRunID, authorActivityTestBundleHash, authorActivityTestBundleSource, time.Now().UTC()); err != nil {
-		t.Fatalf("seed sqlite entity tool test run: %v", err)
-	}
+	runlifecyclefixture.RequireSQLite(t, unmanagedToolTestContext(), sqliteStore.DB, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: entityToolTestRunID, StartedAt: time.Now().UTC(), BundleHash: authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource})
 }

@@ -17,6 +17,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -49,7 +50,7 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 				for index, test := range tests {
 					test := test
 					t.Run(test.name, func(t *testing.T) {
-						event := test.make(uuid.NewString(), time.Date(2026, 7, 19, 20, index, 0, 0, time.UTC))
+						event := test.make(uuid.NewString(), time.Date(2026, 7, 14, 10, index, 0, 0, time.UTC))
 						var delivery <-chan *runtimebus.LocalDelivery
 						if routed {
 							delivery = runtimebustest.Subscribe(t, eventBus, agentID, event.Type())
@@ -85,10 +86,9 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 							if _, err := fixture.store.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
 								t.Fatalf("SettleSuccess: %v", err)
 							}
-							if err := eventBus.ConvergeDeliveryRunCompletion(ctx, event); err != nil {
-								t.Fatalf("ConvergeDeliveryRunCompletion: %v", err)
-							}
 						}
+						_, persistedRunID, _, _ := loadRunConvergenceFacts(t, fixture, ctx, event.ID())
+						executeStandaloneCompletionCandidate(t, ctx, fixture.store, persistedRunID)
 						status, runID, triggerID, triggerType := loadRunConvergenceFacts(t, fixture, ctx, event.ID())
 						if status != "completed" || runID == "" || triggerID != event.ID() || triggerType != string(event.Type()) {
 							t.Fatalf("standalone convergence = status:%q run:%q trigger:%q/%q", status, runID, triggerID, triggerType)
@@ -195,7 +195,7 @@ func TestSameLabelCausalAndRunScopedEventsCannotConvergeExistingRunParity(t *tes
 			t.Run(backend.name+"/"+intent, func(t *testing.T) {
 				fixture := backend.open(t)
 				ctx := testAuthorActivityContext()
-				at := time.Date(2026, 7, 19, 20, 30, 0, 0, time.UTC)
+				at := time.Date(2026, 7, 14, 10, 30, 0, 0, time.UTC)
 				runID := uuid.NewString()
 				root := eventtest.RunCreatingRootIngress(uuid.NewString(), "test.trigger", "ingress", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, at)
 				if err := commitSemanticEventFixture(ctx, fixture.store, root); err != nil {
@@ -297,9 +297,7 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 			t.Fatal("timed out waiting for concurrent processed receipts")
 		}
 	}
-	if err := pg.ConvergeStandaloneRuntimePlatformRun(ctx, event); err != nil {
-		t.Fatalf("converge settled standalone runtime event: %v", err)
-	}
+	executeStandaloneCompletionCandidate(t, ctx, pg, event.RunID())
 	status, _, _, _ = loadRunConvergenceFacts(t, fixture, ctx, event.ID())
 	if status != "completed" {
 		t.Fatalf("run status = %q, want completed", status)
@@ -316,6 +314,37 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 	if pending != 0 || delivered != len(agents) {
 		t.Fatalf("delivery counts = pending:%d delivered:%d", pending, delivered)
 	}
+}
+
+func executeStandaloneCompletionCandidate(t *testing.T, ctx context.Context, selected any, runID string) {
+	t.Helper()
+	owner, ok := selected.(runtimerunlifecycle.CandidateStore)
+	if !ok {
+		t.Fatalf("standalone completion store %T does not expose typed candidates", selected)
+	}
+	page, err := owner.ListCompletionCandidates(
+		ctx,
+		runtimerunlifecycle.CandidateScope{BundleHash: authorActivityTestBundleHash},
+		runtimerunlifecycle.CandidateCursor{},
+		128,
+	)
+	if err != nil {
+		t.Fatalf("ListCompletionCandidates: %v", err)
+	}
+	for _, candidate := range page.Candidates {
+		if candidate.RunID != runID {
+			continue
+		}
+		result, err := owner.ExecuteCompletionCandidate(ctx, candidate, runtimerunlifecycle.TerminalCatalog{})
+		if err != nil {
+			t.Fatalf("ExecuteCompletionCandidate: %v", err)
+		}
+		if result.Outcome != runtimerunlifecycle.OutcomeTerminallyEligible {
+			t.Fatalf("completion outcome = %s, want %s", result.Outcome, runtimerunlifecycle.OutcomeTerminallyEligible)
+		}
+		return
+	}
+	t.Fatalf("completion candidate for run %s was not persisted", runID)
 }
 
 func newRunConvergenceEventBus(t *testing.T, selected any) (*runtimebus.EventBus, error) {

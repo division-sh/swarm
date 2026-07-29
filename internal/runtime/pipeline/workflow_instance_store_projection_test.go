@@ -17,7 +17,7 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	store := NewWorkflowInstanceStore(db)
+	store := newPostgresWorkflowInstanceStoreForTest(db)
 	storageRef := uuid.NewString()
 	parentID := uuid.NewString()
 	parentFlowID := "operating"
@@ -157,7 +157,7 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	workflowStore := NewWorkflowInstanceStore(db)
+	workflowStore := newPostgresWorkflowInstanceStoreForTest(db)
 	storageRef := uuid.NewString()
 	ctx := testWorkflowStoreRunContext(t, workflowStore)
 	instance := WorkflowInstance{
@@ -229,7 +229,7 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	store := NewWorkflowInstanceStore(db)
+	store := newPostgresWorkflowInstanceStoreForTest(db)
 	ctx := testWorkflowStoreRunContext(t, store)
 	const storageRef = "review/inst-1"
 	first := materializedWorkflowInstanceForTest(WorkflowInstance{
@@ -328,7 +328,7 @@ func TestWorkflowInstanceStoreProjection_StaticRowsDoNotGainMaterializedFlowPath
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	store := NewWorkflowInstanceStore(db)
+	store := newPostgresWorkflowInstanceStoreForTest(db)
 	storageRef := uuid.NewString()
 	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      storageRef,
@@ -428,7 +428,7 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 
-			store := NewWorkflowInstanceStore(db)
+			store := newPostgresWorkflowInstanceStoreForTest(db)
 			storageRef := "storage-ref"
 			if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID:      "inst-1",

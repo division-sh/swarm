@@ -2,6 +2,7 @@ package digest
 
 import (
 	"context"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"strings"
 	"testing"
 
@@ -69,12 +70,7 @@ func TestSource_FiltersTerminalStatesFromDigestReads(t *testing.T) {
 	doneID := uuid.NewString()
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,

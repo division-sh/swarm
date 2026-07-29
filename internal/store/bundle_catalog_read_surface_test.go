@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 )
 
 func TestBundleCatalogReadSurfaceListGetAgentsAndCursor(t *testing.T) {
@@ -236,12 +237,9 @@ func TestBundleCatalogUpsertRegistersDuplicatesConflictsAndDoesNotRestoreDeleted
 	}
 
 	runID := "00000000-0000-0000-0000-000000000444"
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES ($1::uuid, 'completed', $2, 'deleted', NOW())
-	`, runID, bundleHash); err != nil {
-		t.Fatalf("seed deleted run: %v", err)
-	}
+	runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
+		RunID: runID, State: "completed", BundleHash: bundleHash, BundleSource: "deleted",
+	})
 	if _, err := pg.UpsertBundleCatalog(ctx, req); err != nil {
 		t.Fatalf("UpsertBundleCatalog deleted re-register: %v", err)
 	}

@@ -298,7 +298,7 @@ func provePipelineRunSummary(
 		t.Fatalf("SummarizeRun: %v", err)
 	}
 	if summary.Replayable != 1 || summary.Acknowledged != 1 || summary.TerminalNonSuccess != 2 ||
-		summary.Deferred != 1 || summary.DiagnosticExcluded != 1 || summary.RunInactive || summary.RunForked {
+		summary.Deferred != 1 || summary.DiagnosticExcluded != 1 {
 		t.Fatalf("active run summary = %#v", summary)
 	}
 	if !summary.BlocksCompletion() {
@@ -320,21 +320,6 @@ func provePipelineRunSummary(
 		t.Fatalf("terminal-only summary = %#v", terminalOnly)
 	}
 
-	inactiveRunID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, inactiveRunID)
-	setPipelineRunStatus(t, ctx, fixture, inactiveRunID, "completed", "")
-	inactive, err := owner.SummarizeRun(ctx, inactiveRunID)
-	if err != nil || !inactive.RunInactive || inactive.RunForked {
-		t.Fatalf("inactive summary = %#v err=%v", inactive, err)
-	}
-
-	continuedRunID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, continuedRunID)
-	setPipelineRunStatus(t, ctx, fixture, runID, "forked", continuedRunID)
-	forked, err := owner.SummarizeRun(ctx, runID)
-	if err != nil || !forked.RunInactive || !forked.RunForked {
-		t.Fatalf("forked summary = %#v err=%v", forked, err)
-	}
 }
 
 func provePipelineDecisionRouteDispositions(
@@ -627,26 +612,6 @@ func readExactPipelineReceipt(t *testing.T, ctx context.Context, fixture authorA
 		t.Fatalf("read exact platform pipeline receipt: %v", err)
 	}
 	return count, outcome, reason
-}
-
-func setPipelineRunStatus(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, runID, status, continuedAs string) {
-	t.Helper()
-	now := time.Now().UTC()
-	query := `UPDATE runs SET status = ?, ended_at = ?, continued_as_run_id = ? WHERE run_id = ?`
-	args := []any{status, now, nil, runID}
-	if strings.TrimSpace(continuedAs) != "" {
-		args[2] = continuedAs
-	}
-	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
-		query = `UPDATE runs SET status = $2, ended_at = $3, continued_as_run_id = $4::uuid WHERE run_id = $1::uuid`
-		args = []any{runID, status, now, nil}
-		if strings.TrimSpace(continuedAs) != "" {
-			args[3] = continuedAs
-		}
-	}
-	if _, err := fixture.db.ExecContext(ctx, query, args...); err != nil {
-		t.Fatalf("set run %s status %s: %v", runID, status, err)
-	}
 }
 
 func readDecisionRouteStatus(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, eventID string) string {

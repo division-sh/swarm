@@ -48,6 +48,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -58,26 +59,27 @@ import (
 )
 
 type Stores struct {
-	SQLDB               *sql.DB
-	ConstructionBlocker string
-	EventStore          runtimebus.EventStore
-	RuntimeLogStore     RuntimeLogPersistence
-	PipelineStore       *runtimepipeline.WorkflowInstanceStore
-	SessionRegistry     sessions.Registry
-	ConversationStore   llm.ConversationPersistence
-	ManagerStore        runtimemanager.ManagerPersistence
-	DeliveryStore       runtimedelivery.Store
-	PipelineObligations runtimepipelineobligation.Store
-	ScheduleStore       runtimepipeline.SchedulePersistence
-	MailboxMaterializer runtimepipeline.MailboxWriteMaterializationStore
-	DecisionCards       decisioncard.Store
-	StartupOwnership    runtimestartupownership.Store
-	MailboxStore        runtimetools.MailboxPersistence
-	ToolEntityStore     runtimetools.EntityPersistence
-	HumanTaskStore      runtimetools.HumanTaskCardStore
-	BudgetSpendStore    budgetspend.Store
-	InboundStore        InboundPersistence
-	RuntimeIngressStore runtimeingress.Store
+	SQLDB                  *sql.DB
+	ConstructionBlocker    string
+	EventStore             runtimebus.EventStore
+	RunLifecycleCandidates runtimerunlifecycle.CandidateOwner
+	RuntimeLogStore        RuntimeLogPersistence
+	PipelineStore          *runtimepipeline.WorkflowInstanceStore
+	SessionRegistry        sessions.Registry
+	ConversationStore      llm.ConversationPersistence
+	ManagerStore           runtimemanager.ManagerPersistence
+	DeliveryStore          runtimedelivery.Store
+	PipelineObligations    runtimepipelineobligation.Store
+	ScheduleStore          runtimepipeline.SchedulePersistence
+	MailboxMaterializer    runtimepipeline.MailboxWriteMaterializationStore
+	DecisionCards          decisioncard.Store
+	StartupOwnership       runtimestartupownership.Store
+	MailboxStore           runtimetools.MailboxPersistence
+	ToolEntityStore        runtimetools.EntityPersistence
+	HumanTaskStore         runtimetools.HumanTaskCardStore
+	BudgetSpendStore       budgetspend.Store
+	InboundStore           InboundPersistence
+	RuntimeIngressStore    runtimeingress.Store
 }
 
 type RuntimeOptions struct {
@@ -193,6 +195,8 @@ type Runtime struct {
 	ownershipHandoffPending   bool
 	replacementQuiesced       bool
 	workOccurrence            *worklifetime.RuntimeOccurrence
+	runLifecycleExecutor      *runtimerunlifecycle.Executor
+	runLifecycleRegistration  runtimerunlifecycle.CandidateRegistration
 	ownerID                   string
 	bootID                    string
 	startupAdmission          managedexecution.Admission
@@ -931,6 +935,22 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		ManagedCredentials:        boot.ManagedCredentials,
 		workOccurrence:            workOccurrence,
 	}
+	if candidateOwner := stores.RunLifecycleCandidates; candidateOwner != nil {
+		scope := runtimerunlifecycle.CandidateScope{BundleHash: boot.BundleSourceFact.BundleHash()}
+		executor, err := runtimerunlifecycle.NewExecutor(
+			candidateOwner,
+			scope,
+			runLifecycleTerminalCatalog(source),
+			workOccurrence,
+			runtimerunlifecycle.ExecutorOptions{},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("build run lifecycle completion executor: %w", err)
+		}
+		rt.runLifecycleExecutor = executor
+	} else if stores.SQLDB != nil {
+		return nil, fmt.Errorf("selected runtime store run lifecycle candidate owner is required")
+	}
 
 	if stores.RuntimeLogStore != nil {
 		rt.Logger = NewRuntimeLogger(stores.RuntimeLogStore)
@@ -1368,6 +1388,20 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		}
 		rt.cleanupStartFailure()
 	}()
+	if rt.runLifecycleExecutor != nil {
+		scope := runtimerunlifecycle.CandidateScope{BundleHash: rt.Options.BundleSourceFact.BundleHash()}
+		registration, err := rt.Stores.RunLifecycleCandidates.RegisterCompletionCandidateSink(
+			scope,
+			rt.runLifecycleExecutor,
+		)
+		if err != nil {
+			return fmt.Errorf("register run lifecycle completion executor: %w", err)
+		}
+		rt.runLifecycleRegistration = registration
+		if err := rt.runLifecycleExecutor.Start(startCtx); err != nil {
+			return fmt.Errorf("start run lifecycle completion executor: %w", err)
+		}
+	}
 	bindRuntimeStorePayloadValidator(rt.Stores, rt.payloadValidator)
 	if rt.RuntimeIngress != nil {
 		if err := rt.RuntimeIngress.SyncState(ctx); err != nil {
@@ -1833,6 +1867,9 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions, releaseOwnership bool) 
 	if rt.workOccurrence != nil {
 		_ = rt.workOccurrence.Fence()
 	}
+	if rt.runLifecycleExecutor != nil {
+		rt.runLifecycleExecutor.Retire()
+	}
 	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
 	defer cancelDrain()
 	var shutdownErr error
@@ -1900,6 +1937,10 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions, releaseOwnership bool) 
 			)
 			_, _ = rt.workOccurrence.RetireAndWait(context.Background())
 		}
+	}
+	if rt.runLifecycleRegistration != nil {
+		rt.runLifecycleRegistration.Release()
+		rt.runLifecycleRegistration = nil
 	}
 	if rt.Stores.ScheduleStore != nil {
 		if err := rt.Stores.ScheduleStore.ReleaseScheduleClaims(context.Background()); err != nil {

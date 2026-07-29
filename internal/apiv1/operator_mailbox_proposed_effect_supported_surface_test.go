@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -98,13 +99,13 @@ func TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores(t *t
 			handler, bus := newProposedEffectMailboxHandler(t, persistence, db, source, fact)
 
 			runID, entityID := uuid.NewString(), uuid.NewString()
-			insertProposedEffectAPIRun(t, db, tc.name, runID)
 			cards := persistence.(decisioncard.Store)
 			card, continuation := proposedEffectAPICard(t, runID, entityID, fact, source.WorkflowVersion())
 			fixtureCtx := testAuthorActivityContextForSource(context.Background(), fact)
-			storetest.CommitSemanticEvent(t, fixtureCtx, persistence, eventtest.RunCreatingRootIngress(
+			insertProposedEffectAPIRun(t, fixtureCtx, db, tc.name, runID, fact)
+			storetest.CommitSemanticEvent(t, fixtureCtx, persistence, eventtest.ExistingRunRootIngress(
 				continuation.SourceEventID, events.EventType("thing.created"), "operator", continuation.SourceTaskID,
-				[]byte(`{"amount":250,"who":"alice"}`), 0, runID, "",
+				[]byte(`{"amount":250,"who":"alice"}`), 0, runID,
 				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), continuation.FlowInstance),
 				continuation.CreatedAt.Add(-time.Second),
 			))
@@ -283,14 +284,18 @@ func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecor
 	return card, continuation
 }
 
-func insertProposedEffectAPIRun(t *testing.T, db *sql.DB, backend, runID string) {
+func insertProposedEffectAPIRun(
+	t *testing.T,
+	ctx context.Context,
+	db *sql.DB,
+	backend, runID string,
+	source runtimecorrelation.BundleSourceFact,
+) {
 	t.Helper()
-	query := `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
 	if backend == "postgres" {
-		query = `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
-	}
-	if _, err := db.ExecContext(context.Background(), query, runID, time.Now().UTC()); err != nil {
-		t.Fatal(err)
+		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: source})
+	} else {
+		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: source})
 	}
 }
 

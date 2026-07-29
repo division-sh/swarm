@@ -33,9 +33,9 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 )
@@ -330,26 +330,29 @@ func configuredChannelExecutor(source semanticview.Source, binding packs.Outboun
 
 func configuredChannelCallContext(t *testing.T, ctx context.Context, selectedStore any, actor models.AgentConfig, runID, entityID, flowInstance, operationID string) context.Context {
 	t.Helper()
-	inbound := eventtest.RunCreatingRootIngress(
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, testBundleSourceFact(t, "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+	inbound := eventtest.ExistingRunRootIngress(
 		uuid.NewSHA1(uuid.NameSpaceURL, []byte(runID+"\x00"+operationID)).String(),
-		events.EventType("channel.requested"), actor.ID, operationID, json.RawMessage(`{}`), 0, runID, "",
+		events.EventType("channel.requested"), actor.ID, operationID, json.RawMessage(`{}`), 0, runID,
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), flowInstance), time.Now().UTC(),
 	)
 	storetest.CommitSemanticEvent(t, ctx, selectedStore, inbound)
 	ctx = runtimebus.WithInboundEvent(ctx, inbound)
 	ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, operationID)
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, testBundleSourceFact(t, "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	return runtimetools.WithActor(ctx, actor)
 }
 
 func seedConfiguredChannelBundleIdentity(t *testing.T, ctx context.Context, db *sql.DB, selected, runID, bundleHash string) {
 	t.Helper()
-	query := `UPDATE runs SET bundle_hash = $1, bundle_source = $2 WHERE run_id = $3::uuid`
+	source := testBundleSourceFact(t, bundleHash)
 	if selected == "sqlite" {
-		query = `UPDATE runs SET bundle_hash = ?, bundle_source = ? WHERE run_id = ?`
+		if err := runlifecyclefixture.ReviseSQLiteSource(ctx, db, runID, source); err != nil {
+			t.Fatalf("seed configured SQLite channel bundle identity: %v", err)
+		}
+		return
 	}
-	if _, err := db.ExecContext(ctx, query, bundleHash, storerunlifecycle.BundleSourceEphemeral, runID); err != nil {
-		t.Fatalf("seed configured channel bundle identity: %v", err)
+	if err := runlifecyclefixture.RevisePostgresSource(ctx, db, runID, source); err != nil {
+		t.Fatalf("seed configured PostgreSQL channel bundle identity: %v", err)
 	}
 }
 

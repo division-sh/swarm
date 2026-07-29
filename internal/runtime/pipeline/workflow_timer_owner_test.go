@@ -2092,6 +2092,7 @@ func TestWorkflowTimerLifecyclePostgresFireRollsBackWithOuterMutation(t *testing
 		if err != nil {
 			t.Fatalf("begin author activity: %v", err)
 		}
+		txctx = bindTestRunLifecycleMutation(txctx, tx, workflowStoreDialectPostgres)
 
 		outcome, err := fireWorkflowTimerTestWakeup(txctx, pc, activation)
 		if err != nil || outcome != WorkflowTimerFireCommitted {

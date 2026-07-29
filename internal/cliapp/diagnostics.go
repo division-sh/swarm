@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/cli/readwindow"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/spf13/cobra"
 )
 
@@ -144,18 +145,16 @@ type diagnosticBundleIdentity struct {
 }
 
 type diagnosticRunHeader struct {
-	RunID            string                    `json:"run_id"`
-	Status           string                    `json:"status"`
-	TriggerEventType string                    `json:"trigger_event_type"`
-	TriggerEventID   string                    `json:"trigger_event_id"`
-	EntityCount      *int                      `json:"entity_count"`
-	EventCount       *int                      `json:"event_count"`
-	StartedAt        string                    `json:"started_at"`
-	EndedAt          string                    `json:"ended_at,omitempty"`
-	ForkedFromRunID  string                    `json:"forked_from_run_id,omitempty"`
-	ContinuedAsRunID string                    `json:"continued_as_run_id,omitempty"`
-	Failure          *runtimefailures.Envelope `json:"failure,omitempty"`
-	ControlReason    string                    `json:"control_reason,omitempty"`
+	RunID            string                        `json:"run_id"`
+	Status           string                        `json:"status"`
+	Origin           runtimerunlifecycle.RunOrigin `json:"origin"`
+	EntityCount      *int                          `json:"entity_count"`
+	EventCount       *int                          `json:"event_count"`
+	StartedAt        string                        `json:"started_at"`
+	EndedAt          string                        `json:"ended_at,omitempty"`
+	ContinuedAsRunID string                        `json:"continued_as_run_id,omitempty"`
+	Failure          *runtimefailures.Envelope     `json:"failure,omitempty"`
+	ControlReason    string                        `json:"control_reason,omitempty"`
 }
 
 type diagnosticRunTraceRow struct {
@@ -1321,11 +1320,8 @@ func validateDiagnosticRunHeader(prefix string, run diagnosticRunHeader) error {
 	if _, ok := diagnosticValidRunStatuses[status]; !ok {
 		return fmt.Errorf("malformed run header: %s.status=%q is not a valid RunStatus", prefix, status)
 	}
-	if strings.TrimSpace(run.TriggerEventType) == "" {
-		return fmt.Errorf("malformed run header: %s.trigger_event_type is required", prefix)
-	}
-	if strings.TrimSpace(run.TriggerEventID) == "" {
-		return fmt.Errorf("malformed run header: %s.trigger_event_id is required", prefix)
+	if err := run.Origin.Validate(); err != nil {
+		return fmt.Errorf("malformed run header: %s.origin: %w", prefix, err)
 	}
 	if run.EntityCount == nil {
 		return fmt.Errorf("malformed run header: %s.entity_count is required", prefix)
@@ -1404,7 +1400,7 @@ func writeDiagnosticRunList(out io.Writer, result diagnosticRunListResult) {
 			run.StartedAt,
 			fmt.Sprintf("%d", IntPointerValue(run.EventCount)),
 			fmt.Sprintf("%d", IntPointerValue(run.EntityCount)),
-			run.TriggerEventType,
+			diagnosticRunOriginLabel(run.Origin),
 		})
 	}
 	footers := []string{}
@@ -1418,7 +1414,7 @@ func writeDiagnosticRunList(out io.Writer, result diagnosticRunListResult) {
 			{Header: "STARTED"},
 			{Header: "EVENTS"},
 			{Header: "ENTITIES"},
-			{Header: "TRIGGER"},
+			{Header: "ORIGIN"},
 		},
 		Rows:         rows,
 		EmptyMessage: "No runs found. Start one: swarm run start --event <event>",
@@ -1515,15 +1511,12 @@ func diagnosticRunHeaderRows(run diagnosticRunHeader) []cliLabeledDetailRow {
 		timing += ", ended " + run.EndedAt
 	}
 	rows := []cliLabeledDetailRow{
-		{Label: "trigger", Value: fmt.Sprintf("%s (%s)", run.TriggerEventType, run.TriggerEventID)},
+		{Label: "origin", Value: diagnosticRunOriginLabel(run.Origin)},
 		{Label: "timing", Value: timing},
 		{Label: "scale", Value: fmt.Sprintf("%s, %s",
 			formatCLIHumanCount(IntPointerValue(run.EventCount), "event", "events"),
 			formatCLIHumanCount(IntPointerValue(run.EntityCount), "entity", "entities"),
 		)},
-	}
-	if run.ForkedFromRunID != "" {
-		rows = append(rows, cliLabeledDetailRow{Label: "forked from", Value: run.ForkedFromRunID})
 	}
 	if run.ContinuedAsRunID != "" {
 		rows = append(rows, cliLabeledDetailRow{Label: "continued as", Value: run.ContinuedAsRunID})
@@ -1539,6 +1532,21 @@ func diagnosticRunHeaderRows(run diagnosticRunHeader) []cliLabeledDetailRow {
 		rows = append(rows, cliLabeledDetailRow{Label: "control reason", Value: run.ControlReason})
 	}
 	return rows
+}
+
+func diagnosticRunOriginLabel(origin runtimerunlifecycle.RunOrigin) string {
+	switch origin.Kind() {
+	case runtimerunlifecycle.OriginEvent:
+		return fmt.Sprintf("event %s (%s)", origin.EventType(), origin.EventID())
+	case runtimerunlifecycle.OriginScenarioSetup:
+		return "scenario setup"
+	case runtimerunlifecycle.OriginStandingGeneration:
+		return fmt.Sprintf("standing service %s generation %d", origin.ServiceID(), origin.Generation())
+	case runtimerunlifecycle.OriginForkMaterialization:
+		return fmt.Sprintf("fork from run %s at event %s", origin.SourceRunID(), origin.SourceEventID())
+	default:
+		return ""
+	}
 }
 
 func writeDiagnosticRunTrace(out io.Writer, runID string, result diagnosticRunTraceResult, deliveryDetail, verbose bool) {

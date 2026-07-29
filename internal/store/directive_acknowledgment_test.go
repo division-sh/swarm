@@ -424,7 +424,7 @@ func TestDirectiveMalformedTypedBoardStepFailureCanonicalizesBeforePersistence(t
 
 func TestDirectiveOperationDatabaseEnforcesStateEvidenceEquivalence(t *testing.T) {
 	forEachDirectiveAmbiguityBackend(t, func(t *testing.T, backend directiveAmbiguityBackend) {
-		seedDirectiveAmbiguityRun(t, backend.db, "00000000-0000-0000-0000-000000001000")
+		seedDirectiveAmbiguityRun(t, backend, "00000000-0000-0000-0000-000000001000")
 		failureRaw, err := runtimefailures.MarshalEnvelope(runtimeagentcontrol.DirectiveExecutionLeaseExpiredFailure())
 		if err != nil {
 			t.Fatal(err)
@@ -485,7 +485,7 @@ func (h *directiveAmbiguityHarness) workContext(t *testing.T) context.Context {
 func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBackend, agent *directiveAmbiguityAgent) *directiveAmbiguityHarness {
 	t.Helper()
 	runID := uuid.NewString()
-	seedDirectiveAmbiguityRun(t, backend.db, runID)
+	seedDirectiveAmbiguityRun(t, backend, runID)
 	faults := &faultingDirectiveIntegrationStore{directiveIntegrationStore: backend.store}
 	bus, err := newStoreTestEventBus(t, faults, runtimebus.EventBusOptions{
 		PipelineObligations: pipelineObligationOwnerForFixture(backend.store),
@@ -550,7 +550,7 @@ func (h *directiveAmbiguityHarness) expireLease(t *testing.T, operationID string
 func (h *directiveAmbiguityHarness) reserveKeylessPrepared(t *testing.T) runtimeagentcontrol.DirectiveOperation {
 	t.Helper()
 	now := time.Now().UTC()
-	seedDirectiveAmbiguityRun(t, h.backend.db, "00000000-0000-0000-0000-000000001000")
+	seedDirectiveAmbiguityRun(t, h.backend, "00000000-0000-0000-0000-000000001000")
 	req := directiveOperationReservationForTest(t, uuid.NewString(), uuid.NewString(), "", uuid.NewString(), now)
 	reserved, err := h.backend.store.ReserveDirectiveOperation(testAuthorActivityContext(), req)
 	if err != nil {
@@ -559,14 +559,9 @@ func (h *directiveAmbiguityHarness) reserveKeylessPrepared(t *testing.T) runtime
 	return reserved.Operation
 }
 
-func seedDirectiveAmbiguityRun(t *testing.T, db *sql.DB, runID string) {
+func seedDirectiveAmbiguityRun(t *testing.T, backend directiveAmbiguityBackend, runID string) {
 	t.Helper()
-	if _, err := db.Exec(`INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral') ON CONFLICT(run_id) DO NOTHING`, runID); err == nil {
-		return
-	}
-	if _, err := db.Exec(`INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral') ON CONFLICT(run_id) DO NOTHING`, runID); err != nil {
-		t.Fatalf("seed directive run: %v", err)
-	}
+	requireRunFixtureForTest(t, testAuthorActivityContext(), backend.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 }
 
 func installDirectiveRejectStateTrigger(t *testing.T, backend directiveAmbiguityBackend, state runtimeagentcontrol.DirectiveOperationState) func() {

@@ -11,7 +11,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -70,7 +70,7 @@ func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
 			return
 		}
 		defer tx.Rollback()
-		if err := storerunlifecycle.RequireActive(ctx, tx, fixture.RunID, storerunlifecycle.DialectPostgres); err != nil {
+		if err := requirePostgresRunActive(ctx, tx, fixture.RunID); err != nil {
 			renewalDone <- err
 			return
 		}
@@ -100,7 +100,9 @@ func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
 	}
 	terminalDone := make(chan terminalResult, 1)
 	go func() {
-		snapshot, err := terminalStore.markRunTerminalTx(storyCtx, terminalTx, fixture.RunID, "cancelled", nil, time.Now().UTC())
+		snapshot, _, err := terminalStore.markRunTerminalTx(storyCtx, terminalTx, runtimerunlifecycle.TerminalRequest{
+			RunID: fixture.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
+		})
 		if err == nil {
 			err = runtimepipeline.CapturePipelineRunForkRevisionChanges(storyCtx, terminalTx)
 		}
@@ -110,12 +112,13 @@ func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
 		if err == nil {
 			err = terminalTx.Commit()
 		}
-		terminalDone <- terminalResult{status: snapshot.Status, err: err}
+		terminalDone <- terminalResult{status: string(snapshot.State), err: err}
 	}()
 
 	query := observePostgresTerminalRunLock(t, ctx, db, terminalPID)
-	if !strings.Contains(strings.ToUpper(query), "UPDATE RUNS") {
-		t.Fatalf("terminalization blocked query = %q, want run-row mutation", query)
+	upperQuery := strings.ToUpper(query)
+	if !strings.Contains(upperQuery, "FROM RUNS") || !strings.Contains(upperQuery, "FOR UPDATE") {
+		t.Fatalf("terminalization blocked query = %q, want canonical run lifecycle lock", query)
 	}
 	close(renew)
 

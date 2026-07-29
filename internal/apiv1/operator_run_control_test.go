@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"testing"
 	"time"
 
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -37,12 +39,10 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 	})
 	ctx := context.Background()
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, $3)
-	`, runID, authorActivityTestBundleSourceFact.BundleHash(), "ephemeral"); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+		RunID: runID, BundleHash: authorActivityTestBundleSourceFact.BundleHash(), BundleSource: "ephemeral",
+		StartedAt: time.Date(2026, 5, 11, 11, 0, 0, 0, time.UTC),
+	})
 
 	pauseBody := runControlBody("run.pause", runID, "idem-pause")
 	pause := rpcCall(t, handler, pauseBody)
@@ -139,12 +139,11 @@ func TestOperatorRunControlHandlersTypedResourceErrors(t *testing.T) {
 	}
 
 	materializedLikePausedRunID := uuid.NewString()
-	if _, err := db.ExecContext(context.Background(), `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'paused', $2, $3)
-	`, materializedLikePausedRunID, authorActivityTestBundleSourceFact.BundleHash(), "ephemeral"); err != nil {
-		t.Fatalf("seed paused run without control owner: %v", err)
-	}
+	storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
+		RunID:      materializedLikePausedRunID,
+		State:      storerunlifecycle.StatePaused,
+		BundleHash: authorActivityTestBundleSourceFact.BundleHash(),
+	})
 	resp := rpcCall(t, handler, runControlBody("run.continue", materializedLikePausedRunID, ""))
 	if resp.Error == nil {
 		t.Fatal("run.continue without operator pause owner error = nil")

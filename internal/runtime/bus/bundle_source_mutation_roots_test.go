@@ -218,17 +218,13 @@ type sourceBoundaryProbeStore struct {
 	InMemoryEventStore
 	runtimedelivery.Store
 
-	upsertCalls    int
-	deleteCalls    int
-	bindCalls      int
-	standaloneRuns int
-	normalRuns     int
-	routes         map[string]FlowInstanceRouteRecord
-	upsertFact     runtimecorrelation.BundleSourceFact
-	deleteFact     runtimecorrelation.BundleSourceFact
-	bindFact       runtimecorrelation.BundleSourceFact
-	standaloneFact runtimecorrelation.BundleSourceFact
-	normalFact     runtimecorrelation.BundleSourceFact
+	upsertCalls int
+	deleteCalls int
+	bindCalls   int
+	routes      map[string]FlowInstanceRouteRecord
+	upsertFact  runtimecorrelation.BundleSourceFact
+	deleteFact  runtimecorrelation.BundleSourceFact
+	bindFact    runtimecorrelation.BundleSourceFact
 }
 
 func (s *sourceBoundaryProbeStore) UpsertFlowInstanceRoute(ctx context.Context, route FlowInstanceRouteRecord) error {
@@ -292,18 +288,6 @@ func (s *sourceBoundaryProbeStore) BindAgentSession(ctx context.Context, _ runti
 	s.bindCalls++
 	s.bindFact, _ = runtimecorrelation.BundleSourceFactFromContext(ctx)
 	return runtimedelivery.Snapshot{}, nil
-}
-
-func (s *sourceBoundaryProbeStore) ConvergeStandaloneRuntimePlatformRun(ctx context.Context, _ events.Event) error {
-	s.standaloneRuns++
-	s.standaloneFact, _ = runtimecorrelation.BundleSourceFactFromContext(ctx)
-	return nil
-}
-
-func (s *sourceBoundaryProbeStore) ConvergeNormalRunCompletion(ctx context.Context, _ string, _ []string, _ map[string][]string) error {
-	s.normalRuns++
-	s.normalFact, _ = runtimecorrelation.BundleSourceFactFromContext(ctx)
-	return nil
 }
 
 func (t *sourceMutationProbeTransaction) BeginPreparedPublish(context.Context, PreparedPublishEvent) (EventAppendOutcome, error) {
@@ -554,42 +538,6 @@ func TestAdjacentDurableMutationRootsRejectForeignSourceBeforeMutation(t *testin
 		t.Fatalf("delivery-session store mutations = %d, want zero", store.bindCalls)
 	}
 
-	evt := sourceMutationEvent()
-	for _, run := range []struct {
-		name string
-		call func(context.Context) error
-	}{
-		{name: "delivery convergence", call: func(ctx context.Context) error {
-			return bus.ConvergeDeliveryRunCompletion(ctx, evt)
-		}},
-		{name: "standalone convergence", call: func(ctx context.Context) error {
-			return bus.convergeStandaloneRuntimePlatformRun(ctx, evt)
-		}},
-		{name: "normal convergence", call: func(ctx context.Context) error {
-			return bus.ConvergeNormalRunCompletionForEvent(ctx, evt.ID())
-		}},
-	} {
-		t.Run(run.name, func(t *testing.T) {
-			beforeStandalone, beforeNormal := store.standaloneRuns, store.normalRuns
-			if err := run.call(foreignCtx); err == nil ||
-				!strings.Contains(err.Error(), "bundle source fact conflicts") {
-				t.Fatalf("error = %v, want source conflict", err)
-			}
-			if store.standaloneRuns != beforeStandalone || store.normalRuns != beforeNormal {
-				t.Fatalf(
-					"convergence mutations = standalone:%d normal:%d, want unchanged %d/%d",
-					store.standaloneRuns, store.normalRuns, beforeStandalone, beforeNormal,
-				)
-			}
-		})
-	}
-	if err := bus.ConvergeDeliveryRunCompletion(context.Background(), evt); err != nil {
-		t.Fatalf("owner-bound delivery convergence: %v", err)
-	}
-	if store.standaloneRuns != 1 || store.normalRuns != 1 ||
-		!owned.Matches(store.standaloneFact) || !owned.Matches(store.normalFact) {
-		t.Fatal("owner-bound convergence did not preserve the immutable bus source")
-	}
 }
 
 func TestDeliverySessionBindingRejectsForeignSourceWithExactClaimBeforeStoreMutation(t *testing.T) {

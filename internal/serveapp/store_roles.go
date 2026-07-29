@@ -16,6 +16,7 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -32,6 +33,7 @@ type selectedConcreteRuntimeStore interface {
 	runtime.RuntimeLogPersistence
 	store.SchemaBootstrapper
 	runtimebus.EventStore
+	runtimerunlifecycle.CandidateOwner
 	runtimedelivery.Store
 	runtimellm.ConversationPersistence
 	runtimemanager.ManagerPersistence
@@ -127,6 +129,7 @@ func selectedStoreBundleRoleLedger() []selectedStoreBundleRoleEntry {
 		{Name: "RuntimeBlocker", Classification: selectedStoreRoleLegacyConstructionBlocker, ForbiddenOn: selectedStoreRoleBoth, Issue: 1087, SpecRef: backendSpec, Reason: "successful selected construction must not carry a residual fail-closed construction blocker"},
 		{Name: "SchemaBootstrapper", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "schema/bootstrap capability is required before selected runtime persistence executes"},
 		{Name: "EventStore", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "event append/read persistence is a required selected runtime capability"},
+		{Name: "RunLifecycleCandidates", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, Issue: 2111, SpecRef: selectedFacadeSpec, Reason: "typed completion candidate persistence and generation-owned execution are required for every selected runtime"},
 		{Name: "PipelineStore", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "workflow instance persistence wrapper is required for runtime construction"},
 		{Name: "SessionRegistry", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "LLM session registry is required for runtime construction"},
 		{Name: "ConversationStore", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "conversation persistence is required for runtime construction"},

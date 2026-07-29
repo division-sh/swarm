@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -226,12 +227,10 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 
 func seedFanInBarrierRun(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, db *sql.DB, runID string) {
 	t.Helper()
-	query := `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
 	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
-	}
-	if _, err := db.ExecContext(ctx, query, runID); err != nil {
-		t.Fatalf("seed fan-in barrier run: %v", err)
+		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
+	} else {
+		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
 	}
 }
 
@@ -283,7 +282,7 @@ func publishFanInBarrierEvent(t *testing.T, ctx context.Context, eventBus *runti
 	if err != nil {
 		t.Fatalf("marshal %s payload: %v", localEvent, err)
 	}
-	evt := eventtest.RunCreatingRootIngress(
+	evt := eventtest.ExistingRunRootIngress(
 		eventID,
 		events.EventType(source.ResolveFlowEventReference(flowID, localEvent)),
 		flowID,
@@ -291,7 +290,6 @@ func publishFanInBarrierEvent(t *testing.T, ctx context.Context, eventBus *runti
 		raw,
 		0,
 		runtimecorrelation.RunIDFromContext(ctx),
-		"",
 		events.EventEnvelope{},
 		time.Now().UTC(),
 	)

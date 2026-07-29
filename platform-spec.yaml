@@ -965,7 +965,7 @@ contract_formats:
           rule: Both selected stores enforce the same construction, DDL, exact-write, duplicate, rollback, bounded-hydration, and canonical-readback contract.
           negative_proof: TestFreshEventDDLRejectsMalformedStructuralFactsParity
       terminal_run_admission:
-        owner: internal/store/runlifecycle plus the selected-store event mutation boundary
+        owner: internal/runtime/runlifecycle plus private selected-store lifecycle adapters and the selected-store event mutation boundary
         rule: >
           The admitted run disposition is the only authority for run lifecycle behavior. create-authorized events
           may create their exact missing run through the canonical run-creation owner. require-active events require
@@ -1004,10 +1004,10 @@ contract_formats:
           sqlite: The serialized runtime mutation transaction reads and validates run status before inserting a new event or recipient manifest.
         standalone_convergence: >
           Final-receipt convergence for a runtime-created standalone run consumes only durable creation evidence:
-          runs.trigger_event_id and runs.trigger_event_type MUST match the admitted event, the event class MUST be
-          runtime_control or runtime_diagnostic, the producer MUST be exactly platform/runtime, and source_event_id
-          MUST be absent. Labels are not standalone classifiers. A causal or run-scoped event with the same label
-          cannot create or converge a run.
+          the run origin MUST be the event variant and its event_id and event_type MUST match the admitted event,
+          the event class MUST be runtime_control or runtime_diagnostic, the producer MUST be exactly
+          platform/runtime, and source_event_id MUST be absent. Labels are not standalone classifiers. A causal or
+          run-scoped event with the same label cannot create or converge a run.
       constructor_classes:
         root_ingress:
           rule: External root ingress events carry their final source, envelope,
@@ -13529,18 +13529,22 @@ platform_tables:
         \      TEXT,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (delivery_id, claim_version),\n    FOREIGN KEY (delivery_id, claim_version) REFERENCES event_delivery_outcomes(delivery_id, claim_version),\n    CHECK ((delivery_id IS NULL AND claim_version IS NULL) OR (delivery_id IS NOT NULL AND claim_version > 0)),\n    INDEX idx_dead_letters_flow (flow_instance,\
         \ created_at),\n    INDEX idx_dead_letters_class ((failure->>'class'))\n);"
     runs:
-      description: 'Platform run registry. A run is a top-level execution context — everything that happens from a
-        system.started event or a fork operation. Every event, delivery, session, and turn belongs to exactly one run.
-        run_id is the primary correlation key for observability, debugging, and fork/replay. Forked runs link back to
-        their parent via forked_from_run_id and forked_from_event_id.'
+      description: 'Platform run registry. A run is a top-level execution context with one immutable, explicitly
+        discriminated origin: event, scenario setup, standing generation, or fork materialization. Every event,
+        delivery, session, and turn belongs to exactly one run. run_id is the primary correlation key for
+        observability, debugging, and fork/replay. Nullable origin payload columns never imply a kind and readers never
+        infer origin from event history. Standing origins are additionally validated against the exact
+        standing_service_generations relation. Fork-materialized runs link back to their parent through the origin-owned
+        forked_from_run_id and forked_from_event_id pair.'
       ddl: "CREATE TABLE runs (\n    run_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    status            TEXT\
         \ NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'paused', 'completed', 'failed', 'cancelled', 'forked')),\n\
         \    bundle_hash        TEXT NOT NULL CHECK (bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),\n\
         \    bundle_source      TEXT NOT NULL CHECK (bundle_source IN ('persisted', 'ephemeral', 'deleted')),\n\
-        \    trigger_event_id  UUID,\n    trigger_event_type TEXT,\n    forked_from_run_id UUID REFERENCES runs(run_id),\n\
+        \    origin_kind        TEXT NOT NULL CHECK (origin_kind IN ('event', 'scenario_setup', 'standing_generation', 'fork_materialization')),\n\
+        \    trigger_event_id   UUID,\n    trigger_event_type TEXT,\n    origin_service_id UUID,\n    origin_generation BIGINT,\n    completion_due_at TIMESTAMPTZ,\n    completion_revision BIGINT NOT NULL DEFAULT 0 CHECK (completion_revision >= 0),\n    forked_from_run_id UUID REFERENCES runs(run_id),\n\
         \    forked_from_event_id UUID,\n    continued_as_run_id UUID REFERENCES runs(run_id),\n    entity_count      INTEGER NOT NULL DEFAULT 0,\n    event_count       INTEGER\
         \ NOT NULL DEFAULT 0,\n    failure           JSONB,\n    started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n\
-        \    ended_at          TIMESTAMPTZ,\n    CHECK (continued_as_run_id IS NULL OR continued_as_run_id <> run_id),\n    CHECK ((status = 'forked') = (continued_as_run_id IS NOT NULL)),\n    INDEX idx_runs_status (status, started_at),\n    INDEX idx_runs_fork\
+        \    ended_at          TIMESTAMPTZ,\n    CHECK ((origin_kind = 'event' AND trigger_event_id IS NOT NULL AND NULLIF(TRIM(trigger_event_type), '') IS NOT NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'scenario_setup' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'standing_generation' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NOT NULL AND origin_generation IS NOT NULL AND origin_generation > 0 AND forked_from_run_id IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'fork_materialization' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NOT NULL AND forked_from_event_id IS NOT NULL)),\n    CHECK (continued_as_run_id IS NULL OR continued_as_run_id <> run_id),\n    CHECK ((status = 'forked') = (continued_as_run_id IS NOT NULL)),\n    CHECK (completion_due_at IS NULL OR completion_revision > 0),\n    CHECK (status IN ('running', 'paused') OR completion_due_at IS NULL),\n    INDEX idx_runs_status (status, started_at),\n    INDEX idx_runs_completion_candidates (bundle_hash, completion_due_at, run_id) WHERE completion_due_at IS NOT NULL,\n    INDEX idx_runs_standing_origin (origin_service_id, origin_generation) WHERE origin_kind = 'standing_generation',\n    INDEX idx_runs_fork\
         \ (forked_from_run_id) WHERE forked_from_run_id IS NOT NULL,\n    UNIQUE INDEX idx_runs_continued_as (continued_as_run_id) WHERE continued_as_run_id IS NOT NULL,\n    INDEX idx_runs_bundle_hash (bundle_hash) WHERE bundle_hash IS NOT NULL,\n\
         \    INDEX idx_runs_bundle_source_status (bundle_source, status, started_at),\n    INDEX idx_runs_bundle_delete_planning\
         \ (bundle_hash, status) WHERE bundle_hash IS NOT NULL\n);"
@@ -13554,7 +13558,7 @@ platform_tables:
           admits no further execution or continuation mutation, and exposes continued_as_run_id as
           its single forward lineage pointer. The forked run continues execution independently.'
       terminal_evidence:
-        canonical_owner: internal/store/runlifecycle plus internal/runtime/failures
+        canonical_owner: internal/runtime/runlifecycle, private selected-store lifecycle adapters, and internal/runtime/failures
         store_enforcement:
           postgres: Hard status/failure and status/ended_at constraints installed by the canonical failure migration owner.
           sqlite: Equivalent fail-closed insert/update triggers installed by the canonical failure migration owner because the shared DDL translator does not interpret table-level named checks.
@@ -13584,25 +13588,97 @@ platform_tables:
             ended_at: required
             control_reason: historical control evidence only; fork lineage explains the status
         explicit_terminalization_operation: >
-          MarkRunTerminal accepts only failed, cancelled, and forked transitions, with typed failure evidence where the
-          status requires it, and returns the authoritative persisted snapshot from one store-owned transaction. It
-          rejects completed because generic terminalization does not own successful-completion eligibility. PostgreSQL
-          acquires the run row before delivery rows so concurrent claim/settlement and terminalization use one lock order.
+          MarkTerminalRun accepts only failed and cancelled transitions, with typed failure evidence where the status
+          requires it, and returns the authoritative persisted snapshot and exact mutation disposition from one named
+          selected-store transaction. It rejects completed and forked because generic terminalization owns neither
+          successful-completion eligibility nor selected-fork source lineage. PostgreSQL acquires the run row before
+          delivery rows so concurrent claim/settlement and terminalization use one lock order. The PostgreSQL-only
+          selected-fork source operation owns the exact forked transition and continuation pointer; SQLite returns a
+          typed unsupported result and never emulates that operation.
         normal_completion_operation: >
-          ConvergeNormalRunCompletion is the sole successful-completion writer. In one selected-store transaction it
-          requires terminal workflow entities, successful pipeline receipts, settled deliveries, timers, and session
-          leases, no open or decision_committed gate, and every human_task decision card to have a matching same-run
-          continuation whose outcome is durably dispatched. Human-task continuations in pending, decision_committed, or
-          expired state remain unresolved; a missing or identity-inconsistent continuation fails closed. A dispatched
-          decision must retain the card's decision event identity, while a dispatched expiry retains its stamped outcome
-          event identity, and the corresponding deterministic human_task outcome event must remain persisted. Every proposed_effect card must likewise have a matching same-run continuation that is either
-          request_released, outcome_dispatched, or consistently superseded; pending, decision_committed, missing, or
-          identity-inconsistent proposed-effect continuations remain unresolved. A released/dispatched proposed effect
-          requires route_event_id to equal decision_event_id and its exact activity request or generated outcome event to
-          remain persisted. Local runtime or builder quiescence is
-          observational only: the builder may project a completed state already committed by this owner, but MUST NOT
-          derive or write completed from local quiescence and MUST leave a waiting decision run running without a
-          synthetic failure.
+          The durable completion-candidate executor is the sole successful-completion writer. For an ordinary run, one
+          selected-store transaction locks the exact current candidate revision, observes selected-store time, and
+          consumes typed run summaries from the delivery, pipeline, workflow-timer, session, decision-card,
+          external-effect, and entity owners. Every summary must carry the same run_id and validate its own finite
+          states. Missing, malformed, identity-inconsistent, unresolved, active, or orphaned facts fail closed as a
+          blocker or typed execution failure; the completion owner does not reinterpret another owner's rows. A
+          standalone runtime run consumes its typed durable creation evidence and delivery summary only. When all
+          required summaries are terminally eligible, the executor commits completed status, ended_at, terminal side
+          effects, author activity, and candidate absorption atomically. Local runtime or builder quiescence is
+          observational only and cannot derive or write completed.
+        completion_candidate:
+          canonical_owner: internal/runtime/runlifecycle domain and generation-owned executor plus private PostgreSQL and SQLite selected-store adapters
+          durable_identity: >
+            One nullable completion_due_at and monotonic completion_revision pair on the canonical runs row is the only
+            durable candidate authority. The candidate identity is exact {run_id, bundle_hash, completion_revision,
+            completion_due_at}. Candidate SQL and columns are private to lifecycle adapters. There is no callback
+            owner, queue table, scheduler, polling loop, retry registry, or reader-side completion inference.
+          request_outcomes:
+            requested: A nonterminal row records a new exact revision and selected-store due coordinate.
+            already_current: An exact current coordinate or an already-due current coordinate is unchanged and does not churn revision.
+            absorbed_terminal: A terminal row remains terminal and carries no candidate.
+          execution_outcomes:
+            terminally_eligible: Successful completion and candidate absorption committed atomically.
+            await_mutation: A typed non-time blocker remains; the current candidate is cleared and its owner must request a candidate on the next real eligibility-changing transition.
+            rearm_at: The same operation commits a newer exact revision at the earliest selected-store-owned future blocker coordinate before the current execution chain settles.
+            exact_noop: The run is missing, terminal, scoped differently, or no longer carries the exact revision.
+            retry_current: A typed execution/storage failure retains the current durable revision and retries only while the owning generation remains live.
+          eligibility_origins: >
+            Fresh ordinary non-standalone run creation declares no candidate because that transaction cannot establish
+            completion eligibility; standalone run-plus-trigger creation requests an immediate candidate in the same
+            event transaction. Real resume from paused to running, active source revision, standing generation repair,
+            ordinary or selected-contract fork activation, and final settlement or expiry of delivery, pipeline,
+            workflow-timer, session, decision/gate, external-effect, and entity obligations declare their exact candidate
+            effect inside the named mutation. A byte-identical duplicate does not advance revision. Paused runs cannot
+            complete, but exact future session expiry may remain reconstructible. Every future operation that can expose
+            terminal eligibility must choose immediate request, exact future request, terminal clear, or a structurally
+            enforced proof that eligibility cannot change.
+          terminal_absorption: >
+            Completed, failed, cancelled, and PostgreSQL forked transitions clear completion_due_at in the same update
+            that establishes terminal status. Exact duplicate terminal writes preserve the original snapshot and clear
+            only an impossible stale current marker; conflicting terminal writes fail closed. Late blocker settlement
+            returns absorbed_terminal and cannot reopen, revise, or otherwise mutate the terminal run.
+          selected_store_time: >
+            PostgreSQL CURRENT_TIMESTAMP and the selected SQLite store clock are the only eligibility-time authorities.
+            Process clocks, timers, and backoff merely wake an execution chain and never establish durable eligibility.
+          registration_and_startup: >
+            Runtime construction registers one generation-owned candidate sink before EventBus, managers, standing
+            reconciliation, public admission, or any candidate producer becomes reachable. The executor accepts exact
+            revision notifications while it enumerates the complete selected-store projection. Registration plus
+            monotonic per-run revision representation closes the startup race without a timestamp watermark. Runtime
+            readiness publishes only after enumeration is exhausted and every accepted identity is represented by an
+            execution chain or exact future wake.
+          post_commit_handoff: >
+            A candidate-producing operation acquires generation work admission before its mutation becomes
+            commit-capable. Commit submits the exact durable identity through a detached handoff and releases admission
+            only after representation; rollback cancels that admission. Caller cancellation after commit cannot cancel
+            the handoff. A process crash after commit is recovered by successor startup enumeration because process
+            memory is never durable authority.
+          retirement: >
+            Retirement atomically rejects new candidate admission, cancels process-local waits, and joins every
+            accepted chain before selected-store release. A rearm operation commits and represents its newer exact
+            revision before settling the current chain. A retired generation cannot mutate or block its successor;
+            successor startup reconstructs every durable candidate and future wake before readiness.
+          backend_contract: >
+            SQLite and PostgreSQL share the typed request, execution, stale-revision, rollback, readback, startup,
+            retirement, and late-settlement contract. Selected-fork source terminalization remains PostgreSQL-only and
+            SQLite proves the typed unsupported result.
+          fresh_schema_only: >
+            Existing selected stores are unsupported. No migration, legacy candidate adoption, trigger backfill,
+            compatibility reader, fallback completion path, dual writer, or old callback behavior exists.
+        continue_post_commit_recovery:
+          canonical_owner: internal/runtime/runcontrol.Controller consuming the selected-store pipeline-obligation SweepResult
+          transition_rule: >
+            run.continue first commits the exact paused-to-running lifecycle and control transition. It then performs
+            immediate per-run durable recovery through the canonical pipeline-obligation owner. Failure or caller
+            cancellation after commit never becomes an ordinary transition error, because replaying that error could
+            replay an already-committed transition.
+          result_contract: >
+            TransitionResult carries one typed post-commit recovery result with the accumulated settled, examined,
+            exhausted, and blocked facts plus exactly one disposition: not_configured, exhausted, blocked, failed, or
+            cancelled. Failed and cancelled results retain their diagnostic error. Counts are effects only; they never
+            imply exhaustion, completion, or transition failure. No count-only adapter, second recovery owner, fallback,
+            or compatibility result survives.
         immutability: A repeated terminal write is idempotent only when status and canonical failure match exactly. Conflicting failure evidence or terminal status fails closed.
         selected_store_admission:
           rule: The current runs shape contains only the typed failure envelope. A selected store containing legacy terminal-evidence columns or another non-current runs shape fails canonical schema admission unchanged.
@@ -13849,11 +13925,14 @@ run_model:
       The event tree within the forked run starts fresh (new event_ids, new source_event_id chains) — it does not
       extend the parent run''s event tree.'
   lifecycle:
-    creation: 'A run is created when: (1) system.started fires (cold start), (2) an external event arrives with
-      no active run (warm start), or (3) the runtime fork owner creates a forked run. The platform inserts a row
-      in the runs table with status=running and returns the run_id. Public run forking is governed by
-      multi_bundle_persistence.api_surface.run_fork and the intended CLI command
-      `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]`.'
+    creation: >
+      Every run is constructed with exactly one immutable typed origin and persists its discriminator and complete
+      payload atomically with the run: event {event_id,event_type}; scenario_setup with no payload;
+      standing_generation {service_id,generation} backed by the exact standing_service_generations relation; or
+      fork_materialization {source_run_id,source_event_id}. Later events and lifecycle transitions preserve the
+      origin unchanged. Readers decode only these persisted facts and never infer origin from event history.
+      Public run forking is governed by multi_bundle_persistence.api_surface.run_fork and the intended CLI command
+      `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]`.
     propagation: 'run_id propagates through the causal chain. When a handler, agent, or contextual platform
       producer emits an event, it supplies typed EventLineage from the exact parent at construction. EventBus
       validates but never infers or mutates run_id, source_event_id, task_id, or execution_mode. Producers that
@@ -13867,7 +13946,10 @@ run_model:
     pause_resume: 'Run-scoped pause/resume is owned by run.pause and run.continue. Operator run-control transition
       state is persisted in run_control_state so run.continue can distinguish operator-paused runs from materialized
       fork rows that also use runs.status=paused. It gates dispatch for one run while in-flight events complete.
-      Runtime-scoped external ingress pause/resume is a separate global control owned by api_specification.conventions.runtime_ingress.'
+      After continue commits, its canonical typed post-commit recovery result distinguishes exhausted, blocked,
+      failed, cancelled, and unconfigured immediate recovery without returning an ordinary error that could cause
+      the committed transition to be replayed. Runtime-scoped external ingress pause/resume is a separate global
+      control owned by api_specification.conventions.runtime_ingress.'
     stalled_run_escalation:
       owner: policy.runtime.stalled_run_escalation
       event_owner: platform_events.catalog.platform.run_stalled
@@ -25090,14 +25172,70 @@ api_specification:
         - failed
         - cancelled
         - forked
+      RunOrigin:
+        description: >
+          Immutable, explicitly discriminated run creation provenance. Exactly one variant is present and readers
+          never infer or coalesce it from event history.
+        oneOf:
+        - type: object
+          additionalProperties: false
+          required:
+          - kind
+          - event_id
+          - event_type
+          properties:
+            kind:
+              type: string
+              const: event
+            event_id:
+              $ref: '#/components/schemas/OpaqueId'
+            event_type:
+              type: string
+              minLength: 1
+        - type: object
+          additionalProperties: false
+          required:
+          - kind
+          properties:
+            kind:
+              type: string
+              const: scenario_setup
+        - type: object
+          additionalProperties: false
+          required:
+          - kind
+          - service_id
+          - generation
+          properties:
+            kind:
+              type: string
+              const: standing_generation
+            service_id:
+              $ref: '#/components/schemas/OpaqueId'
+            generation:
+              type: integer
+              minimum: 1
+        - type: object
+          additionalProperties: false
+          required:
+          - kind
+          - source_run_id
+          - source_event_id
+          properties:
+            kind:
+              type: string
+              const: fork_materialization
+            source_run_id:
+              $ref: '#/components/schemas/OpaqueId'
+            source_event_id:
+              $ref: '#/components/schemas/OpaqueId'
       RunHeader:
         type: object
         additionalProperties: false
         required:
         - run_id
         - status
-        - trigger_event_type
-        - trigger_event_id
+        - origin
         - entity_count
         - event_count
         - started_at
@@ -25106,10 +25244,8 @@ api_specification:
             $ref: '#/components/schemas/OpaqueId'
           status:
             $ref: '#/components/schemas/RunStatus'
-          trigger_event_type:
-            type: string
-          trigger_event_id:
-            $ref: '#/components/schemas/OpaqueId'
+          origin:
+            $ref: '#/components/schemas/RunOrigin'
           entity_count:
             type: integer
             minimum: 0
@@ -25121,9 +25257,6 @@ api_specification:
           ended_at:
             $ref: '#/components/schemas/Timestamp'
             description: Omitted while run is active; present once status is terminal (completed/failed/cancelled/forked).
-          forked_from_run_id:
-            $ref: '#/components/schemas/OpaqueId'
-            description: Present only if status indicates a fork.
           continued_as_run_id:
             $ref: '#/components/schemas/OpaqueId'
             description: Present on a source frozen by a freeze-style fork; identifies the one run that continues its state.

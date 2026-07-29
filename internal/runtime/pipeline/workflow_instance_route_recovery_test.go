@@ -36,7 +36,7 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 			setup: func(t *testing.T) (*sql.DB, *WorkflowInstanceStore) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				return db, NewWorkflowInstanceStore(db)
+				return db, newPostgresWorkflowInstanceStoreForTest(db)
 			},
 			bind: "$1",
 			json: "$4::jsonb",

@@ -11,7 +11,7 @@ import (
 	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -23,17 +23,8 @@ func TestRunLifecycleInsertForkRejectsMissingPersistedBundleBeforeMutation(t *te
 	missingHash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
 
 	err := pg.runAuthorActivityMutation(testAuthorActivityContext(), "reject missing persisted fork identity", func(txctx context.Context, tx *sql.Tx) error {
-		return storerunlifecycle.InsertFork(
-			txctx,
-			tx,
-			forkRunID,
-			RunForkMaterializedStatus,
-			uuid.NewString(),
-			uuid.NewString(),
-			0,
-			time.Now().UTC(),
-			storerunlifecycle.InsertForkOptions{BundleSourceFact: mustStoreTestPersistedBundleSourceFact(missingHash)},
-		)
+		return insertRunForkRun(txctx, tx, forkRunID, uuid.NewString(), uuid.NewString(), 0, time.Now().UTC(),
+			runForkBundleInsertIdentity{BundleSourceFact: mustStoreTestPersistedBundleSourceFact(missingHash)})
 	})
 	if !errors.Is(err, storerunlifecycle.ErrPersistedBundleUnavailable) {
 		t.Fatalf("InsertFork error = %v, want ErrPersistedBundleUnavailable", err)
@@ -107,17 +98,8 @@ func TestRunLifecycleInsertForkFailsAfterDeleteFirstSerializationWithoutMutation
 	done := make(chan error, 1)
 	go func() {
 		done <- pg.runAuthorActivityMutation(ctx, "delete-first fork identity admission", func(txctx context.Context, tx *sql.Tx) error {
-			return storerunlifecycle.InsertFork(
-				txctx,
-				tx,
-				forkRunID,
-				RunForkMaterializedStatus,
-				uuid.NewString(),
-				uuid.NewString(),
-				0,
-				time.Now().UTC(),
-				storerunlifecycle.InsertForkOptions{BundleSourceFact: mustStoreTestPersistedBundleSourceFact(targetHash)},
-			)
+			return insertRunForkRun(txctx, tx, forkRunID, uuid.NewString(), uuid.NewString(), 0, time.Now().UTC(),
+				runForkBundleInsertIdentity{BundleSourceFact: mustStoreTestPersistedBundleSourceFact(targetHash)})
 		})
 	}()
 	waitForPostgresRunAdmissionLock(t, ctx, db, done)
@@ -138,6 +120,7 @@ func TestPostgresStandingRevisionFailsAfterDeleteFirstSerializationWithoutMutati
 	t.Cleanup(cleanup)
 	selected := admitTestPostgresStore(t, db)
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	workflowStore.ConfigureRuntimeMutationRunner(selected)
 	workflowStore.ConfigureDeliveryLifecycleStore(selected)
 	workflowStore.ConfigurePipelineObligationStore(selected.PipelineObligations())
 	ctx := testAuthorActivityRuntimeContext()

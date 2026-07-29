@@ -376,7 +376,7 @@ func fanInStreamEvent(eventType, id, flowInstance, reportID, periodID string, re
 		"operating_id": flowInstance,
 		"revenue":      revenue,
 	})
-	return eventtest.RunCreatingRootIngress(
+	return eventtest.ExistingRunRootIngress(
 		eventtest.UUID(id),
 		events.EventType(eventType),
 		"",
@@ -384,7 +384,6 @@ func fanInStreamEvent(eventType, id, flowInstance, reportID, periodID string, re
 		payload,
 		0,
 		eventtest.UUID("run-fanin-stream"),
-		"",
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
 			FlowID:       templatefanin.ProducerFlowID,
 			FlowInstance: flowInstance,

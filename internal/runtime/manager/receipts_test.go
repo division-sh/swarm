@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"reflect"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -67,8 +66,6 @@ func (b *recordingReceiptBus) LogRuntime(_ context.Context, entry runtimepipelin
 
 type recordingCompletionReceiptBus struct {
 	recordingReceiptBus
-	normalCompletionEvents []string
-	completionErr          error
 }
 
 type projectedEmergencyBudgetGuard struct{}
@@ -94,11 +91,6 @@ func TestProjectedBudgetEmergencySuppressesDeliveryButNotThresholdEvent(t *testi
 	}
 }
 
-func (b *recordingCompletionReceiptBus) ConvergeDeliveryRunCompletion(_ context.Context, evt events.Event) error {
-	b.normalCompletionEvents = append(b.normalCompletionEvents, strings.TrimSpace(evt.ID()))
-	return b.completionErr
-}
-
 type receiptReaderStub struct{}
 
 func (*receiptReaderStub) UpsertAgent(context.Context, PersistedAgent) error { return nil }
@@ -106,27 +98,6 @@ func (*receiptReaderStub) LoadAgents(context.Context) ([]PersistedAgent, error) 
 	return nil, nil
 }
 func (*receiptReaderStub) EnsureEntitySchema(context.Context, string) error { return nil }
-
-func TestDeliverySettlementConvergesRunCompletionWithExactEvent(t *testing.T) {
-	bus := &recordingCompletionReceiptBus{}
-	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{})
-	am.convergeDeliveryRunCompletion(testAuthorActivityContext(context.Background()), receiptTestEvent("event-1"), "agent-1")
-	if len(bus.normalCompletionEvents) != 1 || bus.normalCompletionEvents[0] != "event-1" {
-		t.Fatalf("delivery completion events = %#v, want event-1", bus.normalCompletionEvents)
-	}
-}
-
-func TestDeliveryRunCompletionFailureIsVisible(t *testing.T) {
-	bus := &recordingCompletionReceiptBus{completionErr: errors.New("completion unavailable")}
-	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{})
-	am.convergeDeliveryRunCompletion(testAuthorActivityContext(context.Background()), receiptTestEvent("event-1"), "agent-1")
-	if len(bus.normalCompletionEvents) != 1 || bus.normalCompletionEvents[0] != "event-1" {
-		t.Fatalf("delivery completion events = %#v, want event-1", bus.normalCompletionEvents)
-	}
-	if len(bus.runtimeLogs) != 1 || bus.runtimeLogs[0].Action != "delivery_run_completion_failed" {
-		t.Fatalf("runtime logs = %#v, want visible delivery completion failure", bus.runtimeLogs)
-	}
-}
 
 type traceRecordingAgent struct {
 	parent         string

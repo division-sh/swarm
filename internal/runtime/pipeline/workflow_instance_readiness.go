@@ -15,6 +15,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -77,8 +78,8 @@ type DynamicFlowRuntimeReadinessKey struct {
 }
 
 func (r DynamicFlowRuntimeReadiness) Eligible() bool {
-	runStatus := strings.ToLower(strings.TrimSpace(r.RunStatus))
-	return (runStatus == "running" || runStatus == "paused") &&
+	runState, err := runtimerunlifecycle.ParseState(r.RunStatus)
+	return err == nil && runState.Active() &&
 		strings.EqualFold(strings.TrimSpace(r.InstanceStatus), "active") &&
 		r.InstanceTerminatedAt.IsZero()
 }

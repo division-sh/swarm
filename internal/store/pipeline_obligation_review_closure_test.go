@@ -341,11 +341,14 @@ func TestPostgresPipelineScanSnapshotExcludesEarlierSequenceCommittedAfterBounda
 	if len(first.Work) != 1 || first.Work[0].Event.ID() != visibleAtBoundary.ID() {
 		t.Fatalf("first batch = %#v, want boundary-visible event %s", first, visibleAtBoundary.ID())
 	}
+	// The lifecycle candidate request locks the run during settlement. Release
+	// the deliberately delayed event transaction after the scan boundary has
+	// been fixed, but before settlement acquires that run lock.
+	releaseCommit()
 	if err := owner.Settle(ctx, first.Work[0].Claim, runtimepipelineobligation.Acknowledged("boundary_visible")); err != nil {
 		t.Fatalf("settle boundary-visible event: %v", err)
 	}
 
-	releaseCommit()
 	txErr := <-txDone
 	txFinished = true
 	if txErr != nil {
@@ -879,7 +882,16 @@ func TestInactiveProcessedDecisionRouteClosesAtParentTerminalizationOnSQLiteAndP
 				t.Fatalf("release decision claim: %v", err)
 			}
 
-			setPipelineRunStatus(t, ctx, fixture, runID, "failed", "")
+			if _, err := markRunTerminalStatusForTest(
+				ctx,
+				fixture.store,
+				runID,
+				"cancelled",
+				nil,
+				time.Now().UTC(),
+			); err != nil {
+				t.Fatalf("mark parent run terminal: %v", err)
+			}
 			if err := terminalizeReviewClosureRun(ctx, fixture, owner, runID); err != nil {
 				t.Fatalf("terminalize inactive processed decision route: %v", err)
 			}

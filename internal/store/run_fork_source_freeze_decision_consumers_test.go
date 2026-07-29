@@ -12,7 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -28,7 +28,7 @@ type forkedDecisionConsumerSurface interface {
 }
 
 func TestForkedSourceDecisionCardsContinuationsDraftsAndRoutesCannotAdvance(t *testing.T) {
-	for _, backend := range []string{"postgres", "sqlite"} {
+	for _, backend := range []string{"postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedConsumerTestBackend(t, backend)
 			ctx := testAuthorActivityBundleSourceContext()

@@ -763,7 +763,10 @@ func (a *Adapter) SummarizeRun(ctx context.Context, q queryer, runID string) (Ru
 			summary.NextEligibleAt = parsed
 		}
 	}
-	return summary, rows.Err()
+	if err := rows.Err(); err != nil {
+		return RunSummary{}, err
+	}
+	return summary, summary.Validate()
 }
 
 func (a *Adapter) SnapshotsForEvent(ctx context.Context, q queryer, eventID string) ([]Snapshot, error) {

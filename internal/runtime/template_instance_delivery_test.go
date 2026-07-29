@@ -67,7 +67,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	eventID := "99999999-9999-4999-8999-999999999902"
-	evt := eventtest.RunCreatingRootIngress(
+	evt := eventtest.ExistingRunRootIngress(
 		eventID,
 		events.EventType("operating/inst-1/opco.product_initialization_requested"),
 		"operating",
@@ -75,7 +75,6 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 		[]byte(`{"entity_id":"11111111-1111-4111-8111-111111111111"}`),
 		0,
 		templateInstanceDeliveryRunID,
-		"",
 		events.EnvelopeForSourceRoute(
 			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-4111-8111-111111111111"), "operating/inst-1"),
 			events.RouteIdentity{FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: "11111111-1111-4111-8111-111111111111"},
@@ -119,7 +118,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 	}
 	ch := runtimeInternalDeliveriesForTest(t, bus, "workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
 	eventID := "99999999-9999-4999-8999-999999999903"
-	evt := eventtest.RunCreatingRootIngress(
+	evt := eventtest.ExistingRunRootIngress(
 		eventID,
 		events.EventType("operating/inst-1/opco.product_initialization_requested"),
 		"operating",
@@ -127,7 +126,6 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 		[]byte(`{"entity_id":"11111111-1111-4111-8111-111111111111"}`),
 		0,
 		templateInstanceDeliveryRunID,
-		"",
 		events.EnvelopeForSourceRoute(
 			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-4111-8111-111111111111"), "operating/inst-1"),
 			events.RouteIdentity{FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: "11111111-1111-4111-8111-111111111111"},
@@ -198,7 +196,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	})
 	bus.SetInterceptors(pc)
 
-	spinup := eventtest.RunCreatingRootIngress(
+	spinup := eventtest.ExistingRunRootIngress(
 		"99999999-9999-4999-8999-999999999910",
 		events.EventType("opco.spinup_requested"),
 		"test-producer",
@@ -206,7 +204,6 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 		[]byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
 		0,
 		templateInstanceDeliveryRunID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "22222222-2222-4222-8222-222222222222"),
 		time.Now().UTC(),
 	)
@@ -286,7 +283,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	})
 	bus.SetInterceptors(pc)
 
-	spinup := eventtest.RunCreatingRootIngress(
+	spinup := eventtest.ExistingRunRootIngress(
 		"99999999-9999-4999-8999-999999999930",
 		events.EventType("opco.spinup_requested"),
 		"test-producer",
@@ -294,7 +291,6 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 		[]byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
 		0,
 		templateInstanceDeliveryRunID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "22222222-2222-4222-8222-222222222222"),
 		time.Now().UTC(),
 	)
@@ -373,7 +369,7 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 		WorkflowInstances: workflowStore,
 		LifecycleStore:    pg,
 	}))
-	evt := eventtest.RunCreatingRootIngress(
+	evt := eventtest.ExistingRunRootIngress(
 		"99999999-9999-4999-8999-999999999940",
 		events.EventType("producer/deploy.done"),
 		"producer",
@@ -381,7 +377,6 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 		[]byte(`{"vertical_id":"v-1"}`),
 		0,
 		templateInstanceDeliveryRunID,
-		"",
 		events.EventEnvelope{},
 		time.Now().UTC(),
 	)
@@ -449,7 +444,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		DeliveryStore:     pg,
 	})
 
-	mailbox := eventtest.RunCreatingRootIngress(
+	mailbox := eventtest.ExistingRunRootIngress(
 		"99999999-9999-4999-8999-999999999913",
 		events.EventType("approval.completed"),
 		"approval-source",
@@ -457,7 +452,6 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		[]byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
 		0,
 		templateInstanceDeliveryRunID,
-		"",
 		events.EventEnvelope{EntityID: "22222222-2222-4222-8222-222222222222"},
 		time.Now().UTC())
 
@@ -557,7 +551,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		DeliveryStore:     pg,
 	})
 
-	mailbox := eventtest.RunCreatingRootIngress(
+	mailbox := eventtest.ExistingRunRootIngress(
 		"99999999-9999-4999-8999-999999999912",
 		events.EventType("approval.completed"),
 		"approval-source",
@@ -565,7 +559,6 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		[]byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
 		0,
 		templateInstanceDeliveryRunID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "22222222-2222-4222-8222-222222222222"),
 		time.Now().UTC(),
 	)
@@ -872,9 +865,7 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 				sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithBundleSourceFact(ctx, providerRollbackBundleSourceFact())
-				if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, templateInstanceDeliveryRunID); err != nil {
-					t.Fatalf("seed SQLite rollback run: %v", err)
-				}
+				storetest.RequireSQLiteRun(t, ctx, sqliteStore.DB, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
 				return ctx, sqliteStore.DB, &providerRollbackSQLiteStore{
 					SQLiteRuntimeStore: sqliteStore,
 					proof:              &providerRollbackProof{checkpoint: checkpoint},
@@ -1431,13 +1422,7 @@ func (s routeMaterializationDBProofStore) ListActiveFlowInstanceDescriptors(ctx 
 func seedRuntimeTestRun(t *testing.T, db *sql.DB) context.Context {
 	t.Helper()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-		ON CONFLICT (run_id) DO NOTHING
-	`, templateInstanceDeliveryRunID); err != nil {
-		t.Fatalf("seed runtime test run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
 	return ctx
 }
 

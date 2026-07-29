@@ -22,6 +22,7 @@ type PostgresStore struct {
 	authorActivityCatalogMu sync.Mutex
 	authorActivityCatalog   *runtimeauthoractivity.EventCatalogRegistry
 	sessionLockTTL          time.Duration
+	runLifecycleSinks       runLifecycleCandidateSinkRegistry
 
 	scheduleClaimMu   sync.Mutex
 	scheduleClaimConn *sql.Conn

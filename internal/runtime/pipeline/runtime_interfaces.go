@@ -43,10 +43,6 @@ type systemNodeRuntimeLogger interface {
 	LogRuntime(context.Context, RuntimeLogEntry) error
 }
 
-type systemNodeDeliveryRunCompletionConverger interface {
-	ConvergeDeliveryRunCompletion(context.Context, events.Event) error
-}
-
 type SubscriptionReadyBackgroundNode interface {
 	BackgroundNode
 	AddSubscriptionReadyHook(func())

@@ -34,10 +34,8 @@ func selectedScheduleStoreCases() []selectedScheduleStoreCase {
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
 			ctx := selectedScheduleTestContext(t, runID)
-			if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', now(), 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-				t.Fatalf("seed PostgreSQL run: %v", err)
-			}
 			store := admitTestPostgresStore(t, db)
+			requireRunningRunForTest(t, ctx, store, runID, time.Now().UTC())
 			t.Cleanup(func() { _ = store.ReleaseScheduleClaims(context.Background()) })
 			return store, db, ctx
 		}},

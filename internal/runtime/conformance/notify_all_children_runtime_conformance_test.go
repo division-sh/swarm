@@ -231,7 +231,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 		t.Fatalf("run v1 manager: %v", err)
 	}
 
-	publishNotifyAllChildrenEvent(t, ctx, runtimeV1.bus, sourceV1, runID, "portfolio.opened", map[string]any{
+	publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtimeV1.bus, sourceV1, runID, "portfolio.opened", map[string]any{
 		"portfolio_id": "portfolio-main",
 	})
 	publishNotifyAllChildrenEvent(t, ctx, runtimeV1.bus, sourceV1, runID, "portfolio.account.register.requested", map[string]any{
@@ -743,7 +743,7 @@ func TestDynamicFlowTerminalizationAndRouteReplacementRollbackTogetherOnBothBack
 			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
 			runtime := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now)
 
-			publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.opened", map[string]any{
+			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime.bus, source, runID, "portfolio.opened", map[string]any{
 				"portfolio_id": "portfolio-main",
 			})
 			publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.account.register.requested", map[string]any{
@@ -830,7 +830,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
 			runtime := newNotifyAllChildrenRuntime(t, backend, db, source, func() time.Time { return fixedEngineNow })
 
-			publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.opened", map[string]any{
+			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime.bus, source, runID, "portfolio.opened", map[string]any{
 				"portfolio_id": "portfolio-main",
 			})
 			assertNotifyAllChildrenRunPersisted(t, ctx, backend, db, runID)
@@ -1128,23 +1128,31 @@ func loadNotifyAllChildrenFlowInstanceStatus(
 
 func publishNotifyAllChildrenEvent(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, source semanticview.Source, runID, localEvent string, payload map[string]any) string {
 	t.Helper()
+	return publishNotifyAllChildrenEventClass(t, ctx, eventBus, source, runID, localEvent, payload, false)
+}
+
+func publishNotifyAllChildrenRunCreatingEvent(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, source semanticview.Source, runID, localEvent string, payload map[string]any) string {
+	t.Helper()
+	return publishNotifyAllChildrenEventClass(t, ctx, eventBus, source, runID, localEvent, payload, true)
+}
+
+func publishNotifyAllChildrenEventClass(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, source semanticview.Source, runID, localEvent string, payload map[string]any, runCreating bool) string {
+	t.Helper()
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("marshal %s payload: %v", localEvent, err)
 	}
 	id := uuid.NewString()
-	evt := eventtest.RunCreatingRootIngress(
-		id,
-		events.EventType(source.ResolveFlowEventReference(notifyallchildren.OwnerFlowID, localEvent)),
-		notifyallchildren.OwnerFlowID,
-		"",
-		raw,
-		0,
-		runID,
-		"",
-		events.EventEnvelope{},
-		time.Now().UTC(),
+	eventType := events.EventType(source.ResolveFlowEventReference(notifyallchildren.OwnerFlowID, localEvent))
+	createdAt := time.Now().UTC()
+	evt := eventtest.ExistingRunRootIngress(
+		id, eventType, notifyallchildren.OwnerFlowID, "", raw, 0, runID, events.EventEnvelope{}, createdAt,
 	)
+	if runCreating {
+		evt = eventtest.RunCreatingRootIngress(
+			id, eventType, notifyallchildren.OwnerFlowID, "", raw, 0, runID, "", events.EventEnvelope{}, createdAt,
+		)
+	}
 	if err := eventBus.PublishAcknowledged(ctx, evt); err != nil {
 		t.Fatalf("PublishAcknowledged(%s): %v", localEvent, err)
 	}

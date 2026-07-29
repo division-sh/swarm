@@ -111,9 +111,7 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 	seedConformanceAgent(t, ctx, pg, "agent-1")
 
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	sessionID := uuid.NewString()
 	if err := pg.AppendAgentTurn(ctx, managedConformanceTurnRecord(t, runtimellm.AgentTurnRecord{
 		AgentID:   "agent-1",
@@ -184,9 +182,7 @@ func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *
 	ctx = runtimeeffects.WithLifecycleToken(ctx, lifecycleToken)
 
 	identity := agentmemory.Identity{RunID: uuid.NewString(), AgentID: "agent-1", FlowInstance: "support/inst-1"}
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, bundle_hash, bundle_source) VALUES ($1::uuid, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, identity.RunID); err != nil {
-		t.Fatalf("seed memory run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: identity.RunID})
 	sessionID := acquireLiveConversationSession(t, ctx, db, identity)
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
 		SessionID: sessionID,
@@ -256,9 +252,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	lifecycleToken := seedConformanceRunningAgent(t, ctx, pg, "agent-1")
 
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 
 	event1 := eventtest.PersistedProjection(uuid.NewString(),
 
@@ -440,9 +434,7 @@ func TestCLISessionFailureDoesNotRotateFromStderrProse(t *testing.T) {
 	lifecycleToken := seedConformanceRunningAgent(t, ctx, pg, "agent-1")
 
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 
 	eventID := uuid.NewString()
 	evt := eventtest.PersistedProjection(eventID,
@@ -606,9 +598,7 @@ func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testi
 	requireCanonicalConversationSurface(t, ctx, pg)
 	seedConformanceAgent(t, ctx, pg, "agent-1")
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, bundle_hash, bundle_source) VALUES ($1::uuid, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 
 	err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
 		SessionID: uuid.NewString(),
@@ -1043,13 +1033,14 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 			Backend: "anthropic",
 		},
 	}, Stores: runtimepkg.Stores{
-		SQLDB:               db,
-		PipelineStore:       runtimepipeline.NewWorkflowInstanceStore(db),
-		EventStore:          pg,
-		RuntimeLogStore:     pg,
-		ManagerStore:        pg,
-		ScheduleStore:       pg,
-		PipelineObligations: pg.PipelineObligations(),
+		SQLDB:                  db,
+		PipelineStore:          runtimepipeline.NewWorkflowInstanceStore(db),
+		EventStore:             pg,
+		RunLifecycleCandidates: pg,
+		RuntimeLogStore:        pg,
+		ManagerStore:           pg,
+		ScheduleStore:          pg,
+		PipelineObligations:    pg.PipelineObligations(),
 	}, Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
 		SelfCheck:         false,
 		WorkflowModule:    loadConformanceRuntimeWorkflowModule(t),
@@ -1129,13 +1120,14 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 			Backend: "anthropic",
 		},
 	}, Stores: runtimepkg.Stores{
-		SQLDB:               db,
-		PipelineStore:       runtimepipeline.NewWorkflowInstanceStore(db),
-		EventStore:          eventStore,
-		RuntimeLogStore:     pg,
-		ManagerStore:        &conformanceManagerReplayStore{},
-		DeliveryStore:       pg,
-		PipelineObligations: eventStore.PipelineObligations(),
+		SQLDB:                  db,
+		PipelineStore:          runtimepipeline.NewWorkflowInstanceStore(db),
+		EventStore:             eventStore,
+		RunLifecycleCandidates: pg,
+		RuntimeLogStore:        pg,
+		ManagerStore:           &conformanceManagerReplayStore{},
+		DeliveryStore:          pg,
+		PipelineObligations:    eventStore.PipelineObligations(),
 	}, Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
 		SelfCheck:         false,
 		WorkflowModule:    module,
@@ -1239,14 +1231,15 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 			Backend: "anthropic",
 		},
 	}, Stores: runtimepkg.Stores{
-		SQLDB:               db,
-		PipelineStore:       runtimepipeline.NewWorkflowInstanceStore(db),
-		EventStore:          pg,
-		RuntimeLogStore:     pg,
-		ManagerStore:        pg,
-		DeliveryStore:       pg,
-		ScheduleStore:       scheduleStore,
-		PipelineObligations: pg.PipelineObligations(),
+		SQLDB:                  db,
+		PipelineStore:          runtimepipeline.NewWorkflowInstanceStore(db),
+		EventStore:             pg,
+		RunLifecycleCandidates: pg,
+		RuntimeLogStore:        pg,
+		ManagerStore:           pg,
+		DeliveryStore:          pg,
+		ScheduleStore:          scheduleStore,
+		PipelineObligations:    pg.PipelineObligations(),
 	}, Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
 		SelfCheck:         false,
 		WorkflowModule:    loadConformanceRuntimeWorkflowModule(t),
@@ -1373,9 +1366,7 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	registry := runtimesessions.Registry(pg)
 	leaseCtx := runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
 	identity := agentmemory.Identity{RunID: uuid.NewString(), AgentID: "agent-1", FlowInstance: "support/inst-1"}
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, bundle_hash, bundle_source) VALUES ($1::uuid, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, identity.RunID); err != nil {
-		t.Fatalf("seed memory run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: identity.RunID})
 	lease, err := registry.Acquire(leaseCtx, identity, "conformance")
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
@@ -1498,9 +1489,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		}},
 	}
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed manager replay run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	eventIDs := map[string]string{
 		"support.replay.ok":     uuid.NewString(),
 		"support.replay.skip":   uuid.NewString(),
@@ -1529,13 +1518,14 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 			Backend: "anthropic",
 		},
 	}, Stores: runtimepkg.Stores{
-		SQLDB:               db,
-		PipelineStore:       runtimepipeline.NewWorkflowInstanceStore(db),
-		EventStore:          pg,
-		RuntimeLogStore:     pg,
-		ManagerStore:        managerStore,
-		DeliveryStore:       pg,
-		PipelineObligations: pg.PipelineObligations(),
+		SQLDB:                  db,
+		PipelineStore:          runtimepipeline.NewWorkflowInstanceStore(db),
+		EventStore:             pg,
+		RunLifecycleCandidates: pg,
+		RuntimeLogStore:        pg,
+		ManagerStore:           managerStore,
+		DeliveryStore:          pg,
+		PipelineObligations:    pg.PipelineObligations(),
 	}, Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
 		SelfCheck:         false,
 		WorkflowModule:    module,
@@ -1651,9 +1641,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	replayDeliveries := runtimebustest.Subscribe(t, bus, replayRecipient)
 
 	replayRunID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, replayRunID); err != nil {
-		t.Fatalf("seed replay run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: replayRunID})
 	replayParentID := uuid.NewString()
 	replayChildID := uuid.NewString()
 	storetest.CommitSemanticEvent(t, ctx, pg, eventtest.PersistedProjection(replayParentID,
@@ -1668,9 +1656,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	acknowledgeConformancePipelineEvent(t, ctx, pg.PipelineObligations(), replayParentID)
 
 	skipRunID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, skipRunID); err != nil {
-		t.Fatalf("seed skipped replay run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: skipRunID})
 	skipParentID := uuid.NewString()
 	skipChildID := uuid.NewString()
 	storetest.CommitSemanticEvent(t, ctx, pg, eventtest.PersistedProjection(skipParentID,
@@ -1684,9 +1670,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 
 	droppedEventID := uuid.NewString()
 	droppedRunID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, droppedRunID); err != nil {
-		t.Fatalf("seed dropped replay run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: droppedRunID})
 	storetest.CommitSemanticEvent(t, ctx, pg, eventtest.RuntimeDiagnostic(
 		droppedEventID, events.EventType("system.recover.drop"), "runtime", "", []byte(`{}`), 0,
 		droppedRunID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
@@ -1779,9 +1763,7 @@ func TestCanonicalRuntimeLogTurnBlockSurface_IsOmittedFromPublicConversationProj
 	seedConformanceAgent(t, ctx, pg, "agent-1")
 
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	sessionID := uuid.NewString()
 	if err := pg.AppendAgentTurn(ctx, managedConformanceTurnRecord(t, runtimellm.AgentTurnRecord{
 		AgentID:   "agent-1",
@@ -1843,16 +1825,14 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 	_, db, _ := testutil.StartPostgres(t)
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 
 	requireMutationSurface(t, db)
 
+	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	instanceStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	instanceStore.ConfigureRuntimeMutationRunner(selected)
+	instanceStore.ConfigureRunLifecycle(selected)
 	entityID := uuid.NewString()
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	if err := instanceStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
@@ -1946,9 +1926,7 @@ func TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField(t *test
 	requireMutationSurface(t, db)
 
 	entityID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, bundle_hash, bundle_source) VALUES ($1::uuid, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator
@@ -2207,12 +2185,7 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 	t.Helper()
 	_, db, _ := testutil.StartPostgres(t)
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, testAuthorActivityContext(context.Background()), db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
 		EntityStore:                    pg,
