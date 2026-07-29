@@ -25,6 +25,7 @@ import (
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -96,11 +97,37 @@ type PipelineCoordinatorOptions struct {
 	WorkOwner                        worklifetime.Occurrence
 }
 
-// ChannelActivityTarget is a private compiled connector target. Generation is
-// persisted with every request and must match before any provider call.
 type ChannelActivityTarget struct {
-	Tool           runtimecontracts.ToolSchemaEntry
-	PlanGeneration string
+	value *channelActivityTargetValue
+}
+
+type channelActivityTargetValue struct {
+	tool       runtimecontracts.ToolSchemaEntry
+	generation plangeneration.Generation
+}
+
+func NewChannelActivityTarget(tool runtimecontracts.ToolSchemaEntry, generation plangeneration.Generation) (ChannelActivityTarget, error) {
+	if tool.IsZero() {
+		return ChannelActivityTarget{}, fmt.Errorf("private channel activity tool is missing")
+	}
+	if !generation.Valid() {
+		return ChannelActivityTarget{}, fmt.Errorf("private channel activity plan generation is missing")
+	}
+	return ChannelActivityTarget{value: &channelActivityTargetValue{tool: tool, generation: generation}}, nil
+}
+
+func (t ChannelActivityTarget) Tool() (runtimecontracts.ToolSchemaEntry, bool) {
+	if t.value == nil {
+		return runtimecontracts.ToolSchemaEntry{}, false
+	}
+	return t.value.tool, true
+}
+
+func (t ChannelActivityTarget) Generation() plangeneration.Generation {
+	if t.value == nil {
+		return plangeneration.Generation{}
+	}
+	return t.value.generation
 }
 
 type runtimeMutationRunnerProvider interface {

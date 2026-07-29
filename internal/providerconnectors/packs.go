@@ -56,7 +56,7 @@ func (r *PackRegistry) PackDescriptors() []packs.ConnectorPackDescriptor {
 	out := make([]packs.ConnectorPackDescriptor, 0, len(ids))
 	for _, id := range ids {
 		pack := cloneLoadedPack(byID[id])
-		tools := runtimecontracts.CloneToolSchemaEntries(pack.Manifest.Tools)
+		tools := cloneToolMap(pack.Manifest.Tools)
 		out = append(out, packs.ConnectorPackDescriptor{
 			Identity: packs.PackIdentity{
 				ID: pack.Envelope.ID, Version: pack.Envelope.Version, ManifestHash: pack.Envelope.ManifestHash,
@@ -93,7 +93,7 @@ func BuiltinTool(provider, toolID string) (runtimecontracts.ToolSchemaEntry, boo
 		return runtimecontracts.ToolSchemaEntry{}, false
 	}
 	tool, ok := pack.Manifest.Tools[strings.TrimSpace(toolID)]
-	return runtimecontracts.CloneToolSchemaEntry(tool), ok
+	return tool, ok
 }
 
 func mustDefaultPackRegistry() *PackRegistry {
@@ -164,11 +164,10 @@ func NewPackRegistry(loaded ...LoadedPack) (*PackRegistry, error) {
 		}
 		admittedTools := make(map[string]runtimecontracts.ToolSchemaEntry, len(pack.Manifest.Tools))
 		for toolID, tool := range pack.Manifest.Tools {
-			admitted, err := runtimecontracts.AdmitToolSchemaEntry(tool)
-			if err != nil {
+			if err := tool.Validate(); err != nil {
 				return nil, fmt.Errorf("admit connector tool %q for pack %q: %w", toolID, pack.Envelope.ID, err)
 			}
-			admittedTools[toolID] = admitted
+			admittedTools[toolID] = tool
 		}
 		pack.Manifest.Tools = admittedTools
 		if pack.Manifest.Generation != nil {
@@ -236,7 +235,7 @@ func (r *PackRegistry) Inventory() []InstalledTool {
 			out = append(out, InstalledTool{
 				Provider: provider,
 				ToolID:   toolID,
-				Tool:     runtimecontracts.CloneToolSchemaEntry(pack.Manifest.Tools[toolID]),
+				Tool:     pack.Manifest.Tools[toolID],
 				Pack:     pack,
 			})
 		}
@@ -363,7 +362,7 @@ func DerivedRequires(manifest ConnectorManifest) packs.Requires {
 	var managedCredentials []string
 	for _, toolID := range manifestToolNames(manifest) {
 		tool := manifest.Tools[toolID]
-		for _, credential := range tool.Credentials {
+		for _, credential := range tool.Credentials() {
 			credential = strings.TrimSpace(credential)
 			if credential == "" {
 				continue
@@ -374,8 +373,8 @@ func DerivedRequires(manifest ConnectorManifest) packs.Requires {
 			seenSecrets[credential] = struct{}{}
 			secrets = append(secrets, credential)
 		}
-		if tool.ManagedCredential != nil {
-			credential := strings.TrimSpace(tool.ManagedCredential.Key)
+		if managed, ok := tool.ManagedCredential(); ok {
+			credential := strings.TrimSpace(managed.Key)
 			if credential != "" {
 				if _, exists := seenManaged[credential]; !exists {
 					seenManaged[credential] = struct{}{}
@@ -397,7 +396,7 @@ func SourceWithConnectorPackImportsFromRegistry(source semanticview.Source, regi
 	if source == nil {
 		return nil, nil
 	}
-	if connectorPackImportsApplied(source) {
+	if source.SemanticCapabilities().ConnectorPackImportsApplied() {
 		return source, nil
 	}
 	imports := connectorPackImportsFromSource(source)
@@ -436,7 +435,7 @@ func SourceWithConnectorPackImportsFromRegistry(source semanticview.Source, regi
 		if prior, exists := importSources[item.toolID]; exists {
 			return nil, fmt.Errorf("provider connector tool %q collision between connector pack imports %s and %s; remove one import", item.toolID, prior, item.source)
 		}
-		tool := runtimecontracts.CloneToolSchemaEntry(pack.Manifest.Tools[item.toolID])
+		tool := pack.Manifest.Tools[item.toolID]
 		importedTools[item.toolID] = tool
 		if generation, exists := GenerationSurfaceForPackTool(pack, item.toolID); exists {
 			importedGeneration[item.toolID] = generation
@@ -454,26 +453,6 @@ func SourceWithConnectorPackImportsFromRegistry(source semanticview.Source, regi
 		importSources:          importSources,
 		importedByProjectScope: importedByProjectScope,
 	}, nil
-}
-
-func connectorPackImportsApplied(source semanticview.Source) bool {
-	type applied interface {
-		ConnectorPackImportsApplied() bool
-	}
-	type baseSource interface {
-		BaseSemanticSource() semanticview.Source
-	}
-	for depth := 0; source != nil && depth < 64; depth++ {
-		if wrapped, ok := source.(applied); ok && wrapped.ConnectorPackImportsApplied() {
-			return true
-		}
-		wrapped, ok := source.(baseSource)
-		if !ok {
-			return false
-		}
-		source = wrapped.BaseSemanticSource()
-	}
-	return false
 }
 
 type connectorPackImport struct {
@@ -513,31 +492,17 @@ type connectorPackSource struct {
 	importedByProjectScope map[string]map[string]runtimecontracts.ToolSchemaEntry
 }
 
-func (s connectorPackSource) BaseSemanticSource() semanticview.Source {
-	return s.Source
-}
-
-func (s connectorPackSource) ConnectorPackImportsApplied() bool {
-	return true
-}
-
-func (s connectorPackSource) ConnectorGenerationSurface(toolID string) (GenerationSurface, bool) {
-	evidence, ok := s.importedGeneration[strings.TrimSpace(toolID)]
-	return evidence, ok
-}
-
-func (s connectorPackSource) ConnectorPackImportSource(toolID string) (string, bool) {
-	source, ok := s.importSources[strings.TrimSpace(toolID)]
-	return source, ok
+func (s connectorPackSource) SemanticCapabilities() semanticview.Capabilities {
+	return s.Source.SemanticCapabilities().WithConnectorPackImports(s.importedGeneration, s.importSources)
 }
 
 func (s connectorPackSource) ToolEntries() map[string]runtimecontracts.ToolSchemaEntry {
 	out := map[string]runtimecontracts.ToolSchemaEntry{}
 	for key, value := range s.Source.ToolEntries() {
-		out[key] = runtimecontracts.CloneToolSchemaEntry(value)
+		out[key] = value
 	}
 	for key, value := range s.importedTools {
-		out[key] = runtimecontracts.CloneToolSchemaEntry(value)
+		out[key] = value
 	}
 	return out
 }
@@ -548,7 +513,7 @@ func (s connectorPackSource) ProjectScopes() []semanticview.ProjectScope {
 	for _, scope := range scopes {
 		scope.Tools = cloneToolMap(scope.Tools)
 		for toolID, tool := range s.importedByProjectScope[strings.TrimSpace(scope.Key)] {
-			scope.Tools[toolID] = runtimecontracts.CloneToolSchemaEntry(tool)
+			scope.Tools[toolID] = tool
 		}
 		out = append(out, scope)
 	}
@@ -557,10 +522,10 @@ func (s connectorPackSource) ProjectScopes() []semanticview.ProjectScope {
 
 func (s connectorPackSource) ToolEntryForAgent(agentID, toolID string) (runtimecontracts.ToolSchemaEntry, bool) {
 	if tool, ok := s.Source.ToolEntryForAgent(agentID, toolID); ok {
-		return runtimecontracts.CloneToolSchemaEntry(tool), true
+		return tool, true
 	}
 	tool, ok := s.importedTools[strings.TrimSpace(toolID)]
-	return runtimecontracts.CloneToolSchemaEntry(tool), ok
+	return tool, ok
 }
 
 func (s connectorPackSource) ResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry {
@@ -678,7 +643,11 @@ func manifestToolNames(manifest ConnectorManifest) []string {
 }
 
 func cloneToolMap(in map[string]runtimecontracts.ToolSchemaEntry) map[string]runtimecontracts.ToolSchemaEntry {
-	return runtimecontracts.CloneToolSchemaEntries(in)
+	out := make(map[string]runtimecontracts.ToolSchemaEntry, len(in))
+	for name, tool := range in {
+		out[name] = tool
+	}
+	return out
 }
 
 func cloneLoadedPack(in LoadedPack) LoadedPack {
@@ -696,7 +665,7 @@ func cloneLoadedPack(in LoadedPack) LoadedPack {
 			out.Envelope.Requires.Packs[name] = version
 		}
 	}
-	out.Manifest.Tools = runtimecontracts.CloneToolSchemaEntries(in.Manifest.Tools)
+	out.Manifest.Tools = cloneToolMap(in.Manifest.Tools)
 	if in.Manifest.Generation != nil {
 		generation := *in.Manifest.Generation
 		if in.Manifest.Generation.Operations != nil {

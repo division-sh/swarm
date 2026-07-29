@@ -43,7 +43,7 @@ func (e *Executor) applyWorkspaceExecutionDecision(ctx context.Context, actor mo
 	if !cap.Visible && !cap.Callable {
 		return cap
 	}
-	if _, ok := nativeFallbackRegisteredTool(actor, cap.Name); !ok {
+	if _, ok := nativeFallbackExecutionTool(actor, cap.Name); !ok {
 		return cap
 	}
 	ok, reason := e.nativeWorkspaceExecutionDecision(ctx, actor, cap.Name)
@@ -62,7 +62,7 @@ func (e *Executor) applyWorkspaceExecutionDecision(ctx context.Context, actor mo
 func (e *Executor) filterNativeDefinitionsForWorkspaceExecution(ctx context.Context, actor models.AgentConfig, defs []llm.ToolDefinition) []llm.ToolDefinition {
 	filtered := make([]llm.ToolDefinition, 0, len(defs))
 	for _, def := range defs {
-		if _, ok := nativeFallbackRegisteredTool(actor, def.Name); !ok {
+		if _, ok := nativeFallbackExecutionTool(actor, def.Name); !ok {
 			filtered = append(filtered, def)
 			continue
 		}

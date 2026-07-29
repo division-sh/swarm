@@ -40,7 +40,7 @@ func classifyToolAuthorization(actor models.AgentConfig, toolName string, provid
 		decision.allowed = true
 		return decision
 	}
-	if _, ok := nativeFallbackRegisteredTool(actor, toolName); ok {
+	if _, ok := nativeFallbackExecutionTool(actor, toolName); ok {
 		decision.class = toolAuthorizationNativeTool
 		decision.allowed = true
 		return decision

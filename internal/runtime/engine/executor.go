@@ -2254,9 +2254,9 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 	if !ok {
 		return fmt.Errorf("%w: activity tool %q is not declared", ErrInvalidConfig, toolID)
 	}
-	effectClass := runtimecontracts.NormalizeActivityEffectClass(tool.EffectClass)
+	effectClass := tool.Effect()
 	if !runtimecontracts.SupportedActivityEffectClass(effectClass) {
-		return fmt.Errorf("%w: activity tool %q effect_class %q is not executable in Stage 1", ErrInvalidConfig, toolID, tool.EffectClass)
+		return fmt.Errorf("%w: activity tool %q effect_class %q is not executable in Stage 1", ErrInvalidConfig, toolID, tool.Effect())
 	}
 	input := make(map[string]any, len(activitySpec.Input))
 	base := e.currentContext(frame)

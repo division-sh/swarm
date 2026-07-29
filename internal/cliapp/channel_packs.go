@@ -89,7 +89,7 @@ func loadChannelPlatformSpecDocument(platformSpecPath string) (runtimecontracts.
 func compileChannelBindings(ctx context.Context, cfg *config.Config, plans []packs.SatisfactionPlan, staticCredentials runtimecredentials.Store, managedCredentials runtimemanagedcredentials.Store) ([]packs.OutboundBindingPlan, error) {
 	byID := make(map[string]packs.SatisfactionPlan, len(plans))
 	for _, plan := range plans {
-		byID[plan.Channel.ID] = plan
+		byID[plan.ChannelIdentity().ID] = plan
 	}
 	ids := make([]string, 0, len(cfg.Channels.Bindings))
 	for id := range cfg.Channels.Bindings {
@@ -105,9 +105,12 @@ func compileChannelBindings(ctx context.Context, cfg *config.Config, plans []pac
 		}
 		requirementsByKey := map[string]packs.Requirement{}
 		requirementOwner := map[string]string{}
-		for _, operationName := range sortedChannelOperationNames(plan.Operations) {
-			operation := plan.Operations[operationName]
-			resolved, err := providerconnectors.RequirementsForTool(ctx, operation.Tool, operation.ToolSchema, providerconnectors.CapabilityOptions{
+		for _, operationName := range plan.OperationNames() {
+			connectorToolID, tool, err := plan.ConnectorOperation(operationName)
+			if err != nil {
+				return nil, fmt.Errorf("channels.bindings.%s connector operation: %w", id, err)
+			}
+			resolved, err := providerconnectors.RequirementsForTool(ctx, connectorToolID, tool, providerconnectors.CapabilityOptions{
 				StaticCredentials: staticCredentials, ManagedCredentials: managedCredentials,
 			})
 			if err != nil {
@@ -141,15 +144,6 @@ func compileChannelBindings(ctx context.Context, cfg *config.Config, plans []pac
 		bindings = append(bindings, binding)
 	}
 	return bindings, nil
-}
-
-func sortedChannelOperationNames(operations map[string]packs.CompiledChannelOperation) []string {
-	names := make([]string, 0, len(operations))
-	for name := range operations {
-		names = append(names, strings.TrimSpace(name))
-	}
-	sort.Strings(names)
-	return names
 }
 
 func appendChannelCapabilitySubjects(report *LocalPreflightReport, load ChannelPackLoad) {

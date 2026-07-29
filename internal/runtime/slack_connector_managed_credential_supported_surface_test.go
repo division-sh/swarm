@@ -398,12 +398,15 @@ func slackManagedConnectorPackRegistry(t *testing.T, baseURL string) *providerco
 	if !ok {
 		t.Fatal("provider connector pack slack.post_message not found")
 	}
-	if tool.HTTP == nil {
+	httpSpec, ok := tool.HTTP()
+	if !ok {
 		t.Fatal("provider connector pack slack.post_message missing http block")
 	}
-	httpSpec := *tool.HTTP
-	tool.HTTP = &httpSpec
-	tool.HTTP.URL = strings.TrimRight(baseURL, "/") + "/api/chat.postMessage"
+	httpSpec.URL = strings.TrimRight(baseURL, "/") + "/api/chat.postMessage"
+	tool, err := tool.WithHTTP(httpSpec)
+	if err != nil {
+		t.Fatalf("replace Slack connector HTTP endpoint: %v", err)
+	}
 	registry, err := providerconnectors.NewPackRegistry(providerconnectors.LoadedPack{
 		Envelope: packs.Envelope{
 			ID: "provider.slack.connector",
@@ -428,10 +431,6 @@ func slackManagedConnectorPackRegistry(t *testing.T, baseURL string) *providerco
 type slackManagedConnectorPackImportSource struct {
 	semanticview.Source
 	projectScopes []semanticview.ProjectScope
-}
-
-func (s slackManagedConnectorPackImportSource) BaseSemanticSource() semanticview.Source {
-	return s.Source
 }
 
 func (s slackManagedConnectorPackImportSource) ProjectScopes() []semanticview.ProjectScope {

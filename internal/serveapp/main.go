@@ -1061,7 +1061,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(5, "runtime_context", err)
 		return 1
 	}
-	admissionState := runtime.ProcessAdmissionState{GenerationID: providerPackLoad.Catalog.GenerationID(), InstalledSubjects: installedTriggerSubjects}
+	admissionState := runtime.ProcessAdmissionState{Generation: providerPackLoad.Catalog.Generation(), InstalledSubjects: installedTriggerSubjects}
 	if err := runtime.ValidateRuntimeContextSetWithAdmission(admissionState, preflightContexts...); err != nil {
 		presenter.fail(5, "runtime_context", err)
 		return 1

@@ -1599,20 +1599,13 @@ func proposedEffectProofBundle(serverURL string) *runtimecontracts.WorkflowContr
 			},
 		},
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"provider_write": {
-				HandlerType: "http", EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
-				Credentials: []string{"provider_token"},
-				InputSchema: runtimecontracts.ToolInputSchema{
-					Type: "object", Required: []string{"chat_id", "text"},
-					Properties: map[string]runtimecontracts.ToolInputSchema{"chat_id": {Type: "string"}, "text": {Type: "string"}},
-				},
-				OutputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
-				HTTP: &runtimecontracts.HTTPToolSpec{
-					Method: "POST", URL: strings.TrimRight(serverURL, "/"),
-					Headers: map[string]string{"Authorization": "Bearer {{credentials.provider_token}}"},
-					Body:    map[string]any{"chat_id": "{{input.chat_id}}", "text": "{{input.text}}"},
-				},
-			},
+			"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{"chat_id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")), "text": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string"))}), runtimecontracts.ToolSchemaRequired("chat_id", "text")),
+
+				runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+				Method: "POST", URL: strings.TrimRight(serverURL, "/"),
+				Headers: map[string]string{"Authorization": "Bearer {{credentials.provider_token}}"},
+				Body:    map[string]any{"chat_id": "{{input.chat_id}}", "text": "{{input.text}}"},
+			}), runtimecontracts.WithToolCredentials([]string{"provider_token"}...)),
 		},
 	}
 }

@@ -424,12 +424,15 @@ func githubAppIssueCommentPackRegistry(t *testing.T, baseURL string) *providerco
 	if !ok {
 		t.Fatal("provider connector pack github.create_issue_comment not found")
 	}
-	if tool.HTTP == nil {
+	httpSpec, ok := tool.HTTP()
+	if !ok {
 		t.Fatal("provider connector pack github.create_issue_comment missing http block")
 	}
-	httpSpec := *tool.HTTP
-	tool.HTTP = &httpSpec
-	tool.HTTP.URL = strings.TrimRight(baseURL, "/") + "/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/comments"
+	httpSpec.URL = strings.TrimRight(baseURL, "/") + "/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/comments"
+	tool, err := tool.WithHTTP(httpSpec)
+	if err != nil {
+		t.Fatalf("replace provider connector HTTP endpoint: %v", err)
+	}
 	registry, err := providerconnectors.NewPackRegistry(providerconnectors.LoadedPack{
 		Envelope: packs.Envelope{
 			ID: "provider.github.connector",

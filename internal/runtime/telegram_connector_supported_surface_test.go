@@ -347,12 +347,15 @@ func telegramConnectorSupportedSurfacePackRegistry(t *testing.T, baseURL string)
 	if !ok {
 		t.Fatal("provider connector pack telegram.send_message not found")
 	}
-	if tool.HTTP == nil {
+	httpSpec, ok := tool.HTTP()
+	if !ok {
 		t.Fatal("provider connector pack telegram.send_message missing http block")
 	}
-	httpSpec := *tool.HTTP
-	tool.HTTP = &httpSpec
-	tool.HTTP.URL = strings.TrimRight(baseURL, "/") + "/bot{{credentials.telegram_bot_token}}/sendMessage"
+	httpSpec.URL = strings.TrimRight(baseURL, "/") + "/bot{{credentials.telegram_bot_token}}/sendMessage"
+	tool, err := tool.WithHTTP(httpSpec)
+	if err != nil {
+		t.Fatalf("replace Telegram connector HTTP endpoint: %v", err)
+	}
 	registry, err := providerconnectors.NewPackRegistry(providerconnectors.LoadedPack{
 		Envelope: packs.Envelope{
 			ID: "provider.telegram.connector",
@@ -377,10 +380,6 @@ func telegramConnectorSupportedSurfacePackRegistry(t *testing.T, baseURL string)
 type telegramConnectorSupportedSurfacePackImportSource struct {
 	semanticview.Source
 	projectScopes []semanticview.ProjectScope
-}
-
-func (s telegramConnectorSupportedSurfacePackImportSource) BaseSemanticSource() semanticview.Source {
-	return s.Source
 }
 
 func (s telegramConnectorSupportedSurfacePackImportSource) ProjectScopes() []semanticview.ProjectScope {

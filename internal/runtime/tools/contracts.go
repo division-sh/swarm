@@ -35,7 +35,7 @@ var supportedRuntimeToolNames = map[string]struct{}{
 }
 
 func LoadContractSchemasForSource(source semanticview.Source) (map[string]ContractSchemaEntry, error) {
-	defs, err := registeredToolsForRuntime(source, nil)
+	defs, err := executionToolsForRuntime(source, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -44,13 +44,13 @@ func LoadContractSchemasForSource(source semanticview.Source) (map[string]Contra
 		if runtimeToolHiddenFromAgents(name) {
 			continue
 		}
-		if entry.HandlerType == implementationMCP {
+		if entry.Handler() == implementationMCP {
 			continue
 		}
 		parsed[name] = ContractSchemaEntry{
-			Category:    entry.Category,
-			Description: entry.Description,
-			InputSchema: deepCloneMap(entry.InputSchema),
+			Category:    entry.Category(),
+			Description: entry.Description(),
+			InputSchema: entry.InputSchema(),
 		}
 	}
 	return parsed, nil

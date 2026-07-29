@@ -243,13 +243,13 @@ func (b *WorkflowContractBundle) ToolEntryForAgent(agentID, toolID string) (Tool
 	source, ok := b.AgentContractSource(agentID)
 	if !ok {
 		entry, ok := b.Tools[toolID]
-		return CloneToolSchemaEntry(entry), ok
+		return entry, ok
 	}
 	if entry, ok := b.scopedTools[contractScopeKey(source, toolID)]; ok {
-		return CloneToolSchemaEntry(entry), true
+		return entry, true
 	}
 	entry, ok := b.Tools[toolID]
-	return CloneToolSchemaEntry(entry), ok
+	return entry, ok
 }
 func (b *WorkflowContractBundle) AuthoredEventEntries() map[string]EventCatalogEntry {
 	if b == nil {

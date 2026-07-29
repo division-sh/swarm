@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
 
 type AdmissionKind string
@@ -80,7 +81,7 @@ type RawAdmissionPolicy struct {
 }
 
 type InboundAdmissionPlan struct {
-	generationID          string
+	generation            triggergeneration.Generation
 	provider              string
 	policySource          PolicySource
 	requestAuthentication RequestAuthentication
@@ -101,7 +102,7 @@ type AdmittedRequest struct {
 	Response                  *Response
 	AcknowledgeBeforeDispatch bool
 
-	generationID      string
+	generation        triggergeneration.Generation
 	provider          string
 	manifestOwner     *Manifest
 	rawOwner          *RawAdmissionPolicy
@@ -186,7 +187,7 @@ func (s *CatalogSnapshot) compilePackAdmission(alias, provider, signingSecret st
 	manifest := entry.Manifest
 	identity := entry.Identity
 	return InboundAdmissionPlan{
-		generationID: s.GenerationID(), provider: provider, policySource: PolicySourceVerifiedPack,
+		generation: s.Generation(), provider: provider, policySource: PolicySourceVerifiedPack,
 		requestAuthentication: auth, packIdentity: &identity, manifest: &manifest,
 		requiresSecret: requiresSecret, outputs: manifest.OutputManifest(),
 		acknowledgedUnsigned: ack == UnsignedWebhookAcknowledgement,
@@ -217,12 +218,12 @@ func (s *CatalogSnapshot) compileRawAdmission(alias, provider, signingSecret str
 	if !requiresSecret && signingSecret != "" {
 		return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q is UNAUTHENTICATED and must not declare signing_secret; remove signing_secret", alias, provider)
 	}
-	generationID := ""
+	generation := triggergeneration.Generation{}
 	if s != nil {
-		generationID = s.GenerationID()
+		generation = s.Generation()
 	}
 	return InboundAdmissionPlan{
-		generationID: generationID, provider: provider, policySource: PolicySourceRawDeclaration,
+		generation: generation, provider: provider, policySource: PolicySourceRawDeclaration,
 		requestAuthentication: auth, raw: &policy, requiresSecret: requiresSecret,
 		outputs: []OutputManifest{{Kind: OutputKindRaw, EventName: EventNameManifest{Literal: policy.Event}}}, acknowledgedUnsigned: ack == UnsignedWebhookAcknowledgement,
 	}, nil
@@ -332,10 +333,12 @@ func compileRawPolicy(alias, provider string, declaration AdmissionDeclaration) 
 }
 
 func (p InboundAdmissionPlan) Valid() bool {
-	return p.provider != "" && p.generationID != "" && (p.manifest != nil || p.raw != nil)
+	return p.provider != "" && p.generation.Valid() && (p.manifest != nil || p.raw != nil)
 }
 
-func (p InboundAdmissionPlan) GenerationID() string       { return p.generationID }
+func (p InboundAdmissionPlan) Generation() triggergeneration.Generation {
+	return p.generation
+}
 func (p InboundAdmissionPlan) Provider() string           { return p.provider }
 func (p InboundAdmissionPlan) PolicySource() PolicySource { return p.policySource }
 func (p InboundAdmissionPlan) RequestAuthentication() RequestAuthentication {
@@ -412,7 +415,7 @@ func (p InboundAdmissionPlan) EffectiveCapabilitySubject(req EffectiveSubjectReq
 	source := "raw_declaration"
 	provenance := "project"
 	admission := &packs.TriggerAdmission{
-		BundleHash: bundleHash, Alias: alias, CatalogGeneration: p.generationID,
+		BundleHash: bundleHash, Alias: alias, CatalogGeneration: p.generation.Diagnostic(),
 		PolicySource: string(p.policySource), RequestAuthentication: string(p.requestAuthentication), Event: eventName,
 	}
 	if p.manifest != nil {
@@ -515,7 +518,7 @@ func (p InboundAdmissionPlan) AdmitRequest(req Request) (AdmittedRequest, error)
 			ProviderEventID: manifestAdmission.deliveryID, ProviderEventType: manifestAdmission.eventType,
 			Response:                  manifestAdmission.response,
 			AcknowledgeBeforeDispatch: strings.TrimSpace(p.manifest.Ack.Mode) == "durable_before_dispatch",
-			generationID:              p.generationID, provider: p.provider, manifestOwner: p.manifest,
+			generation:                p.generation, provider: p.provider, manifestOwner: p.manifest,
 			manifestAdmission: &manifestAdmission,
 		}
 		if admitted.Response == nil {
@@ -540,7 +543,7 @@ func (p InboundAdmissionPlan) AdmitRequest(req Request) (AdmittedRequest, error)
 	}
 	return AdmittedRequest{
 		ProviderEventID: rawAdmission.deliveryID, ProviderEventType: rawAdmission.eventType,
-		SemanticContentDigest: digest, generationID: p.generationID, provider: p.provider,
+		SemanticContentDigest: digest, generation: p.generation, provider: p.provider,
 		rawOwner: p.raw, rawAdmission: &rawAdmission,
 	}, nil
 }
@@ -548,7 +551,7 @@ func (p InboundAdmissionPlan) AdmitRequest(req Request) (AdmittedRequest, error)
 // ProjectDelivery constructs the raw and optional normalized executable
 // outputs only after the durable publication ledger has reported a miss.
 func (p InboundAdmissionPlan) ProjectDelivery(admitted AdmittedRequest) (Delivery, error) {
-	if admitted.generationID != p.generationID || admitted.provider != p.provider {
+	if !admitted.generation.Equal(p.generation) || admitted.provider != p.provider {
 		return Delivery{}, badRequest("admitted request belongs to a different compiled admission plan")
 	}
 	if admitted.Response != nil {
@@ -573,7 +576,7 @@ func (p InboundAdmissionPlan) ProjectDelivery(admitted AdmittedRequest) (Deliver
 			delivery.Events[index].Authorization = runtimeprovideroutput.Authorization{
 				Provider: p.provider, Event: string(delivery.Events[index].Name),
 				PackID: p.packIdentity.ID, PackVersion: p.packIdentity.Version,
-				ManifestHash: p.packIdentity.ManifestHash, GenerationID: p.generationID,
+				ManifestHash: p.packIdentity.ManifestHash, GenerationID: p.generation.Diagnostic(),
 			}.Normalized()
 		}
 		return delivery, nil

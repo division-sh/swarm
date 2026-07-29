@@ -75,7 +75,7 @@ func MCPToolDiscovered(toolName string, discovered map[string]runtimemcp.Discove
 }
 
 func toolEntryRequiresMCPDiscovery(entry runtimecontracts.ToolSchemaEntry) bool {
-	return strings.EqualFold(strings.TrimSpace(entry.HandlerType), string(implementationMCP))
+	return entry.Handler() == runtimecontracts.ToolHandlerMCP
 }
 
 func declaredMCPServerPrefixes(source semanticview.Source) map[string]struct{} {

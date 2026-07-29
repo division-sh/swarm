@@ -34,15 +34,14 @@ func TestValidateSourceAcceptsTelegramProviderConnectorHTTPActivityTool(t *testi
 func TestValidateSourceRejectsUnsupportedProviderConnectorShape(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"telegram.send_message": {
-				Category:        Category,
-				HandlerType:     "http",
-				EffectClass:     string(runtimecontracts.ActivityEffectClassReadOnly),
-				Credentials:     nil,
-				HTTP:            &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://api.telegram.org"},
-				RateLimit:       "1/s",
-				ResponseMapping: map[string]any{"ok": "{{response.body.ok}}"},
-			},
+			"telegram.send_message": testProviderConnectorTool(
+				t,
+				runtimecontracts.ActivityEffectClassReadOnly,
+				nil,
+				nil,
+				&runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"},
+				runtimecontracts.WithToolRateLimit("1/s", ""),
+			),
 		},
 	})
 
@@ -72,28 +71,23 @@ func TestValidateSourceAcceptsSlackManagedCredentialProviderConnectorHTTPActivit
 }
 
 func TestValidateSourceRejectsMixedStaticAndManagedProviderConnectorCredentials(t *testing.T) {
-	tool := slackConnectorTool("https://slack.com/api/chat.postMessage")
-	tool.Credentials = []string{"slack_bot_token"}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"slack.post_message": tool,
-		},
-	})
-
-	errs := ValidateSource(source)
-	joined := joinErrors(errs)
-	if !strings.Contains(joined, "must not declare both static credentials and managed_credential") {
-		t.Fatalf("ValidateSource errors = %q, want mixed auth rejection", joined)
+	objectSchema := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)
+	_, err := runtimecontracts.NewToolSchemaEntry(
+		runtimecontracts.WithToolSchemas(objectSchema, objectSchema),
+		runtimecontracts.WithToolCredentials("slack_bot_token"),
+		runtimecontracts.WithToolManagedCredential(runtimecontracts.ManagedCredentialRef{Key: "slack_oauth"}),
+	)
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("tool admission error = %v, want mixed auth rejection", err)
 	}
 }
 
 func TestValidateSourceRejectsGitHubAppInstallationWithoutInputCarrier(t *testing.T) {
-	tool := slackConnectorTool("https://api.github.test/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/comments")
-	tool.ManagedCredential = &runtimecontracts.ManagedCredentialRef{
+	tool := testProviderConnectorTool(t, runtimecontracts.ActivityEffectClassNonIdempotentWrite, nil, &runtimecontracts.ManagedCredentialRef{
 		Key:        "github_app",
 		GrantType:  runtimemanagedcredentials.GrantGitHubAppInstallation,
 		GrantModel: managedcredentialmodel.GrantModelInstallation,
-	}
+	}, &runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"})
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
 			"github.create_issue_comment": tool,
@@ -108,8 +102,10 @@ func TestValidateSourceRejectsGitHubAppInstallationWithoutInputCarrier(t *testin
 }
 
 func TestValidateSourceRejectsInstallationInputOnNonGitHubAppCredential(t *testing.T) {
-	tool := slackConnectorTool("https://slack.com/api/chat.postMessage")
-	tool.ManagedCredential.InstallationIDInput = "installation_id"
+	tool := testProviderConnectorTool(t, runtimecontracts.ActivityEffectClassNonIdempotentWrite, nil, &runtimecontracts.ManagedCredentialRef{
+		Key:                 "slack_oauth",
+		InstallationIDInput: "installation_id",
+	}, &runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"})
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
 			"slack.post_message": tool,
@@ -124,8 +120,7 @@ func TestValidateSourceRejectsInstallationInputOnNonGitHubAppCredential(t *testi
 }
 
 func TestValidateSourceRejectsConnectorWithoutResponseSuccess(t *testing.T) {
-	tool := slackConnectorTool("https://slack.com/api/chat.postMessage")
-	tool.ResponseSuccess = nil
+	tool := testProviderConnectorTool(t, runtimecontracts.ActivityEffectClassNonIdempotentWrite, nil, &runtimecontracts.ManagedCredentialRef{Key: "slack_oauth"}, nil)
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
 			"slack.post_message": tool,
@@ -140,8 +135,9 @@ func TestValidateSourceRejectsConnectorWithoutResponseSuccess(t *testing.T) {
 }
 
 func TestValidateSourceRejectsMalformedProviderConnectorResponseSuccess(t *testing.T) {
-	tool := slackConnectorTool("https://slack.com/api/chat.postMessage")
-	tool.ResponseSuccess = &runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "body.ok", Equals: true}
+	tool := testProviderConnectorTool(t, runtimecontracts.ActivityEffectClassNonIdempotentWrite, nil, &runtimecontracts.ManagedCredentialRef{Key: "slack_oauth"}, &runtimecontracts.HTTPResponseSuccess{
+		Kind: "json_field_equals", Path: "body.ok", Equals: true,
+	})
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
 			"slack.post_message": tool,
@@ -411,9 +407,10 @@ func TestDefaultPackRegistryLoadsTelegramFromVerifiedPlatformPack(t *testing.T) 
 		t.Fatal("BuiltinTool telegram.send_message not found")
 	}
 	if !isProviderConnector(tool) {
-		t.Fatalf("builtin telegram tool category = %q, want %q", tool.Category, Category)
+		t.Fatalf("builtin telegram tool category = %q, want %q", tool.Category(), Category)
 	}
-	if strings.Contains(tool.HTTP.URL, "provider-secret") {
+	httpSpec, _ := tool.HTTP()
+	if strings.Contains(httpSpec.URL, "provider-secret") {
 		t.Fatal("builtin telegram tool leaked a concrete credential value")
 	}
 }
@@ -431,103 +428,53 @@ func TestNewPackRegistryAdmitsSchemasAndReadbacksAreMutationIsolated(t *testing.
 		t.Fatalf("NewPackRegistry: %v", err)
 	}
 
-	mutate := func(entry *runtimecontracts.ToolSchemaEntry) {
-		entry.InputSchema.Properties["chat_id"] = runtimecontracts.ToolInputSchema{Type: "boolean"}
-		entry.HTTP.Headers = map[string]string{"X-Mutated": "true"}
-		entry.HTTP.Body.(map[string]any)["chat_id"] = "changed"
+	mutateSnapshots := func(entry runtimecontracts.ToolSchemaEntry) {
+		properties := entry.InputSchema().Properties()
+		properties["chat_id"] = runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaBoolean)
+		httpSpec, ok := entry.HTTP()
+		if !ok {
+			t.Fatal("connector HTTP snapshot missing")
+		}
+		httpSpec.Headers["X-Mutated"] = "true"
+		httpSpec.Body.(map[string]any)["chat_id"] = "changed"
 	}
 	descriptors := registry.PackDescriptors()
 	descriptorTool := descriptors[0].Tools["telegram.send_message"]
-	mutate(&descriptorTool)
-	descriptors[0].Tools["telegram.send_message"] = descriptorTool
+	mutateSnapshots(descriptorTool)
+	descriptors[0].Tools["telegram.send_message"] = runtimecontracts.ToolSchemaEntry{}
 	lookedUp, ok := registry.Lookup("telegram", "telegram.send_message")
 	if !ok {
 		t.Fatal("registry lookup failed")
 	}
 	lookupTool := lookedUp.Manifest.Tools["telegram.send_message"]
-	mutate(&lookupTool)
-	lookedUp.Manifest.Tools["telegram.send_message"] = lookupTool
+	mutateSnapshots(lookupTool)
+	lookedUp.Manifest.Tools["telegram.send_message"] = runtimecontracts.ToolSchemaEntry{}
 	inventory := registry.Inventory()
-	mutate(&inventory[0].Tool)
+	mutateSnapshots(inventory[0].Tool)
+	inventory[0].Tool = runtimecontracts.ToolSchemaEntry{}
 	packTool := inventory[0].Pack.Manifest.Tools["telegram.send_message"]
-	mutate(&packTool)
-	inventory[0].Pack.Manifest.Tools["telegram.send_message"] = packTool
+	mutateSnapshots(packTool)
+	inventory[0].Pack.Manifest.Tools["telegram.send_message"] = runtimecontracts.ToolSchemaEntry{}
 
 	fresh, ok := registry.Lookup("telegram", "telegram.send_message")
 	if !ok {
 		t.Fatal("fresh registry lookup failed")
 	}
 	freshTool := fresh.Manifest.Tools["telegram.send_message"]
-	if freshTool.InputSchema.Properties["chat_id"].Type != "string" || len(freshTool.HTTP.Headers) != 0 || freshTool.HTTP.Body.(map[string]any)["chat_id"] != "{{input.chat_id}}" {
+	chatID, _ := freshTool.InputSchema().Property("chat_id")
+	httpSpec, _ := freshTool.HTTP()
+	if chatID.Kind() != runtimecontracts.ToolSchemaString || len(httpSpec.Headers) != 0 || httpSpec.Body.(map[string]any)["chat_id"] != "{{input.chat_id}}" {
 		t.Fatalf("registry readback mutation leaked: %#v", freshTool)
 	}
 
-	cyclic := tool
-	cyclic.InputSchema = runtimecontracts.ToolInputSchema{Type: "array"}
-	cyclic.InputSchema.Items = &cyclic.InputSchema
 	_, err = NewPackRegistry(LoadedPack{
-		Envelope: packs.Envelope{ID: "test.cyclic"},
+		Envelope: packs.Envelope{ID: "test.missing-tool"},
 		Manifest: ConnectorManifest{Provider: "telegram", Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"telegram.send_message": cyclic,
+			"telegram.send_message": {},
 		}},
 	})
-	if err == nil || !strings.Contains(err.Error(), "schema cycle") {
-		t.Fatalf("cyclic connector registry error = %v", err)
-	}
-
-	emptyEnum := tool
-	emptyEnum.InputSchema = runtimecontracts.ToolInputSchema{Type: "string", Enum: []runtimecontracts.SchemaLiteral{}}
-	_, err = NewPackRegistry(LoadedPack{
-		Envelope: packs.Envelope{ID: "test.empty-enum"},
-		Manifest: ConnectorManifest{Provider: "telegram", Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"telegram.send_message": emptyEnum,
-		}},
-	})
-	if err == nil || !strings.Contains(err.Error(), "enum must contain at least one value") {
-		t.Fatalf("programmatic empty enum registry error = %v", err)
-	}
-
-	cyclicCarrier := tool
-	cyclicBody := map[string]any{}
-	cyclicBody["self"] = cyclicBody
-	cyclicHTTP := *cyclicCarrier.HTTP
-	cyclicHTTP.Body = cyclicBody
-	cyclicCarrier.HTTP = &cyclicHTTP
-	_, err = NewPackRegistry(LoadedPack{
-		Envelope: packs.Envelope{ID: "test.cyclic-carrier"},
-		Manifest: ConnectorManifest{Provider: "telegram", Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"telegram.send_message": cyclicCarrier,
-		}},
-	})
-	if err == nil || !strings.Contains(err.Error(), "http.body") || !strings.Contains(err.Error(), "cycle") {
-		t.Fatalf("cyclic HTTP carrier registry error = %v", err)
-	}
-
-	typedCarrier := tool
-	typedBody := map[string]string{"chat_id": "{{input.chat_id}}", "text": "{{input.text}}"}
-	typedLabels := []string{"{{response.body.result.label}}"}
-	typedHTTP := *typedCarrier.HTTP
-	typedHTTP.Body = typedBody
-	typedCarrier.HTTP = &typedHTTP
-	typedCarrier.ResponseMapping = map[string]any{"labels": typedLabels}
-	typedRegistry, err := NewPackRegistry(LoadedPack{
-		Envelope: packs.Envelope{ID: "test.typed-carrier"},
-		Manifest: ConnectorManifest{Provider: "telegram", Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"telegram.send_message": typedCarrier,
-		}},
-	})
-	if err != nil {
-		t.Fatalf("typed carrier registry: %v", err)
-	}
-	typedBody["text"] = "changed"
-	typedLabels[0] = "changed"
-	typedReadback, ok := typedRegistry.Lookup("telegram", "telegram.send_message")
-	if !ok {
-		t.Fatal("typed carrier lookup failed")
-	}
-	typedTool := typedReadback.Manifest.Tools["telegram.send_message"]
-	if typedTool.HTTP.Body.(map[string]any)["text"] != "{{input.text}}" || typedTool.ResponseMapping["labels"].([]any)[0] != "{{response.body.result.label}}" {
-		t.Fatalf("typed connector carrier retained caller ownership: %#v", typedTool)
+	if err == nil || !strings.Contains(err.Error(), `must declare category "provider_connector"`) {
+		t.Fatalf("missing connector tool admission error = %v", err)
 	}
 }
 
@@ -599,18 +546,21 @@ func TestDefaultPackRegistryLoadsSlackManagedCredentialPack(t *testing.T) {
 		t.Fatal("BuiltinTool slack.post_message not found")
 	}
 	if !isProviderConnector(tool) {
-		t.Fatalf("builtin slack tool category = %q, want %q", tool.Category, Category)
+		t.Fatalf("builtin slack tool category = %q, want %q", tool.Category(), Category)
 	}
-	if tool.ManagedCredential == nil || tool.ManagedCredential.Key != "slack_oauth" {
-		t.Fatalf("builtin slack managed credential = %#v, want slack_oauth", tool.ManagedCredential)
+	managed, ok := tool.ManagedCredential()
+	if !ok || managed.Key != "slack_oauth" {
+		t.Fatalf("builtin slack managed credential = %#v, want slack_oauth", managed)
 	}
-	if tool.ResponseSuccess == nil || tool.ResponseSuccess.Path != "response.body.ok" || tool.ResponseSuccess.Equals != true {
-		t.Fatalf("builtin slack response_success = %#v, want response.body.ok true", tool.ResponseSuccess)
+	success, ok := tool.ResponseSuccess()
+	if !ok || success.Path != "response.body.ok" || success.Equals != true {
+		t.Fatalf("builtin slack response_success = %#v, want response.body.ok true", success)
 	}
-	if len(tool.Credentials) != 0 {
-		t.Fatalf("builtin slack static credentials = %#v, want none", tool.Credentials)
+	if credentials := tool.Credentials(); len(credentials) != 0 {
+		t.Fatalf("builtin slack static credentials = %#v, want none", credentials)
 	}
-	if strings.Contains(tool.HTTP.URL, "xoxb") || strings.Contains(tool.HTTP.URL, "secret") {
+	httpSpec, _ := tool.HTTP()
+	if strings.Contains(httpSpec.URL, "xoxb") || strings.Contains(httpSpec.URL, "secret") {
 		t.Fatal("builtin slack tool leaked a concrete credential value")
 	}
 }
@@ -621,13 +571,14 @@ func TestDefaultPackRegistryLoadsNotionManagedCredentialPack(t *testing.T) {
 		t.Fatal("BuiltinTool notion.append_block_children not found")
 	}
 	if !isProviderConnector(tool) {
-		t.Fatalf("builtin Notion tool category = %q, want %q", tool.Category, Category)
+		t.Fatalf("builtin Notion tool category = %q, want %q", tool.Category(), Category)
 	}
-	if tool.ManagedCredential == nil || tool.ManagedCredential.Key != "notion_oauth" {
-		t.Fatalf("builtin Notion managed credential = %#v, want notion_oauth", tool.ManagedCredential)
+	managed, ok := tool.ManagedCredential()
+	if !ok || managed.Key != "notion_oauth" {
+		t.Fatalf("builtin Notion managed credential = %#v, want notion_oauth", managed)
 	}
-	if tool.ManagedCredential.GrantModel != managedcredentialmodel.GrantModelWorkspace {
-		t.Fatalf("builtin Notion grant_model = %q, want workspace_grant", tool.ManagedCredential.GrantModel)
+	if managed.GrantModel != managedcredentialmodel.GrantModelWorkspace {
+		t.Fatalf("builtin Notion grant_model = %q, want workspace_grant", managed.GrantModel)
 	}
 	wantProfile := managedcredentialmodel.TokenRequestProfile{
 		ClientAuth: managedcredentialmodel.TokenClientAuthBasic,
@@ -636,17 +587,18 @@ func TestDefaultPackRegistryLoadsNotionManagedCredentialPack(t *testing.T) {
 			"Notion-Version": "2026-03-11",
 		},
 	}
-	if !managedcredentialmodel.TokenRequestProfileEqual(tool.ManagedCredential.TokenRequest, wantProfile) {
-		t.Fatalf("builtin Notion token_request = %#v, want Basic JSON Notion-Version", tool.ManagedCredential.TokenRequest)
+	if !managedcredentialmodel.TokenRequestProfileEqual(managed.TokenRequest, wantProfile) {
+		t.Fatalf("builtin Notion token_request = %#v, want Basic JSON Notion-Version", managed.TokenRequest)
 	}
-	if tool.HTTP == nil || tool.HTTP.Method != "PATCH" || !strings.Contains(tool.HTTP.URL, "/v1/blocks/{{input.block_id}}/children") {
-		t.Fatalf("builtin Notion http = %#v, want append block children PATCH endpoint", tool.HTTP)
+	httpSpec, hasHTTP := tool.HTTP()
+	if !hasHTTP || httpSpec.Method != "PATCH" || !strings.Contains(httpSpec.URL, "/v1/blocks/{{input.block_id}}/children") {
+		t.Fatalf("builtin Notion http = %#v, want append block children PATCH endpoint", httpSpec)
 	}
-	if got := tool.HTTP.Headers["Notion-Version"]; got != "2026-03-11" {
+	if got := httpSpec.Headers["Notion-Version"]; got != "2026-03-11" {
 		t.Fatalf("builtin Notion API header = %q, want Notion-Version", got)
 	}
-	if len(tool.Credentials) != 0 {
-		t.Fatalf("builtin Notion static credentials = %#v, want none", tool.Credentials)
+	if credentials := tool.Credentials(); len(credentials) != 0 {
+		t.Fatalf("builtin Notion static credentials = %#v, want none", credentials)
 	}
 }
 
@@ -656,27 +608,29 @@ func TestDefaultPackRegistryLoadsMicrosoftGraphManagedCredentialPack(t *testing.
 		t.Fatal("BuiltinTool microsoft_graph.send_mail not found")
 	}
 	if !isProviderConnector(tool) {
-		t.Fatalf("builtin Microsoft Graph tool category = %q, want %q", tool.Category, Category)
+		t.Fatalf("builtin Microsoft Graph tool category = %q, want %q", tool.Category(), Category)
 	}
-	if tool.ManagedCredential == nil || tool.ManagedCredential.Key != "microsoft_graph_app" {
-		t.Fatalf("builtin Microsoft Graph managed credential = %#v, want microsoft_graph_app", tool.ManagedCredential)
+	managed, ok := tool.ManagedCredential()
+	if !ok || managed.Key != "microsoft_graph_app" {
+		t.Fatalf("builtin Microsoft Graph managed credential = %#v, want microsoft_graph_app", managed)
 	}
-	if got := strings.Join(tool.ManagedCredential.Scopes, " "); got != "https://graph.microsoft.com/.default" {
+	if got := strings.Join(managed.Scopes, " "); got != "https://graph.microsoft.com/.default" {
 		t.Fatalf("builtin Microsoft Graph scopes = %q, want Graph .default resource scope", got)
 	}
-	if managedcredentialmodel.NormalizeGrantModel(tool.ManagedCredential.GrantModel) != managedcredentialmodel.GrantModelScope {
-		t.Fatalf("builtin Microsoft Graph grant_model = %q, want scope_grant", tool.ManagedCredential.GrantModel)
+	if managedcredentialmodel.NormalizeGrantModel(managed.GrantModel) != managedcredentialmodel.GrantModelScope {
+		t.Fatalf("builtin Microsoft Graph grant_model = %q, want scope_grant", managed.GrantModel)
 	}
-	if !managedcredentialmodel.TokenRequestProfileEqual(tool.ManagedCredential.TokenRequest, managedcredentialmodel.DefaultTokenRequestProfile()) {
-		t.Fatalf("builtin Microsoft Graph token_request = %#v, want default post/form", tool.ManagedCredential.TokenRequest)
+	if !managedcredentialmodel.TokenRequestProfileEqual(managed.TokenRequest, managedcredentialmodel.DefaultTokenRequestProfile()) {
+		t.Fatalf("builtin Microsoft Graph token_request = %#v, want default post/form", managed.TokenRequest)
 	}
-	if tool.HTTP == nil || tool.HTTP.Method != "POST" || !strings.Contains(tool.HTTP.URL, "/v1.0/users/{{input.user_id}}/sendMail") {
-		t.Fatalf("builtin Microsoft Graph http = %#v, want sendMail POST endpoint", tool.HTTP)
+	httpSpec, hasHTTP := tool.HTTP()
+	if !hasHTTP || httpSpec.Method != "POST" || !strings.Contains(httpSpec.URL, "/v1.0/users/{{input.user_id}}/sendMail") {
+		t.Fatalf("builtin Microsoft Graph http = %#v, want sendMail POST endpoint", httpSpec)
 	}
-	if len(tool.Credentials) != 0 {
-		t.Fatalf("builtin Microsoft Graph static credentials = %#v, want none", tool.Credentials)
+	if credentials := tool.Credentials(); len(credentials) != 0 {
+		t.Fatalf("builtin Microsoft Graph static credentials = %#v, want none", credentials)
 	}
-	if strings.Contains(tool.HTTP.URL, "secret") || strings.Contains(tool.HTTP.URL, "token") {
+	if strings.Contains(httpSpec.URL, "secret") || strings.Contains(httpSpec.URL, "token") {
 		t.Fatal("builtin Microsoft Graph tool leaked a concrete credential value")
 	}
 }
@@ -687,27 +641,29 @@ func TestDefaultPackRegistryLoadsGitHubAppInstallationPack(t *testing.T) {
 		t.Fatal("BuiltinTool github.create_issue_comment not found")
 	}
 	if !isProviderConnector(tool) {
-		t.Fatalf("builtin GitHub tool category = %q, want %q", tool.Category, Category)
+		t.Fatalf("builtin GitHub tool category = %q, want %q", tool.Category(), Category)
 	}
-	if tool.ManagedCredential == nil || tool.ManagedCredential.Key != "github_app" {
-		t.Fatalf("builtin GitHub managed credential = %#v, want github_app", tool.ManagedCredential)
+	managed, ok := tool.ManagedCredential()
+	if !ok || managed.Key != "github_app" {
+		t.Fatalf("builtin GitHub managed credential = %#v, want github_app", managed)
 	}
-	if tool.ManagedCredential.GrantType != runtimemanagedcredentials.GrantGitHubAppInstallation {
-		t.Fatalf("builtin GitHub grant_type = %q, want github_app_installation", tool.ManagedCredential.GrantType)
+	if managed.GrantType != runtimemanagedcredentials.GrantGitHubAppInstallation {
+		t.Fatalf("builtin GitHub grant_type = %q, want github_app_installation", managed.GrantType)
 	}
-	if tool.ManagedCredential.GrantModel != managedcredentialmodel.GrantModelInstallation {
-		t.Fatalf("builtin GitHub grant_model = %q, want installation_grant", tool.ManagedCredential.GrantModel)
+	if managed.GrantModel != managedcredentialmodel.GrantModelInstallation {
+		t.Fatalf("builtin GitHub grant_model = %q, want installation_grant", managed.GrantModel)
 	}
-	if tool.ManagedCredential.InstallationIDInput != "installation_id" {
-		t.Fatalf("builtin GitHub installation_id_input = %q, want installation_id", tool.ManagedCredential.InstallationIDInput)
+	if managed.InstallationIDInput != "installation_id" {
+		t.Fatalf("builtin GitHub installation_id_input = %q, want installation_id", managed.InstallationIDInput)
 	}
-	if tool.HTTP == nil || tool.HTTP.Method != "POST" || !strings.Contains(tool.HTTP.URL, "/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/comments") {
-		t.Fatalf("builtin GitHub http = %#v, want create issue comment endpoint", tool.HTTP)
+	httpSpec, hasHTTP := tool.HTTP()
+	if !hasHTTP || httpSpec.Method != "POST" || !strings.Contains(httpSpec.URL, "/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/comments") {
+		t.Fatalf("builtin GitHub http = %#v, want create issue comment endpoint", httpSpec)
 	}
-	if len(tool.Credentials) != 0 {
-		t.Fatalf("builtin GitHub static credentials = %#v, want none", tool.Credentials)
+	if credentials := tool.Credentials(); len(credentials) != 0 {
+		t.Fatalf("builtin GitHub static credentials = %#v, want none", credentials)
 	}
-	if strings.Contains(tool.HTTP.URL, "secret") || strings.Contains(tool.HTTP.URL, "token") {
+	if strings.Contains(httpSpec.URL, "secret") || strings.Contains(httpSpec.URL, "token") {
 		t.Fatal("builtin GitHub tool leaked a concrete credential value")
 	}
 
@@ -715,29 +671,33 @@ func TestDefaultPackRegistryLoadsGitHubAppInstallationPack(t *testing.T) {
 	if !ok {
 		t.Fatal("BuiltinTool github.create_issue not found")
 	}
-	if !isProviderConnector(createIssue) || createIssue.ManagedCredential == nil || createIssue.ManagedCredential.GrantType != runtimemanagedcredentials.GrantGitHubAppInstallation {
+	createIssueCredential, hasCredential := createIssue.ManagedCredential()
+	if !isProviderConnector(createIssue) || !hasCredential || createIssueCredential.GrantType != runtimemanagedcredentials.GrantGitHubAppInstallation {
 		t.Fatalf("builtin GitHub create issue tool = %#v, want provider connector with github_app_installation", createIssue)
 	}
-	if createIssue.HTTP == nil || createIssue.HTTP.Method != "POST" || !strings.Contains(createIssue.HTTP.URL, "/repos/{{input.owner}}/{{input.repo}}/issues") {
-		t.Fatalf("builtin GitHub create issue http = %#v, want create issue endpoint", createIssue.HTTP)
+	createIssueHTTP, hasHTTP := createIssue.HTTP()
+	if !hasHTTP || createIssueHTTP.Method != "POST" || !strings.Contains(createIssueHTTP.URL, "/repos/{{input.owner}}/{{input.repo}}/issues") {
+		t.Fatalf("builtin GitHub create issue http = %#v, want create issue endpoint", createIssueHTTP)
 	}
 
 	addLabels, ok := BuiltinTool("github", "github.add_labels_to_issue")
 	if !ok {
 		t.Fatal("BuiltinTool github.add_labels_to_issue not found")
 	}
-	if !isProviderConnector(addLabels) || addLabels.ManagedCredential == nil || addLabels.ManagedCredential.GrantType != runtimemanagedcredentials.GrantGitHubAppInstallation {
+	addLabelsCredential, hasCredential := addLabels.ManagedCredential()
+	if !isProviderConnector(addLabels) || !hasCredential || addLabelsCredential.GrantType != runtimemanagedcredentials.GrantGitHubAppInstallation {
 		t.Fatalf("builtin GitHub add labels tool = %#v, want provider connector with github_app_installation", addLabels)
 	}
-	if addLabels.HTTP == nil || addLabels.HTTP.Method != "POST" || !strings.Contains(addLabels.HTTP.URL, "/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/labels") {
-		t.Fatalf("builtin GitHub add labels http = %#v, want issue labels endpoint", addLabels.HTTP)
+	addLabelsHTTP, hasHTTP := addLabels.HTTP()
+	if !hasHTTP || addLabelsHTTP.Method != "POST" || !strings.Contains(addLabelsHTTP.URL, "/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/labels") {
+		t.Fatalf("builtin GitHub add labels http = %#v, want issue labels endpoint", addLabelsHTTP)
 	}
-	bodyMap, ok := addLabels.HTTP.Body.(map[string]any)
+	bodyMap, ok := addLabelsHTTP.Body.(map[string]any)
 	if !ok {
-		t.Fatalf("builtin GitHub add labels body = %#v, want object body", addLabels.HTTP.Body)
+		t.Fatalf("builtin GitHub add labels body = %#v, want object body", addLabelsHTTP.Body)
 	}
 	if body, ok := bodyMap["labels"].(string); !ok || body != "{{input.labels}}" {
-		t.Fatalf("builtin GitHub add labels body = %#v, want whole-field labels template", addLabels.HTTP.Body)
+		t.Fatalf("builtin GitHub add labels body = %#v, want whole-field labels template", addLabelsHTTP.Body)
 	}
 }
 
@@ -867,7 +827,8 @@ func TestGitHubConnectorPackImportsMultipleActionsExplicitly(t *testing.T) {
 		if !ok {
 			t.Fatalf("imported tool %s missing", toolID)
 		}
-		if !isProviderConnector(tool) || tool.ManagedCredential == nil || tool.ManagedCredential.Key != "github_app" {
+		managed, hasManaged := tool.ManagedCredential()
+		if !isProviderConnector(tool) || !hasManaged || managed.Key != "github_app" {
 			t.Fatalf("imported GitHub tool %s = %#v, want github_app provider connector", toolID, tool)
 		}
 	}
@@ -1053,8 +1014,8 @@ func TestConnectorPackImportRequiresExplicitEnableAndReportsSurface(t *testing.T
 	if !exists {
 		t.Fatal("explicit import did not expose telegram.send_message")
 	}
-	if tool.Category != Category {
-		t.Fatalf("imported tool category = %q, want %q", tool.Category, Category)
+	if tool.Category() != Category {
+		t.Fatalf("imported tool category = %q, want %q", tool.Category(), Category)
 	}
 	if errs := ValidateSource(source); len(errs) != 0 {
 		t.Fatalf("ValidateSource imported connector errors = %#v", errs)
@@ -1106,8 +1067,13 @@ func TestConnectorPackCapabilitiesRemainVisibleThroughRuntimeToolOverlay(t *test
 	if err != nil {
 		t.Fatalf("SourceWithConnectorPackImports: %v", err)
 	}
+	objectSchema := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)
 	overlaid, err := semanticview.WithRuntimeTools(imported, map[string]runtimecontracts.ToolSchemaEntry{
-		"channel.ops.deliver": {Category: "channel_operation", HandlerType: "channel"},
+		"channel.ops.deliver": runtimecontracts.MustToolSchemaEntry(
+			runtimecontracts.WithToolCategory("channel_operation"),
+			runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerChannel),
+			runtimecontracts.WithToolSchemas(objectSchema, objectSchema),
+		),
 	})
 	if err != nil {
 		t.Fatalf("WithRuntimeTools: %v", err)
@@ -1161,7 +1127,8 @@ func TestSlackConnectorPackImportRequiresExplicitEnableAndReportsManagedSurface(
 	if !exists {
 		t.Fatal("explicit import did not expose slack.post_message")
 	}
-	if tool.Category != Category || tool.ManagedCredential == nil || tool.ManagedCredential.Key != "slack_oauth" {
+	managed, hasManaged := tool.ManagedCredential()
+	if tool.Category() != Category || !hasManaged || managed.Key != "slack_oauth" {
 		t.Fatalf("imported tool = %#v, want provider_connector managed slack_oauth", tool)
 	}
 	if errs := ValidateSource(source); len(errs) != 0 {
@@ -1233,10 +1200,6 @@ type providerConnectorSourceWrapper struct {
 	semanticview.Source
 }
 
-func (s providerConnectorSourceWrapper) BaseSemanticSource() semanticview.Source {
-	return s.Source
-}
-
 func (s providerConnectorScopedSource) ProjectScopes() []semanticview.ProjectScope {
 	return append([]semanticview.ProjectScope(nil), s.projectScopes...)
 }
@@ -1255,69 +1218,97 @@ func (s providerConnectorScopedSource) FlowScopeByID(id string) (semanticview.Fl
 	return semanticview.FlowScope{}, false
 }
 
+func testProviderConnectorTool(
+	t *testing.T,
+	effect runtimecontracts.ActivityEffectClass,
+	credentials []string,
+	managed *runtimecontracts.ManagedCredentialRef,
+	success *runtimecontracts.HTTPResponseSuccess,
+	extra ...runtimecontracts.ToolSchemaEntryOption,
+) runtimecontracts.ToolSchemaEntry {
+	t.Helper()
+	objectSchema := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)
+	options := []runtimecontracts.ToolSchemaEntryOption{
+		runtimecontracts.WithToolCategory(Category),
+		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+		runtimecontracts.WithToolEffect(effect),
+		runtimecontracts.WithToolSchemas(objectSchema, objectSchema),
+		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"}),
+	}
+	if len(credentials) > 0 {
+		options = append(options, runtimecontracts.WithToolCredentials(credentials...))
+	}
+	if managed != nil {
+		options = append(options, runtimecontracts.WithToolManagedCredential(*managed))
+	}
+	if success != nil {
+		options = append(options, runtimecontracts.WithToolResponseSuccess(*success))
+	}
+	options = append(options, extra...)
+	tool, err := runtimecontracts.NewToolSchemaEntry(options...)
+	if err != nil {
+		t.Fatalf("construct provider connector tool: %v", err)
+	}
+	return tool
+}
+
 func telegramConnectorTool(baseURL string) runtimecontracts.ToolSchemaEntry {
-	return runtimecontracts.ToolSchemaEntry{
-		Category:    Category,
-		Description: "send Telegram messages",
-		HandlerType: "http",
-		EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
-		Credentials: []string{"telegram_bot_token"},
-		InputSchema: runtimecontracts.ToolInputSchema{
-			Type: "object",
-			Properties: map[string]runtimecontracts.ToolInputSchema{
-				"chat_id": {Type: "string"},
-				"text":    {Type: "string"},
-			},
-			Required: []string{"chat_id", "text"},
-		},
-		OutputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
-		ResponseSuccess: &runtimecontracts.HTTPResponseSuccess{
-			Kind: "http_status_2xx",
-		},
-		HTTP: &runtimecontracts.HTTPToolSpec{
+	return runtimecontracts.MustToolSchemaEntry(
+		runtimecontracts.WithToolCategory(Category),
+		runtimecontracts.WithToolDescription("send Telegram messages"),
+		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+		runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+		runtimecontracts.WithToolSchemas(
+			runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject, runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+				"chat_id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString),
+				"text":    runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString),
+			}), runtimecontracts.ToolSchemaRequired("chat_id", "text")),
+			runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
+		),
+		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
 			Method: "POST",
 			URL:    strings.TrimRight(baseURL, "/") + "/bot{{credentials.telegram_bot_token}}/sendMessage",
 			Body: map[string]any{
 				"chat_id": "{{input.chat_id}}",
 				"text":    "{{input.text}}",
 			},
-		},
-	}
+		}),
+		runtimecontracts.WithToolResponseSuccess(runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"}),
+		runtimecontracts.WithToolCredentials("telegram_bot_token"),
+	)
 }
 
 func slackConnectorTool(url string) runtimecontracts.ToolSchemaEntry {
-	return runtimecontracts.ToolSchemaEntry{
-		Category:    Category,
-		Description: "post Slack messages",
-		HandlerType: "http",
-		EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
-		ManagedCredential: &runtimecontracts.ManagedCredentialRef{
-			Key:    "slack_oauth",
-			Scopes: []string{"chat:write"},
-		},
-		InputSchema: runtimecontracts.ToolInputSchema{
-			Type: "object",
-			Properties: map[string]runtimecontracts.ToolInputSchema{
-				"channel": {Type: "string"},
-				"text":    {Type: "string"},
-			},
-			Required: []string{"channel", "text"},
-		},
-		OutputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
-		ResponseSuccess: &runtimecontracts.HTTPResponseSuccess{
-			Kind:   "json_field_equals",
-			Path:   "response.body.ok",
-			Equals: true,
-		},
-		HTTP: &runtimecontracts.HTTPToolSpec{
+	return runtimecontracts.MustToolSchemaEntry(
+		runtimecontracts.WithToolCategory(Category),
+		runtimecontracts.WithToolDescription("post Slack messages"),
+		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+		runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+		runtimecontracts.WithToolSchemas(
+			runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject, runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+				"channel": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString),
+				"text":    runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString),
+			}), runtimecontracts.ToolSchemaRequired("channel", "text")),
+			runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
+		),
+		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
 			Method: "POST",
 			URL:    strings.TrimSpace(url),
 			Body: map[string]any{
 				"channel": "{{input.channel}}",
 				"text":    "{{input.text}}",
 			},
-		},
-	}
+		}),
+		runtimecontracts.WithToolResponseSuccess(runtimecontracts.HTTPResponseSuccess{
+			Kind:   "json_field_equals",
+			Path:   "response.body.ok",
+			Equals: true,
+		}),
+		runtimecontracts.WithToolManagedCredential(runtimecontracts.ManagedCredentialRef{
+			Key:    "slack_oauth",
+			Scopes: []string{"chat:write"},
+		}),
+	)
 }
 
 func notionConnectedRecord() runtimemanagedcredentials.Record {

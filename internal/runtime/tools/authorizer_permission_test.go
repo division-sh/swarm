@@ -184,14 +184,10 @@ func TestValidateAgentPermissions_AcceptsToolDefinedExtensionPermission(t *testi
 			},
 		},
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"lookup_data": {
-				HandlerType: "http",
-				Permission:  "external_api_access",
-				HTTP: &runtimecontracts.HTTPToolSpec{
-					Method: "GET",
-					URL:    "https://example.com",
-				},
-			},
+			"lookup_data": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolPermissions("external_api_access", ""), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+				Method: "GET",
+				URL:    "https://example.com",
+			})),
 		},
 	})
 

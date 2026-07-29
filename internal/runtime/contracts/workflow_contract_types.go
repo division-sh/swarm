@@ -1093,13 +1093,6 @@ type SchemaRefinements struct {
 	Range   SchemaRangeRefinement  `yaml:"range"`
 	EqualTo string                 `yaml:"equal_to"`
 }
-type SchemaLiteral struct {
-	Node yaml.Node
-}
-type ToolAdditionalProperties struct {
-	Allowed *bool            `yaml:"allowed,omitempty"`
-	Schema  *ToolInputSchema `yaml:"schema,omitempty"`
-}
 type HTTPToolSpec struct {
 	Method         string            `yaml:"method"`
 	URL            string            `yaml:"url"`
@@ -1116,23 +1109,6 @@ type ManagedCredentialRef struct {
 	GrantModel          string                                     `yaml:"grant_model,omitempty"`
 	TokenRequest        managedcredentialmodel.TokenRequestProfile `yaml:"token_request,omitempty"`
 	InstallationIDInput string                                     `yaml:"installation_id_input,omitempty"`
-}
-type ToolInputSchema struct {
-	Type                 string                     `yaml:"type"`
-	Description          string                     `yaml:"description,omitempty"`
-	Properties           map[string]ToolInputSchema `yaml:"properties,omitempty"`
-	Required             []string                   `yaml:"required,omitempty"`
-	Items                *ToolInputSchema           `yaml:"items,omitempty"`
-	Enum                 []SchemaLiteral            `yaml:"enum,omitempty"`
-	AdditionalProperties ToolAdditionalProperties   `yaml:"additionalProperties,omitempty"`
-	Minimum              *float64                   `yaml:"minimum,omitempty"`
-	Maximum              *float64                   `yaml:"maximum,omitempty"`
-	Pattern              string                     `yaml:"pattern,omitempty"`
-	MinLength            *int                       `yaml:"minLength,omitempty"`
-	MaxLength            *int                       `yaml:"maxLength,omitempty"`
-	MinItems             *int                       `yaml:"minItems,omitempty"`
-	MaxItems             *int                       `yaml:"maxItems,omitempty"`
-	enumDeclared         bool
 }
 type ProjectPackagePaths struct {
 	Key               string
@@ -2044,25 +2020,6 @@ func (e AgentRegistryEntry) ConfiguredTools() []string {
 		return append([]string{}, e.Tools...)
 	}
 	return nil
-}
-
-type ToolSchemaEntry struct {
-	Category           string                    `yaml:"category,omitempty"`
-	Description        string                    `yaml:"description,omitempty"`
-	HandlerType        string                    `yaml:"handler_type,omitempty"`
-	EffectClass        string                    `yaml:"effect_class,omitempty"`
-	Permission         string                    `yaml:"permission,omitempty"`
-	RequiredPermission string                    `yaml:"required_permission,omitempty"`
-	RateLimit          string                    `yaml:"rate_limit,omitempty"`
-	RateLimitMaxWait   string                    `yaml:"rate_limit_max_wait,omitempty"`
-	InputSchema        ToolInputSchema           `yaml:"input_schema,omitempty"`
-	OutputSchema       ToolInputSchema           `yaml:"output_schema,omitempty"`
-	HTTP               *HTTPToolSpec             `yaml:"http,omitempty"`
-	ResponseMapping    map[string]any            `yaml:"response_mapping,omitempty"`
-	ResponseSuccess    *HTTPResponseSuccess      `yaml:"response_success,omitempty"`
-	Credentials        []string                  `yaml:"credentials,omitempty"`
-	ManagedCredential  *ManagedCredentialRef     `yaml:"managed_credential,omitempty"`
-	CompiledResult     *CompiledResultProjection `yaml:"-"`
 }
 
 // CompiledResultProjection is runtime-only adapter data. It is never authored

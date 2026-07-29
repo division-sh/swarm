@@ -11,11 +11,11 @@ import (
 
 type ToolHandler func(ctx context.Context, actor models.AgentConfig, input any) (any, error)
 type EmitToolHandler func(ctx context.Context, actor models.AgentConfig, name string, input any) (any, error)
-type HTTPToolHandler func(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error)
-type MCPToolHandler func(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error)
-type ChannelToolHandler func(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error)
+type HTTPToolHandler func(ctx context.Context, actor models.AgentConfig, tool ExecutionTool, input any) (any, error)
+type MCPToolHandler func(ctx context.Context, actor models.AgentConfig, tool ExecutionTool, input any) (any, error)
+type ChannelToolHandler func(ctx context.Context, actor models.AgentConfig, tool ExecutionTool, input any) (any, error)
 type RoleScopedEntityToolHandler func(ctx context.Context, actor models.AgentConfig, name string, input any) (any, bool, error)
-type ToolResolver func(actor models.AgentConfig, name string) (RegisteredTool, bool, error)
+type ToolResolver func(actor models.AgentConfig, name string) (ExecutionTool, bool, error)
 
 type ToolDispatcher struct {
 	emitHandler             EmitToolHandler
@@ -67,7 +67,7 @@ func (d *ToolDispatcher) Dispatch(ctx context.Context, actor models.AgentConfig,
 	if !ok {
 		return nil, fmt.Errorf("unsupported runtime tool: %s", name)
 	}
-	switch tool.HandlerType {
+	switch tool.Handler() {
 	case implementationPlatformBuiltin:
 		handler, ok := d.handlers[name]
 		if !ok || handler == nil {
@@ -96,6 +96,6 @@ func (d *ToolDispatcher) Dispatch(ctx context.Context, actor models.AgentConfig,
 		}
 		return d.channelHandler(ctx, actor, tool, input)
 	default:
-		return nil, fmt.Errorf("unsupported tool handler type for %s: %s", name, tool.HandlerType)
+		return nil, fmt.Errorf("unsupported tool handler type for %s: %s", name, tool.Handler())
 	}
 }

@@ -197,8 +197,8 @@ func TestRuntimeProjectSupervisorReloadRecompilesAndInstallsChannelPlans(t *test
 		if source == nil || catalog == nil {
 			t.Fatal("channel reload compiler received nil source or accepted trigger catalog")
 		}
-		plan := packs.SatisfactionPlan{Channel: packs.PackIdentity{ID: "provider.mock.channel"}}
-		binding := packs.OutboundBindingPlan{ID: "ops", Structural: plan}
+		plan := packs.SatisfactionPlan{}
+		binding := packs.OutboundBindingPlan{}
 		return cliapp.ChannelPackLoad{Plans: []packs.SatisfactionPlan{plan}, Bindings: []packs.OutboundBindingPlan{binding}}, nil
 	})
 
@@ -208,10 +208,10 @@ func TestRuntimeProjectSupervisorReloadRecompilesAndInstallsChannelPlans(t *test
 	if loads != 1 {
 		t.Fatalf("channel compiler calls = %d, want one", loads)
 	}
-	if len(captured.Options.ChannelPlans) != 1 || captured.Options.ChannelPlans[0].Channel.ID != "provider.mock.channel" {
+	if len(captured.Options.ChannelPlans) != 1 {
 		t.Fatalf("replacement runtime channel plans = %#v", captured.Options.ChannelPlans)
 	}
-	if len(captured.Options.ChannelOutboundBindings) != 1 || captured.Options.ChannelOutboundBindings[0].ID != "ops" {
+	if len(captured.Options.ChannelOutboundBindings) != 1 {
 		t.Fatalf("replacement runtime channel bindings = %#v", captured.Options.ChannelOutboundBindings)
 	}
 }
@@ -454,7 +454,7 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager, err := runtimepkg.NewRuntimeContextManagerWithAdmission(nil, runtimepkg.ProcessAdmissionState{GenerationID: catalog.GenerationID(), InstalledSubjects: installed}, contextA, contextB)
+	manager, err := runtimepkg.NewRuntimeContextManagerWithAdmission(nil, runtimepkg.ProcessAdmissionState{Generation: catalog.Generation(), InstalledSubjects: installed}, contextA, contextB)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
@@ -1211,7 +1211,7 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 					if err != nil {
 						t.Fatalf("installed capability subjects: %v", err)
 					}
-					admissionState := runtimepkg.ProcessAdmissionState{GenerationID: catalog.GenerationID(), InstalledSubjects: installed}
+					admissionState := runtimepkg.ProcessAdmissionState{Generation: catalog.Generation(), InstalledSubjects: installed}
 					processWorkOwner := newSupervisorTestProcessOwner(t)
 					var manager *runtimepkg.RuntimeContextManager
 					var createdRuntimes []*runtimepkg.Runtime

@@ -12,6 +12,10 @@ type bundleSource struct {
 	bundle *runtimecontracts.WorkflowContractBundle
 }
 
+type sourceCore struct {
+	bundle *runtimecontracts.WorkflowContractBundle
+}
+
 func Wrap(bundle *runtimecontracts.WorkflowContractBundle) Source {
 	if bundle == nil {
 		return nil
@@ -20,27 +24,15 @@ func Wrap(bundle *runtimecontracts.WorkflowContractBundle) Source {
 }
 
 func Bundle(source Source) (*runtimecontracts.WorkflowContractBundle, bool) {
-	switch typed := source.(type) {
-	case bundleSource:
-		if typed.bundle == nil {
-			return nil, false
-		}
-		return typed.bundle, true
-	case *bundleSource:
-		if typed == nil || typed.bundle == nil {
-			return nil, false
-		}
-		return typed.bundle, true
-	default:
-		type baseSourceProvider interface {
-			BaseSemanticSource() Source
-		}
-		if provider, ok := source.(baseSourceProvider); ok && provider.BaseSemanticSource() != nil {
-			return Bundle(provider.BaseSemanticSource())
-		}
+	if source == nil {
 		return nil, false
 	}
+	core := source.semanticSourceCore()
+	return core.bundle, core.bundle != nil
 }
+
+func (s bundleSource) SemanticCapabilities() Capabilities { return Capabilities{} }
+func (s bundleSource) semanticSourceCore() sourceCore     { return sourceCore{bundle: s.bundle} }
 
 func (s bundleSource) WorkflowVersion() string { return s.bundle.WorkflowVersion() }
 func (s bundleSource) WorkflowName() string    { return s.bundle.WorkflowName() }
@@ -185,7 +177,7 @@ func (s bundleSource) ProjectScopes() []ProjectScope {
 			Nodes:        view.Nodes,
 			Events:       view.Events,
 			Agents:       runtimecontracts.EffectiveAgentRegistryEntries(view.Agents),
-			Tools:        runtimecontracts.CloneToolSchemaEntries(view.Tools),
+			Tools:        toolEntryMapSnapshot(view.Tools),
 			Policy:       view.Policy,
 		})
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/google/uuid"
 )
 
@@ -73,10 +74,10 @@ func TestRuntimeContextManagerPublishesOneAdmissionGenerationAcrossAllContexts(t
 				}
 				return
 			}
-			lookupGeneration := lookup.Target.AdmissionPlan.GenerationID()
-			if lookupGeneration != oldCatalog.GenerationID() && lookupGeneration != newCatalog.GenerationID() {
+			lookupGeneration := lookup.Target.AdmissionPlan.Generation()
+			if !lookupGeneration.Equal(oldCatalog.Generation()) && !lookupGeneration.Equal(newCatalog.Generation()) {
 				select {
-				case errCh <- &mixedAdmissionGenerationError{first: oldCatalog.GenerationID() + " or " + newCatalog.GenerationID(), second: lookupGeneration}:
+				case errCh <- &mixedAdmissionGenerationError{first: oldCatalog.Generation().Diagnostic() + " or " + newCatalog.Generation().Diagnostic(), second: lookupGeneration.Diagnostic()}:
 				default:
 				}
 				return
@@ -115,17 +116,17 @@ func TestRuntimeContextManagerPublishesOneAdmissionGenerationAcrossAllContexts(t
 	default:
 	}
 
-	if got := manager.AdmissionState().GenerationID; got != newCatalog.GenerationID() {
-		t.Fatalf("process generation = %q, want %q", got, newCatalog.GenerationID())
+	if got := manager.AdmissionState().Generation; !got.Equal(newCatalog.Generation()) {
+		t.Fatalf("process generation = %q, want %q", got.Diagnostic(), newCatalog.Generation().Diagnostic())
 	}
 	for _, alias := range []string{"primary", "survivor"} {
 		lookup := manager.LookupIngress(alias, "acme")
-		if !lookup.Loaded() || lookup.Target.AdmissionPlan.GenerationID() != newCatalog.GenerationID() {
+		if !lookup.Loaded() || !lookup.Target.AdmissionPlan.Generation().Equal(newCatalog.Generation()) {
 			t.Fatalf("lookup %q = %#v, want loaded new generation", alias, lookup)
 		}
 	}
 	subjects := manager.CapabilitySubjects()
-	assertRuntimeAdmissionSubjectGeneration(t, subjects, newCatalog.GenerationID(), 2)
+	assertRuntimeAdmissionSubjectGeneration(t, subjects, newCatalog.Generation(), 2)
 	for _, subject := range subjects {
 		if subject.Applicability != "effective" || subject.TriggerAdmission == nil {
 			continue
@@ -703,16 +704,16 @@ func TestRuntimeContextManagerRejectsIncompleteAdmissionGenerationWithoutMutatio
 	if err == nil || !strings.Contains(err.Error(), "did not recompile loaded runtime context") {
 		t.Fatalf("validation error = %v", err)
 	}
-	if got := manager.AdmissionState().GenerationID; got != oldCatalog.GenerationID() {
-		t.Fatalf("failed candidate changed generation to %q", got)
+	if got := manager.AdmissionState().Generation; !got.Equal(oldCatalog.Generation()) {
+		t.Fatalf("failed candidate changed generation to %q", got.Diagnostic())
 	}
 	for _, alias := range []string{"primary", "survivor"} {
 		lookup := manager.LookupIngress(alias, "acme")
-		if !lookup.Loaded() || lookup.Target.AdmissionPlan.GenerationID() != oldCatalog.GenerationID() {
+		if !lookup.Loaded() || !lookup.Target.AdmissionPlan.Generation().Equal(oldCatalog.Generation()) {
 			t.Fatalf("failed candidate changed lookup %q: %#v", alias, lookup)
 		}
 	}
-	assertRuntimeAdmissionSubjectGeneration(t, manager.CapabilitySubjects(), oldCatalog.GenerationID(), 2)
+	assertRuntimeAdmissionSubjectGeneration(t, manager.CapabilitySubjects(), oldCatalog.Generation(), 2)
 }
 
 func TestRuntimeContextManagerAdmissionGenerationDoesNotDependOnPrimaryPackUse(t *testing.T) {
@@ -737,7 +738,7 @@ func TestRuntimeContextManagerAdmissionGenerationDoesNotDependOnPrimaryPackUse(t
 	if err := manager.PublishBundleHashReplacementWithAdmission(runtimeContextTestHashA, candidatePrimary, updates, state); err != nil {
 		t.Fatal(err)
 	}
-	if got := manager.LookupIngress("survivor", "acme"); !got.Loaded() || got.Target.AdmissionPlan.GenerationID() != newCatalog.GenerationID() {
+	if got := manager.LookupIngress("survivor", "acme"); !got.Loaded() || !got.Target.AdmissionPlan.Generation().Equal(newCatalog.Generation()) {
 		t.Fatalf("surviving pack target = %#v", got)
 	}
 	if primary, ok := manager.LookupBundleHash(runtimeContextTestHashA); !ok || len(primary.StandingTargets) != 0 {
@@ -773,10 +774,10 @@ func TestRuntimeContextManagerRejectsCandidatePackRemovalAcrossContexts(t *testi
 	if _, err = RecompileStandingTargetAdmissions(survivor.Source, emptyCatalog, survivor.StandingTargets); err == nil || !strings.Contains(err.Error(), `provider "telegram" is pack-required`) {
 		t.Fatalf("actual pack removal recompile error = %v", err)
 	}
-	if got := manager.AdmissionState().GenerationID; got != oldCatalog.GenerationID() {
-		t.Fatalf("pack removal changed process generation to %q", got)
+	if got := manager.AdmissionState().Generation; !got.Equal(oldCatalog.Generation()) {
+		t.Fatalf("pack removal changed process generation to %q", got.Diagnostic())
 	}
-	if got := manager.LookupIngress("chat", "telegram"); !got.Loaded() || got.Target.AdmissionPlan.GenerationID() != oldCatalog.GenerationID() {
+	if got := manager.LookupIngress("chat", "telegram"); !got.Loaded() || !got.Target.AdmissionPlan.Generation().Equal(oldCatalog.Generation()) {
 		t.Fatalf("pack removal changed survivor: %#v", got)
 	}
 	if _, ok := manager.LookupBundleHash(candidatePrimary.BundleHash()); !ok {
@@ -801,12 +802,12 @@ func TestRuntimeContextManagerRejectsTwoContextIngressCollisionWithoutMutation(t
 	if err == nil || !strings.Contains(err.Error(), `duplicate standing ingress alias "survivor"`) {
 		t.Fatalf("collision validation error = %v", err)
 	}
-	if got := manager.AdmissionState().GenerationID; got != oldCatalog.GenerationID() {
-		t.Fatalf("collision changed generation to %q", got)
+	if got := manager.AdmissionState().Generation; !got.Equal(oldCatalog.Generation()) {
+		t.Fatalf("collision changed generation to %q", got.Diagnostic())
 	}
 	for alias, hash := range map[string]string{"primary": runtimeContextTestHashA, "survivor": runtimeContextTestHashB} {
 		lookup := manager.LookupIngress(alias, "acme")
-		if !lookup.Loaded() || lookup.Context.BundleHash() != hash || lookup.Target.AdmissionPlan.GenerationID() != oldCatalog.GenerationID() {
+		if !lookup.Loaded() || lookup.Context.BundleHash() != hash || !lookup.Target.AdmissionPlan.Generation().Equal(oldCatalog.Generation()) {
 			t.Fatalf("collision changed %s lookup: %#v", alias, lookup)
 		}
 	}
@@ -852,7 +853,7 @@ func TestRuntimeContextManagerSignedToUnsignedTransitionRequiresAcknowledgedReco
 		t.Fatal(err)
 	}
 	lookup := manager.LookupIngress("survivor", "acme")
-	if !lookup.Loaded() || lookup.Target.AdmissionPlan.RequestAuthentication() != providertriggers.RequestAuthenticationNone || lookup.Target.AdmissionPlan.GenerationID() != unsigned.GenerationID() {
+	if !lookup.Loaded() || lookup.Target.AdmissionPlan.RequestAuthentication() != providertriggers.RequestAuthenticationNone || !lookup.Target.AdmissionPlan.Generation().Equal(unsigned.Generation()) {
 		t.Fatalf("acknowledged transition lookup = %#v", lookup)
 	}
 	for _, subject := range manager.CapabilitySubjects() {
@@ -881,10 +882,10 @@ func TestRuntimeContextManagerRejectsAdmissionTargetsOnLegacyPublishAndRestoresP
 		t.Fatalf("PublishRestoredBundleHashReplacement: %v", err)
 	}
 	lookup := manager.LookupIngress("primary", "acme")
-	if !lookup.Loaded() || lookup.Target.AdmissionPlan.GenerationID() != catalog.GenerationID() {
+	if !lookup.Loaded() || !lookup.Target.AdmissionPlan.Generation().Equal(catalog.Generation()) {
 		t.Fatalf("restored lookup = %#v", lookup)
 	}
-	assertRuntimeAdmissionSubjectGeneration(t, manager.CapabilitySubjects(), catalog.GenerationID(), 1)
+	assertRuntimeAdmissionSubjectGeneration(t, manager.CapabilitySubjects(), catalog.Generation(), 1)
 }
 
 type mixedAdmissionGenerationError struct{ first, second string }
@@ -942,7 +943,7 @@ func runtimeAdmissionTestState(t *testing.T, catalog *providertriggers.CatalogSn
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ProcessAdmissionState{GenerationID: catalog.GenerationID(), InstalledSubjects: installed}
+	return ProcessAdmissionState{Generation: catalog.Generation(), InstalledSubjects: installed}
 }
 
 func runtimeAdmissionTestContext(t *testing.T, hash, alias string, catalog *providertriggers.CatalogSnapshot) BundleContext {
@@ -962,7 +963,7 @@ func runtimeAdmissionTestContext(t *testing.T, hash, alias string, catalog *prov
 	return contextDef
 }
 
-func assertRuntimeAdmissionSubjectGeneration(t *testing.T, subjects []packs.Subject, generation string, wantEffective int) {
+func assertRuntimeAdmissionSubjectGeneration(t *testing.T, subjects []packs.Subject, generation triggergeneration.Generation, wantEffective int) {
 	t.Helper()
 	effective := 0
 	for _, subject := range subjects {
@@ -970,8 +971,8 @@ func assertRuntimeAdmissionSubjectGeneration(t *testing.T, subjects []packs.Subj
 			continue
 		}
 		effective++
-		if subject.TriggerAdmission.CatalogGeneration != generation {
-			t.Fatalf("subject %q generation = %q, want %q", subject.ID, subject.TriggerAdmission.CatalogGeneration, generation)
+		if subject.TriggerAdmission.CatalogGeneration != generation.Diagnostic() {
+			t.Fatalf("subject %q generation = %q, want %q", subject.ID, subject.TriggerAdmission.CatalogGeneration, generation.Diagnostic())
 		}
 	}
 	if effective != wantEffective {

@@ -597,18 +597,21 @@ func githubAppIssueWorkflowPackRegistry(t *testing.T, baseURL string) *providerc
 		if !ok {
 			t.Fatalf("provider connector pack %s not found", toolID)
 		}
-		if tool.HTTP == nil {
+		httpSpec, ok := tool.HTTP()
+		if !ok {
 			t.Fatalf("provider connector pack %s missing http block", toolID)
 		}
-		httpSpec := *tool.HTTP
-		tool.HTTP = &httpSpec
 		switch toolID {
 		case "github.add_labels_to_issue":
-			tool.HTTP.URL = strings.TrimRight(baseURL, "/") + "/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/labels"
+			httpSpec.URL = strings.TrimRight(baseURL, "/") + "/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/labels"
 		case "github.create_issue":
-			tool.HTTP.URL = strings.TrimRight(baseURL, "/") + "/repos/{{input.owner}}/{{input.repo}}/issues"
+			httpSpec.URL = strings.TrimRight(baseURL, "/") + "/repos/{{input.owner}}/{{input.repo}}/issues"
 		case "github.create_issue_comment":
-			tool.HTTP.URL = strings.TrimRight(baseURL, "/") + "/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/comments"
+			httpSpec.URL = strings.TrimRight(baseURL, "/") + "/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/comments"
+		}
+		tool, err := tool.WithHTTP(httpSpec)
+		if err != nil {
+			t.Fatalf("replace provider connector %s HTTP endpoint: %v", toolID, err)
 		}
 		tools[toolID] = tool
 	}

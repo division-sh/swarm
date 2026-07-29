@@ -43,7 +43,6 @@ type NormalizedEventFieldProjection struct {
 
 func (p NormalizedEventFieldProjection) normalized() NormalizedEventFieldProjection {
 	p.From = strings.TrimSpace(p.From)
-	p.Schema = cloneNormalizedEventSchema(p.Schema)
 	p.Convert = strings.ToLower(strings.TrimSpace(p.Convert))
 	return p
 }
@@ -128,7 +127,7 @@ func (m Manifest) validateNormalizedEvents() error {
 				return fmt.Errorf("%s normalized event %q author_summary_field %q is not a declared field", provider, eventName, summaryField)
 			}
 			field = field.normalized()
-			if field.Schema.Type != "string" {
+			if field.Schema.Kind() != runtimecontracts.ToolSchemaString {
 				return fmt.Errorf("%s normalized event %q author_summary_field %q must project text", provider, eventName, summaryField)
 			}
 		}
@@ -145,7 +144,7 @@ func (m Manifest) validateNormalizedEvents() error {
 				return fmt.Errorf("%s normalized event %q author_subject field %q is not declared", provider, eventName, authorSubject.Field)
 			}
 			field = field.normalized()
-			if field.Schema.Type != "string" {
+			if field.Schema.Kind() != runtimecontracts.ToolSchemaString {
 				return fmt.Errorf("%s normalized event %q author_subject field %q must project text", provider, eventName, authorSubject.Field)
 			}
 		}
@@ -171,7 +170,7 @@ func (m Manifest) validateNormalizedEvents() error {
 			switch field.Convert {
 			case "":
 			case runtimecontracts.FieldProjectionConvertNumberToText:
-				if field.Schema.Type != "string" {
+				if field.Schema.Kind() != runtimecontracts.ToolSchemaString {
 					return fmt.Errorf("%s normalized event %q field %q conversion number_to_text requires a string output schema", provider, eventName, name)
 				}
 			default:
@@ -278,7 +277,7 @@ func normalizedBranchesExclusive(left, right NormalizedEventWhen) bool {
 
 func validateNormalizedEventFieldSchema(provider, eventName, fieldName string, schema runtimecontracts.ToolInputSchema) error {
 	subject := fmt.Sprintf("%s normalized event %q field %q schema", provider, eventName, fieldName)
-	if err := runtimecontracts.ValidateToolInputSchema(schema); err != nil {
+	if err := schema.ValidateDefinition(); err != nil {
 		return fmt.Errorf("%s: %w", subject, err)
 	}
 	return nil
@@ -406,7 +405,11 @@ func normalizeProjectedValue(value any, field NormalizedEventFieldProjection) (a
 	if err != nil {
 		return nil, err
 	}
-	if err := eventschema.ValidateValueAgainstSchema(runtimecontracts.ToolInputSchemaJSONSchema(field.Schema), normalized); err != nil {
+	projectedSchema, err := field.Schema.Project()
+	if err != nil {
+		return nil, fmt.Errorf("project declared output schema: %w", err)
+	}
+	if err := eventschema.ValidateValueAgainstSchema(projectedSchema, normalized); err != nil {
 		return nil, fmt.Errorf("projected value violates its declared output schema: %w", err)
 	}
 	return normalized, nil
@@ -463,40 +466,36 @@ func (m Manifest) eventCatalogEntries() map[string]runtimecontracts.EventCatalog
 }
 
 func normalizedEventFieldSpec(schema runtimecontracts.ToolInputSchema) runtimecontracts.EventFieldSpec {
-	exact := runtimecontracts.CloneToolInputSchema(schema)
-	typeName := strings.ToLower(strings.TrimSpace(schema.Type))
-	if typeName == "string" {
+	exact := schema
+	typeName := string(schema.Kind())
+	if schema.Kind() == runtimecontracts.ToolSchemaString {
 		typeName = "text"
 	}
 	return runtimecontracts.EventFieldSpec{
 		Type:        typeName,
 		ExactSchema: &exact,
 		Refinements: runtimecontracts.SchemaRefinements{
-			Pattern: schema.Pattern,
-			Length:  runtimecontracts.SchemaLengthRefinement{Min: cloneNormalizedInt(schema.MinLength), Max: cloneNormalizedInt(schema.MaxLength)},
-			Range:   runtimecontracts.SchemaRangeRefinement{Min: cloneNormalizedFloat(schema.Minimum), Max: cloneNormalizedFloat(schema.Maximum)},
+			Pattern: schema.Pattern(),
+			Length:  runtimecontracts.SchemaLengthRefinement{Min: normalizedInt(schema.MinLength), Max: normalizedInt(schema.MaxLength)},
+			Range:   runtimecontracts.SchemaRangeRefinement{Min: normalizedFloat(schema.Minimum), Max: normalizedFloat(schema.Maximum)},
 		},
 	}
 }
 
-func cloneNormalizedEventSchema(in runtimecontracts.ToolInputSchema) runtimecontracts.ToolInputSchema {
-	return runtimecontracts.CloneToolInputSchema(in)
-}
-
-func cloneNormalizedInt(in *int) *int {
-	if in == nil {
+func normalizedInt(accessor func() (int, bool)) *int {
+	value, ok := accessor()
+	if !ok {
 		return nil
 	}
-	out := *in
-	return &out
+	return &value
 }
 
-func cloneNormalizedFloat(in *float64) *float64 {
-	if in == nil {
+func normalizedFloat(accessor func() (float64, bool)) *float64 {
+	value, ok := accessor()
+	if !ok {
 		return nil
 	}
-	out := *in
-	return &out
+	return &value
 }
 
 func RawEventCatalogEntry() runtimecontracts.EventCatalogEntry {

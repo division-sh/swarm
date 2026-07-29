@@ -11,94 +11,57 @@ import (
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
 func TestChannelSchemaAdmissionRejectsRecursiveMalformedSchemasAtEveryTypedBoundary(t *testing.T) {
 	tests := []struct {
-		name             string
-		schema           runtimecontracts.ToolInputSchema
-		want             string
-		programmaticOnly bool
-	}{
-		{name: "scalar regex", schema: runtimecontracts.ToolInputSchema{Type: "string", Pattern: "["}, want: "pattern is invalid"},
-		{name: "object required", schema: runtimecontracts.ToolInputSchema{Type: "object", Required: []string{"missing"}}, want: "is not declared"},
-		{name: "array items", schema: runtimecontracts.ToolInputSchema{Type: "array"}, want: "array requires items"},
-		{name: "typed enum", schema: runtimecontracts.ToolInputSchema{Type: "integer", Enum: []runtimecontracts.SchemaLiteral{{Node: yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "one"}}}}, want: "must be integer"},
-		{name: "programmatic empty enum", schema: runtimecontracts.ToolInputSchema{Type: "string", Enum: []runtimecontracts.SchemaLiteral{}}, want: "enum must contain at least one value", programmaticOnly: true},
-		{name: "additional properties schema", schema: runtimecontracts.ToolInputSchema{Type: "object", AdditionalProperties: runtimecontracts.ToolAdditionalProperties{Schema: &runtimecontracts.ToolInputSchema{Type: "array"}}}, want: "array requires items"},
-	}
-	boundaries := []struct {
 		name  string
-		admit func(*testing.T, runtimecontracts.ToolInputSchema) error
+		build func() error
+		want  string
 	}{
-		{name: "yaml", admit: func(_ *testing.T, schema runtimecontracts.ToolInputSchema) error {
-			raw, err := yaml.Marshal(schema)
-			if err != nil {
-				return err
-			}
-			var decoded runtimecontracts.ToolInputSchema
-			return yaml.Unmarshal(raw, &decoded)
-		}},
-		{name: "interface", admit: func(t *testing.T, schema runtimecontracts.ToolInputSchema) error {
-			spec := loadChannelPlatformSpec(t)
-			versions := spec.Interfaces["swarm.hitl-channel"]
-			definition := versions["v1"]
-			definition.Schemas["presentation"] = schema
-			versions["v1"] = definition
-			spec.Interfaces["swarm.hitl-channel"] = versions
-			_, err := packs.NewInterfaceRegistry(spec)
+		{name: "scalar regex", build: func() error {
+			_, err := runtimecontracts.NewToolInputSchema(runtimecontracts.ToolSchemaString, runtimecontracts.ToolSchemaPattern("["))
 			return err
-		}},
-		{name: "trigger", admit: func(t *testing.T, schema runtimecontracts.ToolInputSchema) error {
-			registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
-			event := trigger.Events["inbound.telegram.text_message"]
-			field := event.Fields["external_account_reference"]
-			field.Schema = schema
-			event.Fields["external_account_reference"] = field
-			trigger.Events["inbound.telegram.text_message"] = event
-			_, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+		}, want: "pattern is invalid"},
+		{name: "object required", build: func() error {
+			_, err := runtimecontracts.NewToolInputSchema(runtimecontracts.ToolSchemaObject, runtimecontracts.ToolSchemaRequired("missing"))
 			return err
-		}},
-		{name: "channel", admit: func(t *testing.T, schema runtimecontracts.ToolInputSchema) error {
-			registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
-			channel.Manifest.OpaqueTypes["external_account_reference"] = schema
-			_, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+		}, want: "is not declared"},
+		{name: "array items", build: func() error {
+			_, err := runtimecontracts.NewToolInputSchema(runtimecontracts.ToolSchemaArray)
 			return err
-		}},
-		{name: "connector", admit: func(t *testing.T, schema runtimecontracts.ToolInputSchema) error {
-			registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
-			tool := connector.Tools["telegram.send_interactive"]
-			tool.InputSchema = schema
-			connector.Tools["telegram.send_interactive"] = tool
-			_, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+		}, want: "array requires items"},
+		{name: "typed enum", build: func() error {
+			_, err := runtimecontracts.NewToolInputSchema(runtimecontracts.ToolSchemaInteger, runtimecontracts.ToolSchemaEnum("one"))
 			return err
-		}},
+		}, want: "must be integer"},
+		{name: "programmatic empty enum", build: func() error {
+			_, err := runtimecontracts.NewToolInputSchema(runtimecontracts.ToolSchemaString, runtimecontracts.ToolSchemaEnum())
+			return err
+		}, want: "enum must contain at least one value"},
 	}
 	for _, tc := range tests {
-		for _, boundary := range boundaries {
-			if tc.programmaticOnly && boundary.name == "yaml" {
-				continue
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.build(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("schema owner admission error = %v, want %q", err, tc.want)
 			}
-			t.Run(tc.name+"/"+boundary.name, func(t *testing.T) {
-				if err := boundary.admit(t, runtimecontracts.CloneToolInputSchema(tc.schema)); err == nil || !strings.Contains(err.Error(), tc.want) {
-					t.Fatalf("admission error = %v, want %q", err, tc.want)
-				}
-			})
-		}
+		})
+	}
+
+	registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
+	channel.Manifest.OpaqueTypes["external_account_reference"] = runtimecontracts.ToolInputSchema{}
+	if _, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector}); err == nil || !strings.Contains(err.Error(), "schema is missing") {
+		t.Fatalf("channel boundary accepted missing admitted schema: %v", err)
 	}
 }
 
 func TestChannelGenerationRejectsProgrammaticEmptyEnum(t *testing.T) {
-	registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
-	plan, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
-	if err != nil {
-		t.Fatalf("CompileChannel: %v", err)
-	}
-	plan.OpaqueTypes["external_account_reference"] = runtimecontracts.ToolInputSchema{Type: "string", Enum: []runtimecontracts.SchemaLiteral{}}
-	if _, err := plan.GenerationID(); err == nil || !strings.Contains(err.Error(), "enum must contain at least one value") {
-		t.Fatalf("GenerationID empty enum error = %v", err)
+	if _, err := runtimecontracts.NewToolInputSchema(runtimecontracts.ToolSchemaString, runtimecontracts.ToolSchemaEnum()); err == nil || !strings.Contains(err.Error(), "enum must contain at least one value") {
+		t.Fatalf("schema admission empty enum error = %v", err)
 	}
 }
 
@@ -204,54 +167,41 @@ enum: [' approved ']
 	}
 	original := compile(t, exact)
 	for _, eventName := range []string{"text", "action"} {
-		eventSchema := original.Events[eventName].Descriptor.Fields["external_account_reference"].Schema
-		if eventSchema.Pattern != " approved $" || channelSchemaEnumText(t, eventSchema) != " approved " {
+		eventSchema, ok := original.EventFieldSchema(eventName, "external_account_reference")
+		if !ok || eventSchema.Pattern() != " approved $" || channelSchemaEnumText(t, eventSchema) != " approved " {
 			t.Fatalf("%s exact schema = %#v", eventName, eventSchema)
 		}
 	}
-	originalGeneration, err := original.GenerationID()
+	originalGeneration, err := original.Generation()
 	if err != nil {
-		t.Fatalf("original GenerationID: %v", err)
+		t.Fatalf("original Generation: %v", err)
 	}
-	changed := runtimecontracts.CloneToolInputSchema(exact)
-	channelSchemaEnumScalar(t, &changed.Enum[0].Node).Value = " accepted "
-	changed.Pattern = " accepted $"
-	changedGeneration, err := compile(t, changed).GenerationID()
+	changed := runtimecontracts.MustToolInputSchema(
+		runtimecontracts.ToolSchemaString,
+		runtimecontracts.ToolSchemaMinLength(1),
+		runtimecontracts.ToolSchemaPattern(" accepted $"),
+		runtimecontracts.ToolSchemaEnum(" accepted "),
+	)
+	changedGeneration, err := compile(t, changed).Generation()
 	if err != nil {
-		t.Fatalf("changed GenerationID: %v", err)
+		t.Fatalf("changed Generation: %v", err)
 	}
-	if changedGeneration == originalGeneration {
+	if changedGeneration.Equal(originalGeneration) {
 		t.Fatal("exact enum/pattern change did not change compiled generation")
 	}
 }
 
 func channelSchemaEnumText(t *testing.T, schema runtimecontracts.ToolInputSchema) string {
 	t.Helper()
-	var value string
-	if err := schema.Enum[0].Node.Decode(&value); err != nil {
-		t.Fatalf("decode schema enum: %v", err)
+	values, declared := schema.EnumValues()
+	if !declared || len(values) == 0 {
+		t.Fatal("schema enum is missing")
+	}
+	value, ok := values[0].Interface().(string)
+	if !ok {
+		t.Fatalf("schema enum = %#v, want string", values[0].Interface())
 	}
 	return value
-}
-
-func channelSchemaEnumScalar(t *testing.T, node *yaml.Node) *yaml.Node {
-	t.Helper()
-	if node == nil {
-		t.Fatal("schema enum node is nil")
-	}
-	if node.Kind == yaml.ScalarNode {
-		return node
-	}
-	for _, child := range node.Content {
-		if child != nil {
-			return channelSchemaEnumScalar(t, child)
-		}
-	}
-	if node.Alias != nil {
-		return channelSchemaEnumScalar(t, node.Alias)
-	}
-	t.Fatalf("schema enum node kind %d has no scalar", node.Kind)
-	return nil
 }
 
 func TestTelegramChannelPackCompilesThroughAcceptedProductionInventories(t *testing.T) {
@@ -264,16 +214,16 @@ func TestTelegramChannelPackCompilesThroughAcceptedProductionInventories(t *test
 		"actions[].token":   64,
 	}
 	for name, want := range wantMax {
-		schema, ok := plan.Constraints[name]
+		schema, ok := plan.Constraint(name)
 		if !ok {
-			t.Fatalf("constraint %q missing from %#v", name, plan.Constraints)
+			t.Fatalf("constraint %q missing", name)
 		}
-		got := schema.MaxLength
+		got, declared := schema.MaxLength()
 		if name == "actions" {
-			got = schema.MaxItems
+			got, declared = schema.MaxItems()
 		}
-		if got == nil || *got != want {
-			t.Fatalf("constraint %q max = %v, want %d", name, got, want)
+		if !declared || got != want {
+			t.Fatalf("constraint %q max = %v declared=%v, want %d", name, got, declared, want)
 		}
 	}
 
@@ -338,17 +288,17 @@ func TestTelegramChannelCompilerRejectsUnboundedMessageIDOutput(t *testing.T) {
 	registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
 	tool := connector.Tools["telegram.send_interactive"]
 	allow := false
-	minimum := float64(1)
-	tool.OutputSchema = runtimecontracts.ToolInputSchema{
-		Type: "object", Required: []string{"message_id"},
-		AdditionalProperties: runtimecontracts.ToolAdditionalProperties{Allowed: &allow},
-		Properties: map[string]runtimecontracts.ToolInputSchema{
-			"message_id": {Type: "integer", Minimum: &minimum},
-		},
+	output := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject, runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+		"message_id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaInteger, runtimecontracts.ToolSchemaMinimum(1)),
+	}), runtimecontracts.ToolSchemaRequired("message_id"), runtimecontracts.ToolSchemaAdditionalPropertiesAllowed(allow))
+	var err error
+	tool, err = tool.WithSchemas(tool.InputSchema(), output)
+	if err != nil {
+		t.Fatalf("replace output schema: %v", err)
 	}
 	connector.Tools["telegram.send_interactive"] = tool
 
-	_, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+	_, err = packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
 	if err == nil || !strings.Contains(err.Error(), "source maximum is broader than target maximum") {
 		t.Fatalf("CompileChannel error = %v, want unbounded provider result rejection", err)
 	}
@@ -386,18 +336,15 @@ func TestTelegramChannelCompilerConsumesExactNormalizedIdentifierSchemas(t *test
 }
 
 func withoutMaximum(schema runtimecontracts.ToolInputSchema) runtimecontracts.ToolInputSchema {
-	schema.Maximum = nil
-	return schema
+	return schema.WithoutMaximum()
 }
 
 func withoutPattern(schema runtimecontracts.ToolInputSchema) runtimecontracts.ToolInputSchema {
-	schema.Pattern = ""
-	return schema
+	return schema.WithoutPattern()
 }
 
 func withoutMaximumLength(schema runtimecontracts.ToolInputSchema) runtimecontracts.ToolInputSchema {
-	schema.MaxLength = nil
-	return schema
+	return schema.WithoutMaxLength()
 }
 
 func TestProductionCompilerAcceptsStructurallyDifferentTighterSatisfier(t *testing.T) {
@@ -414,13 +361,16 @@ func TestProductionCompilerAcceptsStructurallyDifferentTighterSatisfier(t *testi
 		"actions[].token":   20,
 	}
 	for name, want := range wantMax {
-		schema := plan.Constraints[name]
-		got := schema.MaxLength
-		if name == "actions" {
-			got = schema.MaxItems
+		schema, ok := plan.Constraint(name)
+		if !ok {
+			t.Fatalf("constraint %q missing", name)
 		}
-		if got == nil || *got != want {
-			t.Fatalf("mock constraint %q max = %v, want %d", name, got, want)
+		got, declared := schema.MaxLength()
+		if name == "actions" {
+			got, declared = schema.MaxItems()
+		}
+		if !declared || got != want {
+			t.Fatalf("mock constraint %q max = %v declared=%v, want %d", name, got, declared, want)
 		}
 	}
 	if _, err := packs.NewOutboundBindingPlan("mock_ops", plan, "queue-a", nil); err == nil {
@@ -473,7 +423,7 @@ func TestProductionCompilerFailsClosedAcrossChannelContractPhases(t *testing.T) 
 			name: "effect mismatch",
 			mutate: func(_ *packs.LoadedChannelPack, _ *packs.TriggerPackDescriptor, connector *packs.ConnectorPackDescriptor) {
 				tool := connector.Tools["mock.deliver"]
-				tool.EffectClass = string(runtimecontracts.ActivityEffectClassReadOnly)
+				tool = mustToolWithEffect(tool, runtimecontracts.ActivityEffectClassReadOnly)
 				connector.Tools["mock.deliver"] = tool
 			},
 			want: "effect class does not match",
@@ -492,7 +442,8 @@ func TestProductionCompilerFailsClosedAcrossChannelContractPhases(t *testing.T) 
 				controls := mockArraySchema(0, 2, mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
 					"name": mockStringSchema(1, 24, ""), "value": mockStringSchema(1, 20, `^[A-Z]+$`),
 				}, "name", "value"))
-				tool.InputSchema.Properties["controls"] = controls
+				input := mustSchemaWithProperty(tool.InputSchema(), "controls", controls)
+				tool = mustToolWithSchemas(tool, input, tool.OutputSchema())
 				connector.Tools["mock.edit"] = tool
 			},
 			want: "incompatible patterns",
@@ -502,9 +453,13 @@ func TestProductionCompilerFailsClosedAcrossChannelContractPhases(t *testing.T) 
 			mutate: func(_ *packs.LoadedChannelPack, _ *packs.TriggerPackDescriptor, connector *packs.ConnectorPackDescriptor) {
 				for _, name := range []string{"mock.deliver", "mock.edit"} {
 					tool := connector.Tools[name]
-					body := tool.InputSchema.Properties["body"]
-					body.MaxLength = nil
-					tool.InputSchema.Properties["body"] = body
+					input := tool.InputSchema()
+					body, ok := input.Property("body")
+					if !ok {
+						panic("mock body schema is missing")
+					}
+					input = mustSchemaWithProperty(input, "body", body.WithoutMaxLength())
+					tool = mustToolWithSchemas(tool, input, tool.OutputSchema())
 					connector.Tools[name] = tool
 				}
 			},
@@ -514,7 +469,7 @@ func TestProductionCompilerFailsClosedAcrossChannelContractPhases(t *testing.T) 
 			name: "event field type mismatch",
 			mutate: func(_ *packs.LoadedChannelPack, trigger *packs.TriggerPackDescriptor, _ *packs.ConnectorPackDescriptor) {
 				event := trigger.Events["mock.text"]
-				event.Fields["text"] = packs.TriggerEventField{Schema: runtimecontracts.ToolInputSchema{Type: "integer"}, Required: true}
+				event.Fields["text"] = packs.TriggerEventField{Schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("integer")), Required: true}
 				trigger.Events["mock.text"] = event
 			},
 			want: "incompatible types",
@@ -536,12 +491,14 @@ func TestProductionCompilerRejectsPartialRequiredConnectorObject(t *testing.T) {
 	registry := loadChannelInterfaceRegistry(t)
 	channel, trigger, connector := mockChannelSatisfier()
 	tool := connector.Tools["mock.deliver"]
-	destination := tool.InputSchema.Properties["destination"]
-	destination.Properties = map[string]runtimecontracts.ToolInputSchema{"queue": destination.Properties["queue"]}
-	destination.Required = append([]string(nil), destination.Required...)
-	destination.Properties["region"] = mockStringSchema(1, 10, "")
-	destination.Required = append(destination.Required, "region")
-	tool.InputSchema.Properties["destination"] = destination
+	input := tool.InputSchema()
+	destination, _ := input.Property("destination")
+	queue, _ := destination.Property("queue")
+	destination = mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
+		"queue": queue, "region": mockStringSchema(1, 10, ""),
+	}, "queue", "region")
+	input = mustSchemaWithProperty(input, "destination", destination)
+	tool = mustToolWithSchemas(tool, input, tool.OutputSchema())
 	connector.Tools["mock.deliver"] = tool
 
 	_, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
@@ -554,11 +511,13 @@ func TestProductionCompilerRejectsDroppedRequiredInterfaceArrayLeaf(t *testing.T
 	registry := loadChannelInterfaceRegistry(t)
 	channel, trigger, connector := mockChannelSatisfier()
 	tool := connector.Tools["mock.deliver"]
-	controls := tool.InputSchema.Properties["controls"]
-	controls.Items = pointerToChannelSchema(mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
+	input := tool.InputSchema()
+	controls, _ := input.Property("controls")
+	controls = mustSchemaWithItems(controls, mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
 		"name": mockStringSchema(1, 24, ""),
 	}, "name"))
-	tool.InputSchema.Properties["controls"] = controls
+	input = mustSchemaWithProperty(input, "controls", controls)
+	tool = mustToolWithSchemas(tool, input, tool.OutputSchema())
 	connector.Tools["mock.deliver"] = tool
 	binding := channel.Manifest.Operations["deliver"]
 	binding.Input["controls"] = packs.ChannelMapping{
@@ -583,13 +542,14 @@ func TestProductionCompilerRejectsRecursiveDirectionalAndCardinalityGaps(t *test
 		{
 			name: "input scalar source broader than target",
 			mutate: func(channel *packs.LoadedChannelPack, connector *packs.ConnectorPackDescriptor) {
-				destination := connector.Tools["mock.deliver"].InputSchema.Properties["destination"]
-				queue := destination.Properties["queue"]
-				max := 5
-				queue.MaxLength = &max
-				destination.Properties["queue"] = queue
 				tool := connector.Tools["mock.deliver"]
-				tool.InputSchema.Properties["destination"] = destination
+				input := tool.InputSchema()
+				destination, _ := input.Property("destination")
+				queue, _ := destination.Property("queue")
+				queue = mustSchemaWithMaxLength(queue, 5)
+				destination = mustSchemaWithProperty(destination, "queue", queue)
+				input = mustSchemaWithProperty(input, "destination", destination)
+				tool = mustToolWithSchemas(tool, input, tool.OutputSchema())
 				connector.Tools["mock.deliver"] = tool
 				channel.Manifest.OpaqueTypes["destination"] = mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
 					"queue": mockStringSchema(1, 10, `^[a-z0-9-]+$`),
@@ -601,10 +561,11 @@ func TestProductionCompilerRejectsRecursiveDirectionalAndCardinalityGaps(t *test
 			name: "whole input object misses required target child",
 			mutate: func(channel *packs.LoadedChannelPack, connector *packs.ConnectorPackDescriptor) {
 				tool := connector.Tools["mock.deliver"]
-				destination := tool.InputSchema.Properties["destination"]
-				destination.Properties["region"] = mockStringSchema(1, 10, "")
-				destination.Required = append(destination.Required, "region")
-				tool.InputSchema.Properties["destination"] = destination
+				input := tool.InputSchema()
+				destination, _ := input.Property("destination")
+				destination = mustSchemaWithRequiredProperty(destination, "region", mockStringSchema(1, 10, ""))
+				input = mustSchemaWithProperty(input, "destination", destination)
+				tool = mustToolWithSchemas(tool, input, tool.OutputSchema())
 				connector.Tools["mock.deliver"] = tool
 				channel.Manifest.OpaqueTypes["destination"] = mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
 					"queue": mockStringSchema(1, 10, `^[a-z0-9-]+$`),
@@ -620,10 +581,11 @@ func TestProductionCompilerRejectsRecursiveDirectionalAndCardinalityGaps(t *test
 			name: "output scalar source broader than target",
 			mutate: func(_ *packs.LoadedChannelPack, connector *packs.ConnectorPackDescriptor) {
 				tool := connector.Tools["mock.deliver"]
-				ref := tool.OutputSchema.Properties["ref"]
-				min, max := 1, 100
-				ref.MinLength, ref.MaxLength = &min, &max
-				tool.OutputSchema.Properties["ref"] = ref
+				output := tool.OutputSchema()
+				ref, _ := output.Property("ref")
+				ref = mustSchemaWithLengthBounds(ref, 1, 100)
+				output = mustSchemaWithProperty(output, "ref", ref)
+				tool = mustToolWithSchemas(tool, tool.InputSchema(), output)
 				connector.Tools["mock.deliver"] = tool
 			},
 			want: "source minimum is broader than target minimum 22",
@@ -632,13 +594,13 @@ func TestProductionCompilerRejectsRecursiveDirectionalAndCardinalityGaps(t *test
 			name: "whole output object misses required target child",
 			mutate: func(channel *packs.LoadedChannelPack, connector *packs.ConnectorPackDescriptor) {
 				receipt := channel.Manifest.OpaqueTypes["delivery_receipt"]
-				receipt.Properties["status"] = mockStringSchema(1, 12, "")
-				receipt.Required = append(receipt.Required, "status")
+				receipt = mustSchemaWithRequiredProperty(receipt, "status", mockStringSchema(1, 12, ""))
 				channel.Manifest.OpaqueTypes["delivery_receipt"] = receipt
 				tool := connector.Tools["mock.edit"]
-				tool.OutputSchema = mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
-					"receipt": mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"revision": {Type: "integer"}}, "revision"),
+				output := mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
+					"receipt": mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"revision": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaInteger)}, "revision"),
 				}, "receipt")
+				tool = mustToolWithSchemas(tool, tool.InputSchema(), output)
 				connector.Tools["mock.edit"] = tool
 				binding := channel.Manifest.Operations["edit"]
 				delete(binding.Output, "delivery_receipt.revision")
@@ -660,10 +622,13 @@ func TestProductionCompilerRejectsRecursiveDirectionalAndCardinalityGaps(t *test
 			name: "duplicate recursive item source",
 			mutate: func(channel *packs.LoadedChannelPack, connector *packs.ConnectorPackDescriptor) {
 				tool := connector.Tools["mock.deliver"]
-				controls := tool.InputSchema.Properties["controls"]
-				controls.Items.Properties["alias"] = mockStringSchema(1, 24, "")
-				controls.Items.Required = append(controls.Items.Required, "alias")
-				tool.InputSchema.Properties["controls"] = controls
+				input := tool.InputSchema()
+				controls, _ := input.Property("controls")
+				items, _ := controls.ItemsSchema()
+				items = mustSchemaWithRequiredProperty(items, "alias", mockStringSchema(1, 24, ""))
+				controls = mustSchemaWithItems(controls, items)
+				input = mustSchemaWithProperty(input, "controls", controls)
+				tool = mustToolWithSchemas(tool, input, tool.OutputSchema())
 				connector.Tools["mock.deliver"] = tool
 				binding := channel.Manifest.Operations["deliver"]
 				mapping := binding.Input["controls"]
@@ -697,87 +662,103 @@ func TestChannelRuntimeToolsExposeOnlyProviderNeutralContract(t *testing.T) {
 		t.Fatalf("RuntimeTools: %v", err)
 	}
 	tool := tools["channel.ops.deliver"]
-	if tool.Category != "channel_operation" || tool.HandlerType != "channel" || tool.HTTP != nil || len(tool.Credentials) != 0 || tool.ManagedCredential != nil {
+	_, hasHTTP := tool.HTTP()
+	_, hasManagedCredential := tool.ManagedCredential()
+	if tool.Category() != "channel_operation" || tool.Handler() != runtimecontracts.ToolHandlerChannel || hasHTTP || len(tool.Credentials()) != 0 || hasManagedCredential {
 		t.Fatalf("public channel tool leaked connector execution details: %#v", tool)
 	}
-	if _, ok := tool.InputSchema.Properties["presentation"]; !ok {
-		t.Fatalf("public channel input = %#v, want presentation", tool.InputSchema)
+	input := tool.InputSchema()
+	if _, ok := input.Property("presentation"); !ok {
+		t.Fatalf("public channel input = %#v, want presentation", input)
 	}
-	if _, ok := tool.InputSchema.Properties["chat_id"]; ok {
-		t.Fatalf("public channel input exposed connector destination: %#v", tool.InputSchema)
+	if _, ok := input.Property("chat_id"); ok {
+		t.Fatalf("public channel input exposed connector destination: %#v", input)
 	}
-	activityTool, err := binding.Structural.OperationTool("deliver")
+	activityTool, err := binding.OperationTool("deliver")
 	if err != nil {
 		t.Fatalf("OperationTool: %v", err)
 	}
-	activityToolID, generation, err := binding.RuntimeActivityTarget("deliver")
+	target, err := binding.RuntimeActivityTarget("deliver")
 	if err != nil {
 		t.Fatalf("RuntimeActivityTarget: %v", err)
 	}
-	if activityToolID == binding.RuntimeToolID("deliver") || generation == "" || activityTool.HTTP == nil || activityTool.CompiledResult == nil {
-		t.Fatalf("private channel activity target is not separated: id=%q generation=%q tool=%#v", activityToolID, generation, activityTool)
+	_, activityHasHTTP := activityTool.HTTP()
+	_, activityHasCompiledResult := activityTool.CompiledResult()
+	if target.ToolID() == binding.RuntimeToolID("deliver") || !target.Generation().Valid() || !activityHasHTTP || !activityHasCompiledResult {
+		t.Fatalf("private channel activity target is not separated: id=%q generation=%q tool=%#v", target.ToolID(), target.Generation().Diagnostic(), activityTool)
 	}
 }
 
-func TestSatisfactionPlanCloneDeeplyIsolatesRuntimeOperation(t *testing.T) {
-	original := loadTelegramChannelPlan(t)
-	cloned := original.Clone()
-	op := cloned.Operations["deliver"]
-	text := op.ToolSchema.InputSchema.Properties["text"]
-	if text.MaxLength == nil {
+func TestSatisfactionPlanReadbackIsImmutableWithoutClone(t *testing.T) {
+	plan := loadTelegramChannelPlan(t)
+	tool, err := plan.OperationTool("deliver")
+	if err != nil {
+		t.Fatalf("OperationTool: %v", err)
+	}
+	input := tool.InputSchema()
+	text, ok := input.Property("text")
+	if !ok {
 		t.Fatal("Telegram text maxLength missing")
 	}
-	*text.MaxLength = 7
-	op.ToolSchema.InputSchema.Properties["text"] = text
-	httpSpec := *op.ToolSchema.HTTP
-	httpSpec.URL = "https://mutated.invalid"
-	op.ToolSchema.HTTP = &httpSpec
-	keyboard := op.Input["reply_markup.inline_keyboard"]
-	keyboard.Item[0]["text"] = packs.ChannelMapping{From: "item.token"}
-	op.Input["reply_markup.inline_keyboard"] = keyboard
-	cloned.Operations["deliver"] = op
+	originalMaximum, declared := text.MaxLength()
+	if !declared {
+		t.Fatal("Telegram text maxLength missing")
+	}
+	changedText := mustSchemaWithMaxLength(text, 7)
+	changedInput := mustSchemaWithProperty(input, "text", changedText)
+	_ = mustToolWithSchemas(tool, changedInput, tool.OutputSchema())
 
-	originalOp := original.Operations["deliver"]
-	if got := *originalOp.ToolSchema.InputSchema.Properties["text"].MaxLength; got == 7 {
-		t.Fatalf("clone mutation changed original text maxLength to %d", got)
+	httpSpec, ok := tool.HTTP()
+	if !ok {
+		t.Fatal("Telegram HTTP contract missing")
 	}
-	if originalOp.ToolSchema.HTTP.URL == "https://mutated.invalid" {
-		t.Fatal("clone mutation changed original HTTP URL")
+	httpSpec.URL = "https://mutated.invalid"
+	httpSpec.Headers["X-Test"] = "mutated"
+
+	originalTool, err := plan.OperationTool("deliver")
+	if err != nil {
+		t.Fatalf("OperationTool readback: %v", err)
 	}
-	if got := originalOp.Input["reply_markup.inline_keyboard"].Item[0]["text"].From; got != "item.label" {
-		t.Fatalf("clone mutation changed original item mapping to %q", got)
+	originalText, _ := originalTool.InputSchema().Property("text")
+	if got, declared := originalText.MaxLength(); !declared || got != originalMaximum {
+		t.Fatalf("schema readback changed after derived-value mutation: max=%d declared=%v, want %d", got, declared, originalMaximum)
+	}
+	originalHTTP, ok := originalTool.HTTP()
+	if !ok || originalHTTP.URL == "https://mutated.invalid" || originalHTTP.Headers["X-Test"] == "mutated" {
+		t.Fatalf("HTTP readback changed after snapshot mutation: %#v", originalHTTP)
 	}
 }
 
 func TestRuntimeActivityTargetPinsCompleteCompiledPlanGeneration(t *testing.T) {
 	original := loadTelegramChannelPlan(t)
-	cloned := original.Clone()
-	originalGeneration, err := original.GenerationID()
+	originalGeneration, err := original.Generation()
 	if err != nil {
-		t.Fatalf("original GenerationID: %v", err)
-	}
-	cloneGeneration, err := cloned.GenerationID()
-	if err != nil {
-		t.Fatalf("clone GenerationID: %v", err)
-	}
-	if cloneGeneration != originalGeneration {
-		t.Fatalf("clone generation = %q, want %q", cloneGeneration, originalGeneration)
+		t.Fatalf("original Generation: %v", err)
 	}
 
-	operation := cloned.Operations["deliver"]
-	text := operation.ToolSchema.InputSchema.Properties["text"]
-	if text.MaxLength == nil || *text.MaxLength < 2 {
-		t.Fatalf("fixture text schema = %#v", text)
+	registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
+	tool := connector.Tools["telegram.send_interactive"]
+	input := tool.InputSchema()
+	text, ok := input.Property("text")
+	if !ok {
+		t.Fatal("Telegram connector text schema missing")
 	}
-	changedMaximum := *text.MaxLength - 1
-	text.MaxLength = &changedMaximum
-	operation.ToolSchema.InputSchema.Properties["text"] = text
-	cloned.Operations["deliver"] = operation
-	changedGeneration, err := cloned.GenerationID()
+	maximum, declared := text.MaxLength()
+	if !declared || maximum < 2 {
+		t.Fatalf("Telegram connector text schema = %#v", text)
+	}
+	text = mustSchemaWithMaxLength(text, maximum-1)
+	input = mustSchemaWithProperty(input, "text", text)
+	connector.Tools["telegram.send_interactive"] = mustToolWithSchemas(tool, input, tool.OutputSchema())
+	changed, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
 	if err != nil {
-		t.Fatalf("changed GenerationID: %v", err)
+		t.Fatalf("CompileChannel(changed): %v", err)
 	}
-	if changedGeneration == originalGeneration {
+	changedGeneration, err := changed.Generation()
+	if err != nil {
+		t.Fatalf("changed Generation: %v", err)
+	}
+	if changedGeneration.Equal(originalGeneration) {
 		t.Fatal("compiled schema change did not change the plan generation")
 	}
 
@@ -785,20 +766,67 @@ func TestRuntimeActivityTargetPinsCompleteCompiledPlanGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("original binding: %v", err)
 	}
-	changedBinding, err := packs.NewOutboundBindingPlan("ops", cloned, "42", nil)
+	changedBinding, err := packs.NewOutboundBindingPlan("ops", changed, "42", nil)
 	if err != nil {
 		t.Fatalf("changed binding: %v", err)
 	}
-	originalTarget, originalPin, err := originalBinding.RuntimeActivityTarget("deliver")
+	originalTarget, err := originalBinding.RuntimeActivityTarget("deliver")
 	if err != nil {
 		t.Fatalf("original target: %v", err)
 	}
-	changedTarget, changedPin, err := changedBinding.RuntimeActivityTarget("deliver")
+	changedTarget, err := changedBinding.RuntimeActivityTarget("deliver")
 	if err != nil {
 		t.Fatalf("changed target: %v", err)
 	}
-	if originalTarget == changedTarget || originalPin == changedPin {
-		t.Fatalf("replacement plan reused private target: original=(%q,%q) changed=(%q,%q)", originalTarget, originalPin, changedTarget, changedPin)
+	if originalTarget.ToolID() == changedTarget.ToolID() || originalTarget.Generation().Equal(changedTarget.Generation()) {
+		t.Fatalf("replacement plan reused private target: original=(%q,%q) changed=(%q,%q)",
+			originalTarget.ToolID(), originalTarget.Generation().Diagnostic(),
+			changedTarget.ToolID(), changedTarget.Generation().Diagnostic())
+	}
+}
+
+func TestToolExecutionContractHasOneAuthorityAcrossPublicConnectorAndPrivateTargets(t *testing.T) {
+	plan := loadTelegramChannelPlan(t)
+	binding, err := packs.NewOutboundBindingPlan("ops", plan, "42", nil)
+	if err != nil {
+		t.Fatalf("NewOutboundBindingPlan: %v", err)
+	}
+	owner, err := binding.OperationTool("deliver")
+	if err != nil {
+		t.Fatalf("OperationTool: %v", err)
+	}
+	identity, err := binding.RuntimeActivityTarget("deliver")
+	if err != nil {
+		t.Fatalf("RuntimeActivityTarget: %v", err)
+	}
+	target, err := runtimepipeline.NewChannelActivityTarget(owner, identity.Generation())
+	if err != nil {
+		t.Fatalf("NewChannelActivityTarget: %v", err)
+	}
+	carried, ok := target.Tool()
+	if !ok {
+		t.Fatal("private target lost the admitted execution contract")
+	}
+	ownerHash, err := owner.CanonicalHash()
+	if err != nil {
+		t.Fatalf("owner hash: %v", err)
+	}
+	carriedHash, err := carried.CanonicalHash()
+	if err != nil {
+		t.Fatalf("carried hash: %v", err)
+	}
+	if carriedHash != ownerHash || !target.Generation().Equal(identity.Generation()) {
+		t.Fatalf("private target reconstructed authority: owner=%s carried=%s generation=%q", ownerHash, carriedHash, target.Generation().Diagnostic())
+	}
+	httpSpec, ok := carried.HTTP()
+	if !ok {
+		t.Fatal("private target lost HTTP execution semantics")
+	}
+	httpSpec.URL = "https://mutated.invalid"
+	carriedAgain, _ := target.Tool()
+	httpAgain, _ := carriedAgain.HTTP()
+	if httpAgain.URL == httpSpec.URL {
+		t.Fatal("private target retained caller-owned execution mutation")
 	}
 }
 
@@ -895,7 +923,7 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 	}, "name", "value"))
 	destination := mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"queue": mockStringSchema(1, 10, `^[a-z0-9-]+$`)}, "queue")
 	deliveryReference := mockStringSchema(22, 22, `^mock-delivery:[0-9a-f]{8}$`)
-	deliveryReceipt := mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"revision": {Type: "integer"}}, "revision")
+	deliveryReceipt := mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"revision": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaInteger)}, "revision")
 	interaction := mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"cursor": mockStringSchema(1, 16, "")}, "cursor")
 	externalAccount := mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"principal": mockStringSchema(1, 20, "")}, "principal")
 	conversation := mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"room": mockStringSchema(1, 20, "")}, "room")
@@ -905,10 +933,10 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 		}, "destination", "body", "controls"), mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"ref": deliveryReference}, "ref")),
 		"mock.edit": mockConnectorTool(mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
 			"destination": destination, "reference": deliveryReference, "body": text128, "controls": actions,
-		}, "destination", "reference", "body", "controls"), mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"revision": {Type: "integer"}}, "revision")),
+		}, "destination", "reference", "body", "controls"), mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"revision": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaInteger)}, "revision")),
 		"mock.ack": mockConnectorTool(mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
 			"cursor": mockStringSchema(1, 16, ""),
-		}, "cursor"), runtimecontracts.ToolInputSchema{Type: "object"}),
+		}, "cursor"), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))),
 	}
 	manifest := packs.ChannelManifest{
 		Provider: "mock",
@@ -977,6 +1005,7 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 	}
 	trigger := packs.TriggerPackDescriptor{
 		Identity: packs.PackIdentity{ID: "provider.mock", Type: packs.TypeTrigger, Version: "0.1.0", ManifestHash: "sha256:mock-trigger"}, Provider: "mock",
+		Generation: triggergeneration.FromCanonicalBytes([]byte("mock-trigger-generation")),
 		Events: map[string]packs.TriggerEvent{
 			"mock.action": {Name: "mock.action", Fields: triggerFields("token", "cursor", "principal", "room", "message_ref")},
 			"mock.text":   {Name: "mock.text", Fields: triggerFields("text", "principal", "room", "message_ref")},
@@ -990,25 +1019,75 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 }
 
 func mockConnectorTool(input, output runtimecontracts.ToolInputSchema) runtimecontracts.ToolSchemaEntry {
-	return runtimecontracts.ToolSchemaEntry{EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite), InputSchema: input, OutputSchema: output}
+	return runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(input, output))
 }
 
 func mockStringSchema(min, max int, pattern string) runtimecontracts.ToolInputSchema {
-	return runtimecontracts.ToolInputSchema{Type: "string", MinLength: &min, MaxLength: &max, Pattern: pattern}
+	return runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string"), runtimecontracts.ToolSchemaMinLength(min), runtimecontracts.ToolSchemaMaxLength(max), runtimecontracts.ToolSchemaPattern(pattern))
 }
 
 func mockArraySchema(min, max int, items runtimecontracts.ToolInputSchema) runtimecontracts.ToolInputSchema {
-	return runtimecontracts.ToolInputSchema{Type: "array", MinItems: &min, MaxItems: &max, Items: &items}
-}
-
-func pointerToChannelSchema(schema runtimecontracts.ToolInputSchema) *runtimecontracts.ToolInputSchema {
-	return &schema
+	return runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("array"), runtimecontracts.ToolSchemaItems(items), runtimecontracts.ToolSchemaMinItems(min), runtimecontracts.ToolSchemaMaxItems(max))
 }
 
 func mockObjectSchema(properties map[string]runtimecontracts.ToolInputSchema, required ...string) runtimecontracts.ToolInputSchema {
 	allowed := false
-	return runtimecontracts.ToolInputSchema{
-		Type: "object", Properties: properties, Required: required,
-		AdditionalProperties: runtimecontracts.ToolAdditionalProperties{Allowed: &allowed},
+	return runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(properties), runtimecontracts.ToolSchemaRequired(required...), runtimecontracts.ToolSchemaAdditionalPropertiesAllowed(allowed))
+
+}
+
+func mustSchemaWithProperty(schema runtimecontracts.ToolInputSchema, name string, property runtimecontracts.ToolInputSchema) runtimecontracts.ToolInputSchema {
+	updated, err := schema.WithProperty(name, property)
+	if err != nil {
+		panic(err)
 	}
+	return updated
+}
+
+func mustSchemaWithRequiredProperty(schema runtimecontracts.ToolInputSchema, name string, property runtimecontracts.ToolInputSchema) runtimecontracts.ToolInputSchema {
+	updated, err := schema.WithRequiredProperty(name, property)
+	if err != nil {
+		panic(err)
+	}
+	return updated
+}
+
+func mustSchemaWithItems(schema, items runtimecontracts.ToolInputSchema) runtimecontracts.ToolInputSchema {
+	updated, err := schema.WithItems(items)
+	if err != nil {
+		panic(err)
+	}
+	return updated
+}
+
+func mustSchemaWithMaxLength(schema runtimecontracts.ToolInputSchema, maximum int) runtimecontracts.ToolInputSchema {
+	updated, err := schema.WithMaxLength(maximum)
+	if err != nil {
+		panic(err)
+	}
+	return updated
+}
+
+func mustSchemaWithLengthBounds(schema runtimecontracts.ToolInputSchema, minimum, maximum int) runtimecontracts.ToolInputSchema {
+	updated, err := schema.WithLengthBounds(minimum, maximum)
+	if err != nil {
+		panic(err)
+	}
+	return updated
+}
+
+func mustToolWithSchemas(tool runtimecontracts.ToolSchemaEntry, input, output runtimecontracts.ToolInputSchema) runtimecontracts.ToolSchemaEntry {
+	updated, err := tool.WithSchemas(input, output)
+	if err != nil {
+		panic(err)
+	}
+	return updated
+}
+
+func mustToolWithEffect(tool runtimecontracts.ToolSchemaEntry, effect runtimecontracts.ActivityEffectClass) runtimecontracts.ToolSchemaEntry {
+	updated, err := tool.WithEffect(effect)
+	if err != nil {
+		panic(err)
+	}
+	return updated
 }

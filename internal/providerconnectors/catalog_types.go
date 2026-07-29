@@ -13,6 +13,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/httpresponsesuccess"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"gopkg.in/yaml.v3"
 )
 
@@ -47,10 +48,7 @@ type GenerationProfileEvidence struct {
 	SHA256        string `yaml:"sha256"`
 }
 
-type GenerationPermission struct {
-	ID   string `yaml:"id"`
-	Note string `yaml:"note"`
-}
+type GenerationPermission = semanticview.ConnectorGenerationPermission
 
 type GenerationOperationEvidence struct {
 	OperationID     string                               `yaml:"operation_id"`
@@ -125,7 +123,8 @@ func (g GenerationEvidence) Validate(provider string, tools map[string]runtimeco
 		if err := httpresponsesuccess.Validate(operation.ResponseSuccess); err != nil {
 			return fmt.Errorf("generation operation %q: %w", operationID, err)
 		}
-		if tool.ResponseSuccess == nil || !httpresponsesuccess.Equivalent(*tool.ResponseSuccess, operation.ResponseSuccess) {
+		responseSuccess, ok := tool.ResponseSuccess()
+		if !ok || !httpresponsesuccess.Equivalent(responseSuccess, operation.ResponseSuccess) {
 			return fmt.Errorf("generation operation %q response_success does not match tool %q", operationID, toolID)
 		}
 		if strings.TrimSpace(operation.FixtureID) == "" || strings.TrimSpace(operation.FixtureStatus) != GenerationFixturePassing {

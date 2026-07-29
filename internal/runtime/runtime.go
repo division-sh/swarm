@@ -557,7 +557,7 @@ func workflowModuleWithProviderPacks(module runtimepipeline.WorkflowModule, trig
 	for _, binding := range channelBindings {
 		tools, err := binding.RuntimeTools()
 		if err != nil {
-			return nil, nil, fmt.Errorf("compile channel binding %q runtime tools: %w", binding.ID, err)
+			return nil, nil, fmt.Errorf("compile channel binding %q runtime tools: %w", binding.BindingID(), err)
 		}
 		for id, tool := range tools {
 			if _, exists := channelTools[id]; exists {
@@ -576,24 +576,23 @@ func workflowModuleWithProviderPacks(module runtimepipeline.WorkflowModule, trig
 func compiledChannelActivityTools(bindings []packs.OutboundBindingPlan) (map[string]runtimepipeline.ChannelActivityTarget, error) {
 	out := map[string]runtimepipeline.ChannelActivityTarget{}
 	for _, binding := range bindings {
-		operations := make([]string, 0, len(binding.Structural.Operations))
-		for operation := range binding.Structural.Operations {
-			operations = append(operations, operation)
-		}
-		sort.Strings(operations)
-		for _, operation := range operations {
-			id, generation, err := binding.RuntimeActivityTarget(operation)
+		for _, operation := range binding.OperationNames() {
+			identity, err := binding.RuntimeActivityTarget(operation)
 			if err != nil {
-				return nil, fmt.Errorf("channel binding %q operation %q private target: %w", binding.ID, operation, err)
+				return nil, fmt.Errorf("channel binding %q operation %q private target: %w", binding.BindingID(), operation, err)
 			}
-			if _, exists := out[id]; exists {
-				return nil, fmt.Errorf("duplicate private channel activity tool %q", id)
+			if _, exists := out[identity.ToolID()]; exists {
+				return nil, fmt.Errorf("duplicate private channel activity tool %q", identity.ToolID())
 			}
-			tool, err := binding.Structural.OperationTool(operation)
+			tool, err := binding.OperationTool(operation)
 			if err != nil {
-				return nil, fmt.Errorf("channel binding %q operation %q: %w", binding.ID, operation, err)
+				return nil, fmt.Errorf("channel binding %q operation %q: %w", binding.BindingID(), operation, err)
 			}
-			out[id] = runtimepipeline.ChannelActivityTarget{Tool: tool, PlanGeneration: generation}
+			target, err := runtimepipeline.NewChannelActivityTarget(tool, identity.Generation())
+			if err != nil {
+				return nil, fmt.Errorf("channel binding %q operation %q private target: %w", binding.BindingID(), operation, err)
+			}
+			out[identity.ToolID()] = target
 		}
 	}
 	return out, nil

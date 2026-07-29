@@ -32,12 +32,7 @@ type channelOperation struct {
 func compileChannelOperations(bindings []packs.OutboundBindingPlan) map[string]channelOperation {
 	out := map[string]channelOperation{}
 	for _, binding := range bindings {
-		binding = binding.Clone()
-		for operation := range binding.Structural.Operations {
-			operation = strings.TrimSpace(operation)
-			if operation == "" {
-				continue
-			}
+		for _, operation := range binding.OperationNames() {
 			out[binding.RuntimeToolID(operation)] = channelOperation{binding: binding, operation: operation}
 		}
 	}
@@ -52,7 +47,6 @@ func (e *Executor) execChannelOperation(ctx context.Context, actor models.AgentC
 	if !ok {
 		return nil, runtimefailures.New(runtimefailures.ClassTargetUnreachable, "channel_operation_not_configured", "channel-runtime", "execute", map[string]any{"tool": strings.TrimSpace(toolID)})
 	}
-	compiled := operation.binding.Structural.Operations[operation.operation]
 	connectorToolID, prepared, err := operation.binding.PrepareOperation(operation.operation, input)
 	if err != nil {
 		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "channel_operation_input_invalid", "channel-runtime", "prepare", map[string]any{"tool": strings.TrimSpace(toolID)}, err)
@@ -95,17 +89,20 @@ func (e *Executor) execChannelOperation(ctx context.Context, actor models.AgentC
 	flowInstance := firstChannelString(target.FlowInstance, inbound.FlowInstance(), actor.CanonicalFlowPath(), flowID)
 	activityCoordinate := strings.Join([]string{strings.TrimSpace(toolID), logicalOperationID}, "\x00")
 	activityID := "channel_" + strings.ReplaceAll(strings.TrimPrefix(strings.TrimSpace(toolID), "channel."), ".", "_") + "_" + uuid.NewSHA1(uuid.NameSpaceURL, []byte(activityCoordinate)).String()
-	activityToolID, planGeneration, err := operation.binding.RuntimeActivityTarget(operation.operation)
+	privateTarget, err := operation.binding.RuntimeActivityTarget(operation.operation)
 	if err != nil {
 		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "channel_activity_plan_generation_invalid", "channel-runtime", "build_activity", map[string]any{"tool": strings.TrimSpace(toolID)}, err)
 	}
-	effectClass := runtimecontracts.NormalizeActivityEffectClass(compiled.Interface.EffectClass)
+	effectClass, err := operation.binding.OperationEffectClass(operation.operation)
+	if err != nil {
+		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "channel_operation_plan_invalid", "channel-runtime", "build_activity", map[string]any{"tool": strings.TrimSpace(toolID)}, err)
+	}
 	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(effectClass)
 	intent := runtimeengine.ActivityIntent{
 		Context:          events.DeliveryContextFromContext(ctx),
 		ActivityID:       activityID,
-		Tool:             activityToolID,
-		PlanGeneration:   planGeneration,
+		Tool:             privateTarget.ToolID(),
+		PlanGeneration:   privateTarget.Generation(),
 		BundleHash:       bundleHash,
 		WorkflowVersion:  workflowVersion,
 		Input:            semanticInput,

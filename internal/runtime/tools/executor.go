@@ -120,17 +120,17 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		func(ctx context.Context, actor models.AgentConfig, name string, input any) (any, error) {
 			return exec.handleEmitTool(ctx, actor, name, input)
 		},
-		func(actor models.AgentConfig, name string) (RegisteredTool, bool, error) {
-			return exec.resolveRegisteredTool(actor, name)
+		func(actor models.AgentConfig, name string) (ExecutionTool, bool, error) {
+			return exec.resolveExecutionTool(actor, name)
 		},
-		func(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error) {
+		func(ctx context.Context, actor models.AgentConfig, tool ExecutionTool, input any) (any, error) {
 			return exec.execHTTPTool(ctx, actor, tool, input)
 		},
-		func(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error) {
+		func(ctx context.Context, actor models.AgentConfig, tool ExecutionTool, input any) (any, error) {
 			return exec.execMCPTool(ctx, actor, tool, input)
 		},
-		func(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error) {
-			return exec.execChannelOperation(ctx, actor, tool.Name, input)
+		func(ctx context.Context, actor models.AgentConfig, tool ExecutionTool, input any) (any, error) {
+			return exec.execChannelOperation(ctx, actor, tool.Name(), input)
 		},
 		exec.dispatchRoleScopedEntityTool,
 		exec.buildToolHandlers(),
@@ -175,7 +175,7 @@ func (e *Executor) contractDefinitionsForActor(actor *models.AgentConfig) ([]llm
 	return toolDefinitionsForActor(source, *actor, discovered)
 }
 
-func (e *Executor) resolveRegisteredTool(actor models.AgentConfig, name string) (RegisteredTool, bool, error) {
+func (e *Executor) resolveExecutionTool(actor models.AgentConfig, name string) (ExecutionTool, bool, error) {
 	name = normalizeNativeToolName(name)
 	e.mu.RLock()
 	source := e.workflowSource
@@ -187,19 +187,19 @@ func (e *Executor) resolveRegisteredTool(actor models.AgentConfig, name string) 
 		discovered = client.DiscoveredTools()
 	}
 	if allowInternalLegacy && IsLegacyEntityToolSurfaceName(name) {
-		entries, err := registeredToolsForRuntime(source, discovered)
+		entries, err := executionToolsForRuntime(source, discovered)
 		if err != nil {
-			return RegisteredTool{}, false, err
+			return ExecutionTool{}, false, err
 		}
 		tool, ok := entries[name]
 		return tool, ok, nil
 	}
-	tool, ok, err := resolveRegisteredToolForActor(source, actor, name, discovered)
+	tool, ok, err := resolveExecutionToolForActor(source, actor, name, discovered)
 	if err != nil || !ok {
 		return tool, ok, err
 	}
 	if !e.nativeToolAdmittedForTool(context.Background(), actor, name) {
-		return RegisteredTool{}, false, nil
+		return ExecutionTool{}, false, nil
 	}
 	return tool, true, nil
 }
@@ -222,7 +222,7 @@ func (e *Executor) ToolDefinitionsForActor(actor models.AgentConfig) []llm.ToolD
 	if client != nil {
 		discovered = client.DiscoveredTools()
 	}
-	entries, err := registeredToolsForActor(source, actor, discovered)
+	entries, err := executionToolsForActor(source, actor, discovered)
 	if err != nil {
 		processWarn("tool-executor", "failed to load actor-scoped contract tool definitions: %v", err)
 		return nil
@@ -243,9 +243,9 @@ func (e *Executor) ToolDefinitionsForActor(actor models.AgentConfig) []llm.ToolD
 		}
 		filtered = append(filtered, llm.ToolDefinition{
 			Name:        name,
-			Description: strings.TrimSpace(entry.Description),
-			Usage:       strings.TrimSpace(entry.Usage),
-			Schema:      deepCloneJSONValue(entry.InputSchema),
+			Description: entry.Description(),
+			Usage:       entry.Usage(),
+			Schema:      entry.InputSchema(),
 		})
 	}
 	if e.emitRegistry != nil {

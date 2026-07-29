@@ -46,30 +46,62 @@ func TestGeneratedCatalogIsDeterministicCurrentAndProviderGeneric(t *testing.T) 
 		if !ok {
 			t.Fatalf("generated GitHub tool %q missing", toolID)
 		}
-		if tool.ManagedCredential == nil || tool.ManagedCredential.Key != "github_app" || tool.ManagedCredential.InstallationIDInput != "installation_id" {
-			t.Fatalf("generated GitHub tool %q credential = %#v", toolID, tool.ManagedCredential)
+		credential, ok := tool.ManagedCredential()
+		if !ok || credential.Key != "github_app" || credential.InstallationIDInput != "installation_id" {
+			t.Fatalf("generated GitHub tool %q credential = %#v", toolID, credential)
 		}
-		if tool.ResponseSuccess == nil || tool.ResponseSuccess.Kind != "http_status_2xx" {
-			t.Fatalf("generated GitHub tool %q response_success = %#v", toolID, tool.ResponseSuccess)
+		success, ok := tool.ResponseSuccess()
+		if !ok || success.Kind != "http_status_2xx" {
+			t.Fatalf("generated GitHub tool %q response_success = %#v", toolID, success)
 		}
 	}
 
 	acme := artifacts["acme"]
 	tool, ok := acme.Manifest.Tools["acme.create_widget"]
-	if !ok || tool.HTTP == nil {
+	httpSpec, hasHTTP := tool.HTTP()
+	if !ok || !hasHTTP {
 		t.Fatalf("synthetic generated tool = %#v, want acme.create_widget HTTP tool", tool)
 	}
-	if tool.HTTP.Method != "POST" || tool.HTTP.URL != "https://api.acme.test/accounts/{{input.account_id}}/widgets" {
-		t.Fatalf("synthetic generated HTTP shape = %#v", tool.HTTP)
+	if httpSpec.Method != "POST" || httpSpec.URL != "https://api.acme.test/accounts/{{input.account_id}}/widgets" {
+		t.Fatalf("synthetic generated HTTP shape = %#v", httpSpec)
 	}
-	if got := tool.HTTP.Headers["Authorization"]; got != "Bearer {{credentials.acme_api_key}}" {
+	if got := httpSpec.Headers["Authorization"]; got != "Bearer {{credentials.acme_api_key}}" {
 		t.Fatalf("synthetic generated Authorization = %q", got)
 	}
-	if len(tool.Credentials) != 1 || tool.Credentials[0] != "acme_api_key" {
-		t.Fatalf("synthetic generated credentials = %#v", tool.Credentials)
+	credentials := tool.Credentials()
+	if len(credentials) != 1 || credentials[0] != "acme_api_key" {
+		t.Fatalf("synthetic generated credentials = %#v", credentials)
 	}
 	if _, exists := BuiltinTool("acme", "acme.create_widget"); exists {
 		t.Fatal("synthetic conformance connector became an ambient builtin tool")
+	}
+}
+
+func TestGeneratedConnectorToolsUseClosedAdmissionAndExecutionContract(t *testing.T) {
+	artifacts, err := GenerateCatalog(os.DirFS("."))
+	if err != nil {
+		t.Fatalf("GenerateCatalog: %v", err)
+	}
+	for _, artifact := range artifacts {
+		for toolID, tool := range artifact.Manifest.Tools {
+			before, err := tool.CanonicalHash()
+			if err != nil {
+				t.Fatalf("%s.%s admitted hash: %v", artifact.Manifest.Provider, toolID, err)
+			}
+			httpSpec, ok := tool.HTTP()
+			if !ok {
+				t.Fatalf("%s.%s has no admitted HTTP contract", artifact.Manifest.Provider, toolID)
+			}
+			httpSpec.URL = "https://mutated.invalid"
+			httpSpec.Headers["X-Mutated"] = "true"
+			after, err := tool.CanonicalHash()
+			if err != nil {
+				t.Fatalf("%s.%s hash after readback mutation: %v", artifact.Manifest.Provider, toolID, err)
+			}
+			if after != before {
+				t.Fatalf("%s.%s retained caller-owned generated-tool mutation", artifact.Manifest.Provider, toolID)
+			}
+		}
 	}
 }
 
@@ -446,8 +478,13 @@ func TestGenerationEvidenceResponseSuccessBindingPreservesScalarKinds(t *testing
 					ReviewStatus:    GenerationReviewApproved,
 				}},
 			}
+			objectSchema := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)
+			toolEntry := runtimecontracts.MustToolSchemaEntry(
+				runtimecontracts.WithToolSchemas(objectSchema, objectSchema),
+				runtimecontracts.WithToolResponseSuccess(toolPolicy),
+			)
 			err := evidence.Validate("acme", map[string]runtimecontracts.ToolSchemaEntry{
-				"acme.create_widget": {ResponseSuccess: &toolPolicy},
+				"acme.create_widget": toolEntry,
 			})
 			if tc.wantErr && (err == nil || !strings.Contains(err.Error(), "response_success does not match")) {
 				t.Fatalf("Validate error = %v, want type-preserving mismatch", err)

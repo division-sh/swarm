@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 )
@@ -66,14 +67,29 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 		t.Fatalf("preflight channel subjects = %#v, want structural and outbound", report.CapabilitySubjects)
 	}
 
-	conflicting := ready.Plans[0].Clone()
-	for operationName, scope := range map[string]string{"deliver": "deliver", "edit": "edit"} {
-		operation := conflicting.Operations[operationName]
-		operation.ToolSchema.Credentials = nil
-		operation.ToolSchema.ManagedCredential = &runtimecontracts.ManagedCredentialRef{Key: "shared-channel-auth", Scopes: []string{scope}}
-		conflicting.Operations[operationName] = operation
+	connectors := providerconnectors.DefaultPackRegistry().PackDescriptors()
+	for index := range connectors {
+		if connectors[index].Identity.ID != "provider.telegram.connector" {
+			continue
+		}
+		for toolID, scope := range map[string]string{"telegram.send_interactive": "deliver", "telegram.edit_message": "edit"} {
+			tool := connectors[index].Tools[toolID]
+			tool, err = tool.WithManagedCredential(runtimecontracts.ManagedCredentialRef{Key: "shared-channel-auth", Scopes: []string{scope}})
+			if err != nil {
+				t.Fatalf("derive conflicting connector tool %q: %v", toolID, err)
+			}
+			connectors[index].Tools[toolID] = tool
+		}
 	}
-	if _, err := compileChannelBindings(context.Background(), cfg, []packs.SatisfactionPlan{conflicting}, nil, nil); err == nil {
+	registry, err := packs.NewInterfaceRegistry(spec)
+	if err != nil {
+		t.Fatalf("NewInterfaceRegistry: %v", err)
+	}
+	conflicting, err := packs.CompileChannelInventory(registry, ready.Loaded, triggers.Catalog.PackDescriptors(), connectors)
+	if err != nil {
+		t.Fatalf("CompileChannelInventory: %v", err)
+	}
+	if _, err := compileChannelBindings(context.Background(), cfg, conflicting, nil, nil); err == nil {
 		t.Fatal("incompatible same-key channel credential requirements were accepted")
 	}
 }

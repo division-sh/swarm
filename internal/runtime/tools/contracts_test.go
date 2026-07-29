@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -14,20 +15,9 @@ import (
 func TestContractDefinitionsForSource_UsesProvidedSource(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"agent_message": {
-				Category:    "platform",
-				Description: "source-backed agent messaging schema",
-				InputSchema: runtimecontracts.ToolInputSchema{
-					Type:        "object",
-					Description: "source-backed agent messaging schema",
-					Required:    []string{"to"},
-					Properties: map[string]runtimecontracts.ToolInputSchema{
-						"to": {
-							Type: "string",
-						},
-					},
-				},
-			},
+			"agent_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("platform"), runtimecontracts.WithToolDescription("source-backed agent messaging schema"), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaDescription("source-backed agent messaging schema"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+				"to": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+			}), runtimecontracts.ToolSchemaRequired("to")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
 		},
 	}
 
@@ -83,11 +73,7 @@ func TestContractDefinitionsForSource_DoesNotExposeCreateFlowInstance(t *testing
 func TestContractDefinitionsForSource_DoesNotExposeConfigureRouting(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"configure_routing": {
-				HandlerType: "platform_builtin",
-				Category:    "platform",
-				Description: "deprecated runtime stub should stay hidden",
-			},
+			"configure_routing": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("platform"), runtimecontracts.WithToolDescription("deprecated runtime stub should stay hidden"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("platform_builtin")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
 		},
 	}
 
@@ -122,11 +108,7 @@ required: [mode]
 
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"agent_message": {
-				Category:    "platform",
-				Description: "canonical schema test",
-				InputSchema: schema,
-			},
+			"agent_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("platform"), runtimecontracts.WithToolDescription("canonical schema test"), runtimecontracts.WithToolSchemas(schema, runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
 		},
 	}
 
@@ -196,7 +178,10 @@ required: [result]
 	if err != nil {
 		t.Fatalf("provider-visible projection: %v", err)
 	}
-	runtimeAdmission := runtimecontracts.ToolInputSchemaJSONSchema(schema)
+	runtimeAdmission, err := schema.Project()
+	if err != nil {
+		t.Fatalf("runtime admission projection: %v", err)
+	}
 	providerResult := providerVisible["properties"].(map[string]any)["result"].(map[string]any)
 	runtimeResult := runtimeAdmission["properties"].(map[string]any)["result"].(map[string]any)
 	providerNested := providerResult["properties"].(map[string]any)
@@ -224,7 +209,7 @@ required: [result]
 	}
 }
 
-func TestRegisteredToolProjectionConsumesExactCanonicalSchemaOwner(t *testing.T) {
+func TestExecutionToolProjectionConsumesExactCanonicalSchemaOwner(t *testing.T) {
 	var schema runtimecontracts.ToolInputSchema
 	if err := yaml.Unmarshal([]byte(`
 type: object
@@ -242,22 +227,88 @@ additionalProperties: false
 `), &schema); err != nil {
 		t.Fatalf("decode schema: %v", err)
 	}
-	want, err := runtimecontracts.ProjectToolInputSchema(schema)
+	want, err := schema.Project()
 	if err != nil {
-		t.Fatalf("ProjectToolInputSchema: %v", err)
+		t.Fatalf("schema Project: %v", err)
 	}
-	registered, included, err := registeredToolFromContract("test.exact", runtimecontracts.ToolSchemaEntry{HandlerType: "http", InputSchema: schema})
+	execution, included, err := executionToolFromContract("test.exact", runtimecontracts.MustToolSchemaEntry(
+		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+		runtimecontracts.WithToolSchemas(schema, runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
+		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"}),
+	))
 	if err != nil || !included {
-		t.Fatalf("registeredToolFromContract = (%#v, %v, %v)", registered, included, err)
+		t.Fatalf("executionToolFromContract = (%#v, %v, %v)", execution, included, err)
 	}
-	if !reflect.DeepEqual(registered.InputSchema, want) {
-		t.Fatalf("registered schema = %#v, want exact %#v", registered.InputSchema, want)
+	gotHash, err := canonicaljson.Hash(execution.InputSchema())
+	if err != nil {
+		t.Fatalf("hash execution schema: %v", err)
+	}
+	wantHash, err := canonicaljson.Hash(want)
+	if err != nil {
+		t.Fatalf("hash canonical owner schema: %v", err)
+	}
+	if gotHash != wantHash {
+		t.Fatalf("execution schema hash = %s, want exact owner hash %s", gotHash, wantHash)
 	}
 
-	cyclic := runtimecontracts.ToolInputSchema{Type: "array"}
-	cyclic.Items = &cyclic
-	if _, _, err := registeredToolFromContract("test.cyclic", runtimecontracts.ToolSchemaEntry{HandlerType: "http", InputSchema: cyclic}); err == nil || !strings.Contains(err.Error(), "schema cycle") {
-		t.Fatalf("cyclic registered schema error = %v", err)
+	if _, err := runtimecontracts.NewToolInputSchema(runtimecontracts.ToolSchemaArray); err == nil || !strings.Contains(err.Error(), "requires items") {
+		t.Fatalf("malformed admitted schema error = %v", err)
+	}
+}
+
+func TestRuntimeExecutionViewIsDerivedAndAuthorityFree(t *testing.T) {
+	headers := map[string]string{"X-Test": "owner"}
+	body := map[string]any{"nested": []any{"owner"}}
+	mapping := map[string]any{"value": "{{response.body.value}}"}
+	input := runtimecontracts.MustToolInputSchema(
+		runtimecontracts.ToolSchemaObject,
+		runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+			"value": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString),
+		}),
+		runtimecontracts.ToolSchemaRequired("value"),
+	)
+	entry := runtimecontracts.MustToolSchemaEntry(
+		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+		runtimecontracts.WithToolSchemas(input, input),
+		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+			Method: "POST", URL: "https://example.test", Headers: headers, Body: body,
+		}),
+		runtimecontracts.WithToolResponseMapping(mapping),
+	)
+	ownerHash, err := entry.CanonicalHash()
+	if err != nil {
+		t.Fatalf("owner hash: %v", err)
+	}
+	execution, included, err := executionToolFromContract("test.execution", entry)
+	if err != nil || !included {
+		t.Fatalf("executionToolFromContract = (%#v, %v, %v)", execution, included, err)
+	}
+
+	headers["X-Test"] = "caller mutation"
+	body["nested"].([]any)[0] = "caller mutation"
+	mapping["value"] = "caller mutation"
+	execution.InputSchema()["properties"].(map[string]any)["value"] = map[string]any{"type": "boolean"}
+	httpSnapshot, ok := execution.HTTP()
+	if !ok {
+		t.Fatal("derived execution view lost HTTP semantics")
+	}
+	httpSnapshot.Headers["X-Test"] = "readback mutation"
+	httpSnapshot.Body.(map[string]any)["nested"].([]any)[0] = "readback mutation"
+	execution.ResponseMapping()["value"] = "readback mutation"
+
+	httpSnapshot, _ = execution.HTTP()
+	if execution.Handler() != implementationHTTP ||
+		httpSnapshot.Headers["X-Test"] != "owner" ||
+		httpSnapshot.Body.(map[string]any)["nested"].([]any)[0] != "owner" ||
+		execution.ResponseMapping()["value"] != "{{response.body.value}}" {
+		t.Fatalf("derived execution view leaked mutation authority: %#v", execution)
+	}
+	afterHash, err := entry.CanonicalHash()
+	if err != nil {
+		t.Fatalf("owner hash after readback mutation: %v", err)
+	}
+	if afterHash != ownerHash {
+		t.Fatalf("derived execution view changed admitted owner hash: before=%s after=%s", ownerHash, afterHash)
 	}
 }
 

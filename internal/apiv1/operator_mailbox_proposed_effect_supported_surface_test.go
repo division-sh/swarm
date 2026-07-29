@@ -67,18 +67,12 @@ func TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores(t *t
 			persistence, db := tc.open(t)
 			bundle := mailboxWriteSupportedSurfaceBundle(t)
 			bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-				"provider_write": {
-					HandlerType: "http", EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
-					InputSchema: runtimecontracts.ToolInputSchema{
-						Type: "object", Required: []string{"text"},
-						Properties: map[string]runtimecontracts.ToolInputSchema{"text": {Type: "string"}},
-					},
-					OutputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
-					HTTP: &runtimecontracts.HTTPToolSpec{
-						Method: http.MethodPost, URL: provider.URL,
-						Body: map[string]any{"text": "{{input.text}}"},
-					},
-				},
+				"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{"text": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string"))}), runtimecontracts.ToolSchemaRequired("text")),
+
+					runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+					Method: http.MethodPost, URL: provider.URL,
+					Body: map[string]any{"text": "{{input.text}}"},
+				})),
 			}
 			activityNode := runtimecontracts.SystemNodeContract{
 				ID: "activity-runtime", ExecutionType: runtimecontracts.SystemNodeExecutionType,

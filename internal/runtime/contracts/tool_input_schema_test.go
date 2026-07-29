@@ -18,65 +18,106 @@ func TestValidateToolInputSchemaRejectsMalformedRecursiveSchemas(t *testing.T) {
 	trueValue := true
 	negativeZero := math.Copysign(0, -1)
 	notFinite := math.Inf(1)
+	stringSchema := MustToolInputSchema(ToolSchemaString)
+
 	tests := []struct {
-		name   string
-		schema ToolInputSchema
-		want   string
+		name  string
+		build func() error
+		want  string
 	}{
-		{name: "missing type", schema: ToolInputSchema{}, want: "explicit supported JSON type"},
-		{name: "noncanonical type", schema: ToolInputSchema{Type: " String "}, want: "not canonical"},
-		{name: "nested unsupported type", schema: ToolInputSchema{Type: "array", Items: &ToolInputSchema{Type: "money"}}, want: "$.items requires an explicit supported JSON type"},
-		{name: "array missing items", schema: ToolInputSchema{Type: "array"}, want: "array requires items"},
-		{name: "negative item bound", schema: ToolInputSchema{Type: "array", Items: &ToolInputSchema{Type: "string"}, MinItems: &negative}, want: "minItems must be non-negative"},
-		{name: "impossible item bounds", schema: ToolInputSchema{Type: "array", Items: &ToolInputSchema{Type: "string"}, MinItems: &one, MaxItems: &zero}, want: "minItems must be <= maxItems"},
-		{name: "invalid regex", schema: ToolInputSchema{Type: "string", Pattern: "["}, want: "pattern is invalid"},
-		{name: "inapplicable string constraint", schema: ToolInputSchema{Type: "boolean", MinLength: &one}, want: "cannot declare string constraints"},
-		{name: "negative zero", schema: ToolInputSchema{Type: "number", Minimum: &negativeZero}, want: "finite non-negative-zero"},
-		{name: "nonfinite number", schema: ToolInputSchema{Type: "number", Maximum: &notFinite}, want: "finite non-negative-zero"},
-		{name: "missing required property", schema: ToolInputSchema{Type: "object", Required: []string{"id"}}, want: "required property \"id\" is not declared"},
-		{name: "noncanonical property", schema: ToolInputSchema{Type: "object", Properties: map[string]ToolInputSchema{" id ": {Type: "string"}}}, want: "property name \" id \" is not canonical"},
-		{name: "duplicate required", schema: ToolInputSchema{Type: "object", Properties: map[string]ToolInputSchema{"id": {Type: "string"}}, Required: []string{"id", "id"}}, want: "required property \"id\" is duplicated"},
-		{name: "two additional properties forms", schema: ToolInputSchema{Type: "object", AdditionalProperties: ToolAdditionalProperties{Allowed: &falseValue, Schema: &ToolInputSchema{Type: "string"}}}, want: "boolean or schema, not both"},
-		{name: "additional properties malformed", schema: ToolInputSchema{Type: "object", AdditionalProperties: ToolAdditionalProperties{Schema: &ToolInputSchema{Type: "array"}}}, want: "additionalProperties array requires items"},
-		{name: "enum wrong type", schema: ToolInputSchema{Type: "integer", Enum: []SchemaLiteral{schemaStringLiteral("one")}}, want: "enum[0] must be integer"},
-		{name: "duplicate semantic enum", schema: ToolInputSchema{Type: "string", Enum: []SchemaLiteral{schemaStringLiteral("one"), schemaStringLiteral("one")}}, want: "duplicates another semantic value"},
-		{name: "object constraints on scalar", schema: ToolInputSchema{Type: "string", AdditionalProperties: ToolAdditionalProperties{Allowed: &trueValue}}, want: "cannot declare object constraints"},
+		{name: "missing type", build: func() error { _, err := NewToolInputSchema(""); return err }, want: "explicit supported JSON type"},
+		{name: "noncanonical type", build: func() error { _, err := NewToolInputSchema(ToolSchemaKind(" String ")); return err }, want: "explicit supported JSON type"},
+		{name: "array missing items", build: func() error { _, err := NewToolInputSchema(ToolSchemaArray); return err }, want: "array requires items"},
+		{name: "negative item bound", build: func() error {
+			_, err := NewToolInputSchema(ToolSchemaArray, ToolSchemaItems(stringSchema), ToolSchemaMinItems(negative))
+			return err
+		}, want: "minItems must be non-negative"},
+		{name: "impossible item bounds", build: func() error {
+			_, err := NewToolInputSchema(ToolSchemaArray, ToolSchemaItems(stringSchema), ToolSchemaMinItems(one), ToolSchemaMaxItems(zero))
+			return err
+		}, want: "minItems must be <= maxItems"},
+		{name: "invalid regex", build: func() error {
+			_, err := NewToolInputSchema(ToolSchemaString, ToolSchemaPattern("["))
+			return err
+		}, want: "pattern is invalid"},
+		{name: "inapplicable string constraint", build: func() error {
+			_, err := NewToolInputSchema(ToolSchemaBoolean, ToolSchemaMinLength(one))
+			return err
+		}, want: "cannot declare string constraints"},
+		{name: "negative zero", build: func() error {
+			_, err := NewToolInputSchema(ToolSchemaNumber, ToolSchemaMinimum(negativeZero))
+			return err
+		}, want: "finite non-negative-zero"},
+		{name: "nonfinite number", build: func() error {
+			_, err := NewToolInputSchema(ToolSchemaNumber, ToolSchemaMaximum(notFinite))
+			return err
+		}, want: "finite non-negative-zero"},
+		{name: "missing required property", build: func() error {
+			_, err := NewToolInputSchema(ToolSchemaObject, ToolSchemaRequired("id"))
+			return err
+		}, want: "required property \"id\" is not declared"},
+		{name: "noncanonical property", build: func() error {
+			_, err := NewToolInputSchema(ToolSchemaObject, ToolSchemaProperties(map[string]ToolInputSchema{" id ": stringSchema}))
+			return err
+		}, want: "property name \" id \" is not canonical"},
+		{name: "duplicate required", build: func() error {
+			_, err := NewToolInputSchema(ToolSchemaObject, ToolSchemaProperties(map[string]ToolInputSchema{"id": stringSchema}), ToolSchemaRequired("id", "id"))
+			return err
+		}, want: "required property \"id\" is duplicated"},
+		{name: "two additional properties forms", build: func() error {
+			_, err := NewToolInputSchema(ToolSchemaObject, ToolSchemaAdditionalPropertiesAllowed(falseValue), ToolSchemaAdditionalPropertiesSchema(stringSchema))
+			return err
+		}, want: "boolean or schema, not both"},
+		{name: "enum wrong type", build: func() error {
+			_, err := NewToolInputSchema(ToolSchemaInteger, ToolSchemaEnum("one"))
+			return err
+		}, want: "enum[0] must be integer"},
+		{name: "duplicate semantic enum", build: func() error {
+			_, err := NewToolInputSchema(ToolSchemaString, ToolSchemaEnum("one", "one"))
+			return err
+		}, want: "duplicates another semantic value"},
+		{name: "object constraints on scalar", build: func() error {
+			_, err := NewToolInputSchema(ToolSchemaString, ToolSchemaAdditionalPropertiesAllowed(trueValue))
+			return err
+		}, want: "cannot declare object constraints"},
 	}
+
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := ValidateToolInputSchema(tc.schema); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("ValidateToolInputSchema error = %v, want %q", err, tc.want)
+			if err := tc.build(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("admission error = %v, want %q", err, tc.want)
 			}
 		})
+	}
+
+	var nested ToolInputSchema
+	err := yaml.Unmarshal([]byte("type: array\nitems:\n  type: money\n"), &nested)
+	if err == nil || !strings.Contains(err.Error(), "requires an explicit supported JSON type") {
+		t.Fatalf("nested YAML admission error = %v", err)
 	}
 }
 
 func TestValidateToolInputSchemaRejectsCyclesAndExcessiveDepthBeforeProjectionOrClone(t *testing.T) {
-	cyclic := ToolInputSchema{Type: "array"}
-	cyclic.Items = &cyclic
-	if err := ValidateToolInputSchema(cyclic); err == nil || !strings.Contains(err.Error(), "schema cycle") {
+	cyclicValue := &toolInputSchemaValue{kind: ToolSchemaArray, hasItems: true}
+	cyclic := ToolInputSchema{value: cyclicValue}
+	cyclicValue.items = cyclic
+	if err := cyclic.ValidateDefinition(); err == nil || !strings.Contains(err.Error(), "schema cycle") {
 		t.Fatalf("cyclic schema error = %v", err)
 	}
-	if _, err := ProjectToolInputSchema(cyclic); err == nil || !strings.Contains(err.Error(), "schema cycle") {
+	if _, err := cyclic.Project(); err == nil || !strings.Contains(err.Error(), "schema cycle") {
 		t.Fatalf("cyclic projection error = %v", err)
 	}
-	if cloned := CloneToolInputSchema(cyclic); ToolInputSchemaIsZero(cloned) || ValidateToolInputSchema(cloned) == nil {
-		t.Fatalf("cyclic clone = %#v, want fail-closed invalid schema", cloned)
-	}
 
-	deep := ToolInputSchema{Type: "string"}
+	deep := MustToolInputSchema(ToolSchemaString)
+	var err error
 	for depth := 0; depth <= MaxToolInputSchemaDepth; depth++ {
-		item := deep
-		deep = ToolInputSchema{Type: "array", Items: &item}
+		deep, err = NewToolInputSchema(ToolSchemaArray, ToolSchemaItems(deep))
+		if err != nil {
+			break
+		}
 	}
-	if err := ValidateToolInputSchema(deep); err == nil || !strings.Contains(err.Error(), "exceeds maximum schema depth") {
+	if err == nil || !strings.Contains(err.Error(), "exceeds maximum schema depth") {
 		t.Fatalf("deep schema error = %v", err)
-	}
-	if _, err := ProjectToolInputSchema(deep); err == nil || !strings.Contains(err.Error(), "exceeds maximum schema depth") {
-		t.Fatalf("deep projection error = %v", err)
-	}
-	if cloned := CloneToolInputSchema(deep); ToolInputSchemaIsZero(cloned) || ValidateToolInputSchema(cloned) == nil {
-		t.Fatalf("deep clone = %#v, want fail-closed invalid schema", cloned)
 	}
 }
 
@@ -84,17 +125,10 @@ func TestToolInputSchemaRejectsExplicitEmptyEnum(t *testing.T) {
 	var schema ToolInputSchema
 	err := yaml.Unmarshal([]byte("type: string\nenum: []\n"), &schema)
 	if err == nil || !strings.Contains(err.Error(), "enum must contain at least one value") {
-		t.Fatalf("empty enum error = %v", err)
+		t.Fatalf("empty enum YAML error = %v", err)
 	}
-	typed := ToolInputSchema{Type: "string", Enum: []SchemaLiteral{}}
-	if err := ValidateToolInputSchema(typed); err == nil || !strings.Contains(err.Error(), "enum must contain at least one value") {
+	if _, err := NewToolInputSchema(ToolSchemaString, ToolSchemaEnum()); err == nil || !strings.Contains(err.Error(), "enum must contain at least one value") {
 		t.Fatalf("typed empty enum error = %v", err)
-	}
-	if _, err := ProjectToolInputSchema(typed); err == nil || !strings.Contains(err.Error(), "enum must contain at least one value") {
-		t.Fatalf("typed empty enum projection error = %v", err)
-	}
-	if ToolInputSchemaIsZero(typed) {
-		t.Fatal("typed empty enum was treated as an omitted schema")
 	}
 }
 
@@ -160,22 +194,10 @@ schema:
 `), &document); err != nil {
 		t.Fatalf("decode non-null schema alias: %v", err)
 	}
-	child := document.Schema.Properties["child"]
-	if child.Type != "string" || len(child.Enum) != 1 {
+	child, ok := document.Schema.Property("child")
+	values, declared := child.EnumValues()
+	if !ok || child.Kind() != ToolSchemaString || !declared || len(values) != 1 {
 		t.Fatalf("non-null schema alias = %#v", child)
-	}
-
-	if err := yaml.Unmarshal([]byte(`
-null_anchor: &nil null
-child_schema: &child
-  type: string
-  enum: *nil
-schema:
-  type: object
-  properties:
-    child: *child
-`), &document); err == nil || !strings.Contains(err.Error(), `tool schema field "enum" must not be null`) {
-		t.Fatalf("nested schema alias error = %v", err)
 	}
 
 	cycleA := &yaml.Node{Kind: yaml.AliasNode}
@@ -188,17 +210,6 @@ schema:
 	var schema ToolInputSchema
 	if err := schema.UnmarshalYAML(cycleSchema); err == nil || !strings.Contains(err.Error(), "YAML alias cycle") {
 		t.Fatalf("alias-cycle error = %v", err)
-	}
-
-	alias := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"}
-	for depth := 0; depth <= MaxToolInputSchemaDepth; depth++ {
-		alias = &yaml.Node{Kind: yaml.AliasNode, Alias: alias}
-	}
-	deepSchema := &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
-		{Kind: yaml.ScalarNode, Tag: "!!str", Value: "enum"}, alias,
-	}}
-	if err := schema.UnmarshalYAML(deepSchema); err == nil || !strings.Contains(err.Error(), "alias chain exceeds maximum depth") {
-		t.Fatalf("deep-alias error = %v", err)
 	}
 }
 
@@ -217,10 +228,10 @@ properties:
     type: array
     items: {type: number}
 `)
-	if err := ValidateToolInputSchema(schema); err != nil {
-		t.Fatalf("ValidateToolInputSchema: %v", err)
+	projected, err := schema.Project()
+	if err != nil {
+		t.Fatalf("Project: %v", err)
 	}
-	projected := ToolInputSchemaJSONSchema(schema)
 	if got := projected["required"]; !reflect.DeepEqual(got, []string{"status"}) {
 		t.Fatalf("required = %#v", got)
 	}
@@ -235,116 +246,78 @@ properties:
 	}
 }
 
-func TestCloneToolInputSchemaAndEventCatalogAreMutationIsolated(t *testing.T) {
-	schema := schemaWithEnum(t, `
-type: object
-properties:
-  state:
-    type: object
-    properties:
-      code: {type: string}
-    required: [code]
-    enum:
-      - {code: approved}
-`)
-	anchor := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "anchored"}
-	alias := yaml.Node{Kind: yaml.AliasNode, Alias: anchor}
-	state := schema.Properties["state"]
-	state.Enum = append(state.Enum, SchemaLiteral{Node: alias})
-	schema.Properties["state"] = state
-
-	cloned := CloneToolInputSchema(schema)
-	clonedState := cloned.Properties["state"]
-	clonedState.Required[0] = "changed"
-	clonedState.Enum[0].Node.Content[1].Value = "changed"
-	clonedState.Enum[1].Node.Alias.Value = "changed"
-	cloned.Properties["state"] = clonedState
-	originalState := schema.Properties["state"]
-	if originalState.Required[0] != "code" || originalState.Enum[0].Node.Content[1].Value != "approved" || originalState.Enum[1].Node.Alias.Value != "anchored" {
-		t.Fatalf("schema clone mutated original: %#v", originalState)
+func TestAdmittedToolExecutionContractIsOpaqueAndMutationProof(t *testing.T) {
+	stringSchema := MustToolInputSchema(ToolSchemaString, ToolSchemaEnum("approved"))
+	properties := map[string]ToolInputSchema{"state": stringSchema}
+	required := []string{"state"}
+	schema := MustToolInputSchema(ToolSchemaObject, ToolSchemaProperties(properties), ToolSchemaRequired(required...))
+	properties["state"] = MustToolInputSchema(ToolSchemaBoolean)
+	required[0] = "changed"
+	snapshot := schema.Properties()
+	snapshot["state"] = MustToolInputSchema(ToolSchemaBoolean)
+	requiredSnapshot := schema.RequiredProperties()
+	requiredSnapshot[0] = "changed"
+	state, _ := schema.Property("state")
+	if state.Kind() != ToolSchemaString || !schema.IsRequired("state") {
+		t.Fatal("schema retained caller or accessor mutation")
 	}
 
-	entry := EventCatalogEntry{Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{
-		"value": {ExactSchema: &schema, Citation: CriteriaCitation{AllowedClasses: []string{"source"}}},
-	}}}
-	entryClone := CloneEventCatalogEntry(entry)
-	entryField := entryClone.Payload.Properties["value"]
-	entryField.Citation.AllowedClasses[0] = "changed"
-	entryField.ExactSchema.Properties["state"] = ToolInputSchema{Type: "boolean"}
-	entryClone.Payload.Properties["value"] = entryField
-	if entry.Payload.Properties["value"].Citation.AllowedClasses[0] != "source" || entry.Payload.Properties["value"].ExactSchema.Properties["state"].Type != "object" {
-		t.Fatal("event catalog clone shared nested schema state")
+	headers := map[string]string{"X-Test": "one"}
+	body := map[string]any{"nested": []any{"one"}}
+	mapping := map[string]any{"state": map[string]any{"from": "result.state"}}
+	equals := map[string]any{"ok": true}
+	fields := map[string]CompiledResultField{"state": {From: "result.state"}}
+	credentials := []string{"token"}
+	entry := MustToolSchemaEntry(
+		WithToolHandler(ToolHandlerHTTP),
+		WithToolSchemas(schema, schema),
+		WithToolHTTP(HTTPToolSpec{Method: "POST", URL: "https://example.test", Headers: headers, Body: body}),
+		WithToolResponseMapping(mapping),
+		WithToolResponseSuccess(HTTPResponseSuccess{Kind: "field_equals", Equals: equals}),
+		WithToolCredentials(credentials...),
+		WithToolCompiledResult(CompiledResultProjection{Fields: fields, OutputSchema: schema}),
+	)
+	headers["X-Test"] = "changed"
+	body["nested"].([]any)[0] = "changed"
+	mapping["state"].(map[string]any)["from"] = "changed"
+	equals["ok"] = false
+	fields["state"] = CompiledResultField{From: "changed"}
+	credentials[0] = "changed"
+
+	httpSpec, _ := entry.HTTP()
+	responseMapping, _ := entry.ResponseMapping()
+	responseSuccess, _ := entry.ResponseSuccess()
+	compiled, _ := entry.CompiledResult()
+	entryCredentials := entry.Credentials()
+	httpSpec.Headers["X-Test"] = "changed-again"
+	responseMapping["state"].(map[string]any)["from"] = "changed-again"
+	responseSuccess.Equals.(map[string]any)["ok"] = false
+	compiled.Fields["state"] = CompiledResultField{From: "changed-again"}
+	entryCredentials[0] = "changed-again"
+
+	httpSpec, _ = entry.HTTP()
+	responseMapping, _ = entry.ResponseMapping()
+	responseSuccess, _ = entry.ResponseSuccess()
+	compiled, _ = entry.CompiledResult()
+	if httpSpec.Headers["X-Test"] != "one" ||
+		httpSpec.Body.(map[string]any)["nested"].([]any)[0] != "one" ||
+		responseMapping["state"].(map[string]any)["from"] != "result.state" ||
+		responseSuccess.Equals.(map[string]any)["ok"] != true ||
+		entry.Credentials()[0] != "token" ||
+		compiled.Fields["state"].From != "result.state" {
+		t.Fatal("admitted tool execution contract leaked mutable authority")
 	}
 }
 
-func TestCloneToolSchemaEntryOwnsEveryMutableSchemaCarrier(t *testing.T) {
-	schema := schemaWithEnum(t, "type: string\nenum: [approved]\n")
-	entry := ToolSchemaEntry{
-		InputSchema:  schema,
-		OutputSchema: ToolInputSchema{Type: "object", Properties: map[string]ToolInputSchema{"state": schema}},
-		HTTP:         &HTTPToolSpec{Headers: map[string]string{"X-Test": "one"}, Body: map[string]any{"nested": []any{"one"}}},
-		ResponseMapping: map[string]any{
-			"state": map[string]any{"from": "result.state"},
-		},
-		ResponseSuccess: &HTTPResponseSuccess{Kind: "field_equals", Equals: map[string]any{"ok": true}},
-		Credentials:     []string{"token"},
-		CompiledResult: &CompiledResultProjection{
-			Fields: map[string]CompiledResultField{"state": {From: "result.state"}}, OutputSchema: schema,
-		},
-	}
-	cloned := CloneToolSchemaEntry(entry)
-	cloned.InputSchema.Enum[0].Node.Value = "changed"
-	cloned.OutputSchema.Properties["state"] = ToolInputSchema{Type: "boolean"}
-	cloned.HTTP.Headers["X-Test"] = "changed"
-	cloned.HTTP.Body.(map[string]any)["nested"].([]any)[0] = "changed"
-	cloned.ResponseMapping["state"].(map[string]any)["from"] = "changed"
-	cloned.ResponseSuccess.Equals.(map[string]any)["ok"] = false
-	cloned.Credentials[0] = "changed"
-	cloned.CompiledResult.Fields["state"] = CompiledResultField{From: "changed"}
-	cloned.CompiledResult.OutputSchema.Enum[0].Node.Value = "changed"
-
-	if entry.InputSchema.Enum[0].Node.Value != "approved" || entry.OutputSchema.Properties["state"].Type != "string" ||
-		entry.HTTP.Headers["X-Test"] != "one" || entry.HTTP.Body.(map[string]any)["nested"].([]any)[0] != "one" ||
-		entry.ResponseMapping["state"].(map[string]any)["from"] != "result.state" || entry.ResponseSuccess.Equals.(map[string]any)["ok"] != true ||
-		entry.Credentials[0] != "token" || entry.CompiledResult.Fields["state"].From != "result.state" ||
-		entry.CompiledResult.OutputSchema.Enum[0].Node.Value != "approved" {
-		t.Fatal("tool schema clone leaked a mutable carrier")
-	}
-}
-
-func TestAdmitToolSchemaEntryOwnsTypedSemanticJSONCarriersAndRejectsCycles(t *testing.T) {
-	body := map[string]string{"text": "one"}
-	labels := []string{"one"}
-	equals := map[string]string{"state": "ok"}
-	entry := ToolSchemaEntry{
-		InputSchema:     ToolInputSchema{Type: "object"},
-		OutputSchema:    ToolInputSchema{Type: "object"},
-		HTTP:            &HTTPToolSpec{Body: body},
-		ResponseMapping: map[string]any{"labels": labels},
-		ResponseSuccess: &HTTPResponseSuccess{Kind: "field_equals", Equals: equals},
-	}
-	admitted, err := AdmitToolSchemaEntry(entry)
-	if err != nil {
-		t.Fatalf("AdmitToolSchemaEntry: %v", err)
-	}
-	body["text"] = "changed"
-	labels[0] = "changed"
-	equals["state"] = "changed"
-	if admitted.HTTP.Body.(map[string]any)["text"] != "one" ||
-		admitted.ResponseMapping["labels"].([]any)[0] != "one" ||
-		admitted.ResponseSuccess.Equals.(map[string]any)["state"] != "ok" {
-		t.Fatalf("typed semantic carriers retained caller ownership: %#v", admitted)
-	}
-
+func TestAdmittedToolSemanticJSONCarriersRejectCycles(t *testing.T) {
 	cyclic := map[string]any{}
 	cyclic["self"] = cyclic
-	entry.HTTP.Body = cyclic
-	if _, err := AdmitToolSchemaEntry(entry); err == nil || !strings.Contains(err.Error(), "http.body") || !strings.Contains(err.Error(), "cycle") {
+	_, err := NewToolSchemaEntry(
+		WithToolSchemas(MustToolInputSchema(ToolSchemaObject), MustToolInputSchema(ToolSchemaObject)),
+		WithToolHTTP(HTTPToolSpec{Body: cyclic}),
+	)
+	if err == nil || !strings.Contains(err.Error(), "http.body") || !strings.Contains(err.Error(), "cycle") {
 		t.Fatalf("cyclic semantic carrier error = %v", err)
-	}
-	cloned := CloneToolSchemaEntry(entry)
-	if ValidateToolInputSchema(cloned.InputSchema) == nil || cloned.HTTP != nil {
-		t.Fatalf("invalid carrier clone did not fail closed: %#v", cloned)
 	}
 }
 
@@ -355,8 +328,4 @@ func schemaWithEnum(t *testing.T, body string) ToolInputSchema {
 		t.Fatalf("decode schema: %v", err)
 	}
 	return schema
-}
-
-func schemaStringLiteral(value string) SchemaLiteral {
-	return SchemaLiteral{Node: yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value}}
 }

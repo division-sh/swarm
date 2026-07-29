@@ -35,15 +35,15 @@ func TestCatalogGenerationIsSemanticAndOrderIndependent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.GenerationID() == "" || first.GenerationID() != second.GenerationID() {
-		t.Fatalf("generation ids = %q %q", first.GenerationID(), second.GenerationID())
+	if !first.Generation().Valid() || !first.Generation().Equal(second.Generation()) {
+		t.Fatalf("generation ids = %q %q", first.Generation().Diagnostic(), second.Generation().Diagnostic())
 	}
 	b.Identity.ManifestHash = strings.Repeat("b", 64)
 	changed, err := NewCatalogSnapshot(a, b)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if changed.GenerationID() == first.GenerationID() {
+	if changed.Generation().Equal(first.Generation()) {
 		t.Fatal("manifest identity change did not change catalog generation")
 	}
 }
@@ -123,7 +123,7 @@ func TestPackAuthenticationTransitionRequiresNewExplicitTargetContract(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if signed.GenerationID() == unsigned.GenerationID() {
+	if signed.Generation().Equal(unsigned.Generation()) {
 		t.Fatal("signed-to-unsigned pack transition retained catalog generation")
 	}
 	_, err = unsigned.CompileAdmission(CompileAdmissionRequest{Alias: "chat", Provider: "acme", SigningSecret: "webhook_signing.acme"})

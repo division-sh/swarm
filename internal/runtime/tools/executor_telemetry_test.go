@@ -109,21 +109,12 @@ func TestExecutorTelemetry_LogsSuccess(t *testing.T) {
 	bus := &telemetryBusStub{}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"check_domain": {
-				Description: "Check domain availability",
-				HandlerType: "http",
-				InputSchema: runtimecontracts.ToolInputSchema{
-					Type:     "object",
-					Required: []string{"domain"},
-					Properties: map[string]runtimecontracts.ToolInputSchema{
-						"domain": {Type: "string"},
-					},
-				},
-				HTTP: &runtimecontracts.HTTPToolSpec{
-					Method: "GET",
-					URL:    server.URL + "?domain={{input.domain}}",
-				},
-			},
+			"check_domain": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolDescription("Check domain availability"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+				"domain": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+			}), runtimecontracts.ToolSchemaRequired("domain")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+				Method: "GET",
+				URL:    server.URL + "?domain={{input.domain}}",
+			})),
 		},
 	})
 
@@ -206,21 +197,12 @@ func TestExecutorTelemetry_LogsExecutionFailure(t *testing.T) {
 	bus := &telemetryBusStub{}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"check_domain": {
-				Description: "Check domain availability",
-				HandlerType: "http",
-				InputSchema: runtimecontracts.ToolInputSchema{
-					Type:     "object",
-					Required: []string{"domain"},
-					Properties: map[string]runtimecontracts.ToolInputSchema{
-						"domain": {Type: "string"},
-					},
-				},
-				HTTP: &runtimecontracts.HTTPToolSpec{
-					Method: "GET",
-					URL:    server.URL + "?domain={{input.domain}}",
-				},
-			},
+			"check_domain": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolDescription("Check domain availability"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+				"domain": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+			}), runtimecontracts.ToolSchemaRequired("domain")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+				Method: "GET",
+				URL:    server.URL + "?domain={{input.domain}}",
+			})),
 		},
 	})
 
@@ -268,21 +250,12 @@ func TestExecutorTelemetry_PreservesTypedLineageForToolDiagnostics(t *testing.T)
 		bus := &telemetryBusStub{}
 		source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 			Tools: map[string]runtimecontracts.ToolSchemaEntry{
-				"check_domain": {
-					Description: "Check domain availability",
-					HandlerType: "http",
-					InputSchema: runtimecontracts.ToolInputSchema{
-						Type:     "object",
-						Required: []string{"domain"},
-						Properties: map[string]runtimecontracts.ToolInputSchema{
-							"domain": {Type: "string"},
-						},
-					},
-					HTTP: &runtimecontracts.HTTPToolSpec{
-						Method: "GET",
-						URL:    server.URL + "?domain={{input.domain}}",
-					},
-				},
+				"check_domain": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolDescription("Check domain availability"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+					"domain": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+				}), runtimecontracts.ToolSchemaRequired("domain")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+					Method: "GET",
+					URL:    server.URL + "?domain={{input.domain}}",
+				})),
 			},
 		})
 		actor := models.AgentConfig{ExecutionMode: "live", ID: "selected-agent", EntityID: "entity-typed-lineage", Tools: []string{"check_domain"}}
@@ -320,21 +293,12 @@ func TestExecutorTelemetry_PreservesTypedLineageForToolDiagnostics(t *testing.T)
 		bus := &telemetryBusStub{}
 		source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 			Tools: map[string]runtimecontracts.ToolSchemaEntry{
-				"check_domain": {
-					Description: "Check domain availability",
-					HandlerType: "http",
-					InputSchema: runtimecontracts.ToolInputSchema{
-						Type:     "object",
-						Required: []string{"domain"},
-						Properties: map[string]runtimecontracts.ToolInputSchema{
-							"domain": {Type: "string"},
-						},
-					},
-					HTTP: &runtimecontracts.HTTPToolSpec{
-						Method: "GET",
-						URL:    server.URL + "?domain={{input.domain}}",
-					},
-				},
+				"check_domain": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolDescription("Check domain availability"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+					"domain": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+				}), runtimecontracts.ToolSchemaRequired("domain")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+					Method: "GET",
+					URL:    server.URL + "?domain={{input.domain}}",
+				})),
 			},
 		})
 		actor := models.AgentConfig{ExecutionMode: "live", ID: "selected-agent", EntityID: "entity-typed-lineage", Tools: []string{"check_domain"}}

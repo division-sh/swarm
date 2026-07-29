@@ -160,11 +160,7 @@ func TestRun_DoesNotWarnForBuiltinRuntimeToolReference(t *testing.T) {
 func TestRun_FailsClosedForInvalidExternalDispatchRateLimit(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"bad_http": {
-				HandlerType: "http",
-				HTTP:        &runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test"},
-				RateLimit:   "1/s",
-			},
+			"bad_http": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolRateLimit("1/s", ""), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test"})),
 		},
 	})
 
@@ -281,7 +277,7 @@ func TestRun_FailsClosedForMissingContractMCPTool(t *testing.T) {
 			"agent-1": {Tools: []string{"infra.missing"}},
 		},
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"infra.missing": {HandlerType: "mcp"},
+			"infra.missing": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("mcp")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
 		},
 		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 			"mcp_servers": {
@@ -506,7 +502,7 @@ func TestRun_SkipsMCPServerReachableWhenReachabilityCheckDisabled(t *testing.T) 
 func TestRun_MapsPlatformToolUsageHintCoverageToBootCheck(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"custom_platform_tool": {HandlerType: "platform_builtin"},
+			"custom_platform_tool": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("platform_builtin")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
 		},
 	})
 
@@ -7831,7 +7827,7 @@ func (s bootverifyCredentialStore) Delete(_ context.Context, key string) error {
 func runtimeExternalResourceSource(mcpURL string) semanticview.Source {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"email_api": {Credentials: []string{"sendgrid_api_key"}},
+			"email_api": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolCredentials([]string{"sendgrid_api_key"}...)),
 		},
 		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 			"mcp_servers": {

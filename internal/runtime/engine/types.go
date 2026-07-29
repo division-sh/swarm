@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/platformcontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 )
@@ -309,7 +310,7 @@ type ActivityIntent struct {
 	Context          events.DeliveryContext
 	ActivityID       string
 	Tool             string
-	PlanGeneration   string
+	PlanGeneration   plangeneration.Generation
 	BundleHash       string
 	WorkflowVersion  string
 	Input            semanticvalue.Value
@@ -342,7 +343,6 @@ func (i ActivityIntent) Normalized() ActivityIntent {
 	i.Context = i.Context.Normalized()
 	i.ActivityID = strings.TrimSpace(i.ActivityID)
 	i.Tool = strings.TrimSpace(i.Tool)
-	i.PlanGeneration = strings.TrimSpace(i.PlanGeneration)
 	i.BundleHash = strings.TrimSpace(i.BundleHash)
 	i.WorkflowVersion = strings.TrimSpace(i.WorkflowVersion)
 	i.SuccessEvent = strings.TrimSpace(i.SuccessEvent)

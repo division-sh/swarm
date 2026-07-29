@@ -1698,10 +1698,10 @@ func agentPermissionWarningsLocal(source semanticview.Source, scopeLabel, agentI
 }
 
 func toolRequiredPermissionLocal(toolID string, entry runtimecontracts.ToolSchemaEntry) string {
-	if perm := strings.TrimSpace(entry.Permission); perm != "" {
+	if perm := entry.Permission(); perm != "" {
 		return perm
 	}
-	if perm := strings.TrimSpace(entry.RequiredPermission); perm != "" {
+	if perm := entry.RequiredPermission(); perm != "" {
 		return perm
 	}
 	return ""

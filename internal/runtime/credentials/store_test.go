@@ -97,7 +97,7 @@ func TestListDescriptors_IndexesToolsMCPServersAndWebSearchProvider(t *testing.T
 	store := NewOverlayStore(NewEnvStore(), fileStore)
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"email_api": {Credentials: []string{"sendgrid_api_key"}},
+			"email_api": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolCredentials([]string{"sendgrid_api_key"}...)),
 		},
 		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 			"mcp_servers": {

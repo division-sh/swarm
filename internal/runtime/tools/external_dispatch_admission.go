@@ -189,12 +189,13 @@ func isExternalDispatchRateLimited(err error) bool {
 	return ok && failure != nil && failure.Failure.Detail.Code == externalDispatchRateLimitedCode
 }
 
-func (e *Executor) httpToolExternalDispatchPolicy(tool RegisteredTool) externalDispatchAdmissionPolicy {
-	if !tool.RateLimit.Enabled {
+func (e *Executor) httpToolExternalDispatchPolicy(tool ExecutionTool) externalDispatchAdmissionPolicy {
+	rateLimit := tool.RateLimit()
+	if !rateLimit.Enabled {
 		return externalDispatchAdmissionPolicy{}
 	}
 	source := e.workflowSourceForAdmission()
-	toolName := strings.TrimSpace(tool.Name)
+	toolName := tool.Name()
 	bucketKey := strings.Join([]string{
 		externalDispatchScopeHTTPTool,
 		externalDispatchSourceKey(source),
@@ -204,15 +205,15 @@ func (e *Executor) httpToolExternalDispatchPolicy(tool RegisteredTool) externalD
 		Scope:      externalDispatchScopeHTTPTool,
 		BucketName: "http tool " + toolName,
 		BucketKey:  bucketKey,
-		Config:     tool.RateLimit,
+		Config:     rateLimit,
 	}
 }
 
-func (e *Executor) mcpToolExternalDispatchPolicy(tool RegisteredTool) (externalDispatchAdmissionPolicy, error) {
+func (e *Executor) mcpToolExternalDispatchPolicy(tool ExecutionTool) (externalDispatchAdmissionPolicy, error) {
 	if e == nil || e.mcpClient == nil {
 		return externalDispatchAdmissionPolicy{}, nil
 	}
-	serverName := strings.TrimSpace(tool.MCPServerName)
+	serverName := tool.MCPServerName()
 	if serverName == "" {
 		return externalDispatchAdmissionPolicy{}, nil
 	}
@@ -419,7 +420,8 @@ func ValidateExternalDispatchRateLimitDeclarations(source semanticview.Source) [
 	errs := make([]error, 0)
 	for name, entry := range source.ToolEntries() {
 		location := fmt.Sprintf("tool %s", strings.TrimSpace(name))
-		_, enabled, err := parseExternalDispatchRateLimit(entry.RateLimit, entry.RateLimitMaxWait)
+		rateLimit, maxWait := entry.RateLimitSyntax()
+		_, enabled, err := parseExternalDispatchRateLimit(rateLimit, maxWait)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", location, err))
 			continue

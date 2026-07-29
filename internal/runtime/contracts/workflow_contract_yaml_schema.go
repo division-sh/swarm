@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"gopkg.in/yaml.v3"
 )
 
@@ -194,58 +193,6 @@ func (p *EventPayloadSpec) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-func (v *SchemaLiteral) UnmarshalYAML(node *yaml.Node) error {
-	if v == nil || node == nil {
-		return nil
-	}
-	v.Node = *node
-	return nil
-}
-
-func (v SchemaLiteral) MarshalYAML() (any, error) {
-	return v.Node, nil
-}
-
-func (a *ToolAdditionalProperties) UnmarshalYAML(node *yaml.Node) error {
-	if a == nil || node == nil {
-		return nil
-	}
-	switch node.Kind {
-	case yaml.ScalarNode:
-		if strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") || strings.TrimSpace(node.Value) == "" {
-			*a = ToolAdditionalProperties{}
-			return nil
-		}
-		var allowed bool
-		if err := node.Decode(&allowed); err != nil {
-			return err
-		}
-		a.Allowed = &allowed
-		a.Schema = nil
-		return nil
-	case yaml.MappingNode:
-		var schema ToolInputSchema
-		if err := node.Decode(&schema); err != nil {
-			return err
-		}
-		a.Allowed = nil
-		a.Schema = &schema
-		return nil
-	default:
-		return fmt.Errorf("unsupported additionalProperties yaml node kind %d", node.Kind)
-	}
-}
-
-func (a ToolAdditionalProperties) MarshalYAML() (any, error) {
-	if a.Allowed != nil {
-		return *a.Allowed, nil
-	}
-	if a.Schema != nil {
-		return a.Schema, nil
-	}
-	return nil, nil
-}
-
 func (s *ToolInputSchema) UnmarshalYAML(node *yaml.Node) error {
 	if s == nil {
 		return nil
@@ -271,17 +218,102 @@ func (s *ToolInputSchema) UnmarshalYAML(node *yaml.Node) error {
 			return fmt.Errorf("tool schema field %q must not be null", key)
 		}
 	}
-	type alias ToolInputSchema
-	var aux alias
-	if err := node.Decode(&aux); err != nil {
+	type wire struct {
+		Type        string                     `yaml:"type"`
+		Description string                     `yaml:"description"`
+		Properties  map[string]ToolInputSchema `yaml:"properties"`
+		Required    []string                   `yaml:"required"`
+		Items       *ToolInputSchema           `yaml:"items"`
+		Minimum     *float64                   `yaml:"minimum"`
+		Maximum     *float64                   `yaml:"maximum"`
+		Pattern     string                     `yaml:"pattern"`
+		MinLength   *int                       `yaml:"minLength"`
+		MaxLength   *int                       `yaml:"maxLength"`
+		MinItems    *int                       `yaml:"minItems"`
+		MaxItems    *int                       `yaml:"maxItems"`
+	}
+	var decoded wire
+	if err := node.Decode(&decoded); err != nil {
 		return err
 	}
-	decoded := ToolInputSchema(aux)
-	decoded.enumDeclared = hasYAMLMappingKey(node, "enum")
-	if err := ValidateToolInputSchema(decoded); err != nil {
+	options := []ToolInputSchemaOption{ToolSchemaDescription(decoded.Description)}
+	if decoded.Properties != nil {
+		options = append(options, ToolSchemaProperties(decoded.Properties))
+	}
+	if decoded.Required != nil {
+		options = append(options, ToolSchemaRequired(decoded.Required...))
+	}
+	if decoded.Items != nil {
+		options = append(options, ToolSchemaItems(*decoded.Items))
+	}
+	if decoded.Minimum != nil {
+		options = append(options, ToolSchemaMinimum(*decoded.Minimum))
+	}
+	if decoded.Maximum != nil {
+		options = append(options, ToolSchemaMaximum(*decoded.Maximum))
+	}
+	if decoded.Pattern != "" {
+		options = append(options, ToolSchemaPattern(decoded.Pattern))
+	}
+	if decoded.MinLength != nil {
+		options = append(options, ToolSchemaMinLength(*decoded.MinLength))
+	}
+	if decoded.MaxLength != nil {
+		options = append(options, ToolSchemaMaxLength(*decoded.MaxLength))
+	}
+	if decoded.MinItems != nil {
+		options = append(options, ToolSchemaMinItems(*decoded.MinItems))
+	}
+	if decoded.MaxItems != nil {
+		options = append(options, ToolSchemaMaxItems(*decoded.MaxItems))
+	}
+	for index := 0; index < len(node.Content); index += 2 {
+		switch strings.TrimSpace(node.Content[index].Value) {
+		case "enum":
+			enumNode, err := resolveToolSchemaYAMLValue(node.Content[index+1])
+			if err != nil {
+				return fmt.Errorf("tool schema enum: %w", err)
+			}
+			if enumNode.Kind != yaml.SequenceNode {
+				return fmt.Errorf("tool schema enum must be a sequence")
+			}
+			values := make([]any, 0, len(enumNode.Content))
+			for itemIndex, item := range enumNode.Content {
+				value, err := toolInputSchemaEnumLiteralValue(item)
+				if err != nil {
+					return fmt.Errorf("tool schema enum[%d]: %w", itemIndex, err)
+				}
+				values = append(values, value)
+			}
+			options = append(options, ToolSchemaEnum(values...))
+		case "additionalProperties":
+			additionalNode, err := resolveToolSchemaYAMLValue(node.Content[index+1])
+			if err != nil {
+				return fmt.Errorf("tool schema additionalProperties: %w", err)
+			}
+			switch additionalNode.Kind {
+			case yaml.ScalarNode:
+				var allowed bool
+				if err := additionalNode.Decode(&allowed); err != nil {
+					return fmt.Errorf("tool schema additionalProperties: %w", err)
+				}
+				options = append(options, ToolSchemaAdditionalPropertiesAllowed(allowed))
+			case yaml.MappingNode:
+				var additional ToolInputSchema
+				if err := additionalNode.Decode(&additional); err != nil {
+					return fmt.Errorf("tool schema additionalProperties: %w", err)
+				}
+				options = append(options, ToolSchemaAdditionalPropertiesSchema(additional))
+			default:
+				return fmt.Errorf("unsupported additionalProperties yaml node kind %d", additionalNode.Kind)
+			}
+		}
+	}
+	admitted, err := NewToolInputSchema(ToolSchemaKind(decoded.Type), options...)
+	if err != nil {
 		return fmt.Errorf("tool schema: %w", err)
 	}
-	*s = decoded
+	*s = admitted
 	return nil
 }
 
@@ -403,48 +435,65 @@ func (t *ToolSchemaEntry) UnmarshalYAML(node *yaml.Node) error {
 	if hasYAMLMappingKey(node, "type") {
 		return fmt.Errorf("RETIRED: tool field %q is not accepted; use handler_type", "type")
 	}
-	type alias ToolSchemaEntry
-	var aux alias
+	var aux struct {
+		Category           string                `yaml:"category,omitempty"`
+		Description        string                `yaml:"description,omitempty"`
+		HandlerType        string                `yaml:"handler_type,omitempty"`
+		EffectClass        string                `yaml:"effect_class,omitempty"`
+		Permission         string                `yaml:"permission,omitempty"`
+		RequiredPermission string                `yaml:"required_permission,omitempty"`
+		RateLimit          string                `yaml:"rate_limit,omitempty"`
+		RateLimitMaxWait   string                `yaml:"rate_limit_max_wait,omitempty"`
+		InputSchema        ToolInputSchema       `yaml:"input_schema,omitempty"`
+		OutputSchema       ToolInputSchema       `yaml:"output_schema,omitempty"`
+		HTTP               *HTTPToolSpec         `yaml:"http,omitempty"`
+		ResponseMapping    map[string]any        `yaml:"response_mapping,omitempty"`
+		ResponseSuccess    *HTTPResponseSuccess  `yaml:"response_success,omitempty"`
+		Credentials        []string              `yaml:"credentials,omitempty"`
+		ManagedCredential  *ManagedCredentialRef `yaml:"managed_credential,omitempty"`
+	}
 	if err := node.Decode(&aux); err != nil {
 		return err
 	}
-	*t = ToolSchemaEntry(aux)
-	t.HandlerType = strings.TrimSpace(t.HandlerType)
-	t.EffectClass = strings.TrimSpace(t.EffectClass)
-	t.Permission = strings.TrimSpace(t.Permission)
-	t.RequiredPermission = strings.TrimSpace(t.RequiredPermission)
-	t.Credentials = normalizeStrings(t.Credentials)
-	if t.ResponseSuccess != nil {
-		t.ResponseSuccess.Kind = strings.TrimSpace(t.ResponseSuccess.Kind)
-		t.ResponseSuccess.Path = strings.TrimSpace(t.ResponseSuccess.Path)
+	handler, err := ParseToolHandlerKind(aux.HandlerType)
+	if err != nil {
+		return err
 	}
-	if t.ManagedCredential != nil {
-		t.ManagedCredential.Key = strings.TrimSpace(t.ManagedCredential.Key)
-		t.ManagedCredential.Header = strings.TrimSpace(t.ManagedCredential.Header)
-		t.ManagedCredential.Prefix = strings.TrimSpace(t.ManagedCredential.Prefix)
-		t.ManagedCredential.Scopes = normalizeStrings(t.ManagedCredential.Scopes)
-		if err := managedcredentialmodel.ValidateGrantModel(t.ManagedCredential.GrantModel); err != nil {
-			return err
-		}
-		if err := managedcredentialmodel.ValidateTokenRequestProfile(t.ManagedCredential.TokenRequest); err != nil {
-			return err
-		}
-		t.ManagedCredential.GrantModel = managedcredentialmodel.NormalizeGrantModel(t.ManagedCredential.GrantModel)
-		t.ManagedCredential.TokenRequest = managedcredentialmodel.NormalizeTokenRequestProfile(t.ManagedCredential.TokenRequest)
+	if aux.InputSchema.IsZero() {
+		aux.InputSchema = MustToolInputSchema(ToolSchemaObject)
 	}
-	if t.HTTP != nil {
-		t.HTTP.Method = strings.TrimSpace(t.HTTP.Method)
-		t.HTTP.URL = strings.TrimSpace(t.HTTP.URL)
-		headers := make(map[string]string, len(t.HTTP.Headers))
-		for key, value := range t.HTTP.Headers {
-			key = strings.TrimSpace(key)
-			if key == "" {
-				continue
-			}
-			headers[key] = value
-		}
-		t.HTTP.Headers = headers
+	if aux.OutputSchema.IsZero() {
+		aux.OutputSchema = MustToolInputSchema(ToolSchemaObject)
 	}
+	options := []ToolSchemaEntryOption{
+		WithToolCategory(aux.Category),
+		WithToolDescription(aux.Description),
+		WithToolHandler(handler),
+		WithToolEffect(ActivityEffectClass(aux.EffectClass)),
+		WithToolPermissions(aux.Permission, aux.RequiredPermission),
+		WithToolRateLimit(aux.RateLimit, aux.RateLimitMaxWait),
+		WithToolSchemas(aux.InputSchema, aux.OutputSchema),
+	}
+	if aux.HTTP != nil {
+		options = append(options, WithToolHTTP(*aux.HTTP))
+	}
+	if aux.ResponseMapping != nil {
+		options = append(options, WithToolResponseMapping(aux.ResponseMapping))
+	}
+	if aux.ResponseSuccess != nil {
+		options = append(options, WithToolResponseSuccess(*aux.ResponseSuccess))
+	}
+	if len(aux.Credentials) > 0 {
+		options = append(options, WithToolCredentials(aux.Credentials...))
+	}
+	if aux.ManagedCredential != nil {
+		options = append(options, WithToolManagedCredential(*aux.ManagedCredential))
+	}
+	admitted, err := NewToolSchemaEntry(options...)
+	if err != nil {
+		return err
+	}
+	*t = admitted
 	return nil
 }
 

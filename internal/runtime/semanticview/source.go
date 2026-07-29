@@ -6,6 +6,8 @@ import (
 )
 
 type Source interface {
+	SemanticCapabilities() Capabilities
+	semanticSourceCore() sourceCore
 	WorkflowVersion() string
 	WorkflowName() string
 	PlatformSpec() runtimecontracts.PlatformSpecDocument

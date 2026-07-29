@@ -184,25 +184,26 @@ func validateCatalogFixtureBinding(artifact GeneratedCatalogArtifact, operation 
 		return fmt.Errorf("response_success does not match generated evidence")
 	}
 	tool, exists := artifact.Manifest.Tools[strings.TrimSpace(operation.ToolID)]
-	if !exists || tool.HTTP == nil {
+	httpSpec, hasHTTP := tool.HTTP()
+	if !exists || !hasHTTP {
 		return fmt.Errorf("generated tool is unavailable or lacks HTTP declaration")
 	}
-	if strings.ToUpper(strings.TrimSpace(fixture.Expected.Method)) != strings.ToUpper(strings.TrimSpace(tool.HTTP.Method)) {
+	if strings.ToUpper(strings.TrimSpace(fixture.Expected.Method)) != strings.ToUpper(strings.TrimSpace(httpSpec.Method)) {
 		return fmt.Errorf("expected method does not match generated tool")
 	}
 	if err := validateCatalogFixtureCredentials(tool, fixture.Credentials, fixture.ManagedCredentials); err != nil {
 		return err
 	}
-	resolvedURL, err := resolveCatalogTemplateString(tool.HTTP.URL, fixture.Input, fixture.Credentials, true)
+	resolvedURL, err := resolveCatalogTemplateString(httpSpec.URL, fixture.Input, fixture.Credentials, true)
 	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(resolvedURL) != strings.TrimSpace(fixture.Expected.URL) {
 		return fmt.Errorf("expected URL %q does not match generated %q", fixture.Expected.URL, resolvedURL)
 	}
-	resolvedHeaders := make(http.Header, len(tool.HTTP.Headers)+1)
+	resolvedHeaders := make(http.Header, len(httpSpec.Headers)+1)
 	seenHeaders := map[string]string{}
-	for key, value := range tool.HTTP.Headers {
+	for key, value := range httpSpec.Headers {
 		resolved, err := resolveCatalogTemplateString(value, fixture.Input, fixture.Credentials, false)
 		if err != nil {
 			return fmt.Errorf("resolve catalog conformance header %q: %w", key, err)
@@ -214,13 +215,13 @@ func validateCatalogFixtureBinding(artifact GeneratedCatalogArtifact, operation 
 		seenHeaders[normalized] = key
 		resolvedHeaders.Set(key, resolved)
 	}
-	if tool.ManagedCredential != nil {
-		key := strings.TrimSpace(tool.ManagedCredential.Key)
+	if managed, ok := tool.ManagedCredential(); ok {
+		key := strings.TrimSpace(managed.Key)
 		if err := runtimemanagedcredentials.ApplyHTTPAuthorization(resolvedHeaders, runtimemanagedcredentials.HTTPAuthorization{
 			CredentialKey: key,
 			AccessToken:   fixture.ManagedCredentials[key],
-			Header:        tool.ManagedCredential.Header,
-			Prefix:        tool.ManagedCredential.Prefix,
+			Header:        managed.Header,
+			Prefix:        managed.Prefix,
 		}, false); err != nil {
 			return fmt.Errorf("apply catalog conformance managed credential: %w", err)
 		}
@@ -236,7 +237,7 @@ func validateCatalogFixtureBinding(artifact GeneratedCatalogArtifact, operation 
 	if !reflect.DeepEqual(generatedHeaderSet, expectedHeaderSet) {
 		return fmt.Errorf("expected resolved headers %#v do not match generated %#v", expectedHeaderSet, generatedHeaderSet)
 	}
-	resolvedBody, err := resolveCatalogTemplateValue(tool.HTTP.Body, fixture.Input, fixture.Credentials)
+	resolvedBody, err := resolveCatalogTemplateValue(httpSpec.Body, fixture.Input, fixture.Credentials)
 	if err != nil {
 		return err
 	}
@@ -247,8 +248,9 @@ func validateCatalogFixtureBinding(artifact GeneratedCatalogArtifact, operation 
 }
 
 func validateCatalogFixtureCredentials(tool runtimecontracts.ToolSchemaEntry, credentials, managedCredentials map[string]string) error {
-	expected := make(map[string]struct{}, len(tool.Credentials))
-	for _, key := range tool.Credentials {
+	toolCredentials := tool.Credentials()
+	expected := make(map[string]struct{}, len(toolCredentials))
+	for _, key := range toolCredentials {
 		key = strings.TrimSpace(key)
 		if key != "" {
 			expected[key] = struct{}{}
@@ -265,8 +267,8 @@ func validateCatalogFixtureCredentials(tool runtimecontracts.ToolSchemaEntry, cr
 		}
 	}
 	expectedManaged := ""
-	if tool.ManagedCredential != nil {
-		expectedManaged = strings.TrimSpace(tool.ManagedCredential.Key)
+	if managed, ok := tool.ManagedCredential(); ok {
+		expectedManaged = strings.TrimSpace(managed.Key)
 		if _, exists := managedCredentials[expectedManaged]; !exists {
 			return fmt.Errorf("catalog conformance managed credential %q is unavailable", expectedManaged)
 		}
