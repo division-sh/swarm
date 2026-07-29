@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -72,6 +74,102 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+func beginFakeDockerActivity(root string) (func(), error) {
+	activeDir := filepath.Join(root, "active")
+	if err := os.MkdirAll(activeDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create activity directory: %w", err)
+	}
+	file, err := os.CreateTemp(root, ".fake-docker-active-*")
+	if err != nil {
+		return nil, fmt.Errorf("create activity marker: %w", err)
+	}
+	cleanup := func() {
+		_ = file.Close()
+		_ = os.Remove(file.Name())
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("lock activity marker: %w", err)
+	}
+	activePath := filepath.Join(activeDir, fmt.Sprint(os.Getpid()))
+	if err := os.Rename(file.Name(), activePath); err != nil {
+		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		cleanup()
+		return nil, fmt.Errorf("publish activity marker: %w", err)
+	}
+	return func() {
+		_ = os.Remove(activePath)
+		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		_ = file.Close()
+	}, nil
+}
+
+func liveFakeDockerProcesses(root string) ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(root, "active"))
+	if err != nil {
+		return nil, err
+	}
+	var live []string
+	for _, entry := range entries {
+		path := filepath.Join(root, "active", entry.Name())
+		file, err := os.OpenFile(path, os.O_RDWR, 0)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("open activity marker %q: %w", entry.Name(), err)
+		}
+		lockErr := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		switch {
+		case lockErr == nil:
+			_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+			_ = file.Close()
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return nil, fmt.Errorf("remove stale activity marker %q: %w", entry.Name(), err)
+			}
+		case errors.Is(lockErr, syscall.EWOULDBLOCK), errors.Is(lockErr, syscall.EAGAIN):
+			_ = file.Close()
+			live = append(live, entry.Name())
+		default:
+			_ = file.Close()
+			return nil, fmt.Errorf("probe activity marker %q: %w", entry.Name(), lockErr)
+		}
+	}
+	sort.Strings(live)
+	return live, nil
+}
+
+func TestFakeDockerActivityTracksOnlyLiveProcesses(t *testing.T) {
+	root := t.TempDir()
+	endActivity, err := beginFakeDockerActivity(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := liveFakeDockerProcesses(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(live) != 1 {
+		t.Fatalf("live fake Docker processes = %v, want one", live)
+	}
+	endActivity()
+
+	stalePath := filepath.Join(root, "active", "stale")
+	if err := os.WriteFile(stalePath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	live, err = liveFakeDockerProcesses(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(live) != 0 {
+		t.Fatalf("live fake Docker processes after exit = %v, want none", live)
+	}
+	if _, err := os.Stat(stalePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale activity marker still exists: %v", err)
+	}
+}
+
 func fakeDockerArgs(args []string) []string {
 	for i, arg := range args {
 		if arg == "--" {
@@ -87,17 +185,12 @@ func runFakeDocker(args []string) int {
 		fmt.Fprintln(os.Stderr, "release E2E fake Docker state root is missing")
 		return 97
 	}
-	activeDir := filepath.Join(root, "active")
-	if err := os.MkdirAll(activeDir, 0o700); err != nil {
-		fmt.Fprintf(os.Stderr, "create fake Docker activity directory: %v\n", err)
-		return 97
-	}
-	activePath := filepath.Join(activeDir, fmt.Sprint(os.Getpid()))
-	if err := os.WriteFile(activePath, nil, 0o600); err != nil {
+	endActivity, err := beginFakeDockerActivity(root)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "record fake Docker activity: %v\n", err)
 		return 97
 	}
-	defer os.Remove(activePath)
+	defer endActivity()
 	if len(args) == 0 {
 		return fakeDockerUnexpected(root, args, "missing command")
 	}
