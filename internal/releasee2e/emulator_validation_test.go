@@ -2,12 +2,17 @@ package releasee2e
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestReleaseDockerCommandAdmissionRejectsMalformedShapes(t *testing.T) {
-	validCreate := validReleaseScaffoldCreateArgs()
+	root := filepath.Join(t.TempDir(), "fake-docker-state")
+	validCreate := validReleaseScaffoldCreateArgs(root)
+	if err := validateReleaseDockerCommand(root, validCreate); err != nil {
+		t.Fatalf("valid fixture create rejected: %v", err)
+	}
 	cases := map[string][]string{
 		"version shape":    {"version"},
 		"network name":     {"network", "inspect", "wrong-network"},
@@ -19,7 +24,7 @@ func TestReleaseDockerCommandAdmissionRejectsMalformedShapes(t *testing.T) {
 	}
 	for name, args := range cases {
 		t.Run(name, func(t *testing.T) {
-			if err := validateReleaseDockerCommand(args); err == nil {
+			if err := validateReleaseDockerCommand(root, args); err == nil {
 				t.Fatalf("validateReleaseDockerCommand(%q) error = nil, want rejection", args)
 			}
 		})
@@ -28,24 +33,56 @@ func TestReleaseDockerCommandAdmissionRejectsMalformedShapes(t *testing.T) {
 	t.Run("create image", func(t *testing.T) {
 		args := append([]string(nil), validCreate...)
 		args[len(args)-3] = "wrong-image"
-		if err := validateReleaseDockerCommand(args); err == nil {
+		if err := validateReleaseDockerCommand(root, args); err == nil {
 			t.Fatal("wrong create image was accepted")
 		}
 	})
 	t.Run("create mount", func(t *testing.T) {
 		args := append([]string(nil), validCreate...)
 		replaceReleaseArgValue(args, "-v", "wrong-volume:/opt/swarm/scaffold")
-		if err := validateReleaseDockerCommand(args); err == nil {
+		if err := validateReleaseDockerCommand(root, args); err == nil {
 			t.Fatal("wrong create mount was accepted")
 		}
 	})
 	t.Run("create identity", func(t *testing.T) {
 		args := append([]string(nil), validCreate...)
 		replaceReleaseArgValue(args, "--label", "dev.swarm.owner=foreign")
-		if err := validateReleaseDockerCommand(args); err == nil {
+		if err := validateReleaseDockerCommand(root, args); err == nil {
 			t.Fatal("wrong create identity was accepted")
 		}
 	})
+
+	releaseRoot := filepath.Dir(root)
+	projectMounts := map[string]string{
+		"/data":                filepath.Join(releaseRoot, ".swarm", "data"),
+		"/opt/swarm/contracts": filepath.Join(releaseRoot, "contracts"),
+	}
+	for target, source := range projectMounts {
+		t.Run("missing "+target, func(t *testing.T) {
+			args := removeReleaseCreateMount(append([]string(nil), validCreate...), target)
+			if err := validateReleaseDockerCommand(root, args); err == nil {
+				t.Fatalf("create without %s was accepted", target)
+			}
+		})
+		t.Run("wrong source "+target, func(t *testing.T) {
+			args := replaceReleaseCreateMount(append([]string(nil), validCreate...), target, filepath.Join(releaseRoot, "wrong")+":"+target+":ro")
+			if err := validateReleaseDockerCommand(root, args); err == nil {
+				t.Fatalf("create with wrong %s source was accepted", target)
+			}
+		})
+		t.Run("writable "+target, func(t *testing.T) {
+			args := replaceReleaseCreateMount(append([]string(nil), validCreate...), target, source+":"+target+":rw")
+			if err := validateReleaseDockerCommand(root, args); err == nil {
+				t.Fatalf("create with writable %s was accepted", target)
+			}
+		})
+		t.Run("duplicate "+target, func(t *testing.T) {
+			args := insertReleaseCreateMount(append([]string(nil), validCreate...), source+":"+target+":ro")
+			if err := validateReleaseDockerCommand(root, args); err == nil {
+				t.Fatalf("create with duplicate %s was accepted", target)
+			}
+		})
+	}
 }
 
 func TestReleaseDockerExecAdmissionRejectsCredentialTargetAndClaudeMutations(t *testing.T) {
@@ -211,7 +248,8 @@ func validReleaseClaudeDockerExecArgs(t *testing.T, rawURL string) []string {
 	}
 }
 
-func validReleaseScaffoldCreateArgs() []string {
+func validReleaseScaffoldCreateArgs(root string) []string {
+	releaseRoot := filepath.Dir(filepath.Clean(root))
 	return []string{
 		"create",
 		"--name", "swarm-scaffold",
@@ -223,6 +261,8 @@ func validReleaseScaffoldCreateArgs() []string {
 		"--label", "dev.swarm.owner=runtime",
 		"--label", "dev.swarm.reset.eligible=false",
 		"--label", "dev.swarm.workspace.scope=scaffold",
+		"-v", filepath.Join(releaseRoot, ".swarm", "data") + ":/data:ro",
+		"-v", filepath.Join(releaseRoot, "contracts") + ":/opt/swarm/contracts:ro",
 		"-v", "scaffold:/opt/swarm/scaffold",
 		"-w", "/opt/swarm/scaffold",
 		releaseE2EWorkspaceImage, "sleep", "infinity",
@@ -294,4 +334,38 @@ func removeReleaseFlag(args []string, name string) []string {
 		}
 	}
 	return args
+}
+
+func removeReleaseCreateMount(args []string, target string) []string {
+	for index := 0; index+1 < len(args); index++ {
+		if args[index] == "-v" && releaseMountTarget(args[index+1]) == target {
+			return append(args[:index:index], args[index+2:]...)
+		}
+	}
+	return args
+}
+
+func replaceReleaseCreateMount(args []string, target, value string) []string {
+	for index := 0; index+1 < len(args); index++ {
+		if args[index] == "-v" && releaseMountTarget(args[index+1]) == target {
+			args[index+1] = value
+			return args
+		}
+	}
+	return args
+}
+
+func insertReleaseCreateMount(args []string, value string) []string {
+	commandIndex := len(args) - 3
+	out := append([]string(nil), args[:commandIndex]...)
+	out = append(out, "-v", value)
+	return append(out, args[commandIndex:]...)
+}
+
+func releaseMountTarget(value string) string {
+	parts := strings.Split(value, ":")
+	if len(parts) < 2 {
+		return ""
+	}
+	return parts[1]
 }
