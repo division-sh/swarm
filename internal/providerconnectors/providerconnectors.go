@@ -53,7 +53,7 @@ func RequirementsForTool(ctx context.Context, toolID string, tool runtimecontrac
 	}
 	descriptor := runtimemanagedcredentials.RequirementDescriptor{Descriptor: runtimemanagedcredentials.Descriptor{Key: key, Status: runtimemanagedcredentials.StatusUnconnected}}
 	for _, candidate := range descriptors {
-		if strings.TrimSpace(candidate.Key) == key {
+		if candidate.Key == key {
 			descriptor = candidate
 			break
 		}
@@ -244,13 +244,9 @@ func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, t
 		return packs.Subject{}, err
 	}
 	for _, key := range credentials {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
 		storeKey := key
 		if resolved, mapped := semanticview.CredentialStoreKeyForFlow(source, flowID, key); mapped {
-			storeKey = strings.TrimSpace(resolved)
+			storeKey = resolved
 		}
 		if storeKey == "" {
 			return packs.Subject{}, fmt.Errorf("provider connector tool %q credential %q has no deployment binding", toolID, key)
@@ -273,7 +269,7 @@ func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, t
 			requiredTokenRequest := managed.TokenRequest()
 			storeKey := key
 			if resolved, mapped := semanticview.CredentialStoreKeyForFlow(source, flowID, key); mapped {
-				storeKey = strings.TrimSpace(resolved)
+				storeKey = resolved
 			}
 			if storeKey == "" {
 				return packs.Subject{}, fmt.Errorf("provider connector tool %q managed credential %q has no deployment binding", toolID, key)
@@ -284,7 +280,7 @@ func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, t
 			}
 			descriptor := runtimemanagedcredentials.RequirementDescriptor{Descriptor: runtimemanagedcredentials.Descriptor{Key: storeKey, Status: runtimemanagedcredentials.StatusUnconnected}}
 			for _, candidate := range descriptors {
-				if strings.TrimSpace(candidate.Key) == storeKey {
+				if candidate.Key == storeKey {
 					descriptor = candidate
 					break
 				}

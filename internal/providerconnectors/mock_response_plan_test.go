@@ -22,16 +22,21 @@ func TestMockResponsePlanAdmitsOnlyExactProviderConnectorResponses(t *testing.T)
 	if err != nil {
 		t.Fatalf("Admit: %v", err)
 	}
-	result, err := response.Materialize()
+	materialized, err := response.Materialize()
 	if err != nil {
 		t.Fatalf("Materialize: %v", err)
+	}
+	result, ok := materialized.(map[string]any)
+	if !ok {
+		t.Fatalf("result = %T, want object", materialized)
 	}
 	if result["ok"] != true {
 		t.Fatalf("result = %#v, want ok=true", result)
 	}
 	result["ok"] = false
-	again, err := response.Materialize()
-	if err != nil || again["ok"] != true {
+	materializedAgain, err := response.Materialize()
+	again, ok := materializedAgain.(map[string]any)
+	if err != nil || !ok || again["ok"] != true {
 		t.Fatalf("immutable materialization = %#v err=%v", again, err)
 	}
 
@@ -78,7 +83,7 @@ func TestMockResponsePlanRejectsOutputOutsideTypedEnum(t *testing.T) {
 		"status": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString, runtimecontracts.ToolSchemaEnum("ok")),
 	}), runtimecontracts.ToolSchemaRequired("status")))
 
-	if _, err := plan.Admit("provider.write", tool); err == nil || !strings.Contains(err.Error(), "$.status has invalid enum value wrong") {
+	if _, err := plan.Admit("provider.write", tool); err == nil || !strings.Contains(err.Error(), "$.status is not one of the declared enum values") {
 		t.Fatalf("Admit error = %v, want exact out-of-enum rejection", err)
 	}
 }

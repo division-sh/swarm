@@ -9,7 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
 
-var connectorCapabilitySHA256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+var connectorCapabilitySHA256Pattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 type ConnectorGenerationPermission struct {
 	id   string
@@ -64,8 +64,7 @@ func NewConnectorGenerationSurface(
 	reviewStatus string,
 ) (ConnectorGenerationSurface, error) {
 	values := []*string{
-		&generatorVersion, &sourcePath, &sourceSHA256, &profilePath, &profileSHA256,
-		&manifestSHA256, &operationID, &fixtureID, &fixtureStatus, &reviewStatus,
+		&generatorVersion, &sourcePath, &profilePath, &operationID, &fixtureID, &fixtureStatus, &reviewStatus,
 	}
 	for _, value := range values {
 		*value = strings.TrimSpace(*value)
@@ -75,11 +74,9 @@ func NewConnectorGenerationSurface(
 	}
 	hashes := []*string{&sourceSHA256, &profileSHA256, &manifestSHA256}
 	for _, hash := range hashes {
-		raw := strings.TrimPrefix(*hash, "sha256:")
-		if !connectorCapabilitySHA256Pattern.MatchString(raw) {
+		if !connectorCapabilitySHA256Pattern.MatchString(*hash) {
 			return ConnectorGenerationSurface{}, fmt.Errorf("connector generation hash %q must use canonical sha256:<lowercase-hex>", *hash)
 		}
-		*hash = "sha256:" + raw
 	}
 	if len(permissions) == 0 {
 		return ConnectorGenerationSurface{}, fmt.Errorf("connector generation permissions are required")
@@ -128,7 +125,22 @@ func MustConnectorGenerationSurface(
 	return surface
 }
 
-func (s ConnectorGenerationSurface) Valid() bool              { return s.generatorVersion != "" }
+func (s ConnectorGenerationSurface) Valid() bool {
+	if s.generatorVersion == "" || s.sourcePath == "" || s.profilePath == "" || s.operationID == "" ||
+		s.fixtureID == "" || s.fixtureStatus == "" || s.reviewStatus == "" ||
+		!connectorCapabilitySHA256Pattern.MatchString(s.sourceSHA256) ||
+		!connectorCapabilitySHA256Pattern.MatchString(s.profileSHA256) ||
+		!connectorCapabilitySHA256Pattern.MatchString(s.manifestSHA256) ||
+		len(s.permissions) == 0 {
+		return false
+	}
+	for _, permission := range s.permissions {
+		if permission.id == "" || permission.note == "" {
+			return false
+		}
+	}
+	return true
+}
 func (s ConnectorGenerationSurface) GeneratorVersion() string { return s.generatorVersion }
 func (s ConnectorGenerationSurface) SourcePath() string       { return s.sourcePath }
 func (s ConnectorGenerationSurface) SourceSHA256() string     { return s.sourceSHA256 }
@@ -223,17 +235,29 @@ func (c Capabilities) ProviderTriggerTargetFreeAuthorizations() []runtimeprovide
 
 func (c Capabilities) WithConnectorPackImports(generations map[string]ConnectorGenerationSurface, importSources map[string]ConnectorImportSource) Capabilities {
 	out := c
-	generationCopy := make(map[string]ConnectorGenerationSurface, len(generations))
-	for toolID, generation := range generations {
-		if toolID == strings.TrimSpace(toolID) && toolID != "" && generation.Valid() {
-			generationCopy[toolID] = generation
-		}
+	if len(importSources) == 0 {
+		out.connectorPacks = nil
+		return out
 	}
 	sourceCopy := make(map[string]ConnectorImportSource, len(importSources))
 	for toolID, source := range importSources {
-		if toolID == strings.TrimSpace(toolID) && toolID != "" && source.value != "" {
-			sourceCopy[toolID] = source
+		if toolID == "" || toolID != strings.TrimSpace(toolID) || source.value == "" {
+			out.connectorPacks = nil
+			return out
 		}
+		sourceCopy[toolID] = source
+	}
+	generationCopy := make(map[string]ConnectorGenerationSurface, len(generations))
+	for toolID, generation := range generations {
+		if toolID == "" || toolID != strings.TrimSpace(toolID) || !generation.Valid() {
+			out.connectorPacks = nil
+			return out
+		}
+		if _, imported := sourceCopy[toolID]; !imported {
+			out.connectorPacks = nil
+			return out
+		}
+		generationCopy[toolID] = generation
 	}
 	out.connectorPacks = &connectorPackCapabilities{generations: generationCopy, importSources: sourceCopy}
 	return out
@@ -247,7 +271,10 @@ func (c Capabilities) ConnectorGeneration(toolID string) (ConnectorGenerationSur
 	if c.connectorPacks == nil {
 		return ConnectorGenerationSurface{}, false
 	}
-	generation, ok := c.connectorPacks.generations[strings.TrimSpace(toolID)]
+	if toolID == "" || toolID != strings.TrimSpace(toolID) {
+		return ConnectorGenerationSurface{}, false
+	}
+	generation, ok := c.connectorPacks.generations[toolID]
 	return generation, ok
 }
 
@@ -255,6 +282,9 @@ func (c Capabilities) ConnectorImportSource(toolID string) (ConnectorImportSourc
 	if c.connectorPacks == nil {
 		return ConnectorImportSource{}, false
 	}
-	source, ok := c.connectorPacks.importSources[strings.TrimSpace(toolID)]
+	if toolID == "" || toolID != strings.TrimSpace(toolID) {
+		return ConnectorImportSource{}, false
+	}
+	source, ok := c.connectorPacks.importSources[toolID]
 	return source, ok
 }

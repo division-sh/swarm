@@ -24,20 +24,113 @@ const (
 	GrantModelInstallation = "installation_grant"
 )
 
+type GrantTypeKind uint8
+
+const (
+	GrantTypeAuthorizationCode GrantTypeKind = iota + 1
+	GrantTypeAuthorizationCodePKCE
+	GrantTypeClientCredentials
+	GrantTypeGitHubAppInstallation
+)
+
+func ParseGrantTypeKind(raw string) (GrantTypeKind, error) {
+	switch normalized := NormalizeGrantType(raw); normalized {
+	case "":
+		return 0, nil
+	case GrantAuthorizationCode:
+		return GrantTypeAuthorizationCode, nil
+	case GrantAuthorizationCodePKCE:
+		return GrantTypeAuthorizationCodePKCE, nil
+	case GrantClientCredentials:
+		return GrantTypeClientCredentials, nil
+	case GrantGitHubAppInstallation:
+		return GrantTypeGitHubAppInstallation, nil
+	default:
+		return 0, fmt.Errorf("grant_type %q is not supported", normalized)
+	}
+}
+
+func (k GrantTypeKind) String() string {
+	switch k {
+	case 0:
+		return ""
+	case GrantTypeAuthorizationCode:
+		return GrantAuthorizationCode
+	case GrantTypeAuthorizationCodePKCE:
+		return GrantAuthorizationCodePKCE
+	case GrantTypeClientCredentials:
+		return GrantClientCredentials
+	case GrantTypeGitHubAppInstallation:
+		return GrantGitHubAppInstallation
+	default:
+		return ""
+	}
+}
+
 func NormalizeGrantType(raw string) string {
 	return strings.TrimSpace(strings.ToLower(raw))
 }
 
 func ValidateRequiredGrantType(raw string) error {
-	normalized := NormalizeGrantType(raw)
-	if normalized == "" {
-		return nil
-	}
-	switch normalized {
-	case GrantAuthorizationCode, GrantAuthorizationCodePKCE, GrantClientCredentials, GrantGitHubAppInstallation:
-		return nil
+	_, err := ParseGrantTypeKind(raw)
+	return err
+}
+
+type TokenClientAuthKind uint8
+
+const (
+	TokenClientAuthPostKind TokenClientAuthKind = iota + 1
+	TokenClientAuthBasicKind
+)
+
+func ParseTokenClientAuthKind(raw string) (TokenClientAuthKind, error) {
+	switch normalized := strings.TrimSpace(strings.ToLower(raw)); normalized {
+	case "", TokenClientAuthPost:
+		return TokenClientAuthPostKind, nil
+	case TokenClientAuthBasic:
+		return TokenClientAuthBasicKind, nil
 	default:
-		return fmt.Errorf("grant_type %q is not supported", normalized)
+		return 0, fmt.Errorf("token_request.client_auth %q is not supported; want %s or %s", normalized, TokenClientAuthPost, TokenClientAuthBasic)
+	}
+}
+
+func (k TokenClientAuthKind) String() string {
+	switch k {
+	case TokenClientAuthPostKind:
+		return TokenClientAuthPost
+	case TokenClientAuthBasicKind:
+		return TokenClientAuthBasic
+	default:
+		return ""
+	}
+}
+
+type TokenBodyKind uint8
+
+const (
+	TokenBodyFormKind TokenBodyKind = iota + 1
+	TokenBodyJSONKind
+)
+
+func ParseTokenBodyKind(raw string) (TokenBodyKind, error) {
+	switch normalized := strings.TrimSpace(strings.ToLower(raw)); normalized {
+	case "", TokenBodyForm:
+		return TokenBodyFormKind, nil
+	case TokenBodyJSON:
+		return TokenBodyJSONKind, nil
+	default:
+		return 0, fmt.Errorf("token_request.body %q is not supported; want %s or %s", normalized, TokenBodyForm, TokenBodyJSON)
+	}
+}
+
+func (k TokenBodyKind) String() string {
+	switch k {
+	case TokenBodyFormKind:
+		return TokenBodyForm
+	case TokenBodyJSONKind:
+		return TokenBodyJSON
+	default:
+		return ""
 	}
 }
 
@@ -81,15 +174,11 @@ func NormalizeTokenRequestProfile(profile TokenRequestProfile) TokenRequestProfi
 
 func ValidateTokenRequestProfile(profile TokenRequestProfile) error {
 	normalized := NormalizeTokenRequestProfile(profile)
-	switch normalized.ClientAuth {
-	case TokenClientAuthPost, TokenClientAuthBasic:
-	default:
-		return fmt.Errorf("token_request.client_auth %q is not supported; want %s or %s", normalized.ClientAuth, TokenClientAuthPost, TokenClientAuthBasic)
+	if _, err := ParseTokenClientAuthKind(normalized.ClientAuth); err != nil {
+		return err
 	}
-	switch normalized.Body {
-	case TokenBodyForm, TokenBodyJSON:
-	default:
-		return fmt.Errorf("token_request.body %q is not supported; want %s or %s", normalized.Body, TokenBodyForm, TokenBodyJSON)
+	if _, err := ParseTokenBodyKind(normalized.Body); err != nil {
+		return err
 	}
 	seen := map[string]struct{}{}
 	for key, value := range profile.StaticHeaders {
@@ -161,14 +250,43 @@ func NormalizeGrantModel(raw string) string {
 	return raw
 }
 
-func ValidateGrantModel(raw string) error {
-	normalized := NormalizeGrantModel(raw)
-	switch normalized {
-	case GrantModelScope, GrantModelWorkspace, GrantModelInstallation:
-		return nil
+type GrantModelKind uint8
+
+const (
+	GrantModelScopeKind GrantModelKind = iota + 1
+	GrantModelWorkspaceKind
+	GrantModelInstallationKind
+)
+
+func ParseGrantModelKind(raw string) (GrantModelKind, error) {
+	switch normalized := NormalizeGrantModel(raw); normalized {
+	case GrantModelScope:
+		return GrantModelScopeKind, nil
+	case GrantModelWorkspace:
+		return GrantModelWorkspaceKind, nil
+	case GrantModelInstallation:
+		return GrantModelInstallationKind, nil
 	default:
-		return fmt.Errorf("grant_model %q is not supported; want %s, %s, or %s", normalized, GrantModelScope, GrantModelWorkspace, GrantModelInstallation)
+		return 0, fmt.Errorf("grant_model %q is not supported; want %s, %s, or %s", normalized, GrantModelScope, GrantModelWorkspace, GrantModelInstallation)
 	}
+}
+
+func (k GrantModelKind) String() string {
+	switch k {
+	case GrantModelScopeKind:
+		return GrantModelScope
+	case GrantModelWorkspaceKind:
+		return GrantModelWorkspace
+	case GrantModelInstallationKind:
+		return GrantModelInstallation
+	default:
+		return ""
+	}
+}
+
+func ValidateGrantModel(raw string) error {
+	_, err := ParseGrantModelKind(raw)
+	return err
 }
 
 func GrantModelCovers(actual, required string) error {

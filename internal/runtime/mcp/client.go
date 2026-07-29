@@ -329,10 +329,10 @@ func (c *Client) callHTTPServerWithCredentialKeyResolver(ctx context.Context, cf
 	if credentialKey != "" {
 		if resolver != nil {
 			resolved, resolveErr := resolver(credentialKey)
-			if resolveErr != nil || strings.TrimSpace(resolved) == "" {
+			if resolveErr != nil || resolved == "" {
 				return RPCResponse{}, externalMCPFailure(runtimefailures.ClassAuthenticationNeeded, "mcp_credential_required", cfg, req, map[string]any{"auth_kind": "mcp_credential"}, resolveErr)
 			}
-			credentialKey = strings.TrimSpace(resolved)
+			credentialKey = resolved
 		}
 		if c.store == nil {
 			return RPCResponse{}, externalMCPFailure(runtimefailures.ClassAuthenticationNeeded, "mcp_credential_required", cfg, req, map[string]any{"auth_kind": "mcp_credential"}, nil)

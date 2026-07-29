@@ -549,13 +549,18 @@ func normalizeProviderTriggerSubject(subject *Subject) error {
 				return fmt.Errorf("effective verified-pack trigger subject %q requires trigger_pack_binding source and pack identity", subject.ID)
 			}
 			pack := admission.Pack
-			pack.ID = strings.TrimSpace(pack.ID)
-			pack.Version = strings.TrimSpace(pack.Version)
-			pack.ManifestHash = strings.TrimSpace(pack.ManifestHash)
-			pack.Provenance = strings.TrimSpace(pack.Provenance)
-			if pack.ID == "" || pack.Version == "" || pack.ManifestHash == "" || pack.Provenance == "" {
-				return fmt.Errorf("effective verified-pack trigger subject %q has incomplete pack identity", subject.ID)
+			source, err := NewPackSource(pack.Provenance, "")
+			if err != nil {
+				return fmt.Errorf("effective verified-pack trigger subject %q has invalid pack identity: %w", subject.ID, err)
 			}
+			identity, err := NewPackIdentity(pack.ID, pack.Version, pack.ManifestHash, TypeTrigger, source)
+			if err != nil {
+				return fmt.Errorf("effective verified-pack trigger subject %q has invalid pack identity: %w", subject.ID, err)
+			}
+			pack.ID = identity.ID()
+			pack.Version = identity.Version()
+			pack.ManifestHash = identity.ManifestHash()
+			pack.Provenance = identity.Source().Provenance()
 		} else if subject.Source != "raw_declaration" || admission.Pack != nil {
 			return fmt.Errorf("effective raw trigger subject %q must use raw_declaration source without pack identity", subject.ID)
 		}

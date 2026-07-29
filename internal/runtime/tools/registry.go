@@ -19,8 +19,8 @@ type executionToolValue struct {
 	usage                string
 	requiredPermission   runtimecontracts.ToolPermission
 	handler              runtimecontracts.ToolHandlerKind
-	inputSchema          map[string]any
-	outputSchema         map[string]any
+	inputSchema          runtimecontracts.ToolInputSchema
+	outputSchema         runtimecontracts.ToolInputSchema
 	generatedSchema      bool
 	http                 runtimecontracts.ToolHTTPExecution
 	hasHTTP              bool
@@ -81,13 +81,13 @@ func (t ExecutionTool) InputSchema() map[string]any {
 	if t.value == nil {
 		return nil
 	}
-	return deepCloneMap(t.value.inputSchema)
+	return t.value.inputSchema.Projection()
 }
 func (t ExecutionTool) OutputSchema() map[string]any {
 	if t.value == nil {
 		return nil
 	}
-	return deepCloneMap(t.value.outputSchema)
+	return t.value.outputSchema.Projection()
 }
 func (t ExecutionTool) GeneratedSchema() bool {
 	return t.value != nil && t.value.generatedSchema
@@ -351,7 +351,7 @@ func executionToolFromAdmitted(name string, entry runtimecontracts.ToolSchemaEnt
 	value := executionToolValue{
 		name: name, category: entry.Category(), description: entry.Description(),
 		usage: runtimeOwnedToolUsage(name), requiredPermission: entry.Permission(),
-		handler: handlerType, inputSchema: entry.InputSchema().Projection(), outputSchema: entry.OutputSchema().Projection(),
+		handler: handlerType, inputSchema: entry.InputSchema(), outputSchema: entry.OutputSchema(),
 		generatedSchema: entry.GeneratedSchema(),
 		http:            httpExecution, hasHTTP: hasHTTP,
 		responseMapping: responseMapping, hasResponseMapping: hasResponseMapping,

@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -216,6 +217,33 @@ func TestExecutor_HTTPToolExecutesTemplateAndResponseMapping(t *testing.T) {
 	}
 	if got, ok := result["status"].(int); !ok || got != 200 {
 		t.Fatalf("status = %#v, want 200", result["status"])
+	}
+}
+
+func TestExecutor_HTTPToolRejectsProviderOutputOutsideAdmittedSchema(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ok":"not-a-boolean"}`)
+	}))
+	defer server.Close()
+
+	output := runtimecontracts.MustToolInputSchema(
+		runtimecontracts.ToolSchemaObject,
+		runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+			"ok": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaBoolean),
+		}),
+		runtimecontracts.ToolSchemaRequired("ok"),
+	)
+	tool := admittedExecutionToolForTest(t, "schema_probe",
+		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+		runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), output),
+		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: http.MethodGet, URL: server.URL}),
+	)
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{})
+	_, err := exec.execHTTPRequestOnce(unmanagedToolTestContext(), http.MethodGet, server.URL, http.Header{}, nil, time.Second, tool, nil)
+	failure, ok := runtimefailures.As(err)
+	if err == nil || !ok || failure.Failure.Detail.Code != "provider_response_schema_invalid" {
+		t.Fatalf("failure = %#v, want provider_response_schema_invalid", failure)
 	}
 }
 

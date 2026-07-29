@@ -85,7 +85,7 @@ type InboundAdmissionPlan struct {
 	provider              string
 	policySource          PolicySource
 	requestAuthentication RequestAuthentication
-	packIdentity          *PackIdentity
+	packIdentity          *packs.PackIdentity
 	manifest              *Manifest
 	raw                   *RawAdmissionPolicy
 	requiresSecret        bool
@@ -148,28 +148,28 @@ func (s *CatalogSnapshot) compilePackAdmission(alias, provider, signingSecret st
 		return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q uses pack admission and must not declare authentication, event, delivery_id, or payload; remove raw-only fields", alias, provider)
 	}
 	var (
-		entry CatalogEntry
+		entry catalogEntryValue
 		ok    bool
 	)
 	if pin := strings.TrimSpace(declaration.PackID); pin != "" {
-		entry, ok = s.EntryByID(pin)
+		entry, ok = s.entryValueByID(pin)
 		if !ok {
-			if installed, exists := s.EntryByProvider(provider); exists {
-				return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q pins pack %q, but that id is not loaded; verified pack for %q is %q; fix admission.pack.id or provider_triggers.packs.*", alias, provider, pin, provider, installed.Identity.ID)
+			if installed, exists := s.entryValueByProvider(provider); exists {
+				return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q pins pack %q, but that id is not loaded; verified pack for %q is %q; fix admission.pack.id or provider_triggers.packs.*", alias, provider, pin, provider, installed.identity.ID())
 			}
 			return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q pins pack %q, but that id is not loaded; fix admission.pack.id or provider_triggers.packs.*", alias, provider, pin)
 		}
-		entryProvider := NormalizeProviderName(entry.Manifest.Provider)
+		entryProvider := NormalizeProviderName(entry.manifest.Provider)
 		if entryProvider != provider {
 			return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q pins pack %q, which provides %q; use a pack for %q or change provider to %q", alias, provider, pin, entryProvider, provider, entryProvider)
 		}
 	} else {
-		entry, ok = s.EntryByProvider(provider)
+		entry, ok = s.entryValueByProvider(provider)
 		if !ok {
 			return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q is pack-required, but no verified trigger pack provides %q; configure that pack in provider_triggers.packs.external_dirs, or declare admission.kind: raw with an explicit raw policy", alias, provider, provider)
 		}
 	}
-	auth, err := manifestRequestAuthentication(entry.Manifest)
+	auth, err := manifestRequestAuthentication(entry.manifest)
 	if err != nil {
 		return InboundAdmissionPlan{}, err
 	}
@@ -184,8 +184,11 @@ func (s *CatalogSnapshot) compilePackAdmission(alias, provider, signingSecret st
 	if !requiresSecret && signingSecret != "" {
 		return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q is UNAUTHENTICATED and must not declare signing_secret; remove signing_secret", alias, provider)
 	}
-	manifest := entry.Manifest
-	identity := entry.Identity
+	manifest, err := cloneManifest(entry.manifest)
+	if err != nil {
+		return InboundAdmissionPlan{}, fmt.Errorf("clone admitted provider trigger manifest for %q: %w", provider, err)
+	}
+	identity := entry.identity
 	return InboundAdmissionPlan{
 		generation: s.Generation(), provider: provider, policySource: PolicySourceVerifiedPack,
 		requestAuthentication: auth, packIdentity: &identity, manifest: &manifest,
@@ -199,8 +202,8 @@ func (s *CatalogSnapshot) compileRawAdmission(alias, provider, signingSecret str
 		return InboundAdmissionPlan{}, fmt.Errorf("raw ingress alias %q provider %q must not pin a pack; remove admission.pack", alias, provider)
 	}
 	if s != nil {
-		if entry, exists := s.EntryByProvider(provider); exists {
-			return InboundAdmissionPlan{}, fmt.Errorf("raw ingress alias %q provider %q conflicts with installed pack %q; use pack admission or rename the intentional raw namespace to %q", alias, provider, entry.Identity.ID, provider+"-raw")
+		if entry, exists := s.entryValueByProvider(provider); exists {
+			return InboundAdmissionPlan{}, fmt.Errorf("raw ingress alias %q provider %q conflicts with installed pack %q; use pack admission or rename the intentional raw namespace to %q", alias, provider, entry.identity.ID(), provider+"-raw")
 		}
 	}
 	policy, auth, err := compileRawPolicy(alias, provider, declaration)
@@ -371,7 +374,13 @@ func (p InboundAdmissionPlan) PackIdentity() (PackIdentity, bool) {
 	if p.packIdentity == nil {
 		return PackIdentity{}, false
 	}
-	return *p.packIdentity, true
+	source := p.packIdentity.Source()
+	return PackIdentity{
+		ID:           p.packIdentity.ID(),
+		Version:      p.packIdentity.Version(),
+		ManifestHash: p.packIdentity.ManifestHash(),
+		Provenance:   source.Provenance(),
+	}, true
 }
 func (p InboundAdmissionPlan) AcknowledgedUnsigned() bool { return p.acknowledgedUnsigned }
 
@@ -420,15 +429,15 @@ func (p InboundAdmissionPlan) EffectiveCapabilitySubject(req EffectiveSubjectReq
 	}
 	if p.manifest != nil {
 		source = "trigger_pack_binding"
-		provenance = p.packIdentity.Provenance
+		provenance = p.packIdentity.Source().Provenance()
 		admission.SignedPayload = strings.TrimSpace(p.manifest.Signature.SignedPayload)
 		admission.DigestEncoding = strings.TrimSpace(p.manifest.Signature.digestEncoding())
 		if strings.TrimSpace(p.manifest.Signature.Type) == signatureTypeTokenEquality || p.requestAuthentication == RequestAuthenticationNone {
 			admission.DigestEncoding = ""
 		}
 		admission.Pack = &packs.TriggerPackIdentity{
-			ID: p.packIdentity.ID, Version: p.packIdentity.Version,
-			ManifestHash: p.packIdentity.ManifestHash, Provenance: p.packIdentity.Provenance,
+			ID: p.packIdentity.ID(), Version: p.packIdentity.Version(),
+			ManifestHash: p.packIdentity.ManifestHash(), Provenance: p.packIdentity.Source().Provenance(),
 		}
 	} else if p.raw != nil && p.requestAuthentication == RequestAuthenticationHMACSHA256 {
 		admission.SignedPayload = "raw_body"
@@ -565,7 +574,7 @@ func (p InboundAdmissionPlan) ProjectDelivery(admitted AdmittedRequest) (Deliver
 		if err != nil {
 			var normalizationErr NormalizationError
 			if errors.As(err, &normalizationErr) && p.packIdentity != nil {
-				return Delivery{}, badRequest(fmt.Sprintf("pack %s version=%s manifest_hash=%s normalized event %q path %q failed: %s", p.packIdentity.ID, p.packIdentity.Version, p.packIdentity.ManifestHash, normalizationErr.Event, normalizationErr.Path, normalizationErr.Cause))
+				return Delivery{}, badRequest(fmt.Sprintf("pack %s version=%s manifest_hash=%s normalized event %q path %q failed: %s", p.packIdentity.ID(), p.packIdentity.Version(), p.packIdentity.ManifestHash(), normalizationErr.Event, normalizationErr.Path, normalizationErr.Cause))
 			}
 			return Delivery{}, err
 		}
@@ -576,9 +585,9 @@ func (p InboundAdmissionPlan) ProjectDelivery(admitted AdmittedRequest) (Deliver
 			authorization, err := runtimeprovideroutput.NewAuthorization(
 				p.provider,
 				string(delivery.Events[index].Name),
-				p.packIdentity.ID,
-				p.packIdentity.Version,
-				p.packIdentity.ManifestHash,
+				p.packIdentity.ID(),
+				p.packIdentity.Version(),
+				p.packIdentity.ManifestHash(),
 				p.generation,
 			)
 			if err != nil {

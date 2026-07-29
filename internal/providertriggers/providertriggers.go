@@ -115,8 +115,14 @@ type CatalogEntry struct {
 
 type CatalogSnapshot struct {
 	generation triggergeneration.Generation
-	byProvider map[string]CatalogEntry
-	byID       map[string]CatalogEntry
+	byProvider map[string]catalogEntryValue
+	byID       map[string]catalogEntryValue
+}
+
+type catalogEntryValue struct {
+	identity packs.PackIdentity
+	manifest Manifest
+	source   string
 }
 
 type LoadedPack struct {
@@ -141,7 +147,7 @@ func (s *CatalogSnapshot) PackDescriptors() []packs.TriggerPackDescriptor {
 	for _, id := range ids {
 		entry := s.byID[id]
 		events := map[string]packs.TriggerEvent{}
-		for _, output := range entry.Manifest.OutputManifest() {
+		for _, output := range entry.manifest.OutputManifest() {
 			if output.Kind != OutputKindNormalized {
 				continue
 			}
@@ -153,14 +159,8 @@ func (s *CatalogSnapshot) PackDescriptors() []packs.TriggerPackDescriptor {
 			events[output.Event] = packs.TriggerEvent{Name: output.Event, Fields: fields}
 		}
 		out = append(out, packs.TriggerPackDescriptor{
-			Identity: packs.MustPackIdentity(
-				entry.Identity.ID,
-				entry.Identity.Version,
-				entry.Identity.ManifestHash,
-				packs.TypeTrigger,
-				packs.MustPackSource(entry.Identity.Provenance, entry.Source),
-			),
-			Provider: entry.Manifest.Provider, Generation: s.generation, Events: events,
+			Identity: entry.identity,
+			Provider: entry.manifest.Provider, Generation: s.generation, Events: events,
 		})
 	}
 	return out
@@ -168,10 +168,10 @@ func (s *CatalogSnapshot) PackDescriptors() []packs.TriggerPackDescriptor {
 
 func NewCatalogSnapshot(entries ...CatalogEntry) (*CatalogSnapshot, error) {
 	snapshot := &CatalogSnapshot{
-		byProvider: make(map[string]CatalogEntry, len(entries)),
-		byID:       make(map[string]CatalogEntry, len(entries)),
+		byProvider: make(map[string]catalogEntryValue, len(entries)),
+		byID:       make(map[string]catalogEntryValue, len(entries)),
 	}
-	normalizedEntries := make([]CatalogEntry, 0, len(entries))
+	normalizedEntries := make([]catalogEntryValue, 0, len(entries))
 	for _, entry := range entries {
 		manifest := entry.Manifest
 		if err := manifest.Validate(); err != nil {
@@ -183,9 +183,6 @@ func NewCatalogSnapshot(entries ...CatalogEntry) (*CatalogSnapshot, error) {
 		}
 		provider := NormalizeProviderName(manifest.Provider)
 		entry.Manifest.Provider = provider
-		entry.Identity.ID = strings.TrimSpace(entry.Identity.ID)
-		entry.Identity.Version = strings.TrimSpace(entry.Identity.Version)
-		entry.Identity.ManifestHash = strings.TrimSpace(entry.Identity.ManifestHash)
 		entry.Identity.Provenance = strings.TrimSpace(entry.Identity.Provenance)
 		entry.SourcePath = strings.TrimSpace(entry.SourcePath)
 		entry.Source = firstNonEmpty(entry.Source, "unknown")
@@ -197,15 +194,30 @@ func NewCatalogSnapshot(entries ...CatalogEntry) (*CatalogSnapshot, error) {
 		if entry.Identity.ID == "" || entry.Identity.Version == "" || entry.Identity.ManifestHash == "" || entry.Identity.Provenance == "" {
 			return nil, fmt.Errorf("provider trigger catalog entry for %q requires pack id, version, manifest_hash, and provenance", provider)
 		}
+		source, err := packs.NewPackSource(entry.Identity.Provenance, entry.SourcePath)
+		if err != nil {
+			return nil, fmt.Errorf("provider trigger catalog entry for %q %w", provider, err)
+		}
+		identity, err := packs.NewPackIdentity(
+			entry.Identity.ID,
+			entry.Identity.Version,
+			entry.Identity.ManifestHash,
+			packs.TypeTrigger,
+			source,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("provider trigger catalog entry for %q %w", provider, err)
+		}
+		value := catalogEntryValue{identity: identity, manifest: entry.Manifest, source: entry.Source}
 		if existing, exists := snapshot.byProvider[provider]; exists {
-			return nil, fmt.Errorf("duplicate provider trigger manifest for %q from %s and %s", provider, existing.Source, entry.Source)
+			return nil, fmt.Errorf("duplicate provider trigger manifest for %q from %s and %s", provider, existing.source, entry.Source)
 		}
-		if existing, exists := snapshot.byID[entry.Identity.ID]; exists {
-			return nil, fmt.Errorf("duplicate provider trigger pack id %q from %s and %s", entry.Identity.ID, existing.Source, entry.Source)
+		if existing, exists := snapshot.byID[identity.ID()]; exists {
+			return nil, fmt.Errorf("duplicate provider trigger pack id %q from %s and %s", identity.ID(), existing.source, entry.Source)
 		}
-		snapshot.byProvider[provider] = entry
-		snapshot.byID[entry.Identity.ID] = entry
-		normalizedEntries = append(normalizedEntries, entry)
+		snapshot.byProvider[provider] = value
+		snapshot.byID[identity.ID()] = value
+		normalizedEntries = append(normalizedEntries, value)
 	}
 	generation, err := catalogGeneration(normalizedEntries)
 	if err != nil {
@@ -303,9 +315,9 @@ func rejectDuplicatePackDirectories(platformDirs, externalDirs []string) error {
 func validateLoadedPackIdentities(loaded []LoadedPack) error {
 	seen := map[string]LoadedPack{}
 	for _, pack := range loaded {
-		id := strings.TrimSpace(pack.Envelope.ID)
+		id := pack.Envelope.ID
 		if previous, ok := seen[id]; ok {
-			if strings.TrimSpace(previous.Envelope.Version) == strings.TrimSpace(pack.Envelope.Version) && strings.TrimSpace(previous.Envelope.ManifestHash) != strings.TrimSpace(pack.Envelope.ManifestHash) {
+			if previous.Envelope.Version == pack.Envelope.Version && previous.Envelope.ManifestHash != pack.Envelope.ManifestHash {
 				return fmt.Errorf("competing immutable provider trigger pack identity (%q, %q) from %s and %s has manifest hashes %q and %q", id, pack.Envelope.Version, loadedPackSource(previous), loadedPackSource(pack), previous.Envelope.ManifestHash, pack.Envelope.ManifestHash)
 			}
 			return fmt.Errorf("duplicate provider trigger pack id %q from %s and %s", id, loadedPackSource(previous), loadedPackSource(pack))
@@ -335,8 +347,8 @@ func CatalogEntriesFromLoadedPacks(loaded ...LoadedPack) []CatalogEntry {
 	for _, pack := range loaded {
 		entries = append(entries, CatalogEntry{
 			Identity: PackIdentity{
-				ID: strings.TrimSpace(pack.Envelope.ID), Version: strings.TrimSpace(pack.Envelope.Version),
-				ManifestHash: strings.TrimSpace(pack.Envelope.ManifestHash), Provenance: strings.TrimSpace(pack.Envelope.Provenance.Source),
+				ID: pack.Envelope.ID, Version: pack.Envelope.Version,
+				ManifestHash: pack.Envelope.ManifestHash, Provenance: pack.Envelope.Provenance.Source,
 			},
 			Manifest: pack.Manifest, SourcePath: strings.TrimSpace(pack.SourcePath),
 			Source: firstNonEmpty(pack.Source, loadedPackSource(pack)),
@@ -510,13 +522,13 @@ func (s *CatalogSnapshot) VerifyProviderOutputAuthorization(authorization runtim
 	if !ok {
 		return fmt.Errorf("pack %q is not present in the current verified catalog", authorization.PackID())
 	}
-	if entry.Identity.Version != authorization.PackVersion() || entry.Identity.ManifestHash != authorization.ManifestHash() {
+	if entry.identity.Version() != authorization.PackVersion() || entry.identity.ManifestHash() != authorization.ManifestHash() {
 		return fmt.Errorf("pack %q version/hash does not match the current verified catalog", authorization.PackID())
 	}
-	if NormalizeProviderName(entry.Manifest.Provider) != authorization.Provider() {
+	if NormalizeProviderName(entry.manifest.Provider) != authorization.Provider() {
 		return fmt.Errorf("pack %q does not own provider %q", authorization.PackID(), authorization.Provider())
 	}
-	for _, normalized := range entry.Manifest.NormalizedEvents {
+	for _, normalized := range entry.manifest.NormalizedEvents {
 		if strings.TrimSpace(normalized.Event) == authorization.Event() {
 			return nil
 		}
@@ -525,25 +537,19 @@ func (s *CatalogSnapshot) VerifyProviderOutputAuthorization(authorization runtim
 }
 
 func (s *CatalogSnapshot) EntryByProvider(provider string) (CatalogEntry, bool) {
-	if s == nil {
-		return CatalogEntry{}, false
-	}
-	entry, ok := s.byProvider[NormalizeProviderName(provider)]
+	entry, ok := s.entryValueByProvider(provider)
 	if !ok {
 		return CatalogEntry{}, false
 	}
-	return cloneCatalogEntry(entry), true
+	return entry.readback(), true
 }
 
 func (s *CatalogSnapshot) EntryByID(id string) (CatalogEntry, bool) {
-	if s == nil {
-		return CatalogEntry{}, false
-	}
-	entry, ok := s.byID[strings.TrimSpace(id)]
+	entry, ok := s.entryValueByID(id)
 	if !ok {
 		return CatalogEntry{}, false
 	}
-	return cloneCatalogEntry(entry), true
+	return entry.readback(), true
 }
 
 func (s *CatalogSnapshot) Entries() []CatalogEntry {
@@ -552,19 +558,45 @@ func (s *CatalogSnapshot) Entries() []CatalogEntry {
 	}
 	out := make([]CatalogEntry, 0, len(s.byID))
 	for _, entry := range s.byID {
-		out = append(out, cloneCatalogEntry(entry))
+		out = append(out, entry.readback())
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Identity.ID < out[j].Identity.ID })
 	return out
 }
 
-func cloneCatalogEntry(entry CatalogEntry) CatalogEntry {
-	manifest, err := cloneManifest(entry.Manifest)
+func (s *CatalogSnapshot) entryValueByProvider(provider string) (catalogEntryValue, bool) {
+	if s == nil {
+		return catalogEntryValue{}, false
+	}
+	entry, ok := s.byProvider[NormalizeProviderName(provider)]
+	return entry, ok
+}
+
+func (s *CatalogSnapshot) entryValueByID(id string) (catalogEntryValue, bool) {
+	if s == nil {
+		return catalogEntryValue{}, false
+	}
+	entry, ok := s.byID[strings.TrimSpace(id)]
+	return entry, ok
+}
+
+func (entry catalogEntryValue) readback() CatalogEntry {
+	manifest, err := cloneManifest(entry.manifest)
 	if err != nil {
 		panic("provider trigger catalog contains an invalid manifest clone: " + err.Error())
 	}
-	entry.Manifest = manifest
-	return entry
+	source := entry.identity.Source()
+	return CatalogEntry{
+		Identity: PackIdentity{
+			ID:           entry.identity.ID(),
+			Version:      entry.identity.Version(),
+			ManifestHash: entry.identity.ManifestHash(),
+			Provenance:   source.Provenance(),
+		},
+		Manifest:   manifest,
+		SourcePath: source.Path(),
+		Source:     entry.source,
+	}
 }
 
 func cloneManifest(manifest Manifest) (Manifest, error) {
@@ -575,16 +607,17 @@ func cloneManifest(manifest Manifest) (Manifest, error) {
 	return parseManifestStrict(body)
 }
 
-func catalogGeneration(entries []CatalogEntry) (triggergeneration.Generation, error) {
+func catalogGeneration(entries []catalogEntryValue) (triggergeneration.Generation, error) {
 	type tuple struct {
 		ID, Provider, Version, ManifestHash, Provenance string
 	}
 	tuples := make([]tuple, 0, len(entries))
 	for _, entry := range entries {
+		source := entry.identity.Source()
 		tuples = append(tuples, tuple{
-			ID: strings.TrimSpace(entry.Identity.ID), Provider: NormalizeProviderName(entry.Manifest.Provider),
-			Version: strings.TrimSpace(entry.Identity.Version), ManifestHash: strings.TrimSpace(entry.Identity.ManifestHash),
-			Provenance: strings.TrimSpace(entry.Identity.Provenance),
+			ID: entry.identity.ID(), Provider: NormalizeProviderName(entry.manifest.Provider),
+			Version: entry.identity.Version(), ManifestHash: entry.identity.ManifestHash(),
+			Provenance: source.Provenance(),
 		})
 	}
 	sort.Slice(tuples, func(i, j int) bool { return tuples[i].ID < tuples[j].ID })

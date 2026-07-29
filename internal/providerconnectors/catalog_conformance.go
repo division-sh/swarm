@@ -252,10 +252,7 @@ func validateCatalogFixtureCredentials(tool runtimecontracts.ToolSchemaEntry, cr
 	toolCredentials := tool.Credentials()
 	expected := make(map[string]struct{}, len(toolCredentials))
 	for _, key := range toolCredentials {
-		key = strings.TrimSpace(key)
-		if key != "" {
-			expected[key] = struct{}{}
-		}
+		expected[key] = struct{}{}
 	}
 	for key := range expected {
 		if _, exists := credentials[key]; !exists {

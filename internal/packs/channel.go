@@ -13,6 +13,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
+	"github.com/division-sh/swarm/internal/runtime/core/packidentity"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
@@ -55,25 +57,45 @@ func (s PackSource) Diagnostic() string {
 }
 
 type PackIdentity struct {
-	id           string
-	version      string
-	manifestHash string
-	packType     string
+	id           packidentity.ID
+	version      packidentity.Version
+	manifestHash manifesthash.Hash
+	packType     packIdentityType
 	source       PackSource
 }
 
+type packIdentityType uint8
+
+const (
+	packIdentityTrigger packIdentityType = iota + 1
+	packIdentityConnector
+	packIdentityChannel
+)
+
 func NewPackIdentity(id, version, manifestHash, packType string, source PackSource) (PackIdentity, error) {
-	id = strings.TrimSpace(id)
-	version = strings.TrimSpace(version)
-	manifestHash = strings.TrimSpace(manifestHash)
-	packType = strings.TrimSpace(packType)
-	if id == "" || version == "" || manifestHash == "" || packType == "" {
+	if id == "" || version == "" || strings.TrimSpace(manifestHash) == "" || strings.TrimSpace(packType) == "" {
 		return PackIdentity{}, fmt.Errorf("pack id, version, manifest hash, and type are required")
+	}
+	admittedID, err := packidentity.ParseID(id)
+	if err != nil {
+		return PackIdentity{}, fmt.Errorf("pack identity %w", err)
+	}
+	admittedVersion, err := packidentity.ParseVersion(version)
+	if err != nil {
+		return PackIdentity{}, fmt.Errorf("pack identity %w", err)
+	}
+	admittedManifestHash, err := manifesthash.Parse(manifestHash)
+	if err != nil {
+		return PackIdentity{}, fmt.Errorf("pack identity %w", err)
+	}
+	admittedPackType, err := admitPackIdentityType(packType)
+	if err != nil {
+		return PackIdentity{}, err
 	}
 	if source.Provenance() == "" {
 		return PackIdentity{}, fmt.Errorf("pack source is required")
 	}
-	return PackIdentity{id: id, version: version, manifestHash: manifestHash, packType: packType, source: source}, nil
+	return PackIdentity{id: admittedID, version: admittedVersion, manifestHash: admittedManifestHash, packType: admittedPackType, source: source}, nil
 }
 
 func MustPackIdentity(id, version, manifestHash, packType string, source PackSource) PackIdentity {
@@ -84,17 +106,43 @@ func MustPackIdentity(id, version, manifestHash, packType string, source PackSou
 	return identity
 }
 
-func (i PackIdentity) ID() string           { return i.id }
-func (i PackIdentity) Version() string      { return i.version }
-func (i PackIdentity) ManifestHash() string { return i.manifestHash }
-func (i PackIdentity) Type() string         { return i.packType }
+func (i PackIdentity) ID() string           { return i.id.String() }
+func (i PackIdentity) Version() string      { return i.version.String() }
+func (i PackIdentity) ManifestHash() string { return i.manifestHash.String() }
+func (i PackIdentity) Type() string         { return i.packType.String() }
 func (i PackIdentity) Source() PackSource   { return i.source }
 
 func (i PackIdentity) MarshalJSON() ([]byte, error) {
 	return canonicaljson.Bytes(map[string]any{
-		"id": i.id, "version": i.version, "manifest_hash": i.manifestHash,
-		"type": i.packType, "source": i.source.Diagnostic(),
+		"id": i.id.String(), "version": i.version.String(), "manifest_hash": i.manifestHash.String(),
+		"type": i.packType.String(), "source": i.source.Diagnostic(),
 	})
+}
+
+func admitPackIdentityType(raw string) (packIdentityType, error) {
+	switch raw {
+	case TypeTrigger:
+		return packIdentityTrigger, nil
+	case TypeConnector:
+		return packIdentityConnector, nil
+	case TypeChannel:
+		return packIdentityChannel, nil
+	default:
+		return 0, fmt.Errorf("pack identity type %q is unsupported", raw)
+	}
+}
+
+func (t packIdentityType) String() string {
+	switch t {
+	case packIdentityTrigger:
+		return TypeTrigger
+	case packIdentityConnector:
+		return TypeConnector
+	case packIdentityChannel:
+		return TypeChannel
+	default:
+		return ""
+	}
 }
 
 type TriggerEventField struct {

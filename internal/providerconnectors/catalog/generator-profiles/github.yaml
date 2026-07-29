@@ -44,7 +44,7 @@ operations:
       - {input: installation_id, type: string, required: true, purpose: managed_credential_selection}
     permissions:
       - {id: issues:write, note: GitHub App Issues repository permission at write level}
-    output: {type: object}
+    output: {type: array, items_type: object}
     response_success: {kind: http_status_2xx}
     fixture: {id: github/issues-add-labels, status: passing}
     review_status: approved

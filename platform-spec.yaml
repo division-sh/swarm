@@ -8392,12 +8392,13 @@ tool_model:
         provider_connector. Explicit import remains the enablement fence for packed tools because unimported tools are absent from the
         effective source. Flow-local and imported entries otherwise consume identical response-generation semantics.
       deterministic_inhabitation: >
-        Connector response roots are objects. Omitted schema type has the existing object meaning. Objects materialize only required
-        declared properties in deterministic key order and invent no additional properties. Arrays materialize empty because the
-        admitted ToolInputSchema model has no minimum-item constraint. Non-empty enum-bearing values choose the first authored typed
-        literal; otherwise strings use empty text, booleans false, numbers zero clamped to inclusive bounds, integers the deterministic
-        integer nearest zero within inclusive bounds, and null values null. Optional properties, examples, defaults, and provider-
-        semantic values are not invented.
+        Connector response roots consume the exact admitted output-schema kind; object-only mock response carriers and
+        materializers are forbidden. Objects materialize only required declared properties in deterministic key order and
+        invent no additional properties. Arrays materialize exactly minItems entries, or an empty array when minItems is
+        absent, by recursively inhabiting the admitted item schema. Non-empty enum-bearing values choose the first authored
+        typed literal; otherwise strings use empty text, booleans false, numbers zero clamped to inclusive bounds, integers
+        the deterministic integer nearest zero within inclusive bounds, and null values null. Optional properties,
+        examples, defaults, additional properties, and provider-semantic values are not invented.
       canonical_enum_projection: >
         Provider-visible tool definitions and runtime output-schema admission consume one recursive ToolInputSchema projection for
         typed enum literals through properties and array items. Omitted enum and explicitly authored empty enum retain distinct presence
@@ -8407,8 +8408,8 @@ tool_model:
         numbers, and non-string object keys fail without coercion at the exact enum index. Runtime admission compares enum members as typed
         canonical JSON values;
         stringification, case folding, and a provider-only or validator-only enum interpreter are forbidden. Schema-valued
-        additionalProperties remains part of the broader exact ToolInputSchema acceptance work tracked by #1981 and is not claimed closed
-        by this generated-response slice.
+        additionalProperties consumes the same admitted ToolInputSchema owner; mock generation never invents an additional
+        property solely because a schema permits one.
       failure_policy: >
         Unknown types, required names without declared property schemas, an explicitly authored empty enum, non-JSON enum literals,
         enum/type mismatch, non-finite or contradictory bounds, integer intervals without an inhabitant, or canonical post-generation
@@ -8743,12 +8744,19 @@ tool_model:
       registries re-run the same admission for programmatic packs before indexing them. The authority-free runtime
       ExecutionTool view is derived from the admitted ToolSchemaEntry and consumes its schema projection rather than a local
       JSON-schema interpreter. ToolSchemaEntry also admits one closed category, one permission identity, one typed rate
-      policy, and one exhaustive handler/execution variant. For HTTP tools that same admission compiles method, URL,
-      header, and recursive body templates; validates static or managed credential policy; admits one finite response-success
-      variant with a parsed response path and semantic scalar equality; compiles the recursive response mapping; and parses
-      every result-projection source and target path with overlap rejection. Malformed execution semantics cannot acquire
+      policy, and one exhaustive handler/execution variant. For HTTP tools that same admission compiles method and an
+      absolute HTTP(S)-only URL,
+      header, and recursive body templates; validates static or managed credential policy while retaining finite grant,
+      client-authentication, body-encoding, and grant-model variants as typed values; admits one finite response-success
+      variant with a parsed response path and semantic scalar equality; compiles the recursive response mapping and proves
+      every statically knowable mapped value against the output schema; and parses every result-projection source and
+      target path with overlap rejection, proves both paths against the admitted source and output schemas, and proves that
+      every required output leaf is constructed. One canonical schema-assignability owner governs channel relations,
+      result projection, and response-mapping proof. Malformed execution semantics cannot acquire
       tool authority, and direct and durable execution mechanically invoke these same admitted values without reparsing,
-      trimming, normalizing, or validating authored syntax after a provider effect. Authored, generated, platform-builtin, native, and MCP-discovered
+      trimming, or normalizing authored syntax after a provider effect. Both direct and durable HTTP execution validate
+      every provider result against its admitted output schema before recording success when that schema is declared,
+      whether or not a result projection exists. Authored, generated, platform-builtin, native, and MCP-discovered
       tools all pass through that owner; malformed or missing MCP schemas fail discovery before publication, and runtime
       projection performs no parsing, normalization, permission fallback, or tool-name handler inference. Compiled channel
       operations retain package-local admitted operation/tool identities, parsed input/output mapping paths, precomputed
@@ -8758,7 +8766,10 @@ tool_model:
       private activity targets. Runtime consumers perform exact lookup and mapping execution only; they never reconstruct
       schemas, result projections, tool identifiers, or target identifiers from authored DTOs. Pack
       provenance and diagnostic path remain separate inside an opaque admitted source identity and are never recovered by
-      delimiter parsing. Connector generation evidence/import provenance and normalized-provider target-free authorization
+      delimiter parsing. Pack catalog and normalized-provider authorization admission consume one opaque canonical
+      sha256 manifest-hash value and opaque validated pack identifier and semantic version rather than independently
+      interpreting free identity strings. Connector generation
+      evidence/import provenance and normalized-provider target-free authorization
       are admitted opaque capability values; incomplete records cannot enter the finite semantic-source capability
       aggregate, and provider catalog generation remains typed through authorization verification and persistence codecs.
       Accepted tool entries admit HTTP bodies, response

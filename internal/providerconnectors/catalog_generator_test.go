@@ -55,6 +55,13 @@ func TestGeneratedCatalogIsDeterministicCurrentAndProviderGeneric(t *testing.T) 
 			t.Fatalf("generated GitHub tool %q response_success = %#v", toolID, success)
 		}
 	}
+	addLabels := github.Manifest.Tools["github.add_labels_to_issue"]
+	if err := addLabels.OutputSchema().Validate([]any{map[string]any{"name": "bug"}}); err != nil {
+		t.Fatalf("generated GitHub add-labels output rejects provider array: %v", err)
+	}
+	if err := addLabels.OutputSchema().Validate(map[string]any{"name": "bug"}); err == nil {
+		t.Fatal("generated GitHub add-labels output accepts the stale object shape")
+	}
 
 	acme := artifacts["acme"]
 	tool, ok := acme.Manifest.Tools["acme.create_widget"]
@@ -74,6 +81,18 @@ func TestGeneratedCatalogIsDeterministicCurrentAndProviderGeneric(t *testing.T) 
 	}
 	if _, exists := BuiltinTool("acme", "acme.create_widget"); exists {
 		t.Fatal("synthetic conformance connector became an ambient builtin tool")
+	}
+}
+
+func TestGeneratedCatalogRejectsProfileOutputShapeDriftFromOpenAPI(t *testing.T) {
+	files := catalogWorkingTreeFS(t)
+	var profile GeneratorProfile
+	mustYAMLUnmarshal(t, files["catalog/generator-profiles/github.yaml"].Data, &profile)
+	profile.Operations[0].Output = GeneratorOutput{Type: "object"}
+	files["catalog/generator-profiles/github.yaml"].Data = mustYAMLMarshal(t, profile)
+
+	if _, err := GenerateCatalog(files); err == nil || !strings.Contains(err.Error(), `response type "array" does not match profile type "object"`) {
+		t.Fatalf("GenerateCatalog output-shape drift error = %v", err)
 	}
 }
 

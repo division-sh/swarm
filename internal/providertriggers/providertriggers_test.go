@@ -1673,7 +1673,7 @@ func newTestCatalogSnapshot(manifests ...Manifest) (*CatalogSnapshot, error) {
 		sum := sha256.Sum256(body)
 		provider := NormalizeProviderName(manifest.Provider)
 		entries = append(entries, CatalogEntry{
-			Identity: PackIdentity{ID: "test." + provider, Version: "0.0.0", ManifestHash: hex.EncodeToString(sum[:]), Provenance: "test"},
+			Identity: PackIdentity{ID: "test." + provider, Version: "0.0.0", ManifestHash: "sha256:" + hex.EncodeToString(sum[:]), Provenance: "test"},
 			Manifest: manifest, Source: "test",
 		})
 	}
