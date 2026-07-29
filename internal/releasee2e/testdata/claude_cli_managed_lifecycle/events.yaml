@@ -1,0 +1,6 @@
+work.requested:
+  swarm:
+    source: external
+  request: text
+work.completed:
+  result: text

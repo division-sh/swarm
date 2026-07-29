@@ -1,0 +1,8 @@
+release-worker:
+  id: release-worker
+  role: release-worker
+  prompt_ref: release-worker
+  model: regular
+  memory: false
+  subscriptions: [work.requested]
+  emit_events: [work.completed]
