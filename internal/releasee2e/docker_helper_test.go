@@ -102,7 +102,7 @@ func runFakeDocker(args []string) int {
 		return fakeDockerUnexpected(root, args, "missing command")
 	}
 	if args[0] != "exec" {
-		if err := validateReleaseDockerCommand(args); err != nil {
+		if err := validateReleaseDockerCommand(root, args); err != nil {
 			return fakeDockerUnexpected(root, args, err.Error())
 		}
 	}
@@ -143,7 +143,7 @@ func runFakeDocker(args []string) int {
 	return fakeDockerUnexpected(root, args, "unsupported command")
 }
 
-func validateReleaseDockerCommand(args []string) error {
+func validateReleaseDockerCommand(root string, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("missing command")
 	}
@@ -183,7 +183,7 @@ func validateReleaseDockerCommand(args []string) error {
 			return fmt.Errorf("unsupported Docker inspect format")
 		}
 	case "create":
-		if err := validateReleaseDockerCreate(args); err != nil {
+		if err := validateReleaseDockerCreate(root, args); err != nil {
 			return err
 		}
 	case "start", "stop":
@@ -216,7 +216,7 @@ type releaseDockerCreate struct {
 	command    []string
 }
 
-func validateReleaseDockerCreate(args []string) error {
+func validateReleaseDockerCreate(root string, args []string) error {
 	create, err := parseReleaseDockerCreate(args)
 	if err != nil {
 		return err
@@ -274,7 +274,7 @@ func validateReleaseDockerCreate(args []string) error {
 	if create.workdir != expected.workdir || create.privileged != expected.privileged {
 		return fmt.Errorf("unexpected create workdir or privilege for %s", create.name)
 	}
-	if err := validateReleaseDockerMounts(create.mounts, expected.requiredMount); err != nil {
+	if err := validateReleaseDockerMounts(root, create.mounts, expected.requiredMount); err != nil {
 		return fmt.Errorf("create %s mounts: %w", create.name, err)
 	}
 	if err := validateReleaseDockerLabels(create, expected.kind, expected.resetEligible, expected.source, expected.scope); err != nil {
@@ -341,7 +341,12 @@ func parseReleaseDockerCreate(args []string) (releaseDockerCreate, error) {
 	return create, nil
 }
 
-func validateReleaseDockerMounts(raw []string, required map[string]string) error {
+func validateReleaseDockerMounts(root string, raw []string, required map[string]string) error {
+	releaseRoot := filepath.Dir(filepath.Clean(root))
+	requiredProjectMounts := map[string]string{
+		"/data":                filepath.Join(releaseRoot, ".swarm", "data"),
+		"/opt/swarm/contracts": filepath.Join(releaseRoot, "contracts"),
+	}
 	seen := map[string]string{}
 	for _, mount := range raw {
 		parts := strings.Split(mount, ":")
@@ -358,8 +363,9 @@ func validateReleaseDockerMounts(raw []string, required map[string]string) error
 		}
 		switch target {
 		case "/data", "/opt/swarm/contracts":
-			if mode != "ro" || !filepath.IsAbs(source) {
-				return fmt.Errorf("project mount %q is not absolute read-only", mount)
+			wantSource := requiredProjectMounts[target]
+			if mode != "ro" || !filepath.IsAbs(source) || filepath.Clean(source) != wantSource {
+				return fmt.Errorf("project mount %q does not match %s:%s:ro", mount, wantSource, target)
 			}
 		default:
 			wantSource, ok := required[target]
@@ -371,6 +377,11 @@ func validateReleaseDockerMounts(raw []string, required map[string]string) error
 			return fmt.Errorf("duplicate mount target %q", target)
 		}
 		seen[target] = source
+	}
+	for target := range requiredProjectMounts {
+		if _, ok := seen[target]; !ok {
+			return fmt.Errorf("missing required project mount target %q", target)
+		}
 	}
 	for target := range required {
 		if _, ok := seen[target]; !ok {
