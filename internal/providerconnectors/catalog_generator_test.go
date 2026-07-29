@@ -480,7 +480,9 @@ func TestGenerationEvidenceResponseSuccessBindingPreservesScalarKinds(t *testing
 			}
 			objectSchema := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)
 			toolEntry := runtimecontracts.MustToolSchemaEntry(
+				runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
 				runtimecontracts.WithToolSchemas(objectSchema, objectSchema),
+				runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://acme.example.test/widgets"}),
 				runtimecontracts.WithToolResponseSuccess(toolPolicy),
 			)
 			err := evidence.Validate("acme", map[string]runtimecontracts.ToolSchemaEntry{

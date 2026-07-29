@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -27,9 +25,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
-	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/runtime/httpresponsesuccess"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
@@ -1034,20 +1030,23 @@ func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityInt
 }
 
 type preparedActivityHTTPTool struct {
-	toolName        string
-	method          string
-	url             string
-	headers         http.Header
-	body            []byte
-	timeout         time.Duration
-	client          *http.Client
-	secrets         []string
-	managedAuth     *activityManagedHTTPAuth
-	success         *runtimecontracts.HTTPResponseSuccess
-	responseMapping map[string]any
-	outputSchema    runtimecontracts.ToolInputSchema
-	compiledResult  *runtimecontracts.CompiledResultProjection
-	inputHash       string
+	toolName           string
+	method             string
+	url                string
+	headers            http.Header
+	body               []byte
+	timeout            time.Duration
+	client             *http.Client
+	secrets            []string
+	managedAuth        *activityManagedHTTPAuth
+	success            runtimecontracts.ToolResponseSuccessPolicy
+	hasSuccess         bool
+	responseMapping    runtimecontracts.ToolResponseMapping
+	hasResponseMapping bool
+	outputSchema       runtimecontracts.ToolInputSchema
+	compiledResult     runtimecontracts.ToolCompiledResultProjection
+	hasCompiledResult  bool
+	inputHash          string
 }
 
 func (d pipelineActivityDispatcher) executeActivityHTTPTool(ctx context.Context, client *http.Client, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) (any, error) {
@@ -1059,7 +1058,7 @@ func (d pipelineActivityDispatcher) executeActivityHTTPTool(ctx context.Context,
 }
 
 func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context, client *http.Client, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) (preparedActivityHTTPTool, error) {
-	httpSpec, hasHTTP := tool.HTTP()
+	httpExecution, hasHTTP := tool.HTTPExecution()
 	if !hasHTTP {
 		return preparedActivityHTTPTool{}, activityContractFailure(intent.Tool, "http_block_missing")
 	}
@@ -1069,7 +1068,7 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 	credentials := map[string]any{}
 	secrets := []string{}
 	staticCredentials := tool.Credentials()
-	_, hasManagedCredential := tool.ManagedCredential()
+	_, hasManagedCredential := tool.ManagedCredentialExecution()
 	if len(staticCredentials) > 0 && hasManagedCredential {
 		return preparedActivityHTTPTool{}, activityContractFailure(intent.Tool, "credential_owners_conflict")
 	}
@@ -1097,48 +1096,13 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 	for name, value := range input {
 		inputDTO[name] = value.Interface()
 	}
-	env := map[string]any{"input": inputDTO, "credentials": credentials}
-	url, err := resolveActivityHTTPURLTemplate(httpSpec.URL, env)
+	request, err := httpExecution.Prepare(inputDTO, credentials)
 	if err != nil {
-		return preparedActivityHTTPTool{}, activityTemplateFailure(err, intent.Tool, "url", secrets)
+		return preparedActivityHTTPTool{}, activityTemplateFailure(err, intent.Tool, "request", secrets)
 	}
-	url = strings.TrimSpace(url)
-	if url == "" {
-		return preparedActivityHTTPTool{}, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "activity_url_empty", "activity-runtime", "prepare_http_request", map[string]any{"tool": strings.TrimSpace(intent.Tool)})
-	}
-	var body []byte
-	if httpSpec.Body != nil {
-		resolvedBody, err := resolveActivityTemplateTree(httpSpec.Body, env)
-		if err != nil {
-			return preparedActivityHTTPTool{}, activityTemplateFailure(err, intent.Tool, "body", secrets)
-		}
-		raw, err := json.Marshal(resolvedBody)
-		if err != nil {
-			return preparedActivityHTTPTool{}, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "activity_body_invalid", "activity-runtime", "prepare_http_request", map[string]any{"tool": strings.TrimSpace(intent.Tool)}, redactActivityError(err, secrets))
-		}
-		body = raw
-	}
-	method := strings.ToUpper(strings.TrimSpace(httpSpec.Method))
-	if method == "" {
-		method = http.MethodGet
-	}
-	timeout := 30 * time.Second
-	if httpSpec.TimeoutSeconds > 0 {
-		timeout = time.Duration(httpSpec.TimeoutSeconds) * time.Second
-	}
-	headers := make(http.Header, len(httpSpec.Headers))
-	for key, value := range httpSpec.Headers {
-		resolved, err := resolveActivityTemplateString(value, env)
-		if err != nil {
-			return preparedActivityHTTPTool{}, activityTemplateFailure(err, intent.Tool, "header", secrets)
-		}
-		headers.Set(strings.TrimSpace(key), strings.TrimSpace(resolved))
-	}
-	if len(body) > 0 && strings.TrimSpace(headers.Get("Content-Type")) == "" {
-		headers.Set("Content-Type", "application/json")
-	}
+	headers := request.Headers()
 	if client == nil {
-		client = &http.Client{Timeout: timeout}
+		client = &http.Client{Timeout: request.Timeout()}
 	}
 	managedAuth, err := d.resolveActivityManagedCredential(ctx, client, intent, tool)
 	if err != nil {
@@ -1150,32 +1114,27 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 		}
 		secrets = append(secrets, managedAuth.SecretValues()...)
 	}
-	responseSuccess, hasResponseSuccess := tool.ResponseSuccess()
-	var responseSuccessPtr *runtimecontracts.HTTPResponseSuccess
-	if hasResponseSuccess {
-		responseSuccessPtr = &responseSuccess
-	}
-	responseMapping, _ := tool.ResponseMapping()
-	compiledResult, hasCompiledResult := tool.CompiledResult()
-	var compiledResultPtr *runtimecontracts.CompiledResultProjection
-	if hasCompiledResult {
-		compiledResultPtr = &compiledResult
-	}
+	responseSuccess, hasResponseSuccess := tool.ResponseSuccessPolicy()
+	responseMapping, hasResponseMapping := tool.CompiledResponseMapping()
+	compiledResult, hasCompiledResult := tool.CompiledResultExecution()
 	return preparedActivityHTTPTool{
-		toolName:        intent.Tool,
-		method:          method,
-		url:             url,
-		headers:         headers,
-		body:            body,
-		timeout:         timeout,
-		client:          client,
-		secrets:         secrets,
-		managedAuth:     managedAuth,
-		success:         responseSuccessPtr,
-		responseMapping: responseMapping,
-		outputSchema:    tool.OutputSchema(),
-		compiledResult:  compiledResultPtr,
-		inputHash:       activityInputHash(intent.Input),
+		toolName:           intent.Tool,
+		method:             request.Method(),
+		url:                request.URL(),
+		headers:            headers,
+		body:               request.Body(),
+		timeout:            request.Timeout(),
+		client:             client,
+		secrets:            secrets,
+		managedAuth:        managedAuth,
+		success:            responseSuccess,
+		hasSuccess:         hasResponseSuccess,
+		responseMapping:    responseMapping,
+		hasResponseMapping: hasResponseMapping,
+		outputSchema:       tool.OutputSchema(),
+		compiledResult:     compiledResult,
+		hasCompiledResult:  hasCompiledResult,
+		inputHash:          activityInputHash(intent.Input),
 	}, nil
 }
 
@@ -1257,35 +1216,26 @@ func executePreparedActivityHTTPTool(ctx context.Context, prepared preparedActiv
 				"body":    parsed,
 			},
 		}
-		if err := httpresponsesuccess.Evaluate("activity http tool "+strings.TrimSpace(prepared.toolName), prepared.success, responseEnv, prepared.secrets); err != nil {
-			return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "provider_response_rejected", "activity-runtime", "validate_http_response", map[string]any{"tool": prepared.toolName, "status": resp.StatusCode}, err)
+		if prepared.hasSuccess {
+			if err := prepared.success.Evaluate(responseEnv); err != nil {
+				return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "provider_response_rejected", "activity-runtime", "validate_http_response", map[string]any{"tool": prepared.toolName, "status": resp.StatusCode}, redactActivityError(err, prepared.secrets))
+			}
 		}
 		result := parsed
-		if len(prepared.responseMapping) > 0 {
-			mapped, err := resolveActivityTemplateTree(prepared.responseMapping, responseEnv)
+		if prepared.hasResponseMapping {
+			mapped, err := prepared.responseMapping.Render(responseEnv)
 			if err != nil {
 				return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "provider_response_projection_failed", "activity-runtime", "project_http_response", map[string]any{"tool": prepared.toolName, "status": resp.StatusCode}, redactActivityError(err, prepared.secrets))
 			}
 			result = mapped
 		}
-		if prepared.compiledResult != nil {
-			outputSchema, err := prepared.outputSchema.Project()
-			if err != nil {
-				return nil, runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "provider_response_schema_projection_failed", "activity-runtime", "validate_projected_response", map[string]any{"tool": prepared.toolName}, err)
-			}
-			if err := eventschema.ValidateValueAgainstSchema(outputSchema, result); err != nil {
+		if prepared.hasCompiledResult {
+			if err := prepared.outputSchema.Validate(result); err != nil {
 				return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "provider_response_schema_invalid", "activity-runtime", "validate_projected_response", map[string]any{"tool": prepared.toolName, "status": resp.StatusCode}, redactActivityError(err, prepared.secrets))
 			}
-			projected, err := projectCompiledActivityResult(result, *prepared.compiledResult)
+			projected, err := prepared.compiledResult.Project(result)
 			if err != nil {
 				return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "channel_result_projection_failed", "activity-runtime", "project_channel_result", map[string]any{"tool": prepared.toolName, "status": resp.StatusCode}, err)
-			}
-			compiledOutputSchema, err := prepared.compiledResult.OutputSchema.Project()
-			if err != nil {
-				return nil, runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "channel_result_schema_projection_failed", "activity-runtime", "validate_channel_result", map[string]any{"tool": prepared.toolName}, err)
-			}
-			if err := eventschema.ValidateValueAgainstSchema(compiledOutputSchema, projected); err != nil {
-				return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "channel_result_schema_invalid", "activity-runtime", "validate_channel_result", map[string]any{"tool": prepared.toolName, "status": resp.StatusCode}, err)
 			}
 			result = projected
 		}
@@ -1309,120 +1259,6 @@ func activityHTTPStatusFailure(tool string, status int) error {
 	default:
 		return runtimefailures.New(runtimefailures.ClassConnectorFailure, "provider_http_status", "activity-runtime", "http_status", attributes)
 	}
-}
-
-func cloneActivityResponseSuccess(check *runtimecontracts.HTTPResponseSuccess) *runtimecontracts.HTTPResponseSuccess {
-	if check == nil {
-		return nil
-	}
-	out := *check
-	return &out
-}
-
-func cloneActivityTemplateMap(in map[string]any) map[string]any {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]any, len(in))
-	for key, value := range in {
-		out[key] = cloneActivityTemplateValue(value)
-	}
-	return out
-}
-
-func cloneActivityTemplateValue(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		return cloneActivityTemplateMap(typed)
-	case []any:
-		out := make([]any, len(typed))
-		for index, item := range typed {
-			out[index] = cloneActivityTemplateValue(item)
-		}
-		return out
-	default:
-		return typed
-	}
-}
-
-func cloneCompiledResultProjection(in *runtimecontracts.CompiledResultProjection) *runtimecontracts.CompiledResultProjection {
-	if in == nil {
-		return nil
-	}
-	out := &runtimecontracts.CompiledResultProjection{
-		Fields:       make(map[string]runtimecontracts.CompiledResultField, len(in.Fields)),
-		OutputSchema: in.OutputSchema,
-	}
-	for target, field := range in.Fields {
-		out.Fields[target] = field
-	}
-	return out
-}
-
-func projectCompiledActivityResult(result any, projection runtimecontracts.CompiledResultProjection) (map[string]any, error) {
-	out := map[string]any{}
-	targets := make([]string, 0, len(projection.Fields))
-	for target := range projection.Fields {
-		targets = append(targets, target)
-	}
-	sort.Strings(targets)
-	for _, target := range targets {
-		field := projection.Fields[target]
-		value, ok := activityValueAtPath(result, strings.TrimPrefix(strings.TrimSpace(field.From), "result."))
-		if !ok {
-			return nil, fmt.Errorf("compiled result source %q is missing", field.From)
-		}
-		if err := setActivityValueAtPath(out, target, value); err != nil {
-			return nil, err
-		}
-	}
-	return out, nil
-}
-
-func activityValueAtPath(value any, path string) (any, bool) {
-	current := value
-	if strings.TrimSpace(path) == "" {
-		return current, true
-	}
-	for _, segment := range strings.Split(path, ".") {
-		object, ok := current.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-		current, ok = object[segment]
-		if !ok {
-			return nil, false
-		}
-	}
-	return current, true
-}
-
-func setActivityValueAtPath(out map[string]any, path string, value any) error {
-	parts := strings.Split(strings.TrimSpace(path), ".")
-	if len(parts) == 0 || parts[0] == "" {
-		return fmt.Errorf("compiled result target is required")
-	}
-	current := out
-	for _, segment := range parts[:len(parts)-1] {
-		next, exists := current[segment]
-		if !exists {
-			object := map[string]any{}
-			current[segment] = object
-			current = object
-			continue
-		}
-		object, ok := next.(map[string]any)
-		if !ok {
-			return fmt.Errorf("compiled result target %q overlaps another target", path)
-		}
-		current = object
-	}
-	leaf := parts[len(parts)-1]
-	if _, exists := current[leaf]; exists {
-		return fmt.Errorf("compiled result target %q is assigned more than once", path)
-	}
-	current[leaf] = value
-	return nil
 }
 
 func flattenActivityHTTPHeaders(headers http.Header) map[string]any {
@@ -1479,14 +1315,11 @@ func (a *activityManagedHTTPAuth) HTTPAuthorization() runtimemanagedcredentials.
 }
 
 func (d pipelineActivityDispatcher) resolveActivityManagedCredential(ctx context.Context, client *http.Client, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) (*activityManagedHTTPAuth, error) {
-	ref, ok := tool.ManagedCredential()
+	ref, ok := tool.ManagedCredentialExecution()
 	if !ok {
 		return nil, nil
 	}
-	key := strings.TrimSpace(ref.Key)
-	if key == "" {
-		return nil, fmt.Errorf("activity tool %s managed_credential.key is required", intent.Tool)
-	}
+	key := ref.Key()
 	source := semanticview.Source(nil)
 	var store runtimemanagedcredentials.Store
 	if d.coordinator != nil {
@@ -1509,11 +1342,11 @@ func (d pipelineActivityDispatcher) resolveActivityManagedCredential(ctx context
 	}
 	token, record, err := tokenSource.AccessToken(ctx, runtimemanagedcredentials.AccessTokenRequest{
 		Key:            storeKey,
-		GrantType:      ref.GrantType,
-		Scopes:         ref.Scopes,
-		GrantModel:     ref.GrantModel,
-		TokenRequest:   ref.TokenRequest,
-		InstallationID: activityManagedCredentialInputValue(intent.Input, ref.InstallationIDInput),
+		GrantType:      ref.GrantType(),
+		Scopes:         ref.Scopes(),
+		GrantModel:     ref.GrantModel(),
+		TokenRequest:   ref.TokenRequest(),
+		InstallationID: activityManagedCredentialInputValue(intent.Input, ref.InstallationIDInput()),
 	})
 	if err != nil {
 		redacted := fmt.Errorf("%s", runtimemanagedcredentials.RedactString(err.Error(), record.SecretValues()...))
@@ -1523,8 +1356,8 @@ func (d pipelineActivityDispatcher) resolveActivityManagedCredential(ctx context
 		StoreKey:    storeKey,
 		Token:       token,
 		Record:      record,
-		Header:      ref.Header,
-		Prefix:      ref.Prefix,
+		Header:      ref.Header(),
+		Prefix:      ref.Prefix(),
 		TokenSource: tokenSource,
 	}, nil
 }
@@ -1627,176 +1460,6 @@ func redactActivityError(err error, secrets []string) error {
 		return err
 	}
 	return fmt.Errorf("%s", runtimemanagedcredentials.RedactString(err.Error(), secrets...))
-}
-
-func resolveActivityTemplateTree(value any, env map[string]any) (any, error) {
-	switch typed := value.(type) {
-	case string:
-		return resolveActivityTemplateValue(typed, env)
-	case map[string]any:
-		out := make(map[string]any, len(typed))
-		for key, value := range typed {
-			resolved, err := resolveActivityTemplateTree(value, env)
-			if err != nil {
-				return nil, err
-			}
-			out[key] = resolved
-		}
-		return out, nil
-	case []any:
-		out := make([]any, len(typed))
-		for idx, value := range typed {
-			resolved, err := resolveActivityTemplateTree(value, env)
-			if err != nil {
-				return nil, err
-			}
-			out[idx] = resolved
-		}
-		return out, nil
-	default:
-		return value, nil
-	}
-}
-
-func resolveActivityTemplateValue(template string, env map[string]any) (any, error) {
-	out := strings.TrimSpace(template)
-	matches, err := activityTemplateMatches(out)
-	if err != nil {
-		return nil, err
-	}
-	if len(matches) == 1 && matches[0].start == 0 && matches[0].end == len(out) {
-		value, ok := workflowExpressionLookupPath(env, matches[0].expr)
-		if !ok {
-			return nil, fmt.Errorf("activity template expression %q did not resolve", matches[0].expr)
-		}
-		return value, nil
-	}
-	return resolveActivityTemplateString(out, env)
-}
-
-func resolveActivityTemplateString(template string, env map[string]any) (string, error) {
-	out := strings.TrimSpace(template)
-	matches, err := activityTemplateMatches(out)
-	if err != nil {
-		return "", err
-	}
-	if len(matches) == 0 {
-		return out, nil
-	}
-	var builder strings.Builder
-	last := 0
-	for _, match := range matches {
-		builder.WriteString(out[last:match.start])
-		value, ok := workflowExpressionLookupPath(env, match.expr)
-		if !ok {
-			return "", fmt.Errorf("activity template expression %q did not resolve", match.expr)
-		}
-		builder.WriteString(asString(value))
-		last = match.end
-	}
-	builder.WriteString(out[last:])
-	return builder.String(), nil
-}
-
-func resolveActivityHTTPURLTemplate(template string, env map[string]any) (string, error) {
-	out := strings.TrimSpace(template)
-	matches, err := activityTemplateMatches(out)
-	if err != nil {
-		return "", err
-	}
-	if len(matches) == 0 {
-		return out, nil
-	}
-	if len(matches) == 1 && matches[0].start == 0 && matches[0].end == len(out) {
-		value, ok := workflowExpressionLookupPath(env, matches[0].expr)
-		if !ok {
-			return "", fmt.Errorf("activity template expression %q did not resolve", matches[0].expr)
-		}
-		return asString(value), nil
-	}
-	var builder strings.Builder
-	last := 0
-	for _, match := range matches {
-		builder.WriteString(out[last:match.start])
-		value, ok := workflowExpressionLookupPath(env, match.expr)
-		if !ok {
-			return "", fmt.Errorf("activity template expression %q did not resolve", match.expr)
-		}
-		builder.WriteString(escapeActivityHTTPURLTemplateComponent(out, match.start, match.end, asString(value)))
-		last = match.end
-	}
-	builder.WriteString(out[last:])
-	return builder.String(), nil
-}
-
-type activityTemplateMatch struct {
-	start int
-	end   int
-	expr  string
-}
-
-func activityTemplateMatches(template string) ([]activityTemplateMatch, error) {
-	matches := make([]activityTemplateMatch, 0, 2)
-	cursor := 0
-	for {
-		relativeStart := strings.Index(template[cursor:], "{{")
-		if relativeStart < 0 {
-			return matches, nil
-		}
-		start := cursor + relativeStart
-		relativeEnd := strings.Index(template[start+2:], "}}")
-		if relativeEnd < 0 {
-			return nil, fmt.Errorf("unterminated activity template expression in %q", template)
-		}
-		end := start + 2 + relativeEnd
-		expr := strings.TrimSpace(template[start+2 : end])
-		matches = append(matches, activityTemplateMatch{start: start, end: end + 2, expr: expr})
-		cursor = end + 2
-	}
-}
-
-func escapeActivityHTTPURLTemplateComponent(raw string, start, end int, value string) string {
-	if activityHTTPURLTemplateOffsetInQuery(raw, start) {
-		return strings.ReplaceAll(url.QueryEscape(value), "+", "%20")
-	}
-	if activityHTTPURLTemplatePlaceholderInURLBaseOrAuthority(raw, start, end, value) {
-		return value
-	}
-	return url.PathEscape(value)
-}
-
-func activityHTTPURLTemplateOffsetInQuery(raw string, offset int) bool {
-	queryStart := strings.Index(raw, "?")
-	if queryStart < 0 || queryStart > offset {
-		return false
-	}
-	fragmentStart := strings.Index(raw, "#")
-	return fragmentStart < 0 || offset < fragmentStart
-}
-
-func activityHTTPURLTemplatePlaceholderInURLBaseOrAuthority(raw string, start, end int, value string) bool {
-	prefix := raw[:start]
-	suffix := raw[end:]
-	if strings.HasPrefix(suffix, "://") {
-		return true
-	}
-	if strings.HasSuffix(prefix, "://") {
-		return true
-	}
-	schemeIndex := strings.LastIndex(prefix, "://")
-	if schemeIndex >= 0 {
-		authorityPrefix := prefix[schemeIndex+len("://"):]
-		return !strings.ContainsAny(authorityPrefix, "/?#")
-	}
-	if start == 0 {
-		return activityHTTPURLTemplateValueHasSchemeAuthority(value)
-	}
-	return false
-}
-
-func activityHTTPURLTemplateValueHasSchemeAuthority(value string) bool {
-	parsed, err := url.Parse(strings.TrimSpace(value))
-	return err == nil && parsed.Scheme != "" && parsed.Host != ""
 }
 
 func (d pipelineActivityDispatcher) publishActivitySuccess(ctx context.Context, intent runtimeengine.ActivityIntent, result any) error {

@@ -582,17 +582,6 @@ func TestValidateWorkflowContractSurface_DurableActivityHTTPSubfeaturesFailClose
 		errContains string
 	}{
 		{
-			name: "response mapping",
-			mutateTool: func(tool runtimecontracts.ToolSchemaEntry) runtimecontracts.ToolSchemaEntry {
-				updated, err := tool.WithResponseMapping(map[string]any{"title": "{{response.body.title}}"})
-				if err != nil {
-					panic(err)
-				}
-				return updated
-			},
-			errContains: "uses response_mapping",
-		},
-		{
 			name: "rate limit",
 			mutateTool: func(tool runtimecontracts.ToolSchemaEntry) runtimecontracts.ToolSchemaEntry {
 				updated, err := tool.WithRateLimit("1/s", "0s")

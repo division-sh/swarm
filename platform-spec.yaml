@@ -8743,16 +8743,26 @@ tool_model:
       registries re-run the same admission for programmatic packs before indexing them. The authority-free runtime
       ExecutionTool view is derived from the admitted ToolSchemaEntry and consumes its schema projection rather than a local
       JSON-schema interpreter. ToolSchemaEntry also admits one closed category, one permission identity, one typed rate
-      policy, and one exhaustive handler/execution variant. Authored, generated, platform-builtin, native, and MCP-discovered
+      policy, and one exhaustive handler/execution variant. For HTTP tools that same admission compiles method, URL,
+      header, and recursive body templates; validates static or managed credential policy; admits one finite response-success
+      variant with a parsed response path and semantic scalar equality; compiles the recursive response mapping; and parses
+      every result-projection source and target path with overlap rejection. Malformed execution semantics cannot acquire
+      tool authority, and direct and durable execution mechanically invoke these same admitted values without reparsing,
+      trimming, normalizing, or validating authored syntax after a provider effect. Authored, generated, platform-builtin, native, and MCP-discovered
       tools all pass through that owner; malformed or missing MCP schemas fail discovery before publication, and runtime
       projection performs no parsing, normalization, permission fallback, or tool-name handler inference. Compiled channel
-      operations retain the admitted effect value used by readback, runtime projection, and generation hashing. Pack
+      operations retain package-local admitted operation/tool identities, parsed input/output mapping paths, precomputed
+      input/context/output schemas, the final result-projecting connector tool, and the admitted effect value used by
+      readback, runtime projection, and generation hashing. SatisfactionPlan computes its typed generation at compilation;
+      OutboundBindingPlan admits its binding identity and precomputes public runtime-tool identities and generation-pinned
+      private activity targets. Runtime consumers perform exact lookup and mapping execution only; they never reconstruct
+      schemas, result projections, tool identifiers, or target identifiers from authored DTOs. Pack
       provenance and diagnostic path remain separate inside an opaque admitted source identity and are never recovered by
       delimiter parsing. Connector generation evidence/import provenance and normalized-provider target-free authorization
       are admitted opaque capability values; incomplete records cannot enter the finite semantic-source capability
       aggregate, and provider catalog generation remains typed through authorization verification and persistence codecs.
       Accepted tool entries admit HTTP bodies, response
-      mappings, and response-success literals once through the closed semantic JSON owner before storage, hashing, or
+      mappings, response-success equality values, and result values once through the closed semantic JSON owner before storage, hashing, or
       dispatch; cyclic, non-JSON, and non-finite programmatic carrier graphs reject before publication. ToolSchemaEntry,
       SatisfactionPlan, OutboundBindingPlan, ExecutionTool, ChannelActivityTarget, and plan generation expose only immutable
       snapshots or finite operations. Registries and semantic sources return those immutable values directly; callers do

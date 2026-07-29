@@ -2,13 +2,11 @@ package contracts
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
-	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 )
 
 type ToolHandlerKind uint8
@@ -73,24 +71,19 @@ type toolSchemaEntryValue struct {
 	inputSchema          ToolInputSchema
 	outputSchema         ToolInputSchema
 	generatedSchema      bool
-	http                 HTTPToolSpec
+	http                 ToolHTTPExecution
 	hasHTTP              bool
 	mcp                  ToolMCPBinding
 	hasMCP               bool
-	responseMapping      semanticvalue.Value
+	responseMapping      ToolResponseMapping
 	hasResponseMapping   bool
-	responseSuccess      HTTPResponseSuccess
+	responseSuccess      ToolResponseSuccessPolicy
 	hasResponseSuccess   bool
-	credentials          []string
-	managedCredential    ManagedCredentialRef
+	credentials          []toolCredentialKey
+	managedCredential    ToolManagedCredential
 	hasManagedCredential bool
-	compiledResult       compiledResultProjectionValue
+	compiledResult       ToolCompiledResultProjection
 	hasCompiledResult    bool
-}
-
-type compiledResultProjectionValue struct {
-	fields       map[string]CompiledResultField
-	outputSchema ToolInputSchema
 }
 
 // ToolSchemaEntry is the immutable admitted tool execution contract. Authored
@@ -194,11 +187,11 @@ func WithToolSchemas(input, output ToolInputSchema) ToolSchemaEntryOption {
 
 func WithToolHTTP(spec HTTPToolSpec) ToolSchemaEntryOption {
 	return toolSchemaEntryOption(func(draft *toolSchemaEntryDraft) error {
-		admitted, err := admitHTTPToolSpec(spec)
+		admitted, err := compileHTTPToolSpec(spec)
 		if err != nil {
 			return err
 		}
-		draft.value.http = admitted
+		draft.value.http = ToolHTTPExecution{value: &admitted}
 		draft.value.hasHTTP = true
 		return nil
 	})
@@ -217,12 +210,9 @@ func WithToolMCP(binding ToolMCPBinding) ToolSchemaEntryOption {
 
 func WithToolResponseMapping(mapping map[string]any) ToolSchemaEntryOption {
 	return toolSchemaEntryOption(func(draft *toolSchemaEntryDraft) error {
-		value, err := canonicaljson.FromGo(mapping)
+		value, err := compileToolResponseMapping(mapping)
 		if err != nil {
-			return fmt.Errorf("response_mapping: %w", err)
-		}
-		if value.Kind() != semanticvalue.KindObject {
-			return fmt.Errorf("response_mapping must be an object")
+			return err
 		}
 		draft.value.responseMapping = value
 		draft.value.hasResponseMapping = true
@@ -232,7 +222,7 @@ func WithToolResponseMapping(mapping map[string]any) ToolSchemaEntryOption {
 
 func WithToolResponseSuccess(success HTTPResponseSuccess) ToolSchemaEntryOption {
 	return toolSchemaEntryOption(func(draft *toolSchemaEntryDraft) error {
-		admitted, err := admitHTTPResponseSuccess(success)
+		admitted, err := compileToolResponseSuccess(success)
 		if err != nil {
 			return err
 		}
@@ -244,14 +234,18 @@ func WithToolResponseSuccess(success HTTPResponseSuccess) ToolSchemaEntryOption 
 
 func WithToolCredentials(credentials ...string) ToolSchemaEntryOption {
 	return toolSchemaEntryOption(func(draft *toolSchemaEntryDraft) error {
-		draft.value.credentials = normalizeStrings(credentials)
+		admitted, err := admitToolCredentialKeys(credentials)
+		if err != nil {
+			return err
+		}
+		draft.value.credentials = admitted
 		return nil
 	})
 }
 
 func WithToolManagedCredential(ref ManagedCredentialRef) ToolSchemaEntryOption {
 	return toolSchemaEntryOption(func(draft *toolSchemaEntryDraft) error {
-		admitted, err := admitManagedCredentialRef(ref)
+		admitted, err := admitManagedCredential(ref)
 		if err != nil {
 			return err
 		}
@@ -263,11 +257,11 @@ func WithToolManagedCredential(ref ManagedCredentialRef) ToolSchemaEntryOption {
 
 func WithToolCompiledResult(result CompiledResultProjection) ToolSchemaEntryOption {
 	return toolSchemaEntryOption(func(draft *toolSchemaEntryDraft) error {
-		admitted, err := admitCompiledResultProjection(result)
+		admitted, err := compileToolResultProjection(result)
 		if err != nil {
 			return err
 		}
-		draft.value.compiledResult = admitted
+		draft.value.compiledResult = ToolCompiledResultProjection{value: &admitted}
 		draft.value.hasCompiledResult = true
 		return nil
 	})
@@ -332,12 +326,18 @@ func (e ToolSchemaEntry) validate() error {
 		return fmt.Errorf("HTTP and MCP execution bindings are mutually exclusive")
 	}
 	if e.value.hasCompiledResult {
-		if err := e.value.compiledResult.outputSchema.ValidateDefinition(); err != nil {
+		if err := e.value.compiledResult.OutputSchema().ValidateDefinition(); err != nil {
 			return fmt.Errorf("compiled_result.output_schema: %w", err)
 		}
 	}
 	if len(e.value.credentials) > 0 && e.value.hasManagedCredential {
 		return fmt.Errorf("static credentials and managed_credential are mutually exclusive")
+	}
+	if e.value.hasManagedCredential && e.value.handler != ToolHandlerHTTP {
+		return fmt.Errorf("managed_credential is only supported for handler_type http")
+	}
+	if (e.value.hasResponseMapping || e.value.hasResponseSuccess) && e.value.handler != ToolHandlerHTTP {
+		return fmt.Errorf("HTTP response execution semantics require handler_type http")
 	}
 	return nil
 }
@@ -401,7 +401,13 @@ func (e ToolSchemaEntry) HTTP() (HTTPToolSpec, bool) {
 	if e.value == nil || !e.value.hasHTTP {
 		return HTTPToolSpec{}, false
 	}
-	return snapshotHTTPToolSpec(e.value.http), true
+	return e.value.http.syntax(), true
+}
+func (e ToolSchemaEntry) HTTPExecution() (ToolHTTPExecution, bool) {
+	if e.value == nil || !e.value.hasHTTP {
+		return ToolHTTPExecution{}, false
+	}
+	return e.value.http, true
 }
 func (e ToolSchemaEntry) MCP() (ToolMCPBinding, bool) {
 	if e.value == nil || !e.value.hasMCP {
@@ -413,32 +419,55 @@ func (e ToolSchemaEntry) ResponseMapping() (map[string]any, bool) {
 	if e.value == nil || !e.value.hasResponseMapping {
 		return nil, false
 	}
-	mapping, _ := e.value.responseMapping.Interface().(map[string]any)
-	return mapping, true
+	return e.value.responseMapping.syntax(), true
+}
+func (e ToolSchemaEntry) CompiledResponseMapping() (ToolResponseMapping, bool) {
+	if e.value == nil || !e.value.hasResponseMapping {
+		return ToolResponseMapping{}, false
+	}
+	return e.value.responseMapping, true
 }
 func (e ToolSchemaEntry) ResponseSuccess() (HTTPResponseSuccess, bool) {
 	if e.value == nil || !e.value.hasResponseSuccess {
 		return HTTPResponseSuccess{}, false
 	}
-	return snapshotHTTPResponseSuccess(e.value.responseSuccess), true
+	return e.value.responseSuccess.syntax(), true
+}
+func (e ToolSchemaEntry) ResponseSuccessPolicy() (ToolResponseSuccessPolicy, bool) {
+	if e.value == nil || !e.value.hasResponseSuccess {
+		return ToolResponseSuccessPolicy{}, false
+	}
+	return e.value.responseSuccess, true
 }
 func (e ToolSchemaEntry) Credentials() []string {
 	if e.value == nil {
 		return nil
 	}
-	return append([]string(nil), e.value.credentials...)
+	return toolCredentialKeyStrings(e.value.credentials)
 }
 func (e ToolSchemaEntry) ManagedCredential() (ManagedCredentialRef, bool) {
 	if e.value == nil || !e.value.hasManagedCredential {
 		return ManagedCredentialRef{}, false
 	}
-	return snapshotManagedCredentialRef(e.value.managedCredential), true
+	return e.value.managedCredential.syntax(), true
+}
+func (e ToolSchemaEntry) ManagedCredentialExecution() (ToolManagedCredential, bool) {
+	if e.value == nil || !e.value.hasManagedCredential {
+		return ToolManagedCredential{}, false
+	}
+	return e.value.managedCredential, true
 }
 func (e ToolSchemaEntry) CompiledResult() (CompiledResultProjection, bool) {
 	if e.value == nil || !e.value.hasCompiledResult {
 		return CompiledResultProjection{}, false
 	}
-	return snapshotCompiledResultProjection(e.value.compiledResult), true
+	return e.value.compiledResult.syntax(), true
+}
+func (e ToolSchemaEntry) CompiledResultExecution() (ToolCompiledResultProjection, bool) {
+	if e.value == nil || !e.value.hasCompiledResult {
+		return ToolCompiledResultProjection{}, false
+	}
+	return e.value.compiledResult, true
 }
 
 func (e ToolSchemaEntry) WithSchemas(input, output ToolInputSchema) (ToolSchemaEntry, error) {
@@ -493,12 +522,12 @@ func (e ToolSchemaEntry) WithHTTP(spec HTTPToolSpec) (ToolSchemaEntry, error) {
 	if e.value == nil {
 		return ToolSchemaEntry{}, fmt.Errorf("tool contract is missing")
 	}
-	admitted, err := admitHTTPToolSpec(spec)
+	admitted, err := compileHTTPToolSpec(spec)
 	if err != nil {
 		return ToolSchemaEntry{}, err
 	}
 	copyValue := *e.value
-	copyValue.http = admitted
+	copyValue.http = ToolHTTPExecution{value: &admitted}
 	copyValue.hasHTTP = true
 	out := ToolSchemaEntry{value: &copyValue}
 	if err := out.validate(); err != nil {
@@ -511,12 +540,9 @@ func (e ToolSchemaEntry) WithResponseMapping(mapping map[string]any) (ToolSchema
 	if e.value == nil {
 		return ToolSchemaEntry{}, fmt.Errorf("tool contract is missing")
 	}
-	value, err := canonicaljson.FromGo(mapping)
+	value, err := compileToolResponseMapping(mapping)
 	if err != nil {
-		return ToolSchemaEntry{}, fmt.Errorf("response_mapping: %w", err)
-	}
-	if value.Kind() != semanticvalue.KindObject {
-		return ToolSchemaEntry{}, fmt.Errorf("response_mapping must be an object")
+		return ToolSchemaEntry{}, err
 	}
 	copyValue := *e.value
 	copyValue.responseMapping = value
@@ -533,8 +559,12 @@ func (e ToolSchemaEntry) WithStaticCredentials(credentials ...string) (ToolSchem
 		return ToolSchemaEntry{}, fmt.Errorf("tool contract is missing")
 	}
 	copyValue := *e.value
-	copyValue.credentials = normalizeStrings(credentials)
-	copyValue.managedCredential = ManagedCredentialRef{}
+	admitted, err := admitToolCredentialKeys(credentials)
+	if err != nil {
+		return ToolSchemaEntry{}, err
+	}
+	copyValue.credentials = admitted
+	copyValue.managedCredential = ToolManagedCredential{}
 	copyValue.hasManagedCredential = false
 	out := ToolSchemaEntry{value: &copyValue}
 	if err := out.validate(); err != nil {
@@ -547,7 +577,7 @@ func (e ToolSchemaEntry) WithManagedCredential(ref ManagedCredentialRef) (ToolSc
 	if e.value == nil {
 		return ToolSchemaEntry{}, fmt.Errorf("tool contract is missing")
 	}
-	admitted, err := admitManagedCredentialRef(ref)
+	admitted, err := admitManagedCredential(ref)
 	if err != nil {
 		return ToolSchemaEntry{}, err
 	}
@@ -566,12 +596,12 @@ func (e ToolSchemaEntry) WithCompiledResult(result CompiledResultProjection) (To
 	if e.value == nil {
 		return ToolSchemaEntry{}, fmt.Errorf("tool contract is missing")
 	}
-	admitted, err := admitCompiledResultProjection(result)
+	admitted, err := compileToolResultProjection(result)
 	if err != nil {
 		return ToolSchemaEntry{}, err
 	}
 	copyValue := *e.value
-	copyValue.compiledResult = admitted
+	copyValue.compiledResult = ToolCompiledResultProjection{value: &admitted}
 	copyValue.hasCompiledResult = true
 	out := ToolSchemaEntry{value: &copyValue}
 	if err := out.validate(); err != nil {
@@ -602,26 +632,26 @@ func (e ToolSchemaEntry) CanonicalValue() (map[string]any, error) {
 		"permission": e.value.permission.String(),
 		"rate_limit": rateLimit, "rate_limit_max_wait": rateLimitMaxWait,
 		"input_schema": input, "output_schema": output,
-		"credentials":      append([]string(nil), e.value.credentials...),
+		"credentials":      toolCredentialKeyStrings(e.value.credentials),
 		"generated_schema": e.value.generatedSchema,
 	}
 	if e.value.hasHTTP {
-		out["http"] = snapshotHTTPToolSpec(e.value.http)
+		out["http"] = e.value.http.syntax()
 	}
 	if e.value.hasMCP {
 		out["mcp"] = map[string]any{"server": e.value.mcp.Server(), "remote": e.value.mcp.Remote()}
 	}
 	if e.value.hasResponseMapping {
-		out["response_mapping"] = e.value.responseMapping.Interface()
+		out["response_mapping"] = e.value.responseMapping.syntax()
 	}
 	if e.value.hasResponseSuccess {
-		out["response_success"] = snapshotHTTPResponseSuccess(e.value.responseSuccess)
+		out["response_success"] = e.value.responseSuccess.syntax()
 	}
 	if e.value.hasManagedCredential {
-		out["managed_credential"] = snapshotManagedCredentialRef(e.value.managedCredential)
+		out["managed_credential"] = e.value.managedCredential.syntax()
 	}
 	if e.value.hasCompiledResult {
-		out["compiled_result"] = snapshotCompiledResultProjection(e.value.compiledResult)
+		out["compiled_result"] = e.value.compiledResult.syntax()
 	}
 	return out, nil
 }
@@ -681,128 +711,4 @@ func (e ToolSchemaEntry) MarshalYAML() (any, error) {
 		out.ManagedCredential = &value
 	}
 	return out, nil
-}
-
-func admitHTTPToolSpec(spec HTTPToolSpec) (HTTPToolSpec, error) {
-	spec.Method = strings.ToUpper(strings.TrimSpace(spec.Method))
-	spec.URL = strings.TrimSpace(spec.URL)
-	headers := make(map[string]string, len(spec.Headers))
-	for key, value := range spec.Headers {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			return HTTPToolSpec{}, fmt.Errorf("http header name is required")
-		}
-		headers[key] = value
-	}
-	spec.Headers = headers
-	if spec.Body != nil {
-		value, err := canonicaljson.FromGo(spec.Body)
-		if err != nil {
-			return HTTPToolSpec{}, fmt.Errorf("http.body: %w", err)
-		}
-		spec.Body = value.Interface()
-	}
-	if spec.TimeoutSeconds < 0 {
-		return HTTPToolSpec{}, fmt.Errorf("http.timeout_seconds must be non-negative")
-	}
-	return spec, nil
-}
-
-func snapshotHTTPToolSpec(spec HTTPToolSpec) HTTPToolSpec {
-	out := spec
-	out.Headers = make(map[string]string, len(spec.Headers))
-	for key, value := range spec.Headers {
-		out.Headers[key] = value
-	}
-	if spec.Body != nil {
-		value, _ := canonicaljson.FromGo(spec.Body)
-		out.Body = value.Interface()
-	}
-	return out
-}
-
-func admitHTTPResponseSuccess(success HTTPResponseSuccess) (HTTPResponseSuccess, error) {
-	success.Kind = strings.TrimSpace(success.Kind)
-	success.Path = strings.TrimSpace(success.Path)
-	if success.Equals != nil {
-		value, err := canonicaljson.FromGo(success.Equals)
-		if err != nil {
-			return HTTPResponseSuccess{}, fmt.Errorf("response_success.equals: %w", err)
-		}
-		success.Equals = value.Interface()
-	}
-	return success, nil
-}
-
-func snapshotHTTPResponseSuccess(success HTTPResponseSuccess) HTTPResponseSuccess {
-	out := success
-	if success.Equals != nil {
-		value, _ := canonicaljson.FromGo(success.Equals)
-		out.Equals = value.Interface()
-	}
-	return out
-}
-
-func admitManagedCredentialRef(ref ManagedCredentialRef) (ManagedCredentialRef, error) {
-	ref.Key = strings.TrimSpace(ref.Key)
-	ref.Header = strings.TrimSpace(ref.Header)
-	ref.Prefix = strings.TrimSpace(ref.Prefix)
-	ref.GrantType = strings.TrimSpace(ref.GrantType)
-	ref.Scopes = normalizeStrings(ref.Scopes)
-	ref.InstallationIDInput = strings.TrimSpace(ref.InstallationIDInput)
-	if err := validateManagedCredentialModel(ref); err != nil {
-		return ManagedCredentialRef{}, err
-	}
-	ref.GrantModel = managedcredentialmodel.NormalizeGrantModel(ref.GrantModel)
-	ref.TokenRequest = managedcredentialmodel.NormalizeTokenRequestProfile(ref.TokenRequest)
-	return snapshotManagedCredentialRef(ref), nil
-}
-
-func validateManagedCredentialModel(ref ManagedCredentialRef) error {
-	if err := managedcredentialmodel.ValidateGrantModel(ref.GrantModel); err != nil {
-		return err
-	}
-	if err := managedcredentialmodel.ValidateTokenRequestProfile(ref.TokenRequest); err != nil {
-		return err
-	}
-	return nil
-}
-
-func snapshotManagedCredentialRef(ref ManagedCredentialRef) ManagedCredentialRef {
-	out := ref
-	out.Scopes = append([]string(nil), ref.Scopes...)
-	out.TokenRequest.StaticHeaders = make(map[string]string, len(ref.TokenRequest.StaticHeaders))
-	for key, value := range ref.TokenRequest.StaticHeaders {
-		out.TokenRequest.StaticHeaders[key] = value
-	}
-	return out
-}
-
-func admitCompiledResultProjection(result CompiledResultProjection) (compiledResultProjectionValue, error) {
-	if err := result.OutputSchema.ValidateDefinition(); err != nil {
-		return compiledResultProjectionValue{}, err
-	}
-	fields := make(map[string]CompiledResultField, len(result.Fields))
-	for target, field := range result.Fields {
-		target = strings.TrimSpace(target)
-		field.From = strings.TrimSpace(field.From)
-		if target == "" || field.From == "" {
-			return compiledResultProjectionValue{}, fmt.Errorf("compiled result field target and source are required")
-		}
-		fields[target] = field
-	}
-	return compiledResultProjectionValue{fields: fields, outputSchema: result.OutputSchema}, nil
-}
-
-func snapshotCompiledResultProjection(result compiledResultProjectionValue) CompiledResultProjection {
-	fields := make(map[string]CompiledResultField, len(result.fields))
-	keys := make([]string, 0, len(result.fields))
-	for key := range result.fields {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		fields[key] = result.fields[key]
-	}
-	return CompiledResultProjection{Fields: fields, OutputSchema: result.outputSchema}
 }

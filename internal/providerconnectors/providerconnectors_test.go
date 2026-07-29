@@ -83,39 +83,23 @@ func TestValidateSourceRejectsMixedStaticAndManagedProviderConnectorCredentials(
 }
 
 func TestValidateSourceRejectsGitHubAppInstallationWithoutInputCarrier(t *testing.T) {
-	tool := testProviderConnectorTool(t, runtimecontracts.ActivityEffectClassNonIdempotentWrite, nil, &runtimecontracts.ManagedCredentialRef{
+	_, err := runtimecontracts.NewToolSchemaEntry(testProviderConnectorToolOptions(runtimecontracts.ActivityEffectClassNonIdempotentWrite, nil, &runtimecontracts.ManagedCredentialRef{
 		Key:        "github_app",
 		GrantType:  runtimemanagedcredentials.GrantGitHubAppInstallation,
 		GrantModel: managedcredentialmodel.GrantModelInstallation,
-	}, &runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"})
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"github.create_issue_comment": tool,
-		},
-	})
-
-	errs := ValidateSource(source)
-	joined := joinErrors(errs)
-	if !strings.Contains(joined, "managed_credential.installation_id_input is required") {
-		t.Fatalf("ValidateSource errors = %q, want installation_id_input requirement", joined)
+	}, &runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"})...)
+	if err == nil || !strings.Contains(err.Error(), "managed_credential.installation_id_input is required") {
+		t.Fatalf("tool admission error = %v, want installation_id_input requirement", err)
 	}
 }
 
 func TestValidateSourceRejectsInstallationInputOnNonGitHubAppCredential(t *testing.T) {
-	tool := testProviderConnectorTool(t, runtimecontracts.ActivityEffectClassNonIdempotentWrite, nil, &runtimecontracts.ManagedCredentialRef{
+	_, err := runtimecontracts.NewToolSchemaEntry(testProviderConnectorToolOptions(runtimecontracts.ActivityEffectClassNonIdempotentWrite, nil, &runtimecontracts.ManagedCredentialRef{
 		Key:                 "slack_oauth",
 		InstallationIDInput: "installation_id",
-	}, &runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"})
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"slack.post_message": tool,
-		},
-	})
-
-	errs := ValidateSource(source)
-	joined := joinErrors(errs)
-	if !strings.Contains(joined, "managed_credential.installation_id_input requires grant_type github_app_installation") {
-		t.Fatalf("ValidateSource errors = %q, want grant_type guarded installation input", joined)
+	}, &runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"})...)
+	if err == nil || !strings.Contains(err.Error(), "managed_credential.installation_id_input requires grant_type github_app_installation") {
+		t.Fatalf("tool admission error = %v, want grant_type guarded installation input", err)
 	}
 }
 
@@ -135,19 +119,11 @@ func TestValidateSourceRejectsConnectorWithoutResponseSuccess(t *testing.T) {
 }
 
 func TestValidateSourceRejectsMalformedProviderConnectorResponseSuccess(t *testing.T) {
-	tool := testProviderConnectorTool(t, runtimecontracts.ActivityEffectClassNonIdempotentWrite, nil, &runtimecontracts.ManagedCredentialRef{Key: "slack_oauth"}, &runtimecontracts.HTTPResponseSuccess{
+	_, err := runtimecontracts.NewToolSchemaEntry(testProviderConnectorToolOptions(runtimecontracts.ActivityEffectClassNonIdempotentWrite, nil, &runtimecontracts.ManagedCredentialRef{Key: "slack_oauth"}, &runtimecontracts.HTTPResponseSuccess{
 		Kind: "json_field_equals", Path: "body.ok", Equals: true,
-	})
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"slack.post_message": tool,
-		},
-	})
-
-	errs := ValidateSource(source)
-	joined := joinErrors(errs)
-	if !strings.Contains(joined, "response_success.path must start with response.") {
-		t.Fatalf("ValidateSource errors = %q, want response_success path rejection", joined)
+	})...)
+	if err == nil || !strings.Contains(err.Error(), "response_success.path") {
+		t.Fatalf("tool admission error = %v, want response_success path rejection", err)
 	}
 }
 
@@ -1231,6 +1207,21 @@ func testProviderConnectorTool(
 	extra ...runtimecontracts.ToolSchemaEntryOption,
 ) runtimecontracts.ToolSchemaEntry {
 	t.Helper()
+	options := testProviderConnectorToolOptions(effect, credentials, managed, success, extra...)
+	tool, err := runtimecontracts.NewToolSchemaEntry(options...)
+	if err != nil {
+		t.Fatalf("construct provider connector tool: %v", err)
+	}
+	return tool
+}
+
+func testProviderConnectorToolOptions(
+	effect runtimecontracts.ActivityEffectClass,
+	credentials []string,
+	managed *runtimecontracts.ManagedCredentialRef,
+	success *runtimecontracts.HTTPResponseSuccess,
+	extra ...runtimecontracts.ToolSchemaEntryOption,
+) []runtimecontracts.ToolSchemaEntryOption {
 	objectSchema := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)
 	options := []runtimecontracts.ToolSchemaEntryOption{
 		runtimecontracts.WithToolCategory(Category),
@@ -1249,11 +1240,7 @@ func testProviderConnectorTool(
 		options = append(options, runtimecontracts.WithToolResponseSuccess(*success))
 	}
 	options = append(options, extra...)
-	tool, err := runtimecontracts.NewToolSchemaEntry(options...)
-	if err != nil {
-		t.Fatalf("construct provider connector tool: %v", err)
-	}
-	return tool
+	return options
 }
 
 func telegramConnectorTool(baseURL string) runtimecontracts.ToolSchemaEntry {

@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
-	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -30,8 +28,8 @@ func ValidateToolImplementations(source semanticview.Source) ([]error, error) {
 		if strings.HasPrefix(name, runtimecontracts.PrivateChannelActivityPrefix) {
 			return warnings, fmt.Errorf("tool %s uses reserved private channel activity namespace %s*", name, runtimecontracts.PrivateChannelActivityPrefix)
 		}
-		managedCredential, hasManagedCredential := entry.ManagedCredential()
-		httpSpec, hasHTTP := entry.HTTP()
+		_, hasManagedCredential := entry.ManagedCredentialExecution()
+		_, hasHTTP := entry.HTTPExecution()
 		switch entry.Handler() {
 		case runtimecontracts.ToolHandlerPlatformBuiltin:
 			if hasManagedCredential {
@@ -43,37 +41,6 @@ func ValidateToolImplementations(source semanticview.Source) ([]error, error) {
 		case runtimecontracts.ToolHandlerHTTP:
 			if !hasHTTP {
 				return warnings, fmt.Errorf("tool %s resolves as http but has no http block", name)
-			}
-			if strings.TrimSpace(httpSpec.Method) == "" {
-				return warnings, fmt.Errorf("tool %s http.method is required", name)
-			}
-			if strings.TrimSpace(httpSpec.URL) == "" {
-				return warnings, fmt.Errorf("tool %s http.url is required", name)
-			}
-			if hasManagedCredential && strings.TrimSpace(managedCredential.Key) == "" {
-				return warnings, fmt.Errorf("tool %s managed_credential.key is required", name)
-			}
-			if hasManagedCredential && strings.TrimSpace(managedCredential.Header) == "" && strings.TrimSpace(managedCredential.Prefix) != "" {
-				return warnings, fmt.Errorf("tool %s managed_credential.header is required when prefix is set", name)
-			}
-			if hasManagedCredential {
-				if err := runtimemanagedcredentials.ValidateRequiredGrantType(managedCredential.GrantType); err != nil {
-					return warnings, fmt.Errorf("tool %s managed_credential.%s", name, err.Error())
-				}
-				grantType := runtimemanagedcredentials.NormalizeGrantType(managedCredential.GrantType)
-				installationIDInput := strings.TrimSpace(managedCredential.InstallationIDInput)
-				if grantType == runtimemanagedcredentials.GrantGitHubAppInstallation && installationIDInput == "" {
-					return warnings, fmt.Errorf("tool %s managed_credential.installation_id_input is required for grant_type %s", name, grantType)
-				}
-				if installationIDInput != "" && grantType != runtimemanagedcredentials.GrantGitHubAppInstallation {
-					return warnings, fmt.Errorf("tool %s managed_credential.installation_id_input requires grant_type %s", name, runtimemanagedcredentials.GrantGitHubAppInstallation)
-				}
-				if err := managedcredentialmodel.ValidateGrantModel(managedCredential.GrantModel); err != nil {
-					return warnings, fmt.Errorf("tool %s managed_credential.%s", name, err.Error())
-				}
-				if err := managedcredentialmodel.ValidateTokenRequestProfile(managedCredential.TokenRequest); err != nil {
-					return warnings, fmt.Errorf("tool %s managed_credential.%s", name, err.Error())
-				}
 			}
 		case runtimecontracts.ToolHandlerMCP:
 			if hasManagedCredential {

@@ -358,15 +358,16 @@ func TestActivityHTTPResponseSuccessPolicyParityCases(t *testing.T) {
 			}))
 			defer server.Close()
 
-			policy := tc.policy
+			policy := admittedActivityResponseSuccess(t, tc.policy)
 			_, err := executePreparedActivityHTTPTool(testAuthorActivityContext(t, context.Background()), preparedActivityHTTPTool{
-				toolName: "policy_probe",
-				method:   http.MethodPost,
-				url:      server.URL,
-				timeout:  time.Second,
-				client:   server.Client(),
-				secrets:  tc.secrets,
-				success:  &policy,
+				toolName:   "policy_probe",
+				method:     http.MethodPost,
+				url:        server.URL,
+				timeout:    time.Second,
+				client:     server.Client(),
+				secrets:    tc.secrets,
+				success:    policy,
+				hasSuccess: true,
 			})
 			if tc.wantClass == "" {
 				if err != nil {
@@ -399,15 +400,16 @@ func TestActivityCredentialRedactionGuarantee(t *testing.T) {
 	}))
 	defer server.Close()
 
-	policy := runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.state", Equals: "accepted"}
+	policy := admittedActivityResponseSuccess(t, runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.state", Equals: "accepted"})
 	_, err := executePreparedActivityHTTPTool(testAuthorActivityContext(t, context.Background()), preparedActivityHTTPTool{
-		toolName: "redaction_guarantee_probe",
-		method:   http.MethodPost,
-		url:      server.URL,
-		timeout:  time.Second,
-		client:   server.Client(),
-		secrets:  []string{secret},
-		success:  &policy,
+		toolName:   "redaction_guarantee_probe",
+		method:     http.MethodPost,
+		url:        server.URL,
+		timeout:    time.Second,
+		client:     server.Client(),
+		secrets:    []string{secret},
+		success:    policy,
+		hasSuccess: true,
 	})
 	failure, ok := runtimefailures.As(err)
 	if err == nil || !ok || failure.Failure.Detail.Code != "provider_response_rejected" {
@@ -430,26 +432,39 @@ func TestActivityHTTPAppliesConnectorThenChannelResultProjection(t *testing.T) {
 	defer server.Close()
 	allow := false
 	minimum, maximum := float64(1), float64(2147483647)
-	result, err := executePreparedActivityHTTPTool(context.Background(), preparedActivityHTTPTool{
-		toolName: "telegram.send_interactive",
-		method:   http.MethodPost,
-		url:      server.URL,
-		timeout:  time.Second,
-		client:   server.Client(),
-		success:  &runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.ok", Equals: true},
-		responseMapping: map[string]any{
-			"message_id": "{{response.body.result.message_id}}",
-		},
-		outputSchema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{"message_id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("integer"), runtimecontracts.ToolSchemaMinimum(minimum), runtimecontracts.ToolSchemaMaximum(maximum))}), runtimecontracts.ToolSchemaRequired("message_id"), runtimecontracts.ToolSchemaAdditionalPropertiesAllowed(allow)),
-
-		compiledResult: &runtimecontracts.CompiledResultProjection{
+	outputSchema := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{"message_id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("integer"), runtimecontracts.ToolSchemaMinimum(minimum), runtimecontracts.ToolSchemaMaximum(maximum))}), runtimecontracts.ToolSchemaRequired("message_id"), runtimecontracts.ToolSchemaAdditionalPropertiesAllowed(allow))
+	compiledOutputSchema := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+		"delivery_reference": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{"id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("integer"), runtimecontracts.ToolSchemaMinimum(minimum), runtimecontracts.ToolSchemaMaximum(maximum))}), runtimecontracts.ToolSchemaRequired([]string{"id"}...), runtimecontracts.ToolSchemaAdditionalPropertiesAllowed(allow)),
+	}), runtimecontracts.ToolSchemaRequired("delivery_reference"), runtimecontracts.ToolSchemaAdditionalPropertiesAllowed(allow))
+	owner := runtimecontracts.MustToolSchemaEntry(
+		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+		runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), outputSchema),
+		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL}),
+		runtimecontracts.WithToolResponseSuccess(runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.ok", Equals: true}),
+		runtimecontracts.WithToolResponseMapping(map[string]any{"message_id": "{{response.body.result.message_id}}"}),
+		runtimecontracts.WithToolCompiledResult(runtimecontracts.CompiledResultProjection{
 			Fields: map[string]runtimecontracts.CompiledResultField{
 				"delivery_reference.id": {From: "result.message_id"},
 			},
-			OutputSchema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
-				"delivery_reference": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{"id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("integer"), runtimecontracts.ToolSchemaMinimum(minimum), runtimecontracts.ToolSchemaMaximum(maximum))}), runtimecontracts.ToolSchemaRequired([]string{"id"}...), runtimecontracts.ToolSchemaAdditionalPropertiesAllowed(allow)),
-			}), runtimecontracts.ToolSchemaRequired("delivery_reference"), runtimecontracts.ToolSchemaAdditionalPropertiesAllowed(allow)),
-		},
+			OutputSchema: compiledOutputSchema,
+		}),
+	)
+	success, _ := owner.ResponseSuccessPolicy()
+	mapping, _ := owner.CompiledResponseMapping()
+	compiledResult, _ := owner.CompiledResultExecution()
+	result, err := executePreparedActivityHTTPTool(context.Background(), preparedActivityHTTPTool{
+		toolName:           "telegram.send_interactive",
+		method:             http.MethodPost,
+		url:                server.URL,
+		timeout:            time.Second,
+		client:             server.Client(),
+		success:            success,
+		hasSuccess:         true,
+		responseMapping:    mapping,
+		hasResponseMapping: true,
+		outputSchema:       outputSchema,
+		compiledResult:     compiledResult,
+		hasCompiledResult:  true,
 	})
 	if err != nil {
 		t.Fatalf("executePreparedActivityHTTPTool: %v", err)
@@ -458,6 +473,21 @@ func TestActivityHTTPAppliesConnectorThenChannelResultProjection(t *testing.T) {
 	if !reflect.DeepEqual(result, want) {
 		t.Fatalf("result = %#v, want %#v", result, want)
 	}
+}
+
+func admittedActivityResponseSuccess(t *testing.T, policy runtimecontracts.HTTPResponseSuccess) runtimecontracts.ToolResponseSuccessPolicy {
+	t.Helper()
+	owner := runtimecontracts.MustToolSchemaEntry(
+		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+		runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
+		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"}),
+		runtimecontracts.WithToolResponseSuccess(policy),
+	)
+	admitted, ok := owner.ResponseSuccessPolicy()
+	if !ok {
+		t.Fatal("response-success policy was not admitted")
+	}
+	return admitted
 }
 
 func TestCompiledResultProjectionHasNoConversionSeam(t *testing.T) {

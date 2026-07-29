@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	"github.com/google/uuid"
 )
 
 const MaxToolInputSchemaDepth = 64
@@ -30,6 +33,19 @@ func validateToolSchemaValue(path string, schema ToolInputSchema, value semantic
 		text, ok := value.String()
 		if !ok {
 			return fmt.Errorf("%s must be string", path)
+		}
+		switch schema.Format() {
+		case "":
+		case "uuid":
+			if _, err := uuid.Parse(strings.TrimSpace(text)); err != nil {
+				return fmt.Errorf("%s must be uuid", path)
+			}
+		case "date-time":
+			if _, err := time.Parse(time.RFC3339, strings.TrimSpace(text)); err != nil {
+				return fmt.Errorf("%s must be RFC3339 date-time", path)
+			}
+		default:
+			panic("admitted tool schema contains unsupported string format")
 		}
 		if pattern := schema.Pattern(); pattern != "" && !regexp.MustCompile(pattern).MatchString(text) {
 			return fmt.Errorf("%s does not match pattern %q", path, pattern)
@@ -103,6 +119,24 @@ func validateToolSchemaValue(path string, schema ToolInputSchema, value semantic
 			}
 			if allowed, declared := schema.AdditionalPropertiesAllowed(); declared && !allowed {
 				return fmt.Errorf("%s.%s is not allowed", path, name)
+			}
+		}
+		for _, name := range schema.PropertyNames() {
+			property, _ := schema.Property(name)
+			target := property.EqualTo()
+			if target == "" {
+				continue
+			}
+			member, exists := members[name]
+			if !exists {
+				continue
+			}
+			other, exists := members[target]
+			if !exists {
+				return fmt.Errorf("%s.%s must equal %s.%s, but target is missing", path, name, path, target)
+			}
+			if !member.Equal(other) {
+				return fmt.Errorf("%s.%s must equal %s.%s", path, name, path, target)
 			}
 		}
 	}

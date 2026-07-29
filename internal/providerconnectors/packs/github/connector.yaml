@@ -75,7 +75,7 @@ tools:
             url: https://api.github.com/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/labels
             headers:
                 Accept: application/vnd.github+json
-                X-GitHub-Api-Version: "2022-11-28"
+                X-Github-Api-Version: "2022-11-28"
             body:
                 labels: '{{input.labels}}'
         response_success:
@@ -116,7 +116,7 @@ tools:
             url: https://api.github.com/repos/{{input.owner}}/{{input.repo}}/issues
             headers:
                 Accept: application/vnd.github+json
-                X-GitHub-Api-Version: "2022-11-28"
+                X-Github-Api-Version: "2022-11-28"
             body:
                 body: '{{input.body}}'
                 title: '{{input.title}}'
@@ -158,7 +158,7 @@ tools:
             url: https://api.github.com/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/comments
             headers:
                 Accept: application/vnd.github+json
-                X-GitHub-Api-Version: "2022-11-28"
+                X-Github-Api-Version: "2022-11-28"
             body:
                 body: '{{input.body}}'
         response_success:

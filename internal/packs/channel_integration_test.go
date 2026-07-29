@@ -3,6 +3,7 @@ package packs_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -726,6 +727,59 @@ func TestSatisfactionPlanReadbackIsImmutableWithoutClone(t *testing.T) {
 	originalHTTP, ok := originalTool.HTTP()
 	if !ok || originalHTTP.URL == "https://mutated.invalid" || originalHTTP.Headers["X-Test"] == "mutated" {
 		t.Fatalf("HTTP readback changed after snapshot mutation: %#v", originalHTTP)
+	}
+}
+
+func TestAdmittedToolMutationCannotChangeCompiledPlanGeneration(t *testing.T) {
+	registry := loadChannelInterfaceRegistry(t)
+	channel, trigger, connector := mockChannelSatisfier()
+	plan, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+	if err != nil {
+		t.Fatalf("CompileChannel: %v", err)
+	}
+	beforeGeneration, err := plan.Generation()
+	if err != nil {
+		t.Fatalf("Generation before mutation: %v", err)
+	}
+	input := map[string]any{
+		"presentation": map[string]any{"text": "hello"},
+		"actions":      []any{},
+	}
+	context := map[string]any{"destination": map[string]any{"queue": "ops"}}
+	beforeProjection, err := plan.PrepareOperationInput("deliver", input, context)
+	if err != nil {
+		t.Fatalf("PrepareOperationInput before mutation: %v", err)
+	}
+
+	deliver := channel.Manifest.Operations["deliver"]
+	deliver.Input["body"] = packs.ChannelMapping{From: "input.actions"}
+	deliver.Output["delivery_reference"] = packs.ChannelMapping{From: "result.mutated"}
+	channel.Manifest.Operations["deliver"] = deliver
+	connector.Tools["mock.deliver"] = connector.Tools["mock.edit"]
+	triggerEvent := trigger.Events["mock.text"]
+	triggerEvent.Fields["text"] = packs.TriggerEventField{Schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaBoolean), Required: true}
+	trigger.Events["mock.text"] = triggerEvent
+	toolReadback, err := plan.OperationTool("deliver")
+	if err != nil {
+		t.Fatalf("OperationTool: %v", err)
+	}
+	resultReadback, ok := toolReadback.CompiledResult()
+	if !ok {
+		t.Fatal("compiled result readback is missing")
+	}
+	resultReadback.Fields["delivery_reference"] = runtimecontracts.CompiledResultField{From: "result.mutated"}
+
+	afterGeneration, err := plan.Generation()
+	if err != nil {
+		t.Fatalf("Generation after mutation: %v", err)
+	}
+	afterProjection, err := plan.PrepareOperationInput("deliver", input, context)
+	if err != nil {
+		t.Fatalf("PrepareOperationInput after mutation: %v", err)
+	}
+	if !beforeGeneration.Equal(afterGeneration) || !reflect.DeepEqual(beforeProjection, afterProjection) {
+		t.Fatalf("admitted plan changed after caller mutation: generation=%q/%q projection=%#v/%#v",
+			beforeGeneration.Diagnostic(), afterGeneration.Diagnostic(), beforeProjection, afterProjection)
 	}
 }
 

@@ -3,7 +3,6 @@ package providerconnectors
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"reflect"
 	"sort"
 	"strings"
@@ -11,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/runtime/httpresponsesuccess"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -33,11 +31,7 @@ type CapabilityOptions struct {
 func RequirementsForTool(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, opts CapabilityOptions) ([]packs.Requirement, error) {
 	credentials := tool.Credentials()
 	requires := make([]packs.Requirement, 0, len(credentials)+1)
-	for _, raw := range credentials {
-		key := strings.TrimSpace(raw)
-		if key == "" {
-			continue
-		}
+	for _, key := range credentials {
 		descriptor, err := runtimecredentials.Describe(ctx, opts.StaticCredentials, nil, key)
 		if err != nil {
 			return nil, err
@@ -48,14 +42,11 @@ func RequirementsForTool(ctx context.Context, toolID string, tool runtimecontrac
 		}
 		requires = append(requires, packs.RequirementWithStatus(packs.RequirementSecret, key, "deployment", status, descriptor.Source))
 	}
-	managed, hasManaged := tool.ManagedCredential()
+	managed, hasManaged := tool.ManagedCredentialExecution()
 	if !hasManaged {
 		return requires, nil
 	}
-	key := strings.TrimSpace(managed.Key)
-	if key == "" {
-		return nil, fmt.Errorf("provider connector tool %q managed credential key is required", toolID)
-	}
+	key := managed.Key()
 	descriptors, err := runtimemanagedcredentials.ListRequirementDescriptors(ctx, opts.ManagedCredentials, nil)
 	if err != nil {
 		return nil, err
@@ -69,11 +60,11 @@ func RequirementsForTool(ctx context.Context, toolID string, tool runtimecontrac
 	}
 	required := runtimemanagedcredentials.Requirement{
 		Kind: "tool", Name: strings.TrimSpace(toolID),
-		GrantType:           runtimemanagedcredentials.NormalizeGrantType(managed.GrantType),
-		Scopes:              append([]string(nil), managed.Scopes...),
-		GrantModel:          managedcredentialmodel.NormalizeGrantModel(managed.GrantModel),
-		TokenRequest:        managedcredentialmodel.NormalizeTokenRequestProfile(managed.TokenRequest),
-		InstallationIDInput: strings.TrimSpace(managed.InstallationIDInput),
+		GrantType:           managed.GrantType(),
+		Scopes:              managed.Scopes(),
+		GrantModel:          managed.GrantModel(),
+		TokenRequest:        managed.TokenRequest(),
+		InstallationIDInput: managed.InstallationIDInput(),
 	}
 	evaluation := runtimemanagedcredentials.EvaluateRequirement(descriptor, required)
 	status := strings.ToUpper(strings.TrimSpace(evaluation.Descriptor.Status))
@@ -183,16 +174,9 @@ func validateTool(toolID string, tool runtimecontracts.ToolSchemaEntry) []error 
 	if tool.Handler() != runtimecontracts.ToolHandlerHTTP {
 		errs = append(errs, fmt.Errorf("%s handler_type %q is not supported; provider connectors use authored HTTP tools", context, tool.Handler()))
 	}
-	httpSpec, hasHTTP := tool.HTTP()
+	_, hasHTTP := tool.HTTPExecution()
 	if !hasHTTP {
 		errs = append(errs, fmt.Errorf("%s is missing http block", context))
-	} else {
-		if strings.TrimSpace(httpSpec.Method) == "" {
-			errs = append(errs, fmt.Errorf("%s must declare http.method explicitly", context))
-		}
-		if strings.TrimSpace(httpSpec.URL) == "" {
-			errs = append(errs, fmt.Errorf("%s must declare http.url", context))
-		}
 	}
 	if err := tool.Validate(); err != nil {
 		errs = append(errs, fmt.Errorf("%s: %w", context, err))
@@ -202,41 +186,16 @@ func validateTool(toolID string, tool runtimecontracts.ToolSchemaEntry) []error 
 		errs = append(errs, fmt.Errorf("%s effect_class must be non_idempotent_write for the Stage 1 connector proof", context))
 	}
 	credentials := tool.Credentials()
-	managed, hasManagedCredential := tool.ManagedCredential()
+	_, hasManagedCredential := tool.ManagedCredentialExecution()
 	hasStaticCredentials := len(credentials) > 0
 	if hasStaticCredentials && hasManagedCredential {
 		errs = append(errs, fmt.Errorf("%s must not declare both static credentials and managed_credential; connector auth has one authoritative credential mode", context))
 	} else if !hasStaticCredentials && !hasManagedCredential {
 		errs = append(errs, fmt.Errorf("%s must declare exactly one credential binding mode: static credentials or managed_credential", context))
 	}
-	if hasManagedCredential {
-		key := strings.TrimSpace(managed.Key)
-		if key == "" {
-			errs = append(errs, fmt.Errorf("%s managed_credential.key is required", context))
-		}
-		if err := runtimemanagedcredentials.ValidateRequiredGrantType(managed.GrantType); err != nil {
-			errs = append(errs, fmt.Errorf("%s managed_credential.%s", context, err.Error()))
-		}
-		grantType := runtimemanagedcredentials.NormalizeGrantType(managed.GrantType)
-		installationIDInput := strings.TrimSpace(managed.InstallationIDInput)
-		if grantType == runtimemanagedcredentials.GrantGitHubAppInstallation && installationIDInput == "" {
-			errs = append(errs, fmt.Errorf("%s managed_credential.installation_id_input is required for grant_type %s", context, grantType))
-		}
-		if installationIDInput != "" && grantType != runtimemanagedcredentials.GrantGitHubAppInstallation {
-			errs = append(errs, fmt.Errorf("%s managed_credential.installation_id_input requires grant_type %s", context, runtimemanagedcredentials.GrantGitHubAppInstallation))
-		}
-		if err := managedcredentialmodel.ValidateGrantModel(managed.GrantModel); err != nil {
-			errs = append(errs, fmt.Errorf("%s managed_credential.%s", context, err.Error()))
-		}
-		if err := managedcredentialmodel.ValidateTokenRequestProfile(managed.TokenRequest); err != nil {
-			errs = append(errs, fmt.Errorf("%s managed_credential.%s", context, err.Error()))
-		}
-	}
-	responseSuccess, hasResponseSuccess := tool.ResponseSuccess()
+	_, hasResponseSuccess := tool.ResponseSuccessPolicy()
 	if !hasResponseSuccess {
 		errs = append(errs, fmt.Errorf("%s must declare exactly one response_success policy", context))
-	} else if err := httpresponsesuccess.Validate(responseSuccess); err != nil {
-		errs = append(errs, fmt.Errorf("%s %s", context, err))
 	}
 	if tool.RatePolicy().Enabled() {
 		errs = append(errs, fmt.Errorf("%s uses rate_limit; connector activity rate-limit admission is split", context))
@@ -275,11 +234,8 @@ func validateProviderConnectorAgentExposure(source semanticview.Source) []error 
 func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, toolID string, tool runtimecontracts.ToolSchemaEntry, opts CapabilityOptions) (packs.Subject, error) {
 	provider, action, _ := splitToolID(toolID)
 	host := ""
-	if httpSpec, ok := tool.HTTP(); ok {
-		parsed, err := url.Parse(strings.TrimSpace(httpSpec.URL))
-		if err == nil {
-			host = strings.TrimSpace(parsed.Host)
-		}
+	if httpExecution, ok := tool.HTTPExecution(); ok {
+		host = httpExecution.StaticHost()
 	}
 	credentials := tool.Credentials()
 	requires := make([]packs.Requirement, 0, len(credentials)+1)
@@ -309,12 +265,12 @@ func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, t
 		}
 		requires = append(requires, packs.RequirementWithStatus(packs.RequirementSecret, storeKey, "deployment", status, descriptor.Source))
 	}
-	if managed, ok := tool.ManagedCredential(); ok {
-		key := strings.TrimSpace(managed.Key)
+	if managed, ok := tool.ManagedCredentialExecution(); ok {
+		key := managed.Key()
 		if key != "" {
-			requiredGrantType := runtimemanagedcredentials.NormalizeGrantType(managed.GrantType)
-			requiredGrantModel := managedcredentialmodel.NormalizeGrantModel(managed.GrantModel)
-			requiredTokenRequest := managedcredentialmodel.NormalizeTokenRequestProfile(managed.TokenRequest)
+			requiredGrantType := managed.GrantType()
+			requiredGrantModel := managed.GrantModel()
+			requiredTokenRequest := managed.TokenRequest()
 			storeKey := key
 			if resolved, mapped := semanticview.CredentialStoreKeyForFlow(source, flowID, key); mapped {
 				storeKey = strings.TrimSpace(resolved)
@@ -337,10 +293,10 @@ func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, t
 				Kind:                "tool",
 				Name:                toolID,
 				GrantType:           requiredGrantType,
-				Scopes:              append([]string{}, managed.Scopes...),
+				Scopes:              managed.Scopes(),
 				GrantModel:          requiredGrantModel,
 				TokenRequest:        requiredTokenRequest,
-				InstallationIDInput: strings.TrimSpace(managed.InstallationIDInput),
+				InstallationIDInput: managed.InstallationIDInput(),
 			}
 			evaluation := runtimemanagedcredentials.EvaluateRequirement(descriptor, required)
 			status := strings.ToUpper(strings.TrimSpace(evaluation.Descriptor.Status))
@@ -349,11 +305,11 @@ func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, t
 			}
 			requirement := packs.RequirementWithStatus(packs.RequirementManagedCredential, storeKey, "deployment", status, "managed_credential_store")
 			requirement.GrantType = requiredGrantType
-			requirement.Scopes = normalizeStringSet(managed.Scopes)
+			requirement.Scopes = normalizeStringSet(managed.Scopes())
 			requirement.GrantModel = requiredGrantModel
 			tokenRequest := tokenRequestFields(requiredTokenRequest)
 			requirement.TokenRequest = &tokenRequest
-			requirement.InstallationIDInput = strings.TrimSpace(managed.InstallationIDInput)
+			requirement.InstallationIDInput = managed.InstallationIDInput()
 			requires = append(requires, requirement)
 		}
 	}
@@ -414,10 +370,8 @@ func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, t
 func availableCapabilitySubject(installed InstalledTool) (packs.Subject, error) {
 	provider, action, _ := splitToolID(installed.ToolID)
 	host := ""
-	if httpSpec, ok := installed.Tool.HTTP(); ok {
-		if parsed, err := url.Parse(strings.TrimSpace(httpSpec.URL)); err == nil {
-			host = strings.TrimSpace(parsed.Host)
-		}
+	if httpExecution, ok := installed.Tool.HTTPExecution(); ok {
+		host = httpExecution.StaticHost()
 	}
 	subject := packs.Subject{
 		ID:            strings.TrimSpace(installed.ToolID),
