@@ -1609,10 +1609,8 @@ func (s *postgresPipelineObligationStore) Settle(ctx context.Context, claim runt
 	if err := lease.session.endTx(tx); err != nil {
 		return err
 	}
-	if err := handoff.commit(); err != nil {
-		return err
-	}
-	return s.releasePostgresPipelineClaimLocked(context.WithoutCancel(ctx), claim, state)
+	releaseErr := s.releasePostgresPipelineClaimLocked(context.WithoutCancel(ctx), claim, state)
+	return errors.Join(releaseErr, handoff.commit())
 }
 
 func (s *sqlitePipelineObligationStore) Settle(ctx context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) error {
@@ -1624,7 +1622,7 @@ func (s *sqlitePipelineObligationStore) Settle(ctx context.Context, claim runtim
 		return err
 	}
 	defer state.operationMu.Unlock()
-	if err := s.runRuntimeMutation(ctx, "settle sqlite pipeline obligation", func(txctx context.Context, tx *sql.Tx) error {
+	postCommit, err := s.runRuntimeMutationCommitted(ctx, "settle sqlite pipeline obligation", func(txctx context.Context, tx *sql.Tx) error {
 		if current, err := s.sqlitePipelineClaimState(claim); err != nil || current != state {
 			if err != nil {
 				return err
@@ -1643,10 +1641,13 @@ func (s *sqlitePipelineObligationStore) Settle(ctx context.Context, claim runtim
 		}
 		_, err = s.requestCompletionCandidateTx(txctx, tx, runID, nil)
 		return err
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
-	return s.releaseSQLitePipelineClaimLocked(claim, state)
+	releaseErr := s.releaseSQLitePipelineClaimLocked(claim, state)
+	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	return releaseErr
 }
 
 type pipelineExecer interface {

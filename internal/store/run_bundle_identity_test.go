@@ -65,7 +65,8 @@ func TestRunLifecycleOwnerRejectsPersistedSourceWithoutBundleRow(t *testing.T) {
 
 	err := pg.runAuthorActivityMutation(testAuthorActivityContext(), "test ensure missing persisted run bundle", func(txctx context.Context, tx *sql.Tx) error {
 		_, err := (postgresRunLifecycleMutation{store: pg, tx: tx}).Create(txctx, storerunlifecycle.CreateRequest{
-			RunID: runID, Source: mustStoreTestPersistedBundleSourceFact(testCanonicalBundleHash), StartedAt: time.Now().UTC(),
+			RunID: runID, Origin: storerunlifecycle.ScenarioSetupRunOrigin(),
+			Source: mustStoreTestPersistedBundleSourceFact(testCanonicalBundleHash), StartedAt: time.Now().UTC(),
 		})
 		return err
 	})

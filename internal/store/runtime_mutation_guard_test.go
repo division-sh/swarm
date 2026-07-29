@@ -259,7 +259,7 @@ func TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary(t *testing.T)
 		t.Fatalf("read internal/serveapp/store_facade.go: %v", err)
 	}
 	facadeText := string(facadeData)
-	if !strings.Contains(facadeText, "SQLDB:               s.RuntimeSQLDB,") {
+	if !strings.Contains(facadeText, "SQLDB:                  s.RuntimeSQLDB,") {
 		t.Fatal("selected runtime facade must use RuntimeSQLDB, leaving runtime.Stores.SQLDB nil for SQLite")
 	}
 

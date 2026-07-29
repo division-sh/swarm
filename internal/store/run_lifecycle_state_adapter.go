@@ -27,6 +27,7 @@ type terminalRunMutation struct {
 }
 
 func terminalRunMutationFromRequest(request runtimerunlifecycle.TerminalRequest) (terminalRunMutation, error) {
+	request.EndedAt = runtimerunlifecycle.CanonicalTimestamp(request.EndedAt)
 	if err := request.Validate(); err != nil {
 		return terminalRunMutation{}, err
 	}
@@ -37,6 +38,7 @@ func terminalRunMutationFromRequest(request runtimerunlifecycle.TerminalRequest)
 }
 
 func terminalRunMutationFromForkSource(request runtimerunlifecycle.ForkSourceRequest) (terminalRunMutation, error) {
+	request.EndedAt = runtimerunlifecycle.CanonicalTimestamp(request.EndedAt)
 	if err := request.Validate(); err != nil {
 		return terminalRunMutation{}, err
 	}
@@ -48,6 +50,7 @@ func terminalRunMutationFromForkSource(request runtimerunlifecycle.ForkSourceReq
 
 func terminalRunMutationForCompletion(runID string, endedAt time.Time) (terminalRunMutation, error) {
 	runID = strings.TrimSpace(runID)
+	endedAt = runtimerunlifecycle.CanonicalTimestamp(endedAt)
 	if runID == "" {
 		return terminalRunMutation{}, errors.New("successful run completion requires run_id")
 	}
@@ -55,7 +58,7 @@ func terminalRunMutationForCompletion(runID string, endedAt time.Time) (terminal
 		return terminalRunMutation{}, errors.New("successful run completion requires ended_at")
 	}
 	return terminalRunMutation{
-		RunID: runID, State: runtimerunlifecycle.StateCompleted, EndedAt: endedAt.UTC(),
+		RunID: runID, State: runtimerunlifecycle.StateCompleted, EndedAt: endedAt,
 	}, nil
 }
 
@@ -514,7 +517,7 @@ func recordTerminalRunActivity(
 	snapshot runtimerunlifecycle.Snapshot,
 	failure *runtimefailures.Envelope,
 ) error {
-	scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, snapshot.BundleHash)
+	scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, snapshot.BundleHash)
 	if err != nil {
 		return err
 	}

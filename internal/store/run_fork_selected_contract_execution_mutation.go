@@ -205,7 +205,7 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 		}, fmt.Errorf("selected-contract fork execution materialization blocked: %s", runForkBlockerCodes(blockers))
 	}
 
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return RunForkMaterialization{}, fmt.Errorf("begin selected-contract fork materialization: %w", err)
 	}
@@ -344,7 +344,7 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 		return RunForkActivation{}, err
 	}
 
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return RunForkActivation{}, fmt.Errorf("begin selected-contract fork activation: %w", err)
 	}
@@ -358,7 +358,16 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 	if err != nil {
 		return RunForkActivation{}, err
 	}
+	postCommit := make([]runtimepipeline.OwnerAction, 0, 2)
+	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 2)
 	ctx = s.bindRunLifecycleMutation(storyctx, tx)
+	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
+	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollbackActions)
+	defer func() {
+		if !committed {
+			runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
+		}
+	}()
 
 	lineage, err := loadRunForkActivationLineage(ctx, tx, forkRunID)
 	if err != nil {
@@ -484,6 +493,7 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 			return result, fmt.Errorf("commit selected-contract branch activation: %w", err)
 		}
 		committed = true
+		runtimepipeline.FlushPipelinePostCommitActions(postCommit)
 		result.ForkRunStatus = RunForkActivatedStatus
 		result.SourceRunStatus = lineage.SourceRunStatus
 		result.Activated = true
@@ -499,6 +509,7 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 		return result, fmt.Errorf("commit selected-contract fork activation: %w", err)
 	}
 	committed = true
+	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
 	result.ForkRunStatus = RunForkActivatedStatus
 	result.SourceRunStatus = RunForkSourceFrozenStatus
 	result.Activated = true
@@ -708,7 +719,7 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Cont
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return nil, fmt.Errorf("begin selected-contract source event preparation: %w", err)
 	}

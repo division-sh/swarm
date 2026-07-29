@@ -1430,7 +1430,7 @@ func TestRunForkActivation_FailsClosedForSourceAdvancedAndRepeat(t *testing.T) {
 	}
 }
 
-func TestRunForkActivation_FailsClosedForDeliveryAdvancementAndMissingLineage(t *testing.T) {
+func TestRunForkActivation_FailsClosedForDeliveryAdvancementAndUsesTypedOriginLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
@@ -1456,11 +1456,42 @@ func TestRunForkActivation_FailsClosedForDeliveryAdvancementAndMissingLineage(t 
 		t.Fatalf("blocked activation = %#v, want source delivery advancement", blocked)
 	}
 
+	orphanSourceRunID := uuid.NewString()
+	orphanEntityID := uuid.NewString()
+	orphanEventID := uuid.NewString()
+	seedActivationReadySourceRun(t, db, orphanSourceRunID, orphanEntityID, orphanEventID, at.Add(time.Minute))
+	captureRunForkTestRevision(t, db, orphanSourceRunID)
 	orphanRunID := uuid.NewString()
-	requirePausedRunForTest(t, ctx, pg, orphanRunID, at)
-	_, err = pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: orphanRunID})
-	if err == nil || !strings.Contains(err.Error(), "requires fork lineage") {
-		t.Fatalf("ActivateRunFork orphan error = %v, want lineage failure", err)
+	orphanOrigin, err := storerunlifecycle.ForkMaterializationRunOrigin(orphanSourceRunID, orphanEventID)
+	if err != nil {
+		t.Fatalf("construct orphan fork origin: %v", err)
+	}
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{
+		Origin:    orphanOrigin,
+		RunID:     orphanRunID,
+		State:     storerunlifecycle.StatePaused,
+		StartedAt: at,
+	})
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, name,
+			current_state, gates, fields, accumulator, revision,
+			entered_state_at, created_at, updated_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'flow-a/1', 'default', 'Orphan Fork Entity',
+			'pending', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1,
+			$3, $3, $3
+		)
+	`, orphanRunID, orphanEntityID, at); err != nil {
+		t.Fatalf("seed orphan fork entity_state: %v", err)
+	}
+	activated, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: orphanRunID, ConfirmSourceFreeze: true})
+	if err != nil {
+		t.Fatalf("ActivateRunFork typed-origin lineage: %v", err)
+	}
+	if !activated.Activated || activated.SourceRunID != orphanSourceRunID || activated.ForkPoint.EventID != orphanEventID {
+		t.Fatalf("typed-origin activation = %#v, want source %s event %s", activated, orphanSourceRunID, orphanEventID)
 	}
 }
 

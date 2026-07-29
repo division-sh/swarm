@@ -1381,6 +1381,34 @@ type serveStandingServiceController struct {
 	mu      sync.Mutex
 }
 
+type serveStandingServiceTransition struct {
+	occurrence       *runtime.StandingServiceTransition
+	pipelineRecovery *runtimebus.PipelineParentTransition
+}
+
+func (t *serveStandingServiceTransition) Wait(ctx context.Context) error {
+	if t == nil {
+		return nil
+	}
+	return t.occurrence.Wait(ctx)
+}
+
+func (t *serveStandingServiceTransition) Restore(ctx context.Context) error {
+	if t == nil {
+		return nil
+	}
+	defer t.pipelineRecovery.Done()
+	return t.occurrence.Restore(ctx)
+}
+
+func (t *serveStandingServiceTransition) Retire(ctx context.Context) error {
+	if t == nil {
+		return nil
+	}
+	defer t.pipelineRecovery.Done()
+	return t.occurrence.Retire(ctx)
+}
+
 func (c *serveStandingServiceController) SuspendStandingService(ctx context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
 	if c.store == nil {
 		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("standing service owner is not configured")
@@ -1473,7 +1501,7 @@ func (c *serveStandingServiceController) ResetStandingService(ctx context.Contex
 	return result, nil
 }
 
-func (c *serveStandingServiceController) closeAndDrain(ctx context.Context, serviceID string, owner *runtime.Runtime) (*runtime.Runtime, *runtime.StandingServiceTransition, error) {
+func (c *serveStandingServiceController) closeAndDrain(ctx context.Context, serviceID string, owner *runtime.Runtime) (*runtime.Runtime, *serveStandingServiceTransition, error) {
 	if owner == nil {
 		return nil, nil, fmt.Errorf("standing service %s runtime owner is unavailable", strings.TrimSpace(serviceID))
 	}
@@ -1485,9 +1513,21 @@ func (c *serveStandingServiceController) closeAndDrain(ctx context.Context, serv
 	if c.manager == nil {
 		return nil, nil, errors.Join(errors.New("standing service runtime context manager is required"), c.restoreAdmission(owner, serviceID, nil))
 	}
-	transition, err := c.manager.BeginStandingServiceTransition(ctx, serviceID)
+	if owner.Bus == nil {
+		return nil, nil, errors.Join(errors.New("standing service pipeline recovery owner is required"), c.restoreAdmission(owner, serviceID, nil))
+	}
+	pipelineRecovery, err := owner.Bus.BeginPipelineParentTransition()
 	if err != nil {
 		return nil, nil, errors.Join(err, c.restoreAdmission(owner, serviceID, nil))
+	}
+	occurrence, err := c.manager.BeginStandingServiceTransition(ctx, serviceID)
+	if err != nil {
+		pipelineRecovery.Done()
+		return nil, nil, errors.Join(err, c.restoreAdmission(owner, serviceID, nil))
+	}
+	transition := &serveStandingServiceTransition{
+		occurrence:       occurrence,
+		pipelineRecovery: pipelineRecovery,
 	}
 	if owner.InboundGateway != nil {
 		if err := owner.InboundGateway.WaitForStandingServiceAdmission(ctx, serviceID); err != nil {
@@ -1500,7 +1540,7 @@ func (c *serveStandingServiceController) closeAndDrain(ctx context.Context, serv
 	return owner, transition, nil
 }
 
-func (c *serveStandingServiceController) restoreAdmission(owner *runtime.Runtime, serviceID string, transition *runtime.StandingServiceTransition) error {
+func (c *serveStandingServiceController) restoreAdmission(owner *runtime.Runtime, serviceID string, transition *serveStandingServiceTransition) error {
 	if transition != nil {
 		if err := transition.Restore(context.Background()); err != nil {
 			return fmt.Errorf("restore standing service %s process targets: %w", serviceID, err)

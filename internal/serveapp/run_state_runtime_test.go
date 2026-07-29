@@ -89,10 +89,10 @@ func publishRunStatusRootEvent(t *testing.T, bus *runtimebus.EventBus, runID, en
 	return eventID
 }
 
-func seedRunStatusEntityState(t *testing.T, db *sql.DB, runID, entityID string) {
+func seedRunStatusEntityState(t *testing.T, pg *store.PostgresStore, runID, entityID string) {
 	t.Helper()
 	now := time.Now().UTC()
-	if _, err := db.ExecContext(context.Background(), `
+	if _, err := pg.DB.ExecContext(context.Background(), `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
@@ -102,6 +102,9 @@ func seedRunStatusEntityState(t *testing.T, db *sql.DB, runID, entityID string) 
 		)
 	`, runID, entityID, now); err != nil {
 		t.Fatalf("seed run status entity_state: %v", err)
+	}
+	if err := storetest.SyncRunCounters(runStatusAuthorActivityContext(), pg, runID); err != nil {
+		t.Fatalf("synchronize run status counters: %v", err)
 	}
 }
 
@@ -179,7 +182,7 @@ func TestRunState_UsesDurableCompletedRunState(t *testing.T) {
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := publishRunStatusRootEvent(t, eb, runID, entityID)
-	seedRunStatusEntityState(t, db, runID, entityID)
+	seedRunStatusEntityState(t, pg, runID, entityID)
 	markRunStatusCompleted(t, pg, eventID)
 
 	ctx := context.Background()
@@ -241,7 +244,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := publishRunStatusRootEvent(t, eb, runID, entityID)
-	seedRunStatusEntityState(t, db, runID, entityID)
+	seedRunStatusEntityState(t, pg, runID, entityID)
 
 	select {
 	case <-agentStarted:
@@ -359,7 +362,7 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := publishRunStatusRootEvent(t, eb, runID, entityID)
-	seedRunStatusEntityState(t, db, runID, entityID)
+	seedRunStatusEntityState(t, pg, runID, entityID)
 
 	select {
 	case <-agentStarted:

@@ -53,7 +53,7 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	childEventID := uuid.NewString()
 	grandchildEventID := uuid.NewString()
 	fixtureCtx := testAuthorActivityContext(context.Background())
-	storetest.CommitSemanticEvent(t, fixtureCtx, pg, eventtest.RunCreatingRootIngress(
+	storetest.CommitSemanticEvent(t, fixtureCtx, pg, eventtest.ExistingRunRootIngress(
 		rootEventID,
 		"root.started",
 		"",
@@ -61,7 +61,6 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 		[]byte(`{"entity_id":"`+rootID+`"}`),
 		0,
 		catalogRuntimeRunID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, rootID),
 		time.Now().UTC(),
 	))
@@ -202,7 +201,7 @@ func TestAssertEmittedEvents_AcceptsCrossFlowInheritDispatcherEmission(t *testin
 	h.bundle = bundle
 
 	insertCatalogAssertionEntityState(t, h, entityID, "dispatched")
-	storetest.CommitSemanticEvent(t, testAuthorActivityContext(context.Background()), h.pg, eventtest.RunCreatingRootIngress(
+	storetest.CommitSemanticEvent(t, testAuthorActivityContext(context.Background()), h.pg, eventtest.ExistingRunRootIngress(
 		uuid.NewString(),
 		"score.requested",
 		"runtime",
@@ -210,7 +209,6 @@ func TestAssertEmittedEvents_AcceptsCrossFlowInheritDispatcherEmission(t *testin
 		[]byte(`{"entity_id":"`+entityID+`"}`),
 		0,
 		catalogRuntimeRunID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 		time.Now().UTC(),
 	))
@@ -258,7 +256,7 @@ func insertCatalogAssertionEntityState(t *testing.T, h *runtimeHarness, entityID
 
 func insertCatalogAssertionDeadLetterEvent(t *testing.T, h *runtimeHarness, entityID string) {
 	t.Helper()
-	storetest.CommitSemanticEvent(t, testAuthorActivityContext(context.Background()), h.pg, eventtest.RunCreatingRootIngress(
+	storetest.CommitSemanticEvent(t, testAuthorActivityContext(context.Background()), h.pg, eventtest.ExistingRunRootIngress(
 		uuid.NewString(),
 		"platform.dead_letter",
 		"runtime",
@@ -266,7 +264,6 @@ func insertCatalogAssertionDeadLetterEvent(t *testing.T, h *runtimeHarness, enti
 		[]byte(`{"entity_id":"`+entityID+`"}`),
 		0,
 		catalogRuntimeRunID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 		time.Now().UTC(),
 	))

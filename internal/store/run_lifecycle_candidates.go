@@ -58,7 +58,7 @@ func (r *runLifecycleCandidateHandoffReservation) prepare(
 	sinks *runLifecycleCandidateSinkRegistry,
 	result runtimerunlifecycle.CandidateRequestResult,
 ) error {
-	if r == nil || r.lease == nil || result.Disposition == runtimerunlifecycle.CandidateAbsorbedTerminal {
+	if r == nil || r.lease == nil || !result.RequiresRepresentation() {
 		return nil
 	}
 	if err := result.Candidate.Validate(); err != nil {
@@ -216,7 +216,7 @@ func (s *PostgresStore) requestCompletionCandidateTx(
 	if err != nil {
 		return runtimerunlifecycle.CandidateRequestResult{}, err
 	}
-	if result.Disposition != runtimerunlifecycle.CandidateAbsorbedTerminal {
+	if result.RequiresRepresentation() {
 		if err := queueCompletionCandidateSignal(ctx, &s.runLifecycleSinks, result.Candidate); err != nil {
 			return runtimerunlifecycle.CandidateRequestResult{}, err
 		}
@@ -234,7 +234,7 @@ func (s *SQLiteRuntimeStore) requestCompletionCandidateTx(
 	if err != nil {
 		return runtimerunlifecycle.CandidateRequestResult{}, err
 	}
-	if result.Disposition != runtimerunlifecycle.CandidateAbsorbedTerminal {
+	if result.RequiresRepresentation() {
 		if err := queueCompletionCandidateSignal(ctx, &s.runLifecycleSinks, result.Candidate); err != nil {
 			return runtimerunlifecycle.CandidateRequestResult{}, err
 		}
@@ -305,7 +305,7 @@ func requestPostgresCompletionCandidateTx(
 		selectedNow time.Time
 	)
 	if err := tx.QueryRowContext(ctx, `
-		SELECT LOWER(status), bundle_hash, completion_due_at, completion_revision, CURRENT_TIMESTAMP
+		SELECT LOWER(status), bundle_hash, completion_due_at, completion_revision, clock_timestamp()
 		FROM runs
 		WHERE run_id = $1::uuid
 		FOR UPDATE
@@ -321,6 +321,9 @@ func requestPostgresCompletionCandidateTx(
 	}
 	if lifecycleState.Terminal() {
 		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateAbsorbedTerminal}, nil
+	}
+	if lifecycleState == runtimerunlifecycle.StatePaused {
+		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateDeferredPaused}, nil
 	}
 	requestedDue := selectedNow.UTC()
 	if dueAt != nil {
@@ -345,9 +348,14 @@ func requestPostgresCompletionCandidateTx(
 		SET completion_revision = completion_revision + 1,
 		    completion_due_at = $2
 		WHERE run_id = $1::uuid
-		  AND status IN (`+runLifecycleActiveStateSQLValues+`)
+		  AND status = $3
 		RETURNING run_id::text, bundle_hash, completion_revision, completion_due_at
-	`, runID, requestedDue).Scan(&candidate.RunID, &candidate.BundleHash, &candidate.Revision, &candidate.DueAt); err != nil {
+	`, runID, requestedDue, string(runtimerunlifecycle.StateRunning)).Scan(
+		&candidate.RunID,
+		&candidate.BundleHash,
+		&candidate.Revision,
+		&candidate.DueAt,
+	); err != nil {
 		return runtimerunlifecycle.CandidateRequestResult{}, fmt.Errorf("request completion candidate: %w", err)
 	}
 	candidate.DueAt = candidate.DueAt.UTC()
@@ -390,6 +398,9 @@ func requestSQLiteCompletionCandidateTx(
 	if lifecycleState.Terminal() {
 		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateAbsorbedTerminal}, nil
 	}
+	if lifecycleState == runtimerunlifecycle.StatePaused {
+		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateDeferredPaused}, nil
+	}
 	requestedDue := selectedNow.UTC()
 	if dueAt != nil {
 		requestedDue = dueAt.UTC()
@@ -411,8 +422,8 @@ func requestSQLiteCompletionCandidateTx(
 		SET completion_revision = completion_revision + 1,
 		    completion_due_at = ?
 		WHERE run_id = ?
-		  AND status IN (`+runLifecycleActiveStateSQLValues+`)
-	`, requestedDue, runID)
+		  AND status = ?
+	`, requestedDue, runID, string(runtimerunlifecycle.StateRunning))
 	if err != nil {
 		return runtimerunlifecycle.CandidateRequestResult{}, fmt.Errorf("request sqlite completion candidate: %w", err)
 	}
@@ -455,6 +466,42 @@ func clearSQLiteCompletionCandidateTx(ctx context.Context, tx *sql.Tx, runID str
 	return nil
 }
 
+func transitionPostgresActiveRunStateTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	runID string,
+	state runtimerunlifecycle.State,
+	current runtimerunlifecycle.State,
+) (sql.Result, error) {
+	return tx.ExecContext(ctx, `
+		UPDATE runs
+		SET status = $2,
+		    ended_at = NULL,
+		    failure = NULL,
+		    completion_due_at = NULL
+		WHERE run_id = $1::uuid
+		  AND status = $3
+	`, runID, string(state), string(current))
+}
+
+func transitionSQLiteActiveRunStateTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	runID string,
+	state runtimerunlifecycle.State,
+	current runtimerunlifecycle.State,
+) (sql.Result, error) {
+	return tx.ExecContext(ctx, `
+		UPDATE runs
+		SET status = ?,
+		    ended_at = NULL,
+		    failure = NULL,
+		    completion_due_at = NULL
+		WHERE run_id = ?
+		  AND status = ?
+	`, string(state), runID, string(current))
+}
+
 func (s *PostgresStore) ListCompletionCandidates(
 	ctx context.Context,
 	scope runtimerunlifecycle.CandidateScope,
@@ -475,6 +522,7 @@ func (s *PostgresStore) ListCompletionCandidates(
 		FROM runs
 		WHERE bundle_hash = $1
 		  AND completion_due_at IS NOT NULL
+		  AND status = 'running'
 		  AND run_id::text > $2
 		ORDER BY run_id::text
 		LIMIT $3
@@ -523,6 +571,7 @@ func (s *SQLiteRuntimeStore) ListCompletionCandidates(
 		FROM runs
 		WHERE bundle_hash = ?
 		  AND completion_due_at IS NOT NULL
+		  AND status = 'running'
 		  AND run_id > ?
 		ORDER BY run_id
 		LIMIT ?
@@ -607,7 +656,7 @@ func (s *PostgresStore) executeCompletionCandidateTx(
 	)
 	err := tx.QueryRowContext(ctx, `
 		SELECT LOWER(status), bundle_hash, completion_revision, completion_due_at,
-		       CURRENT_TIMESTAMP
+		       clock_timestamp()
 		FROM runs
 		WHERE run_id = $1::uuid
 		FOR UPDATE
@@ -640,16 +689,22 @@ func (s *PostgresStore) executeCompletionCandidateTx(
 		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeExactNoop}, nil
 	}
 	if lifecycleState == runtimerunlifecycle.StatePaused {
-		sessions, err := summarizeSessionRun(ctx, tx, candidate.RunID, selectedNow.UTC(), true)
-		if err != nil {
-			return runtimerunlifecycle.CompletionResult{}, err
-		}
-		return s.finishBlockedPostgresCandidate(ctx, tx, candidate, optionalWake(sessions.NextExpiry))
+		return runtimerunlifecycle.CompletionResult{}, errors.New("paused run carries an executable completion candidate")
 	}
 	standalone := false
 	snapshot, loadErr := loadPostgresRunLifecycleSnapshot(ctx, tx, candidate.RunID, false)
 	if loadErr != nil {
 		return runtimerunlifecycle.CompletionResult{}, loadErr
+	}
+	if selectedNow.Before(snapshot.StartedAt) {
+		return runtimerunlifecycle.CompletionResult{
+			Outcome: runtimerunlifecycle.OutcomeRetryCurrent,
+			Retryable: &runtimerunlifecycle.SelectedStoreBeforeRunStartError{
+				RunID:      candidate.RunID,
+				SelectedAt: selectedNow,
+				StartedAt:  snapshot.StartedAt,
+			},
+		}, nil
 	}
 	if snapshot.Origin.Kind() == runtimerunlifecycle.OriginEvent {
 		rec, found, loadErr := loadStandaloneRuntimePlatformRunRecord(ctx, tx, snapshot.Origin.EventID())
@@ -756,16 +811,22 @@ func (s *SQLiteRuntimeStore) executeCompletionCandidateTx(
 		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeExactNoop}, nil
 	}
 	if lifecycleState == runtimerunlifecycle.StatePaused {
-		sessions, err := summarizeSessionRun(ctx, tx, candidate.RunID, selectedNow, false)
-		if err != nil {
-			return runtimerunlifecycle.CompletionResult{}, err
-		}
-		return s.finishBlockedSQLiteCandidate(ctx, tx, candidate, optionalWake(sessions.NextExpiry), selectedNow)
+		return runtimerunlifecycle.CompletionResult{}, errors.New("paused run carries an executable completion candidate")
 	}
 	standalone := false
 	snapshot, loadErr := loadSQLiteRunLifecycleSnapshot(ctx, tx, candidate.RunID)
 	if loadErr != nil {
 		return runtimerunlifecycle.CompletionResult{}, loadErr
+	}
+	if selectedNow.Before(snapshot.StartedAt) {
+		return runtimerunlifecycle.CompletionResult{
+			Outcome: runtimerunlifecycle.OutcomeRetryCurrent,
+			Retryable: &runtimerunlifecycle.SelectedStoreBeforeRunStartError{
+				RunID:      candidate.RunID,
+				SelectedAt: selectedNow,
+				StartedAt:  snapshot.StartedAt,
+			},
+		}, nil
 	}
 	if snapshot.Origin.Kind() == runtimerunlifecycle.OriginEvent {
 		rec, found, loadErr := sqliteLoadStandaloneRuntimePlatformRunRecord(ctx, tx, snapshot.Origin.EventID())

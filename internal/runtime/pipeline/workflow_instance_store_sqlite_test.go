@@ -243,7 +243,8 @@ func TestSQLiteWorkflowInstanceStore_RunPipelineMutationUsesRuntimeMutationRunne
 			return err
 		}
 		_, err = storerunlifecycle.Create(txctx, storerunlifecycle.CreateRequest{
-			RunID: uuid.NewString(), Source: source, StartedAt: time.Now().UTC(),
+			RunID: uuid.NewString(), Origin: storerunlifecycle.ScenarioSetupRunOrigin(),
+			Source: source, StartedAt: time.Now().UTC(),
 		})
 		return err
 	})

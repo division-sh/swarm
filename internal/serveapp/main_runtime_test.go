@@ -9226,7 +9226,10 @@ func (a delayedRunStatusAgent) OnEvent(ctx context.Context, evt events.Event) ([
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	return []events.Event{eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("scan.completed"), a.id, "", []byte(`{}`), 0, evt.RunID(), "", events.EnvelopeForEntityID(events.EventEnvelope{}, evt.EntityID()), time.Now().UTC())}, nil
+	return []events.Event{eventtest.Child(
+		uuid.NewString(), events.EventType("scan.completed"), a.id, "", []byte(`{}`),
+		evt.ChainDepth()+1, evt, events.EnvelopeForEntityID(events.EventEnvelope{}, evt.EntityID()), time.Now().UTC(),
+	)}, nil
 }
 
 func writeServedEventPublishFollowUpFixture(t *testing.T) string {

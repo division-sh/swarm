@@ -58,6 +58,8 @@ func TestTier5LifecycleCatalogFixtures_RealRuntime(t *testing.T) {
 				fixtureName == "test-create-flow-instance" ||
 				fixtureName == "test-create-flow-instance-config" ||
 				fixtureName == "test-create-flow-instance-duplicate" ||
+				fixtureName == "test-terminal-state-preserves" ||
+				fixtureName == "test-terminal-state-rejects" ||
 				fixtureName == "test-timer-fire" ||
 				fixtureName == "test-timer-recurring"
 			h := newRuntimeHarness(t, fixtureRoot, startRuntime)
@@ -66,7 +68,12 @@ func TestTier5LifecycleCatalogFixtures_RealRuntime(t *testing.T) {
 				assertCatalogRuntimeOutcome(t, h, expected)
 				return
 			}
-			for _, step := range expected.triggerSequence() {
+			for index, step := range expected.triggerSequence() {
+				if index > 0 &&
+					(fixtureName == "test-terminal-state-preserves" ||
+						fixtureName == "test-terminal-state-rejects") {
+					h.waitForRunTerminal(catalogRuntimePublishTimeout)
+				}
 				h.publishAndWait(step, catalogRuntimePublishTimeout)
 			}
 			h.waitForExpectedEmittedEvents(expected, catalogRuntimePublishTimeout)

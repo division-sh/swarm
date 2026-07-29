@@ -609,8 +609,9 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 	if get.Error != nil {
 		t.Fatalf("run.get error = %#v", get.Error)
 	}
-	if got := asMap(t, asMap(t, get.Result)["run"])["trigger_event_id"]; got != eventID {
-		t.Fatalf("run.get trigger_event_id = %v, want %s", got, eventID)
+	origin := asMap(t, asMap(t, asMap(t, get.Result)["run"])["origin"])
+	if origin["kind"] != string(runtimerunlifecycle.OriginEvent) || origin["event_id"] != eventID {
+		t.Fatalf("run.get origin = %#v, want event %s", origin, eventID)
 	}
 
 	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

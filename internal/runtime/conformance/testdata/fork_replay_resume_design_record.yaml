@@ -90,7 +90,7 @@ rows:
     blocker_codes: [delivery_history_unproven]
     enforcement_point: internal/store/run_fork_replay_resume_admission.go
     proof_refs:
-      - {kind: go_test, name: TestRunForkActivation_FailsClosedForDeliveryAdvancementAndMissingLineage}
+      - {kind: go_test, name: TestRunForkActivation_FailsClosedForDeliveryAdvancementAndUsesTypedOriginLineage}
       - {kind: go_test, name: TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers}
     rationale: "In-progress delivery state is not append-only replay truth and cannot be resumed from current rows."
 

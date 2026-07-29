@@ -14,8 +14,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -23,6 +25,36 @@ type pipelineObligationParityStore interface {
 	semanticEventFixtureStore
 	diagnosticRuntimeLogFixtureStore
 	PipelineObligations() runtimepipelineobligation.Store
+}
+
+type pipelineClaimReleaseProbeSink struct {
+	owner   runtimepipelineobligation.Store
+	eventID string
+	result  chan error
+}
+
+type pipelineClaimReleaseProbeAdmission struct {
+	sink *pipelineClaimReleaseProbeSink
+}
+
+func (s *pipelineClaimReleaseProbeSink) ReserveCompletionCandidate(context.Context) (runtimerunlifecycle.CandidateAdmission, error) {
+	return &pipelineClaimReleaseProbeAdmission{sink: s}, nil
+}
+
+func (a *pipelineClaimReleaseProbeAdmission) Submit(runtimerunlifecycle.Candidate) error {
+	work, err := a.sink.owner.ClaimEvent(context.Background(), a.sink.eventID, runtimepipelineobligation.PurposeRecovery)
+	if err == nil {
+		err = errors.Join(
+			errors.New("settled pipeline event remained eligible after lifecycle handoff"),
+			a.sink.owner.Release(context.Background(), work.Claim),
+		)
+	}
+	a.sink.result <- err
+	return nil
+}
+
+func (*pipelineClaimReleaseProbeAdmission) Cancel() error {
+	return nil
 }
 
 func TestPipelineObligationSQLitePostgresParityMatrix(t *testing.T) {
@@ -68,8 +100,62 @@ func TestPipelineObligationSQLitePostgresParityMatrix(t *testing.T) {
 			t.Run("settlement_failure_rolls_back_and_retains_claim", func(t *testing.T) {
 				provePipelineSettlementRollback(t, ctx, fixture, selected)
 			})
+			t.Run("settlement_retires_claim_before_lifecycle_handoff", func(t *testing.T) {
+				provePipelineClaimRetiredBeforeLifecycleHandoff(t, ctx, fixture, selected)
+			})
 		})
 	}
+}
+
+func provePipelineClaimRetiredBeforeLifecycleHandoff(
+	t *testing.T,
+	ctx context.Context,
+	fixture authorActivityReceiptFixture,
+	selected pipelineObligationParityStore,
+) {
+	t.Helper()
+	registrar, ok := selected.(runtimerunlifecycle.CandidateRegistrar)
+	if !ok {
+		t.Fatalf("%T does not expose completion candidate registration", selected)
+	}
+	runID := uuid.NewString()
+	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
+	owner := selected.PipelineObligations()
+	work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
+	if err != nil {
+		t.Fatalf("claim pipeline event: %v", err)
+	}
+
+	process := worklifetime.NewProcess()
+	occurrence := newRunLifecycleExecutorOccurrence(t, process)
+	runtimeCtx := worklifetime.WithRuntimeOccurrence(ctx, occurrence)
+	probe := &pipelineClaimReleaseProbeSink{
+		owner: owner, eventID: eventID, result: make(chan error, 1),
+	}
+	registration, err := registrar.RegisterCompletionCandidateSink(
+		runtimerunlifecycle.CandidateScope{BundleHash: runLifecycleCandidateParityBundleHash},
+		probe,
+	)
+	if err != nil {
+		t.Fatalf("register completion candidate probe: %v", err)
+	}
+	defer registration.Release()
+
+	if err := owner.Settle(runtimeCtx, work.Claim, runtimepipelineobligation.Acknowledged("processed")); err != nil {
+		t.Fatalf("settle pipeline event: %v", err)
+	}
+	select {
+	case probeErr := <-probe.result:
+		if !errors.Is(probeErr, runtimepipelineobligation.ErrIneligible) {
+			t.Fatalf("claim state observed by lifecycle handoff = %v, want ErrIneligible", probeErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for lifecycle handoff claim-state probe")
+	}
+
+	retireRunLifecycleExecutorOccurrence(t, occurrence)
+	retireRunLifecycleProcess(t, process)
 }
 
 func provePipelineAgeIndependentSelection(

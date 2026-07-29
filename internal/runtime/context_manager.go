@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/division-sh/swarm/internal/store/runbundle"
@@ -510,7 +511,57 @@ func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccur
 		}
 		return errors.Join(err, retireErr)
 	}
+	if activateOccurrences && runtimeOwner != nil && runtimeOwner.Bus != nil {
+		runtimeOwner.Bus.SetStandingRunWorkOwner(m)
+	}
 	return nil
+}
+
+func (m *RuntimeContextManager) BeginStandingRunRecovery(
+	ctx context.Context,
+	runID string,
+	origin runtimerunlifecycle.RunOrigin,
+) (*worklifetime.Lease, error) {
+	if m == nil {
+		return nil, errors.New("runtime context manager is required")
+	}
+	runID = strings.TrimSpace(runID)
+	if origin.Kind() != runtimerunlifecycle.OriginStandingGeneration {
+		return nil, fmt.Errorf("standing recovery requires standing_generation origin, got %s", origin.Kind())
+	}
+	if err := origin.Validate(); err != nil {
+		return nil, err
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var selected *worklifetime.StandingOccurrence
+	for _, entry := range m.contexts {
+		if !runtimeContextEntryLoaded(entry) || entry.standing == nil {
+			continue
+		}
+		occurrence := entry.standing[origin.ServiceID()]
+		if occurrence == nil {
+			continue
+		}
+		identity := occurrence.Identity()
+		if identity.RunID != runID || identity.Generation != uint64(origin.Generation()) {
+			return nil, fmt.Errorf(
+				"standing recovery origin %s/%d run %s conflicts with loaded occurrence run %s generation %d",
+				origin.ServiceID(), origin.Generation(), runID, identity.RunID, identity.Generation,
+			)
+		}
+		if selected != nil && selected != occurrence {
+			return nil, fmt.Errorf("standing recovery run %s has more than one process-local owner", runID)
+		}
+		selected = occurrence
+	}
+	if selected == nil {
+		return nil, fmt.Errorf(
+			"standing recovery origin %s/%d run %s has no loaded process-local owner",
+			origin.ServiceID(), origin.Generation(), runID,
+		)
+	}
+	return selected.Begin(ctx)
 }
 
 func (m *RuntimeContextManager) newStandingOccurrencesLocked(workOwner *worklifetime.RuntimeOccurrence, targets []StandingTarget) (map[string]*worklifetime.StandingOccurrence, error) {
@@ -1688,6 +1739,9 @@ func (m *RuntimeContextManager) applyReplacementPublicationLocked(publication *r
 	entry.parkedStanding = nil
 	entry.state = RuntimeContextStateLoaded
 	entry.cause = ""
+	if entry.runtime != nil && entry.runtime.Bus != nil {
+		entry.runtime.Bus.SetStandingRunWorkOwner(m)
+	}
 	if publication.admissionGeneration.Valid() {
 		m.admissionGeneration = publication.admissionGeneration
 		m.installedTriggerSubjects = publication.installedSubjects
