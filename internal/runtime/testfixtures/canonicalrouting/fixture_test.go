@@ -65,6 +65,24 @@ func TestCanonicalRoutingExamplesLoadAndVerify(t *testing.T) {
 	}
 }
 
+func TestReleaseE2EClaudeLifecycleFixtureLoadsAndVerifies(t *testing.T) {
+	const fixture = ArtifactID("internal/releasee2e/testdata/claude_cli_managed_lifecycle")
+	Prove(t, ArtifactID("internal/releasee2e/testdata/claude_cli_managed_lifecycle"))
+	repo := RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repo,
+		filepath.Join(repo, filepath.FromSlash(string(fixture))),
+		runtimecontracts.DefaultPlatformSpecFile(repo),
+	)
+	if err != nil {
+		t.Fatalf("load release E2E Claude lifecycle fixture: %v", err)
+	}
+	report := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{})
+	if findings := report.HardInvalidities(); len(findings) != 0 {
+		t.Fatalf("release E2E Claude lifecycle fixture hard invalidities: %#v", findings)
+	}
+}
+
 func TestCanonicalRoutingExampleInventoryAndTeachingContract(t *testing.T) {
 	ProveSource(t, canonicalRoutingTeachingContractSource(t))
 }
