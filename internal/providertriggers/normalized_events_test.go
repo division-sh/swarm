@@ -8,6 +8,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"gopkg.in/yaml.v3"
 )
 
@@ -86,9 +87,9 @@ func TestCompiledPackPlanOwnsNormalizedOutputAuthorization(t *testing.T) {
 		t.Fatalf("raw output authorization = %#v, want empty", delivery.Events)
 	}
 	got := delivery.Events[1].Authorization
-	if !got.Valid() || got.Provider != "telegram" || got.Event != "inbound.telegram.text_message" ||
-		got.PackID != identity.ID || got.PackVersion != identity.Version ||
-		got.ManifestHash != identity.ManifestHash || got.GenerationID != catalog.Generation().Diagnostic() {
+	if !got.Valid() || got.Provider() != "telegram" || got.Event() != "inbound.telegram.text_message" ||
+		got.PackID() != identity.ID || got.PackVersion() != identity.Version ||
+		got.ManifestHash() != identity.ManifestHash || !got.Generation().Equal(catalog.Generation()) {
 		t.Fatalf("normalized output authorization = %#v, want compiled pack identity/generation", got)
 	}
 	if err := catalog.VerifyProviderOutputAuthorization(got); err != nil {
@@ -96,18 +97,29 @@ func TestCompiledPackPlanOwnsNormalizedOutputAuthorization(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name   string
-		mutate func(*runtimeprovideroutput.Authorization)
+		mutate func(runtimeprovideroutput.Authorization) runtimeprovideroutput.Authorization
 	}{
-		{name: "provider", mutate: func(a *runtimeprovideroutput.Authorization) { a.Provider = "telegram-stale" }},
-		{name: "event", mutate: func(a *runtimeprovideroutput.Authorization) { a.Event = "inbound.telegram.edited_message" }},
-		{name: "pack id", mutate: func(a *runtimeprovideroutput.Authorization) { a.PackID = "provider.telegram.stale" }},
-		{name: "pack version", mutate: func(a *runtimeprovideroutput.Authorization) { a.PackVersion = "0.9.0" }},
-		{name: "manifest hash", mutate: func(a *runtimeprovideroutput.Authorization) { a.ManifestHash = "sha256:" + strings.Repeat("d", 64) }},
-		{name: "catalog generation", mutate: func(a *runtimeprovideroutput.Authorization) { a.GenerationID = "generation-stale" }},
+		{name: "provider", mutate: func(a runtimeprovideroutput.Authorization) runtimeprovideroutput.Authorization {
+			return runtimeprovideroutput.MustAuthorization("telegram-stale", a.Event(), a.PackID(), a.PackVersion(), a.ManifestHash(), a.Generation())
+		}},
+		{name: "event", mutate: func(a runtimeprovideroutput.Authorization) runtimeprovideroutput.Authorization {
+			return runtimeprovideroutput.MustAuthorization(a.Provider(), "inbound.telegram.edited_message", a.PackID(), a.PackVersion(), a.ManifestHash(), a.Generation())
+		}},
+		{name: "pack id", mutate: func(a runtimeprovideroutput.Authorization) runtimeprovideroutput.Authorization {
+			return runtimeprovideroutput.MustAuthorization(a.Provider(), a.Event(), "provider.telegram.stale", a.PackVersion(), a.ManifestHash(), a.Generation())
+		}},
+		{name: "pack version", mutate: func(a runtimeprovideroutput.Authorization) runtimeprovideroutput.Authorization {
+			return runtimeprovideroutput.MustAuthorization(a.Provider(), a.Event(), a.PackID(), "0.9.0", a.ManifestHash(), a.Generation())
+		}},
+		{name: "manifest hash", mutate: func(a runtimeprovideroutput.Authorization) runtimeprovideroutput.Authorization {
+			return runtimeprovideroutput.MustAuthorization(a.Provider(), a.Event(), a.PackID(), a.PackVersion(), "sha256:"+strings.Repeat("d", 64), a.Generation())
+		}},
+		{name: "catalog generation", mutate: func(a runtimeprovideroutput.Authorization) runtimeprovideroutput.Authorization {
+			return runtimeprovideroutput.MustAuthorization(a.Provider(), a.Event(), a.PackID(), a.PackVersion(), a.ManifestHash(), triggergeneration.FromCanonicalBytes([]byte("generation-stale")))
+		}},
 	} {
 		t.Run("rejects "+tc.name+" mismatch", func(t *testing.T) {
-			stale := got
-			tc.mutate(&stale)
+			stale := tc.mutate(got)
 			if err := catalog.VerifyProviderOutputAuthorization(stale); err == nil {
 				t.Fatalf("VerifyProviderOutputAuthorization(%s mismatch) error = nil", tc.name)
 			}

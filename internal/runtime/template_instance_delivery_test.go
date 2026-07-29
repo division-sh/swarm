@@ -1238,11 +1238,10 @@ func providerRollbackSemanticSource(t *testing.T, withCarrier bool) semanticview
 }
 
 func providerRollbackAuthorization() runtimeprovideroutput.Authorization {
-	return runtimeprovideroutput.Authorization{
-		Provider: "telegram", Event: "inbound.telegram.text_message",
-		PackID: "provider.telegram", PackVersion: "1.0.0",
-		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: providerRollbackGeneration().Diagnostic(),
-	}
+	return runtimeprovideroutput.MustAuthorization(
+		"telegram", "inbound.telegram.text_message", "provider.telegram", "1.0.0",
+		"sha256:"+strings.Repeat("a", 64), providerRollbackGeneration(),
+	)
 }
 
 func providerRollbackGeneration() triggergeneration.Generation {

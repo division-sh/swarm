@@ -64,9 +64,9 @@ func actorHasEntityContract(source semanticview.Source, actor models.AgentConfig
 	return ok
 }
 
-func roleScopedEntityToolSchemaEntriesForActor(source semanticview.Source, actor models.AgentConfig, contract entityruntime.Contract) map[string]ContractSchemaEntry {
+func roleScopedEntityToolSchemaEntriesForActor(source semanticview.Source, actor models.AgentConfig, contract entityruntime.Contract) map[string]builtinToolDraft {
 	specs := roleScopedEntityToolSpecsForActor(source, actor, contract)
-	out := make(map[string]ContractSchemaEntry, len(specs))
+	out := make(map[string]builtinToolDraft, len(specs))
 	names := make([]string, 0, len(specs))
 	for name := range specs {
 		names = append(names, name)
@@ -79,8 +79,8 @@ func roleScopedEntityToolSchemaEntriesForActor(source semanticview.Source, actor
 	return out
 }
 
-func roleScopedEntityToolSchemaEntry(contract entityruntime.Contract, spec roleScopedEntityToolSpec) ContractSchemaEntry {
-	entry := ContractSchemaEntry{
+func roleScopedEntityToolSchemaEntry(contract entityruntime.Contract, spec roleScopedEntityToolSpec) builtinToolDraft {
+	entry := builtinToolDraft{
 		Category:        "entity_persistence",
 		Description:     roleScopedEntityToolDescription(spec),
 		InputSchema:     ObjectSchema(map[string]any{}),

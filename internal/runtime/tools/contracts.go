@@ -5,11 +5,12 @@ import (
 	"sort"
 	"strings"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-type ContractSchemaEntry struct {
+type builtinToolDraft struct {
 	Category        string         `yaml:"category"`
 	Description     string         `yaml:"description"`
 	InputSchema     map[string]any `yaml:"input_schema"`
@@ -34,28 +35,6 @@ var supportedRuntimeToolNames = map[string]struct{}{
 	"read_flow_data":     {},
 }
 
-func LoadContractSchemasForSource(source semanticview.Source) (map[string]ContractSchemaEntry, error) {
-	defs, err := executionToolsForRuntime(source, nil)
-	if err != nil {
-		return nil, err
-	}
-	parsed := make(map[string]ContractSchemaEntry, len(defs))
-	for name, entry := range defs {
-		if runtimeToolHiddenFromAgents(name) {
-			continue
-		}
-		if entry.Handler() == implementationMCP {
-			continue
-		}
-		parsed[name] = ContractSchemaEntry{
-			Category:    entry.Category(),
-			Description: entry.Description(),
-			InputSchema: entry.InputSchema(),
-		}
-	}
-	return parsed, nil
-}
-
 // This is the canonical builtin/non-MCP runtime tool inventory for supported
 // verify, boot-warning, and operator-diagnostic surfaces. Authored ToolEntries
 // alone are not the full runtime-available tool truth.
@@ -74,8 +53,8 @@ func RuntimeAvailableToolNamesForSource(source semanticview.Source) []string {
 			if name == "" || runtimeToolHiddenFromAgents(name) {
 				continue
 			}
-			handlerType := normalizeImplementationClass(name, entry)
-			if handlerType == "" || handlerType == implementationMCP {
+			handlerType := entry.Handler()
+			if handlerType == runtimecontracts.ToolHandlerUnspecified || handlerType == runtimecontracts.ToolHandlerMCP {
 				continue
 			}
 			names[name] = struct{}{}

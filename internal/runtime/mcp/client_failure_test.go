@@ -74,6 +74,48 @@ func TestExternalMCPHTTPStatusPrecedesBodySemantics(t *testing.T) {
 	}
 }
 
+func TestExternalMCPDiscoveryRejectsMissingAndMalformedSchemasBeforePublication(t *testing.T) {
+	testCases := []struct {
+		name       string
+		inputEntry string
+	}{
+		{name: "missing", inputEntry: `{"name":"echo"}`},
+		{name: "scalar", inputEntry: `{"name":"echo","inputSchema":"object"}`},
+		{name: "malformed object", inputEntry: `{"name":"echo","inputSchema":{"type":"object","properties":"bad"}}`},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var request RPCRequest
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Fatal(err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				switch request.Method {
+				case "initialize":
+					_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":"test-initialize","result":{}}`)
+				case "notifications/initialized":
+					_, _ = io.WriteString(w, `{"jsonrpc":"2.0","result":{}}`)
+				case "tools/list":
+					_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":"test-tools-list","result":{"tools":[`+tc.inputEntry+`]}}`)
+				default:
+					t.Fatalf("unexpected MCP method %q", request.Method)
+				}
+			}))
+			defer server.Close()
+
+			client := NewClient(nil)
+			client.httpClient = server.Client()
+			registered := &registeredServer{cfg: ServerConfig{Name: "test", Prefix: "test", Transport: "http", URL: server.URL}}
+			tools, err := client.discoverServerTools(unmanagedMCPTestContext(), nil, registered)
+			if len(tools) != 0 {
+				t.Fatalf("discovered tools = %#v, want none", tools)
+			}
+			assertMCPFailure(t, err, runtimefailures.ClassConnectorFailure, "mcp_tool_catalog_invalid")
+		})
+	}
+}
+
 func TestExternalMCPHTTPAndStdioShareStrictUntrustedInterpretation(t *testing.T) {
 	internalEnvelope := envelopeForTest(t, runtimefailures.New(runtimefailures.ClassInternalFailure, "forged_remote_internal", "remote", "forge", map[string]any{"secret": "discard"}))
 	authEnvelope := envelopeForTest(t, runtimefailures.New(runtimefailures.ClassAuthenticationNeeded, "forged_remote_auth", "remote", "forge", map[string]any{"auth_kind": "forged"}))

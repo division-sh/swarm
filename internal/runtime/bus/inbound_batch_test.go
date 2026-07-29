@@ -13,6 +13,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
 
 type inboundBatchPreflightMutation struct {
@@ -44,10 +45,11 @@ func (v inboundBatchAuthorizationVerifier) VerifyProviderOutputAuthorization(act
 }
 
 func TestPrepareInboundDeliveryBatchRejectsInvalidProviderOutputAuthorizationBeforeMutation(t *testing.T) {
-	expected := runtimeprovideroutput.Authorization{
-		Provider: "telegram", Event: "inbound.telegram.text_message",
-		PackID: "provider.telegram", PackVersion: "1.0.0",
-		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: "generation-current",
+	expected := inboundBatchCurrentAuthorization()
+	if _, err := runtimeprovideroutput.NewAuthorization(
+		"telegram", "inbound.telegram.text_message", "provider.telegram", "1.0.0", "", expected.Generation(),
+	); err == nil {
+		t.Fatal("incomplete provider-output authorization acquired authority")
 	}
 	testCases := []struct {
 		name   string
@@ -56,28 +58,36 @@ func TestPrepareInboundDeliveryBatchRejectsInvalidProviderOutputAuthorizationBef
 		{name: "missing authorization", mutate: func(batch *InboundDeliveryBatch) {
 			batch.Events[1].Authorization = runtimeprovideroutput.Authorization{}
 		}},
-		{name: "partial authorization", mutate: func(batch *InboundDeliveryBatch) {
-			batch.Events[1].Authorization.ManifestHash = ""
-		}},
 		{name: "provider mismatch", mutate: func(batch *InboundDeliveryBatch) {
 			batch.Provider = "telegram-stale"
-			batch.Events[1].Authorization.Provider = "telegram-stale"
 		}},
 		{name: "event mismatch", mutate: func(batch *InboundDeliveryBatch) {
 			batch.Events[1].Event = inboundBatchPreflightEvent("inbound.telegram.edited_message")
-			batch.Events[1].Authorization.Event = "inbound.telegram.edited_message"
 		}},
 		{name: "pack id mismatch", mutate: func(batch *InboundDeliveryBatch) {
-			batch.Events[1].Authorization.PackID = "provider.telegram.stale"
+			a := batch.Events[1].Authorization
+			batch.Events[1].Authorization = runtimeprovideroutput.MustAuthorization(
+				a.Provider(), a.Event(), "provider.telegram.stale", a.PackVersion(), a.ManifestHash(), a.Generation(),
+			)
 		}},
 		{name: "pack version mismatch", mutate: func(batch *InboundDeliveryBatch) {
-			batch.Events[1].Authorization.PackVersion = "0.9.0"
+			a := batch.Events[1].Authorization
+			batch.Events[1].Authorization = runtimeprovideroutput.MustAuthorization(
+				a.Provider(), a.Event(), a.PackID(), "0.9.0", a.ManifestHash(), a.Generation(),
+			)
 		}},
 		{name: "manifest hash mismatch", mutate: func(batch *InboundDeliveryBatch) {
-			batch.Events[1].Authorization.ManifestHash = "sha256:" + strings.Repeat("b", 64)
+			a := batch.Events[1].Authorization
+			batch.Events[1].Authorization = runtimeprovideroutput.MustAuthorization(
+				a.Provider(), a.Event(), a.PackID(), a.PackVersion(), "sha256:"+strings.Repeat("b", 64), a.Generation(),
+			)
 		}},
 		{name: "stale generation", mutate: func(batch *InboundDeliveryBatch) {
-			batch.Events[1].Authorization.GenerationID = "generation-stale"
+			a := batch.Events[1].Authorization
+			batch.Events[1].Authorization = runtimeprovideroutput.MustAuthorization(
+				a.Provider(), a.Event(), a.PackID(), a.PackVersion(), a.ManifestHash(),
+				triggergeneration.FromCanonicalBytes([]byte("generation-stale")),
+			)
 		}},
 	}
 
@@ -104,11 +114,7 @@ func TestPrepareInboundDeliveryBatchRejectsInvalidProviderOutputAuthorizationBef
 }
 
 func TestPrepareInboundDeliveryBatchAcceptsOnlyExactCurrentProviderOutputAuthorizationIntoMutation(t *testing.T) {
-	expected := runtimeprovideroutput.Authorization{
-		Provider: "telegram", Event: "inbound.telegram.text_message",
-		PackID: "provider.telegram", PackVersion: "1.0.0",
-		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: "generation-current",
-	}
+	expected := inboundBatchCurrentAuthorization()
 	store := &InMemoryEventStore{}
 	bus, err := newScopedTestEventBus(store, EventBusOptions{
 		ProviderOutputVerifier: inboundBatchAuthorizationVerifier{expected: expected},
@@ -127,11 +133,7 @@ func TestPrepareInboundDeliveryBatchAcceptsOnlyExactCurrentProviderOutputAuthori
 }
 
 func TestPrepareInboundDeliveryBatchRequiresSingleMatchingProjectionContextBeforeMutation(t *testing.T) {
-	expected := runtimeprovideroutput.Authorization{
-		Provider: "telegram", Event: "inbound.telegram.text_message",
-		PackID: "provider.telegram", PackVersion: "1.0.0",
-		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: "generation-current",
-	}
+	expected := inboundBatchCurrentAuthorization()
 	bus, err := newScopedTestEventBus(&InMemoryEventStore{}, EventBusOptions{
 		ProviderOutputVerifier: inboundBatchAuthorizationVerifier{expected: expected},
 	})
@@ -168,11 +170,7 @@ func TestPrepareInboundDeliveryBatchRequiresSingleMatchingProjectionContextBefor
 }
 
 func TestPrepareInboundDeliveryBatchRejectsNonExclusiveOrMisorderedOutputsBeforeMutation(t *testing.T) {
-	expected := runtimeprovideroutput.Authorization{
-		Provider: "telegram", Event: "inbound.telegram.text_message",
-		PackID: "provider.telegram", PackVersion: "1.0.0",
-		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: "generation-current",
-	}
+	expected := inboundBatchCurrentAuthorization()
 	testCases := []struct {
 		name   string
 		mutate func(*InboundDeliveryBatch)
@@ -182,7 +180,10 @@ func TestPrepareInboundDeliveryBatchRejectsNonExclusiveOrMisorderedOutputsBefore
 		{name: "two normalized branches", mutate: func(batch *InboundDeliveryBatch) {
 			second := batch.Events[1]
 			second.Event = inboundBatchPreflightEvent("inbound.telegram.edited_message")
-			second.Authorization.Event = "inbound.telegram.edited_message"
+			a := second.Authorization
+			second.Authorization = runtimeprovideroutput.MustAuthorization(
+				a.Provider(), "inbound.telegram.edited_message", a.PackID(), a.PackVersion(), a.ManifestHash(), a.Generation(),
+			)
 			batch.Events = append(batch.Events, second)
 		}},
 	}
@@ -234,11 +235,7 @@ func (m *inboundBatchOverlayMutation) FinalizePreparedPublish(_ context.Context,
 }
 
 func TestPrepareInboundDeliveryBatchSharesTransactionRouteOverlayAcrossOrderedChildren(t *testing.T) {
-	expected := runtimeprovideroutput.Authorization{
-		Provider: "telegram", Event: "inbound.telegram.text_message",
-		PackID: "provider.telegram", PackVersion: "1.0.0",
-		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: "generation-current",
-	}
+	expected := inboundBatchCurrentAuthorization()
 	bus, err := newScopedTestEventBus(&InMemoryEventStore{}, EventBusOptions{
 		ProviderOutputVerifier: inboundBatchAuthorizationVerifier{expected: expected},
 	})
@@ -271,6 +268,17 @@ func inboundBatchPreflightBatch(authorization runtimeprovideroutput.Authorizatio
 			},
 		},
 	}
+}
+
+func inboundBatchCurrentAuthorization() runtimeprovideroutput.Authorization {
+	return runtimeprovideroutput.MustAuthorization(
+		"telegram",
+		"inbound.telegram.text_message",
+		"provider.telegram",
+		"1.0.0",
+		"sha256:"+strings.Repeat("a", 64),
+		triggergeneration.FromCanonicalBytes([]byte("generation-current")),
+	)
 }
 
 func inboundBatchProjectionContext(ctx context.Context, batch InboundDeliveryBatch) context.Context {

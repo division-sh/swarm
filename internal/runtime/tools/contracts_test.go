@@ -15,7 +15,7 @@ import (
 func TestContractDefinitionsForSource_UsesProvidedSource(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"agent_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("platform"), runtimecontracts.WithToolDescription("source-backed agent messaging schema"), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaDescription("source-backed agent messaging schema"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+			"agent_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("platform"), runtimecontracts.WithToolDescription("source-backed agent messaging schema"), runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerPlatformBuiltin), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaDescription("source-backed agent messaging schema"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 				"to": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
 			}), runtimecontracts.ToolSchemaRequired("to")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
 		},
@@ -108,7 +108,7 @@ required: [mode]
 
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"agent_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("platform"), runtimecontracts.WithToolDescription("canonical schema test"), runtimecontracts.WithToolSchemas(schema, runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
+			"agent_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("platform"), runtimecontracts.WithToolDescription("canonical schema test"), runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerPlatformBuiltin), runtimecontracts.WithToolSchemas(schema, runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
 		},
 	}
 
@@ -174,10 +174,7 @@ required: [result]
 		t.Fatalf("unmarshal nested enum schema: %v", err)
 	}
 
-	providerVisible, err := schemaToMap(schema)
-	if err != nil {
-		t.Fatalf("provider-visible projection: %v", err)
-	}
+	providerVisible := schema.Projection()
 	runtimeAdmission, err := schema.Project()
 	if err != nil {
 		t.Fatalf("runtime admission projection: %v", err)
@@ -231,13 +228,13 @@ additionalProperties: false
 	if err != nil {
 		t.Fatalf("schema Project: %v", err)
 	}
-	execution, included, err := executionToolFromContract("test.exact", runtimecontracts.MustToolSchemaEntry(
+	execution, included := executionToolFromAdmitted("test.exact", runtimecontracts.MustToolSchemaEntry(
 		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
 		runtimecontracts.WithToolSchemas(schema, runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
 		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"}),
 	))
-	if err != nil || !included {
-		t.Fatalf("executionToolFromContract = (%#v, %v, %v)", execution, included, err)
+	if !included {
+		t.Fatalf("executionToolFromAdmitted = (%#v, %v)", execution, included)
 	}
 	gotHash, err := canonicaljson.Hash(execution.InputSchema())
 	if err != nil {
@@ -279,9 +276,9 @@ func TestRuntimeExecutionViewIsDerivedAndAuthorityFree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("owner hash: %v", err)
 	}
-	execution, included, err := executionToolFromContract("test.execution", entry)
-	if err != nil || !included {
-		t.Fatalf("executionToolFromContract = (%#v, %v, %v)", execution, included, err)
+	execution, included := executionToolFromAdmitted("test.execution", entry)
+	if !included {
+		t.Fatalf("executionToolFromAdmitted = (%#v, %v)", execution, included)
 	}
 
 	headers["X-Test"] = "caller mutation"
@@ -297,7 +294,7 @@ func TestRuntimeExecutionViewIsDerivedAndAuthorityFree(t *testing.T) {
 	execution.ResponseMapping()["value"] = "readback mutation"
 
 	httpSnapshot, _ = execution.HTTP()
-	if execution.Handler() != implementationHTTP ||
+	if execution.Handler() != runtimecontracts.ToolHandlerHTTP ||
 		httpSnapshot.Headers["X-Test"] != "owner" ||
 		httpSnapshot.Body.(map[string]any)["nested"].([]any)[0] != "owner" ||
 		execution.ResponseMapping()["value"] != "{{response.body.value}}" {

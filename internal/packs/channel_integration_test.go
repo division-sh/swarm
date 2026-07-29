@@ -664,7 +664,7 @@ func TestChannelRuntimeToolsExposeOnlyProviderNeutralContract(t *testing.T) {
 	tool := tools["channel.ops.deliver"]
 	_, hasHTTP := tool.HTTP()
 	_, hasManagedCredential := tool.ManagedCredential()
-	if tool.Category() != "channel_operation" || tool.Handler() != runtimecontracts.ToolHandlerChannel || hasHTTP || len(tool.Credentials()) != 0 || hasManagedCredential {
+	if tool.Category() != runtimecontracts.ToolCategoryChannelOperation || tool.Handler() != runtimecontracts.ToolHandlerChannel || hasHTTP || len(tool.Credentials()) != 0 || hasManagedCredential {
 		t.Fatalf("public channel tool leaked connector execution details: %#v", tool)
 	}
 	input := tool.InputSchema()
@@ -879,12 +879,12 @@ func loadTelegramChannelCompilerInputs(t *testing.T) (*packs.InterfaceRegistry, 
 	connectorID := channels[0].Envelope.Requires.Packs[packs.TypeConnector]
 	var connector packs.ConnectorPackDescriptor
 	for _, candidate := range providerconnectors.DefaultPackRegistry().PackDescriptors() {
-		if candidate.Identity.ID == connectorID {
+		if candidate.Identity.ID() == connectorID {
 			connector = candidate
 			break
 		}
 	}
-	if connector.Identity.ID == "" {
+	if connector.Identity.ID() == "" {
 		t.Fatalf("Telegram connector descriptor %q is missing", connectorID)
 	}
 	return registry, channels[0], triggerDescriptors[0], connector
@@ -979,7 +979,7 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 			Implements: []string{"swarm.hitl-channel/v1"}, Provenance: packs.Provenance{Source: "external"},
 			Requires: packs.Requires{Packs: map[string]string{packs.TypeTrigger: "provider.mock", packs.TypeConnector: "provider.mock.connector"}},
 		},
-		Manifest: manifest, Source: "external:mock-channel",
+		Manifest: manifest, Source: packs.MustPackSource("external", "mock-channel"),
 	}
 	triggerFields := func(names ...string) map[string]packs.TriggerEventField {
 		fields := make(map[string]packs.TriggerEventField, len(names))
@@ -1004,7 +1004,7 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 		return fields
 	}
 	trigger := packs.TriggerPackDescriptor{
-		Identity: packs.PackIdentity{ID: "provider.mock", Type: packs.TypeTrigger, Version: "0.1.0", ManifestHash: "sha256:mock-trigger"}, Provider: "mock",
+		Identity: packs.MustPackIdentity("provider.mock", "0.1.0", "sha256:mock-trigger", packs.TypeTrigger, packs.MustPackSource("test", "mock-trigger")), Provider: "mock",
 		Generation: triggergeneration.FromCanonicalBytes([]byte("mock-trigger-generation")),
 		Events: map[string]packs.TriggerEvent{
 			"mock.action": {Name: "mock.action", Fields: triggerFields("token", "cursor", "principal", "room", "message_ref")},
@@ -1012,7 +1012,7 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 		},
 	}
 	connector := packs.ConnectorPackDescriptor{
-		Identity: packs.PackIdentity{ID: "provider.mock.connector", Type: packs.TypeConnector, Version: "0.1.0", ManifestHash: "sha256:mock-connector"},
+		Identity: packs.MustPackIdentity("provider.mock.connector", "0.1.0", "sha256:mock-connector", packs.TypeConnector, packs.MustPackSource("test", "mock-connector")),
 		Provider: "mock", Tools: connectorTools,
 	}
 	return channel, trigger, connector

@@ -5,64 +5,62 @@ import (
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
-	llm "github.com/division-sh/swarm/internal/runtime/llm"
 )
 
 const runtimeToolsMCPPrefix = toolidentity.RuntimeToolsMCPPrefix
 
-func nativeFallbackExecutionTool(actor models.AgentConfig, name string) (ExecutionTool, bool) {
+func nativeFallbackExecutionTool(actor models.AgentConfig, name string) (ExecutionTool, bool, error) {
 	name = strings.TrimSpace(name)
+	var draft builtinToolDraft
 	switch name {
 	case "bash":
 		if !nativeToolCapabilityEnabledForActor(actor, "bash") {
-			return ExecutionTool{}, false
+			return ExecutionTool{}, false, nil
 		}
-		return newExecutionTool(executionToolValue{
-			name: name, description: "Execute a shell command locally in the agent workspace.",
-			usage: runtimeOwnedToolUsage(name), handler: implementationPlatformBuiltin,
-			inputSchema: ObjectSchema(map[string]any{
+		draft = builtinToolDraft{
+			Description: "Execute a shell command locally in the agent workspace.",
+			InputSchema: ObjectSchema(map[string]any{
 				"command":         map[string]any{"type": "string"},
 				"timeout_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 300},
 			}, "command"),
-		}), true
+		}
 	case "web_search":
 		if !nativeToolCapabilityEnabledForActor(actor, "web_search") {
-			return ExecutionTool{}, false
+			return ExecutionTool{}, false, nil
 		}
-		return newExecutionTool(executionToolValue{
-			name: name, description: "Search the web and return normalized results.",
-			usage: runtimeOwnedToolUsage(name), handler: implementationPlatformBuiltin,
-			inputSchema: ObjectSchema(map[string]any{
+		draft = builtinToolDraft{
+			Description: "Search the web and return normalized results.",
+			InputSchema: ObjectSchema(map[string]any{
 				"query":       map[string]any{"type": "string"},
 				"max_results": map[string]any{"type": "integer", "minimum": 1, "maximum": 20},
 			}, "query"),
-		}), true
+		}
 	case "read_file":
 		if !nativeToolCapabilityEnabledForActor(actor, "file_io") {
-			return ExecutionTool{}, false
+			return ExecutionTool{}, false, nil
 		}
-		return newExecutionTool(executionToolValue{
-			name: name, description: "Read a file from the workspace or mounted read-only paths.",
-			usage: runtimeOwnedToolUsage(name), handler: implementationPlatformBuiltin,
-			inputSchema: ObjectSchema(map[string]any{
+		draft = builtinToolDraft{
+			Description: "Read a file from the workspace or mounted read-only paths.",
+			InputSchema: ObjectSchema(map[string]any{
 				"path": map[string]any{"type": "string"},
 			}, "path"),
-		}), true
+		}
 	case "write_file":
 		if !nativeToolCapabilityEnabledForActor(actor, "file_io") {
-			return ExecutionTool{}, false
+			return ExecutionTool{}, false, nil
 		}
-		return newExecutionTool(executionToolValue{
-			name: name, description: "Write a file within the agent workspace.",
-			usage: runtimeOwnedToolUsage(name), handler: implementationPlatformBuiltin,
-			inputSchema: ObjectSchema(map[string]any{
+		draft = builtinToolDraft{
+			Description: "Write a file within the agent workspace.",
+			InputSchema: ObjectSchema(map[string]any{
 				"path":    map[string]any{"type": "string"},
 				"content": map[string]any{"type": "string"},
 			}, "path", "content"),
-		}), true
+		}
 	default:
-		return ExecutionTool{}, false
+		return ExecutionTool{}, false, nil
 	}
+	tool, err := admitBuiltinExecutionTool(name, draft)
+	return tool, err == nil, err
 }
 
 func nativeToolCapabilityEnabledForActor(actor models.AgentConfig, capability string) bool {
@@ -75,23 +73,6 @@ func nativeToolCapabilityEnabledForActor(actor models.AgentConfig, capability st
 
 func normalizeNativeToolName(name string) string {
 	return toolidentity.CanonicalName(name)
-}
-
-func nativeFallbackToolDefinitionsForActor(actor models.AgentConfig) []llm.ToolDefinition {
-	defs := make([]llm.ToolDefinition, 0, 4)
-	for _, name := range []string{"bash", "web_search", "read_file", "write_file"} {
-		tool, ok := nativeFallbackExecutionTool(actor, name)
-		if !ok {
-			continue
-		}
-		defs = append(defs, llm.ToolDefinition{
-			Name:        tool.Name(),
-			Description: tool.Description(),
-			Usage:       tool.Usage(),
-			Schema:      tool.InputSchema(),
-		})
-	}
-	return defs
 }
 
 func nativeToolNameForCapability(capability string) []string {

@@ -69,7 +69,7 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 
 	connectors := providerconnectors.DefaultPackRegistry().PackDescriptors()
 	for index := range connectors {
-		if connectors[index].Identity.ID != "provider.telegram.connector" {
+		if connectors[index].Identity.ID() != "provider.telegram.connector" {
 			continue
 		}
 		for toolID, scope := range map[string]string{"telegram.send_interactive": "deliver", "telegram.edit_message": "edit"} {

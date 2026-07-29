@@ -420,13 +420,7 @@ func ValidateExternalDispatchRateLimitDeclarations(source semanticview.Source) [
 	errs := make([]error, 0)
 	for name, entry := range source.ToolEntries() {
 		location := fmt.Sprintf("tool %s", strings.TrimSpace(name))
-		rateLimit, maxWait := entry.RateLimitSyntax()
-		_, enabled, err := parseExternalDispatchRateLimit(rateLimit, maxWait)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", location, err))
-			continue
-		}
-		if enabled && normalizeImplementationClass(name, entry) != implementationHTTP {
+		if entry.RatePolicy().Enabled() && entry.Handler() != runtimecontracts.ToolHandlerHTTP {
 			errs = append(errs, fmt.Errorf("%s: rate_limit is only supported for handler_type http", location))
 		}
 	}

@@ -256,8 +256,8 @@ func collectToolPermissionExtensions(out map[string]struct{}, source semanticvie
 	if source == nil {
 		return
 	}
-	for toolID, entry := range source.ToolEntries() {
-		perm := strings.TrimSpace(toolRequiredPermission(toolID, entry))
+	for _, entry := range source.ToolEntries() {
+		perm := entry.Permission().String()
 		if perm != "" {
 			out[perm] = struct{}{}
 		}

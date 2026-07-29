@@ -10,12 +10,14 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	"gopkg.in/yaml.v3"
 )
 
 // ToolSchemaKind is the closed JSON type vocabulary admitted by tool schemas.
 type ToolSchemaKind string
 
 const (
+	ToolSchemaAny     ToolSchemaKind = "any"
 	ToolSchemaString  ToolSchemaKind = "string"
 	ToolSchemaInteger ToolSchemaKind = "integer"
 	ToolSchemaNumber  ToolSchemaKind = "number"
@@ -27,7 +29,7 @@ const (
 
 func (k ToolSchemaKind) Valid() bool {
 	switch k {
-	case ToolSchemaString, ToolSchemaInteger, ToolSchemaNumber, ToolSchemaBoolean, ToolSchemaObject, ToolSchemaArray, ToolSchemaNull:
+	case ToolSchemaAny, ToolSchemaString, ToolSchemaInteger, ToolSchemaNumber, ToolSchemaBoolean, ToolSchemaObject, ToolSchemaArray, ToolSchemaNull:
 		return true
 	default:
 		return false
@@ -58,6 +60,8 @@ type toolInputSchemaValue struct {
 	hasMaximum bool
 
 	pattern string
+	format  string
+	equalTo string
 
 	minLength    int
 	hasMinLength bool
@@ -188,6 +192,30 @@ func ToolSchemaPattern(pattern string) ToolInputSchemaOption {
 	})
 }
 
+func ToolSchemaFormat(format string) ToolInputSchemaOption {
+	return toolInputSchemaOption(func(draft *toolInputSchemaDraft) error {
+		format = strings.TrimSpace(format)
+		switch format {
+		case "", "uuid", "date-time":
+			draft.value.format = format
+			return nil
+		default:
+			return fmt.Errorf("unsupported schema format %q", format)
+		}
+	})
+}
+
+func ToolSchemaEqualTo(field string) ToolInputSchemaOption {
+	return toolInputSchemaOption(func(draft *toolInputSchemaDraft) error {
+		field = strings.TrimSpace(field)
+		if field == "" || !utf8.ValidString(field) {
+			return fmt.Errorf("x-swarm-equalTo requires a valid field name")
+		}
+		draft.value.equalTo = field
+		return nil
+	})
+}
+
 func ToolSchemaMinLength(value int) ToolInputSchemaOption {
 	return toolInputSchemaOption(func(draft *toolInputSchemaDraft) error {
 		draft.value.minLength = value
@@ -246,6 +274,23 @@ func MustToolInputSchema(kind ToolSchemaKind, options ...ToolInputSchemaOption) 
 		panic(err)
 	}
 	return schema
+}
+
+// AdmitToolInputSchemaMap admits programmatic JSON Schema through the same
+// bounded lexical decoder used by authored schemas.
+func AdmitToolInputSchemaMap(raw map[string]any) (ToolInputSchema, error) {
+	if raw == nil {
+		return ToolInputSchema{}, fmt.Errorf("tool schema is missing")
+	}
+	data, err := yaml.Marshal(raw)
+	if err != nil {
+		return ToolInputSchema{}, err
+	}
+	var schema ToolInputSchema
+	if err := yaml.Unmarshal(data, &schema); err != nil {
+		return ToolInputSchema{}, err
+	}
+	return schema, nil
 }
 
 func validateAdmittedToolInputSchema(path string, schema ToolInputSchema, depth int) error {
@@ -506,6 +551,20 @@ func (s ToolInputSchema) Pattern() string {
 	return s.value.pattern
 }
 
+func (s ToolInputSchema) Format() string {
+	if s.value == nil {
+		return ""
+	}
+	return s.value.format
+}
+
+func (s ToolInputSchema) EqualTo() string {
+	if s.value == nil {
+		return ""
+	}
+	return s.value.equalTo
+}
+
 func (s ToolInputSchema) MinLength() (int, bool) {
 	if s.value == nil || !s.value.hasMinLength {
 		return 0, false
@@ -723,9 +782,21 @@ func (s ToolInputSchema) Project() (map[string]any, error) {
 	return projectAdmittedToolInputSchema(s), nil
 }
 
+// Projection is the authority-free JSON Schema view of an already admitted
+// schema. Its zero value projects to nil for optional output positions.
+func (s ToolInputSchema) Projection() map[string]any {
+	if s.value == nil {
+		return nil
+	}
+	return projectAdmittedToolInputSchema(s)
+}
+
 func projectAdmittedToolInputSchema(schema ToolInputSchema) map[string]any {
 	value := schema.value
-	out := map[string]any{"type": string(value.kind)}
+	out := map[string]any{}
+	if value.kind != ToolSchemaAny {
+		out["type"] = string(value.kind)
+	}
 	if value.description != "" {
 		out["description"] = value.description
 	}
@@ -764,6 +835,12 @@ func projectAdmittedToolInputSchema(schema ToolInputSchema) map[string]any {
 	}
 	if value.pattern != "" {
 		out["pattern"] = value.pattern
+	}
+	if value.format != "" {
+		out["format"] = value.format
+	}
+	if value.equalTo != "" {
+		out["x-swarm-equalTo"] = value.equalTo
 	}
 	if value.hasMinLength {
 		out["minLength"] = value.minLength
@@ -823,6 +900,8 @@ func (s ToolInputSchema) MarshalYAML() (any, error) {
 		Minimum              *float64                   `yaml:"minimum,omitempty"`
 		Maximum              *float64                   `yaml:"maximum,omitempty"`
 		Pattern              string                     `yaml:"pattern,omitempty"`
+		Format               string                     `yaml:"format,omitempty"`
+		EqualTo              string                     `yaml:"x-swarm-equalTo,omitempty"`
 		MinLength            *int                       `yaml:"minLength,omitempty"`
 		MaxLength            *int                       `yaml:"maxLength,omitempty"`
 		MinItems             *int                       `yaml:"minItems,omitempty"`
@@ -835,6 +914,8 @@ func (s ToolInputSchema) MarshalYAML() (any, error) {
 		Properties:  s.Properties(),
 		Required:    s.RequiredProperties(),
 		Pattern:     value.pattern,
+		Format:      value.format,
+		EqualTo:     value.equalTo,
 	}
 	if items, ok := s.ItemsSchema(); ok {
 		out.Items = &items

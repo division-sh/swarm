@@ -22,12 +22,78 @@ const ChannelInterfaceKind = "pack_channel"
 
 var channelPathSegmentPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+type PackSource struct {
+	provenance string
+	path       string
+}
+
+func NewPackSource(provenance, path string) (PackSource, error) {
+	provenance = strings.TrimSpace(provenance)
+	path = strings.TrimSpace(path)
+	if provenance == "" {
+		return PackSource{}, fmt.Errorf("pack provenance is required")
+	}
+	return PackSource{provenance: provenance, path: path}, nil
+}
+
+func MustPackSource(provenance, path string) PackSource {
+	source, err := NewPackSource(provenance, path)
+	if err != nil {
+		panic(err)
+	}
+	return source
+}
+
+func (s PackSource) Provenance() string { return s.provenance }
+func (s PackSource) Path() string       { return s.path }
+func (s PackSource) Diagnostic() string {
+	if s.path == "" {
+		return s.provenance
+	}
+	return s.provenance + ":" + s.path
+}
+
 type PackIdentity struct {
-	ID           string `json:"id"`
-	Version      string `json:"version"`
-	ManifestHash string `json:"manifest_hash"`
-	Type         string `json:"type"`
-	Source       string `json:"source"`
+	id           string
+	version      string
+	manifestHash string
+	packType     string
+	source       PackSource
+}
+
+func NewPackIdentity(id, version, manifestHash, packType string, source PackSource) (PackIdentity, error) {
+	id = strings.TrimSpace(id)
+	version = strings.TrimSpace(version)
+	manifestHash = strings.TrimSpace(manifestHash)
+	packType = strings.TrimSpace(packType)
+	if id == "" || version == "" || manifestHash == "" || packType == "" {
+		return PackIdentity{}, fmt.Errorf("pack id, version, manifest hash, and type are required")
+	}
+	if source.Provenance() == "" {
+		return PackIdentity{}, fmt.Errorf("pack source is required")
+	}
+	return PackIdentity{id: id, version: version, manifestHash: manifestHash, packType: packType, source: source}, nil
+}
+
+func MustPackIdentity(id, version, manifestHash, packType string, source PackSource) PackIdentity {
+	identity, err := NewPackIdentity(id, version, manifestHash, packType, source)
+	if err != nil {
+		panic(err)
+	}
+	return identity
+}
+
+func (i PackIdentity) ID() string           { return i.id }
+func (i PackIdentity) Version() string      { return i.version }
+func (i PackIdentity) ManifestHash() string { return i.manifestHash }
+func (i PackIdentity) Type() string         { return i.packType }
+func (i PackIdentity) Source() PackSource   { return i.source }
+
+func (i PackIdentity) MarshalJSON() ([]byte, error) {
+	return canonicaljson.Bytes(map[string]any{
+		"id": i.id, "version": i.version, "manifest_hash": i.manifestHash,
+		"type": i.packType, "source": i.source.Diagnostic(),
+	})
 }
 
 type TriggerEventField struct {
@@ -238,7 +304,7 @@ type LoadedChannelPack struct {
 	Manifest     ChannelManifest
 	ManifestBody []byte
 	Directory    string
-	Source       string
+	Source       PackSource
 }
 
 func LoadChannelPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedChannelPack, error) {
@@ -263,7 +329,7 @@ func LoadChannelPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedCh
 	}
 	return LoadedChannelPack{
 		Envelope: loaded.Envelope, Manifest: manifest, ManifestBody: append([]byte(nil), loaded.ManifestBody...),
-		Directory: loaded.Directory, Source: strings.TrimSpace(loaded.Envelope.Provenance.Source) + ":" + strings.TrimSpace(loaded.Envelope.ID),
+		Directory: loaded.Directory, Source: MustPackSource(loaded.Envelope.Provenance.Source, loaded.Envelope.ID),
 	}, nil
 }
 
@@ -292,7 +358,7 @@ func LoadChannelPackDirs(runningPlatformVersion, provenance string, dirs ...stri
 			return nil, fmt.Errorf("channel pack %q provenance %q does not match selected tier %q", pack.Envelope.ID, got, provenance)
 		}
 		pack.Directory = absolute
-		pack.Source = strings.TrimSpace(provenance) + ":" + absolute
+		pack.Source = MustPackSource(provenance, absolute)
 		loaded = append(loaded, pack)
 	}
 	return loaded, nil
@@ -301,12 +367,12 @@ func LoadChannelPackDirs(runningPlatformVersion, provenance string, dirs ...stri
 func CompileChannelInventory(registry *InterfaceRegistry, channels []LoadedChannelPack, triggers []TriggerPackDescriptor, connectors []ConnectorPackDescriptor) ([]SatisfactionPlan, error) {
 	seenIDs := map[string]PackIdentity{}
 	register := func(identity PackIdentity) error {
-		id := strings.TrimSpace(identity.ID)
+		id := identity.ID()
 		if id == "" {
 			return fmt.Errorf("pack identity is required")
 		}
 		if prior, exists := seenIDs[id]; exists {
-			return fmt.Errorf("duplicate accepted pack id %q across roles %q and %q", id, prior.Type, identity.Type)
+			return fmt.Errorf("duplicate accepted pack id %q across roles %q and %q", id, prior.Type(), identity.Type())
 		}
 		seenIDs[id] = identity
 		return nil
@@ -334,7 +400,7 @@ func CompileChannelInventory(registry *InterfaceRegistry, channels []LoadedChann
 		}
 		plans = append(plans, plan)
 	}
-	sort.Slice(plans, func(i, j int) bool { return plans[i].channel.ID < plans[j].channel.ID })
+	sort.Slice(plans, func(i, j int) bool { return plans[i].channel.ID() < plans[j].channel.ID() })
 	return plans, nil
 }
 
@@ -444,6 +510,7 @@ type compiledChannelOperation struct {
 	name           string
 	tool           string
 	toolSchema     runtimecontracts.ToolSchemaEntry
+	effect         runtimecontracts.ActivityEffectClass
 	input          map[string]ChannelMapping
 	output         map[string]ChannelMapping
 	interfaceValue runtimecontracts.PackInterfaceOperation
@@ -503,7 +570,7 @@ func (p SatisfactionPlan) OperationEffectClass(name string) (runtimecontracts.Ac
 	if !ok {
 		return "", fmt.Errorf("channel operation %q is not compiled", name)
 	}
-	return runtimecontracts.NormalizeActivityEffectClass(operation.interfaceValue.EffectClass), nil
+	return operation.effect, nil
 }
 
 func (p OutboundBindingPlan) BindingID() string {
@@ -529,7 +596,7 @@ func NewOutboundBindingPlan(id string, structural SatisfactionPlan, destination 
 	}
 	destinationSchema, ok := structural.opaqueTypes["destination"]
 	if !ok {
-		return OutboundBindingPlan{}, fmt.Errorf("channel %q has no destination opaque type", structural.channel.ID)
+		return OutboundBindingPlan{}, fmt.Errorf("channel %q has no destination opaque type", structural.channel.ID())
 	}
 	admitted, err := canonicaljson.FromGo(destination)
 	if err != nil {
@@ -564,7 +631,7 @@ func (p OutboundBindingPlan) RuntimeTools() (map[string]runtimecontracts.ToolSch
 			runtimecontracts.WithToolCategory("channel_operation"),
 			runtimecontracts.WithToolDescription("Execute the configured "+name+" operation through channel binding "+p.id+"."),
 			runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerChannel),
-			runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(operation.interfaceValue.EffectClass)),
+			runtimecontracts.WithToolEffect(operation.effect),
 			runtimecontracts.WithToolSchemas(inputSchema, outputSchema),
 		)
 		if err != nil {
@@ -593,14 +660,14 @@ func (p OutboundBindingPlan) PrepareOperation(operation string, input any) (stri
 
 func (p SatisfactionPlan) CapabilitySubject() (Subject, error) {
 	subject := Subject{
-		ID: p.channel.ID, Kind: SubjectChannelPack, Provider: p.provider,
-		Source: "channel_pack", Provenance: sourceProvenance(p.channel.Source), SourcePath: p.channel.Source,
+		ID: p.channel.ID(), Kind: SubjectChannelPack, Provider: p.provider,
+		Source: "channel_pack", Provenance: p.channel.Source().Provenance(), SourcePath: p.channel.Source().Path(),
 		Applicability: "installed", Status: StatusAvailable,
 		Capabilities: []Capability{{Code: CapabilitySatisfyPackInterface, Target: p.interfaceRef}},
 		Evidence: []Evidence{{Kind: "channel_plan", Fields: map[string]string{
-			"interface": p.interfaceRef, "channel_hash": p.channel.ManifestHash,
-			"trigger_id": p.trigger.ID, "trigger_hash": p.trigger.ManifestHash,
-			"connector_id": p.connector.ID, "connector_hash": p.connector.ManifestHash,
+			"interface": p.interfaceRef, "channel_hash": p.channel.ManifestHash(),
+			"trigger_id": p.trigger.ID(), "trigger_hash": p.trigger.ManifestHash(),
+			"connector_id": p.connector.ID(), "connector_hash": p.connector.ManifestHash(),
 		}}},
 	}
 	normalized, err := NormalizeSubjects([]Subject{subject})
@@ -613,18 +680,18 @@ func (p SatisfactionPlan) CapabilitySubject() (Subject, error) {
 func (p OutboundBindingPlan) CapabilitySubject() (Subject, error) {
 	subject := Subject{
 		ID: p.id, Kind: SubjectChannelOutbound, Provider: p.structural.provider,
-		Source: "channel_binding", Provenance: sourceProvenance(p.structural.channel.Source),
-		SourcePath: p.structural.channel.Source, Applicability: "effective",
+		Source: "channel_binding", Provenance: p.structural.channel.Source().Provenance(),
+		SourcePath: p.structural.channel.Source().Path(), Applicability: "effective",
 		Capabilities: []Capability{
 			{Code: CapabilityDeliverChannel, Target: p.structural.interfaceRef},
 			{Code: CapabilityLowerThroughActivity}, {Code: CapabilityJournalAttempts},
 		},
 		Requirements: cloneRequirements(p.requirements),
 		Evidence: []Evidence{{Kind: "channel_outbound", Fields: map[string]string{
-			"interface": p.structural.interfaceRef, "channel_id": p.structural.channel.ID,
-			"channel_hash":   p.structural.channel.ManifestHash,
-			"trigger_hash":   p.structural.trigger.ManifestHash,
-			"connector_hash": p.structural.connector.ManifestHash,
+			"interface": p.structural.interfaceRef, "channel_id": p.structural.channel.ID(),
+			"channel_hash":   p.structural.channel.ManifestHash(),
+			"trigger_hash":   p.structural.trigger.ManifestHash(),
+			"connector_hash": p.structural.connector.ManifestHash(),
 		}}},
 	}
 	for _, code := range []string{GuaranteeActivityJournal, GuaranteeNoAutomaticWriteRetry, GuaranteeCredentialRedaction} {
@@ -639,11 +706,6 @@ func (p OutboundBindingPlan) CapabilitySubject() (Subject, error) {
 		return Subject{}, err
 	}
 	return normalized[0], nil
-}
-
-func sourceProvenance(source string) string {
-	value, _, _ := strings.Cut(strings.TrimSpace(source), ":")
-	return value
 }
 
 func (p SatisfactionPlan) OperationTool(name string) (runtimecontracts.ToolSchemaEntry, error) {
@@ -952,14 +1014,18 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 	for _, name := range sortedKeys(definition.Operations) {
 		binding := channel.Manifest.Operations[name]
 		operation := definition.Operations[name]
+		effect := runtimecontracts.NormalizeActivityEffectClass(operation.EffectClass)
+		if effect == "" {
+			return SatisfactionPlan{}, fmt.Errorf("channel operation %q has unsupported effect class %q", name, operation.EffectClass)
+		}
 		tool, ok := connector.Tools[strings.TrimSpace(binding.Tool)]
 		if !ok {
 			return SatisfactionPlan{}, fmt.Errorf("channel operation %q references unknown connector tool %q", name, binding.Tool)
 		}
-		if tool.Effect() != runtimecontracts.NormalizeActivityEffectClass(operation.EffectClass) {
+		if tool.Effect() != effect {
 			return SatisfactionPlan{}, fmt.Errorf("channel operation %q effect class does not match connector tool %q", name, binding.Tool)
 		}
-		plan.operations[name] = compiledChannelOperation{name: name, tool: strings.TrimSpace(binding.Tool), toolSchema: tool, input: cloneMappingMap(binding.Input), output: cloneMappingMap(binding.Output), interfaceValue: operation}
+		plan.operations[name] = compiledChannelOperation{name: name, tool: strings.TrimSpace(binding.Tool), toolSchema: tool, effect: effect, input: cloneMappingMap(binding.Input), output: cloneMappingMap(binding.Output), interfaceValue: operation}
 	}
 	plan.constraints, err = compileSelectedChannelConstraints(plan)
 	if err != nil {
@@ -991,12 +1057,12 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 
 func validateAcceptedTriggerDescriptor(trigger TriggerPackDescriptor) error {
 	if !trigger.Generation.Valid() {
-		return fmt.Errorf("accepted trigger %q generation is missing", trigger.Identity.ID)
+		return fmt.Errorf("accepted trigger %q generation is missing", trigger.Identity.ID())
 	}
 	for eventName, event := range trigger.Events {
 		for fieldName, field := range event.Fields {
 			if err := field.Schema.ValidateDefinition(); err != nil {
-				return fmt.Errorf("accepted trigger %q event %q field %q schema: %w", trigger.Identity.ID, eventName, fieldName, err)
+				return fmt.Errorf("accepted trigger %q event %q field %q schema: %w", trigger.Identity.ID(), eventName, fieldName, err)
 			}
 		}
 	}
@@ -1006,10 +1072,10 @@ func validateAcceptedTriggerDescriptor(trigger TriggerPackDescriptor) error {
 func validateAcceptedConnectorDescriptor(connector ConnectorPackDescriptor) error {
 	for toolName, tool := range connector.Tools {
 		if err := tool.InputSchema().ValidateDefinition(); err != nil {
-			return fmt.Errorf("accepted connector %q tool %q input schema: %w", connector.Identity.ID, toolName, err)
+			return fmt.Errorf("accepted connector %q tool %q input schema: %w", connector.Identity.ID(), toolName, err)
 		}
 		if err := tool.OutputSchema().ValidateDefinition(); err != nil {
-			return fmt.Errorf("accepted connector %q tool %q output schema: %w", connector.Identity.ID, toolName, err)
+			return fmt.Errorf("accepted connector %q tool %q output schema: %w", connector.Identity.ID(), toolName, err)
 		}
 	}
 	return nil
@@ -1158,15 +1224,15 @@ func resolveTriggerDependency(channel LoadedChannelPack, descriptors []TriggerPa
 	id := strings.TrimSpace(channel.Envelope.Requires.Packs[TypeTrigger])
 	var matches []TriggerPackDescriptor
 	for _, descriptor := range descriptors {
-		if strings.TrimSpace(descriptor.Identity.ID) == id {
+		if descriptor.Identity.ID() == id {
 			matches = append(matches, descriptor)
 		}
 	}
 	if len(matches) != 1 {
 		return TriggerPackDescriptor{}, fmt.Errorf("channel pack %q trigger dependency %q resolved %d accepted packs; require exactly one", channel.Envelope.ID, id, len(matches))
 	}
-	if matches[0].Identity.Type != TypeTrigger {
-		return TriggerPackDescriptor{}, fmt.Errorf("channel pack %q dependency %q has wrong role %q", channel.Envelope.ID, id, matches[0].Identity.Type)
+	if matches[0].Identity.Type() != TypeTrigger {
+		return TriggerPackDescriptor{}, fmt.Errorf("channel pack %q dependency %q has wrong role %q", channel.Envelope.ID, id, matches[0].Identity.Type())
 	}
 	return matches[0], nil
 }
@@ -1175,15 +1241,15 @@ func resolveConnectorDependency(channel LoadedChannelPack, descriptors []Connect
 	id := strings.TrimSpace(channel.Envelope.Requires.Packs[TypeConnector])
 	var matches []ConnectorPackDescriptor
 	for _, descriptor := range descriptors {
-		if strings.TrimSpace(descriptor.Identity.ID) == id {
+		if descriptor.Identity.ID() == id {
 			matches = append(matches, descriptor)
 		}
 	}
 	if len(matches) != 1 {
 		return ConnectorPackDescriptor{}, fmt.Errorf("channel pack %q connector dependency %q resolved %d accepted packs; require exactly one", channel.Envelope.ID, id, len(matches))
 	}
-	if matches[0].Identity.Type != TypeConnector {
-		return ConnectorPackDescriptor{}, fmt.Errorf("channel pack %q dependency %q has wrong role %q", channel.Envelope.ID, id, matches[0].Identity.Type)
+	if matches[0].Identity.Type() != TypeConnector {
+		return ConnectorPackDescriptor{}, fmt.Errorf("channel pack %q dependency %q has wrong role %q", channel.Envelope.ID, id, matches[0].Identity.Type())
 	}
 	return matches[0], nil
 }
@@ -1667,8 +1733,8 @@ func stringSet(values []string) map[string]struct{} {
 	return out
 }
 
-func identityFromEnvelope(envelope Envelope, source string) PackIdentity {
-	return PackIdentity{ID: strings.TrimSpace(envelope.ID), Version: strings.TrimSpace(envelope.Version), ManifestHash: strings.TrimSpace(envelope.ManifestHash), Type: strings.TrimSpace(envelope.Type), Source: strings.TrimSpace(source)}
+func identityFromEnvelope(envelope Envelope, source PackSource) PackIdentity {
+	return MustPackIdentity(envelope.ID, envelope.Version, envelope.ManifestHash, envelope.Type, source)
 }
 
 func cloneInterfaceDefinition(in runtimecontracts.PackInterfaceDefinition) runtimecontracts.PackInterfaceDefinition {

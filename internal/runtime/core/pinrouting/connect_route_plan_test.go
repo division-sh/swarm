@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
 
 func TestConnectSourceEndpointMatchesEventUsesImmutableSourceAcrossTargetProjection(t *testing.T) {
@@ -231,10 +232,12 @@ func TestLowerTargetFreeInputRoutePlans_RejectsHarnessSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load harness injection artifact: %v", err)
 	}
-	plans, issues := LowerTargetFreeInputRoutePlans(semanticview.Wrap(bundle), []runtimeprovideroutput.Authorization{{
-		Provider: "test", Event: "worker/work.requested", PackID: "provider.test", PackVersion: "1.0.0",
-		ManifestHash: "sha256:test", GenerationID: "generation-test",
-	}})
+	authorization := runtimeprovideroutput.MustAuthorization(
+		"test", "worker/work.requested", "provider.test", "1.0.0",
+		"sha256:"+strings.Repeat("a", 64),
+		triggergeneration.FromCanonicalBytes([]byte("generation-test")),
+	)
+	plans, issues := LowerTargetFreeInputRoutePlans(semanticview.Wrap(bundle), []runtimeprovideroutput.Authorization{authorization})
 	if len(plans) != 0 || len(issues) != 0 {
 		t.Fatalf("plans = %#v issues = %#v, want harness excluded without lowering issues", plans, issues)
 	}

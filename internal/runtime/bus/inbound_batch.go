@@ -103,7 +103,7 @@ func preflightInboundDeliveryBatch(verifier ProviderOutputAuthorizationVerifier,
 	validated.Events = append([]InboundDeliveryEvent(nil), batch.Events...)
 	for index := range validated.Events {
 		item := &validated.Events[index]
-		authorization := item.Authorization.Normalized()
+		authorization := item.Authorization
 		switch item.Kind {
 		case runtimeprovideroutput.KindRaw:
 			if index != 0 {
@@ -121,7 +121,7 @@ func preflightInboundDeliveryBatch(verifier ProviderOutputAuthorizationVerifier,
 				return InboundDeliveryBatch{}, fmt.Errorf("inbound delivery event %d normalized provider output requires complete verified-pack authorization", index)
 			}
 			eventName := strings.TrimSpace(string(item.Event.Type()))
-			if authorization.Provider != provider || authorization.Event != eventName {
+			if authorization.Provider() != provider || authorization.Event() != eventName {
 				return InboundDeliveryBatch{}, fmt.Errorf("inbound delivery event %d normalized provider output authorization does not match provider/event", index)
 			}
 			if verifier == nil {
@@ -141,7 +141,7 @@ func preflightInboundDeliveryBatch(verifier ProviderOutputAuthorizationVerifier,
 type providerOutputAuthorizationContextKey struct{}
 
 func withProviderOutputAuthorization(ctx context.Context, authorization runtimeprovideroutput.Authorization) context.Context {
-	return context.WithValue(ctx, providerOutputAuthorizationContextKey{}, authorization.Normalized())
+	return context.WithValue(ctx, providerOutputAuthorizationContextKey{}, authorization)
 }
 
 func withoutProviderOutputAuthorization(ctx context.Context) context.Context {

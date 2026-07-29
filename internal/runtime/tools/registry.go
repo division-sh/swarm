@@ -12,22 +12,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-type implementationClass string
-
-const (
-	implementationPlatformBuiltin implementationClass = "platform_builtin"
-	implementationHTTP            implementationClass = "http"
-	implementationMCP             implementationClass = "mcp"
-	implementationChannel         implementationClass = "channel"
-)
-
 type executionToolValue struct {
 	name               string
-	category           string
+	category           runtimecontracts.ToolCategory
 	description        string
 	usage              string
-	requiredPermission string
-	handler            implementationClass
+	requiredPermission runtimecontracts.ToolPermission
+	handler            runtimecontracts.ToolHandlerKind
 	inputSchema        map[string]any
 	outputSchema       map[string]any
 	generatedSchema    bool
@@ -36,36 +27,14 @@ type executionToolValue struct {
 	responseSuccess    *runtimecontracts.HTTPResponseSuccess
 	credentials        []string
 	managedCredential  *runtimecontracts.ManagedCredentialRef
-	rateLimit          externalDispatchRateLimitConfig
-	mcpServerName      string
-	mcpRemoteName      string
+	ratePolicy         runtimecontracts.ToolRatePolicy
+	mcp                runtimecontracts.ToolMCPBinding
 }
 
 // ExecutionTool is an immutable runtime view derived from one admitted owner.
 // It carries no authored or registry mutation authority.
 type ExecutionTool struct {
 	value *executionToolValue
-}
-
-func newExecutionTool(value executionToolValue) ExecutionTool {
-	value.name = strings.TrimSpace(value.name)
-	value.category = strings.TrimSpace(value.category)
-	value.description = strings.TrimSpace(value.description)
-	value.usage = strings.TrimSpace(value.usage)
-	value.requiredPermission = strings.TrimSpace(value.requiredPermission)
-	value.inputSchema = deepCloneMap(value.inputSchema)
-	value.outputSchema = deepCloneMap(value.outputSchema)
-	if value.http != nil {
-		httpSpec := *value.http
-		httpSpec.Headers = cloneRuntimeStringMap(value.http.Headers)
-		httpSpec.Body = deepCloneJSONValue(value.http.Body)
-		value.http = &httpSpec
-	}
-	value.responseMapping = deepCloneMap(value.responseMapping)
-	value.responseSuccess = cloneResponseSuccess(value.responseSuccess)
-	value.credentials = append([]string(nil), value.credentials...)
-	value.managedCredential = cloneManagedCredentialRef(value.managedCredential)
-	return ExecutionTool{value: &value}
 }
 
 func (t ExecutionTool) Name() string {
@@ -78,7 +47,7 @@ func (t ExecutionTool) Category() string {
 	if t.value == nil {
 		return ""
 	}
-	return t.value.category
+	return t.value.category.String()
 }
 func (t ExecutionTool) Description() string {
 	if t.value == nil {
@@ -96,11 +65,11 @@ func (t ExecutionTool) RequiredPermission() string {
 	if t.value == nil {
 		return ""
 	}
-	return t.value.requiredPermission
+	return t.value.requiredPermission.String()
 }
-func (t ExecutionTool) Handler() implementationClass {
+func (t ExecutionTool) Handler() runtimecontracts.ToolHandlerKind {
 	if t.value == nil {
-		return ""
+		return runtimecontracts.ToolHandlerUnspecified
 	}
 	return t.value.handler
 }
@@ -123,8 +92,10 @@ func (t ExecutionTool) HTTP() (*runtimecontracts.HTTPToolSpec, bool) {
 	if t.value == nil || t.value.http == nil {
 		return nil, false
 	}
-	snapshot := newExecutionTool(executionToolValue{http: t.value.http})
-	return snapshot.value.http, true
+	spec := *t.value.http
+	spec.Headers = cloneRuntimeStringMap(spec.Headers)
+	spec.Body = deepCloneJSONValue(spec.Body)
+	return &spec, true
 }
 func (t ExecutionTool) ResponseMapping() map[string]any {
 	if t.value == nil {
@@ -154,29 +125,25 @@ func (t ExecutionTool) RateLimit() externalDispatchRateLimitConfig {
 	if t.value == nil {
 		return externalDispatchRateLimitConfig{}
 	}
-	return t.value.rateLimit
+	policy := t.value.ratePolicy
+	return externalDispatchRateLimitConfig{
+		Enabled: policy.Enabled(),
+		Limit:   policy.Limit(),
+		Period:  policy.Period(),
+		MaxWait: policy.MaxWait(),
+	}
 }
 func (t ExecutionTool) MCPServerName() string {
 	if t.value == nil {
 		return ""
 	}
-	return t.value.mcpServerName
+	return t.value.mcp.Server()
 }
 func (t ExecutionTool) MCPRemoteName() string {
 	if t.value == nil {
 		return ""
 	}
-	return t.value.mcpRemoteName
-}
-func (t ExecutionTool) withInputSchema(schema map[string]any) ExecutionTool {
-	copyValue := *t.value
-	copyValue.inputSchema = schema
-	return newExecutionTool(copyValue)
-}
-func (t ExecutionTool) withOutputSchema(schema map[string]any) ExecutionTool {
-	copyValue := *t.value
-	copyValue.outputSchema = schema
-	return newExecutionTool(copyValue)
+	return t.value.mcp.Remote()
 }
 
 func toolDefinitionsForRuntime(source semanticview.Source, discovered map[string]runtimemcp.DiscoveredTool) ([]llm.ToolDefinition, error) {
@@ -234,25 +201,25 @@ func toolDefinitionsForActor(source semanticview.Source, actor models.AgentConfi
 }
 
 func runtimeToolHiddenFromAgents(name string) bool {
-	return false
+	return strings.TrimSpace(name) == "configure_routing"
 }
 
 func executionToolsForRuntime(source semanticview.Source, discovered map[string]runtimemcp.DiscoveredTool) (map[string]ExecutionTool, error) {
-	entries := builtinExecutionTools(source, nil)
+	entries, err := builtinExecutionTools(source, nil)
+	if err != nil {
+		return nil, err
+	}
 	if source != nil {
 		for name, entry := range source.ToolEntries() {
 			name = strings.TrimSpace(name)
 			if name == "" {
 				continue
 			}
-			execution, include, err := executionToolFromContract(name, entry)
-			if err != nil {
-				return nil, err
-			}
+			execution, include := executionToolFromAdmitted(name, entry)
 			if !include {
 				continue
 			}
-			if existing, ok := entries[name]; ok && existing.Handler() == implementationPlatformBuiltin && execution.Handler() == implementationPlatformBuiltin {
+			if existing, ok := entries[name]; ok && existing.Handler() == runtimecontracts.ToolHandlerPlatformBuiltin && execution.Handler() == runtimecontracts.ToolHandlerPlatformBuiltin {
 				continue
 			}
 			entries[name] = execution
@@ -263,12 +230,11 @@ func executionToolsForRuntime(source semanticview.Source, discovered map[string]
 		if name == "" {
 			continue
 		}
-		schema, _ := tool.InputSchema.(map[string]any)
-		schema = deepCloneMap(schema)
-		entries[name] = newExecutionTool(executionToolValue{
-			name: name, description: tool.Description, handler: implementationMCP,
-			inputSchema: schema, mcpServerName: tool.ServerName, mcpRemoteName: tool.RemoteName,
-		})
+		execution, include := executionToolFromAdmitted(name, tool.Contract)
+		if !include {
+			return nil, fmt.Errorf("discovered MCP tool %s has no admitted execution binding", name)
+		}
+		entries[name] = execution
 	}
 	return entries, nil
 }
@@ -279,7 +245,11 @@ func executionToolsForActor(source semanticview.Source, actor models.AgentConfig
 		return nil, err
 	}
 	removeLegacyEntityToolSurface(entries)
-	for name, entry := range builtinExecutionTools(source, &actor) {
+	builtins, err := builtinExecutionTools(source, &actor)
+	if err != nil {
+		return nil, err
+	}
+	for name, entry := range builtins {
 		entries[name] = entry
 	}
 	candidates := map[string]struct{}{}
@@ -297,25 +267,21 @@ func executionToolsForActor(source semanticview.Source, actor models.AgentConfig
 			if !ok {
 				continue
 			}
-			execution, include, err := executionToolFromContract(strings.TrimSpace(name), entry)
-			if err != nil {
-				return nil, err
-			}
+			execution, include := executionToolFromAdmitted(strings.TrimSpace(name), entry)
 			if !include {
 				continue
 			}
-			if existing, ok := entries[strings.TrimSpace(name)]; ok && existing.Handler() == implementationPlatformBuiltin && execution.Handler() == implementationPlatformBuiltin {
+			if existing, ok := entries[strings.TrimSpace(name)]; ok && existing.Handler() == runtimecontracts.ToolHandlerPlatformBuiltin && execution.Handler() == runtimecontracts.ToolHandlerPlatformBuiltin {
 				continue
 			}
 			entries[strings.TrimSpace(name)] = execution
 		}
 	}
-	for _, def := range nativeFallbackToolDefinitionsForActor(actor) {
-		name := strings.TrimSpace(def.Name)
-		if name == "" {
-			continue
+	for _, name := range []string{"bash", "web_search", "read_file", "write_file"} {
+		tool, ok, err := nativeFallbackExecutionTool(actor, name)
+		if err != nil {
+			return nil, err
 		}
-		tool, ok := nativeFallbackExecutionTool(actor, name)
 		if !ok {
 			continue
 		}
@@ -341,29 +307,14 @@ func resolveExecutionToolForActor(source semanticview.Source, actor models.Agent
 	return tool, true, nil
 }
 
-func executionToolFromContract(name string, entry runtimecontracts.ToolSchemaEntry) (ExecutionTool, bool, error) {
-	handlerType := normalizeImplementationClass(name, entry)
-	if handlerType == "" {
-		return ExecutionTool{}, false, nil
+func executionToolFromAdmitted(name string, entry runtimecontracts.ToolSchemaEntry) (ExecutionTool, bool) {
+	handlerType := entry.Handler()
+	if handlerType == runtimecontracts.ToolHandlerUnspecified {
+		return ExecutionTool{}, false
 	}
-	rateLimitSyntax, maxWaitSyntax := entry.RateLimitSyntax()
-	rateLimit, enabled, err := parseExternalDispatchRateLimit(rateLimitSyntax, maxWaitSyntax)
-	if err != nil {
-		return ExecutionTool{}, false, err
-	}
-	if enabled && handlerType != implementationHTTP {
-		return ExecutionTool{}, false, fmt.Errorf("tool %s rate_limit is only supported for handler_type http", strings.TrimSpace(name))
-	}
-	if handlerType == implementationMCP {
-		return ExecutionTool{}, false, nil
-	}
-	inputSchema, err := schemaToMap(entry.InputSchema())
-	if err != nil {
-		return ExecutionTool{}, false, err
-	}
-	outputSchema, err := schemaToMap(entry.OutputSchema())
-	if err != nil {
-		return ExecutionTool{}, false, err
+	mcpBinding, hasMCPBinding := entry.MCP()
+	if handlerType == runtimecontracts.ToolHandlerMCP && !hasMCPBinding {
+		return ExecutionTool{}, false
 	}
 	httpSpec, hasHTTP := entry.HTTP()
 	var httpPtr *runtimecontracts.HTTPToolSpec
@@ -381,13 +332,16 @@ func executionToolFromContract(name string, entry runtimecontracts.ToolSchemaEnt
 	if hasManaged {
 		managedPtr = &managed
 	}
-	return newExecutionTool(executionToolValue{
+	value := executionToolValue{
 		name: name, category: entry.Category(), description: entry.Description(),
-		usage: runtimeOwnedToolUsage(name), requiredPermission: toolRequiredPermission(name, entry),
-		handler: handlerType, inputSchema: inputSchema, outputSchema: outputSchema,
-		http: httpPtr, responseMapping: responseMapping, responseSuccess: responseSuccessPtr,
-		credentials: entry.Credentials(), managedCredential: managedPtr, rateLimit: rateLimit,
-	}), true, nil
+		usage: runtimeOwnedToolUsage(name), requiredPermission: entry.Permission(),
+		handler: handlerType, inputSchema: entry.InputSchema().Projection(), outputSchema: entry.OutputSchema().Projection(),
+		generatedSchema: entry.GeneratedSchema(),
+		http:            httpPtr, responseMapping: responseMapping, responseSuccess: responseSuccessPtr,
+		credentials: entry.Credentials(), managedCredential: managedPtr, ratePolicy: entry.RatePolicy(),
+		mcp: mcpBinding,
+	}
+	return ExecutionTool{value: &value}, true
 }
 
 func cloneResponseSuccess(check *runtimecontracts.HTTPResponseSuccess) *runtimecontracts.HTTPResponseSuccess {
@@ -406,47 +360,6 @@ func cloneManagedCredentialRef(ref *runtimecontracts.ManagedCredentialRef) *runt
 	out.Scopes = append([]string{}, ref.Scopes...)
 	out.TokenRequest.StaticHeaders = cloneRuntimeStringMap(ref.TokenRequest.StaticHeaders)
 	return &out
-}
-
-func normalizeImplementationClass(name string, entry runtimecontracts.ToolSchemaEntry) implementationClass {
-	name = strings.TrimSpace(name)
-	if name == "configure_routing" {
-		return ""
-	}
-	switch entry.Handler() {
-	case runtimecontracts.ToolHandlerUnspecified:
-		if _, ok := supportedRuntimeToolNames[name]; ok {
-			return implementationPlatformBuiltin
-		}
-		return ""
-	case runtimecontracts.ToolHandlerPlatformBuiltin:
-		return implementationPlatformBuiltin
-	case runtimecontracts.ToolHandlerHTTP:
-		return implementationHTTP
-	case runtimecontracts.ToolHandlerMCP:
-		return implementationMCP
-	case runtimecontracts.ToolHandlerChannel:
-		return implementationChannel
-	default:
-		return ""
-	}
-}
-
-func toolRequiredPermission(toolID string, entry runtimecontracts.ToolSchemaEntry) string {
-	if perm := strings.TrimSpace(entry.Permission()); perm != "" {
-		return perm
-	}
-	if perm := strings.TrimSpace(entry.RequiredPermission()); perm != "" {
-		return perm
-	}
-	return ""
-}
-
-func schemaToMap(schema runtimecontracts.ToolInputSchema) (map[string]any, error) {
-	if schema.IsZero() {
-		return nil, nil
-	}
-	return schema.Project()
 }
 
 func cloneRuntimeStringMap(in map[string]string) map[string]string {

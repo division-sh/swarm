@@ -58,10 +58,13 @@ func (r *PackRegistry) PackDescriptors() []packs.ConnectorPackDescriptor {
 		pack := cloneLoadedPack(byID[id])
 		tools := cloneToolMap(pack.Manifest.Tools)
 		out = append(out, packs.ConnectorPackDescriptor{
-			Identity: packs.PackIdentity{
-				ID: pack.Envelope.ID, Version: pack.Envelope.Version, ManifestHash: pack.Envelope.ManifestHash,
-				Type: packs.TypeConnector, Source: pack.Source,
-			},
+			Identity: packs.MustPackIdentity(
+				pack.Envelope.ID,
+				pack.Envelope.Version,
+				pack.Envelope.ManifestHash,
+				packs.TypeConnector,
+				packs.MustPackSource(pack.Envelope.Provenance.Source, pack.Source),
+			),
 			Provider: pack.Manifest.Provider, Tools: tools,
 		})
 	}
@@ -251,19 +254,31 @@ func GenerationSurfaceForPackTool(pack LoadedPack, toolID string) (GenerationSur
 	if !ok {
 		return GenerationSurface{}, false
 	}
-	return GenerationSurface{
-		GeneratorVersion: pack.Manifest.Generation.GeneratorVersion,
-		SourcePath:       pack.Manifest.Generation.Source.Path,
-		SourceSHA256:     pack.Manifest.Generation.Source.SHA256,
-		ProfilePath:      pack.Manifest.Generation.Profile.Path,
-		ProfileSHA256:    pack.Manifest.Generation.Profile.SHA256,
-		ManifestSHA256:   pack.Envelope.ManifestHash,
-		OperationID:      operation.OperationID,
-		Permissions:      append([]GenerationPermission(nil), operation.Permissions...),
-		FixtureID:        operation.FixtureID,
-		FixtureStatus:    operation.FixtureStatus,
-		ReviewStatus:     operation.ReviewStatus,
-	}, true
+	permissions := make([]semanticview.ConnectorGenerationPermission, 0, len(operation.Permissions))
+	for _, permission := range operation.Permissions {
+		admitted, err := semanticview.NewConnectorGenerationPermission(permission.ID, permission.Note)
+		if err != nil {
+			return GenerationSurface{}, false
+		}
+		permissions = append(permissions, admitted)
+	}
+	surface, err := semanticview.NewConnectorGenerationSurface(
+		pack.Manifest.Generation.GeneratorVersion,
+		pack.Manifest.Generation.Source.Path,
+		pack.Manifest.Generation.Source.SHA256,
+		pack.Manifest.Generation.Profile.Path,
+		pack.Manifest.Generation.Profile.SHA256,
+		pack.Envelope.ManifestHash,
+		operation.OperationID,
+		permissions,
+		operation.FixtureID,
+		operation.FixtureStatus,
+		operation.ReviewStatus,
+	)
+	if err != nil {
+		return GenerationSurface{}, false
+	}
+	return surface, true
 }
 
 func LoadPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedPack, error) {
@@ -409,7 +424,7 @@ func SourceWithConnectorPackImportsFromRegistry(source semanticview.Source, regi
 	existing := existingToolSources(source)
 	importedTools := map[string]runtimecontracts.ToolSchemaEntry{}
 	importedGeneration := map[string]GenerationSurface{}
-	importSources := map[string]string{}
+	importSources := map[string]semanticview.ConnectorImportSource{}
 	importedByProjectScope := map[string]map[string]runtimecontracts.ToolSchemaEntry{}
 	for _, item := range imports {
 		if item.provider == "" {
@@ -433,14 +448,18 @@ func SourceWithConnectorPackImportsFromRegistry(source semanticview.Source, regi
 			return nil, fmt.Errorf("provider connector tool %q collision between connector pack import %s and %s; remove one, or rename the flow-local tool", item.toolID, item.source, strings.Join(existingSources, ", "))
 		}
 		if prior, exists := importSources[item.toolID]; exists {
-			return nil, fmt.Errorf("provider connector tool %q collision between connector pack imports %s and %s; remove one import", item.toolID, prior, item.source)
+			return nil, fmt.Errorf("provider connector tool %q collision between connector pack imports %s and %s; remove one import", item.toolID, prior.String(), item.source)
 		}
 		tool := pack.Manifest.Tools[item.toolID]
 		importedTools[item.toolID] = tool
 		if generation, exists := GenerationSurfaceForPackTool(pack, item.toolID); exists {
 			importedGeneration[item.toolID] = generation
 		}
-		importSources[item.toolID] = item.source
+		importSource, err := semanticview.NewConnectorImportSource(item.source)
+		if err != nil {
+			return nil, fmt.Errorf("provider connector tool %q import source: %w", item.toolID, err)
+		}
+		importSources[item.toolID] = importSource
 		if importedByProjectScope[item.projectScopeKey] == nil {
 			importedByProjectScope[item.projectScopeKey] = map[string]runtimecontracts.ToolSchemaEntry{}
 		}
@@ -488,7 +507,7 @@ type connectorPackSource struct {
 	semanticview.Source
 	importedTools          map[string]runtimecontracts.ToolSchemaEntry
 	importedGeneration     map[string]GenerationSurface
-	importSources          map[string]string
+	importSources          map[string]semanticview.ConnectorImportSource
 	importedByProjectScope map[string]map[string]runtimecontracts.ToolSchemaEntry
 }
 

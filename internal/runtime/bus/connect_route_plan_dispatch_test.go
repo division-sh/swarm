@@ -3321,10 +3321,10 @@ func TestRoutePlanCanonicalFailClosedDropsExecutableRoutes(t *testing.T) {
 func TestOrdinaryOperatorPublishCannotAcquireProviderTargetFreeAuthorityByEventName(t *testing.T) {
 	const eventName = "inbound.telegram.text_message"
 	generation := triggergeneration.FromCanonicalBytes([]byte("operator-provider-trigger-generation"))
-	authorization := runtimeprovideroutput.Authorization{
-		Provider: "telegram", Event: eventName, PackID: "provider.telegram", PackVersion: "1.0.0",
-		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: generation.Diagnostic(),
-	}
+	authorization := runtimeprovideroutput.MustAuthorization(
+		"telegram", eventName, "provider.telegram", "1.0.0",
+		"sha256:"+strings.Repeat("a", 64), generation,
+	)
 	source := providerOutputAuthorizedTestSource{
 		Source: semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{{
 			id: "consumer", mode: "static",

@@ -28,10 +28,14 @@ func TestValidateUsageHintCoverage_ExternalMCPMissingHintIsLintOnly(t *testing.T
 		semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
 		map[string]runtimemcp.DiscoveredTool{
 			"infra.ping": {
-				ServerName:  "infra",
-				RemoteName:  "ping",
-				Description: "Ping infra",
-				InputSchema: map[string]any{"type": "object"},
+				ServerName: "infra",
+				RemoteName: "ping",
+				Contract: runtimecontracts.MustToolSchemaEntry(
+					runtimecontracts.WithToolDescription("Ping infra"),
+					runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerMCP),
+					runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.ToolInputSchema{}),
+					runtimecontracts.WithToolMCP(runtimecontracts.MustToolMCPBinding("infra", "ping")),
+				),
 			},
 		},
 	)

@@ -112,8 +112,7 @@ func validateActivitySpec(source semanticview.Source, flowID, nodeID, handlerEve
 	if _, hasHTTP := tool.HTTP(); !hasHTTP {
 		errs = append(errs, fmt.Errorf("%s: tool %q is missing http block; activities support authored HTTP tools only", context, toolID))
 	}
-	rateLimit, rateLimitMaxWait := tool.RateLimitSyntax()
-	if rateLimit != "" || rateLimitMaxWait != "" {
+	if tool.RatePolicy().Enabled() {
 		errs = append(errs, fmt.Errorf("%s: tool %q uses rate_limit; activity HTTP rate-limit admission is split until the activity dispatcher consumes the external dispatch owner", context, toolID))
 	}
 	if responseMapping, ok := tool.ResponseMapping(); ok && len(responseMapping) > 0 {
@@ -135,7 +134,7 @@ func validateActivitySpec(source semanticview.Source, flowID, nodeID, handlerEve
 		if len(credentials) > 0 {
 			errs = append(errs, fmt.Errorf("%s: tool %q must not declare both static credentials and managed_credential for activity HTTP execution", context, toolID))
 		}
-		if !strings.EqualFold(tool.Category(), "provider_connector") || effectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+		if tool.Category() != runtimecontracts.ToolCategoryProviderConnector || effectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 			errs = append(errs, fmt.Errorf("%s: tool %q uses managed_credential; managed credential activity HTTP execution is supported only for non_idempotent_write provider connector tools", context, toolID))
 		}
 		if strings.TrimSpace(managedCredential.Key) == "" {

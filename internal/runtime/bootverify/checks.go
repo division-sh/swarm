@@ -1685,7 +1685,7 @@ func agentPermissionWarningsLocal(source semanticview.Source, scopeLabel, agentI
 			continue
 		}
 		entry, _ := source.ToolEntryForAgent(agentID, toolID)
-		required := toolRequiredPermissionLocal(toolID, entry)
+		required := entry.Permission().String()
 		if required == "" {
 			continue
 		}
@@ -1695,16 +1695,6 @@ func agentPermissionWarningsLocal(source semanticview.Source, scopeLabel, agentI
 		out = append(out, permissionWarning{Message: fmt.Sprintf("%s/%s: tool %q missing permission %q", strings.TrimSpace(scopeLabel), strings.TrimSpace(agentID), toolID, required)})
 	}
 	return out
-}
-
-func toolRequiredPermissionLocal(toolID string, entry runtimecontracts.ToolSchemaEntry) string {
-	if perm := entry.Permission(); perm != "" {
-		return perm
-	}
-	if perm := entry.RequiredPermission(); perm != "" {
-		return perm
-	}
-	return ""
 }
 
 func resolvedAgentPermissionsLocal(agent runtimecontracts.AgentRegistryEntry, policy runtimecontracts.PolicyDocument) ([]string, error) {

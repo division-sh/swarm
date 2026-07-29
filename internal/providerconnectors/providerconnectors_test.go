@@ -40,7 +40,7 @@ func TestValidateSourceRejectsUnsupportedProviderConnectorShape(t *testing.T) {
 				nil,
 				nil,
 				&runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"},
-				runtimecontracts.WithToolRateLimit("1/s", ""),
+				runtimecontracts.WithToolRateLimit("1/s", "1s"),
 			),
 		},
 	})
@@ -418,7 +418,11 @@ func TestDefaultPackRegistryLoadsTelegramFromVerifiedPlatformPack(t *testing.T) 
 func TestNewPackRegistryAdmitsSchemasAndReadbacksAreMutationIsolated(t *testing.T) {
 	tool := telegramConnectorTool("https://api.telegram.org")
 	loaded := LoadedPack{
-		Envelope: packs.Envelope{ID: "test.telegram"},
+		Envelope: packs.Envelope{
+			ID: "test.telegram", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("a", 64),
+			Provenance: packs.Provenance{Source: packs.ProvenancePlatform},
+		},
+		Source: "fixture:test.telegram",
 		Manifest: ConnectorManifest{Provider: "telegram", Tools: map[string]runtimecontracts.ToolSchemaEntry{
 			"telegram.send_message": tool,
 		}},
@@ -1014,7 +1018,7 @@ func TestConnectorPackImportRequiresExplicitEnableAndReportsSurface(t *testing.T
 	if !exists {
 		t.Fatal("explicit import did not expose telegram.send_message")
 	}
-	if tool.Category() != Category {
+	if tool.Category() != runtimecontracts.ToolCategoryProviderConnector {
 		t.Fatalf("imported tool category = %q, want %q", tool.Category(), Category)
 	}
 	if errs := ValidateSource(source); len(errs) != 0 {
@@ -1128,7 +1132,7 @@ func TestSlackConnectorPackImportRequiresExplicitEnableAndReportsManagedSurface(
 		t.Fatal("explicit import did not expose slack.post_message")
 	}
 	managed, hasManaged := tool.ManagedCredential()
-	if tool.Category() != Category || !hasManaged || managed.Key != "slack_oauth" {
+	if tool.Category() != runtimecontracts.ToolCategoryProviderConnector || !hasManaged || managed.Key != "slack_oauth" {
 		t.Fatalf("imported tool = %#v, want provider_connector managed slack_oauth", tool)
 	}
 	if errs := ValidateSource(source); len(errs) != 0 {

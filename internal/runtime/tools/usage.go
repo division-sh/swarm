@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -93,7 +94,7 @@ func ValidateUsageHintCoverage(source semanticview.Source, discovered map[string
 		}
 		usage := entry.Usage()
 		switch entry.Handler() {
-		case implementationPlatformBuiltin:
+		case runtimecontracts.ToolHandlerPlatformBuiltin:
 			if usage == "" {
 				findings = append(findings, UsageHintFinding{
 					ToolName: name,
@@ -102,7 +103,7 @@ func ValidateUsageHintCoverage(source semanticview.Source, discovered map[string
 				})
 				continue
 			}
-		case implementationMCP:
+		case runtimecontracts.ToolHandlerMCP:
 			if usage == "" {
 				findings = append(findings, UsageHintFinding{
 					ToolName: name,

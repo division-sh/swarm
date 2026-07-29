@@ -8696,15 +8696,19 @@ tool_model:
       authored_schema_lexical_boundary: internal/runtime/contracts.ToolInputSchema.UnmarshalYAML
       immutable_semantic_schema: internal/runtime/contracts.ToolInputSchema
       immutable_tool_execution_contract: internal/runtime/contracts.ToolSchemaEntry
+      admitted_tool_category_permission_rate_and_handler: internal/runtime/contracts typed ToolCategory, ToolPermission, ToolRatePolicy, ToolHandlerKind, and ToolMCPBinding values
       normalized_event_exact_schema_carrier: internal/runtime/contracts.EventFieldSpec.ExactSchema
       runtime_schema_acceptance: internal/runtime/eventschema
       structural_compiler: internal/packs.CompileChannelInventory
       immutable_structural_plan: internal/packs.SatisfactionPlan
+      admitted_pack_source_and_identity: internal/packs.PackSource and PackIdentity
       directional_assignability_and_cardinality: internal/packs channel relation owner
       semantic_source_capabilities: internal/runtime/semanticview.Capabilities
       outbound_binding: internal/packs.OutboundBindingPlan
       compiled_plan_generation: internal/runtime/plangeneration.Generation
       provider_trigger_catalog_generation: internal/runtime/triggergeneration.Generation
+      provider_output_target_free_authorization: internal/runtime/core/provideroutput.Authorization
+      connector_generation_and_import_capabilities: internal/runtime/semanticview admitted ConnectorGenerationSurface and ConnectorImportSource values
       runtime_execution_view: internal/runtime/tools.ExecutionTool
       runtime_adapter: internal/runtime/tools channel handler consuming internal/packs.OutboundBindingPlan
       private_activity_targets: internal/runtime/pipeline.ChannelActivityTarget
@@ -8736,7 +8740,16 @@ tool_model:
       complete exact ToolInputSchema through imported event catalogs and runtime registry construction. Accepted connector
       registries re-run the same admission for programmatic packs before indexing them. The authority-free runtime
       ExecutionTool view is derived from the admitted ToolSchemaEntry and consumes its schema projection rather than a local
-      JSON-schema interpreter. Accepted tool entries admit HTTP bodies, response
+      JSON-schema interpreter. ToolSchemaEntry also admits one closed category, one permission identity, one typed rate
+      policy, and one exhaustive handler/execution variant. Authored, generated, platform-builtin, native, and MCP-discovered
+      tools all pass through that owner; malformed or missing MCP schemas fail discovery before publication, and runtime
+      projection performs no parsing, normalization, permission fallback, or tool-name handler inference. Compiled channel
+      operations retain the admitted effect value used by readback, runtime projection, and generation hashing. Pack
+      provenance and diagnostic path remain separate inside an opaque admitted source identity and are never recovered by
+      delimiter parsing. Connector generation evidence/import provenance and normalized-provider target-free authorization
+      are admitted opaque capability values; incomplete records cannot enter the finite semantic-source capability
+      aggregate, and provider catalog generation remains typed through authorization verification and persistence codecs.
+      Accepted tool entries admit HTTP bodies, response
       mappings, and response-success literals once through the closed semantic JSON owner before storage, hashing, or
       dispatch; cyclic, non-JSON, and non-finite programmatic carrier graphs reject before publication. ToolSchemaEntry,
       SatisfactionPlan, OutboundBindingPlan, ExecutionTool, ChannelActivityTarget, and plan generation expose only immutable
@@ -8788,6 +8801,10 @@ tool_model:
       - return immutable connector ToolSchemaEntry readbacks directly and mutation-isolated imported EventCatalogEntry readbacks through the event catalog carrier owner
       - reserve platform.channel_activity.* for generation-pinned private targets and reject any authored or imported tool in that namespace during load/boot validation
       - reject retired handler_type workflow_registered and api_call at lexical admission; no compatibility normalization or warning-only execution path survives
+      - admit category, permission, rate policy, handler/execution variant, and MCP binding once in ToolSchemaEntry; every executable origin consumes the same admitted projection and malformed MCP schema discovery fails closed
+      - compile operation effect once and retain the typed value for readback, runtime tools, and plan generation; post-compilation effect normalization is forbidden
+      - retain pack provenance and diagnostic path as separate opaque PackSource facts; capability projection must not parse a combined source string
+      - admit connector generation/import capability payloads and provider-output authorization before semantic-source composition; incomplete payloads do not acquire capability authority
       selected_constraints: >
         Runtime authoring limits are the intersection of interface invariants and the selected connector schemas for deliver
         and edit. Text length, action count, action-label length, and action-token length require finite maxima; absent or

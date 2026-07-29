@@ -336,7 +336,7 @@ func EventIntegrityFingerprint(evt events.Event, kind runtimeprovideroutput.Kind
 		Kind          runtimeprovideroutput.Kind          `json:"kind"`
 		Authorization runtimeprovideroutput.Authorization `json:"authorization"`
 	}{
-		Event: eventProjection, Kind: kind, Authorization: authorization.Normalized(),
+		Event: eventProjection, Kind: kind, Authorization: authorization,
 	}
 	return SemanticFingerprint(projection)
 }

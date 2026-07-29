@@ -301,9 +301,8 @@ func LowerTargetFreeInputRoutePlans(source semanticview.Source, authorizations [
 	}
 	allowed := map[string]runtimeprovideroutput.Authorization{}
 	for _, authorization := range authorizations {
-		authorization = authorization.Normalized()
 		if authorization.Valid() {
-			allowed[eventidentity.Normalize(authorization.Event)] = authorization
+			allowed[eventidentity.Normalize(authorization.Event())] = authorization
 		}
 	}
 	plans := make([]ConnectRoutePlan, 0)

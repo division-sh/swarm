@@ -73,14 +73,14 @@ func (m *sqlInboundPublicationMutation) FinalizeInboundPublication(ctx context.C
 		if item.Event.RunID() != m.request.ResolvedRunID {
 			return fmt.Errorf("inbound publication child ordinal %d must use the admitted resolved_run_id", index)
 		}
-		authorization := item.Authorization.Normalized()
+		authorization := item.Authorization
 		switch item.Kind {
 		case runtimeprovideroutput.KindRaw:
 			if index != 0 || !authorization.Empty() {
 				return fmt.Errorf("inbound raw output must be ordinal 0 and carry no normalized authorization")
 			}
 		case runtimeprovideroutput.KindNormalized:
-			if index != 1 || !authorization.Valid() || authorization.Provider != m.request.Provider || authorization.Event != string(item.Event.Type()) {
+			if index != 1 || !authorization.Valid() || authorization.Provider() != m.request.Provider || authorization.Event() != string(item.Event.Type()) {
 				return fmt.Errorf("inbound normalized output must be ordinal 1 with matching complete authorization")
 			}
 		default:
@@ -322,7 +322,11 @@ func loadPostgresInboundPublicationChildren(ctx context.Context, db inboundPubli
 		}
 		child.Kind = runtimeprovideroutput.Kind(kind)
 		if child.Kind == runtimeprovideroutput.KindNormalized {
-			child.Authorization = runtimeprovideroutput.Authorization{Provider: record.Provider, Event: child.EventName, PackID: packID, PackVersion: packVersion, ManifestHash: manifestHash, GenerationID: generationID}.Normalized()
+			child.Authorization, err = runtimeprovideroutput.ParseAuthorization(record.Provider, child.EventName, packID, packVersion, manifestHash, generationID)
+			if err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("admit inbound publication child authorization: %w", err)
+			}
 		}
 		children = append(children, child)
 	}
@@ -397,14 +401,14 @@ func insertPostgresInboundPublicationPreparedTx(ctx context.Context, tx *sql.Tx,
 }
 
 func (s *PostgresStore) linkInboundPublicationEventTx(ctx context.Context, tx *sql.Tx, request runtimeinbound.Request, child runtimeinbound.EventRecord) error {
-	auth := child.Authorization.Normalized()
+	auth := child.Authorization
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO inbound_publication_events (
 			publication_id, ordinal, event_id, event_name, output_kind,
 			pack_id, pack_version, manifest_hash, observed_generation_id,
 			event_integrity_fingerprint, recipient_manifest_fingerprint, recipient_count
 		) VALUES ($1::uuid, $2, $3::uuid, $4, $5, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), $10, $11, $12)
-	`, request.PublicationID, child.Ordinal, child.EventID, child.EventName, string(child.Kind), auth.PackID, auth.PackVersion, auth.ManifestHash, auth.GenerationID, child.EventIntegrityFingerprint, child.RecipientManifestFingerprint, child.RecipientCount)
+	`, request.PublicationID, child.Ordinal, child.EventID, child.EventName, string(child.Kind), auth.PackID(), auth.PackVersion(), auth.ManifestHash(), auth.Generation().Diagnostic(), child.EventIntegrityFingerprint, child.RecipientManifestFingerprint, child.RecipientCount)
 	if err != nil {
 		return fmt.Errorf("link inbound publication child ordinal %d: %w", child.Ordinal, err)
 	}
@@ -483,12 +487,12 @@ func validateInboundPublicationRecordShape(record *runtimeinbound.Record) error 
 		if child.Event.ID() != child.EventID || string(child.Event.Type()) != child.EventName || child.Event.RunID() != record.ResolvedRunID {
 			return fmt.Errorf("inbound publication %s child ordinal %d event coupling is incoherent", record.PublicationID, index)
 		}
-		auth := child.Authorization.Normalized()
+		auth := child.Authorization
 		if index == 0 {
 			if child.Kind != runtimeprovideroutput.KindRaw || !auth.Empty() {
 				return fmt.Errorf("inbound publication %s ordinal 0 is not an unauthorised raw output", record.PublicationID)
 			}
-		} else if child.Kind != runtimeprovideroutput.KindNormalized || !auth.Valid() || auth.Provider != record.Provider || auth.Event != child.EventName {
+		} else if child.Kind != runtimeprovideroutput.KindNormalized || !auth.Valid() || auth.Provider() != record.Provider || auth.Event() != child.EventName {
 			return fmt.Errorf("inbound publication %s normalized child authorization is incoherent", record.PublicationID)
 		}
 		fingerprint, err := runtimeinbound.EventIntegrityFingerprint(child.Event, child.Kind, auth)

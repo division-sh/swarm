@@ -1,6 +1,7 @@
 package semanticview
 
 import (
+	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -21,38 +22,45 @@ func TestSemanticSourceCapabilitiesAreCompileVisibleAndComplete(t *testing.T) {
 	var _ Source = markedToolOverlaySource{}
 
 	base := Wrap(&runtimecontracts.WorkflowContractBundle{})
-	permissions := []ConnectorGenerationPermission{{ID: "messages.write", Note: "owner"}}
-	authorizations := []runtimeprovideroutput.Authorization{{Provider: "telegram", Event: "inbound.telegram.message"}}
+	permissions := []ConnectorGenerationPermission{MustConnectorGenerationPermission("messages.write", "owner")}
 	triggerGeneration := triggergeneration.FromCanonicalBytes([]byte("trigger-v1"))
+	authorizations := []runtimeprovideroutput.Authorization{runtimeprovideroutput.MustAuthorization(
+		"telegram", "inbound.telegram.message", "provider.telegram", "1.0.0",
+		"sha256:"+strings.Repeat("a", 64), triggerGeneration,
+	)}
 	capabilities := Capabilities{}.
 		WithConnectorPackImports(
 			map[string]ConnectorGenerationSurface{
-				"telegram.send": {GeneratorVersion: "v1", Permissions: permissions},
+				"telegram.send": semanticCapabilityGeneration("v1", permissions),
 			},
-			map[string]string{"telegram.send": "pack://telegram"},
+			map[string]ConnectorImportSource{"telegram.send": MustConnectorImportSource("pack://telegram")},
 		).
 		WithProviderTriggerEvents(base, triggerGeneration, authorizations)
-	permissions[0].ID = "caller mutation"
-	authorizations[0].Provider = "caller mutation"
+	permissions[0] = MustConnectorGenerationPermission("caller.mutation", "owner")
+	authorizations[0] = runtimeprovideroutput.MustAuthorization(
+		"caller-mutation", "inbound.telegram.message", "provider.telegram", "1.0.0",
+		"sha256:"+strings.Repeat("a", 64), triggerGeneration,
+	)
 
 	generation, triggerBase, ok := capabilities.ProviderTriggerEvents()
 	if !ok || !generation.Equal(triggerGeneration) || triggerBase != base {
 		t.Fatalf("provider-trigger capability = (%q, %#v, %v)", generation.Diagnostic(), triggerBase, ok)
 	}
 	targetFree := capabilities.ProviderTriggerTargetFreeAuthorizations()
-	targetFree[0].Provider = "readback mutation"
-	if got := capabilities.ProviderTriggerTargetFreeAuthorizations(); len(got) != 1 || got[0].Provider != "telegram" {
+	targetFree[0] = runtimeprovideroutput.Authorization{}
+	if got := capabilities.ProviderTriggerTargetFreeAuthorizations(); len(got) != 1 || got[0].Provider() != "telegram" {
 		t.Fatalf("provider-trigger authorization leaked mutation: %#v", got)
 	}
 	connector, ok := capabilities.ConnectorGeneration("telegram.send")
-	if !ok || connector.GeneratorVersion != "v1" || len(connector.Permissions) != 1 || connector.Permissions[0].ID != "messages.write" {
+	if !ok || connector.GeneratorVersion() != "v1" || len(connector.Permissions()) != 1 || connector.Permissions()[0].ID() != "messages.write" {
 		t.Fatalf("connector capability = %#v, exists=%v", connector, ok)
 	}
-	connector.Permissions[0].ID = "readback mutation"
-	if got, _ := capabilities.ConnectorGeneration("telegram.send"); got.Permissions[0].ID != "messages.write" {
+	readback := connector.Permissions()
+	readback[0] = MustConnectorGenerationPermission("readback.mutation", "owner")
+	if got, _ := capabilities.ConnectorGeneration("telegram.send"); got.Permissions()[0].ID() != "messages.write" {
 		t.Fatalf("connector capability leaked readback mutation: %#v", got)
 	}
-	if source, ok := capabilities.ConnectorImportSource("telegram.send"); !ok || source != "pack://telegram" {
+	if source, ok := capabilities.ConnectorImportSource("telegram.send"); !ok || source.String() != "pack://telegram" {
 		t.Fatalf("connector import source = %q, exists=%v", source, ok)
 	}
 }
@@ -60,16 +68,20 @@ func TestSemanticSourceCapabilitiesAreCompileVisibleAndComplete(t *testing.T) {
 func TestSemanticSourceCapabilityCompositionHasOneOwner(t *testing.T) {
 	base := Wrap(&runtimecontracts.WorkflowContractBundle{})
 	triggerGeneration := triggergeneration.FromCanonicalBytes([]byte("trigger-v1"))
+	authorization := runtimeprovideroutput.MustAuthorization(
+		"telegram", "inbound.telegram.message", "provider.telegram", "1.0.0",
+		"sha256:"+strings.Repeat("a", 64), triggerGeneration,
+	)
 	capabilities := Capabilities{}.
-		WithProviderTriggerEvents(base, triggerGeneration, []runtimeprovideroutput.Authorization{{Provider: "telegram"}}).
+		WithProviderTriggerEvents(base, triggerGeneration, []runtimeprovideroutput.Authorization{authorization}).
 		WithConnectorPackImports(
-			map[string]ConnectorGenerationSurface{"telegram.send": {GeneratorVersion: "connector-v1"}},
-			map[string]string{"telegram.send": "pack://telegram"},
+			map[string]ConnectorGenerationSurface{"telegram.send": semanticCapabilityGeneration("connector-v1", nil)},
+			map[string]ConnectorImportSource{"telegram.send": MustConnectorImportSource("pack://telegram")},
 		)
 	if generation, triggerBase, ok := capabilities.ProviderTriggerEvents(); !ok || !generation.Equal(triggerGeneration) || triggerBase != base {
 		t.Fatalf("provider-trigger capability was lost during composition: (%q, %#v, %v)", generation.Diagnostic(), triggerBase, ok)
 	}
-	if generation, ok := capabilities.ConnectorGeneration("telegram.send"); !ok || generation.GeneratorVersion != "connector-v1" {
+	if generation, ok := capabilities.ConnectorGeneration("telegram.send"); !ok || generation.GeneratorVersion() != "connector-v1" {
 		t.Fatalf("connector capability was lost during composition: %#v, exists=%v", generation, ok)
 	}
 	if generation, base, ok := capabilities.WithProviderTriggerEvents(base, triggergeneration.Generation{}, nil).ProviderTriggerEvents(); ok || generation.Valid() || base != nil {
@@ -80,17 +92,21 @@ func TestSemanticSourceCapabilityCompositionHasOneOwner(t *testing.T) {
 func TestRuntimeToolOverlayPreservesSemanticSourceCapabilities(t *testing.T) {
 	baseSource := Wrap(&runtimecontracts.WorkflowContractBundle{})
 	triggerGeneration := triggergeneration.FromCanonicalBytes([]byte("trigger-generation"))
+	authorization := runtimeprovideroutput.MustAuthorization(
+		"target-free", "inbound.target_free", "provider.target-free", "1.0.0",
+		"sha256:"+strings.Repeat("b", 64), triggerGeneration,
+	)
 	capabilities := Capabilities{}.
 		WithConnectorPackImports(
 			map[string]ConnectorGenerationSurface{
-				"deliver": {GeneratorVersion: "generation:deliver"},
+				"deliver": semanticCapabilityGeneration("generation:deliver", nil),
 			},
-			map[string]string{"deliver": "pack://connector/deliver"},
+			map[string]ConnectorImportSource{"deliver": MustConnectorImportSource("pack://connector/deliver")},
 		).
 		WithProviderTriggerEvents(
 			baseSource,
 			triggerGeneration,
-			[]runtimeprovideroutput.Authorization{{Provider: "target-free"}},
+			[]runtimeprovideroutput.Authorization{authorization},
 		)
 	base := markedToolOverlaySource{Source: baseSource, capabilities: capabilities}
 	objectSchema := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)
@@ -109,10 +125,10 @@ func TestRuntimeToolOverlayPreservesSemanticSourceCapabilities(t *testing.T) {
 	if !got.ConnectorPackImportsApplied() {
 		t.Fatal("runtime tool overlay hid connector-pack capabilities")
 	}
-	if value, exists := got.ConnectorImportSource("deliver"); !exists || value != "pack://connector/deliver" {
+	if value, exists := got.ConnectorImportSource("deliver"); !exists || value.String() != "pack://connector/deliver" {
 		t.Fatalf("connector provenance = %q, exists=%v", value, exists)
 	}
-	if value, exists := got.ConnectorGeneration("deliver"); !exists || value.GeneratorVersion != "generation:deliver" {
+	if value, exists := got.ConnectorGeneration("deliver"); !exists || value.GeneratorVersion() != "generation:deliver" {
 		t.Fatalf("connector generation = %#v, exists=%v", value, exists)
 	}
 	generation, triggerBase, exists := got.ProviderTriggerEvents()
@@ -120,7 +136,46 @@ func TestRuntimeToolOverlayPreservesSemanticSourceCapabilities(t *testing.T) {
 		t.Fatalf("provider trigger capability = generation %q base %#v exists=%v", generation.Diagnostic(), triggerBase, exists)
 	}
 	targetFree := got.ProviderTriggerTargetFreeAuthorizations()
-	if len(targetFree) != 1 || targetFree[0].Provider != "target-free" {
+	if len(targetFree) != 1 || targetFree[0].Provider() != "target-free" {
 		t.Fatalf("target-free authorizations = %#v", targetFree)
 	}
+}
+
+func TestSemanticSourceCapabilitiesRejectIncompletePayloads(t *testing.T) {
+	base := Wrap(&runtimecontracts.WorkflowContractBundle{})
+	generation := triggergeneration.FromCanonicalBytes([]byte("trigger-generation"))
+	capabilities := Capabilities{}.
+		WithProviderTriggerEvents(base, generation, []runtimeprovideroutput.Authorization{{}}).
+		WithConnectorPackImports(
+			map[string]ConnectorGenerationSurface{"deliver": {}},
+			map[string]ConnectorImportSource{"deliver": {}},
+		)
+	if _, _, ok := capabilities.ProviderTriggerEvents(); ok {
+		t.Fatal("incomplete provider authorization acquired provider-trigger capability")
+	}
+	if _, ok := capabilities.ConnectorGeneration("deliver"); ok {
+		t.Fatal("incomplete connector generation acquired capability")
+	}
+	if _, ok := capabilities.ConnectorImportSource("deliver"); ok {
+		t.Fatal("incomplete connector import source acquired capability")
+	}
+}
+
+func semanticCapabilityGeneration(version string, permissions []ConnectorGenerationPermission) ConnectorGenerationSurface {
+	if len(permissions) == 0 {
+		permissions = []ConnectorGenerationPermission{MustConnectorGenerationPermission("messages.write", "owner")}
+	}
+	return MustConnectorGenerationSurface(
+		version,
+		"catalog/source.yaml",
+		"sha256:"+strings.Repeat("c", 64),
+		"catalog/profile.yaml",
+		"sha256:"+strings.Repeat("d", 64),
+		"sha256:"+strings.Repeat("e", 64),
+		"messages.send",
+		permissions,
+		"fixture",
+		"passing",
+		"approved",
+	)
 }

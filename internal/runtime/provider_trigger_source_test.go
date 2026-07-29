@@ -182,10 +182,11 @@ func TestProviderTriggerNormalizedEventLowersThroughExactExternalInputPin(t *tes
 		t.Fatalf("target-free normalized route plan = %#v", plan)
 	}
 
-	rawPlans, rawIssues := runtimepinrouting.LowerTargetFreeInputRoutePlans(wrapped, []runtimeprovideroutput.Authorization{{
-		Provider: "telegram", Event: "inbound.telegram", PackID: "provider.telegram", PackVersion: "1.0.0",
-		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: catalog.Generation().Diagnostic(),
-	}})
+	rawAuthorization := runtimeprovideroutput.MustAuthorization(
+		"telegram", "inbound.telegram", "provider.telegram", "1.0.0",
+		"sha256:"+strings.Repeat("a", 64), catalog.Generation(),
+	)
+	rawPlans, rawIssues := runtimepinrouting.LowerTargetFreeInputRoutePlans(wrapped, []runtimeprovideroutput.Authorization{rawAuthorization})
 	if len(rawIssues) != 0 || len(rawPlans) != 0 {
 		t.Fatalf("raw standing event acquired target-free route plans=%#v issues=%#v", rawPlans, rawIssues)
 	}

@@ -19,6 +19,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -582,10 +583,11 @@ func inboundPublicationProofEventsCount(t *testing.T, request runtimeinbound.Req
 	payload := []byte(`{"value":{"z":2,"a":1},"provider":"github"}`)
 	raw := eventtest.ExistingRunRootIngress(rawID, "inbound.github.push", "inbound-gateway", "", payload, 0, request.ResolvedRunID, envelope, request.OriginalReceivedAt)
 	normalized := eventtest.ExistingRunRootIngress(normalizedID, "github.push.normalized", "inbound-gateway", "", payload, 0, request.ResolvedRunID, events.EventEnvelope{}, request.OriginalReceivedAt)
-	authorization := runtimeprovideroutput.Authorization{
-		Provider: request.Provider, Event: string(normalized.Type()), PackID: "provider.github", PackVersion: "1.0.0",
-		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: "proof-generation",
-	}
+	authorization := runtimeprovideroutput.MustAuthorization(
+		request.Provider, string(normalized.Type()), "provider.github", "1.0.0",
+		"sha256:"+strings.Repeat("a", 64),
+		triggergeneration.FromCanonicalBytes([]byte("proof-generation")),
+	)
 	publications := []runtimeinbound.EventFinalization{
 		{Ordinal: 0, Event: raw, Kind: runtimeprovideroutput.KindRaw, RecipientManifest: []byte(`[]`)},
 		{Ordinal: 1, Event: normalized, Kind: runtimeprovideroutput.KindNormalized, Authorization: authorization, RecipientManifest: []byte(`[]`)},

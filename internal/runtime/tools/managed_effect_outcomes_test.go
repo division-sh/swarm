@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -37,7 +38,10 @@ func TestManagedToolEffectOutcomes(t *testing.T) {
 	t.Run("authored_http_tool", func(t *testing.T) {
 		harness := effecttest.New()
 		executor := &Executor{httpClient: &http.Client{Transport: managedEffectRoundTripper{t: t, harness: harness, adapter: "authored_http_tool"}}}
-		tool := newExecutionTool(executionToolValue{name: "effect-test"})
+		tool := admittedExecutionToolForTest(t, "effect-test",
+			runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerPlatformBuiltin),
+			runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.ToolInputSchema{}),
+		)
 		_, err := executor.execHTTPRequestOnce(harness.CompletionContext("authored-http"), http.MethodPost, "http://effect.test/tool", nil, bytes.NewReader([]byte(`{"x":1}`)), time.Second, tool, nil)
 		if err == nil {
 			t.Fatal("authored HTTP transport failure returned nil")

@@ -30,18 +30,17 @@ func ValidateToolImplementations(source semanticview.Source) ([]error, error) {
 		if strings.HasPrefix(name, runtimecontracts.PrivateChannelActivityPrefix) {
 			return warnings, fmt.Errorf("tool %s uses reserved private channel activity namespace %s*", name, runtimecontracts.PrivateChannelActivityPrefix)
 		}
-		normalized := normalizeImplementationClass(name, entry)
 		managedCredential, hasManagedCredential := entry.ManagedCredential()
 		httpSpec, hasHTTP := entry.HTTP()
-		switch normalized {
-		case implementationPlatformBuiltin:
+		switch entry.Handler() {
+		case runtimecontracts.ToolHandlerPlatformBuiltin:
 			if hasManagedCredential {
 				return warnings, fmt.Errorf("tool %s managed_credential is only supported for handler_type http", name)
 			}
 			if _, ok := supportedRuntimeToolNames[name]; !ok {
 				return warnings, fmt.Errorf("tool %s declares handler_type platform_builtin but is not shipped by the generic runtime", name)
 			}
-		case implementationHTTP:
+		case runtimecontracts.ToolHandlerHTTP:
 			if !hasHTTP {
 				return warnings, fmt.Errorf("tool %s resolves as http but has no http block", name)
 			}
@@ -76,26 +75,24 @@ func ValidateToolImplementations(source semanticview.Source) ([]error, error) {
 					return warnings, fmt.Errorf("tool %s managed_credential.%s", name, err.Error())
 				}
 			}
-		case implementationMCP:
+		case runtimecontracts.ToolHandlerMCP:
 			if hasManagedCredential {
 				return warnings, fmt.Errorf("tool %s managed_credential is only supported for handler_type http", name)
 			}
 			if !strings.Contains(name, ".") {
 				warnings = append(warnings, fmt.Errorf("tool %s uses handler_type mcp but is not prefixed with a server namespace", name))
 			}
-		case implementationChannel:
-			if !strings.HasPrefix(name, "channel.") || entry.Category() != "channel_operation" {
+		case runtimecontracts.ToolHandlerChannel:
+			if !strings.HasPrefix(name, "channel.") || entry.Category() != runtimecontracts.ToolCategoryChannelOperation {
 				return warnings, fmt.Errorf("tool %s uses handler_type channel outside the compiled channel runtime surface", name)
 			}
 			if hasHTTP || hasManagedCredential || len(entry.Credentials()) != 0 {
 				return warnings, fmt.Errorf("tool %s channel runtime surface must not expose connector transport or credentials", name)
 			}
-		case "":
-			if entry.Handler() == runtimecontracts.ToolHandlerUnspecified {
-				warnings = append(warnings, fmt.Errorf("tool %s has no executable implementation in the generic runtime; provide handler_type: http with an http block or expose it via mcp", name))
-				continue
-			}
-			return warnings, fmt.Errorf("tool %s has unsupported handler_type %q", name, entry.Handler().String())
+		case runtimecontracts.ToolHandlerUnspecified:
+			warnings = append(warnings, fmt.Errorf("tool %s has no executable implementation in the generic runtime; provide handler_type: http with an http block or expose it via mcp", name))
+		default:
+			return warnings, fmt.Errorf("tool %s has unsupported admitted handler", name)
 		}
 	}
 	return warnings, nil

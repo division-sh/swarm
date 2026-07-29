@@ -1063,8 +1063,7 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 	if !hasHTTP {
 		return preparedActivityHTTPTool{}, activityContractFailure(intent.Tool, "http_block_missing")
 	}
-	rateLimit, maxWait := tool.RateLimitSyntax()
-	if rateLimit != "" || maxWait != "" {
+	if tool.RatePolicy().Enabled() {
 		return preparedActivityHTTPTool{}, activityContractFailure(intent.Tool, "rate_limit_unsupported")
 	}
 	credentials := map[string]any{}
@@ -1086,7 +1085,7 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 		secrets = secretValues
 	}
 	if hasManagedCredential {
-		if intent.EffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite || tool.Category() != "provider_connector" {
+		if intent.EffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite || tool.Category() != runtimecontracts.ToolCategoryProviderConnector {
 			return preparedActivityHTTPTool{}, activityContractFailure(intent.Tool, "managed_credential_effect_class_unsupported")
 		}
 	}
