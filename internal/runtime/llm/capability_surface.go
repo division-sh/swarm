@@ -131,11 +131,19 @@ func managedCapabilityPlan(ctx context.Context, runtime Runtime, runtimeMode str
 	if strings.TrimSpace(runtimeMode) == "" {
 		runtimeMode = contract.RuntimeMode
 	}
+	nativeNames := nativeCapabilityNames(actor)
+	providerNative, err := managedProviderNativeNames(contract, nativeNames)
+	if err != nil {
+		return managedcapabilities.Surface{}, err
+	}
 	planned := make([]managedcapabilities.PlannedTool, 0, len(tools)+4)
 	seen := map[string]struct{}{}
 	for _, def := range tools {
 		name := toolidentity.CanonicalName(def.Name)
 		if name == "" {
+			continue
+		}
+		if _, providerOwned := providerNative[name]; providerOwned {
 			continue
 		}
 		if _, duplicate := seen[name]; duplicate {
@@ -150,22 +158,31 @@ func managedCapabilityPlan(ctx context.Context, runtime Runtime, runtimeMode str
 			Name:           name,
 			DefinitionHash: ToolDefinitionIdentity(def),
 			Capability:     capability,
-			Bindings:       managedCapabilityBindings(contract, actor, name),
+			Bindings:       managedConcreteCapabilityBindings(contract, name),
 		})
 	}
-	for _, nativeName := range nativeCapabilityNames(actor) {
+	for _, nativeName := range nativeNames {
 		if _, duplicate := seen[nativeName]; duplicate {
 			continue
 		}
-		capability, found := capabilities.Capability(nativeName)
-		if !found {
-			capability = toolcapabilities.Capability{Name: nativeName, Visible: true, Callable: true, AuthorizationClass: "provider_native"}
+		if _, providerOwned := providerNative[nativeName]; !providerOwned {
+			return managedcapabilities.Surface{}, fmt.Errorf("authored native capability %s has no selected provider-native support or concrete fallback definition", nativeName)
 		}
+		bindings := managedProviderNativeBindings(actor, nativeName)
+		if len(bindings) == 0 {
+			return managedcapabilities.Surface{}, fmt.Errorf("provider-native capability %s has no exact provider binding", nativeName)
+		}
+		seen[nativeName] = struct{}{}
 		planned = append(planned, managedcapabilities.PlannedTool{
 			Name:           nativeName,
 			DefinitionHash: hashJSON(map[string]any{"canonical_name": nativeName, "provider_contract": contract}),
-			Capability:     capability,
-			Bindings:       managedCapabilityBindings(contract, actor, nativeName),
+			Capability: toolcapabilities.Capability{
+				Name:               nativeName,
+				Visible:            true,
+				Callable:           true,
+				AuthorizationClass: "provider_native",
+			},
+			Bindings: bindings,
 		})
 	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
@@ -181,13 +198,45 @@ func managedCapabilityPlan(ctx context.Context, runtime Runtime, runtimeMode str
 	if err != nil {
 		return managedcapabilities.Surface{}, err
 	}
-	if contract.Transport == ProviderTransportAPI {
-		return surface, nil
-	}
 	return surface, nil
 }
 
-func managedCapabilityBindings(contract ProviderContract, actor models.AgentConfig, name string) []managedcapabilities.DeliveryBinding {
+// ConcreteManagedToolDefinitions removes provider-owned native capabilities
+// before the platform executor is asked to classify concrete definitions.
+func ConcreteManagedToolDefinitions(runtime Runtime, actor models.AgentConfig, definitions []ToolDefinition) ([]ToolDefinition, error) {
+	contract, ok := ProviderContractForRuntime(runtime)
+	if !ok {
+		return nil, fmt.Errorf("managed capability surface requires provider contract")
+	}
+	providerNative, err := managedProviderNativeNames(contract, nativeCapabilityNames(actor))
+	if err != nil {
+		return nil, err
+	}
+	concrete := make([]ToolDefinition, 0, len(definitions))
+	for _, definition := range definitions {
+		if _, providerOwned := providerNative[toolidentity.CanonicalName(definition.Name)]; providerOwned {
+			continue
+		}
+		concrete = append(concrete, definition)
+	}
+	return concrete, nil
+}
+
+func managedProviderNativeNames(contract ProviderContract, nativeNames []string) (map[string]struct{}, error) {
+	providerNative := make(map[string]struct{}, len(nativeNames))
+	for _, name := range nativeNames {
+		if providerNativeCapabilitySupported(contract.NativeTools.Capabilities, name) {
+			providerNative[name] = struct{}{}
+			continue
+		}
+		if !contract.NativeTools.FallbackToolsAllowed {
+			return nil, fmt.Errorf("provider contract %s does not support authored native capability %s", contract.RuntimeMode, name)
+		}
+	}
+	return providerNative, nil
+}
+
+func managedConcreteCapabilityBindings(contract ProviderContract, name string) []managedcapabilities.DeliveryBinding {
 	name = toolidentity.CanonicalName(name)
 	if contract.Transport == ProviderTransportAPI {
 		return []managedcapabilities.DeliveryBinding{{Kind: managedcapabilities.BindingAPIDefinition, ExactName: name, RequiredEvidenceKind: evidenceAPIRequestDelivered}}
@@ -195,17 +244,36 @@ func managedCapabilityBindings(contract ProviderContract, actor models.AgentConf
 	if contract.Transport == ProviderTransportInProcess {
 		return []managedcapabilities.DeliveryBinding{{Kind: managedcapabilities.BindingLocalRuntime, ExactName: name, RequiredEvidenceKind: evidenceMockInputDelivered}}
 	}
-	if builtins := providerBuiltinNamesForCanonical(actor, name); len(builtins) > 0 {
-		out := make([]managedcapabilities.DeliveryBinding, 0, len(builtins))
-		for _, builtin := range builtins {
-			out = append(out, managedcapabilities.DeliveryBinding{Kind: managedcapabilities.BindingProviderBuiltin, ExactName: builtin, RequiredEvidenceKind: evidenceProviderVisible})
-		}
-		return out
-	}
 	exactName := toolidentity.RuntimeToolsMCPPrefix + name
 	return []managedcapabilities.DeliveryBinding{
 		{Kind: managedcapabilities.BindingMCPTool, ExactName: exactName, RequiredEvidenceKind: evidenceMCPListed},
 		{Kind: managedcapabilities.BindingMCPProvider, ExactName: exactName, RequiredEvidenceKind: evidenceMCPVisible},
+	}
+}
+
+func managedProviderNativeBindings(actor models.AgentConfig, name string) []managedcapabilities.DeliveryBinding {
+	builtins := providerBuiltinNamesForCanonical(actor, name)
+	out := make([]managedcapabilities.DeliveryBinding, 0, len(builtins))
+	for _, builtin := range builtins {
+		out = append(out, managedcapabilities.DeliveryBinding{
+			Kind:                 managedcapabilities.BindingProviderBuiltin,
+			ExactName:            builtin,
+			RequiredEvidenceKind: evidenceProviderVisible,
+		})
+	}
+	return out
+}
+
+func providerNativeCapabilitySupported(capabilities NativeToolCapabilities, name string) bool {
+	switch toolidentity.CanonicalName(name) {
+	case "bash":
+		return capabilities.Bash
+	case "web_search":
+		return capabilities.WebSearch
+	case "read_file", "write_file":
+		return capabilities.FileIO
+	default:
+		return false
 	}
 }
 

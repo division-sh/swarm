@@ -233,6 +233,7 @@ type startupProbeToolExecutor struct {
 	contextCaps      map[string]toolcapabilities.Capability
 	contextDefCalls  int
 	contextCapsCalls int
+	contextCapNames  [][]string
 	executed         []string
 	execErrs         map[string]error
 }
@@ -268,6 +269,7 @@ func (s *startupProbeToolExecutor) ToolDefinitionsForActorInContext(context.Cont
 
 func (s *startupProbeToolExecutor) ToolCapabilitiesForActorInContext(_ context.Context, _ runtimeactors.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
 	s.contextCapsCalls++
+	s.contextCapNames = append(s.contextCapNames, append([]string(nil), names...))
 	if s.contextCaps != nil {
 		return startupProbeCapabilitySet(names, s.contextCaps)
 	}
@@ -728,7 +730,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_AcceptsFullyDeniedToolPlan(t *te
 	}
 }
 
-func TestValidateClaudeMCPToolsForManagedAgents_UsesLiveVisibleSurfaceForNativeBuiltinOnlySurface(t *testing.T) {
+func TestValidateClaudeMCPToolsForManagedAgents_SeparatesProviderNativeSurfaceFromFallbackDenial(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := runtimemanager.NewAgentManager(nil, nil)
@@ -752,10 +754,10 @@ func TestValidateClaudeMCPToolsForManagedAgents_UsesLiveVisibleSurfaceForNativeB
 			{Name: "web_search", Schema: map[string]any{"type": "object"}},
 		},
 		caps: map[string]toolcapabilities.Capability{
-			"read_file":  {Name: "read_file", Visible: true, Callable: true},
-			"write_file": {Name: "write_file", Visible: true, Callable: true},
-			"bash":       {Name: "bash", Visible: true, Callable: true},
-			"web_search": {Name: "web_search", Visible: true, Callable: true},
+			"read_file":  {Name: "read_file", DenialReason: "provider-native fallback is not admitted"},
+			"write_file": {Name: "write_file", DenialReason: "provider-native fallback is not admitted"},
+			"bash":       {Name: "bash", DenialReason: "provider-native fallback is not admitted"},
+			"web_search": {Name: "web_search", DenialReason: "provider-native fallback is not admitted"},
 		},
 	}
 	turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
@@ -773,6 +775,9 @@ func TestValidateClaudeMCPToolsForManagedAgents_UsesLiveVisibleSurfaceForNativeB
 	}
 	if len(exec.executed) != 0 {
 		t.Fatalf("executed = %#v, want no MCP startup probe for native-only surface", exec.executed)
+	}
+	if len(exec.contextCapNames) != 1 || len(exec.contextCapNames[0]) != 0 {
+		t.Fatalf("concrete executor capability queries = %#v, want provider-native names excluded", exec.contextCapNames)
 	}
 }
 

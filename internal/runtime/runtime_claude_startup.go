@@ -276,7 +276,10 @@ func ValidateManagedProviderPreflight(ctx context.Context, cfg *config.Config, s
 			return nil, fmt.Errorf("claude cli startup probe is required for agent %s", agentID)
 		}
 		agentCtx := runtimeactors.WithActor(ctx, agentCfg)
-		sessionTools, capabilities := startupToolPlan(agentCtx, agentCfg, tools)
+		sessionTools, capabilities, err := startupToolPlan(agentCtx, agentCfg, modelRuntime, tools)
+		if err != nil {
+			return nil, fmt.Errorf("build managed capability startup inputs for agent %s: %w", agentID, err)
+		}
 		probeID := uuid.NewString()
 		capabilityAuthority := managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityStartupProbe, ID: probeID,
@@ -397,34 +400,24 @@ func isClaudeCLIBackend(cfg *config.Config) (bool, error) {
 	return profile.ID == llmselection.BackendClaudeCLI, nil
 }
 
-func startupToolPlan(ctx context.Context, agentCfg runtimeactors.AgentConfig, tools claudeStartupToolSource) ([]llm.ToolDefinition, toolcapabilities.Set) {
+func startupToolPlan(ctx context.Context, agentCfg runtimeactors.AgentConfig, modelRuntime llm.Runtime, tools claudeStartupToolSource) ([]llm.ToolDefinition, toolcapabilities.Set, error) {
 	concreteTools := tools.ToolDefinitionsForActor(agentCfg)
 	if contextAware, ok := tools.(claudeStartupContextAwareToolSource); ok {
 		concreteTools = contextAware.ToolDefinitionsForActorInContext(ctx, agentCfg)
 	}
+	var err error
+	concreteTools, err = llm.ConcreteManagedToolDefinitions(modelRuntime, agentCfg, concreteTools)
+	if err != nil {
+		return nil, toolcapabilities.Set{}, err
+	}
 	concreteNames := startupSessionToolNames(concreteTools)
-	concreteNames = append(concreteNames, startupNativeCapabilityNames(agentCfg)...)
 	var concreteCaps toolcapabilities.Set
 	if contextAware, ok := tools.(claudeStartupContextAwareToolSource); ok {
 		concreteCaps = contextAware.ToolCapabilitiesForActorInContext(ctx, agentCfg, concreteNames, nil)
 	} else {
 		concreteCaps = tools.ToolCapabilitiesForActor(agentCfg, concreteNames, nil)
 	}
-	return concreteTools, concreteCaps
-}
-
-func startupNativeCapabilityNames(agent runtimeactors.AgentConfig) []string {
-	var names []string
-	if agent.NativeTools.Bash {
-		names = append(names, "bash")
-	}
-	if agent.NativeTools.WebSearch {
-		names = append(names, "web_search")
-	}
-	if agent.NativeTools.FileIO {
-		names = append(names, "read_file", "write_file")
-	}
-	return names
+	return concreteTools, concreteCaps, nil
 }
 
 func startupSurfaceCanonicalNames(surface managedcapabilities.Surface, kind managedcapabilities.BindingKind) []string {

@@ -162,11 +162,11 @@ func (c *Conversation) continueOnce(ctx context.Context, msg Message) (*Response
 			return nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "managed_capability_turn_authority_invalid", "llm-conversation", "prepare_turn", map[string]any{"validation_error": err.Error()}, err)
 		}
 		_ = authority
-		capabilities, err := c.plannedToolCapabilities(turnCtx)
+		definitions, capabilities, err := c.plannedToolInputs(turnCtx)
 		if err != nil {
 			return nil, err
 		}
-		surface, err := managedCapabilityPlanForTurn(turnCtx, c.runtime, c.Session, c.turnToolDefinitions(), capabilities)
+		surface, err := managedCapabilityPlanForTurn(turnCtx, c.runtime, c.Session, definitions, capabilities)
 		if err != nil {
 			return nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "managed_capability_plan_invalid", "llm-conversation", "prepare_turn", map[string]any{"validation_error": err.Error()}, err)
 		}
@@ -445,26 +445,28 @@ func (c *Conversation) withToolCapabilities(ctx context.Context) context.Context
 	return toolcapabilities.WithContext(ctx, c.toolExecutor.ToolCapabilitiesForActor(actor, names, nil))
 }
 
-func (c *Conversation) plannedToolCapabilities(ctx context.Context) (toolcapabilities.Set, error) {
+func (c *Conversation) plannedToolInputs(ctx context.Context) ([]ToolDefinition, toolcapabilities.Set, error) {
 	if c == nil || c.toolExecutor == nil {
-		return toolcapabilities.Set{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_executor_missing", "llm-conversation", "plan_turn", nil)
+		return nil, toolcapabilities.Set{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_executor_missing", "llm-conversation", "plan_turn", nil)
 	}
 	actor, ok := models.ActorFromContext(ctx)
 	if !ok {
-		return toolcapabilities.Set{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_actor_missing", "llm-conversation", "plan_turn", nil)
+		return nil, toolcapabilities.Set{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_actor_missing", "llm-conversation", "plan_turn", nil)
 	}
-	defs := c.turnToolDefinitions()
-	names := make([]string, 0, len(defs)+4)
-	for _, def := range defs {
+	definitions, err := ConcreteManagedToolDefinitions(c.runtime, actor, c.turnToolDefinitions())
+	if err != nil {
+		return nil, toolcapabilities.Set{}, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "managed_capability_plan_invalid", "llm-conversation", "prepare_turn", map[string]any{"validation_error": err.Error()}, err)
+	}
+	names := make([]string, 0, len(definitions))
+	for _, def := range definitions {
 		if name := strings.TrimSpace(def.Name); name != "" {
 			names = append(names, name)
 		}
 	}
-	names = append(names, nativeCapabilityNames(actor)...)
 	if contextAware, ok := c.toolExecutor.(ContextAwareCapabilityToolExecutor); ok {
-		return contextAware.ToolCapabilitiesForActorInContext(ctx, actor, names, nil), nil
+		return definitions, contextAware.ToolCapabilitiesForActorInContext(ctx, actor, names, nil), nil
 	}
-	return c.toolExecutor.ToolCapabilitiesForActor(actor, names, nil), nil
+	return definitions, c.toolExecutor.ToolCapabilitiesForActor(actor, names, nil), nil
 }
 
 func managedAgentExecutionContext(ctx context.Context) bool {

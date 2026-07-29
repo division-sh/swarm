@@ -242,7 +242,7 @@ func validReleaseClaudeDockerExecArgs(t *testing.T, rawURL string) []string {
 		"--verbose",
 		"--system-prompt", "release worker",
 		"--disallowedTools", "Bash",
-		"--allowedTools", "ExitPlanMode,mcp__runtime-tools__emit_work_completed",
+		"--allowedTools", strings.Join(releaseE2EAllowedTools(), ","),
 		"--mcp-config", string(rawConfig),
 		"--strict-mcp-config",
 	}
@@ -280,13 +280,14 @@ func validReleaseEvidence() []fakeDockerRecord {
 		{Class: "network_connect"},
 		{
 			Class:     "claude_startup",
-			Args:      []string{"claude", "--allowedTools", "ExitPlanMode,mcp__runtime-tools__emit_work_completed"},
+			Args:      []string{"claude", "--allowedTools", strings.Join(releaseE2EAllowedTools(), ",")},
 			SessionID: "11111111-1111-1111-1111-111111111111",
 			RawMCPURL: releaseE2ERawMCPURL,
 			MCPURL:    releaseE2EHostMCPURL,
 		},
 		{
 			Class:     "claude_live",
+			Args:      []string{"claude", "--allowedTools", strings.Join(releaseE2EAllowedTools(), ",")},
 			SessionID: "22222222-2222-2222-2222-222222222222",
 			RawMCPURL: releaseE2ERawMCPURL,
 			MCPURL:    releaseE2EHostMCPURL,
