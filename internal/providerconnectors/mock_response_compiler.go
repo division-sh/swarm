@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -43,10 +42,10 @@ func CompileMockResponsePlan(source semanticview.Source) (*MockResponsePlan, err
 			}
 			return nil, fmt.Errorf("compile mock connector response for tool %q: %s", toolID, strings.Join(parts, "; "))
 		}
-		if err := validateMockResponseSchema(tool.OutputSchema, "output_schema", true); err != nil {
+		if err := validateMockResponseSchema(tool.OutputSchema(), "output_schema", true); err != nil {
 			return nil, fmt.Errorf("compile mock connector response for tool %q: %w", toolID, err)
 		}
-		value, err := deterministicMockSchemaValue(tool.OutputSchema, "output_schema")
+		value, err := deterministicMockSchemaValue(tool.OutputSchema(), "output_schema")
 		if err != nil {
 			return nil, fmt.Errorf("compile mock connector response for tool %q: %w", toolID, err)
 		}
@@ -70,86 +69,80 @@ func CompileMockResponsePlan(source semanticview.Source) (*MockResponsePlan, err
 }
 
 func validateMockResponseSchema(schema runtimecontracts.ToolInputSchema, path string, root bool) error {
-	typeName := strings.TrimSpace(schema.Type)
-	if typeName == "" {
-		typeName = "object"
+	kind := schema.Kind()
+	if root && kind != runtimecontracts.ToolSchemaObject {
+		return fmt.Errorf("%s: provider connector mock response root must be object, got %q", path, kind)
 	}
-	if root && typeName != "object" {
-		return fmt.Errorf("%s: provider connector mock response root must be object, got %q", path, typeName)
-	}
-	switch typeName {
-	case "object", "array", "string", "boolean", "number", "integer", "null":
+	switch kind {
+	case runtimecontracts.ToolSchemaObject, runtimecontracts.ToolSchemaArray, runtimecontracts.ToolSchemaString,
+		runtimecontracts.ToolSchemaBoolean, runtimecontracts.ToolSchemaNumber, runtimecontracts.ToolSchemaInteger,
+		runtimecontracts.ToolSchemaNull:
 	default:
-		return fmt.Errorf("%s: unsupported schema type %q", path, typeName)
+		return fmt.Errorf("%s: unsupported schema type %q", path, kind)
 	}
-	if err := validateMockNumericBounds(schema, path, typeName); err != nil {
+	if err := validateMockNumericBounds(schema, path); err != nil {
 		return err
 	}
 
-	enum, enumPresent, err := runtimecontracts.ToolInputSchemaEnumProjection(schema)
-	if err != nil {
-		return fmt.Errorf("%s.%w", path, err)
-	}
-	if enumPresent && len(enum) == 0 {
-		return fmt.Errorf("%s.enum: explicitly declared enum must contain at least one value", path)
-	}
-	projected := runtimecontracts.ToolInputSchemaJSONSchema(schema)
+	enum, enumPresent := schema.EnumValues()
 	for index, value := range enum {
-		if err := eventschema.ValidateValueAgainstSchema(projected, value); err != nil {
+		if err := schema.Validate(value.Interface()); err != nil {
 			return fmt.Errorf("%s.enum[%d]: value does not match declared schema: %w", path, index, err)
 		}
 	}
+	_ = enumPresent
 
-	if typeName == "object" {
-		for _, required := range sortedUniqueStrings(schema.Required) {
-			if _, ok := schema.Properties[required]; !ok {
+	if kind == runtimecontracts.ToolSchemaObject {
+		for _, required := range sortedUniqueStrings(schema.RequiredProperties()) {
+			if _, ok := schema.Property(required); !ok {
 				return fmt.Errorf("%s.properties.%s: required property has no declared schema", path, required)
 			}
 		}
-		propertyNames := make([]string, 0, len(schema.Properties))
-		for name := range schema.Properties {
-			propertyNames = append(propertyNames, name)
-		}
-		sort.Strings(propertyNames)
-		for _, name := range propertyNames {
-			if err := validateMockResponseSchema(schema.Properties[name], path+".properties."+name, false); err != nil {
+		for _, name := range schema.PropertyNames() {
+			property, _ := schema.Property(name)
+			if err := validateMockResponseSchema(property, path+".properties."+name, false); err != nil {
 				return err
 			}
 		}
-		if schema.AdditionalProperties.Schema != nil {
-			if err := validateMockResponseSchema(*schema.AdditionalProperties.Schema, path+".additionalProperties", false); err != nil {
+		if additional, ok := schema.AdditionalPropertiesSchema(); ok {
+			if err := validateMockResponseSchema(additional, path+".additionalProperties", false); err != nil {
 				return err
 			}
 		}
 	}
-	if typeName == "array" && schema.Items != nil {
-		if err := validateMockResponseSchema(*schema.Items, path+".items", false); err != nil {
-			return err
+	if kind == runtimecontracts.ToolSchemaArray {
+		items, ok := schema.ItemsSchema()
+		if ok {
+			if err := validateMockResponseSchema(items, path+".items", false); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-func validateMockNumericBounds(schema runtimecontracts.ToolInputSchema, path, typeName string) error {
-	if schema.Minimum != nil && (math.IsNaN(*schema.Minimum) || math.IsInf(*schema.Minimum, 0)) {
+func validateMockNumericBounds(schema runtimecontracts.ToolInputSchema, path string) error {
+	minimum, hasMinimum := schema.Minimum()
+	maximum, hasMaximum := schema.Maximum()
+	if hasMinimum && (math.IsNaN(minimum) || math.IsInf(minimum, 0)) {
 		return fmt.Errorf("%s: minimum must be finite", path)
 	}
-	if schema.Maximum != nil && (math.IsNaN(*schema.Maximum) || math.IsInf(*schema.Maximum, 0)) {
+	if hasMaximum && (math.IsNaN(maximum) || math.IsInf(maximum, 0)) {
 		return fmt.Errorf("%s: maximum must be finite", path)
 	}
-	if schema.Minimum != nil && schema.Maximum != nil && *schema.Minimum > *schema.Maximum {
-		return fmt.Errorf("%s: minimum %v exceeds maximum %v", path, *schema.Minimum, *schema.Maximum)
+	if hasMinimum && hasMaximum && minimum > maximum {
+		return fmt.Errorf("%s: minimum %v exceeds maximum %v", path, minimum, maximum)
 	}
-	if typeName == "integer" {
-		minimum := math.Inf(-1)
-		maximum := math.Inf(1)
-		if schema.Minimum != nil {
-			minimum = *schema.Minimum
+	if schema.Kind() == runtimecontracts.ToolSchemaInteger {
+		lower := math.Inf(-1)
+		upper := math.Inf(1)
+		if hasMinimum {
+			lower = minimum
 		}
-		if schema.Maximum != nil {
-			maximum = *schema.Maximum
+		if hasMaximum {
+			upper = maximum
 		}
-		if math.Ceil(minimum) > math.Floor(maximum) {
+		if math.Ceil(lower) > math.Floor(upper) {
 			return fmt.Errorf("%s: bounds contain no integer", path)
 		}
 	}
@@ -157,25 +150,19 @@ func validateMockNumericBounds(schema runtimecontracts.ToolInputSchema, path, ty
 }
 
 func deterministicMockSchemaValue(schema runtimecontracts.ToolInputSchema, path string) (any, error) {
-	enum, enumPresent, err := runtimecontracts.ToolInputSchemaEnumProjection(schema)
-	if err != nil {
-		return nil, fmt.Errorf("%s.%w", path, err)
-	}
+	enum, enumPresent := schema.EnumValues()
 	if enumPresent {
 		if len(enum) == 0 {
 			return nil, fmt.Errorf("%s.enum: explicitly declared enum must contain at least one value", path)
 		}
-		return enum[0], nil
+		return enum[0].Interface(), nil
 	}
-	typeName := strings.TrimSpace(schema.Type)
-	if typeName == "" {
-		typeName = "object"
-	}
-	switch typeName {
-	case "object":
-		value := make(map[string]any, len(schema.Required))
-		for _, name := range sortedUniqueStrings(schema.Required) {
-			property, ok := schema.Properties[name]
+	switch schema.Kind() {
+	case runtimecontracts.ToolSchemaObject:
+		required := sortedUniqueStrings(schema.RequiredProperties())
+		value := make(map[string]any, len(required))
+		for _, name := range required {
+			property, ok := schema.Property(name)
 			if !ok {
 				return nil, fmt.Errorf("%s.properties.%s: required property has no declared schema", path, name)
 			}
@@ -186,41 +173,41 @@ func deterministicMockSchemaValue(schema runtimecontracts.ToolInputSchema, path 
 			value[name] = generated
 		}
 		return value, nil
-	case "array":
+	case runtimecontracts.ToolSchemaArray:
 		return []any{}, nil
-	case "string":
+	case runtimecontracts.ToolSchemaString:
 		return "", nil
-	case "boolean":
+	case runtimecontracts.ToolSchemaBoolean:
 		return false, nil
-	case "number":
+	case runtimecontracts.ToolSchemaNumber:
 		return deterministicMockNumber(schema), nil
-	case "integer":
+	case runtimecontracts.ToolSchemaInteger:
 		return deterministicMockInteger(schema), nil
-	case "null":
+	case runtimecontracts.ToolSchemaNull:
 		return nil, nil
 	default:
-		return nil, fmt.Errorf("%s: unsupported schema type %q", path, typeName)
+		return nil, fmt.Errorf("%s: unsupported schema type %q", path, schema.Kind())
 	}
 }
 
 func deterministicMockNumber(schema runtimecontracts.ToolInputSchema) float64 {
 	value := float64(0)
-	if schema.Minimum != nil && value < *schema.Minimum {
-		value = *schema.Minimum
+	if minimum, ok := schema.Minimum(); ok && value < minimum {
+		value = minimum
 	}
-	if schema.Maximum != nil && value > *schema.Maximum {
-		value = *schema.Maximum
+	if maximum, ok := schema.Maximum(); ok && value > maximum {
+		value = maximum
 	}
 	return value
 }
 
 func deterministicMockInteger(schema runtimecontracts.ToolInputSchema) float64 {
 	value := float64(0)
-	if schema.Minimum != nil && value < *schema.Minimum {
-		value = math.Ceil(*schema.Minimum)
+	if minimum, ok := schema.Minimum(); ok && value < minimum {
+		value = math.Ceil(minimum)
 	}
-	if schema.Maximum != nil && value > *schema.Maximum {
-		value = math.Floor(*schema.Maximum)
+	if maximum, ok := schema.Maximum(); ok && value > maximum {
+		value = math.Floor(maximum)
 	}
 	return value
 }

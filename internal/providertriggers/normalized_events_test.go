@@ -88,7 +88,7 @@ func TestCompiledPackPlanOwnsNormalizedOutputAuthorization(t *testing.T) {
 	got := delivery.Events[1].Authorization
 	if !got.Valid() || got.Provider != "telegram" || got.Event != "inbound.telegram.text_message" ||
 		got.PackID != identity.ID || got.PackVersion != identity.Version ||
-		got.ManifestHash != identity.ManifestHash || got.GenerationID != catalog.GenerationID() {
+		got.ManifestHash != identity.ManifestHash || got.GenerationID != catalog.Generation().Diagnostic() {
 		t.Fatalf("normalized output authorization = %#v, want compiled pack identity/generation", got)
 	}
 	if err := catalog.VerifyProviderOutputAuthorization(got); err != nil {
@@ -134,7 +134,7 @@ func TestNormalizedEventManifestRejectsOverlappingBranchesAtLoad(t *testing.T) {
 	manifest.NormalizedEvents = append(manifest.NormalizedEvents, NormalizedEventManifest{
 		Event: "inbound.telegram.message_copy",
 		Fields: map[string]NormalizedEventFieldProjection{
-			"text": {From: "message.text", Schema: runtimecontracts.ToolInputSchema{Type: "string"}},
+			"text": {From: "message.text", Schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string"))},
 		},
 	})
 	err := manifest.Validate()
@@ -152,7 +152,7 @@ func TestNormalizedEventPlanRejectsForcedRuntimeMultiMatch(t *testing.T) {
 	manifest.NormalizedEvents = append(manifest.NormalizedEvents, NormalizedEventManifest{
 		Event: "inbound.telegram.message_copy",
 		Fields: map[string]NormalizedEventFieldProjection{
-			"text": {From: "message.text", Schema: runtimecontracts.ToolInputSchema{Type: "string"}},
+			"text": {From: "message.text", Schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string"))},
 		},
 	})
 	_, err := manifest.Accept(Request{
@@ -288,8 +288,8 @@ func TestNormalizedEventPlanRejectsCompositeSchemaMismatchesWithPackProvenance(t
 		value    any
 		wantPart string
 	}{
-		{name: "array", schema: runtimecontracts.ToolInputSchema{Type: "array", Items: &runtimecontracts.ToolInputSchema{Type: "string"}}, value: []any{"ok", json.Number("2")}, wantPart: "$[1] must be string"},
-		{name: "object", schema: runtimecontracts.ToolInputSchema{Type: "object", Properties: map[string]runtimecontracts.ToolInputSchema{"id": {Type: "integer"}}, Required: []string{"id"}}, value: map[string]any{"id": "not-an-integer"}, wantPart: "$.id must be integer"},
+		{name: "array", schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("array"), runtimecontracts.ToolSchemaItems(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")))), value: []any{"ok", json.Number("2")}, wantPart: "$[1] must be string"},
+		{name: "object", schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject, runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{"id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaInteger)}), runtimecontracts.ToolSchemaRequired("id")), value: map[string]any{"id": "not-an-integer"}, wantPart: "$.id must be integer"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			manifest := normalizedEventTestManifest()
@@ -350,7 +350,7 @@ func TestNormalizedEventManifestRejectsMissingOutputSchemaWithPackProvenance(t *
 		},
 		Source: "test",
 	})
-	for _, want := range []string{"provider.telegram", "version=1.0.0", "manifest_hash=sha256:", "requires an explicit supported JSON type"} {
+	for _, want := range []string{"provider.telegram", "version=1.0.0", "manifest_hash=sha256:", "schema is missing"} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("NewCatalogSnapshot error = %v, want %q", err, want)
 		}
@@ -427,8 +427,16 @@ additionalProperties:
 
 	catalogEntries := manifest.EventCatalogEntries()
 	field := catalogEntries["inbound.telegram.text_message"].Payload.Properties["raw"]
-	if field.ExactSchema == nil || field.ExactSchema.Properties["status"].Pattern != " approved $" || len(field.ExactSchema.Properties["attempts"].Enum) != 0 {
+	if field.ExactSchema == nil {
 		t.Fatalf("catalog flattened exact schema: %#v", field)
+	}
+	status, statusOK := field.ExactSchema.Property("status")
+	attempts, attemptsOK := field.ExactSchema.Property("attempts")
+	if !statusOK || !attemptsOK || status.Pattern() != " approved $" {
+		t.Fatalf("catalog flattened exact schema: %#v", field)
+	}
+	if _, declared := attempts.EnumValues(); declared {
+		t.Fatalf("attempts unexpectedly acquired enum authority: %#v", attempts)
 	}
 	registry := runtimecontracts.EventSchemaRegistryFromCatalog(catalogEntries)
 	properties := registry["inbound.telegram.text_message"].Schema["properties"].(map[string]any)
@@ -469,9 +477,11 @@ additionalProperties:
 		t.Fatalf("CompileAdmission: %v", err)
 	}
 	mutateExactStatusEnum := func(schema *runtimecontracts.ToolInputSchema) {
-		status := schema.Properties["status"]
-		normalizedEventEnumScalar(t, &status.Enum[0].Node).Value = "mutated"
-		schema.Properties["status"] = status
+		mutated, err := schema.WithProperty("status", runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString, runtimecontracts.ToolSchemaEnum("mutated")))
+		if err != nil {
+			t.Fatalf("mutate schema copy: %v", err)
+		}
+		*schema = mutated
 	}
 	descriptors := catalog.PackDescriptors()
 	descriptorEvent := descriptors[0].Events["inbound.telegram.text_message"]
@@ -479,7 +489,9 @@ additionalProperties:
 	mutateExactStatusEnum(&descriptorField.Schema)
 	descriptorEvent.Fields["raw"] = descriptorField
 	descriptors[0].Events["inbound.telegram.text_message"] = descriptorEvent
-	if got := normalizedEventEnumText(t, catalog.PackDescriptors()[0].Events["inbound.telegram.text_message"].Fields["raw"].Schema.Properties["status"]); got != " approved " {
+	descriptorSchema := catalog.PackDescriptors()[0].Events["inbound.telegram.text_message"].Fields["raw"].Schema
+	descriptorStatus, _ := descriptorSchema.Property("status")
+	if got := normalizedEventEnumText(t, descriptorStatus); got != " approved " {
 		t.Fatalf("PackDescriptors shared enum node: %q", got)
 	}
 	outputs := plan.Outputs()
@@ -493,7 +505,8 @@ additionalProperties:
 	}
 	for _, output := range plan.Outputs() {
 		if output.Event == "inbound.telegram.text_message" {
-			if got := normalizedEventEnumText(t, output.Fields["raw"].Schema.Properties["status"]); got != " approved " {
+			outputStatus, _ := output.Fields["raw"].Schema.Property("status")
+			if got := normalizedEventEnumText(t, outputStatus); got != " approved " {
 				t.Fatalf("InboundAdmissionPlan.Outputs shared enum node: %q", got)
 			}
 		}
@@ -516,31 +529,15 @@ additionalProperties:
 
 func normalizedEventEnumText(t *testing.T, schema runtimecontracts.ToolInputSchema) string {
 	t.Helper()
-	var value string
-	if err := schema.Enum[0].Node.Decode(&value); err != nil {
-		t.Fatalf("decode schema enum: %v", err)
+	values, declared := schema.EnumValues()
+	if !declared || len(values) == 0 {
+		t.Fatal("schema enum is missing")
+	}
+	value, ok := values[0].Interface().(string)
+	if !ok {
+		t.Fatalf("schema enum = %#v, want string", values[0].Interface())
 	}
 	return value
-}
-
-func normalizedEventEnumScalar(t *testing.T, node *yaml.Node) *yaml.Node {
-	t.Helper()
-	if node == nil {
-		t.Fatal("schema enum node is nil")
-	}
-	if node.Kind == yaml.ScalarNode {
-		return node
-	}
-	for _, child := range node.Content {
-		if child != nil {
-			return normalizedEventEnumScalar(t, child)
-		}
-	}
-	if node.Alias != nil {
-		return normalizedEventEnumScalar(t, node.Alias)
-	}
-	t.Fatalf("schema enum node kind %d has no scalar", node.Kind)
-	return nil
 }
 
 func normalizedEventTestManifest() Manifest {
@@ -553,10 +550,10 @@ func normalizedEventTestManifest() Manifest {
 		NormalizedEvents: []NormalizedEventManifest{{
 			Event: "inbound.telegram.text_message",
 			Fields: map[string]NormalizedEventFieldProjection{
-				"chat_id":    {From: "message.chat.id", Schema: runtimecontracts.ToolInputSchema{Type: "string"}, Convert: runtimecontracts.FieldProjectionConvertNumberToText},
-				"text":       {From: "message.text", Schema: runtimecontracts.ToolInputSchema{Type: "string"}},
-				"message_id": {From: "message.message_id", Schema: runtimecontracts.ToolInputSchema{Type: "integer"}},
-				"raw":        {From: "message", Schema: runtimecontracts.ToolInputSchema{Type: "object"}, Optional: true},
+				"chat_id":    {From: "message.chat.id", Schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")), Convert: runtimecontracts.FieldProjectionConvertNumberToText},
+				"text":       {From: "message.text", Schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string"))},
+				"message_id": {From: "message.message_id", Schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("integer"))},
+				"raw":        {From: "message", Schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), Optional: true},
 			},
 		}},
 	}

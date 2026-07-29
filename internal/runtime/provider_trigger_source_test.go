@@ -47,7 +47,7 @@ func TestSourceWithProviderTriggerEventsImportsEffectivePackSchemasWithoutAuthor
 	}
 }
 
-func TestImportedProviderEventReadbacksUseCanonicalDeepClone(t *testing.T) {
+func TestImportedProviderEventReadbacksAreMutationIsolated(t *testing.T) {
 	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram.text_message")
 	wrapped, err := SourceWithProviderTriggerEvents(source, catalog)
 	if err != nil {
@@ -60,8 +60,8 @@ func TestImportedProviderEventReadbacksUseCanonicalDeepClone(t *testing.T) {
 		if field.ExactSchema == nil {
 			t.Fatalf("%s exact schema is missing", fieldName)
 		}
-		field.ExactSchema.Type = "boolean"
-		field.ExactSchema.Pattern = "changed"
+		changed := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaBoolean)
+		field.ExactSchema = &changed
 		entry.Payload.Properties[fieldName] = field
 	}
 	assertFresh := func(label string) {
@@ -70,7 +70,7 @@ func TestImportedProviderEventReadbacksUseCanonicalDeepClone(t *testing.T) {
 			t.Fatalf("%s: imported event missing", label)
 		}
 		field := entry.Payload.Properties[fieldName]
-		if field.ExactSchema == nil || field.ExactSchema.Type != "string" || field.ExactSchema.Pattern == "changed" {
+		if field.ExactSchema == nil || field.ExactSchema.Kind() != runtimecontracts.ToolSchemaString || field.ExactSchema.Pattern() == "changed" {
 			t.Fatalf("%s: imported event mutation leaked: %#v", label, field.ExactSchema)
 		}
 	}
@@ -166,13 +166,11 @@ func TestProviderTriggerNormalizedEventLowersThroughExactExternalInputPin(t *tes
 	if err != nil {
 		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
 	}
-	authorized, ok := wrapped.(interface {
-		ProviderTriggerTargetFreeAuthorizations() []runtimeprovideroutput.Authorization
-	})
-	if !ok {
+	authorized := wrapped.SemanticCapabilities().ProviderTriggerTargetFreeAuthorizations()
+	if len(authorized) == 0 {
 		t.Fatal("provider trigger source does not expose its target-free event authority")
 	}
-	plans, issues := runtimepinrouting.LowerTargetFreeInputRoutePlans(wrapped, authorized.ProviderTriggerTargetFreeAuthorizations())
+	plans, issues := runtimepinrouting.LowerTargetFreeInputRoutePlans(wrapped, authorized)
 	if len(issues) != 0 {
 		t.Fatalf("target-free route plan issues = %#v", issues)
 	}
@@ -186,7 +184,7 @@ func TestProviderTriggerNormalizedEventLowersThroughExactExternalInputPin(t *tes
 
 	rawPlans, rawIssues := runtimepinrouting.LowerTargetFreeInputRoutePlans(wrapped, []runtimeprovideroutput.Authorization{{
 		Provider: "telegram", Event: "inbound.telegram", PackID: "provider.telegram", PackVersion: "1.0.0",
-		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: catalog.GenerationID(),
+		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: catalog.Generation().Diagnostic(),
 	}})
 	if len(rawIssues) != 0 || len(rawPlans) != 0 {
 		t.Fatalf("raw standing event acquired target-free route plans=%#v issues=%#v", rawPlans, rawIssues)
@@ -208,7 +206,7 @@ func TestSourceWithProviderTriggerEventsRebuildsOnCatalogGenerationChange(t *tes
 	if err != nil {
 		t.Fatalf("NewCatalogSnapshot: %v", err)
 	}
-	if changed.GenerationID() == catalog.GenerationID() {
+	if changed.Generation().Equal(catalog.Generation()) {
 		t.Fatal("changed pack identity retained catalog generation")
 	}
 
@@ -216,11 +214,11 @@ func TestSourceWithProviderTriggerEventsRebuildsOnCatalogGenerationChange(t *tes
 	if err != nil {
 		t.Fatalf("reload SourceWithProviderTriggerEvents: %v", err)
 	}
-	marker, ok := second.(providerTriggerEventSourceMarker)
-	if !ok || marker.ProviderTriggerEventGeneration() != changed.GenerationID() {
-		t.Fatalf("reloaded provider trigger source generation = %T %#v", second, marker)
+	generation, base, ok := second.SemanticCapabilities().ProviderTriggerEvents()
+	if !ok || !generation.Equal(changed.Generation()) {
+		t.Fatalf("reloaded provider trigger source generation = %T %q", second, generation.Diagnostic())
 	}
-	if _, nested := marker.BaseSemanticSource().(providerTriggerEventSourceMarker); nested {
+	if _, _, nested := base.SemanticCapabilities().ProviderTriggerEvents(); nested {
 		t.Fatal("reload stacked a provider trigger wrapper instead of rebuilding from the base source")
 	}
 	if entry, ok := second.EventEntry("inbound.telegram.text_message"); !ok || entry.Source != "provider_trigger_pack_normalized" {
@@ -235,7 +233,7 @@ func TestProviderTriggerCapabilitiesRemainVisibleThroughRuntimeToolOverlay(t *te
 		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
 	}
 	overlaid, err := semanticview.WithRuntimeTools(imported, map[string]runtimecontracts.ToolSchemaEntry{
-		"channel.ops.deliver": {Category: "channel_operation", HandlerType: "channel"},
+		"channel.ops.deliver": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("channel_operation"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("channel")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
 	})
 	if err != nil {
 		t.Fatalf("WithRuntimeTools: %v", err)
@@ -244,14 +242,12 @@ func TestProviderTriggerCapabilitiesRemainVisibleThroughRuntimeToolOverlay(t *te
 	if err != nil {
 		t.Fatalf("same-generation revalidation through overlay: %v", err)
 	}
-	generation, ok := semanticview.SourceCapability[interface{ ProviderTriggerEventGeneration() string }](revalidated)
-	if !ok || generation.ProviderTriggerEventGeneration() != catalog.GenerationID() {
-		t.Fatalf("provider trigger generation hidden through overlay: capability=%v generation=%v", ok, generation)
+	generation, _, ok := revalidated.SemanticCapabilities().ProviderTriggerEvents()
+	if !ok || !generation.Equal(catalog.Generation()) {
+		t.Fatalf("provider trigger generation hidden through overlay: capability=%v generation=%v", ok, generation.Diagnostic())
 	}
-	authorized, ok := semanticview.SourceCapability[interface {
-		ProviderTriggerTargetFreeAuthorizations() []runtimeprovideroutput.Authorization
-	}](revalidated)
-	if !ok || len(authorized.ProviderTriggerTargetFreeAuthorizations()) == 0 {
+	authorized := revalidated.SemanticCapabilities().ProviderTriggerTargetFreeAuthorizations()
+	if len(authorized) == 0 {
 		t.Fatal("target-free provider authority hidden through overlay")
 	}
 }

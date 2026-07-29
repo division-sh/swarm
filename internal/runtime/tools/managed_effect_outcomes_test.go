@@ -37,7 +37,8 @@ func TestManagedToolEffectOutcomes(t *testing.T) {
 	t.Run("authored_http_tool", func(t *testing.T) {
 		harness := effecttest.New()
 		executor := &Executor{httpClient: &http.Client{Transport: managedEffectRoundTripper{t: t, harness: harness, adapter: "authored_http_tool"}}}
-		_, err := executor.execHTTPRequestOnce(harness.CompletionContext("authored-http"), http.MethodPost, "http://effect.test/tool", nil, bytes.NewReader([]byte(`{"x":1}`)), time.Second, RegisteredTool{Name: "effect-test"}, nil)
+		tool := newExecutionTool(executionToolValue{name: "effect-test"})
+		_, err := executor.execHTTPRequestOnce(harness.CompletionContext("authored-http"), http.MethodPost, "http://effect.test/tool", nil, bytes.NewReader([]byte(`{"x":1}`)), time.Second, tool, nil)
 		if err == nil {
 			t.Fatal("authored HTTP transport failure returned nil")
 		}
@@ -47,7 +48,7 @@ func TestManagedToolEffectOutcomes(t *testing.T) {
 		stale := effecttest.New()
 		stale.AuthorizeErr = errors.New("superseded generation")
 		staleExecutor := &Executor{httpClient: &http.Client{Transport: managedEffectRoundTripper{t: t, harness: stale, adapter: "authored_http_tool"}}}
-		if _, err := staleExecutor.execHTTPRequestOnce(stale.CompletionContext("authored-http-stale"), http.MethodPost, "http://effect.test/tool", nil, bytes.NewReader([]byte(`{"x":1}`)), time.Second, RegisteredTool{Name: "effect-test"}, nil); err == nil {
+		if _, err := staleExecutor.execHTTPRequestOnce(stale.CompletionContext("authored-http-stale"), http.MethodPost, "http://effect.test/tool", nil, bytes.NewReader([]byte(`{"x":1}`)), time.Second, tool, nil); err == nil {
 			t.Fatal("stale authored HTTP effect was admitted")
 		}
 		if _, launched := stale.StateForAdapter("authored_http_tool"); launched {
@@ -60,7 +61,7 @@ func TestManagedToolEffectOutcomes(t *testing.T) {
 		launchFencedExecutor := &Executor{httpClient: &http.Client{Transport: managedEffectRoundTripper{
 			t: t, harness: supersededAtLaunch, adapter: "authored_http_tool", calls: &dispatches,
 		}}}
-		if _, err := launchFencedExecutor.execHTTPRequestOnce(supersededAtLaunch.CompletionContext("authored-http-launch-fence"), http.MethodPost, "http://effect.test/tool", nil, bytes.NewReader([]byte(`{"x":1}`)), time.Second, RegisteredTool{Name: "effect-test"}, nil); err == nil {
+		if _, err := launchFencedExecutor.execHTTPRequestOnce(supersededAtLaunch.CompletionContext("authored-http-launch-fence"), http.MethodPost, "http://effect.test/tool", nil, bytes.NewReader([]byte(`{"x":1}`)), time.Second, tool, nil); err == nil {
 			t.Fatal("superseded launch boundary admitted authored HTTP dispatch")
 		}
 		if dispatches != 0 {

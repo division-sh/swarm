@@ -12,7 +12,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -56,10 +55,8 @@ func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTa
 		return connectRoutePlanResolver{routeTable: routeTable, loadDescriptors: loadDescriptors, replyStore: replyStore}
 	}
 	plans, issues := runtimepinrouting.LowerCompositionConnectRoutePlans(source)
-	if targetFree, ok := semanticview.SourceCapability[interface {
-		ProviderTriggerTargetFreeAuthorizations() []runtimeprovideroutput.Authorization
-	}](source); ok {
-		directPlans, directIssues := runtimepinrouting.LowerTargetFreeInputRoutePlans(source, targetFree.ProviderTriggerTargetFreeAuthorizations())
+	if targetFree := source.SemanticCapabilities().ProviderTriggerTargetFreeAuthorizations(); len(targetFree) > 0 {
+		directPlans, directIssues := runtimepinrouting.LowerTargetFreeInputRoutePlans(source, targetFree)
 		plans = append(plans, directPlans...)
 		issues = append(issues, directIssues...)
 	}

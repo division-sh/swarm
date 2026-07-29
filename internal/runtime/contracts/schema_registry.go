@@ -45,7 +45,11 @@ func eventSchemaFromCatalogEntry(eventType string, entry EventCatalogEntry, type
 		var prop map[string]any
 		typeDescription := ""
 		if field.ExactSchema != nil {
-			prop = ToolInputSchemaJSONSchema(CloneToolInputSchema(*field.ExactSchema))
+			var err error
+			prop, err = field.ExactSchema.Project()
+			if err != nil {
+				panic(fmt.Sprintf("project admitted event schema %s.%s: %v", eventType, fieldName, err))
+			}
 		} else {
 			prop, typeDescription = eventSchemaForTypeRef(field.Type, types, map[string]struct{}{})
 		}

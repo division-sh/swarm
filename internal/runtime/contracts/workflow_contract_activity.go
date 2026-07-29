@@ -286,7 +286,7 @@ func ActivityResultEventSchemasForSite(site ActivitySite, tool ToolSchemaEntry) 
 					"tool":         map[string]any{"type": "string"},
 					"effect_class": map[string]any{"type": "string"},
 					"attempt":      map[string]any{"type": "integer"},
-					"result":       toolInputSchemaToJSONSchema(tool.OutputSchema),
+					"result":       toolInputSchemaToJSONSchema(tool.OutputSchema()),
 				},
 			},
 		},
@@ -451,78 +451,20 @@ func (b *WorkflowContractBundle) generatedActivityEventsForNode(nodeID string) [
 }
 
 func toolInputSchemaToJSONSchema(schema ToolInputSchema) map[string]any {
-	out := map[string]any{}
-	if schema.Type != "" {
-		out["type"] = schema.Type
-	} else {
-		out["type"] = "object"
-	}
-	if schema.Description != "" {
-		out["description"] = schema.Description
-	}
-	if len(schema.Properties) > 0 {
-		props := make(map[string]any, len(schema.Properties))
-		for name, prop := range schema.Properties {
-			props[name] = toolInputSchemaToJSONSchema(prop)
-		}
-		out["properties"] = props
-	}
-	if len(schema.Required) > 0 {
-		out["required"] = append([]string(nil), schema.Required...)
-	}
-	if schema.Items != nil {
-		out["items"] = toolInputSchemaToJSONSchema(*schema.Items)
-	}
-	if enum, present, err := ToolInputSchemaEnumProjection(schema); err != nil {
-		out["enum"] = []any{}
-	} else if present {
-		out["enum"] = enum
-	}
-	if schema.AdditionalProperties.Allowed != nil {
-		out["additionalProperties"] = *schema.AdditionalProperties.Allowed
-	} else if schema.AdditionalProperties.Schema != nil {
-		out["additionalProperties"] = toolInputSchemaToJSONSchema(*schema.AdditionalProperties.Schema)
-	} else if out["type"] == "object" {
-		out["additionalProperties"] = true
-	}
-	if schema.Minimum != nil {
-		out["minimum"] = *schema.Minimum
-	}
-	if schema.Maximum != nil {
-		out["maximum"] = *schema.Maximum
-	}
-	if schema.Pattern != "" {
-		out["pattern"] = schema.Pattern
-	}
-	if schema.MinLength != nil {
-		out["minLength"] = *schema.MinLength
-	}
-	if schema.MaxLength != nil {
-		out["maxLength"] = *schema.MaxLength
-	}
-	if schema.MinItems != nil {
-		out["minItems"] = *schema.MinItems
-	}
-	if schema.MaxItems != nil {
-		out["maxItems"] = *schema.MaxItems
-	}
-	return out
+	return projectAdmittedToolInputSchema(schema)
 }
 
 // ToolInputSchemaEnumProjection is the one typed enum projection shared by
 // provider-visible schemas and runtime acceptance validation. The presence bit
 // distinguishes an omitted enum from an explicitly authored empty enum.
 func ToolInputSchemaEnumProjection(schema ToolInputSchema) ([]any, bool, error) {
-	if schema.Enum == nil {
+	enum, declared := schema.EnumValues()
+	if !declared {
 		return nil, false, nil
 	}
-	values := make([]any, 0, len(schema.Enum))
-	for index, literal := range schema.Enum {
-		value, err := toolInputSchemaEnumLiteralValue(&literal.Node)
-		if err != nil {
-			return nil, true, fmt.Errorf("enum[%d]: %w", index, err)
-		}
-		values = append(values, value)
+	values := make([]any, 0, len(enum))
+	for _, value := range enum {
+		values = append(values, value.Interface())
 	}
 	return values, true, nil
 }
@@ -609,24 +551,4 @@ func toolInputSchemaEnumLiteralValue(node *yaml.Node) (any, error) {
 	default:
 		return nil, fmt.Errorf("YAML node kind %d is not a JSON value", node.Kind)
 	}
-}
-
-// ToolInputSchemaJSONSchema exposes the canonical ToolInputSchema projection
-// for provider-visible definitions and runtime validators.
-func ToolInputSchemaJSONSchema(schema ToolInputSchema) map[string]any {
-	projected, err := ProjectToolInputSchema(schema)
-	if err != nil {
-		return map[string]any{"type": "null", "enum": []any{map[string]any{"invalid_schema": true}}}
-	}
-	return projected
-}
-
-// ProjectToolInputSchema validates and projects the exact admitted schema.
-// Runtime registrations use this owner instead of maintaining a second
-// interpretation of enum, regex, key, and additional-property semantics.
-func ProjectToolInputSchema(schema ToolInputSchema) (map[string]any, error) {
-	if err := ValidateToolInputSchema(schema); err != nil {
-		return nil, err
-	}
-	return toolInputSchemaToJSONSchema(schema), nil
 }

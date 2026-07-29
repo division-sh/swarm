@@ -14,6 +14,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/division-sh/swarm/internal/store/runbundle"
 )
 
@@ -88,7 +89,7 @@ type replacementPublication struct {
 	standing            map[string]*worklifetime.StandingOccurrence
 	parkedStanding      map[string]*runtimepipeline.ParkedOccurrence
 	survivingContexts   map[string]*BundleContext
-	admissionGeneration string
+	admissionGeneration triggergeneration.Generation
 	installedSubjects   []packs.Subject
 	capabilitySubjects  []packs.Subject
 }
@@ -354,14 +355,14 @@ type RuntimeContextManager struct {
 	availability               RunBundleAvailabilityReader
 	contexts                   map[string]*runtimeContextEntry
 	order                      []string
-	admissionGeneration        string
+	admissionGeneration        triggergeneration.Generation
 	installedTriggerSubjects   []packs.Subject
 	capabilitySubjects         []packs.Subject
 	suppressedStandingServices map[string]struct{}
 }
 
 type ProcessAdmissionState struct {
-	GenerationID      string
+	Generation        triggergeneration.Generation
 	InstalledSubjects []packs.Subject
 }
 
@@ -381,7 +382,7 @@ func newRuntimeContextManagerState(availability RunBundleAvailabilityReader, sta
 	return &RuntimeContextManager{
 		availability:               availability,
 		contexts:                   map[string]*runtimeContextEntry{},
-		admissionGeneration:        strings.TrimSpace(state.GenerationID),
+		admissionGeneration:        state.Generation,
 		installedTriggerSubjects:   installed,
 		suppressedStandingServices: map[string]struct{}{},
 	}, nil
@@ -597,12 +598,12 @@ func validateRuntimeContextStandingTargets(contextDef BundleContext) error {
 
 func (m *RuntimeContextManager) validateAdmissionGenerationLocked(contextDef BundleContext) error {
 	for _, target := range contextDef.StandingTargets {
-		generation := target.AdmissionPlan.GenerationID()
-		if m.admissionGeneration == "" {
+		generation := target.AdmissionPlan.Generation()
+		if !m.admissionGeneration.Valid() {
 			return fmt.Errorf("runtime context %s standing target %q/%q requires process admission catalog generation", contextDef.BundleHash(), target.Alias, target.Provider)
 		}
-		if generation != m.admissionGeneration {
-			return fmt.Errorf("runtime context %s standing target %q/%q admission generation %q does not match process generation %q", contextDef.BundleHash(), target.Alias, target.Provider, generation, m.admissionGeneration)
+		if !generation.Equal(m.admissionGeneration) {
+			return fmt.Errorf("runtime context %s standing target %q/%q admission generation %q does not match process generation %q", contextDef.BundleHash(), target.Alias, target.Provider, generation.Diagnostic(), m.admissionGeneration.Diagnostic())
 		}
 	}
 	return nil
@@ -640,7 +641,7 @@ func (m *RuntimeContextManager) AdmissionState() ProcessAdmissionState {
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return ProcessAdmissionState{GenerationID: m.admissionGeneration, InstalledSubjects: packs.CloneSubjects(m.installedTriggerSubjects)}
+	return ProcessAdmissionState{Generation: m.admissionGeneration, InstalledSubjects: packs.CloneSubjects(m.installedTriggerSubjects)}
 }
 
 func (m *RuntimeContextManager) CapabilitySubjects() []packs.Subject {
@@ -1569,7 +1570,7 @@ func (m *RuntimeContextManager) PrepareBundleHashReplacementPublication(existing
 	if entry == nil || entry.state != RuntimeContextStateUnloaded || entry.cause != RuntimeContextCauseReplacing {
 		return nil, fmt.Errorf("runtime context %s is not unavailable for replacement", existingHash)
 	}
-	if m.admissionGeneration != "" && (len(entry.context.StandingTargets) > 0 || len(contextDef.StandingTargets) > 0) {
+	if m.admissionGeneration.Valid() && (len(entry.context.StandingTargets) > 0 || len(contextDef.StandingTargets) > 0) {
 		return nil, fmt.Errorf("runtime context %s carries compiled admission targets; publish through PublishBundleHashReplacementWithAdmission", existingHash)
 	}
 	publication, err := m.prepareReplacementPublicationLocked(existingHash, contextDef, entry)
@@ -1618,7 +1619,7 @@ func (m *RuntimeContextManager) PrepareRestoredBundleHashReplacementPublication(
 	if err != nil {
 		return nil, err
 	}
-	if m.admissionGeneration != "" {
+	if m.admissionGeneration.Valid() {
 		publication.admissionGeneration = m.admissionGeneration
 		publication.installedSubjects = packs.CloneSubjects(m.installedTriggerSubjects)
 		publication.capabilitySubjects = subjects
@@ -1687,7 +1688,7 @@ func (m *RuntimeContextManager) applyReplacementPublicationLocked(publication *r
 	entry.parkedStanding = nil
 	entry.state = RuntimeContextStateLoaded
 	entry.cause = ""
-	if publication.admissionGeneration != "" {
+	if publication.admissionGeneration.Valid() {
 		m.admissionGeneration = publication.admissionGeneration
 		m.installedTriggerSubjects = publication.installedSubjects
 		m.capabilitySubjects = publication.capabilitySubjects
@@ -1718,7 +1719,7 @@ func validateRestoredAdmissionAuthority(predecessor, restored BundleContext) err
 		target = target.normalized()
 		previous, ok := want[target.Alias+"\x00"+target.Provider]
 		if !ok || previous.SigningSecret != target.SigningSecret ||
-			previous.AdmissionPlan.GenerationID() != target.AdmissionPlan.GenerationID() ||
+			!previous.AdmissionPlan.Generation().Equal(target.AdmissionPlan.Generation()) ||
 			previous.AdmissionPlan.PolicySource() != target.AdmissionPlan.PolicySource() ||
 			previous.AdmissionPlan.RequestAuthentication() != target.AdmissionPlan.RequestAuthentication() {
 			return fmt.Errorf("restored runtime context %s changed standing admission authority for %q/%q", predecessor.BundleHash(), target.Alias, target.Provider)
@@ -1817,15 +1818,15 @@ func (m *RuntimeContextManager) PrepareBundleHashReplacementPublicationWithAdmis
 			publication.survivingContexts[strings.TrimSpace(bundleHash)] = &copied
 		}
 	}
-	publication.admissionGeneration = strings.TrimSpace(state.GenerationID)
+	publication.admissionGeneration = state.Generation
 	publication.installedSubjects = installed
 	publication.capabilitySubjects = subjects
 	return &PreparedRuntimeContextReplacement{manager: m, publication: publication}, nil
 }
 
 func (m *RuntimeContextManager) validateProcessAdmissionCandidateLocked(existingHash string, contextDef BundleContext, survivingTargets map[string][]StandingTarget, state ProcessAdmissionState) ([]packs.Subject, []packs.Subject, error) {
-	generation := strings.TrimSpace(state.GenerationID)
-	if generation == "" {
+	generation := state.Generation
+	if !generation.Valid() {
 		return nil, nil, fmt.Errorf("candidate provider-trigger catalog generation is required")
 	}
 	installed, err := packs.NormalizeSubjects(state.InstalledSubjects)
@@ -1844,7 +1845,7 @@ func (m *RuntimeContextManager) validateProcessAdmissionCandidateLocked(existing
 		}
 		targets, ok := survivingTargets[bundleHash]
 		if !ok {
-			return nil, nil, fmt.Errorf("candidate provider-trigger catalog generation %q did not recompile loaded runtime context %s", generation, bundleHash)
+			return nil, nil, fmt.Errorf("candidate provider-trigger catalog generation %q did not recompile loaded runtime context %s", generation.Diagnostic(), bundleHash)
 		}
 		seenUpdates[bundleHash] = struct{}{}
 		copied := *entry.context
@@ -1886,10 +1887,10 @@ func (m *RuntimeContextManager) validateProcessAdmissionCandidateLocked(existing
 	return installed, normalized, nil
 }
 
-func validateTargetsGeneration(contextDef BundleContext, generation string) error {
+func validateTargetsGeneration(contextDef BundleContext, generation triggergeneration.Generation) error {
 	for _, target := range contextDef.StandingTargets {
-		if target.AdmissionPlan.GenerationID() != generation {
-			return fmt.Errorf("runtime context %s standing target %q/%q admission generation %q does not match candidate process generation %q", contextDef.BundleHash(), target.Alias, target.Provider, target.AdmissionPlan.GenerationID(), generation)
+		if !target.AdmissionPlan.Generation().Equal(generation) {
+			return fmt.Errorf("runtime context %s standing target %q/%q admission generation %q does not match candidate process generation %q", contextDef.BundleHash(), target.Alias, target.Provider, target.AdmissionPlan.Generation().Diagnostic(), generation.Diagnostic())
 		}
 	}
 	return nil

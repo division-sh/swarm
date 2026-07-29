@@ -20,26 +20,32 @@ func TestCompileMockResponsePlanGeneratesEveryEffectiveConnectorDeterministicall
 		t.Fatalf("shipped connector tool count = %d, want 10", got)
 	}
 
-	flowLocal := telegramConnectorTool("https://example.test")
-	flowLocal.OutputSchema = runtimecontracts.ToolInputSchema{
-		Type: "object",
-		Properties: map[string]runtimecontracts.ToolInputSchema{
-			"accepted": {Type: "boolean"},
-			"count":    {Type: "integer", Minimum: float64Pointer(2), Maximum: float64Pointer(5)},
-			"items":    {Type: "array", Items: &runtimecontracts.ToolInputSchema{Type: "string"}},
-			"metadata": {Type: "object"},
-			"name": {
-				Type: "string",
-				Enum: []runtimecontracts.SchemaLiteral{{Node: yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "fixture"}}},
-			},
-			"nothing":  {Type: "null"},
-			"optional": {Type: "string"},
-		},
-		Required: []string{"accepted", "count", "items", "metadata", "name", "nothing"},
-	}
+	flowLocal := withOutputSchema(t, telegramConnectorTool("https://example.test"), runtimecontracts.MustToolInputSchema(
+		runtimecontracts.ToolSchemaObject,
+		runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+			"accepted": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaBoolean),
+			"count": runtimecontracts.MustToolInputSchema(
+				runtimecontracts.ToolSchemaInteger,
+				runtimecontracts.ToolSchemaMinimum(2),
+				runtimecontracts.ToolSchemaMaximum(5),
+			),
+			"items": runtimecontracts.MustToolInputSchema(
+				runtimecontracts.ToolSchemaArray,
+				runtimecontracts.ToolSchemaItems(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString)),
+			),
+			"metadata": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
+			"name": runtimecontracts.MustToolInputSchema(
+				runtimecontracts.ToolSchemaString,
+				runtimecontracts.ToolSchemaEnum("fixture"),
+			),
+			"nothing":  runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaNull),
+			"optional": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString),
+		}),
+		runtimecontracts.ToolSchemaRequired("accepted", "count", "items", "metadata", "name", "nothing"),
+	))
+
 	tools["acme.create"] = flowLocal
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: tools})
-
 	first, err := CompileMockResponsePlan(source)
 	if err != nil {
 		t.Fatalf("CompileMockResponsePlan first: %v", err)
@@ -121,8 +127,7 @@ required: [value]
 `), &outputSchema); err != nil {
 		t.Fatalf("unmarshal structured enum schema: %v", err)
 	}
-	tool := telegramConnectorTool("https://example.test")
-	tool.OutputSchema = outputSchema
+	tool := withOutputSchema(t, telegramConnectorTool("https://example.test"), outputSchema)
 	plan, err := CompileMockResponsePlan(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{"acme.create": tool},
 	}))
@@ -149,28 +154,6 @@ required: [value]
 }
 
 func TestCompileMockResponsePlanFailsClosedWithExactSchemaPath(t *testing.T) {
-	malformedLiteralSchema := func(typeName string, node yaml.Node) runtimecontracts.ToolInputSchema {
-		return runtimecontracts.ToolInputSchema{
-			Type: "object",
-			Properties: map[string]runtimecontracts.ToolInputSchema{
-				"value": {Type: typeName, Enum: []runtimecontracts.SchemaLiteral{{Node: node}}},
-			},
-			Required: []string{"value"},
-		}
-	}
-	explicitEmptyEnum := runtimecontracts.ToolInputSchema{
-		Type: "object",
-		Properties: map[string]runtimecontracts.ToolInputSchema{
-			"status": {Type: "string", Enum: []runtimecontracts.SchemaLiteral{}},
-		},
-		Required: []string{"status"},
-	}
-	timestampEnum := malformedLiteralSchema("string", yaml.Node{Kind: yaml.ScalarNode, Tag: "!!timestamp", Value: "2026-07-16T12:00:00Z"})
-	binaryEnum := malformedLiteralSchema("string", yaml.Node{Kind: yaml.ScalarNode, Tag: "!!binary", Value: "aGVsbG8="})
-	mismatchedTagSchema := func(typeName, tag, literal string) runtimecontracts.ToolInputSchema {
-		return malformedLiteralSchema(typeName, yaml.Node{Kind: yaml.ScalarNode, Tag: tag, Value: literal})
-	}
-
 	tests := []struct {
 		name   string
 		schema runtimecontracts.ToolInputSchema
@@ -178,127 +161,28 @@ func TestCompileMockResponsePlanFailsClosedWithExactSchemaPath(t *testing.T) {
 	}{
 		{
 			name:   "root must be object",
-			schema: runtimecontracts.ToolInputSchema{Type: "string"},
+			schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString),
 			want:   "output_schema: provider connector mock response root must be object",
 		},
 		{
-			name:   "required property must be declared",
-			schema: runtimecontracts.ToolInputSchema{Type: "object", Required: []string{"missing"}},
-			want:   `output_schema: $ required property "missing" is not declared`,
-		},
-		{
-			name: "unsupported nested type",
-			schema: runtimecontracts.ToolInputSchema{
-				Type:       "object",
-				Properties: map[string]runtimecontracts.ToolInputSchema{"value": {Type: "date"}},
-				Required:   []string{"value"},
-			},
-			want: `output_schema: $.properties[value] requires an explicit supported JSON type, got "date"`,
-		},
-		{
-			name: "contradictory bounds",
-			schema: runtimecontracts.ToolInputSchema{
-				Type:       "object",
-				Properties: map[string]runtimecontracts.ToolInputSchema{"value": {Type: "number", Minimum: float64Pointer(5), Maximum: float64Pointer(2)}},
-				Required:   []string{"value"},
-			},
-			want: "output_schema: $.properties[value] minimum must be <= maximum",
-		},
-		{
 			name: "integer interval has no inhabitant",
-			schema: runtimecontracts.ToolInputSchema{
-				Type:       "object",
-				Properties: map[string]runtimecontracts.ToolInputSchema{"value": {Type: "integer", Minimum: float64Pointer(0.2), Maximum: float64Pointer(0.8)}},
-				Required:   []string{"value"},
-			},
+			schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject, runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+				"value": runtimecontracts.MustToolInputSchema(
+					runtimecontracts.ToolSchemaInteger,
+					runtimecontracts.ToolSchemaMinimum(0.2),
+					runtimecontracts.ToolSchemaMaximum(0.8),
+				),
+			}), runtimecontracts.ToolSchemaRequired("value")),
 			want: "output_schema.properties.value: bounds contain no integer",
-		},
-		{
-			name:   "explicit empty enum has no inhabitant",
-			schema: explicitEmptyEnum,
-			want:   "output_schema: $.properties[status] enum must contain at least one value",
-		},
-		{
-			name:   "YAML timestamp enum is not coerced",
-			schema: timestampEnum,
-			want:   `output_schema.properties.value.enum[0]: YAML scalar tag "!!timestamp" is not a JSON value`,
-		},
-		{
-			name:   "YAML binary enum is not coerced",
-			schema: binaryEnum,
-			want:   `output_schema.properties.value.enum[0]: YAML scalar tag "!!binary" is not a JSON value`,
-		},
-		{
-			name:   "missing typed enum literal is rejected",
-			schema: malformedLiteralSchema("string", yaml.Node{}),
-			want:   "output_schema: $.properties[value] enum[0]: value is missing",
-		},
-		{
-			name: "invalid UTF-8 enum string is rejected",
-			schema: malformedLiteralSchema("string", yaml.Node{
-				Kind:  yaml.ScalarNode,
-				Tag:   "!!str",
-				Value: string([]byte{0xff}),
-			}),
-			want: "output_schema: $.properties[value] enum[0]: value is not semantic JSON: programmatic semantic string is not valid UTF-8",
-		},
-		{
-			name: "unsafe enum integer is rejected",
-			schema: malformedLiteralSchema("string", yaml.Node{
-				Kind:  yaml.ScalarNode,
-				Tag:   "!!int",
-				Value: "9007199254740992",
-			}),
-			want: "output_schema: $.properties[value] enum[0]",
-		},
-		{
-			name: "non-finite enum number is rejected",
-			schema: malformedLiteralSchema("string", yaml.Node{
-				Kind:  yaml.ScalarNode,
-				Tag:   "!!float",
-				Value: ".nan",
-			}),
-			want: "output_schema: $.properties[value] enum[0]",
-		},
-		{
-			name: "non-string enum object key is rejected",
-			schema: malformedLiteralSchema("string", yaml.Node{
-				Kind: yaml.MappingNode,
-				Tag:  "!!map",
-				Content: []*yaml.Node{
-					{Kind: yaml.ScalarNode, Tag: "!!int", Value: "1"},
-					{Kind: yaml.ScalarNode, Tag: "!!str", Value: "value"},
-				},
-			}),
-			want: "output_schema: $.properties[value] enum[0]: value is not semantic JSON: json: unsupported type: map[interface {}]interface {}",
-		},
-		{
-			name:   "integer tag cannot carry boolean",
-			schema: mismatchedTagSchema("boolean", "!!int", "true"),
-			want:   "output_schema: $.properties[value] enum[0]: decode value: yaml: cannot decode !!bool `true` as a !!int",
-		},
-		{
-			name:   "boolean tag cannot carry integer",
-			schema: mismatchedTagSchema("integer", "!!bool", "1"),
-			want:   "output_schema: $.properties[value] enum[0]: decode value: yaml: cannot decode !!int `1` as a !!bool",
-		},
-		{
-			name:   "float tag cannot carry boolean",
-			schema: mismatchedTagSchema("boolean", "!!float", "false"),
-			want:   "output_schema: $.properties[value] enum[0]: decode value: yaml: cannot decode !!bool `false` as a !!float",
-		},
-		{
-			name:   "integer tag cannot carry fractional number",
-			schema: mismatchedTagSchema("number", "!!int", "1.5"),
-			want:   "output_schema: $.properties[value] enum[0]: decode value: yaml: cannot decode !!float `1.5` as a !!int",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			tool := telegramConnectorTool("https://example.test")
-			tool.OutputSchema = tc.schema
-			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"acme.create": tool}})
+			tool := withOutputSchema(t, telegramConnectorTool("https://example.test"), tc.schema)
+			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+				Tools: map[string]runtimecontracts.ToolSchemaEntry{"acme.create": tool},
+			})
 			plan, err := CompileMockResponsePlan(source)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("CompileMockResponsePlan plan=%#v error=%v, want containing %q", plan, err, tc.want)
@@ -320,6 +204,11 @@ func TestCompileMockResponsePlanReturnsNoAmbientPlan(t *testing.T) {
 	}
 }
 
-func float64Pointer(value float64) *float64 {
-	return &value
+func withOutputSchema(t *testing.T, tool runtimecontracts.ToolSchemaEntry, output runtimecontracts.ToolInputSchema) runtimecontracts.ToolSchemaEntry {
+	t.Helper()
+	updated, err := tool.WithSchemas(tool.InputSchema(), output)
+	if err != nil {
+		t.Fatalf("replace tool output schema: %v", err)
+	}
+	return updated
 }

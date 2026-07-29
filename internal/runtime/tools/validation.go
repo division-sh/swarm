@@ -30,79 +30,72 @@ func ValidateToolImplementations(source semanticview.Source) ([]error, error) {
 		if strings.HasPrefix(name, runtimecontracts.PrivateChannelActivityPrefix) {
 			return warnings, fmt.Errorf("tool %s uses reserved private channel activity namespace %s*", name, runtimecontracts.PrivateChannelActivityPrefix)
 		}
-		rawType := strings.ToLower(strings.TrimSpace(entry.HandlerType))
 		normalized := normalizeImplementationClass(name, entry)
-		switch rawType {
-		case "workflow_registered", "api_call":
-			warnings = append(warnings, fmt.Errorf("tool %s uses deprecated handler_type %s; migrate to handler_type: http or mcp", name, rawType))
-		}
+		managedCredential, hasManagedCredential := entry.ManagedCredential()
+		httpSpec, hasHTTP := entry.HTTP()
 		switch normalized {
 		case implementationPlatformBuiltin:
-			if entry.ManagedCredential != nil {
+			if hasManagedCredential {
 				return warnings, fmt.Errorf("tool %s managed_credential is only supported for handler_type http", name)
 			}
 			if _, ok := supportedRuntimeToolNames[name]; !ok {
 				return warnings, fmt.Errorf("tool %s declares handler_type platform_builtin but is not shipped by the generic runtime", name)
 			}
 		case implementationHTTP:
-			if entry.HTTP == nil {
+			if !hasHTTP {
 				return warnings, fmt.Errorf("tool %s resolves as http but has no http block", name)
 			}
-			if strings.TrimSpace(entry.HTTP.Method) == "" {
+			if strings.TrimSpace(httpSpec.Method) == "" {
 				return warnings, fmt.Errorf("tool %s http.method is required", name)
 			}
-			if strings.TrimSpace(entry.HTTP.URL) == "" {
+			if strings.TrimSpace(httpSpec.URL) == "" {
 				return warnings, fmt.Errorf("tool %s http.url is required", name)
 			}
-			if entry.ManagedCredential != nil && strings.TrimSpace(entry.ManagedCredential.Key) == "" {
+			if hasManagedCredential && strings.TrimSpace(managedCredential.Key) == "" {
 				return warnings, fmt.Errorf("tool %s managed_credential.key is required", name)
 			}
-			if entry.ManagedCredential != nil && strings.TrimSpace(entry.ManagedCredential.Header) == "" && strings.TrimSpace(entry.ManagedCredential.Prefix) != "" {
+			if hasManagedCredential && strings.TrimSpace(managedCredential.Header) == "" && strings.TrimSpace(managedCredential.Prefix) != "" {
 				return warnings, fmt.Errorf("tool %s managed_credential.header is required when prefix is set", name)
 			}
-			if entry.ManagedCredential != nil {
-				if err := runtimemanagedcredentials.ValidateRequiredGrantType(entry.ManagedCredential.GrantType); err != nil {
+			if hasManagedCredential {
+				if err := runtimemanagedcredentials.ValidateRequiredGrantType(managedCredential.GrantType); err != nil {
 					return warnings, fmt.Errorf("tool %s managed_credential.%s", name, err.Error())
 				}
-				grantType := runtimemanagedcredentials.NormalizeGrantType(entry.ManagedCredential.GrantType)
-				installationIDInput := strings.TrimSpace(entry.ManagedCredential.InstallationIDInput)
+				grantType := runtimemanagedcredentials.NormalizeGrantType(managedCredential.GrantType)
+				installationIDInput := strings.TrimSpace(managedCredential.InstallationIDInput)
 				if grantType == runtimemanagedcredentials.GrantGitHubAppInstallation && installationIDInput == "" {
 					return warnings, fmt.Errorf("tool %s managed_credential.installation_id_input is required for grant_type %s", name, grantType)
 				}
 				if installationIDInput != "" && grantType != runtimemanagedcredentials.GrantGitHubAppInstallation {
 					return warnings, fmt.Errorf("tool %s managed_credential.installation_id_input requires grant_type %s", name, runtimemanagedcredentials.GrantGitHubAppInstallation)
 				}
-				if err := managedcredentialmodel.ValidateGrantModel(entry.ManagedCredential.GrantModel); err != nil {
+				if err := managedcredentialmodel.ValidateGrantModel(managedCredential.GrantModel); err != nil {
 					return warnings, fmt.Errorf("tool %s managed_credential.%s", name, err.Error())
 				}
-				if err := managedcredentialmodel.ValidateTokenRequestProfile(entry.ManagedCredential.TokenRequest); err != nil {
+				if err := managedcredentialmodel.ValidateTokenRequestProfile(managedCredential.TokenRequest); err != nil {
 					return warnings, fmt.Errorf("tool %s managed_credential.%s", name, err.Error())
 				}
 			}
 		case implementationMCP:
-			if entry.ManagedCredential != nil {
+			if hasManagedCredential {
 				return warnings, fmt.Errorf("tool %s managed_credential is only supported for handler_type http", name)
 			}
 			if !strings.Contains(name, ".") {
 				warnings = append(warnings, fmt.Errorf("tool %s uses handler_type mcp but is not prefixed with a server namespace", name))
 			}
 		case implementationChannel:
-			if !strings.HasPrefix(name, "channel.") || strings.TrimSpace(entry.Category) != "channel_operation" {
+			if !strings.HasPrefix(name, "channel.") || entry.Category() != "channel_operation" {
 				return warnings, fmt.Errorf("tool %s uses handler_type channel outside the compiled channel runtime surface", name)
 			}
-			if entry.HTTP != nil || entry.ManagedCredential != nil || len(entry.Credentials) != 0 {
+			if hasHTTP || hasManagedCredential || len(entry.Credentials()) != 0 {
 				return warnings, fmt.Errorf("tool %s channel runtime surface must not expose connector transport or credentials", name)
 			}
 		case "":
-			if rawType == "workflow_registered" || rawType == "api_call" {
-				warnings = append(warnings, fmt.Errorf("tool %s uses deprecated handler_type %s with no http block; tool is ignored until migrated to handler_type: http or mcp", name, rawType))
-				continue
-			}
-			if rawType == "" {
+			if entry.Handler() == runtimecontracts.ToolHandlerUnspecified {
 				warnings = append(warnings, fmt.Errorf("tool %s has no executable implementation in the generic runtime; provide handler_type: http with an http block or expose it via mcp", name))
 				continue
 			}
-			return warnings, fmt.Errorf("tool %s has unsupported handler_type %q", name, strings.TrimSpace(entry.HandlerType))
+			return warnings, fmt.Errorf("tool %s has unsupported handler_type %q", name, entry.Handler().String())
 		}
 	}
 	return warnings, nil

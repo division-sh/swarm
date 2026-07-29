@@ -50,7 +50,7 @@ func (p *MockResponsePlan) Admit(toolID string, tool runtimecontracts.ToolSchema
 	if !isProviderConnector(tool) {
 		return AdmittedMockResponse{}, fmt.Errorf("mock HTTP activity %q cannot execute: only provider_connector tools with exact responders are supported", toolID)
 	}
-	if !strings.EqualFold(strings.TrimSpace(tool.HandlerType), "http") || tool.HTTP == nil {
+	if tool.Handler() != runtimecontracts.ToolHandlerHTTP {
 		return AdmittedMockResponse{}, fmt.Errorf("mock HTTP activity %q cannot execute: provider_connector tool must retain its canonical HTTP declaration", toolID)
 	}
 	if p == nil {
@@ -64,7 +64,10 @@ func (p *MockResponsePlan) Admit(toolID string, tool runtimecontracts.ToolSchema
 	if err := json.Unmarshal(raw, &response); err != nil {
 		return AdmittedMockResponse{}, fmt.Errorf("decode mock connector response for tool %q: %w", toolID, err)
 	}
-	schema := runtimecontracts.ToolInputSchemaJSONSchema(tool.OutputSchema)
+	schema, err := tool.OutputSchema().Project()
+	if err != nil {
+		return AdmittedMockResponse{}, fmt.Errorf("mock HTTP activity %q output schema: %w", toolID, err)
+	}
 	if err := eventschema.ValidatePayloadAgainstSchema(schema, response); err != nil {
 		return AdmittedMockResponse{}, fmt.Errorf("mock connector response for tool %q does not match output_schema: %w", toolID, err)
 	}

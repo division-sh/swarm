@@ -633,10 +633,14 @@ func generateOperationTool(document openAPIDocument, profile GeneratorProfile, s
 	if strings.TrimSpace(operation.OperationID) != strings.TrimSpace(selected.OperationID) {
 		return runtimecontracts.ToolSchemaEntry{}, fmt.Errorf("selected operation id %q does not match OpenAPI %q", selected.OperationID, operation.OperationID)
 	}
-	inputSchema := runtimecontracts.ToolInputSchema{Type: "object", Properties: map[string]runtimecontracts.ToolInputSchema{}}
+	inputProperties := map[string]runtimecontracts.ToolInputSchema{}
 	required := make([]string, 0)
 	for _, injected := range selected.InjectedInputs {
-		inputSchema.Properties[injected.Input] = runtimecontracts.ToolInputSchema{Type: injected.Type}
+		schema, err := toolInputSchema(injected.Type, "")
+		if err != nil {
+			return runtimecontracts.ToolSchemaEntry{}, fmt.Errorf("operation %q injected input %q: %w", selected.OperationID, injected.Input, err)
+		}
+		inputProperties[injected.Input] = schema
 		if injected.Required {
 			required = append(required, injected.Input)
 		}
@@ -657,7 +661,11 @@ func generateOperationTool(document openAPIDocument, profile GeneratorProfile, s
 		if !schemaSupportsType(schema, field.Type, field.ItemsType) {
 			return runtimecontracts.ToolSchemaEntry{}, fmt.Errorf("operation %q parameter %q does not support profile type %q", selected.OperationID, field.Source, field.Type)
 		}
-		inputSchema.Properties[field.Input] = toolInputSchema(field.Type, field.ItemsType)
+		admittedSchema, err := toolInputSchema(field.Type, field.ItemsType)
+		if err != nil {
+			return runtimecontracts.ToolSchemaEntry{}, fmt.Errorf("operation %q parameter %q: %w", selected.OperationID, field.Source, err)
+		}
+		inputProperties[field.Input] = admittedSchema
 		if field.Required {
 			required = append(required, field.Input)
 		}
@@ -688,38 +696,56 @@ func generateOperationTool(document openAPIDocument, profile GeneratorProfile, s
 		if !schemaSupportsType(schema, field.Type, field.ItemsType) {
 			return runtimecontracts.ToolSchemaEntry{}, fmt.Errorf("operation %q body field %q does not support profile type %q", selected.OperationID, field.Source, field.Type)
 		}
-		inputSchema.Properties[field.Input] = toolInputSchema(field.Type, field.ItemsType)
+		admittedSchema, err := toolInputSchema(field.Type, field.ItemsType)
+		if err != nil {
+			return runtimecontracts.ToolSchemaEntry{}, fmt.Errorf("operation %q body field %q: %w", selected.OperationID, field.Source, err)
+		}
+		inputProperties[field.Input] = admittedSchema
 		if field.Required {
 			required = append(required, field.Input)
 		}
 		body[field.Source] = "{{input." + field.Input + "}}"
 	}
-	inputSchema.Required = required
+	inputSchema, err := runtimecontracts.NewToolInputSchema(
+		runtimecontracts.ToolSchemaObject,
+		runtimecontracts.ToolSchemaProperties(inputProperties),
+		runtimecontracts.ToolSchemaRequired(required...),
+	)
+	if err != nil {
+		return runtimecontracts.ToolSchemaEntry{}, fmt.Errorf("operation %q input schema: %w", selected.OperationID, err)
+	}
 	if !has2xxResponse(operation.Responses) {
 		return runtimecontracts.ToolSchemaEntry{}, fmt.Errorf("operation %q has no declared 2xx response", selected.OperationID)
 	}
-	tool := runtimecontracts.ToolSchemaEntry{
-		Category:        Category,
-		Description:     strings.TrimSpace(selected.Description),
-		HandlerType:     "http",
-		EffectClass:     strings.TrimSpace(selected.EffectClass),
-		InputSchema:     inputSchema,
-		OutputSchema:    runtimecontracts.ToolInputSchema{Type: strings.TrimSpace(selected.Output.Type)},
-		ResponseSuccess: cloneHTTPResponseSuccess(selected.ResponseSuccess),
-		HTTP: &runtimecontracts.HTTPToolSpec{
+	outputSchema, err := toolInputSchema(selected.Output.Type, "")
+	if err != nil {
+		return runtimecontracts.ToolSchemaEntry{}, fmt.Errorf("operation %q output schema: %w", selected.OperationID, err)
+	}
+	options := []runtimecontracts.ToolSchemaEntryOption{
+		runtimecontracts.WithToolCategory(Category),
+		runtimecontracts.WithToolDescription(selected.Description),
+		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+		runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(selected.EffectClass)),
+		runtimecontracts.WithToolSchemas(inputSchema, outputSchema),
+		runtimecontracts.WithToolResponseSuccess(selected.ResponseSuccess),
+		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
 			Method:  strings.ToUpper(method),
 			URL:     resolvedURL,
 			Headers: cloneStringMap(profile.StaticHeaders),
 			Body:    body,
-		},
+		}),
 	}
 	switch strings.TrimSpace(profile.Auth.Mode) {
 	case profileAuthManaged:
 		ref := *profile.Auth.ManagedCredential
 		ref.Scopes = append([]string(nil), profile.Auth.ManagedCredential.Scopes...)
-		tool.ManagedCredential = &ref
+		options = append(options, runtimecontracts.WithToolManagedCredential(ref))
 	case profileAuthStatic:
-		tool.Credentials = append([]string(nil), profile.Auth.Credentials...)
+		options = append(options, runtimecontracts.WithToolCredentials(profile.Auth.Credentials...))
+	}
+	tool, err := runtimecontracts.NewToolSchemaEntry(options...)
+	if err != nil {
+		return runtimecontracts.ToolSchemaEntry{}, fmt.Errorf("operation %q admitted tool: %w", selected.OperationID, err)
 	}
 	return tool, nil
 }
@@ -813,12 +839,44 @@ func schemaSupportsType(schema openAPISchema, wantType, wantItems string) bool {
 	return false
 }
 
-func toolInputSchema(fieldType, itemsType string) runtimecontracts.ToolInputSchema {
-	schema := runtimecontracts.ToolInputSchema{Type: strings.TrimSpace(fieldType)}
-	if schema.Type == "array" {
-		schema.Items = &runtimecontracts.ToolInputSchema{Type: strings.TrimSpace(itemsType)}
+func toolInputSchema(fieldType, itemsType string) (runtimecontracts.ToolInputSchema, error) {
+	kind, err := generatedToolSchemaKind(fieldType)
+	if err != nil {
+		return runtimecontracts.ToolInputSchema{}, err
 	}
-	return schema
+	if kind == runtimecontracts.ToolSchemaArray {
+		itemKind, err := generatedToolSchemaKind(itemsType)
+		if err != nil {
+			return runtimecontracts.ToolInputSchema{}, fmt.Errorf("array items: %w", err)
+		}
+		items, err := runtimecontracts.NewToolInputSchema(itemKind)
+		if err != nil {
+			return runtimecontracts.ToolInputSchema{}, err
+		}
+		return runtimecontracts.NewToolInputSchema(kind, runtimecontracts.ToolSchemaItems(items))
+	}
+	return runtimecontracts.NewToolInputSchema(kind)
+}
+
+func generatedToolSchemaKind(value string) (runtimecontracts.ToolSchemaKind, error) {
+	switch runtimecontracts.ToolSchemaKind(strings.TrimSpace(value)) {
+	case runtimecontracts.ToolSchemaString:
+		return runtimecontracts.ToolSchemaString, nil
+	case runtimecontracts.ToolSchemaInteger:
+		return runtimecontracts.ToolSchemaInteger, nil
+	case runtimecontracts.ToolSchemaNumber:
+		return runtimecontracts.ToolSchemaNumber, nil
+	case runtimecontracts.ToolSchemaBoolean:
+		return runtimecontracts.ToolSchemaBoolean, nil
+	case runtimecontracts.ToolSchemaObject:
+		return runtimecontracts.ToolSchemaObject, nil
+	case runtimecontracts.ToolSchemaArray:
+		return runtimecontracts.ToolSchemaArray, nil
+	case runtimecontracts.ToolSchemaNull:
+		return runtimecontracts.ToolSchemaNull, nil
+	default:
+		return "", fmt.Errorf("unsupported generated tool schema type %q", value)
+	}
 }
 
 func has2xxResponse(responses map[string]json.RawMessage) bool {

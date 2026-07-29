@@ -716,16 +716,9 @@ func assertLoadedSelectedConnectorResponse(t *testing.T, loaded LoadedSelectedCo
 }
 
 func selectedMockConnectorTool() runtimecontracts.ToolSchemaEntry {
-	return runtimecontracts.ToolSchemaEntry{
-		Category:        providerconnectors.Category,
-		HandlerType:     "http",
-		EffectClass:     string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
-		Credentials:     []string{"provider_token"},
-		InputSchema:     runtimecontracts.ToolInputSchema{Type: "object"},
-		OutputSchema:    runtimecontracts.ToolInputSchema{Type: "object"},
-		ResponseSuccess: &runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"},
-		HTTP:            &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.invalid/send"},
-	}
+	return runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory(providerconnectors.Category), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")),
+		runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.invalid/send"}), runtimecontracts.WithToolResponseSuccess(runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"}), runtimecontracts.WithToolCredentials("provider_token"))
+
 }
 
 func TestBundleCatalogSelectedContractSourceLoaderFailsClosedOnUnavailableStates(t *testing.T) {

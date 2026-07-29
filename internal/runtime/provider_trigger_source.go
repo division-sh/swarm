@@ -9,27 +9,18 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
-
-type providerTriggerEventSourceMarker interface {
-	ProviderTriggerEventsApplied() bool
-	ProviderTriggerEventGeneration() string
-	BaseSemanticSource() semanticview.Source
-}
-
-type providerTriggerTargetFreeEventSource interface {
-	ProviderTriggerTargetFreeAuthorizations() []runtimeprovideroutput.Authorization
-}
 
 func SourceWithProviderTriggerEvents(source semanticview.Source, catalog *providertriggers.CatalogSnapshot) (semanticview.Source, error) {
 	if source == nil {
 		return nil, fmt.Errorf("semantic source is required")
 	}
-	if marked, ok := semanticview.SourceCapability[providerTriggerEventSourceMarker](source); ok && marked.ProviderTriggerEventsApplied() {
-		if catalog != nil && marked.ProviderTriggerEventGeneration() == catalog.GenerationID() {
+	if generation, base, applied := source.SemanticCapabilities().ProviderTriggerEvents(); applied {
+		if catalog != nil && generation.Equal(catalog.Generation()) {
 			return source, nil
 		}
-		source = marked.BaseSemanticSource()
+		source = base
 	}
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
@@ -66,7 +57,7 @@ func SourceWithProviderTriggerEvents(source semanticview.Source, catalog *provid
 				}
 				entry, exists := catalog.EntryByID(identity.ID)
 				if !exists {
-					return nil, fmt.Errorf("effective ingress pack %q disappeared from verified catalog generation %s", identity.ID, catalog.GenerationID())
+					return nil, fmt.Errorf("effective ingress pack %q disappeared from verified catalog generation %s", identity.ID, catalog.Generation().Diagnostic())
 				}
 				entries := entry.Manifest.EventCatalogEntries()
 				for _, output := range plan.Outputs() {
@@ -102,7 +93,7 @@ func SourceWithProviderTriggerEvents(source semanticview.Source, catalog *provid
 						targetFree[eventName] = runtimeprovideroutput.Authorization{
 							Provider: providertriggers.NormalizeProviderName(binding.Provider), Event: eventName,
 							PackID: identity.ID, PackVersion: identity.Version, ManifestHash: identity.ManifestHash,
-							GenerationID: catalog.GenerationID(),
+							GenerationID: catalog.Generation().Diagnostic(),
 						}.Normalized()
 					}
 					if byProject[strings.TrimSpace(pkg.Key)] == nil {
@@ -116,23 +107,19 @@ func SourceWithProviderTriggerEvents(source semanticview.Source, catalog *provid
 	if len(imported) == 0 {
 		return source, nil
 	}
-	return providerTriggerEventSource{Source: source, generation: catalog.GenerationID(), imported: imported, owners: owners, byProject: byProject, targetFree: targetFree}, nil
+	return providerTriggerEventSource{Source: source, generation: catalog.Generation(), imported: imported, owners: owners, byProject: byProject, targetFree: targetFree}, nil
 }
 
 type providerTriggerEventSource struct {
 	semanticview.Source
-	generation string
+	generation triggergeneration.Generation
 	imported   map[string]runtimecontracts.EventCatalogEntry
 	owners     map[string]string
 	byProject  map[string]map[string]runtimecontracts.EventCatalogEntry
 	targetFree map[string]runtimeprovideroutput.Authorization
 }
 
-func (s providerTriggerEventSource) BaseSemanticSource() semanticview.Source { return s.Source }
-func (s providerTriggerEventSource) ProviderTriggerEventsApplied() bool      { return true }
-func (s providerTriggerEventSource) ProviderTriggerEventGeneration() string  { return s.generation }
-
-func (s providerTriggerEventSource) ProviderTriggerTargetFreeAuthorizations() []runtimeprovideroutput.Authorization {
+func (s providerTriggerEventSource) SemanticCapabilities() semanticview.Capabilities {
 	names := make([]string, 0, len(s.targetFree))
 	for name := range s.targetFree {
 		names = append(names, name)
@@ -142,13 +129,13 @@ func (s providerTriggerEventSource) ProviderTriggerTargetFreeAuthorizations() []
 	for _, name := range names {
 		out = append(out, s.targetFree[name].Normalized())
 	}
-	return out
+	return s.Source.SemanticCapabilities().WithProviderTriggerEvents(s.Source, s.generation, out)
 }
 
 func (s providerTriggerEventSource) ResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry {
 	out := cloneEventCatalog(s.Source.ResolvedEventCatalog())
 	for name, entry := range s.imported {
-		out[name] = runtimecontracts.CloneEventCatalogEntry(entry)
+		out[name] = cloneProviderTriggerEventCatalogEntry(entry)
 	}
 	return out
 }
@@ -159,13 +146,13 @@ func (s providerTriggerEventSource) ResolveFlowEventCatalogEntry(flowID, eventTy
 	}
 	eventType = strings.TrimSpace(eventType)
 	entry, ok := s.imported[eventType]
-	return runtimecontracts.CloneEventCatalogEntry(entry), eventType, ok
+	return cloneProviderTriggerEventCatalogEntry(entry), eventType, ok
 }
 
 func (s providerTriggerEventSource) EventEntries() map[string]runtimecontracts.EventCatalogEntry {
 	out := cloneEventCatalog(s.Source.EventEntries())
 	for name, entry := range s.imported {
-		out[name] = runtimecontracts.CloneEventCatalogEntry(entry)
+		out[name] = cloneProviderTriggerEventCatalogEntry(entry)
 	}
 	return out
 }
@@ -175,7 +162,7 @@ func (s providerTriggerEventSource) EventEntry(eventType string) (runtimecontrac
 		return entry, true
 	}
 	entry, ok := s.imported[strings.TrimSpace(eventType)]
-	return runtimecontracts.CloneEventCatalogEntry(entry), ok
+	return cloneProviderTriggerEventCatalogEntry(entry), ok
 }
 
 func (s providerTriggerEventSource) ProjectScopes() []semanticview.ProjectScope {
@@ -184,7 +171,7 @@ func (s providerTriggerEventSource) ProjectScopes() []semanticview.ProjectScope 
 	for _, scope := range scopes {
 		scope.Events = cloneEventCatalog(scope.Events)
 		for name, entry := range s.byProject[strings.TrimSpace(scope.Key)] {
-			scope.Events[name] = runtimecontracts.CloneEventCatalogEntry(entry)
+			scope.Events[name] = cloneProviderTriggerEventCatalogEntry(entry)
 		}
 		out = append(out, scope)
 	}
@@ -192,5 +179,51 @@ func (s providerTriggerEventSource) ProjectScopes() []semanticview.ProjectScope 
 }
 
 func cloneEventCatalog(in map[string]runtimecontracts.EventCatalogEntry) map[string]runtimecontracts.EventCatalogEntry {
-	return runtimecontracts.CloneEventCatalogEntries(in)
+	out := make(map[string]runtimecontracts.EventCatalogEntry, len(in))
+	for name, entry := range in {
+		out[name] = cloneProviderTriggerEventCatalogEntry(entry)
+	}
+	return out
+}
+
+func cloneProviderTriggerEventCatalogEntry(in runtimecontracts.EventCatalogEntry) runtimecontracts.EventCatalogEntry {
+	out := in
+	out.Swarm.Producer = append([]string(nil), in.Swarm.Producer...)
+	out.Swarm.Consumer = append([]string(nil), in.Swarm.Consumer...)
+	out.Producer = append([]string(nil), in.Producer...)
+	out.AlternateEmitters = append([]string(nil), in.AlternateEmitters...)
+	out.Consumer = append([]string(nil), in.Consumer...)
+	out.ConsumerType = append([]string(nil), in.ConsumerType...)
+	out.Required = append([]string(nil), in.Required...)
+	out.Payload.Required = append([]string(nil), in.Payload.Required...)
+	out.Payload.Properties = make(map[string]runtimecontracts.EventFieldSpec, len(in.Payload.Properties))
+	for name, field := range in.Payload.Properties {
+		field.Citation.AllowedClasses = append([]string(nil), field.Citation.AllowedClasses...)
+		field.Refinements.Length.Min = cloneProviderTriggerInt(field.Refinements.Length.Min)
+		field.Refinements.Length.Max = cloneProviderTriggerInt(field.Refinements.Length.Max)
+		field.Refinements.Range.Min = cloneProviderTriggerFloat(field.Refinements.Range.Min)
+		field.Refinements.Range.Max = cloneProviderTriggerFloat(field.Refinements.Range.Max)
+		if field.ExactSchema != nil {
+			schema := *field.ExactSchema
+			field.ExactSchema = &schema
+		}
+		out.Payload.Properties[name] = field
+	}
+	return out
+}
+
+func cloneProviderTriggerInt(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func cloneProviderTriggerFloat(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }

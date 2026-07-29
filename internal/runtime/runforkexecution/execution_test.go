@@ -1976,11 +1976,7 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 	defer target.Close()
 
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
-		"selected_http": {
-			HandlerType: "http", EffectClass: "write_or_unknown",
-			InputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
-			HTTP:        &runtimecontracts.HTTPToolSpec{Method: http.MethodPost, URL: target.URL, TimeoutSeconds: 5},
-		},
+		"selected_http": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass("write_or_unknown")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: http.MethodPost, URL: target.URL, TimeoutSeconds: 5})),
 	}})
 	executor := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{WorkflowSource: source})
 	actor := runtimeactors.AgentConfig{ID: "selected-tool-agent", Role: "selected_tool", Tools: []string{"selected_http"}}

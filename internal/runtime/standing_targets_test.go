@@ -197,7 +197,7 @@ func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, ProcessAdmissionState{GenerationID: catalog.GenerationID(), InstalledSubjects: installed}, BundleContext{
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, ProcessAdmissionState{Generation: catalog.Generation(), InstalledSubjects: installed}, BundleContext{
 		BundleSourceFact: testBundleSourceFact(t, hash),
 		Source:           source,
 		Runtime:          &Runtime{Bus: bus, workOccurrence: workOwner},
@@ -240,7 +240,7 @@ func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneratio
 		RunID: "run-1", Generation: 1, PublicationSequence: 1, InstanceID: "instance-1",
 		FlowInstance: "coordinator/a", EntityID: "entity", SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 	}
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, ProcessAdmissionState{GenerationID: catalog.GenerationID(), InstalledSubjects: installed}, BundleContext{
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, ProcessAdmissionState{Generation: catalog.Generation(), InstalledSubjects: installed}, BundleContext{
 		BundleSourceFact: testBundleSourceFact(t, hash), Source: source, Runtime: &Runtime{Bus: bus, workOccurrence: workOwner}, WorkOwner: workOwner, StandingTargets: []StandingTarget{target},
 	})
 	if err != nil {
@@ -298,7 +298,7 @@ func TestRuntimeContextManagerDoesNotCreateProcessOccurrenceForSuspendedStartupT
 		RunID: "run-1", Generation: 1, PublicationSequence: 1, InstanceID: "instance-1",
 		FlowInstance: "coordinator/a", EntityID: "entity", SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 	}
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, ProcessAdmissionState{GenerationID: catalog.GenerationID(), InstalledSubjects: installed})
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, ProcessAdmissionState{Generation: catalog.Generation(), InstalledSubjects: installed})
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}

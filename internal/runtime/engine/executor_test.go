@@ -2757,27 +2757,16 @@ func (d *orderedActivityDispatcher) DispatchActivities(_ context.Context, intent
 func sourceWithActivityTool() semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"source_scrape": {
-				HandlerType: "http",
-				EffectClass: string(runtimecontracts.ActivityEffectClassReadOnly),
-				InputSchema: runtimecontracts.ToolInputSchema{
-					Type:     "object",
-					Required: []string{"url"},
-					Properties: map[string]runtimecontracts.ToolInputSchema{
-						"url": {Type: "string"},
-					},
-				},
-				OutputSchema: runtimecontracts.ToolInputSchema{
-					Type: "object",
-					Properties: map[string]runtimecontracts.ToolInputSchema{
-						"title": {Type: "string"},
-					},
-				},
-				HTTP: &runtimecontracts.HTTPToolSpec{
-					Method: "GET",
-					URL:    "https://example.test/source?url={{input.url}}",
-				},
-			},
+			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+				"url": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+			}), runtimecontracts.ToolSchemaRequired("url")),
+
+				runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+					"title": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+				}))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+				Method: "GET",
+				URL:    "https://example.test/source?url={{input.url}}",
+			})),
 		},
 	})
 }

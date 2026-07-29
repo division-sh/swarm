@@ -119,9 +119,7 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 			source: func() semanticview.Source {
 				bundle := testRuntimeWorkflowValidationBundle()
 				bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-					"legacy_call": {
-						HandlerType: "api_call",
-					},
+					"legacy_call": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
 				}
 				return semanticview.Wrap(bundle)
 			}(),
@@ -149,17 +147,9 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 func TestValidateWorkflowContractSurface_DurableActivityHTTPToolRequiresEffectClass(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle()
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"source_scrape": {
-			HandlerType: "http",
-			InputSchema: runtimecontracts.ToolInputSchema{
-				Type:     "object",
-				Required: []string{"url"},
-				Properties: map[string]runtimecontracts.ToolInputSchema{
-					"url": {Type: "string"},
-				},
-			},
-			HTTP: &runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test?url={{input.url}}"},
-		},
+		"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+			"url": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+		}), runtimecontracts.ToolSchemaRequired("url")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test?url={{input.url}}"})),
 	}
 	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
 		"scanner": {
@@ -189,13 +179,7 @@ func TestValidateWorkflowContractSurface_DurableActivityHTTPToolRequiresEffectCl
 func TestValidateWorkflowContractSurface_DurableActivityFailsClosedForMCPTool(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle()
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"mcp_source_scrape": {
-			HandlerType: "mcp",
-			EffectClass: string(runtimecontracts.ActivityEffectClassReadOnly),
-			InputSchema: runtimecontracts.ToolInputSchema{
-				Type: "object",
-			},
-		},
+		"mcp_source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("mcp")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
 	}
 	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
 		"scanner": {
@@ -220,24 +204,13 @@ func TestValidateWorkflowContractSurface_DurableActivityFailsClosedForMCPTool(t 
 func TestValidateWorkflowContractSurface_DurableActivityMinimalHTTPAccepted(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle()
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"source_scrape": {
-			HandlerType: "http",
-			EffectClass: string(runtimecontracts.ActivityEffectClassReadOnly),
-			InputSchema: runtimecontracts.ToolInputSchema{
-				Type:     "object",
-				Required: []string{"url"},
-				Properties: map[string]runtimecontracts.ToolInputSchema{
-					"url": {Type: "string"},
-				},
-			},
-			OutputSchema: runtimecontracts.ToolInputSchema{
-				Type: "object",
-				Properties: map[string]runtimecontracts.ToolInputSchema{
-					"title": {Type: "string"},
-				},
-			},
-			HTTP: &runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test?url={{input.url}}"},
-		},
+		"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+			"url": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+		}), runtimecontracts.ToolSchemaRequired("url")),
+
+			runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+				"title": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+			}))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test?url={{input.url}}"})),
 	}
 	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
 		"scanner": {
@@ -267,15 +240,7 @@ func TestValidateWorkflowContractSurface_DurableActivityMinimalHTTPAccepted(t *t
 func TestValidateWorkflowContractSurface_DurableActivityNonIdempotentWriteAdmitted(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle()
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"source_scrape": {
-			HandlerType: "http",
-			EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
-			Credentials: []string{"provider_token"},
-			InputSchema: runtimecontracts.ToolInputSchema{
-				Type: "object",
-			},
-			HTTP: &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"},
-		},
+		"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"}), runtimecontracts.WithToolCredentials([]string{"provider_token"}...)),
 	}
 	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
 		"scanner": {
@@ -313,11 +278,7 @@ func TestValidateWorkflowContractSurface_ActivityApprovalBoundary(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := testRuntimeWorkflowValidationBundle()
 			bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-				"provider_write": {
-					HandlerType: "http", EffectClass: string(tc.effectClass),
-					InputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
-					HTTP:        &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"},
-				},
+				"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(tc.effectClass))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"})),
 			}
 			handlers := map[string]runtimecontracts.SystemNodeEventHandler{
 				"support.reply_drafted": {
@@ -352,33 +313,21 @@ func TestValidateWorkflowContractSurface_ActivityApprovalBoundary(t *testing.T) 
 func TestValidateWorkflowContractSurface_TelegramProviderConnectorToolAdmitted(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle()
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"telegram.send_message": {
-			Category:    "provider_connector",
-			Description: "send Telegram messages",
-			HandlerType: "http",
-			EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
-			Credentials: []string{"telegram_bot_token"},
-			InputSchema: runtimecontracts.ToolInputSchema{
-				Type:     "object",
-				Required: []string{"chat_id", "text"},
-				Properties: map[string]runtimecontracts.ToolInputSchema{
-					"chat_id": {Type: "string"},
-					"text":    {Type: "string"},
-				},
+		"telegram.send_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolDescription("send Telegram messages"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+			"chat_id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+			"text":    runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+		}), runtimecontracts.ToolSchemaRequired("chat_id", "text")),
+
+			runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+			Method: "POST",
+			URL:    "https://api.telegram.org/bot{{credentials.telegram_bot_token}}/sendMessage",
+			Body: map[string]any{
+				"chat_id": "{{input.chat_id}}",
+				"text":    "{{input.text}}",
 			},
-			OutputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
-			ResponseSuccess: &runtimecontracts.HTTPResponseSuccess{
-				Kind: "http_status_2xx",
-			},
-			HTTP: &runtimecontracts.HTTPToolSpec{
-				Method: "POST",
-				URL:    "https://api.telegram.org/bot{{credentials.telegram_bot_token}}/sendMessage",
-				Body: map[string]any{
-					"chat_id": "{{input.chat_id}}",
-					"text":    "{{input.text}}",
-				},
-			},
-		},
+		}), runtimecontracts.WithToolResponseSuccess(runtimecontracts.HTTPResponseSuccess{
+			Kind: "http_status_2xx",
+		}), runtimecontracts.WithToolCredentials([]string{"telegram_bot_token"}...)),
 	}
 	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
 		"responder": {
@@ -422,38 +371,26 @@ func TestValidateWorkflowContractSurface_TelegramProviderConnectorToolAdmitted(t
 func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnectorToolAdmitted(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle()
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"slack.post_message": {
-			Category:    "provider_connector",
-			Description: "post Slack messages",
-			HandlerType: "http",
-			EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
-			ManagedCredential: &runtimecontracts.ManagedCredentialRef{
-				Key:    "slack_oauth",
-				Scopes: []string{"chat:write"},
+		"slack.post_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolDescription("post Slack messages"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+			"channel": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+			"text":    runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+		}), runtimecontracts.ToolSchemaRequired("channel", "text")),
+
+			runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+			Method: "POST",
+			URL:    "https://slack.com/api/chat.postMessage",
+			Body: map[string]any{
+				"channel": "{{input.channel}}",
+				"text":    "{{input.text}}",
 			},
-			InputSchema: runtimecontracts.ToolInputSchema{
-				Type:     "object",
-				Required: []string{"channel", "text"},
-				Properties: map[string]runtimecontracts.ToolInputSchema{
-					"channel": {Type: "string"},
-					"text":    {Type: "string"},
-				},
-			},
-			OutputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
-			ResponseSuccess: &runtimecontracts.HTTPResponseSuccess{
-				Kind:   "json_field_equals",
-				Path:   "response.body.ok",
-				Equals: true,
-			},
-			HTTP: &runtimecontracts.HTTPToolSpec{
-				Method: "POST",
-				URL:    "https://slack.com/api/chat.postMessage",
-				Body: map[string]any{
-					"channel": "{{input.channel}}",
-					"text":    "{{input.text}}",
-				},
-			},
-		},
+		}), runtimecontracts.WithToolResponseSuccess(runtimecontracts.HTTPResponseSuccess{
+			Kind:   "json_field_equals",
+			Path:   "response.body.ok",
+			Equals: true,
+		}), runtimecontracts.WithToolManagedCredential(runtimecontracts.ManagedCredentialRef{
+			Key:    "slack_oauth",
+			Scopes: []string{"chat:write"},
+		})),
 	}
 	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
 		"responder": {
@@ -484,33 +421,22 @@ func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnector
 func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnectorRequiresResponseSuccess(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle()
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"slack.post_message": {
-			Category:    "provider_connector",
-			Description: "post Slack messages",
-			HandlerType: "http",
-			EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
-			ManagedCredential: &runtimecontracts.ManagedCredentialRef{
-				Key:    "slack_oauth",
-				Scopes: []string{"chat:write"},
+		"slack.post_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolDescription("post Slack messages"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+			"channel": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+			"text":    runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+		}), runtimecontracts.ToolSchemaRequired("channel", "text")),
+
+			runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+			Method: "POST",
+			URL:    "https://slack.com/api/chat.postMessage",
+			Body: map[string]any{
+				"channel": "{{input.channel}}",
+				"text":    "{{input.text}}",
 			},
-			InputSchema: runtimecontracts.ToolInputSchema{
-				Type:     "object",
-				Required: []string{"channel", "text"},
-				Properties: map[string]runtimecontracts.ToolInputSchema{
-					"channel": {Type: "string"},
-					"text":    {Type: "string"},
-				},
-			},
-			OutputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
-			HTTP: &runtimecontracts.HTTPToolSpec{
-				Method: "POST",
-				URL:    "https://slack.com/api/chat.postMessage",
-				Body: map[string]any{
-					"channel": "{{input.channel}}",
-					"text":    "{{input.text}}",
-				},
-			},
-		},
+		}), runtimecontracts.WithToolManagedCredential(runtimecontracts.ManagedCredentialRef{
+			Key:    "slack_oauth",
+			Scopes: []string{"chat:write"},
+		})),
 	}
 	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
 		"responder": {
@@ -541,12 +467,7 @@ func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnector
 func TestValidateWorkflowContractSurface_ProviderConnectorToolFailsClosedForUnsupportedShape(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle()
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"telegram.send_message": {
-			Category:    "provider_connector",
-			HandlerType: "http",
-			EffectClass: string(runtimecontracts.ActivityEffectClassReadOnly),
-			HTTP:        &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://api.telegram.org/bot{{credentials.telegram_bot_token}}/sendMessage"},
-		},
+		"telegram.send_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://api.telegram.org/bot{{credentials.telegram_bot_token}}/sendMessage"})),
 	}
 	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
 		CheckMCPReachable:              false,
@@ -562,14 +483,7 @@ func TestValidateWorkflowContractSurface_ProviderConnectorToolFailsClosedForUnsu
 func TestValidateWorkflowContractSurface_DurableActivityIdempotentWriteFailsClosed(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle()
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"source_scrape": {
-			HandlerType: "http",
-			EffectClass: string(runtimecontracts.ActivityEffectClassIdempotentWrite),
-			InputSchema: runtimecontracts.ToolInputSchema{
-				Type: "object",
-			},
-			HTTP: &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"},
-		},
+		"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"})),
 	}
 	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
 		"scanner": {
@@ -599,14 +513,7 @@ func TestValidateWorkflowContractSurface_DurableActivityResultEventsRejectAuthor
 		},
 	}
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"source_scrape": {
-			HandlerType: "http",
-			EffectClass: string(runtimecontracts.ActivityEffectClassReadOnly),
-			InputSchema: runtimecontracts.ToolInputSchema{
-				Type: "object",
-			},
-			HTTP: &runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test"},
-		},
+		"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test"})),
 	}
 	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
 		"scanner": {
@@ -631,14 +538,7 @@ func TestValidateWorkflowContractSurface_DurableActivityResultEventsRejectAuthor
 func TestValidateWorkflowContractSurface_DurableActivityResultEventsRejectGeneratedCollision(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle()
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"source_scrape": {
-			HandlerType: "http",
-			EffectClass: string(runtimecontracts.ActivityEffectClassReadOnly),
-			InputSchema: runtimecontracts.ToolInputSchema{
-				Type: "object",
-			},
-			HTTP: &runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test"},
-		},
+		"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test"})),
 	}
 	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
 		"scanner": {
@@ -676,36 +576,54 @@ func TestValidateWorkflowContractSurface_DurableActivityResultEventsRejectGenera
 func TestValidateWorkflowContractSurface_DurableActivityHTTPSubfeaturesFailClosed(t *testing.T) {
 	cases := []struct {
 		name        string
-		mutateTool  func(*runtimecontracts.ToolSchemaEntry)
+		mutateTool  func(runtimecontracts.ToolSchemaEntry) runtimecontracts.ToolSchemaEntry
 		errContains string
 	}{
 		{
 			name: "response mapping",
-			mutateTool: func(tool *runtimecontracts.ToolSchemaEntry) {
-				tool.ResponseMapping = map[string]any{"title": "{{response.body.title}}"}
+			mutateTool: func(tool runtimecontracts.ToolSchemaEntry) runtimecontracts.ToolSchemaEntry {
+				updated, err := tool.WithResponseMapping(map[string]any{"title": "{{response.body.title}}"})
+				if err != nil {
+					panic(err)
+				}
+				return updated
 			},
 			errContains: "uses response_mapping",
 		},
 		{
 			name: "rate limit",
-			mutateTool: func(tool *runtimecontracts.ToolSchemaEntry) {
-				tool.RateLimit = "1/s"
-				tool.RateLimitMaxWait = "0s"
+			mutateTool: func(tool runtimecontracts.ToolSchemaEntry) runtimecontracts.ToolSchemaEntry {
+				updated, err := tool.WithRateLimit("1/s", "0s")
+				if err != nil {
+					panic(err)
+				}
+				return updated
 			},
 			errContains: "uses rate_limit",
 		},
 		{
 			name: "read only static credentials",
-			mutateTool: func(tool *runtimecontracts.ToolSchemaEntry) {
-				tool.Credentials = []string{"provider_token"}
+			mutateTool: func(tool runtimecontracts.ToolSchemaEntry) runtimecontracts.ToolSchemaEntry {
+				updated, err := tool.WithStaticCredentials("provider_token")
+				if err != nil {
+					panic(err)
+				}
+				return updated
 			},
 			errContains: "static credential activity HTTP execution is supported only for non_idempotent_write",
 		},
 		{
 			name: "managed credentials",
-			mutateTool: func(tool *runtimecontracts.ToolSchemaEntry) {
-				tool.EffectClass = string(runtimecontracts.ActivityEffectClassNonIdempotentWrite)
-				tool.ManagedCredential = &runtimecontracts.ManagedCredentialRef{Key: "provider_oauth"}
+			mutateTool: func(tool runtimecontracts.ToolSchemaEntry) runtimecontracts.ToolSchemaEntry {
+				updated, err := tool.WithEffect(runtimecontracts.ActivityEffectClassNonIdempotentWrite)
+				if err != nil {
+					panic(err)
+				}
+				updated, err = updated.WithManagedCredential(runtimecontracts.ManagedCredentialRef{Key: "provider_oauth"})
+				if err != nil {
+					panic(err)
+				}
+				return updated
 			},
 			errContains: "uses managed_credential",
 		},
@@ -713,19 +631,11 @@ func TestValidateWorkflowContractSurface_DurableActivityHTTPSubfeaturesFailClose
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := testRuntimeWorkflowValidationBundle()
-			tool := runtimecontracts.ToolSchemaEntry{
-				HandlerType: "http",
-				EffectClass: string(runtimecontracts.ActivityEffectClassReadOnly),
-				InputSchema: runtimecontracts.ToolInputSchema{
-					Type:     "object",
-					Required: []string{"url"},
-					Properties: map[string]runtimecontracts.ToolInputSchema{
-						"url": {Type: "string"},
-					},
-				},
-				HTTP: &runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test?url={{input.url}}"},
-			}
-			tc.mutateTool(&tool)
+			tool := runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+				"url": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+			}), runtimecontracts.ToolSchemaRequired("url")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test?url={{input.url}}"}))
+
+			tool = tc.mutateTool(tool)
 			bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{"source_scrape": tool}
 			bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
 				"scanner": {
@@ -1013,9 +923,7 @@ func TestValidateWorkflowContractSurface_FatalToolImplementationWarningsFollowSh
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 	bundle := testRuntimeWorkflowValidationBundle()
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"legacy_call": {
-			HandlerType: "api_call",
-		},
+		"legacy_call": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
 	}
 	source := semanticview.Wrap(bundle)
 

@@ -11,20 +11,16 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func builtinRegisteredTools(source semanticview.Source, actor *models.AgentConfig) map[string]RegisteredTool {
+func builtinExecutionTools(source semanticview.Source, actor *models.AgentConfig) map[string]ExecutionTool {
 	entries := builtinRuntimeContractSchemas(source, actor)
-	out := make(map[string]RegisteredTool, len(entries))
+	out := make(map[string]ExecutionTool, len(entries))
 	for name, entry := range entries {
-		out[name] = RegisteredTool{
-			Name:            strings.TrimSpace(name),
-			Category:        strings.TrimSpace(entry.Category),
-			Description:     strings.TrimSpace(entry.Description),
-			Usage:           runtimeOwnedToolUsage(name),
-			HandlerType:     implementationPlatformBuiltin,
-			InputSchema:     deepCloneMap(entry.InputSchema),
-			OutputSchema:    deepCloneMap(entry.OutputSchema),
-			GeneratedSchema: entry.GeneratedSchema,
-		}
+		out[name] = newExecutionTool(executionToolValue{
+			name: name, category: entry.Category, description: entry.Description,
+			usage: runtimeOwnedToolUsage(name), handler: implementationPlatformBuiltin,
+			inputSchema: entry.InputSchema, outputSchema: entry.OutputSchema,
+			generatedSchema: entry.GeneratedSchema,
+		})
 	}
 	return out
 }

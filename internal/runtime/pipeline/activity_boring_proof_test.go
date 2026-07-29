@@ -538,17 +538,10 @@ func newActivityBoringFullFlowCoordinator(t *testing.T, db *sql.DB, kind activit
 func activityBoringSource(serverURL string) semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"source_scrape": {
-				HandlerType: "http",
-				EffectClass: string(runtimecontracts.ActivityEffectClassReadOnly),
-				OutputSchema: runtimecontracts.ToolInputSchema{
-					Type: "object",
-				},
-				HTTP: &runtimecontracts.HTTPToolSpec{
-					Method: "GET",
-					URL:    strings.TrimRight(serverURL, "/") + "?url={{input.url}}",
-				},
-			},
+			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+				Method: "GET",
+				URL:    strings.TrimRight(serverURL, "/") + "?url={{input.url}}",
+			})),
 		},
 	})
 }
@@ -620,27 +613,16 @@ func activityBoringFullFlowBundle(serverURL string) *runtimecontracts.WorkflowCo
 			ByID:   map[string]*runtimecontracts.FlowContractView{"research": &flow},
 		},
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"source_scrape": {
-				HandlerType: "http",
-				EffectClass: string(runtimecontracts.ActivityEffectClassReadOnly),
-				InputSchema: runtimecontracts.ToolInputSchema{
-					Type:     "object",
-					Required: []string{"url"},
-					Properties: map[string]runtimecontracts.ToolInputSchema{
-						"url": {Type: "string"},
-					},
-				},
-				OutputSchema: runtimecontracts.ToolInputSchema{
-					Type: "object",
-					Properties: map[string]runtimecontracts.ToolInputSchema{
-						"title": {Type: "string"},
-					},
-				},
-				HTTP: &runtimecontracts.HTTPToolSpec{
-					Method: "GET",
-					URL:    strings.TrimRight(serverURL, "/") + "?url={{input.url}}",
-				},
-			},
+			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+				"url": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+			}), runtimecontracts.ToolSchemaRequired("url")),
+
+				runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+					"title": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+				}))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+				Method: "GET",
+				URL:    strings.TrimRight(serverURL, "/") + "?url={{input.url}}",
+			})),
 		},
 	}
 }

@@ -87,11 +87,7 @@ func TestExecutorHTTPToolNeverRefreshesAndRedispatchesAfterUnauthorized(t *testi
 func TestValidateToolImplementationsRejectsMalformedManagedCredentialReferences(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"bad_http": {
-				HandlerType:       "http",
-				HTTP:              &runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://provider.example.test"},
-				ManagedCredential: &runtimecontracts.ManagedCredentialRef{},
-			},
+			"bad_http": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://provider.example.test"}), runtimecontracts.WithToolManagedCredential(runtimecontracts.ManagedCredentialRef{})),
 		},
 	})
 	if _, err := ValidateToolImplementations(source); err == nil || !strings.Contains(err.Error(), "managed_credential.key is required") {
@@ -100,10 +96,7 @@ func TestValidateToolImplementationsRejectsMalformedManagedCredentialReferences(
 
 	source = semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"bad_mcp": {
-				HandlerType:       "mcp",
-				ManagedCredential: &runtimecontracts.ManagedCredentialRef{Key: "github"},
-			},
+			"bad_mcp": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("mcp")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolManagedCredential(runtimecontracts.ManagedCredentialRef{Key: "github"})),
 		},
 	})
 	if _, err := ValidateToolImplementations(source); err == nil || !strings.Contains(err.Error(), "managed_credential is only supported") {
@@ -120,20 +113,15 @@ func TestExecutorHTTPToolRejectsInstallationIDInputOutsideActivityPath(t *testin
 
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"send_provider": {
-				HandlerType: "http",
-				InputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
-				HTTP: &runtimecontracts.HTTPToolSpec{
-					Method: "POST",
-					URL:    server.URL,
-				},
-				ManagedCredential: &runtimecontracts.ManagedCredentialRef{
-					Key:                 "github_app",
-					GrantType:           runtimemanagedcredentials.GrantGitHubAppInstallation,
-					GrantModel:          managedcredentialmodel.GrantModelInstallation,
-					InstallationIDInput: "installation_id",
-				},
-			},
+			"send_provider": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+				Method: "POST",
+				URL:    server.URL,
+			}), runtimecontracts.WithToolManagedCredential(runtimecontracts.ManagedCredentialRef{
+				Key:                 "github_app",
+				GrantType:           runtimemanagedcredentials.GrantGitHubAppInstallation,
+				GrantModel:          managedcredentialmodel.GrantModelInstallation,
+				InstallationIDInput: "installation_id",
+			})),
 		},
 	})
 	if _, err := ValidateToolImplementations(source); err != nil {
@@ -421,19 +409,13 @@ func managedCredentialActor() models.AgentConfig {
 func managedCredentialSource(serverURL, key string, scopes []string) semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"send_provider": {
-				HandlerType: "http",
-				InputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
-				HTTP: &runtimecontracts.HTTPToolSpec{
-					Method: "GET",
-					URL:    serverURL,
-				},
-				ManagedCredential: &runtimecontracts.ManagedCredentialRef{
-					Key:    key,
-					Scopes: scopes,
-				},
-				ResponseMapping: map[string]any{"ok": "{{response.body.ok}}"},
-			},
+			"send_provider": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+				Method: "GET",
+				URL:    serverURL,
+			}), runtimecontracts.WithToolResponseMapping(map[string]any{"ok": "{{response.body.ok}}"}), runtimecontracts.WithToolManagedCredential(runtimecontracts.ManagedCredentialRef{
+				Key:    key,
+				Scopes: scopes,
+			})),
 		},
 	})
 }

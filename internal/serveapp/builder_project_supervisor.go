@@ -498,7 +498,7 @@ func (s *runtimeProjectSupervisor) compileProcessAdmissionCandidate(ctx context.
 		return processAdmissionCandidate{}, err
 	}
 	candidate := processAdmissionCandidate{
-		state:            runtime.ProcessAdmissionState{GenerationID: catalog.GenerationID(), InstalledSubjects: installed},
+		state:            runtime.ProcessAdmissionState{Generation: catalog.Generation(), InstalledSubjects: installed},
 		survivingTargets: map[string][]runtime.StandingTarget{},
 	}
 	s.mu.RLock()

@@ -4763,9 +4763,7 @@ func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t 
 			bundle: func() *runtimecontracts.WorkflowContractBundle {
 				bundle := testWorkflowValidationBundle()
 				bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-					"legacy_call": {
-						HandlerType: "api_call",
-					},
+					"legacy_call": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
 				}
 				return bundle
 			}(),

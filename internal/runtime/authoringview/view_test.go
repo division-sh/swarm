@@ -85,7 +85,15 @@ func TestBuildShowsApprovedOutwardEffectAsCanonicalApprovalPoint(t *testing.T) {
 			},
 		},
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"telegram_send": {HandlerType: "http", EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite)},
+			"telegram_send": runtimecontracts.MustToolSchemaEntry(
+				runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+				runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+				runtimecontracts.WithToolSchemas(
+					runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
+					runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
+				),
+				runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://telegram.example/send"}),
+			),
 		},
 	}
 	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{})

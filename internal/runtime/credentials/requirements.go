@@ -61,7 +61,7 @@ func appendToolRequirements(index map[string][]Requirement, source semanticview.
 		if name == "" {
 			continue
 		}
-		for _, key := range entry.Credentials {
+		for _, key := range entry.Credentials() {
 			key = strings.TrimSpace(key)
 			if key == "" {
 				continue

@@ -38,24 +38,19 @@ func TestActivityApprovalYAMLIsStrictAndCanonical(t *testing.T) {
 func TestActivityResultEventsMaterializeIntoCatalogSchemaAndProduces(t *testing.T) {
 	bundle := &WorkflowContractBundle{
 		Tools: map[string]ToolSchemaEntry{
-			"source_scrape": {
-				HandlerType: "http",
-				EffectClass: string(ActivityEffectClassReadOnly),
-				InputSchema: ToolInputSchema{
-					Type:     "object",
-					Required: []string{"url"},
-					Properties: map[string]ToolInputSchema{
-						"url": {Type: "string"},
-					},
-				},
-				OutputSchema: ToolInputSchema{
-					Type: "object",
-					Properties: map[string]ToolInputSchema{
-						"title": {Type: "string"},
-					},
-				},
-				HTTP: &HTTPToolSpec{Method: "GET", URL: "https://example.test"},
-			},
+			"source_scrape": MustToolSchemaEntry(
+				WithToolHandler(ToolHandlerHTTP),
+				WithToolEffect(ActivityEffectClassReadOnly),
+				WithToolSchemas(
+					MustToolInputSchema(ToolSchemaObject, ToolSchemaProperties(map[string]ToolInputSchema{
+						"url": MustToolInputSchema(ToolSchemaString),
+					}), ToolSchemaRequired("url")),
+					MustToolInputSchema(ToolSchemaObject, ToolSchemaProperties(map[string]ToolInputSchema{
+						"title": MustToolInputSchema(ToolSchemaString),
+					})),
+				),
+				WithToolHTTP(HTTPToolSpec{Method: "GET", URL: "https://example.test"}),
+			),
 		},
 		Nodes: map[string]SystemNodeContract{
 			"scanner": {

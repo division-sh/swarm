@@ -478,8 +478,8 @@ func TestNativeFallbackToolSurfaceRejectsStrictProviderNativeRuntime(t *testing.
 		if containsToolDefinition(defs, denied) {
 			t.Fatalf("strict provider-native runtime exposed platform fallback definition %q: %#v", denied, defs)
 		}
-		if _, ok, err := exec.resolveRegisteredTool(actor, denied); err != nil || ok {
-			t.Fatalf("resolveRegisteredTool(%s) = ok:%v err:%v, want denied without error", denied, ok, err)
+		if _, ok, err := exec.resolveExecutionTool(actor, denied); err != nil || ok {
+			t.Fatalf("resolveExecutionTool(%s) = ok:%v err:%v, want denied without error", denied, ok, err)
 		}
 	}
 

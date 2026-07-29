@@ -74,7 +74,7 @@ type UsageHintFinding struct {
 
 func ValidateUsageHintCoverage(source semanticview.Source, discovered map[string]runtimemcp.DiscoveredTool) []UsageHintFinding {
 	findings := make([]UsageHintFinding, 0)
-	entries, err := registeredToolsForRuntime(source, discovered)
+	entries, err := executionToolsForRuntime(source, discovered)
 	if err != nil {
 		return []UsageHintFinding{{
 			Severity: "error",
@@ -91,8 +91,8 @@ func ValidateUsageHintCoverage(source semanticview.Source, discovered map[string
 		if runtimeToolHiddenFromAgents(name) {
 			continue
 		}
-		usage := strings.TrimSpace(entry.Usage)
-		switch entry.HandlerType {
+		usage := entry.Usage()
+		switch entry.Handler() {
 		case implementationPlatformBuiltin:
 			if usage == "" {
 				findings = append(findings, UsageHintFinding{

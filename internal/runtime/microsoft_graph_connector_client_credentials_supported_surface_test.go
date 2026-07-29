@@ -419,12 +419,15 @@ func microsoftGraphConnectorPackRegistry(t *testing.T, baseURL string) *provider
 	if !ok {
 		t.Fatal("provider connector pack microsoft_graph.send_mail not found")
 	}
-	if tool.HTTP == nil {
+	httpSpec, ok := tool.HTTP()
+	if !ok {
 		t.Fatal("provider connector pack microsoft_graph.send_mail missing http block")
 	}
-	httpSpec := *tool.HTTP
-	tool.HTTP = &httpSpec
-	tool.HTTP.URL = strings.TrimRight(baseURL, "/") + "/v1.0/users/{{input.user_id}}/sendMail"
+	httpSpec.URL = strings.TrimRight(baseURL, "/") + "/v1.0/users/{{input.user_id}}/sendMail"
+	tool, err := tool.WithHTTP(httpSpec)
+	if err != nil {
+		t.Fatalf("replace Microsoft Graph connector HTTP endpoint: %v", err)
+	}
 	registry, err := providerconnectors.NewPackRegistry(providerconnectors.LoadedPack{
 		Envelope: packs.Envelope{
 			ID: "provider.microsoft_graph.connector",

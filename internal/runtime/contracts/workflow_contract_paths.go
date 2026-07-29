@@ -321,7 +321,7 @@ func cloneSystemNodeContractMap(in map[string]SystemNodeContract) map[string]Sys
 	return out
 }
 func cloneEventCatalogEntryMap(in map[string]EventCatalogEntry) map[string]EventCatalogEntry {
-	return CloneEventCatalogEntries(in)
+	return cloneEventCatalogEntries(in)
 }
 func cloneAgentRegistryEntryMap(in map[string]AgentRegistryEntry) map[string]AgentRegistryEntry {
 	if len(in) == 0 {
@@ -374,7 +374,11 @@ func cloneAgentRegistryEntry(in AgentRegistryEntry) AgentRegistryEntry {
 	return out
 }
 func cloneToolSchemaEntryMap(in map[string]ToolSchemaEntry) map[string]ToolSchemaEntry {
-	return CloneToolSchemaEntries(in)
+	out := make(map[string]ToolSchemaEntry, len(in))
+	for name, entry := range in {
+		out[name] = entry
+	}
+	return out
 }
 func normalizeStrings(in []string) []string {
 	if len(in) == 0 {

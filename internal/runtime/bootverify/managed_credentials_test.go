@@ -73,17 +73,13 @@ func TestBootVerifyReportsManagedCredentialState(t *testing.T) {
 func managedCredentialBootSource(scopes []string) semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"send_provider": {
-				HandlerType: "http",
-				HTTP: &runtimecontracts.HTTPToolSpec{
-					Method: "GET",
-					URL:    "https://provider.example.test",
-				},
-				ManagedCredential: &runtimecontracts.ManagedCredentialRef{
-					Key:    "github",
-					Scopes: scopes,
-				},
-			},
+			"send_provider": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+				Method: "GET",
+				URL:    "https://provider.example.test",
+			}), runtimecontracts.WithToolManagedCredential(runtimecontracts.ManagedCredentialRef{
+				Key:    "github",
+				Scopes: scopes,
+			})),
 		},
 	})
 }

@@ -12,22 +12,20 @@ type toolOverlaySource struct {
 	tools map[string]runtimecontracts.ToolSchemaEntry
 }
 
-func (s toolOverlaySource) BaseSemanticSource() Source { return s.Source }
-
 func (s toolOverlaySource) ToolEntries() map[string]runtimecontracts.ToolSchemaEntry {
 	out := s.Source.ToolEntries()
 	for id, tool := range s.tools {
-		out[id] = runtimecontracts.CloneToolSchemaEntry(tool)
+		out[id] = tool
 	}
 	return out
 }
 
 func (s toolOverlaySource) ToolEntryForAgent(agentID, toolID string) (runtimecontracts.ToolSchemaEntry, bool) {
 	if tool, ok := s.Source.ToolEntryForAgent(agentID, toolID); ok {
-		return runtimecontracts.CloneToolSchemaEntry(tool), true
+		return tool, true
 	}
 	tool, ok := s.tools[strings.TrimSpace(toolID)]
-	return runtimecontracts.CloneToolSchemaEntry(tool), ok
+	return tool, ok
 }
 
 // WithRuntimeTools adds platform-compiled tools without mutating the authored
@@ -52,7 +50,18 @@ func WithRuntimeTools(source Source, tools map[string]runtimecontracts.ToolSchem
 		if _, exists := cloned[id]; exists {
 			return nil, fmt.Errorf("duplicate runtime tool %q", id)
 		}
-		cloned[id] = runtimecontracts.CloneToolSchemaEntry(tool)
+		if err := tool.Validate(); err != nil {
+			return nil, fmt.Errorf("runtime tool %q: %w", id, err)
+		}
+		cloned[id] = tool
 	}
 	return toolOverlaySource{Source: source, tools: cloned}, nil
+}
+
+func toolEntryMapSnapshot(in map[string]runtimecontracts.ToolSchemaEntry) map[string]runtimecontracts.ToolSchemaEntry {
+	out := make(map[string]runtimecontracts.ToolSchemaEntry, len(in))
+	for id, tool := range in {
+		out[id] = tool
+	}
+	return out
 }

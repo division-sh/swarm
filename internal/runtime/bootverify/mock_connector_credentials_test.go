@@ -80,38 +80,35 @@ func TestCredentialChecksRetainNonToolRequirementsSharingAKey(t *testing.T) {
 
 func mockConnectorCredentialFixture(t *testing.T, credentialKind string, includeSibling bool) (semanticview.Source, *providerconnectors.MockResponsePlan) {
 	t.Helper()
-	connector := runtimecontracts.ToolSchemaEntry{
-		Category:    "provider_connector",
-		HandlerType: "http",
-		EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
-		InputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
-		HTTP:        &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://provider.example/messages"},
-		ResponseSuccess: &runtimecontracts.HTTPResponseSuccess{
-			Kind: "http_status_2xx",
-		},
-		OutputSchema: runtimecontracts.ToolInputSchema{
-			Type:     "object",
-			Required: []string{"message_id"},
-			Properties: map[string]runtimecontracts.ToolInputSchema{
-				"message_id": {Type: "string"},
-			},
-		},
-	}
+	connector := runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")),
+
+		runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+			"message_id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+		}), runtimecontracts.ToolSchemaRequired("message_id"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://provider.example/messages"}), runtimecontracts.WithToolResponseSuccess(runtimecontracts.HTTPResponseSuccess{
+		Kind: "http_status_2xx",
+	}))
+
+	var err error
 	switch credentialKind {
 	case "static":
-		connector.Credentials = []string{"provider_credential"}
+		connector, err = connector.WithStaticCredentials("provider_credential")
 	case "managed":
-		connector.ManagedCredential = &runtimecontracts.ManagedCredentialRef{Key: "provider_credential"}
+		connector, err = connector.WithManagedCredential(runtimecontracts.ManagedCredentialRef{Key: "provider_credential"})
 	default:
 		t.Fatalf("unsupported credential kind %q", credentialKind)
 	}
+	if err != nil {
+		t.Fatalf("derive connector credential contract: %v", err)
+	}
 	tools := map[string]runtimecontracts.ToolSchemaEntry{"provider.send": connector}
 	if includeSibling {
-		tools["audit.call"] = runtimecontracts.ToolSchemaEntry{
-			HandlerType: "http",
-			Credentials: []string{"provider_credential"},
-			HTTP:        &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://audit.example/calls"},
-		}
+		objectSchema := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)
+		tools["audit.call"] = runtimecontracts.MustToolSchemaEntry(
+			runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+			runtimecontracts.WithToolSchemas(objectSchema, objectSchema),
+			runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://audit.example/calls"}),
+			runtimecontracts.WithToolCredentials("provider_credential"),
+		)
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{Tools: tools}
 	if includeSibling {

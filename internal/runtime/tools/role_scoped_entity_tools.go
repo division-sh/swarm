@@ -41,7 +41,7 @@ var legacyEntityToolSurfaceNames = map[string]struct{}{
 	"search_entities":    {},
 }
 
-func removeLegacyEntityToolSurface(entries map[string]RegisteredTool) {
+func removeLegacyEntityToolSurface(entries map[string]ExecutionTool) {
 	for name := range legacyEntityToolSurfaceNames {
 		delete(entries, name)
 	}

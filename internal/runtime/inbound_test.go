@@ -922,7 +922,7 @@ func compiledRedactedNormalizedPlan(t *testing.T, version, projectedType string)
 		NormalizedEvents: []providertriggers.NormalizedEventManifest{{
 			Event: "inbound.telegram.text_message",
 			Fields: map[string]providertriggers.NormalizedEventFieldProjection{
-				"text": {From: "message.text", Schema: runtimecontracts.ToolInputSchema{Type: mapProjectedSchemaType(projectedType)}},
+				"text": {From: "message.text", Schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind(mapProjectedSchemaType(projectedType)))},
 			},
 		}},
 	}

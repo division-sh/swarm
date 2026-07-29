@@ -7,3 +7,5 @@ lookup_data:
       query:
         type: string
         description: Search query
+  output_schema:
+    type: object

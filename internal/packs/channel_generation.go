@@ -4,78 +4,82 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 )
 
-// GenerationID identifies the complete compiled channel plan. Durable private
+// Generation identifies the complete compiled channel plan. Durable private
 // targets pin this value so project reload cannot reinterpret an admitted
 // request through a replacement trigger, connector, schema, or projection.
-func (p SatisfactionPlan) GenerationID() (string, error) {
+func (p SatisfactionPlan) Generation() (plangeneration.Generation, error) {
 	if err := validateSatisfactionPlanGenerationInputs(p); err != nil {
-		return "", err
+		return plangeneration.Generation{}, err
 	}
-	operations := make(map[string]any, len(p.Operations))
-	for _, name := range sortedKeys(p.Operations) {
-		operation := p.Operations[name]
+	operations := make(map[string]any, len(p.operations))
+	for _, name := range sortedKeys(p.operations) {
+		operation := p.operations[name]
 		tool, err := p.OperationTool(name)
 		if err != nil {
-			return "", err
+			return plangeneration.Generation{}, err
+		}
+		toolValue, err := tool.CanonicalValue()
+		if err != nil {
+			return plangeneration.Generation{}, fmt.Errorf("channel generation operation %q tool: %w", name, err)
 		}
 		operations[name] = map[string]any{
-			"name":            operation.Name,
-			"tool":            operation.Tool,
-			"tool_schema":     channelToolGenerationValue(tool),
-			"input":           channelMappingGenerationValue(operation.Input),
-			"output":          channelMappingGenerationValue(operation.Output),
-			"interface":       channelInterfaceOperationGenerationValue(operation.Interface),
-			"input_topology":  channelTopologyGenerationValue(operation.InputTopology),
-			"output_topology": channelTopologyGenerationValue(operation.OutputTopology),
+			"name":            operation.name,
+			"tool":            operation.tool,
+			"tool_schema":     toolValue,
+			"input":           channelMappingGenerationValue(operation.input),
+			"output":          channelMappingGenerationValue(operation.output),
+			"interface":       channelInterfaceOperationGenerationValue(operation.interfaceValue),
+			"input_topology":  channelTopologyGenerationValue(operation.inputTopology),
+			"output_topology": channelTopologyGenerationValue(operation.outputTopology),
 		}
 	}
-	events := make(map[string]any, len(p.Events))
-	for _, name := range sortedKeys(p.Events) {
-		event := p.Events[name]
+	events := make(map[string]any, len(p.events))
+	for _, name := range sortedKeys(p.events) {
+		event := p.events[name]
 		events[name] = map[string]any{
-			"name":       event.Name,
-			"event":      event.Event,
-			"fields":     event.Fields,
-			"descriptor": channelTriggerEventGenerationValue(event.Descriptor),
+			"name":       event.name,
+			"event":      event.event,
+			"fields":     event.fields,
+			"descriptor": channelTriggerEventGenerationValue(event.descriptor),
 		}
 	}
-	return canonicaljson.Hash(map[string]any{
-		"interface_ref":         strings.TrimSpace(p.InterfaceRef),
-		"channel":               p.Channel,
-		"trigger":               p.Trigger,
-		"connector":             p.Connector,
-		"provider":              strings.TrimSpace(p.Provider),
-		"trigger_generation_id": strings.TrimSpace(p.TriggerGenerationID),
-		"schemas":               channelSchemaMapGenerationValue(p.Schemas),
-		"opaque_types":          channelSchemaMapGenerationValue(p.OpaqueTypes),
-		"constraints":           channelSchemaMapGenerationValue(p.Constraints),
-		"operations":            operations,
-		"events":                events,
+	return plangeneration.FromCanonicalValue(map[string]any{
+		"interface_ref":      p.interfaceRef,
+		"channel":            p.channel,
+		"trigger":            p.trigger,
+		"connector":          p.connector,
+		"provider":           p.provider,
+		"trigger_generation": p.triggerGeneration.Diagnostic(),
+		"schemas":            channelSchemaMapGenerationValue(p.schemas),
+		"opaque_types":       channelSchemaMapGenerationValue(p.opaqueTypes),
+		"constraints":        channelSchemaMapGenerationValue(p.constraints),
+		"operations":         operations,
+		"events":             events,
 	})
 }
 
 func validateSatisfactionPlanGenerationInputs(plan SatisfactionPlan) error {
 	for family, schemas := range map[string]map[string]runtimecontracts.ToolInputSchema{
-		"schema": plan.Schemas, "opaque type": plan.OpaqueTypes, "constraint": plan.Constraints,
+		"schema": plan.schemas, "opaque type": plan.opaqueTypes, "constraint": plan.constraints,
 	} {
 		for name, schema := range schemas {
-			if err := runtimecontracts.ValidateToolInputSchema(schema); err != nil {
+			if err := schema.ValidateDefinition(); err != nil {
 				return fmt.Errorf("channel generation %s %q: %w", family, name, err)
 			}
 		}
 	}
-	for name, operation := range plan.Operations {
-		if _, err := runtimecontracts.AdmitToolSchemaEntry(operation.ToolSchema); err != nil {
+	for name, operation := range plan.operations {
+		if err := operation.toolSchema.Validate(); err != nil {
 			return fmt.Errorf("channel generation operation %q tool: %w", name, err)
 		}
 	}
-	for eventName, event := range plan.Events {
-		for fieldName, field := range event.Descriptor.Fields {
-			if err := runtimecontracts.ValidateToolInputSchema(field.Schema); err != nil {
+	for eventName, event := range plan.events {
+		for fieldName, field := range event.descriptor.Fields {
+			if err := field.Schema.ValidateDefinition(); err != nil {
 				return fmt.Errorf("channel generation event %q field %q: %w", eventName, fieldName, err)
 			}
 		}
@@ -88,7 +92,7 @@ func channelTriggerEventGenerationValue(event TriggerEvent) map[string]any {
 	for name, field := range event.Fields {
 		fields[name] = map[string]any{
 			"required": field.Required,
-			"schema":   runtimecontracts.ToolInputSchemaJSONSchema(field.Schema),
+			"schema":   mustChannelSchemaProjection(field.Schema),
 		}
 	}
 	return map[string]any{"name": event.Name, "fields": fields}
@@ -97,52 +101,17 @@ func channelTriggerEventGenerationValue(event TriggerEvent) map[string]any {
 func channelSchemaMapGenerationValue(schemas map[string]runtimecontracts.ToolInputSchema) map[string]any {
 	out := make(map[string]any, len(schemas))
 	for name, schema := range schemas {
-		out[name] = runtimecontracts.ToolInputSchemaJSONSchema(schema)
+		out[name] = mustChannelSchemaProjection(schema)
 	}
 	return out
 }
 
-func channelToolGenerationValue(tool runtimecontracts.ToolSchemaEntry) map[string]any {
-	value := map[string]any{
-		"category":            strings.TrimSpace(tool.Category),
-		"description":         strings.TrimSpace(tool.Description),
-		"handler_type":        strings.TrimSpace(tool.HandlerType),
-		"effect_class":        strings.TrimSpace(tool.EffectClass),
-		"permission":          strings.TrimSpace(tool.Permission),
-		"required_permission": strings.TrimSpace(tool.RequiredPermission),
-		"rate_limit":          strings.TrimSpace(tool.RateLimit),
-		"rate_limit_max_wait": strings.TrimSpace(tool.RateLimitMaxWait),
-		"input_schema":        runtimecontracts.ToolInputSchemaJSONSchema(tool.InputSchema),
-		"output_schema":       runtimecontracts.ToolInputSchemaJSONSchema(tool.OutputSchema),
-		"response_mapping":    tool.ResponseMapping,
-		"credentials":         append([]string(nil), tool.Credentials...),
+func mustChannelSchemaProjection(schema runtimecontracts.ToolInputSchema) map[string]any {
+	projected, err := schema.Project()
+	if err != nil {
+		panic(err)
 	}
-	if tool.HTTP != nil {
-		value["http"] = map[string]any{
-			"method": tool.HTTP.Method, "url": tool.HTTP.URL, "headers": tool.HTTP.Headers,
-			"body": tool.HTTP.Body, "timeout_seconds": tool.HTTP.TimeoutSeconds,
-		}
-	}
-	if tool.ResponseSuccess != nil {
-		value["response_success"] = map[string]any{
-			"kind": tool.ResponseSuccess.Kind, "path": tool.ResponseSuccess.Path, "equals": tool.ResponseSuccess.Equals,
-		}
-	}
-	if tool.ManagedCredential != nil {
-		value["managed_credential"] = map[string]any{
-			"key": tool.ManagedCredential.Key, "header": tool.ManagedCredential.Header,
-			"prefix": tool.ManagedCredential.Prefix, "grant_type": tool.ManagedCredential.GrantType,
-			"scopes": append([]string(nil), tool.ManagedCredential.Scopes...), "grant_model": tool.ManagedCredential.GrantModel,
-			"token_request": tool.ManagedCredential.TokenRequest, "installation_id_input": tool.ManagedCredential.InstallationIDInput,
-		}
-	}
-	if tool.CompiledResult != nil {
-		value["compiled_result"] = map[string]any{
-			"fields":        tool.CompiledResult.Fields,
-			"output_schema": runtimecontracts.ToolInputSchemaJSONSchema(tool.CompiledResult.OutputSchema),
-		}
-	}
-	return value
+	return projected
 }
 
 func channelMappingGenerationValue(mappings map[string]ChannelMapping) map[string]any {
@@ -186,15 +155,31 @@ func channelTopologyGenerationValue(topology compiledChannelMappingTopology) map
 	}
 }
 
-func (p OutboundBindingPlan) RuntimeActivityTarget(operation string) (string, string, error) {
+type PrivateActivityTargetIdentity struct {
+	toolID     string
+	generation plangeneration.Generation
+}
+
+func (t PrivateActivityTargetIdentity) ToolID() string {
+	return t.toolID
+}
+
+func (t PrivateActivityTargetIdentity) Generation() plangeneration.Generation {
+	return t.generation
+}
+
+func (p OutboundBindingPlan) RuntimeActivityTarget(operation string) (PrivateActivityTargetIdentity, error) {
 	operation = strings.TrimSpace(operation)
-	if _, ok := p.Structural.Operations[operation]; !ok {
-		return "", "", fmt.Errorf("channel operation %q is not compiled", operation)
+	if _, ok := p.structural.operations[operation]; !ok {
+		return PrivateActivityTargetIdentity{}, fmt.Errorf("channel operation %q is not compiled", operation)
 	}
-	generation, err := p.Structural.GenerationID()
+	generation, err := p.structural.Generation()
 	if err != nil {
-		return "", "", fmt.Errorf("compute channel plan generation: %w", err)
+		return PrivateActivityTargetIdentity{}, fmt.Errorf("compute channel plan generation: %w", err)
 	}
-	identity := strings.TrimPrefix(generation, "sha256:")
-	return runtimecontracts.PrivateChannelActivityPrefix + strings.TrimSpace(p.ID) + "." + operation + ".g" + identity, generation, nil
+	identity := strings.TrimPrefix(generation.Diagnostic(), "sha256:")
+	return PrivateActivityTargetIdentity{
+		toolID:     runtimecontracts.PrivateChannelActivityPrefix + p.id + "." + operation + ".g" + identity,
+		generation: generation,
+	}, nil
 }

@@ -357,7 +357,7 @@ func buildApprovalPoints(bundle *runtimecontracts.WorkflowContractBundle) []Appr
 			ActivityID:   result.ActivityID,
 			Tool:         strings.TrimSpace(site.Spec.Tool),
 			Decision:     strings.TrimSpace(site.Spec.Approval.Decision),
-			EffectClass:  strings.TrimSpace(tool.EffectClass),
+			EffectClass:  string(tool.Effect()),
 		})
 	}
 	return out

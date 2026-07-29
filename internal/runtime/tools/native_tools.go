@@ -10,66 +10,58 @@ import (
 
 const runtimeToolsMCPPrefix = toolidentity.RuntimeToolsMCPPrefix
 
-func nativeFallbackRegisteredTool(actor models.AgentConfig, name string) (RegisteredTool, bool) {
+func nativeFallbackExecutionTool(actor models.AgentConfig, name string) (ExecutionTool, bool) {
 	name = strings.TrimSpace(name)
 	switch name {
 	case "bash":
 		if !nativeToolCapabilityEnabledForActor(actor, "bash") {
-			return RegisteredTool{}, false
+			return ExecutionTool{}, false
 		}
-		return RegisteredTool{
-			Name:        name,
-			Description: "Execute a shell command locally in the agent workspace.",
-			Usage:       runtimeOwnedToolUsage(name),
-			HandlerType: implementationPlatformBuiltin,
-			InputSchema: ObjectSchema(map[string]any{
+		return newExecutionTool(executionToolValue{
+			name: name, description: "Execute a shell command locally in the agent workspace.",
+			usage: runtimeOwnedToolUsage(name), handler: implementationPlatformBuiltin,
+			inputSchema: ObjectSchema(map[string]any{
 				"command":         map[string]any{"type": "string"},
 				"timeout_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 300},
 			}, "command"),
-		}, true
+		}), true
 	case "web_search":
 		if !nativeToolCapabilityEnabledForActor(actor, "web_search") {
-			return RegisteredTool{}, false
+			return ExecutionTool{}, false
 		}
-		return RegisteredTool{
-			Name:        name,
-			Description: "Search the web and return normalized results.",
-			Usage:       runtimeOwnedToolUsage(name),
-			HandlerType: implementationPlatformBuiltin,
-			InputSchema: ObjectSchema(map[string]any{
+		return newExecutionTool(executionToolValue{
+			name: name, description: "Search the web and return normalized results.",
+			usage: runtimeOwnedToolUsage(name), handler: implementationPlatformBuiltin,
+			inputSchema: ObjectSchema(map[string]any{
 				"query":       map[string]any{"type": "string"},
 				"max_results": map[string]any{"type": "integer", "minimum": 1, "maximum": 20},
 			}, "query"),
-		}, true
+		}), true
 	case "read_file":
 		if !nativeToolCapabilityEnabledForActor(actor, "file_io") {
-			return RegisteredTool{}, false
+			return ExecutionTool{}, false
 		}
-		return RegisteredTool{
-			Name:        name,
-			Description: "Read a file from the workspace or mounted read-only paths.",
-			Usage:       runtimeOwnedToolUsage(name),
-			HandlerType: implementationPlatformBuiltin,
-			InputSchema: ObjectSchema(map[string]any{
+		return newExecutionTool(executionToolValue{
+			name: name, description: "Read a file from the workspace or mounted read-only paths.",
+			usage: runtimeOwnedToolUsage(name), handler: implementationPlatformBuiltin,
+			inputSchema: ObjectSchema(map[string]any{
 				"path": map[string]any{"type": "string"},
 			}, "path"),
-		}, true
+		}), true
 	case "write_file":
 		if !nativeToolCapabilityEnabledForActor(actor, "file_io") {
-			return RegisteredTool{}, false
+			return ExecutionTool{}, false
 		}
-		return RegisteredTool{
-			Name:        name,
-			Description: "Write a file within the agent workspace.",
-			Usage:       runtimeOwnedToolUsage(name),
-			HandlerType: implementationPlatformBuiltin,
-			InputSchema: ObjectSchema(map[string]any{
+		return newExecutionTool(executionToolValue{
+			name: name, description: "Write a file within the agent workspace.",
+			usage: runtimeOwnedToolUsage(name), handler: implementationPlatformBuiltin,
+			inputSchema: ObjectSchema(map[string]any{
 				"path":    map[string]any{"type": "string"},
 				"content": map[string]any{"type": "string"},
 			}, "path", "content"),
-		}, true
+		}), true
 	default:
-		return RegisteredTool{}, false
+		return ExecutionTool{}, false
 	}
 }
 
@@ -88,15 +80,15 @@ func normalizeNativeToolName(name string) string {
 func nativeFallbackToolDefinitionsForActor(actor models.AgentConfig) []llm.ToolDefinition {
 	defs := make([]llm.ToolDefinition, 0, 4)
 	for _, name := range []string{"bash", "web_search", "read_file", "write_file"} {
-		tool, ok := nativeFallbackRegisteredTool(actor, name)
+		tool, ok := nativeFallbackExecutionTool(actor, name)
 		if !ok {
 			continue
 		}
 		defs = append(defs, llm.ToolDefinition{
-			Name:        tool.Name,
-			Description: strings.TrimSpace(tool.Description),
-			Usage:       strings.TrimSpace(tool.Usage),
-			Schema:      deepCloneJSONValue(tool.InputSchema),
+			Name:        tool.Name(),
+			Description: tool.Description(),
+			Usage:       tool.Usage(),
+			Schema:      tool.InputSchema(),
 		})
 	}
 	return defs

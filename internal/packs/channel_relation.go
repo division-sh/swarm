@@ -7,7 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/eventschema"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 )
 
 // compiledChannelMappingTopology is the single target topology validated by
@@ -148,31 +148,33 @@ func validateChannelSchemaSubset(subject string, source, target runtimecontracts
 	if finite {
 		return nil
 	}
-	if len(target.Enum) > 0 {
+	if _, declared := target.EnumValues(); declared {
 		return fmt.Errorf("%s target enum is narrower than an unbounded source", subject)
 	}
 
 	switch sourceType {
 	case "string":
-		if err := validateIntBoundsSubset(subject+" string length", source.MinLength, source.MaxLength, target.MinLength, target.MaxLength); err != nil {
+		if err := validateIntBoundsSubset(subject+" string length", admittedInt(source.MinLength), admittedInt(source.MaxLength), admittedInt(target.MinLength), admittedInt(target.MaxLength)); err != nil {
 			return err
 		}
-		if target.Pattern != "" && source.Pattern != target.Pattern {
-			return fmt.Errorf("%s source pattern %q is not provably assignable to target pattern %q", subject, source.Pattern, target.Pattern)
+		if target.Pattern() != "" && source.Pattern() != target.Pattern() {
+			return fmt.Errorf("%s source pattern %q is not provably assignable to target pattern %q", subject, source.Pattern(), target.Pattern())
 		}
 	case "integer", "number":
-		if err := validateFloatBoundsSubset(subject+" numeric range", source.Minimum, source.Maximum, target.Minimum, target.Maximum); err != nil {
+		if err := validateFloatBoundsSubset(subject+" numeric range", admittedFloat(source.Minimum), admittedFloat(source.Maximum), admittedFloat(target.Minimum), admittedFloat(target.Maximum)); err != nil {
 			return err
 		}
 	case "array":
-		if err := validateIntBoundsSubset(subject+" array length", source.MinItems, source.MaxItems, target.MinItems, target.MaxItems); err != nil {
+		if err := validateIntBoundsSubset(subject+" array length", admittedInt(source.MinItems), admittedInt(source.MaxItems), admittedInt(target.MinItems), admittedInt(target.MaxItems)); err != nil {
 			return err
 		}
-		if target.Items != nil {
-			if source.Items == nil {
+		targetItems, targetHasItems := target.ItemsSchema()
+		if targetHasItems {
+			sourceItems, sourceHasItems := source.ItemsSchema()
+			if !sourceHasItems {
 				return fmt.Errorf("%s source array items are unconstrained while target items are constrained", subject)
 			}
-			if err := validateChannelSchemaSubset(subject+"[]", *source.Items, *target.Items); err != nil {
+			if err := validateChannelSchemaSubset(subject+"[]", sourceItems, targetItems); err != nil {
 				return err
 			}
 		}
@@ -186,60 +188,64 @@ func validateChannelSchemaSubset(subject string, source, target runtimecontracts
 }
 
 func validateFiniteSourceEnum(subject string, source, target runtimecontracts.ToolInputSchema) (bool, error) {
-	if len(source.Enum) == 0 {
+	sourceValues, sourceDeclared := source.EnumValues()
+	if !sourceDeclared {
 		return false, nil
 	}
-	targetEnums, err := channelEnumSet(target.Enum)
+	targetValues, targetDeclared := target.EnumValues()
+	targetEnums, err := channelEnumSet(targetValues)
 	if err != nil {
 		return false, fmt.Errorf("%s target enum: %w", subject, err)
 	}
-	sourceConstraint := runtimecontracts.ToolInputSchemaWithoutEnum(source)
-	targetConstraint := runtimecontracts.ToolInputSchemaWithoutEnum(target)
-	for _, literal := range source.Enum {
-		value, key, err := channelEnumLiteral(literal)
+	sourceConstraint := source.WithoutEnum()
+	targetConstraint := target.WithoutEnum()
+	for _, value := range sourceValues {
+		raw, err := canonicaljson.Bytes(value.Interface())
 		if err != nil {
 			return false, fmt.Errorf("%s source enum: %w", subject, err)
 		}
-		if err := eventschema.ValidateValueAgainstSchema(runtimecontracts.ToolInputSchemaJSONSchema(sourceConstraint), value); err != nil {
+		key := string(raw)
+		if err := sourceConstraint.Validate(value.Interface()); err != nil {
 			return false, fmt.Errorf("%s source enum value is outside its declared schema: %w", subject, err)
 		}
-		if len(targetEnums) > 0 {
+		if targetDeclared {
 			if _, ok := targetEnums[key]; !ok {
 				return false, fmt.Errorf("%s source enum value %s is absent from target enum", subject, key)
 			}
 		}
-		if err := eventschema.ValidateValueAgainstSchema(runtimecontracts.ToolInputSchemaJSONSchema(targetConstraint), value); err != nil {
+		if err := targetConstraint.Validate(value.Interface()); err != nil {
 			return false, fmt.Errorf("%s source enum value is outside target schema: %w", subject, err)
 		}
 	}
 	return true, nil
 }
 
-func channelEnumSet(values []runtimecontracts.SchemaLiteral) (map[string]struct{}, error) {
+func channelEnumSet(values []semanticvalue.Value) (map[string]struct{}, error) {
 	out := make(map[string]struct{}, len(values))
-	for _, literal := range values {
-		_, key, err := channelEnumLiteral(literal)
+	for _, value := range values {
+		raw, err := canonicaljson.Bytes(value.Interface())
 		if err != nil {
 			return nil, err
 		}
-		out[key] = struct{}{}
+		out[string(raw)] = struct{}{}
 	}
 	return out, nil
 }
 
-func channelEnumLiteral(literal runtimecontracts.SchemaLiteral) (any, string, error) {
-	if literal.Node.Kind == 0 {
-		return nil, "null", nil
+func admittedInt(accessor func() (int, bool)) *int {
+	value, ok := accessor()
+	if !ok {
+		return nil
 	}
-	var value any
-	if err := literal.Node.Decode(&value); err != nil {
-		return nil, "", err
+	return &value
+}
+
+func admittedFloat(accessor func() (float64, bool)) *float64 {
+	value, ok := accessor()
+	if !ok {
+		return nil
 	}
-	raw, err := canonicaljson.Bytes(value)
-	if err != nil {
-		return nil, "", err
-	}
-	return value, string(raw), nil
+	return &value
 }
 
 func validateIntBoundsSubset(subject string, sourceMin, sourceMax, targetMin, targetMax *int) error {
@@ -263,17 +269,17 @@ func validateFloatBoundsSubset(subject string, sourceMin, sourceMax, targetMin, 
 }
 
 func validateChannelObjectSubset(subject string, source, target runtimecontracts.ToolInputSchema) error {
-	sourceRequired := stringSet(source.Required)
-	for _, name := range target.Required {
+	sourceRequired := stringSet(source.RequiredProperties())
+	for _, name := range target.RequiredProperties() {
 		if _, ok := sourceRequired[name]; !ok {
 			return fmt.Errorf("%s target requires property %q that source does not require", subject, name)
 		}
 	}
 
 	targetAdditional := channelAdditionalProperties(target)
-	for _, name := range sortedKeys(source.Properties) {
-		sourceProperty := source.Properties[name]
-		if targetProperty, ok := target.Properties[name]; ok {
+	for _, name := range source.PropertyNames() {
+		sourceProperty, _ := source.Property(name)
+		if targetProperty, ok := target.Property(name); ok {
 			if err := validateChannelSchemaSubset(subject+"."+name, sourceProperty, targetProperty); err != nil {
 				return err
 			}
@@ -311,25 +317,15 @@ type channelAdditionalPropertyConstraint struct {
 }
 
 func channelAdditionalProperties(schema runtimecontracts.ToolInputSchema) channelAdditionalPropertyConstraint {
-	if schema.AdditionalProperties.Allowed != nil {
-		return channelAdditionalPropertyConstraint{allowed: *schema.AdditionalProperties.Allowed}
+	if allowed, declared := schema.AdditionalPropertiesAllowed(); declared {
+		return channelAdditionalPropertyConstraint{allowed: allowed}
 	}
-	if schema.AdditionalProperties.Schema != nil {
-		cloned := cloneSchema(*schema.AdditionalProperties.Schema)
-		return channelAdditionalPropertyConstraint{allowed: true, schema: &cloned}
+	if additional, ok := schema.AdditionalPropertiesSchema(); ok {
+		return channelAdditionalPropertyConstraint{allowed: true, schema: &additional}
 	}
 	return channelAdditionalPropertyConstraint{allowed: true}
 }
 
 func channelSchemaType(schema runtimecontracts.ToolInputSchema) string {
-	if value := normalizeSchemaType(schema.Type); value != "" {
-		return value
-	}
-	if len(schema.Properties) > 0 || len(schema.Required) > 0 || schema.AdditionalProperties.Allowed != nil || schema.AdditionalProperties.Schema != nil {
-		return "object"
-	}
-	if schema.Items != nil {
-		return "array"
-	}
-	return ""
+	return string(schema.Kind())
 }

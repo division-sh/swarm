@@ -26,6 +26,7 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/google/uuid"
 )
 
@@ -41,11 +42,12 @@ type connectRoutePlanTestFlow struct {
 
 type providerOutputAuthorizedTestSource struct {
 	semanticview.Source
+	generation     triggergeneration.Generation
 	authorizations []runtimeprovideroutput.Authorization
 }
 
-func (s providerOutputAuthorizedTestSource) ProviderTriggerTargetFreeAuthorizations() []runtimeprovideroutput.Authorization {
-	return append([]runtimeprovideroutput.Authorization(nil), s.authorizations...)
+func (s providerOutputAuthorizedTestSource) SemanticCapabilities() semanticview.Capabilities {
+	return s.Source.SemanticCapabilities().WithProviderTriggerEvents(s.Source, s.generation, s.authorizations)
 }
 
 type connectRoutePlanDescriptorStore struct {
@@ -3318,9 +3320,10 @@ func TestRoutePlanCanonicalFailClosedDropsExecutableRoutes(t *testing.T) {
 
 func TestOrdinaryOperatorPublishCannotAcquireProviderTargetFreeAuthorityByEventName(t *testing.T) {
 	const eventName = "inbound.telegram.text_message"
+	generation := triggergeneration.FromCanonicalBytes([]byte("operator-provider-trigger-generation"))
 	authorization := runtimeprovideroutput.Authorization{
 		Provider: "telegram", Event: eventName, PackID: "provider.telegram", PackVersion: "1.0.0",
-		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: "generation-1",
+		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: generation.Diagnostic(),
 	}
 	source := providerOutputAuthorizedTestSource{
 		Source: semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{{
@@ -3332,7 +3335,7 @@ func TestOrdinaryOperatorPublishCannotAcquireProviderTargetFreeAuthorityByEventN
 				"consumer-node": {ID: "consumer-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventName: {}}},
 			},
 		}}, nil)),
-		authorizations: []runtimeprovideroutput.Authorization{authorization},
+		generation: generation, authorizations: []runtimeprovideroutput.Authorization{authorization},
 	}
 	resolver := newConnectRoutePlanResolver(source, nil, nil, nil)
 	evt := eventtest.RunCreatingRootIngress(

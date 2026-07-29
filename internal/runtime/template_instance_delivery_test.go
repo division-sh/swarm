@@ -27,6 +27,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/division-sh/swarm/internal/store"
 	storetest "github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testsql"
@@ -1219,8 +1220,8 @@ type providerRollbackSource struct {
 	authorization runtimeprovideroutput.Authorization
 }
 
-func (s providerRollbackSource) ProviderTriggerTargetFreeAuthorizations() []runtimeprovideroutput.Authorization {
-	return []runtimeprovideroutput.Authorization{s.authorization}
+func (s providerRollbackSource) SemanticCapabilities() semanticview.Capabilities {
+	return s.Source.SemanticCapabilities().WithProviderTriggerEvents(s.Source, providerRollbackGeneration(), []runtimeprovideroutput.Authorization{s.authorization})
 }
 
 func (s providerRollbackSource) VerifyProviderOutputAuthorization(actual runtimeprovideroutput.Authorization) error {
@@ -1228,10 +1229,6 @@ func (s providerRollbackSource) VerifyProviderOutputAuthorization(actual runtime
 		return errors.New("authorization does not match rollback catalog owner")
 	}
 	return nil
-}
-
-func (s providerRollbackSource) BaseSemanticSource() semanticview.Source {
-	return s.Source
 }
 
 func providerRollbackSemanticSource(t *testing.T, withCarrier bool) semanticview.Source {
@@ -1244,8 +1241,12 @@ func providerRollbackAuthorization() runtimeprovideroutput.Authorization {
 	return runtimeprovideroutput.Authorization{
 		Provider: "telegram", Event: "inbound.telegram.text_message",
 		PackID: "provider.telegram", PackVersion: "1.0.0",
-		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: "rollback-generation",
+		ManifestHash: "sha256:" + strings.Repeat("a", 64), GenerationID: providerRollbackGeneration().Diagnostic(),
 	}
+}
+
+func providerRollbackGeneration() triggergeneration.Generation {
+	return triggergeneration.FromCanonicalBytes([]byte("provider-rollback-generation"))
 }
 
 func providerRollbackBundleSourceFact() runtimecorrelation.BundleSourceFact {

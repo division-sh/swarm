@@ -414,12 +414,15 @@ func notionManagedConnectorPackRegistry(t *testing.T, baseURL string) *providerc
 	if !ok {
 		t.Fatal("provider connector pack notion.append_block_children not found")
 	}
-	if tool.HTTP == nil {
+	httpSpec, ok := tool.HTTP()
+	if !ok {
 		t.Fatal("provider connector pack notion.append_block_children missing http block")
 	}
-	httpSpec := *tool.HTTP
-	tool.HTTP = &httpSpec
-	tool.HTTP.URL = strings.TrimRight(baseURL, "/") + "/v1/blocks/{{input.block_id}}/children"
+	httpSpec.URL = strings.TrimRight(baseURL, "/") + "/v1/blocks/{{input.block_id}}/children"
+	tool, err := tool.WithHTTP(httpSpec)
+	if err != nil {
+		t.Fatalf("replace Notion connector HTTP endpoint: %v", err)
+	}
 	registry, err := providerconnectors.NewPackRegistry(providerconnectors.LoadedPack{
 		Envelope: packs.Envelope{
 			ID: "provider.notion.connector",

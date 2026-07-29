@@ -186,6 +186,9 @@ flows:
 root_lookup:
   description: Root-level lookup tool.
   handler_type: http
+  http:
+    method: GET
+    url: https://example.test/root
   input_schema:
     type: object
     required: [query]
@@ -206,6 +209,9 @@ mode: static
 flow_lookup:
   description: Flow-level lookup tool.
   handler_type: http
+  http:
+    method: GET
+    url: https://example.test/flow
   input_schema:
     type: object
     required: [flow_id]
@@ -227,24 +233,25 @@ flow_lookup:
 	if !ok {
 		t.Fatalf("expected root tool to load, got keys %#v", sortedContractKeys(bundle.Tools))
 	}
-	if got := strings.TrimSpace(rootTool.InputSchema.Type); got != "object" {
+	rootInput := rootTool.InputSchema()
+	if got := rootInput.Kind(); got != ToolSchemaObject {
 		t.Fatalf("root input schema type = %q, want object", got)
 	}
-	if _, ok := rootTool.InputSchema.Properties["query"]; !ok {
-		t.Fatalf("root input schema properties = %#v, want query", rootTool.InputSchema.Properties)
+	if _, ok := rootInput.Property("query"); !ok {
+		t.Fatalf("root input schema properties = %#v, want query", rootInput.PropertyNames())
 	}
-	if _, ok := rootTool.OutputSchema.Properties["result"]; !ok {
-		t.Fatalf("root output schema properties = %#v, want result", rootTool.OutputSchema.Properties)
+	if _, ok := rootTool.OutputSchema().Property("result"); !ok {
+		t.Fatalf("root output schema properties = %#v, want result", rootTool.OutputSchema().PropertyNames())
 	}
 	flowTool, ok := bundle.Tools["flow_lookup"]
 	if !ok {
 		t.Fatalf("expected flow tool to load, got keys %#v", sortedContractKeys(bundle.Tools))
 	}
-	if _, ok := flowTool.InputSchema.Properties["flow_id"]; !ok {
-		t.Fatalf("flow input schema properties = %#v, want flow_id", flowTool.InputSchema.Properties)
+	if _, ok := flowTool.InputSchema().Property("flow_id"); !ok {
+		t.Fatalf("flow input schema properties = %#v, want flow_id", flowTool.InputSchema().PropertyNames())
 	}
-	if _, ok := flowTool.OutputSchema.Properties["accepted"]; !ok {
-		t.Fatalf("flow output schema properties = %#v, want accepted", flowTool.OutputSchema.Properties)
+	if _, ok := flowTool.OutputSchema().Property("accepted"); !ok {
+		t.Fatalf("flow output schema properties = %#v, want accepted", flowTool.OutputSchema().PropertyNames())
 	}
 }
 
@@ -266,14 +273,15 @@ func TestMigratedToolFixturesPreserveQueryInputSchema(t *testing.T) {
 			if !ok {
 				t.Fatalf("lookup_data missing from %s: %#v", rel, tools)
 			}
-			if got := strings.TrimSpace(entry.InputSchema.Type); got != "object" {
+			input := entry.InputSchema()
+			if got := input.Kind(); got != ToolSchemaObject {
 				t.Fatalf("%s input_schema.type = %q, want object", rel, got)
 			}
-			query, ok := entry.InputSchema.Properties["query"]
+			query, ok := input.Property("query")
 			if !ok {
-				t.Fatalf("%s input_schema properties = %#v, want query", rel, entry.InputSchema.Properties)
+				t.Fatalf("%s input_schema properties = %#v, want query", rel, input.PropertyNames())
 			}
-			if got := strings.TrimSpace(query.Type); got != "string" {
+			if got := query.Kind(); got != ToolSchemaString {
 				t.Fatalf("%s query.type = %q, want string", rel, got)
 			}
 		})
@@ -674,17 +682,25 @@ additionalProperties: false
 `), &schema); err != nil {
 		t.Fatalf("load tool schema: %v", err)
 	}
-	if len(schema.Properties["mode"].Enum) != 2 {
-		t.Fatalf("expected typed enum values, got %+v", schema.Properties["mode"].Enum)
+	mode, ok := schema.Property("mode")
+	if !ok {
+		t.Fatal("mode property missing")
 	}
-	if schema.AdditionalProperties.Allowed == nil || *schema.AdditionalProperties.Allowed {
-		t.Fatalf("expected additionalProperties=false, got %+v", schema.AdditionalProperties)
+	enum, declared := mode.EnumValues()
+	if !declared || len(enum) != 2 {
+		t.Fatalf("expected typed enum values, got %+v", enum)
 	}
-	if schema.Properties["metadata"].AdditionalProperties.Schema == nil {
-		t.Fatalf("expected nested additionalProperties schema, got %+v", schema.Properties["metadata"].AdditionalProperties)
+	allowed, declared := schema.AdditionalPropertiesAllowed()
+	if !declared || allowed {
+		t.Fatalf("expected additionalProperties=false, got declared=%v allowed=%v", declared, allowed)
 	}
-	if got := strings.TrimSpace(schema.Properties["metadata"].AdditionalProperties.Schema.Type); got != "string" {
-		t.Fatalf("expected nested additionalProperties schema type string, got %q", got)
+	metadata, ok := schema.Property("metadata")
+	if !ok {
+		t.Fatal("metadata property missing")
+	}
+	additional, ok := metadata.AdditionalPropertiesSchema()
+	if !ok || additional.Kind() != ToolSchemaString {
+		t.Fatalf("expected nested additionalProperties schema type string, got %#v", additional)
 	}
 	raw, err := yaml.Marshal(schema)
 	if err != nil {
@@ -694,10 +710,13 @@ additionalProperties: false
 	if err := loadYAMLBytes(raw, &roundTrip); err != nil {
 		t.Fatalf("reload marshaled tool schema: %v\n%s", err, raw)
 	}
-	if roundTrip.AdditionalProperties.Allowed == nil || *roundTrip.AdditionalProperties.Allowed {
-		t.Fatalf("round-trip additionalProperties = %+v, want false", roundTrip.AdditionalProperties)
+	allowed, declared = roundTrip.AdditionalPropertiesAllowed()
+	if !declared || allowed {
+		t.Fatalf("round-trip additionalProperties declared=%v allowed=%v, want false", declared, allowed)
 	}
-	if nested := roundTrip.Properties["metadata"].AdditionalProperties.Schema; nested == nil || strings.TrimSpace(nested.Type) != "string" {
+	metadata, _ = roundTrip.Property("metadata")
+	nested, ok := metadata.AdditionalPropertiesSchema()
+	if !ok || nested.Kind() != ToolSchemaString {
 		t.Fatalf("round-trip nested additionalProperties = %+v, want string schema", nested)
 	}
 }

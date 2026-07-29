@@ -326,6 +326,22 @@ loops:
 	}
 }
 
+func TestToolSchemaEntryDecodeRejectsRetiredHandlerTypesAtLexicalAdmission(t *testing.T) {
+	for _, handler := range []string{"workflow_registered", "api_call"} {
+		t.Run(handler, func(t *testing.T) {
+			var tool ToolSchemaEntry
+			err := yaml.Unmarshal([]byte(`
+handler_type: `+handler+`
+input_schema: {type: object}
+output_schema: {type: object}
+`), &tool)
+			if err == nil || !strings.Contains(err.Error(), "unsupported handler_type") {
+				t.Fatalf("decode retired handler_type %q error = %v", handler, err)
+			}
+		})
+	}
+}
+
 func TestSystemNodeEventHandlerDecodeLoopOperationRequiresExactOperationAndFrom(t *testing.T) {
 	for _, raw := range []string{
 		"loop: {repeat: revision}",

@@ -123,14 +123,19 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			credentialStore := channelRuntimeCredentialStore(t, "provider-secret")
-			privateTool, err := binding.Structural.OperationTool("deliver")
+			privateTool, err := binding.OperationTool("deliver")
 			if err != nil {
 				t.Fatalf("OperationTool: %v", err)
 			}
-			privateToolID, planGeneration, err := binding.RuntimeActivityTarget("deliver")
+			privateIdentity, err := binding.RuntimeActivityTarget("deliver")
 			if err != nil {
 				t.Fatalf("RuntimeActivityTarget: %v", err)
 			}
+			privateTarget, err := runtimepipeline.NewChannelActivityTarget(privateTool, privateIdentity.Generation())
+			if err != nil {
+				t.Fatalf("NewChannelActivityTarget: %v", err)
+			}
+			privateToolID := privateIdentity.ToolID()
 			coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:            runtimeTestEventBusWorkOwner(t, bus),
 				Module:               telegramConnectorSupportedSurfaceModule{source: source},
@@ -138,7 +143,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 				DeliveryStore:        deliveryStore,
 				PipelineObligations:  pipelineObligations,
 				Credentials:          credentialStore,
-				ChannelActivityTools: map[string]runtimepipeline.ChannelActivityTarget{privateToolID: {Tool: privateTool, PlanGeneration: planGeneration}},
+				ChannelActivityTools: map[string]runtimepipeline.ChannelActivityTarget{privateToolID: privateTarget},
 			})
 			stopActivityNode := startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
 			executor := configuredChannelExecutor(source, binding, credentialStore, coordinator)
@@ -151,7 +156,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 				"actions":      []any{map[string]any{"label": "Approve", "token": "approve_1"}},
 			}
 			if _, prepared, err := binding.PrepareOperation("deliver", input); err != nil {
-				t.Fatalf("PrepareOperation: %v; public schema=%#v; prepared=%#v", err, publicTools["channel.ops.deliver"].InputSchema, prepared)
+				t.Fatalf("PrepareOperation: %v; public schema=%#v; prepared=%#v", err, publicTools["channel.ops.deliver"].InputSchema(), prepared)
 			}
 			invalidCtx := configuredChannelCallContext(t, ctx, eventStore, actor, runID, entityID, flowInstance, "invalid-connector-native-input")
 			if _, err := executor.Execute(invalidCtx, "channel.ops.deliver", map[string]any{
@@ -228,29 +233,21 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			if err := credentialStore.Set(ctx, "telegram_bot_token", "provider-secret"); err != nil {
 				t.Fatalf("restore Telegram credential: %v", err)
 			}
-			replacementPlan := binding.Structural.Clone()
-			replacementOperation := replacementPlan.Operations["deliver"]
-			replacementText := replacementOperation.ToolSchema.InputSchema.Properties["text"]
-			if replacementText.MaxLength == nil || *replacementText.MaxLength < 2 {
-				t.Fatalf("replacement fixture text schema = %#v", replacementText)
-			}
-			replacementMaximum := *replacementText.MaxLength - 1
-			replacementText.MaxLength = &replacementMaximum
-			replacementOperation.ToolSchema.InputSchema.Properties["text"] = replacementText
-			replacementPlan.Operations["deliver"] = replacementOperation
-			replacementBinding, err := packs.NewOutboundBindingPlan("ops", replacementPlan, "42", nil)
-			if err != nil {
-				t.Fatalf("replacement binding: %v", err)
-			}
-			replacementTool, err := replacementBinding.Structural.OperationTool("deliver")
+			replacementBinding := configuredTelegramChannelBindingWithTextLimit(t, server.URL, true)
+			replacementTool, err := replacementBinding.OperationTool("deliver")
 			if err != nil {
 				t.Fatalf("replacement OperationTool: %v", err)
 			}
-			replacementToolID, replacementGeneration, err := replacementBinding.RuntimeActivityTarget("deliver")
+			replacementIdentity, err := replacementBinding.RuntimeActivityTarget("deliver")
 			if err != nil {
 				t.Fatalf("replacement RuntimeActivityTarget: %v", err)
 			}
-			if replacementToolID == privateToolID || replacementGeneration == planGeneration {
+			replacementTarget, err := runtimepipeline.NewChannelActivityTarget(replacementTool, replacementIdentity.Generation())
+			if err != nil {
+				t.Fatalf("replacement NewChannelActivityTarget: %v", err)
+			}
+			replacementToolID := replacementIdentity.ToolID()
+			if replacementToolID == privateToolID || replacementIdentity.Generation().Equal(privateIdentity.Generation()) {
 				t.Fatal("replacement plan reused the prior private target generation")
 			}
 			mismatchedCoordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
@@ -261,7 +258,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 				PipelineObligations: pipelineObligations,
 				Credentials:         credentialStore,
 				ChannelActivityTools: map[string]runtimepipeline.ChannelActivityTarget{
-					privateToolID: {Tool: replacementTool, PlanGeneration: replacementGeneration},
+					privateToolID: replacementTarget,
 				},
 			})
 			stopActivityNode()
@@ -283,7 +280,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 				PipelineObligations: pipelineObligations,
 				Credentials:         credentialStore,
 				ChannelActivityTools: map[string]runtimepipeline.ChannelActivityTarget{
-					replacementToolID: {Tool: replacementTool, PlanGeneration: replacementGeneration},
+					replacementToolID: replacementTarget,
 				},
 			})
 			stopActivityNode()
@@ -357,6 +354,10 @@ func seedConfiguredChannelBundleIdentity(t *testing.T, ctx context.Context, db *
 }
 
 func configuredTelegramChannelBinding(t *testing.T, serverURL string) packs.OutboundBindingPlan {
+	return configuredTelegramChannelBindingWithTextLimit(t, serverURL, false)
+}
+
+func configuredTelegramChannelBindingWithTextLimit(t *testing.T, serverURL string, tightenTextLimit bool) packs.OutboundBindingPlan {
 	t.Helper()
 	repo := filepath.Clean(filepath.Join("..", ".."))
 	version, err := platform.PlatformVersion()
@@ -383,17 +384,54 @@ func configuredTelegramChannelBinding(t *testing.T, serverURL string) packs.Outb
 	if err != nil {
 		t.Fatalf("load Telegram channel: %v", err)
 	}
-	plans, err := packs.CompileChannelInventory(registry, channels, triggers.PackDescriptors(), providerconnectors.DefaultPackRegistry().PackDescriptors())
+	connectors := providerconnectors.DefaultPackRegistry().PackDescriptors()
+	for descriptorIndex := range connectors {
+		if connectors[descriptorIndex].Provider != "telegram" {
+			continue
+		}
+		tool, ok := connectors[descriptorIndex].Tools["telegram.send_interactive"]
+		if !ok {
+			t.Fatal("Telegram connector descriptor has no send_interactive tool")
+		}
+		httpSpec, ok := tool.HTTP()
+		if !ok {
+			t.Fatal("Telegram connector descriptor has no HTTP execution contract")
+		}
+		httpSpec.URL = strings.TrimRight(serverURL, "/") + "/bot{{credentials.telegram_bot_token}}/sendMessage"
+		tool, err = tool.WithHTTP(httpSpec)
+		if err != nil {
+			t.Fatalf("replace Telegram HTTP endpoint: %v", err)
+		}
+		if tightenTextLimit {
+			input := tool.InputSchema()
+			text, ok := input.Property("text")
+			if !ok {
+				t.Fatal("Telegram connector descriptor has no text input")
+			}
+			maximum, ok := text.MaxLength()
+			if !ok || maximum < 2 {
+				t.Fatalf("Telegram text maximum = %d, present=%v", maximum, ok)
+			}
+			text, err = text.WithMaxLength(maximum - 1)
+			if err != nil {
+				t.Fatalf("tighten Telegram text maximum: %v", err)
+			}
+			input, err = input.WithProperty("text", text)
+			if err != nil {
+				t.Fatalf("replace Telegram text schema: %v", err)
+			}
+			tool, err = tool.WithSchemas(input, tool.OutputSchema())
+			if err != nil {
+				t.Fatalf("replace Telegram input schema: %v", err)
+			}
+		}
+		connectors[descriptorIndex].Tools["telegram.send_interactive"] = tool
+	}
+	plans, err := packs.CompileChannelInventory(registry, channels, triggers.PackDescriptors(), connectors)
 	if err != nil || len(plans) != 1 {
 		t.Fatalf("CompileChannelInventory = %#v, %v", plans, err)
 	}
-	plan := plans[0].Clone()
-	operation := plan.Operations["deliver"]
-	httpSpec := *operation.ToolSchema.HTTP
-	httpSpec.URL = strings.TrimRight(serverURL, "/") + "/bot{{credentials.telegram_bot_token}}/sendMessage"
-	operation.ToolSchema.HTTP = &httpSpec
-	plan.Operations["deliver"] = operation
-	binding, err := packs.NewOutboundBindingPlan("ops", plan, "42", nil)
+	binding, err := packs.NewOutboundBindingPlan("ops", plans[0], "42", nil)
 	if err != nil {
 		t.Fatalf("NewOutboundBindingPlan: %v", err)
 	}

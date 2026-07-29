@@ -32,6 +32,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/httpresponsesuccess"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -267,17 +268,16 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 		return runtimefailures.New(runtimefailures.ClassInternalFailure, "activity_semantic_source_missing", "activity-runtime", "execute_activity", nil)
 	}
 	target, privateTarget := d.coordinator.channelActivityTools[intent.Tool]
-	tool := target.Tool
-	ok := privateTarget
+	tool, ok := target.Tool()
 	if privateTarget {
-		if intent.PlanGeneration == "" || intent.PlanGeneration != strings.TrimSpace(target.PlanGeneration) {
+		if !intent.PlanGeneration.Valid() || !intent.PlanGeneration.Equal(target.Generation()) {
 			return d.rejectChannelActivityTarget(ctx, intent, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "channel_activity_plan_generation_changed", "activity-runtime", "execute_activity", map[string]any{
-				"tool": intent.Tool, "requested_generation": intent.PlanGeneration, "available_generation": strings.TrimSpace(target.PlanGeneration),
+				"tool": intent.Tool, "requested_generation": intent.PlanGeneration.Diagnostic(), "available_generation": target.Generation().Diagnostic(),
 			}))
 		}
 	} else if strings.HasPrefix(intent.Tool, runtimecontracts.PrivateChannelActivityPrefix) {
 		return d.rejectChannelActivityTarget(ctx, intent, runtimefailures.New(runtimefailures.ClassTargetUnreachable, "channel_activity_plan_generation_unavailable", "activity-runtime", "execute_activity", map[string]any{
-			"tool": intent.Tool, "requested_generation": intent.PlanGeneration,
+			"tool": intent.Tool, "requested_generation": intent.PlanGeneration.Diagnostic(),
 		}))
 	} else {
 		tool, ok = source.ToolEntries()[intent.Tool]
@@ -285,7 +285,7 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	if !ok {
 		return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassTargetUnreachable, "activity_tool_not_declared", "activity-runtime", "execute_activity", map[string]any{"tool": intent.Tool}))
 	}
-	toolEffectClass := runtimecontracts.NormalizeActivityEffectClass(tool.EffectClass)
+	toolEffectClass := tool.Effect()
 	if toolEffectClass != intent.EffectClass {
 		return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "activity_effect_class_changed", "activity-runtime", "execute_activity", map[string]any{
 			"tool": intent.Tool, "requested_effect_class": string(intent.EffectClass), "declared_effect_class": string(toolEffectClass),
@@ -720,7 +720,7 @@ func (pc *PipelineCoordinator) handleActivityRequestEvent(ctx context.Context, e
 type activityRequestPayload struct {
 	ActivityID       string                       `json:"activity_id"`
 	Tool             string                       `json:"tool"`
-	PlanGeneration   string                       `json:"plan_generation,omitempty"`
+	PlanGeneration   *plangeneration.Generation   `json:"plan_generation,omitempty"`
 	BundleHash       string                       `json:"bundle_hash,omitempty"`
 	WorkflowVersion  string                       `json:"workflow_version,omitempty"`
 	EffectClass      string                       `json:"effect_class"`
@@ -935,10 +935,15 @@ func activityRetryDelay(backoff string, completedAttempt int) time.Duration {
 
 func activityRequestPayloadFromIntent(intent runtimeengine.ActivityIntent) activityRequestPayload {
 	intent = intent.Normalized()
+	var planGeneration *plangeneration.Generation
+	if intent.PlanGeneration.Valid() {
+		value := intent.PlanGeneration
+		planGeneration = &value
+	}
 	return activityRequestPayload{
 		ActivityID:       intent.ActivityID,
 		Tool:             intent.Tool,
-		PlanGeneration:   intent.PlanGeneration,
+		PlanGeneration:   planGeneration,
 		BundleHash:       intent.BundleHash,
 		WorkflowVersion:  intent.WorkflowVersion,
 		EffectClass:      string(intent.EffectClass),
@@ -977,15 +982,22 @@ func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityInt
 	if err := canonicaljson.ValueInto(semanticPayload, &payload); err != nil {
 		return runtimeengine.ActivityIntent{}, fmt.Errorf("decode activity request %s: %w", evt.ID(), err)
 	}
+	if strings.HasPrefix(strings.TrimSpace(payload.Tool), runtimecontracts.PrivateChannelActivityPrefix) && payload.PlanGeneration == nil {
+		return runtimeengine.ActivityIntent{}, fmt.Errorf("activity request %s for private channel target requires plan_generation", evt.ID())
+	}
 	input, ok := semanticPayload.Lookup("input")
 	if !ok || input.Kind() != semanticvalue.KindObject {
 		return runtimeengine.ActivityIntent{}, fmt.Errorf("activity request %s input must be a semantic object", evt.ID())
+	}
+	planGeneration := plangeneration.Generation{}
+	if payload.PlanGeneration != nil {
+		planGeneration = *payload.PlanGeneration
 	}
 	intent := runtimeengine.ActivityIntent{
 		Context:          evt.DeliveryContext(),
 		ActivityID:       payload.ActivityID,
 		Tool:             payload.Tool,
-		PlanGeneration:   payload.PlanGeneration,
+		PlanGeneration:   planGeneration,
 		BundleHash:       payload.BundleHash,
 		WorkflowVersion:  payload.WorkflowVersion,
 		Input:            input,
@@ -1047,30 +1059,34 @@ func (d pipelineActivityDispatcher) executeActivityHTTPTool(ctx context.Context,
 }
 
 func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context, client *http.Client, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) (preparedActivityHTTPTool, error) {
-	if tool.HTTP == nil {
+	httpSpec, hasHTTP := tool.HTTP()
+	if !hasHTTP {
 		return preparedActivityHTTPTool{}, activityContractFailure(intent.Tool, "http_block_missing")
 	}
-	if strings.TrimSpace(tool.RateLimit) != "" || strings.TrimSpace(tool.RateLimitMaxWait) != "" {
+	rateLimit, maxWait := tool.RateLimitSyntax()
+	if rateLimit != "" || maxWait != "" {
 		return preparedActivityHTTPTool{}, activityContractFailure(intent.Tool, "rate_limit_unsupported")
 	}
 	credentials := map[string]any{}
 	secrets := []string{}
-	if len(tool.Credentials) > 0 && tool.ManagedCredential != nil {
+	staticCredentials := tool.Credentials()
+	_, hasManagedCredential := tool.ManagedCredential()
+	if len(staticCredentials) > 0 && hasManagedCredential {
 		return preparedActivityHTTPTool{}, activityContractFailure(intent.Tool, "credential_owners_conflict")
 	}
-	if len(tool.Credentials) > 0 {
+	if len(staticCredentials) > 0 {
 		if intent.EffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 			return preparedActivityHTTPTool{}, activityContractFailure(intent.Tool, "static_credential_effect_class_unsupported")
 		}
-		resolved, secretValues, err := d.resolveActivityToolCredentials(ctx, intent, tool.Credentials)
+		resolved, secretValues, err := d.resolveActivityToolCredentials(ctx, intent, staticCredentials)
 		if err != nil {
 			return preparedActivityHTTPTool{}, activityAuthenticationFailure(err, intent.Tool, "resolve_static_credentials", "activity_credential")
 		}
 		credentials = resolved
 		secrets = secretValues
 	}
-	if tool.ManagedCredential != nil {
-		if intent.EffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite || !strings.EqualFold(strings.TrimSpace(tool.Category), "provider_connector") {
+	if hasManagedCredential {
+		if intent.EffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite || tool.Category() != "provider_connector" {
 			return preparedActivityHTTPTool{}, activityContractFailure(intent.Tool, "managed_credential_effect_class_unsupported")
 		}
 	}
@@ -1083,7 +1099,7 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 		inputDTO[name] = value.Interface()
 	}
 	env := map[string]any{"input": inputDTO, "credentials": credentials}
-	url, err := resolveActivityHTTPURLTemplate(tool.HTTP.URL, env)
+	url, err := resolveActivityHTTPURLTemplate(httpSpec.URL, env)
 	if err != nil {
 		return preparedActivityHTTPTool{}, activityTemplateFailure(err, intent.Tool, "url", secrets)
 	}
@@ -1092,8 +1108,8 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 		return preparedActivityHTTPTool{}, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "activity_url_empty", "activity-runtime", "prepare_http_request", map[string]any{"tool": strings.TrimSpace(intent.Tool)})
 	}
 	var body []byte
-	if tool.HTTP.Body != nil {
-		resolvedBody, err := resolveActivityTemplateTree(tool.HTTP.Body, env)
+	if httpSpec.Body != nil {
+		resolvedBody, err := resolveActivityTemplateTree(httpSpec.Body, env)
 		if err != nil {
 			return preparedActivityHTTPTool{}, activityTemplateFailure(err, intent.Tool, "body", secrets)
 		}
@@ -1103,16 +1119,16 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 		}
 		body = raw
 	}
-	method := strings.ToUpper(strings.TrimSpace(tool.HTTP.Method))
+	method := strings.ToUpper(strings.TrimSpace(httpSpec.Method))
 	if method == "" {
 		method = http.MethodGet
 	}
 	timeout := 30 * time.Second
-	if tool.HTTP.TimeoutSeconds > 0 {
-		timeout = time.Duration(tool.HTTP.TimeoutSeconds) * time.Second
+	if httpSpec.TimeoutSeconds > 0 {
+		timeout = time.Duration(httpSpec.TimeoutSeconds) * time.Second
 	}
-	headers := make(http.Header, len(tool.HTTP.Headers))
-	for key, value := range tool.HTTP.Headers {
+	headers := make(http.Header, len(httpSpec.Headers))
+	for key, value := range httpSpec.Headers {
 		resolved, err := resolveActivityTemplateString(value, env)
 		if err != nil {
 			return preparedActivityHTTPTool{}, activityTemplateFailure(err, intent.Tool, "header", secrets)
@@ -1135,6 +1151,17 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 		}
 		secrets = append(secrets, managedAuth.SecretValues()...)
 	}
+	responseSuccess, hasResponseSuccess := tool.ResponseSuccess()
+	var responseSuccessPtr *runtimecontracts.HTTPResponseSuccess
+	if hasResponseSuccess {
+		responseSuccessPtr = &responseSuccess
+	}
+	responseMapping, _ := tool.ResponseMapping()
+	compiledResult, hasCompiledResult := tool.CompiledResult()
+	var compiledResultPtr *runtimecontracts.CompiledResultProjection
+	if hasCompiledResult {
+		compiledResultPtr = &compiledResult
+	}
 	return preparedActivityHTTPTool{
 		toolName:        intent.Tool,
 		method:          method,
@@ -1145,10 +1172,10 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 		client:          client,
 		secrets:         secrets,
 		managedAuth:     managedAuth,
-		success:         cloneActivityResponseSuccess(tool.ResponseSuccess),
-		responseMapping: cloneActivityTemplateMap(tool.ResponseMapping),
-		outputSchema:    tool.OutputSchema,
-		compiledResult:  cloneCompiledResultProjection(tool.CompiledResult),
+		success:         responseSuccessPtr,
+		responseMapping: responseMapping,
+		outputSchema:    tool.OutputSchema(),
+		compiledResult:  compiledResultPtr,
 		inputHash:       activityInputHash(intent.Input),
 	}, nil
 }
@@ -1243,14 +1270,22 @@ func executePreparedActivityHTTPTool(ctx context.Context, prepared preparedActiv
 			result = mapped
 		}
 		if prepared.compiledResult != nil {
-			if err := eventschema.ValidateValueAgainstSchema(runtimecontracts.ToolInputSchemaJSONSchema(prepared.outputSchema), result); err != nil {
+			outputSchema, err := prepared.outputSchema.Project()
+			if err != nil {
+				return nil, runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "provider_response_schema_projection_failed", "activity-runtime", "validate_projected_response", map[string]any{"tool": prepared.toolName}, err)
+			}
+			if err := eventschema.ValidateValueAgainstSchema(outputSchema, result); err != nil {
 				return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "provider_response_schema_invalid", "activity-runtime", "validate_projected_response", map[string]any{"tool": prepared.toolName, "status": resp.StatusCode}, redactActivityError(err, prepared.secrets))
 			}
 			projected, err := projectCompiledActivityResult(result, *prepared.compiledResult)
 			if err != nil {
 				return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "channel_result_projection_failed", "activity-runtime", "project_channel_result", map[string]any{"tool": prepared.toolName, "status": resp.StatusCode}, err)
 			}
-			if err := eventschema.ValidateValueAgainstSchema(runtimecontracts.ToolInputSchemaJSONSchema(prepared.compiledResult.OutputSchema), projected); err != nil {
+			compiledOutputSchema, err := prepared.compiledResult.OutputSchema.Project()
+			if err != nil {
+				return nil, runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "channel_result_schema_projection_failed", "activity-runtime", "validate_channel_result", map[string]any{"tool": prepared.toolName}, err)
+			}
+			if err := eventschema.ValidateValueAgainstSchema(compiledOutputSchema, projected); err != nil {
 				return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "channel_result_schema_invalid", "activity-runtime", "validate_channel_result", map[string]any{"tool": prepared.toolName, "status": resp.StatusCode}, err)
 			}
 			result = projected
@@ -1445,10 +1480,10 @@ func (a *activityManagedHTTPAuth) HTTPAuthorization() runtimemanagedcredentials.
 }
 
 func (d pipelineActivityDispatcher) resolveActivityManagedCredential(ctx context.Context, client *http.Client, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) (*activityManagedHTTPAuth, error) {
-	if tool.ManagedCredential == nil {
+	ref, ok := tool.ManagedCredential()
+	if !ok {
 		return nil, nil
 	}
-	ref := *tool.ManagedCredential
 	key := strings.TrimSpace(ref.Key)
 	if key == "" {
 		return nil, fmt.Errorf("activity tool %s managed_credential.key is required", intent.Tool)

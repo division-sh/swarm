@@ -37,29 +37,18 @@ func TestExecutor_HTTPToolExecutesTemplateAndResponseMapping(t *testing.T) {
 
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"check_domain": {
-				Description: "Check domain availability",
-				HandlerType: "http",
-				InputSchema: runtimecontracts.ToolInputSchema{
-					Type:     "object",
-					Required: []string{"domain"},
-					Properties: map[string]runtimecontracts.ToolInputSchema{
-						"domain": {Type: "string"},
-					},
+			"check_domain": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolDescription("Check domain availability"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+				"domain": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+			}), runtimecontracts.ToolSchemaRequired("domain")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+				Method: "GET",
+				URL:    server.URL + "?domain={{input.domain}}",
+				Headers: map[string]string{
+					"Authorization": "Bearer {{credentials.test_http_api_key}}",
 				},
-				HTTP: &runtimecontracts.HTTPToolSpec{
-					Method: "GET",
-					URL:    server.URL + "?domain={{input.domain}}",
-					Headers: map[string]string{
-						"Authorization": "Bearer {{credentials.test_http_api_key}}",
-					},
-				},
-				ResponseMapping: map[string]any{
-					"available": "{{response.body.available}}",
-					"status":    "{{response.status}}",
-				},
-				Credentials: []string{"test_http_api_key"},
-			},
+			}), runtimecontracts.WithToolResponseMapping(map[string]any{
+				"available": "{{response.body.available}}",
+				"status":    "{{response.status}}",
+			}), runtimecontracts.WithToolCredentials([]string{"test_http_api_key"}...)),
 		},
 	})
 
@@ -120,18 +109,29 @@ func TestExecutor_HTTPResponseSuccessPolicyParityCases(t *testing.T) {
 			}))
 			defer server.Close()
 
-			tool := runtimecontracts.ToolSchemaEntry{
-				Description:     "exercise response success semantics",
-				HandlerType:     "http",
-				ResponseSuccess: &tc.policy,
-				HTTP: &runtimecontracts.HTTPToolSpec{
-					Method: http.MethodPost,
-					URL:    server.URL,
-				},
-			}
+			tool := runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolDescription("exercise response success semantics"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+				Method: http.MethodPost,
+				URL:    server.URL,
+			}), runtimecontracts.WithToolSchemas(
+				runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
+				runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
+			), runtimecontracts.WithToolResponseSuccess(tc.policy))
+
 			if tc.credential {
-				tool.Credentials = []string{"policy_secret"}
-				tool.HTTP.Headers = map[string]string{"X-Policy-Secret": "{{credentials.policy_secret}}"}
+				httpSpec, ok := tool.HTTP()
+				if !ok {
+					t.Fatal("policy probe is missing HTTP execution semantics")
+				}
+				httpSpec.Headers = map[string]string{"X-Policy-Secret": "{{credentials.policy_secret}}"}
+				var err error
+				tool, err = tool.WithHTTP(httpSpec)
+				if err != nil {
+					t.Fatalf("replace policy probe headers: %v", err)
+				}
+				tool, err = tool.WithStaticCredentials("policy_secret")
+				if err != nil {
+					t.Fatalf("replace policy probe credentials: %v", err)
+				}
 			}
 			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"policy_probe": tool}})
 			exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
@@ -175,29 +175,20 @@ func TestExecutor_HTTPToolEncodesURLTemplateComponentsAndPreservesRawHeaderBody(
 
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"x_search_tweets": {
-				Description: "Search X tweets",
-				HandlerType: "http",
-				InputSchema: runtimecontracts.ToolInputSchema{
-					Type:     "object",
-					Required: []string{"segment", "query", "cursor"},
-					Properties: map[string]runtimecontracts.ToolInputSchema{
-						"segment": {Type: "string"},
-						"query":   {Type: "string"},
-						"cursor":  {Type: "string"},
-					},
+			"x_search_tweets": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolDescription("Search X tweets"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+				"segment": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+				"query":   runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+				"cursor":  runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+			}), runtimecontracts.ToolSchemaRequired("segment", "query", "cursor")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+				Method: "POST",
+				URL:    server.URL + "/profiles/{{input.segment}}/search?q={{input.query}}&cursor={{input.cursor}}",
+				Headers: map[string]string{
+					"X-Search-Query": "raw {{input.query}}",
 				},
-				HTTP: &runtimecontracts.HTTPToolSpec{
-					Method: "POST",
-					URL:    server.URL + "/profiles/{{input.segment}}/search?q={{input.query}}&cursor={{input.cursor}}",
-					Headers: map[string]string{
-						"X-Search-Query": "raw {{input.query}}",
-					},
-					Body: map[string]any{
-						"query": "{{input.query}}",
-					},
+				Body: map[string]any{
+					"query": "{{input.query}}",
 				},
-			},
+			})),
 		},
 	})
 
@@ -575,13 +566,7 @@ func TestExecutor_ToolDefinitionsForActor_ExcludesContractMCPWithoutDiscovery(t 
 			"agent-1": {ID: "agent-1", Tools: []string{"infra.ping"}},
 		},
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"infra.ping": {
-				Description: "Authored MCP tool should not create runtime availability",
-				HandlerType: "mcp",
-				InputSchema: runtimecontracts.ToolInputSchema{
-					Type: "object",
-				},
-			},
+			"infra.ping": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolDescription("Authored MCP tool should not create runtime availability"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("mcp")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
 		},
 	})
 
@@ -600,20 +585,12 @@ func TestExecutor_ToolDefinitionsForActor_ExcludesContractMCPWithoutDiscovery(t 
 func TestExecutor_ToolDefinitionsForActor_UsesSharedActorRegistry(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"check_domain": {
-				Description: "Check domain availability",
-				HandlerType: "http",
-				InputSchema: runtimecontracts.ToolInputSchema{
-					Type: "object",
-					Properties: map[string]runtimecontracts.ToolInputSchema{
-						"domain": {Type: "string"},
-					},
-				},
-				HTTP: &runtimecontracts.HTTPToolSpec{
-					Method: "GET",
-					URL:    "https://example.test",
-				},
-			},
+			"check_domain": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolDescription("Check domain availability"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+				"domain": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+			})), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+				Method: "GET",
+				URL:    "https://example.test",
+			})),
 		},
 	})
 
@@ -655,10 +632,7 @@ func containsToolName(names []string, want string) bool {
 func TestValidateToolImplementations_RejectsMalformedHTTPTool(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"bad_http": {
-				HandlerType: "http",
-				HTTP:        &runtimecontracts.HTTPToolSpec{Method: "GET"},
-			},
+			"bad_http": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET"})),
 		},
 	})
 	_, err := ValidateToolImplementations(source)
@@ -671,10 +645,7 @@ func TestValidateToolImplementationsRejectsAuthoredPrivateChannelActivityNamespa
 	toolID := runtimecontracts.PrivateChannelActivityPrefix + "authored.send.gdeadbeef"
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			toolID: {
-				HandlerType: "http",
-				HTTP:        &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.invalid/send"},
-			},
+			toolID: runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.invalid/send"})),
 		},
 	})
 	_, err := ValidateToolImplementations(source)
@@ -683,12 +654,10 @@ func TestValidateToolImplementationsRejectsAuthoredPrivateChannelActivityNamespa
 	}
 }
 
-func TestValidateToolImplementations_AcceptsDeprecatedHandlerWithoutHTTPAsWarning(t *testing.T) {
+func TestValidateToolImplementationsWarnsForUnspecifiedNonExecutableTool(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"legacy_call": {
-				HandlerType: "api_call",
-			},
+			"unimplemented_call": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
 		},
 	})
 
@@ -696,8 +665,8 @@ func TestValidateToolImplementations_AcceptsDeprecatedHandlerWithoutHTTPAsWarnin
 	if err != nil {
 		t.Fatalf("ValidateToolImplementations: %v", err)
 	}
-	if len(warnings) == 0 {
-		t.Fatal("expected deprecated handler warning")
+	if len(warnings) != 1 || !strings.Contains(warnings[0].Error(), "has no executable implementation") {
+		t.Fatalf("warnings = %#v, want one unspecified implementation warning", warnings)
 	}
 }
 

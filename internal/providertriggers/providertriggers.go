@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"gopkg.in/yaml.v3"
 )
 
@@ -113,9 +114,9 @@ type CatalogEntry struct {
 }
 
 type CatalogSnapshot struct {
-	generationID string
-	byProvider   map[string]CatalogEntry
-	byID         map[string]CatalogEntry
+	generation triggergeneration.Generation
+	byProvider map[string]CatalogEntry
+	byID       map[string]CatalogEntry
 }
 
 type LoadedPack struct {
@@ -147,7 +148,7 @@ func (s *CatalogSnapshot) PackDescriptors() []packs.TriggerPackDescriptor {
 			fields := make(map[string]packs.TriggerEventField, len(output.Fields))
 			for name, projection := range output.Fields {
 				projection = projection.normalized()
-				fields[name] = packs.TriggerEventField{Schema: cloneNormalizedEventSchema(projection.Schema), Required: !projection.Optional}
+				fields[name] = packs.TriggerEventField{Schema: projection.Schema, Required: !projection.Optional}
 			}
 			events[output.Event] = packs.TriggerEvent{Name: output.Event, Fields: fields}
 		}
@@ -156,7 +157,7 @@ func (s *CatalogSnapshot) PackDescriptors() []packs.TriggerPackDescriptor {
 				ID: entry.Identity.ID, Version: entry.Identity.Version, ManifestHash: entry.Identity.ManifestHash,
 				Type: packs.TypeTrigger, Source: entry.Source,
 			},
-			Provider: entry.Manifest.Provider, GenerationID: s.generationID, Events: events,
+			Provider: entry.Manifest.Provider, Generation: s.generation, Events: events,
 		})
 	}
 	return out
@@ -203,11 +204,11 @@ func NewCatalogSnapshot(entries ...CatalogEntry) (*CatalogSnapshot, error) {
 		snapshot.byID[entry.Identity.ID] = entry
 		normalizedEntries = append(normalizedEntries, entry)
 	}
-	generationID, err := catalogGenerationID(normalizedEntries)
+	generation, err := catalogGeneration(normalizedEntries)
 	if err != nil {
 		return nil, err
 	}
-	snapshot.generationID = generationID
+	snapshot.generation = generation
 	return snapshot, nil
 }
 
@@ -485,11 +486,11 @@ func triggerEventDescriptors(manifest Manifest) []packs.TriggerEventDescriptor {
 	return out
 }
 
-func (s *CatalogSnapshot) GenerationID() string {
+func (s *CatalogSnapshot) Generation() triggergeneration.Generation {
 	if s == nil {
-		return ""
+		return triggergeneration.Generation{}
 	}
-	return s.generationID
+	return s.generation
 }
 
 func (s *CatalogSnapshot) VerifyProviderOutputAuthorization(authorization runtimeprovideroutput.Authorization) error {
@@ -497,11 +498,11 @@ func (s *CatalogSnapshot) VerifyProviderOutputAuthorization(authorization runtim
 	if !authorization.Valid() {
 		return fmt.Errorf("provider-output authorization is incomplete")
 	}
-	if s == nil || strings.TrimSpace(s.generationID) == "" {
+	if s == nil || !s.generation.Valid() {
 		return fmt.Errorf("verified provider-trigger catalog is unavailable")
 	}
-	if authorization.GenerationID != s.generationID {
-		return fmt.Errorf("catalog generation %q does not match current generation %q", authorization.GenerationID, s.generationID)
+	if !s.generation.MatchesDiagnostic(authorization.GenerationID) {
+		return fmt.Errorf("catalog generation %q does not match current generation %q", authorization.GenerationID, s.generation.Diagnostic())
 	}
 	entry, ok := s.byID[authorization.PackID]
 	if !ok {
@@ -572,7 +573,7 @@ func cloneManifest(manifest Manifest) (Manifest, error) {
 	return parseManifestStrict(body)
 }
 
-func catalogGenerationID(entries []CatalogEntry) (string, error) {
+func catalogGeneration(entries []CatalogEntry) (triggergeneration.Generation, error) {
 	type tuple struct {
 		ID, Provider, Version, ManifestHash, Provenance string
 	}
@@ -587,10 +588,9 @@ func catalogGenerationID(entries []CatalogEntry) (string, error) {
 	sort.Slice(tuples, func(i, j int) bool { return tuples[i].ID < tuples[j].ID })
 	body, err := json.Marshal(tuples)
 	if err != nil {
-		return "", fmt.Errorf("encode provider trigger catalog generation: %w", err)
+		return triggergeneration.Generation{}, fmt.Errorf("encode provider trigger catalog generation: %w", err)
 	}
-	sum := sha256.Sum256(body)
-	return hex.EncodeToString(sum[:]), nil
+	return triggergeneration.FromCanonicalBytes(body), nil
 }
 
 func (req Request) withProvider(provider string) Request {

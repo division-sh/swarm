@@ -105,24 +105,21 @@ func validateActivitySpec(source semanticview.Source, flowID, nodeID, handlerEve
 	if !ok {
 		return []error{fmt.Errorf("%s: tool %q is not declared in tools.yaml", context, toolID)}
 	}
-	handlerType := strings.TrimSpace(strings.ToLower(tool.HandlerType))
-	if handlerType == "" {
-		if tool.HTTP == nil {
-			errs = append(errs, fmt.Errorf("%s: tool %q resolves to unsupported platform/native surface; activities support authored HTTP tools only", context, toolID))
-		}
-	} else if handlerType != "http" {
-		errs = append(errs, fmt.Errorf("%s: tool %q handler_type %q is not supported for activities; MCP/platform/native/generated tools fail closed in Stage 1", context, toolID, handlerType))
+	handler := tool.Handler()
+	if handler != runtimecontracts.ToolHandlerHTTP {
+		errs = append(errs, fmt.Errorf("%s: tool %q handler_type %q is not supported for activities; MCP/platform/native/generated tools fail closed in Stage 1", context, toolID, handler.String()))
 	}
-	if tool.HTTP == nil {
+	if _, hasHTTP := tool.HTTP(); !hasHTTP {
 		errs = append(errs, fmt.Errorf("%s: tool %q is missing http block; activities support authored HTTP tools only", context, toolID))
 	}
-	if strings.TrimSpace(tool.RateLimit) != "" || strings.TrimSpace(tool.RateLimitMaxWait) != "" {
+	rateLimit, rateLimitMaxWait := tool.RateLimitSyntax()
+	if rateLimit != "" || rateLimitMaxWait != "" {
 		errs = append(errs, fmt.Errorf("%s: tool %q uses rate_limit; activity HTTP rate-limit admission is split until the activity dispatcher consumes the external dispatch owner", context, toolID))
 	}
-	if len(tool.ResponseMapping) > 0 {
+	if responseMapping, ok := tool.ResponseMapping(); ok && len(responseMapping) > 0 {
 		errs = append(errs, fmt.Errorf("%s: tool %q uses response_mapping; activity HTTP response mapping is split until the activity dispatcher consumes the HTTP tool response-mapping owner", context, toolID))
 	}
-	effectClass := runtimecontracts.NormalizeActivityEffectClass(tool.EffectClass)
+	effectClass := tool.Effect()
 	if effectClass == "" {
 		errs = append(errs, fmt.Errorf("%s: tool %q must declare effect_class; executable Stage 1 values are read_only and non_idempotent_write on the activity journal path", context, toolID))
 	} else if effectClass == runtimecontracts.ActivityEffectClassLongRunning {
@@ -130,26 +127,28 @@ func validateActivitySpec(source semanticview.Source, flowID, nodeID, handlerEve
 	} else if effectClass == runtimecontracts.ActivityEffectClassIdempotentWrite {
 		errs = append(errs, fmt.Errorf("%s: tool %q effect_class %q is split until idempotency execution ownership is specified and implemented", context, toolID, effectClass))
 	} else if !runtimecontracts.SupportedActivityEffectClass(effectClass) {
-		errs = append(errs, fmt.Errorf("%s: tool %q effect_class %q is not supported for activities", context, toolID, tool.EffectClass))
+		errs = append(errs, fmt.Errorf("%s: tool %q effect_class %q is not supported for activities", context, toolID, effectClass))
 	}
-	if tool.ManagedCredential != nil {
-		if len(tool.Credentials) > 0 {
+	managedCredential, hasManagedCredential := tool.ManagedCredential()
+	credentials := tool.Credentials()
+	if hasManagedCredential {
+		if len(credentials) > 0 {
 			errs = append(errs, fmt.Errorf("%s: tool %q must not declare both static credentials and managed_credential for activity HTTP execution", context, toolID))
 		}
-		if !strings.EqualFold(strings.TrimSpace(tool.Category), "provider_connector") || effectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+		if !strings.EqualFold(tool.Category(), "provider_connector") || effectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 			errs = append(errs, fmt.Errorf("%s: tool %q uses managed_credential; managed credential activity HTTP execution is supported only for non_idempotent_write provider connector tools", context, toolID))
 		}
-		if strings.TrimSpace(tool.ManagedCredential.Key) == "" {
+		if strings.TrimSpace(managedCredential.Key) == "" {
 			errs = append(errs, fmt.Errorf("%s: tool %q managed_credential.key is required", context, toolID))
 		}
-		if err := managedcredentialmodel.ValidateGrantModel(tool.ManagedCredential.GrantModel); err != nil {
+		if err := managedcredentialmodel.ValidateGrantModel(managedCredential.GrantModel); err != nil {
 			errs = append(errs, fmt.Errorf("%s: tool %q managed_credential.%s", context, toolID, err.Error()))
 		}
-		if err := managedcredentialmodel.ValidateTokenRequestProfile(tool.ManagedCredential.TokenRequest); err != nil {
+		if err := managedcredentialmodel.ValidateTokenRequestProfile(managedCredential.TokenRequest); err != nil {
 			errs = append(errs, fmt.Errorf("%s: tool %q managed_credential.%s", context, toolID, err.Error()))
 		}
 	}
-	if len(tool.Credentials) > 0 && effectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+	if len(credentials) > 0 && effectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 		errs = append(errs, fmt.Errorf("%s: tool %q uses static credentials; static credential activity HTTP execution is supported only for non_idempotent_write authored HTTP activities", context, toolID))
 	}
 	if activity.Approval != nil {
@@ -170,7 +169,7 @@ func validateActivitySpec(source semanticview.Source, flowID, nodeID, handlerEve
 			errs = append(errs, fmt.Errorf("%s.approval: generated revision event %q has no consumer; add a handler so operator feedback cannot disappear", context, events.RevisionRequested))
 		}
 	}
-	errs = append(errs, validateActivityInputAgainstToolSchema(context, activity, tool.InputSchema)...)
+	errs = append(errs, validateActivityInputAgainstToolSchema(context, activity, tool.InputSchema())...)
 	site := runtimecontracts.ActivitySite{
 		FlowID:          flowID,
 		NodeID:          nodeID,
@@ -280,22 +279,23 @@ func activitySiteContext(site runtimecontracts.ActivitySite) string {
 func validateActivityInputAgainstToolSchema(context string, activity runtimecontracts.ActivitySpec, schema runtimecontracts.ToolInputSchema) []error {
 	var errs []error
 	input := activity.Input
-	required := normalizeStrings(schema.Required)
+	required := normalizeStrings(schema.RequiredProperties())
 	for _, field := range required {
 		if _, ok := input[field]; !ok {
 			errs = append(errs, fmt.Errorf("%s.input: required tool input field %q is not mapped", context, field))
 		}
 	}
-	if len(schema.Properties) == 0 {
+	if len(schema.PropertyNames()) == 0 {
 		return errs
 	}
-	allowAdditional := schema.AdditionalProperties.Allowed != nil && *schema.AdditionalProperties.Allowed
-	hasAdditionalSchema := schema.AdditionalProperties.Schema != nil
+	allowAdditional, additionalDeclared := schema.AdditionalPropertiesAllowed()
+	_, hasAdditionalSchema := schema.AdditionalPropertiesSchema()
+	allowAdditional = additionalDeclared && allowAdditional
 	if allowAdditional || hasAdditionalSchema {
 		return errs
 	}
 	for field := range input {
-		if _, ok := schema.Properties[field]; !ok {
+		if _, ok := schema.Property(field); !ok {
 			errs = append(errs, fmt.Errorf("%s.input.%s: field is not declared by the tool input schema", context, field))
 		}
 	}
