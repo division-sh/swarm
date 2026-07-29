@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -545,6 +546,7 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 			SourceAgent: runtimeactors.AgentConfig{
 				ID: "agent-source", Type: "managed", Role: "researcher", Model: llmselection.ModelAliasRegular,
 				ExecutionMode: runtimeeffects.ExecutionModeLive, Memory: agentmemory.PlatformDefault(),
+				NativeTools: runtimeactors.NativeToolConfig{Bash: true, WebSearch: true, FileIO: true},
 			},
 			EntitySnapshot: []store.ConversationForkEntitySnapshot{{
 				EntityID:     "entity-1",
@@ -552,16 +554,11 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 				Fields:       map[string]any{"name": "Before"},
 			}},
 		},
-		SandboxPolicy: store.ConversationForkSandboxPolicy{
-			Owner:        store.ConversationForkChatSandboxOwner,
-			ReadPolicy:   "fork_snapshot_only",
-			WritePolicy:  "stub_record_only_no_live_mutation",
-			StubbedTools: []string{"save_entity_field", "emit_event", "run.start", "run.stop"},
-		},
-		AvailableTools: []string{"fork_snapshot_read_entities", "save_entity_field", "emit_event", "run_start", "run_stop"},
-		ForkTurnID:     forkTurnID, SourceBundleHash: bundleHash, RequestOccurrenceID: requestOccurrenceID, RequestHash: "request-hash",
+		SandboxPolicy: store.CanonicalConversationForkSandboxPolicy(),
+		ForkTurnID:    forkTurnID, SourceBundleHash: bundleHash, RequestOccurrenceID: requestOccurrenceID, RequestHash: "request-hash",
 		ActorTokenID: "actor-token", ExecutionOwner: "forkchat-test-owner", LeaseExpiresAt: time.Now().UTC().Add(time.Minute), FenceGeneration: 1,
 	}
+	prepared.AvailableTools = prepared.SandboxPolicy.AvailableToolNames()
 	rt := &forkChatScriptedRuntime{
 		responses: []*runtimellm.Response{
 			{
@@ -586,6 +583,12 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 	}
 	if rt.actorModel != llmselection.ModelAliasRegular || rt.authority.Kind != runtimeeffects.AuthorityConversationForkChat || rt.authority.ID != forkTurnID {
 		t.Fatalf("forkchat runtime authority = model:%q authority:%#v", rt.actorModel, rt.authority)
+	}
+	if !slices.Equal(rt.policyTools, forkChatToolNames(rt.tools)) {
+		t.Fatalf("forkchat invocation policy tools = %#v, runtime tools = %#v", rt.policyTools, forkChatToolNames(rt.tools))
+	}
+	if rt.actorNativeTools != (runtimeactors.NativeToolConfig{}) {
+		t.Fatalf("source actor native tools leaked into forkchat actor: %#v", rt.actorNativeTools)
 	}
 	if rt.authority.ForkChat.BundleHash != bundleHash || rt.scope != runtimeauthoractivity.BundleScope(runtimeInstanceID, bundleHash) {
 		t.Fatalf("forkchat source scope = authority:%#v context:%#v", rt.authority.ForkChat, rt.scope)
@@ -627,14 +630,16 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 }
 
 type forkChatScriptedRuntime struct {
-	responses    []*runtimellm.Response
-	startAgentID string
-	systemPrompt string
-	tools        []runtimellm.ToolDefinition
-	messages     []runtimellm.Message
-	actorModel   string
-	authority    runtimeeffects.Authority
-	scope        runtimeauthoractivity.Scope
+	responses        []*runtimellm.Response
+	startAgentID     string
+	systemPrompt     string
+	tools            []runtimellm.ToolDefinition
+	messages         []runtimellm.Message
+	actorModel       string
+	actorNativeTools runtimeactors.NativeToolConfig
+	authority        runtimeeffects.Authority
+	scope            runtimeauthoractivity.Scope
+	policyTools      []string
 }
 
 func (r *forkChatScriptedRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
@@ -643,8 +648,10 @@ func (r *forkChatScriptedRuntime) StartSession(ctx context.Context, agentID, sys
 	r.tools = append([]runtimellm.ToolDefinition(nil), tools...)
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	r.actorModel = actor.Model
+	r.actorNativeTools = actor.NativeTools
 	r.authority, _ = runtimeeffects.CompletionAuthorityFromContext(ctx)
 	r.scope, _ = runtimeauthoractivity.ScopeFromContext(ctx)
+	r.policyTools, _ = runtimellm.ConversationForkSandboxInvocationPolicyFromContext(ctx)
 	return &runtimellm.Session{ID: "forkchat-runtime-session", AgentID: agentID}, nil
 }
 

@@ -255,6 +255,17 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 	if argValue(secondArgs, "--resume") != firstChild || !slices.Contains(secondArgs, "--fork-session") {
 		t.Fatalf("second args = %#v, want resume %q with fork", secondArgs, firstChild)
 	}
+	for index, args := range [][]string{firstArgs, secondArgs} {
+		if got := argValue(args, "--tools"); got != "Edit,ExitPlanMode,Read,Write" {
+			t.Fatalf("invocation %d --tools = %q", index+1, got)
+		}
+		if got := argValue(args, "--allowedTools"); got != "Edit,ExitPlanMode,Read,Write,mcp__runtime-tools__emit_category_assessed" {
+			t.Fatalf("invocation %d --allowedTools = %q", index+1, got)
+		}
+		if slices.Contains(args, "--disallowedTools") {
+			t.Fatalf("invocation %d retained negative builtin catalog: %#v", index+1, args)
+		}
+	}
 }
 
 func mustReadCapturedArgs(t *testing.T, dir string, invocation int) []string {

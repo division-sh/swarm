@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,16 +28,39 @@ func TestClaudeCLIRuntimeProbeStartupVisibleToolSurface_CapturesProviderInitVisi
 	script := `#!/bin/sh
 set -eu
 session_id=""
+tools_arg=""
+allowed_arg=""
 while [ "$#" -gt 0 ]; do
-  if [ "$1" = "--session-id" ]; then
-    shift
-    session_id="${1:-}"
-    break
-  fi
-  shift
+  case "$1" in
+    --session-id)
+      shift
+      session_id="${1:-}"
+      ;;
+    --tools)
+      shift
+      tools_arg="${1:-}"
+      ;;
+    --allowedTools)
+      shift
+      allowed_arg="${1:-}"
+      ;;
+    --disallowedTools)
+      printf '%s\n' 'unexpected --disallowedTools' >&2
+      exit 1
+      ;;
+  esac
+  shift || true
 done
 if ! printf '%s' "$session_id" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then
   printf '%s\n' 'Error: Invalid session ID. Must be a valid UUID.' >&2
+  exit 1
+fi
+if [ "$tools_arg" != "Edit,ExitPlanMode,Read,Write" ]; then
+  printf '%s\n' "unexpected --tools: $tools_arg" >&2
+  exit 1
+fi
+if [ "$allowed_arg" != "Edit,ExitPlanMode,Read,Write" ]; then
+  printf '%s\n' "unexpected --allowedTools: $allowed_arg" >&2
   exit 1
 fi
 cat >/dev/null
@@ -271,6 +295,61 @@ exit 1
 	tools := []ToolDefinition{{Name: "emit_event"}}
 	_, err := runtime.ProbeStartupVisibleToolSurface(managedStartupProbeTestContext(t, actor, tools), actor, "system prompt", tools)
 	assertClaudeAuthenticationFailure(t, err)
+}
+
+func TestClaudeCLIRuntimeProbeStartupVisibleToolSurface_IncompatiblePositiveSelectorFailsWithoutRetry(t *testing.T) {
+	t.Setenv("SWARM_CLAUDE_USE_MCP", "0")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-oauth-token")
+
+	tempDir := t.TempDir()
+	scriptPath := filepath.Join(tempDir, "fake-docker.sh")
+	countPath := filepath.Join(tempDir, "count")
+	script := `#!/bin/sh
+set -eu
+count_path="${CLAUDE_SELECTOR_COUNT_PATH}"
+count=0
+if [ -f "$count_path" ]; then count="$(cat "$count_path")"; fi
+count=$((count + 1))
+printf '%s' "$count" > "$count_path"
+case " $* " in
+  *" --tools "*) ;;
+  *) printf '%s\n' 'missing required --tools selector' >&2; exit 2 ;;
+esac
+cat >/dev/null
+printf '%s\n' 'error: unknown option --tools' >&2
+exit 2
+`
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake Docker script: %v", err)
+	}
+	t.Setenv("CLAUDE_SELECTOR_COUNT_PATH", countPath)
+
+	cfg := &config.Config{}
+	cfg.Workspace.DockerBin = scriptPath
+	cfg.LLM.ClaudeCLI.OutputFormat = "stream-json"
+	cfg.LLM.ClaudeCLI.Command = "claude"
+	runtime := NewClaudeCLIRuntimeWithOptions(
+		cfg,
+		sessions.NewInMemoryRegistry(0),
+		"worker-1",
+		workspaceResolverStub{target: &workspace.Target{Container: "swarm-agent-selector", Workdir: "/workspace"}},
+		nil,
+		nil,
+		ClaudeCLIRuntimeOptions{ProviderCredentials: testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")},
+	)
+	actor := runtimeactors.AgentConfig{ID: "selector-agent", NativeTools: runtimeactors.NativeToolConfig{WebSearch: true}}
+	_, err := runtime.ProbeStartupVisibleToolSurface(managedStartupProbeTestContext(t, actor, nil), actor, "system prompt", nil)
+	failure, ok := runtimefailures.As(err)
+	if !ok || failure.Failure.Class != runtimefailures.ClassConnectorFailure || failure.Failure.Detail.Code != "claude_cli_startup_probe_failed" {
+		t.Fatalf("ProbeStartupVisibleToolSurface failure = %#v, want canonical incompatible-selector connector failure", failure)
+	}
+	raw, readErr := os.ReadFile(countPath)
+	if readErr != nil {
+		t.Fatalf("read invocation count: %v", readErr)
+	}
+	if got := strings.TrimSpace(string(raw)); got != "1" {
+		t.Fatalf("selector attempts = %q, want exactly one with no negative-catalog retry", got)
+	}
 }
 
 func managedStartupProbeTestContext(t *testing.T, actor runtimeactors.AgentConfig, tools []ToolDefinition) context.Context {
