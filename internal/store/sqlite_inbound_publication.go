@@ -204,7 +204,11 @@ func loadSQLiteInboundPublicationChildren(ctx context.Context, db inboundPublica
 		}
 		child.Kind = runtimeprovideroutput.Kind(kind)
 		if child.Kind == runtimeprovideroutput.KindNormalized {
-			child.Authorization = runtimeprovideroutput.Authorization{Provider: record.Provider, Event: child.EventName, PackID: packID, PackVersion: packVersion, ManifestHash: manifestHash, GenerationID: generationID}.Normalized()
+			child.Authorization, err = runtimeprovideroutput.ParseAuthorization(record.Provider, child.EventName, packID, packVersion, manifestHash, generationID)
+			if err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("admit sqlite inbound publication child authorization: %w", err)
+			}
 		}
 		children = append(children, child)
 	}
@@ -280,14 +284,14 @@ func insertSQLiteInboundPublicationPreparedTx(ctx context.Context, tx *sql.Tx, r
 }
 
 func (s *SQLiteRuntimeStore) linkInboundPublicationEventTx(ctx context.Context, tx *sql.Tx, request runtimeinbound.Request, child runtimeinbound.EventRecord) error {
-	auth := child.Authorization.Normalized()
+	auth := child.Authorization
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO inbound_publication_events (
 			publication_id, ordinal, event_id, event_name, output_kind,
 			pack_id, pack_version, manifest_hash, observed_generation_id,
 			event_integrity_fingerprint, recipient_manifest_fingerprint, recipient_count
 		) VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?)
-	`, request.PublicationID, child.Ordinal, child.EventID, child.EventName, string(child.Kind), auth.PackID, auth.PackVersion, auth.ManifestHash, auth.GenerationID, child.EventIntegrityFingerprint, child.RecipientManifestFingerprint, child.RecipientCount)
+	`, request.PublicationID, child.Ordinal, child.EventID, child.EventName, string(child.Kind), auth.PackID(), auth.PackVersion(), auth.ManifestHash(), auth.Generation().Diagnostic(), child.EventIntegrityFingerprint, child.RecipientManifestFingerprint, child.RecipientCount)
 	if err != nil {
 		return fmt.Errorf("link sqlite inbound publication child ordinal %d: %w", child.Ordinal, err)
 	}

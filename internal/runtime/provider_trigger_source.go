@@ -90,11 +90,18 @@ func SourceWithProviderTriggerEvents(source semanticview.Source, catalog *provid
 					imported[eventName] = eventEntry
 					owners[eventName] = owner
 					if strings.TrimSpace(eventEntry.Source) == "provider_trigger_pack_normalized" {
-						targetFree[eventName] = runtimeprovideroutput.Authorization{
-							Provider: providertriggers.NormalizeProviderName(binding.Provider), Event: eventName,
-							PackID: identity.ID, PackVersion: identity.Version, ManifestHash: identity.ManifestHash,
-							GenerationID: catalog.Generation().Diagnostic(),
-						}.Normalized()
+						authorization, err := runtimeprovideroutput.NewAuthorization(
+							providertriggers.NormalizeProviderName(binding.Provider),
+							eventName,
+							identity.ID,
+							identity.Version,
+							identity.ManifestHash,
+							catalog.Generation(),
+						)
+						if err != nil {
+							return nil, fmt.Errorf("admit provider trigger output %q: %w", eventName, err)
+						}
+						targetFree[eventName] = authorization
 					}
 					if byProject[strings.TrimSpace(pkg.Key)] == nil {
 						byProject[strings.TrimSpace(pkg.Key)] = map[string]runtimecontracts.EventCatalogEntry{}
@@ -127,7 +134,7 @@ func (s providerTriggerEventSource) SemanticCapabilities() semanticview.Capabili
 	sort.Strings(names)
 	out := make([]runtimeprovideroutput.Authorization, 0, len(names))
 	for _, name := range names {
-		out = append(out, s.targetFree[name].Normalized())
+		out = append(out, s.targetFree[name])
 	}
 	return s.Source.SemanticCapabilities().WithProviderTriggerEvents(s.Source, s.generation, out)
 }

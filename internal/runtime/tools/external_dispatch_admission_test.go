@@ -62,13 +62,22 @@ func TestParseExternalDispatchRateLimitGrammar(t *testing.T) {
 }
 
 func TestValidateExternalDispatchRateLimitDeclarations(t *testing.T) {
+	if _, err := runtimecontracts.NewToolSchemaEntry(
+		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerPlatformBuiltin),
+		runtimecontracts.WithToolRateLimit("1/s", "1s"),
+		runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
+	); err == nil || !strings.Contains(err.Error(), "only supported for handler_type http") {
+		t.Fatalf("non-http admitted rate policy error = %v", err)
+	}
+	if _, err := runtimecontracts.NewToolSchemaEntry(
+		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+		runtimecontracts.WithToolRateLimit("1/s", ""),
+		runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
+		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test"}),
+	); err == nil || !strings.Contains(err.Error(), "rate_limit requires rate_limit_max_wait") {
+		t.Fatalf("incomplete admitted rate policy error = %v", err)
+	}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"bad_builtin": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("platform_builtin")), runtimecontracts.WithToolRateLimit("1/s",
-				"1s"), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
-
-			"bad_http": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolRateLimit("1/s", ""), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test"})),
-		},
 		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 			"mcp_servers": {Value: map[string]any{
 				"infra": map[string]any{
@@ -89,8 +98,6 @@ func TestValidateExternalDispatchRateLimitDeclarations(t *testing.T) {
 	errs := ValidateExternalDispatchRateLimitDeclarations(source)
 	joined := externalDispatchJoinedErrors(errs)
 	for _, want := range []string{
-		"tool bad_builtin: rate_limit is only supported for handler_type http",
-		"tool bad_http: rate_limit requires rate_limit_max_wait",
 		"root policy.mcp_servers.infra: rate_limit: must not contain whitespace",
 		"root policy.web_search_provider: rate_limit_max_wait must be a string",
 	} {
@@ -111,7 +118,7 @@ func TestExecutor_HTTPToolRateLimitAdmitsDirectCallsAndLogsWait(t *testing.T) {
 
 	bus := &telemetryBusStub{}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{
-		WorkflowSource: rateLimitedHTTPToolSource(server.URL, "1/40ms", "500ms"),
+		WorkflowSource: rateLimitedHTTPToolSource(server.URL, "1/1s", "2s"),
 	})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{ExecutionMode: "live", ID: "agent-1", Tools: []string{"check_domain"}})
 	for i := 0; i < 2; i++ {
@@ -119,7 +126,7 @@ func TestExecutor_HTTPToolRateLimitAdmitsDirectCallsAndLogsWait(t *testing.T) {
 			t.Fatalf("Execute #%d: %v", i+1, err)
 		}
 	}
-	recorder.requireGapAtLeast(t, 25*time.Millisecond)
+	recorder.requireGapAtLeast(t, 750*time.Millisecond)
 	if len(bus.logs) != 2 {
 		t.Fatalf("runtime logs = %d, want 2", len(bus.logs))
 	}
@@ -145,16 +152,12 @@ func TestExecutor_HTTPTimeoutStartsAfterAdmissionWait(t *testing.T) {
 	defer server.Close()
 
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{})
-	tool := newExecutionTool(executionToolValue{
-		name: "check_domain",
-		http: &runtimecontracts.HTTPToolSpec{Method: "GET", URL: server.URL},
-		rateLimit: externalDispatchRateLimitConfig{
-			Enabled: true,
-			Limit:   1,
-			Period:  60 * time.Millisecond,
-			MaxWait: 500 * time.Millisecond,
-		},
-	})
+	tool := admittedExecutionToolForTest(t, "check_domain",
+		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+		runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.ToolInputSchema{}),
+		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: server.URL}),
+		runtimecontracts.WithToolRateLimit("1/60ms", "500ms"),
+	)
 	if _, err := exec.execHTTPRequestOnce(unmanagedToolTestContext(), http.MethodGet, server.URL, http.Header{}, nil, 20*time.Millisecond, tool, nil); err != nil {
 		t.Fatalf("initial execHTTPRequestOnce: %v", err)
 	}

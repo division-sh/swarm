@@ -573,11 +573,18 @@ func (p InboundAdmissionPlan) ProjectDelivery(admitted AdmittedRequest) (Deliver
 			if delivery.Events[index].Kind != OutputKindNormalized {
 				continue
 			}
-			delivery.Events[index].Authorization = runtimeprovideroutput.Authorization{
-				Provider: p.provider, Event: string(delivery.Events[index].Name),
-				PackID: p.packIdentity.ID, PackVersion: p.packIdentity.Version,
-				ManifestHash: p.packIdentity.ManifestHash, GenerationID: p.generation.Diagnostic(),
-			}.Normalized()
+			authorization, err := runtimeprovideroutput.NewAuthorization(
+				p.provider,
+				string(delivery.Events[index].Name),
+				p.packIdentity.ID,
+				p.packIdentity.Version,
+				p.packIdentity.ManifestHash,
+				p.generation,
+			)
+			if err != nil {
+				return Delivery{}, badRequest(fmt.Sprintf("admit normalized provider output authorization: %v", err))
+			}
+			delivery.Events[index].Authorization = authorization
 		}
 		return delivery, nil
 	}

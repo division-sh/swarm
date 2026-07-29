@@ -41,7 +41,7 @@ func TestMockResponsePlanAdmitsOnlyExactProviderConnectorResponses(t *testing.T)
 		want      string
 	}{
 		"missing exact response": {"telegram.delete_message", tool, "not configured"},
-		"non provider tool":      {"telegram.send_message", mockResponseTool("native", runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), "only provider_connector"},
+		"non provider tool":      {"telegram.send_message", mockResponseTool("platform", runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), "only provider_connector"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := plan.Admit(tc.id, tc.candidate); err == nil || !strings.Contains(err.Error(), tc.want) {

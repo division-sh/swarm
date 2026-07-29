@@ -153,10 +153,13 @@ func (s *CatalogSnapshot) PackDescriptors() []packs.TriggerPackDescriptor {
 			events[output.Event] = packs.TriggerEvent{Name: output.Event, Fields: fields}
 		}
 		out = append(out, packs.TriggerPackDescriptor{
-			Identity: packs.PackIdentity{
-				ID: entry.Identity.ID, Version: entry.Identity.Version, ManifestHash: entry.Identity.ManifestHash,
-				Type: packs.TypeTrigger, Source: entry.Source,
-			},
+			Identity: packs.MustPackIdentity(
+				entry.Identity.ID,
+				entry.Identity.Version,
+				entry.Identity.ManifestHash,
+				packs.TypeTrigger,
+				packs.MustPackSource(entry.Identity.Provenance, entry.Source),
+			),
 			Provider: entry.Manifest.Provider, Generation: s.generation, Events: events,
 		})
 	}
@@ -494,32 +497,31 @@ func (s *CatalogSnapshot) Generation() triggergeneration.Generation {
 }
 
 func (s *CatalogSnapshot) VerifyProviderOutputAuthorization(authorization runtimeprovideroutput.Authorization) error {
-	authorization = authorization.Normalized()
 	if !authorization.Valid() {
 		return fmt.Errorf("provider-output authorization is incomplete")
 	}
 	if s == nil || !s.generation.Valid() {
 		return fmt.Errorf("verified provider-trigger catalog is unavailable")
 	}
-	if !s.generation.MatchesDiagnostic(authorization.GenerationID) {
-		return fmt.Errorf("catalog generation %q does not match current generation %q", authorization.GenerationID, s.generation.Diagnostic())
+	if !s.generation.Equal(authorization.Generation()) {
+		return fmt.Errorf("catalog generation %q does not match current generation %q", authorization.Generation().Diagnostic(), s.generation.Diagnostic())
 	}
-	entry, ok := s.byID[authorization.PackID]
+	entry, ok := s.byID[authorization.PackID()]
 	if !ok {
-		return fmt.Errorf("pack %q is not present in the current verified catalog", authorization.PackID)
+		return fmt.Errorf("pack %q is not present in the current verified catalog", authorization.PackID())
 	}
-	if entry.Identity.Version != authorization.PackVersion || entry.Identity.ManifestHash != authorization.ManifestHash {
-		return fmt.Errorf("pack %q version/hash does not match the current verified catalog", authorization.PackID)
+	if entry.Identity.Version != authorization.PackVersion() || entry.Identity.ManifestHash != authorization.ManifestHash() {
+		return fmt.Errorf("pack %q version/hash does not match the current verified catalog", authorization.PackID())
 	}
-	if NormalizeProviderName(entry.Manifest.Provider) != authorization.Provider {
-		return fmt.Errorf("pack %q does not own provider %q", authorization.PackID, authorization.Provider)
+	if NormalizeProviderName(entry.Manifest.Provider) != authorization.Provider() {
+		return fmt.Errorf("pack %q does not own provider %q", authorization.PackID(), authorization.Provider())
 	}
 	for _, normalized := range entry.Manifest.NormalizedEvents {
-		if strings.TrimSpace(normalized.Event) == authorization.Event {
+		if strings.TrimSpace(normalized.Event) == authorization.Event() {
 			return nil
 		}
 	}
-	return fmt.Errorf("pack %q does not declare normalized event %q", authorization.PackID, authorization.Event)
+	return fmt.Errorf("pack %q does not declare normalized event %q", authorization.PackID(), authorization.Event())
 }
 
 func (s *CatalogSnapshot) EntryByProvider(provider string) (CatalogEntry, bool) {

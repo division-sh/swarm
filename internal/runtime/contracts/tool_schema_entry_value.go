@@ -64,18 +64,19 @@ func MustToolHandlerKind(raw string) ToolHandlerKind {
 }
 
 type toolSchemaEntryValue struct {
-	category             string
+	category             ToolCategory
 	description          string
 	handler              ToolHandlerKind
 	effect               ActivityEffectClass
-	permission           string
-	requiredPermission   string
-	rateLimit            string
-	rateLimitMaxWait     string
+	permission           ToolPermission
+	ratePolicy           ToolRatePolicy
 	inputSchema          ToolInputSchema
 	outputSchema         ToolInputSchema
+	generatedSchema      bool
 	http                 HTTPToolSpec
 	hasHTTP              bool
+	mcp                  ToolMCPBinding
+	hasMCP               bool
 	responseMapping      semanticvalue.Value
 	hasResponseMapping   bool
 	responseSuccess      HTTPResponseSuccess
@@ -114,11 +115,11 @@ func (o toolSchemaEntryOption) applyToolSchemaEntry(draft *toolSchemaEntryDraft)
 
 func WithToolCategory(category string) ToolSchemaEntryOption {
 	return toolSchemaEntryOption(func(draft *toolSchemaEntryDraft) error {
-		category = strings.TrimSpace(category)
-		if !utf8.ValidString(category) {
-			return fmt.Errorf("category is not valid UTF-8")
+		admitted, err := ParseToolCategory(category)
+		if err != nil {
+			return err
 		}
-		draft.value.category = category
+		draft.value.category = admitted
 		return nil
 	})
 }
@@ -154,18 +155,31 @@ func WithToolEffect(effect ActivityEffectClass) ToolSchemaEntryOption {
 	})
 }
 
-func WithToolPermissions(permission, required string) ToolSchemaEntryOption {
+func WithToolPermission(permission string) ToolSchemaEntryOption {
 	return toolSchemaEntryOption(func(draft *toolSchemaEntryDraft) error {
-		draft.value.permission = strings.TrimSpace(permission)
-		draft.value.requiredPermission = strings.TrimSpace(required)
+		admitted, err := NewToolPermission(permission)
+		if err != nil {
+			return err
+		}
+		draft.value.permission = admitted
 		return nil
 	})
 }
 
 func WithToolRateLimit(rateLimit, maxWait string) ToolSchemaEntryOption {
 	return toolSchemaEntryOption(func(draft *toolSchemaEntryDraft) error {
-		draft.value.rateLimit = strings.TrimSpace(rateLimit)
-		draft.value.rateLimitMaxWait = strings.TrimSpace(maxWait)
+		policy, err := NewToolRatePolicy(rateLimit, maxWait)
+		if err != nil {
+			return err
+		}
+		draft.value.ratePolicy = policy
+		return nil
+	})
+}
+
+func WithToolGeneratedSchema(generated bool) ToolSchemaEntryOption {
+	return toolSchemaEntryOption(func(draft *toolSchemaEntryDraft) error {
+		draft.value.generatedSchema = generated
 		return nil
 	})
 }
@@ -186,6 +200,17 @@ func WithToolHTTP(spec HTTPToolSpec) ToolSchemaEntryOption {
 		}
 		draft.value.http = admitted
 		draft.value.hasHTTP = true
+		return nil
+	})
+}
+
+func WithToolMCP(binding ToolMCPBinding) ToolSchemaEntryOption {
+	return toolSchemaEntryOption(func(draft *toolSchemaEntryDraft) error {
+		if binding.IsZero() {
+			return fmt.Errorf("MCP binding is missing")
+		}
+		draft.value.mcp = binding
+		draft.value.hasMCP = true
 		return nil
 	})
 }
@@ -280,14 +305,31 @@ func (e ToolSchemaEntry) validate() error {
 	if err := e.value.inputSchema.ValidateDefinition(); err != nil {
 		return fmt.Errorf("input_schema: %w", err)
 	}
-	if err := e.value.outputSchema.ValidateDefinition(); err != nil {
-		return fmt.Errorf("output_schema: %w", err)
+	if !e.value.outputSchema.IsZero() {
+		if err := e.value.outputSchema.ValidateDefinition(); err != nil {
+			return fmt.Errorf("output_schema: %w", err)
+		}
+	}
+	if e.value.category.String() == "" && e.value.category != ToolCategoryUnspecified {
+		return fmt.Errorf("tool category is invalid")
+	}
+	if e.value.handler.String() == "" && e.value.handler != ToolHandlerUnspecified {
+		return fmt.Errorf("tool handler is invalid")
+	}
+	if e.value.ratePolicy.Enabled() && e.value.handler != ToolHandlerHTTP {
+		return fmt.Errorf("rate_limit is only supported for handler_type http")
 	}
 	if e.value.handler == ToolHandlerHTTP && !e.value.hasHTTP {
 		return fmt.Errorf("handler_type http requires an http block")
 	}
 	if e.value.handler != ToolHandlerHTTP && e.value.hasHTTP {
 		return fmt.Errorf("http block requires handler_type http")
+	}
+	if e.value.handler != ToolHandlerMCP && e.value.hasMCP {
+		return fmt.Errorf("MCP binding requires handler_type mcp")
+	}
+	if e.value.hasHTTP && e.value.hasMCP {
+		return fmt.Errorf("HTTP and MCP execution bindings are mutually exclusive")
 	}
 	if e.value.hasCompiledResult {
 		if err := e.value.compiledResult.outputSchema.ValidateDefinition(); err != nil {
@@ -304,9 +346,9 @@ func (e ToolSchemaEntry) IsZero() bool { return e.value == nil }
 func (e ToolSchemaEntry) Validate() error {
 	return e.validate()
 }
-func (e ToolSchemaEntry) Category() string {
+func (e ToolSchemaEntry) Category() ToolCategory {
 	if e.value == nil {
-		return ""
+		return ToolCategoryUnspecified
 	}
 	return e.value.category
 }
@@ -328,23 +370,20 @@ func (e ToolSchemaEntry) Effect() ActivityEffectClass {
 	}
 	return e.value.effect
 }
-func (e ToolSchemaEntry) Permission() string {
+func (e ToolSchemaEntry) Permission() ToolPermission {
 	if e.value == nil {
-		return ""
+		return ToolPermission{}
 	}
 	return e.value.permission
 }
-func (e ToolSchemaEntry) RequiredPermission() string {
+func (e ToolSchemaEntry) RatePolicy() ToolRatePolicy {
 	if e.value == nil {
-		return ""
+		return ToolRatePolicy{}
 	}
-	return e.value.requiredPermission
+	return e.value.ratePolicy
 }
-func (e ToolSchemaEntry) RateLimitSyntax() (string, string) {
-	if e.value == nil {
-		return "", ""
-	}
-	return e.value.rateLimit, e.value.rateLimitMaxWait
+func (e ToolSchemaEntry) GeneratedSchema() bool {
+	return e.value != nil && e.value.generatedSchema
 }
 func (e ToolSchemaEntry) InputSchema() ToolInputSchema {
 	if e.value == nil {
@@ -363,6 +402,12 @@ func (e ToolSchemaEntry) HTTP() (HTTPToolSpec, bool) {
 		return HTTPToolSpec{}, false
 	}
 	return snapshotHTTPToolSpec(e.value.http), true
+}
+func (e ToolSchemaEntry) MCP() (ToolMCPBinding, bool) {
+	if e.value == nil || !e.value.hasMCP {
+		return ToolMCPBinding{}, false
+	}
+	return e.value.mcp, true
 }
 func (e ToolSchemaEntry) ResponseMapping() (map[string]any, bool) {
 	if e.value == nil || !e.value.hasResponseMapping {
@@ -431,9 +476,12 @@ func (e ToolSchemaEntry) WithRateLimit(rateLimit, maxWait string) (ToolSchemaEnt
 	if e.value == nil {
 		return ToolSchemaEntry{}, fmt.Errorf("tool contract is missing")
 	}
+	policy, err := NewToolRatePolicy(rateLimit, maxWait)
+	if err != nil {
+		return ToolSchemaEntry{}, err
+	}
 	copyValue := *e.value
-	copyValue.rateLimit = strings.TrimSpace(rateLimit)
-	copyValue.rateLimitMaxWait = strings.TrimSpace(maxWait)
+	copyValue.ratePolicy = policy
 	out := ToolSchemaEntry{value: &copyValue}
 	if err := out.validate(); err != nil {
 		return ToolSchemaEntry{}, err
@@ -540,20 +588,28 @@ func (e ToolSchemaEntry) CanonicalValue() (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	output, err := e.value.outputSchema.Project()
-	if err != nil {
-		return nil, err
+	var output map[string]any
+	if !e.value.outputSchema.IsZero() {
+		output, err = e.value.outputSchema.Project()
+		if err != nil {
+			return nil, err
+		}
 	}
+	rateLimit, rateLimitMaxWait := e.value.ratePolicy.Syntax()
 	out := map[string]any{
-		"category": e.value.category, "description": e.value.description,
+		"category": e.value.category.String(), "description": e.value.description,
 		"handler_type": e.value.handler.String(), "effect_class": string(e.value.effect),
-		"permission": e.value.permission, "required_permission": e.value.requiredPermission,
-		"rate_limit": e.value.rateLimit, "rate_limit_max_wait": e.value.rateLimitMaxWait,
+		"permission": e.value.permission.String(),
+		"rate_limit": rateLimit, "rate_limit_max_wait": rateLimitMaxWait,
 		"input_schema": input, "output_schema": output,
-		"credentials": append([]string(nil), e.value.credentials...),
+		"credentials":      append([]string(nil), e.value.credentials...),
+		"generated_schema": e.value.generatedSchema,
 	}
 	if e.value.hasHTTP {
 		out["http"] = snapshotHTTPToolSpec(e.value.http)
+	}
+	if e.value.hasMCP {
+		out["mcp"] = map[string]any{"server": e.value.mcp.Server(), "remote": e.value.mcp.Remote()}
 	}
 	if e.value.hasResponseMapping {
 		out["response_mapping"] = e.value.responseMapping.Interface()
@@ -583,34 +639,32 @@ func (e ToolSchemaEntry) MarshalYAML() (any, error) {
 		return nil, err
 	}
 	type authoredToolYAML struct {
-		Category           string                `yaml:"category,omitempty"`
-		Description        string                `yaml:"description,omitempty"`
-		HandlerType        string                `yaml:"handler_type,omitempty"`
-		EffectClass        string                `yaml:"effect_class,omitempty"`
-		Permission         string                `yaml:"permission,omitempty"`
-		RequiredPermission string                `yaml:"required_permission,omitempty"`
-		RateLimit          string                `yaml:"rate_limit,omitempty"`
-		RateLimitMaxWait   string                `yaml:"rate_limit_max_wait,omitempty"`
-		InputSchema        ToolInputSchema       `yaml:"input_schema"`
-		OutputSchema       ToolInputSchema       `yaml:"output_schema"`
-		HTTP               *HTTPToolSpec         `yaml:"http,omitempty"`
-		ResponseMapping    map[string]any        `yaml:"response_mapping,omitempty"`
-		ResponseSuccess    *HTTPResponseSuccess  `yaml:"response_success,omitempty"`
-		Credentials        []string              `yaml:"credentials,omitempty"`
-		ManagedCredential  *ManagedCredentialRef `yaml:"managed_credential,omitempty"`
+		Category          string                `yaml:"category,omitempty"`
+		Description       string                `yaml:"description,omitempty"`
+		HandlerType       string                `yaml:"handler_type,omitempty"`
+		EffectClass       string                `yaml:"effect_class,omitempty"`
+		Permission        string                `yaml:"permission,omitempty"`
+		RateLimit         string                `yaml:"rate_limit,omitempty"`
+		RateLimitMaxWait  string                `yaml:"rate_limit_max_wait,omitempty"`
+		InputSchema       ToolInputSchema       `yaml:"input_schema"`
+		OutputSchema      ToolInputSchema       `yaml:"output_schema"`
+		HTTP              *HTTPToolSpec         `yaml:"http,omitempty"`
+		ResponseMapping   map[string]any        `yaml:"response_mapping,omitempty"`
+		ResponseSuccess   *HTTPResponseSuccess  `yaml:"response_success,omitempty"`
+		Credentials       []string              `yaml:"credentials,omitempty"`
+		ManagedCredential *ManagedCredentialRef `yaml:"managed_credential,omitempty"`
 	}
 	out := authoredToolYAML{
-		Category:           e.Category(),
-		Description:        e.Description(),
-		HandlerType:        e.Handler().String(),
-		EffectClass:        string(e.Effect()),
-		Permission:         e.Permission(),
-		RequiredPermission: e.RequiredPermission(),
-		InputSchema:        e.InputSchema(),
-		OutputSchema:       e.OutputSchema(),
-		Credentials:        e.Credentials(),
+		Category:     e.Category().String(),
+		Description:  e.Description(),
+		HandlerType:  e.Handler().String(),
+		EffectClass:  string(e.Effect()),
+		Permission:   e.Permission().String(),
+		InputSchema:  e.InputSchema(),
+		OutputSchema: e.OutputSchema(),
+		Credentials:  e.Credentials(),
 	}
-	out.RateLimit, out.RateLimitMaxWait = e.RateLimitSyntax()
+	out.RateLimit, out.RateLimitMaxWait = e.RatePolicy().Syntax()
 	if value, ok := e.HTTP(); ok {
 		out.HTTP = &value
 	}

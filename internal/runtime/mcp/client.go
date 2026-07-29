@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -36,12 +37,11 @@ type ServerConfig struct {
 }
 
 type DiscoveredTool struct {
-	Name        string
-	RemoteName  string
-	ServerName  string
-	Prefix      string
-	Description string
-	InputSchema any
+	Name       string
+	RemoteName string
+	ServerName string
+	Prefix     string
+	Contract   runtimecontracts.ToolSchemaEntry
 }
 
 type Client struct {
@@ -253,19 +253,39 @@ func (c *Client) discoverServerTools(ctx context.Context, source semanticview.So
 	for _, raw := range rawTools {
 		item, ok := raw.(map[string]any)
 		if !ok {
-			continue
+			return nil, externalMCPFailure(runtimefailures.ClassConnectorFailure, "mcp_tool_catalog_invalid", server.cfg, toolsListRequest, nil, nil)
 		}
 		remoteName := strings.TrimSpace(asString(item["name"]))
 		if remoteName == "" {
-			continue
+			return nil, externalMCPFailure(runtimefailures.ClassConnectorFailure, "mcp_tool_catalog_invalid", server.cfg, toolsListRequest, nil, nil)
+		}
+		rawSchema, ok := item["inputSchema"].(map[string]any)
+		if !ok {
+			return nil, externalMCPFailure(runtimefailures.ClassConnectorFailure, "mcp_tool_catalog_invalid", server.cfg, toolsListRequest, map[string]any{"tool": remoteName}, nil)
+		}
+		inputSchema, err := runtimecontracts.AdmitToolInputSchemaMap(rawSchema)
+		if err != nil {
+			return nil, externalMCPFailure(runtimefailures.ClassConnectorFailure, "mcp_tool_catalog_invalid", server.cfg, toolsListRequest, map[string]any{"tool": remoteName}, err)
+		}
+		binding, err := runtimecontracts.NewToolMCPBinding(server.cfg.Name, remoteName)
+		if err != nil {
+			return nil, externalMCPFailure(runtimefailures.ClassConnectorFailure, "mcp_tool_catalog_invalid", server.cfg, toolsListRequest, map[string]any{"tool": remoteName}, err)
+		}
+		contract, err := runtimecontracts.NewToolSchemaEntry(
+			runtimecontracts.WithToolDescription(asString(item["description"])),
+			runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerMCP),
+			runtimecontracts.WithToolSchemas(inputSchema, runtimecontracts.ToolInputSchema{}),
+			runtimecontracts.WithToolMCP(binding),
+		)
+		if err != nil {
+			return nil, externalMCPFailure(runtimefailures.ClassConnectorFailure, "mcp_tool_catalog_invalid", server.cfg, toolsListRequest, map[string]any{"tool": remoteName}, err)
 		}
 		out = append(out, DiscoveredTool{
-			Name:        strings.TrimSpace(server.cfg.Prefix) + "." + remoteName,
-			RemoteName:  remoteName,
-			ServerName:  server.cfg.Name,
-			Prefix:      server.cfg.Prefix,
-			Description: strings.TrimSpace(asString(item["description"])),
-			InputSchema: item["inputSchema"],
+			Name:       strings.TrimSpace(server.cfg.Prefix) + "." + remoteName,
+			RemoteName: remoteName,
+			ServerName: server.cfg.Name,
+			Prefix:     server.cfg.Prefix,
+			Contract:   contract,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })

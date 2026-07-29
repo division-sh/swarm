@@ -167,7 +167,7 @@ func CapabilitySubjects(ctx context.Context, source semanticview.Source, opts Ca
 }
 
 func isProviderConnector(tool runtimecontracts.ToolSchemaEntry) bool {
-	return tool.Category() == Category
+	return tool.Category() == runtimecontracts.ToolCategoryProviderConnector
 }
 
 func validateTool(toolID string, tool runtimecontracts.ToolSchemaEntry) []error {
@@ -238,8 +238,7 @@ func validateTool(toolID string, tool runtimecontracts.ToolSchemaEntry) []error 
 	} else if err := httpresponsesuccess.Validate(responseSuccess); err != nil {
 		errs = append(errs, fmt.Errorf("%s %s", context, err))
 	}
-	rateLimit, maxWait := tool.RateLimitSyntax()
-	if rateLimit != "" || maxWait != "" {
+	if tool.RatePolicy().Enabled() {
 		errs = append(errs, fmt.Errorf("%s uses rate_limit; connector activity rate-limit admission is split", context))
 	}
 	return errs
@@ -370,7 +369,7 @@ func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, t
 	sourcePath := ""
 	if importSource, exists := capabilities.ConnectorImportSource(toolID); exists {
 		sourceKind = "connector_pack_import"
-		sourcePath = strings.TrimSpace(importSource)
+		sourcePath = importSource.String()
 		if loaded, found := opts.Registry.Lookup(provider, toolID); found {
 			provenance = strings.TrimSpace(loaded.Envelope.Provenance.Source)
 		}
@@ -463,22 +462,22 @@ func tokenRequestFields(profile managedcredentialmodel.TokenRequestProfile) pack
 }
 
 func generationEvidence(generation GenerationSurface) packs.Evidence {
-	permissions := make([]string, 0, len(generation.Permissions))
-	for _, permission := range generation.Permissions {
-		permissions = append(permissions, strings.TrimSpace(permission.ID)+":"+strings.TrimSpace(permission.Note))
+	permissions := make([]string, 0, len(generation.Permissions()))
+	for _, permission := range generation.Permissions() {
+		permissions = append(permissions, permission.ID()+":"+permission.Note())
 	}
 	sort.Strings(permissions)
 	return packs.Evidence{Kind: "generation", Fields: map[string]string{
-		"generator":     strings.TrimSpace(generation.GeneratorVersion),
-		"source":        strings.TrimSpace(generation.SourcePath),
-		"source_hash":   strings.TrimSpace(generation.SourceSHA256),
-		"profile":       strings.TrimSpace(generation.ProfilePath),
-		"profile_hash":  strings.TrimSpace(generation.ProfileSHA256),
-		"manifest_hash": strings.TrimSpace(generation.ManifestSHA256),
-		"operation":     strings.TrimSpace(generation.OperationID),
+		"generator":     generation.GeneratorVersion(),
+		"source":        generation.SourcePath(),
+		"source_hash":   generation.SourceSHA256(),
+		"profile":       generation.ProfilePath(),
+		"profile_hash":  generation.ProfileSHA256(),
+		"manifest_hash": generation.ManifestSHA256(),
+		"operation":     generation.OperationID(),
 		"permissions":   strings.Join(permissions, "; "),
-		"fixture":       strings.TrimSpace(generation.FixtureID) + ":" + strings.TrimSpace(generation.FixtureStatus),
-		"review":        strings.TrimSpace(generation.ReviewStatus),
+		"fixture":       generation.FixtureID() + ":" + generation.FixtureStatus(),
+		"review":        generation.ReviewStatus(),
 	}}
 }
 

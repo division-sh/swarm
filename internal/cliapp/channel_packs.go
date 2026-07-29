@@ -89,7 +89,7 @@ func loadChannelPlatformSpecDocument(platformSpecPath string) (runtimecontracts.
 func compileChannelBindings(ctx context.Context, cfg *config.Config, plans []packs.SatisfactionPlan, staticCredentials runtimecredentials.Store, managedCredentials runtimemanagedcredentials.Store) ([]packs.OutboundBindingPlan, error) {
 	byID := make(map[string]packs.SatisfactionPlan, len(plans))
 	for _, plan := range plans {
-		byID[plan.ChannelIdentity().ID] = plan
+		byID[plan.ChannelIdentity().ID()] = plan
 	}
 	ids := make([]string, 0, len(cfg.Channels.Bindings))
 	for id := range cfg.Channels.Bindings {

@@ -157,16 +157,15 @@ func TestRun_DoesNotWarnForBuiltinRuntimeToolReference(t *testing.T) {
 	}
 }
 
-func TestRun_FailsClosedForInvalidExternalDispatchRateLimit(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"bad_http": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolRateLimit("1/s", ""), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test"})),
-		},
-	})
-
-	report := Run(context.Background(), source, Options{})
-	if !reportContains(report.Errors(), "invalid_field_detection", "rate_limit requires rate_limit_max_wait") {
-		t.Fatalf("expected invalid rate_limit hard invalidity, got %#v", report.Errors())
+func TestToolAdmissionFailsClosedBeforeBootVerifyForInvalidExternalDispatchRateLimit(t *testing.T) {
+	_, err := runtimecontracts.NewToolSchemaEntry(
+		runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")),
+		runtimecontracts.WithToolRateLimit("1/s", ""),
+		runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
+		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test"}),
+	)
+	if err == nil || !strings.Contains(err.Error(), "rate_limit requires rate_limit_max_wait") {
+		t.Fatalf("invalid rate_limit admission error = %v", err)
 	}
 }
 

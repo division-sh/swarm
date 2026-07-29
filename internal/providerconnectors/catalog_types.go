@@ -13,7 +13,6 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/httpresponsesuccess"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"gopkg.in/yaml.v3"
 )
 
@@ -48,7 +47,10 @@ type GenerationProfileEvidence struct {
 	SHA256        string `yaml:"sha256"`
 }
 
-type GenerationPermission = semanticview.ConnectorGenerationPermission
+type GenerationPermission struct {
+	ID   string `yaml:"id"`
+	Note string `yaml:"note"`
+}
 
 type GenerationOperationEvidence struct {
 	OperationID     string                               `yaml:"operation_id"`

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 )
@@ -68,7 +69,7 @@ func (d *ToolDispatcher) Dispatch(ctx context.Context, actor models.AgentConfig,
 		return nil, fmt.Errorf("unsupported runtime tool: %s", name)
 	}
 	switch tool.Handler() {
-	case implementationPlatformBuiltin:
+	case runtimecontracts.ToolHandlerPlatformBuiltin:
 		handler, ok := d.handlers[name]
 		if !ok || handler == nil {
 			if d.roleScopedEntityHandler != nil {
@@ -80,17 +81,17 @@ func (d *ToolDispatcher) Dispatch(ctx context.Context, actor models.AgentConfig,
 			return nil, fmt.Errorf("missing platform builtin handler: %s", name)
 		}
 		return handler(ctx, actor, input)
-	case implementationHTTP:
+	case runtimecontracts.ToolHandlerHTTP:
 		if d.httpHandler == nil {
 			return nil, fmt.Errorf("http tool handler is not configured")
 		}
 		return d.httpHandler(ctx, actor, tool, input)
-	case implementationMCP:
+	case runtimecontracts.ToolHandlerMCP:
 		if d.mcpHandler == nil {
 			return nil, fmt.Errorf("mcp tool handler is not configured")
 		}
 		return d.mcpHandler(ctx, actor, tool, input)
-	case implementationChannel:
+	case runtimecontracts.ToolHandlerChannel:
 		if d.channelHandler == nil {
 			return nil, fmt.Errorf("channel tool handler is not configured")
 		}

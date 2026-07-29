@@ -203,7 +203,7 @@ func (s *ToolInputSchema) UnmarshalYAML(node *yaml.Node) error {
 	allowed := map[string]struct{}{
 		"type": {}, "description": {}, "properties": {}, "required": {}, "items": {}, "enum": {},
 		"additionalProperties": {}, "minimum": {}, "maximum": {}, "pattern": {},
-		"minLength": {}, "maxLength": {}, "minItems": {}, "maxItems": {},
+		"format": {}, "x-swarm-equalTo": {}, "minLength": {}, "maxLength": {}, "minItems": {}, "maxItems": {},
 	}
 	for index := 0; index < len(node.Content); index += 2 {
 		key := strings.TrimSpace(node.Content[index].Value)
@@ -227,6 +227,8 @@ func (s *ToolInputSchema) UnmarshalYAML(node *yaml.Node) error {
 		Minimum     *float64                   `yaml:"minimum"`
 		Maximum     *float64                   `yaml:"maximum"`
 		Pattern     string                     `yaml:"pattern"`
+		Format      string                     `yaml:"format"`
+		EqualTo     string                     `yaml:"x-swarm-equalTo"`
 		MinLength   *int                       `yaml:"minLength"`
 		MaxLength   *int                       `yaml:"maxLength"`
 		MinItems    *int                       `yaml:"minItems"`
@@ -254,6 +256,12 @@ func (s *ToolInputSchema) UnmarshalYAML(node *yaml.Node) error {
 	}
 	if decoded.Pattern != "" {
 		options = append(options, ToolSchemaPattern(decoded.Pattern))
+	}
+	if decoded.Format != "" {
+		options = append(options, ToolSchemaFormat(decoded.Format))
+	}
+	if decoded.EqualTo != "" {
+		options = append(options, ToolSchemaEqualTo(decoded.EqualTo))
 	}
 	if decoded.MinLength != nil {
 		options = append(options, ToolSchemaMinLength(*decoded.MinLength))
@@ -309,7 +317,11 @@ func (s *ToolInputSchema) UnmarshalYAML(node *yaml.Node) error {
 			}
 		}
 	}
-	admitted, err := NewToolInputSchema(ToolSchemaKind(decoded.Type), options...)
+	kind := ToolSchemaKind(decoded.Type)
+	if kind == "" && len(node.Content) == 0 {
+		kind = ToolSchemaAny
+	}
+	admitted, err := NewToolInputSchema(kind, options...)
 	if err != nil {
 		return fmt.Errorf("tool schema: %w", err)
 	}
@@ -435,22 +447,24 @@ func (t *ToolSchemaEntry) UnmarshalYAML(node *yaml.Node) error {
 	if hasYAMLMappingKey(node, "type") {
 		return fmt.Errorf("RETIRED: tool field %q is not accepted; use handler_type", "type")
 	}
+	if hasYAMLMappingKey(node, "required_permission") {
+		return fmt.Errorf("RETIRED: tool field %q is not accepted; use permission", "required_permission")
+	}
 	var aux struct {
-		Category           string                `yaml:"category,omitempty"`
-		Description        string                `yaml:"description,omitempty"`
-		HandlerType        string                `yaml:"handler_type,omitempty"`
-		EffectClass        string                `yaml:"effect_class,omitempty"`
-		Permission         string                `yaml:"permission,omitempty"`
-		RequiredPermission string                `yaml:"required_permission,omitempty"`
-		RateLimit          string                `yaml:"rate_limit,omitempty"`
-		RateLimitMaxWait   string                `yaml:"rate_limit_max_wait,omitempty"`
-		InputSchema        ToolInputSchema       `yaml:"input_schema,omitempty"`
-		OutputSchema       ToolInputSchema       `yaml:"output_schema,omitempty"`
-		HTTP               *HTTPToolSpec         `yaml:"http,omitempty"`
-		ResponseMapping    map[string]any        `yaml:"response_mapping,omitempty"`
-		ResponseSuccess    *HTTPResponseSuccess  `yaml:"response_success,omitempty"`
-		Credentials        []string              `yaml:"credentials,omitempty"`
-		ManagedCredential  *ManagedCredentialRef `yaml:"managed_credential,omitempty"`
+		Category          string                `yaml:"category,omitempty"`
+		Description       string                `yaml:"description,omitempty"`
+		HandlerType       string                `yaml:"handler_type,omitempty"`
+		EffectClass       string                `yaml:"effect_class,omitempty"`
+		Permission        string                `yaml:"permission,omitempty"`
+		RateLimit         string                `yaml:"rate_limit,omitempty"`
+		RateLimitMaxWait  string                `yaml:"rate_limit_max_wait,omitempty"`
+		InputSchema       ToolInputSchema       `yaml:"input_schema,omitempty"`
+		OutputSchema      ToolInputSchema       `yaml:"output_schema,omitempty"`
+		HTTP              *HTTPToolSpec         `yaml:"http,omitempty"`
+		ResponseMapping   map[string]any        `yaml:"response_mapping,omitempty"`
+		ResponseSuccess   *HTTPResponseSuccess  `yaml:"response_success,omitempty"`
+		Credentials       []string              `yaml:"credentials,omitempty"`
+		ManagedCredential *ManagedCredentialRef `yaml:"managed_credential,omitempty"`
 	}
 	if err := node.Decode(&aux); err != nil {
 		return err
@@ -470,7 +484,7 @@ func (t *ToolSchemaEntry) UnmarshalYAML(node *yaml.Node) error {
 		WithToolDescription(aux.Description),
 		WithToolHandler(handler),
 		WithToolEffect(ActivityEffectClass(aux.EffectClass)),
-		WithToolPermissions(aux.Permission, aux.RequiredPermission),
+		WithToolPermission(aux.Permission),
 		WithToolRateLimit(aux.RateLimit, aux.RateLimitMaxWait),
 		WithToolSchemas(aux.InputSchema, aux.OutputSchema),
 	}

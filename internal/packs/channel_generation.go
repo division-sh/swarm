@@ -32,7 +32,7 @@ func (p SatisfactionPlan) Generation() (plangeneration.Generation, error) {
 			"tool_schema":     toolValue,
 			"input":           channelMappingGenerationValue(operation.input),
 			"output":          channelMappingGenerationValue(operation.output),
-			"interface":       channelInterfaceOperationGenerationValue(operation.interfaceValue),
+			"interface":       channelInterfaceOperationGenerationValue(operation),
 			"input_topology":  channelTopologyGenerationValue(operation.inputTopology),
 			"output_topology": channelTopologyGenerationValue(operation.outputTopology),
 		}
@@ -128,12 +128,12 @@ func channelMappingGenerationValue(mappings map[string]ChannelMapping) map[strin
 	return out
 }
 
-func channelInterfaceOperationGenerationValue(operation runtimecontracts.PackInterfaceOperation) map[string]any {
+func channelInterfaceOperationGenerationValue(operation compiledChannelOperation) map[string]any {
 	return map[string]any{
-		"effect_class": operation.EffectClass,
-		"input":        channelInterfaceFieldGenerationValue(operation.Input),
-		"context":      channelInterfaceFieldGenerationValue(operation.Context),
-		"output":       channelInterfaceFieldGenerationValue(operation.Output),
+		"effect_class": string(operation.effect),
+		"input":        channelInterfaceFieldGenerationValue(operation.interfaceValue.Input),
+		"context":      channelInterfaceFieldGenerationValue(operation.interfaceValue.Context),
+		"output":       channelInterfaceFieldGenerationValue(operation.interfaceValue.Output),
 	}
 }
 

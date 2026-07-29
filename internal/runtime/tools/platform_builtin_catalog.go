@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -11,21 +12,49 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func builtinExecutionTools(source semanticview.Source, actor *models.AgentConfig) map[string]ExecutionTool {
+func builtinExecutionTools(source semanticview.Source, actor *models.AgentConfig) (map[string]ExecutionTool, error) {
 	entries := builtinRuntimeContractSchemas(source, actor)
 	out := make(map[string]ExecutionTool, len(entries))
 	for name, entry := range entries {
-		out[name] = newExecutionTool(executionToolValue{
-			name: name, category: entry.Category, description: entry.Description,
-			usage: runtimeOwnedToolUsage(name), handler: implementationPlatformBuiltin,
-			inputSchema: entry.InputSchema, outputSchema: entry.OutputSchema,
-			generatedSchema: entry.GeneratedSchema,
-		})
+		execution, err := admitBuiltinExecutionTool(name, entry)
+		if err != nil {
+			return nil, err
+		}
+		out[name] = execution
 	}
-	return out
+	return out, nil
 }
 
-func builtinRuntimeContractSchemas(source semanticview.Source, actor *models.AgentConfig) map[string]ContractSchemaEntry {
+func admitBuiltinExecutionTool(name string, entry builtinToolDraft) (ExecutionTool, error) {
+	input, err := runtimecontracts.AdmitToolInputSchemaMap(entry.InputSchema)
+	if err != nil {
+		return ExecutionTool{}, fmt.Errorf("builtin tool %s input_schema: %w", name, err)
+	}
+	var output runtimecontracts.ToolInputSchema
+	if entry.OutputSchema != nil {
+		output, err = runtimecontracts.AdmitToolInputSchemaMap(entry.OutputSchema)
+		if err != nil {
+			return ExecutionTool{}, fmt.Errorf("builtin tool %s output_schema: %w", name, err)
+		}
+	}
+	contract, err := runtimecontracts.NewToolSchemaEntry(
+		runtimecontracts.WithToolCategory(entry.Category),
+		runtimecontracts.WithToolDescription(entry.Description),
+		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerPlatformBuiltin),
+		runtimecontracts.WithToolSchemas(input, output),
+		runtimecontracts.WithToolGeneratedSchema(entry.GeneratedSchema),
+	)
+	if err != nil {
+		return ExecutionTool{}, fmt.Errorf("builtin tool %s: %w", name, err)
+	}
+	execution, include := executionToolFromAdmitted(name, contract)
+	if !include {
+		return ExecutionTool{}, fmt.Errorf("builtin tool %s did not produce an executable contract", name)
+	}
+	return execution, nil
+}
+
+func builtinRuntimeContractSchemas(source semanticview.Source, actor *models.AgentConfig) map[string]builtinToolDraft {
 	if actor != nil {
 		out := flowDataToolSchemaEntriesForActor(source, *actor)
 		if contract, ok := resolveEntityToolContract(source, actor); ok {
@@ -50,8 +79,8 @@ func builtinRuntimeContractSchemas(source semanticview.Source, actor *models.Age
 	return out
 }
 
-func humanTaskRequestContractSchema() ContractSchemaEntry {
-	return ContractSchemaEntry{
+func humanTaskRequestContractSchema() builtinToolDraft {
+	return builtinToolDraft{
 		Category:    "human_decision",
 		Description: "Create a typed decision card when admitted work requires a human verdict.",
 		InputSchema: ObjectSchema(map[string]any{
@@ -77,16 +106,16 @@ func humanTaskRequestContractSchema() ContractSchemaEntry {
 	}
 }
 
-func flowDataToolSchemaEntriesForActor(source semanticview.Source, actor models.AgentConfig) map[string]ContractSchemaEntry {
+func flowDataToolSchemaEntriesForActor(source semanticview.Source, actor models.AgentConfig) map[string]builtinToolDraft {
 	filenames := flowdata.AllowedFilenames(source, actor)
 	if len(filenames) == 0 {
-		return map[string]ContractSchemaEntry{}
+		return map[string]builtinToolDraft{}
 	}
 	enum := make([]any, 0, len(filenames))
 	for _, filename := range filenames {
 		enum = append(enum, filename)
 	}
-	return map[string]ContractSchemaEntry{
+	return map[string]builtinToolDraft{
 		flowdata.ToolName: {
 			Category:        "flow_data",
 			Description:     "Read a declared static reference-data file from the agent's owning flow data root.",
@@ -118,9 +147,9 @@ func resolveEntityToolContract(source semanticview.Source, actor *models.AgentCo
 	return entityruntime.ResolveForFlow(source, "")
 }
 
-func genericEntityRuntimeContractSchemas(readTargetSchema map[string]any) map[string]ContractSchemaEntry {
+func genericEntityRuntimeContractSchemas(readTargetSchema map[string]any) map[string]builtinToolDraft {
 	anyValueSchema := map[string]any{}
-	return map[string]ContractSchemaEntry{
+	return map[string]builtinToolDraft{
 		"get_entity": {
 			Category:    "entity_persistence",
 			Description: "Read a full entity_state row by entity id.",
@@ -209,7 +238,7 @@ func existingEntityFlowInstanceSchema() map[string]any {
 	}
 }
 
-func entityToolSchemaEntriesForContract(contract entityruntime.Contract, readContracts []entityruntime.Contract, readTargetSchema map[string]any) map[string]ContractSchemaEntry {
+func entityToolSchemaEntriesForContract(contract entityruntime.Contract, readContracts []entityruntime.Contract, readTargetSchema map[string]any) map[string]builtinToolDraft {
 	topLevelFields := entityruntime.FieldNames(contract)
 	writablePaths := entityToolWritablePathNames(contract)
 	filterSelectors := entityToolReadLeafSelectorNames(readContracts)
@@ -234,7 +263,43 @@ func entityToolSchemaEntriesForContract(contract entityruntime.Contract, readCon
 	for _, name := range writablePaths {
 		fieldEnum = append(fieldEnum, name)
 	}
-	return map[string]ContractSchemaEntry{
+	queryEntityProperties := map[string]any{
+		"entity_type":   deepCloneJSONValue(readTargetSchema),
+		"flow_instance": existingEntityFlowInstanceSchema(),
+		"filter":        map[string]any{"type": "string"},
+		"limit":         map[string]any{"type": "integer", "minimum": 1, "maximum": 1000},
+	}
+	queryMetricProperties := map[string]any{
+		"entity_type":   deepCloneJSONValue(readTargetSchema),
+		"flow_instance": existingEntityFlowInstanceSchema(),
+		"metric": map[string]any{
+			"type": "string",
+			"enum": []any{"count", "sum", "avg", "min", "max"},
+		},
+		"filter": map[string]any{"type": "string"},
+	}
+	if len(selectorEnum) > 0 {
+		queryEntityProperties["select"] = map[string]any{
+			"type": "array",
+			"items": map[string]any{
+				"type": "string",
+				"enum": selectorEnum,
+			},
+		}
+		queryEntityProperties["group_by"] = map[string]any{
+			"type": "string",
+			"enum": selectorEnum,
+		}
+		queryMetricProperties["field"] = map[string]any{
+			"type": "string",
+			"enum": selectorEnum,
+		}
+		queryMetricProperties["group_by"] = map[string]any{
+			"type": "string",
+			"enum": selectorEnum,
+		}
+	}
+	entries := map[string]builtinToolDraft{
 		"create_entity": {
 			Category:    "entity_persistence",
 			Description: "Create a new entity_state row from the inferred flow-owned contract.",
@@ -257,19 +322,6 @@ func entityToolSchemaEntriesForContract(contract entityruntime.Contract, readCon
 				"entity_id":     map[string]any{"type": "string"},
 			}, "entity_id"),
 		},
-		"save_entity_field": {
-			Category:    "entity_persistence",
-			Description: "Write a single declared field or dotted subfield path on an entity.",
-			InputSchema: ObjectSchema(map[string]any{
-				"flow_instance": existingEntityFlowInstanceSchema(),
-				"entity_id":     map[string]any{"type": "string"},
-				"field": map[string]any{
-					"type": "string",
-					"enum": fieldEnum,
-				},
-				"value": map[string]any{},
-			}, "entity_id", "field", "value"),
-		},
 		"search_entities": {
 			Category:    "entity_persistence",
 			Description: "Query entity_state rows by state, metadata, and declared field matches.",
@@ -289,46 +341,30 @@ func entityToolSchemaEntriesForContract(contract entityruntime.Contract, readCon
 		"query_entities": {
 			Category:    "entity_persistence",
 			Description: "Query entity_state rows using validated selectors and optional grouping.",
-			InputSchema: ObjectSchema(map[string]any{
-				"entity_type":   deepCloneJSONValue(readTargetSchema),
-				"flow_instance": existingEntityFlowInstanceSchema(),
-				"filter":        map[string]any{"type": "string"},
-				"select": map[string]any{
-					"type": "array",
-					"items": map[string]any{
-						"type": "string",
-						"enum": selectorEnum,
-					},
-				},
-				"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 1000},
-				"group_by": map[string]any{
-					"type": "string",
-					"enum": selectorEnum,
-				},
-			}),
+			InputSchema: ObjectSchema(queryEntityProperties),
 		},
 		"query_metrics": {
 			Category:    "entity_persistence",
 			Description: "Aggregate metrics across entity_state rows.",
-			InputSchema: ObjectSchema(map[string]any{
-				"entity_type":   deepCloneJSONValue(readTargetSchema),
-				"flow_instance": existingEntityFlowInstanceSchema(),
-				"metric": map[string]any{
-					"type": "string",
-					"enum": []any{"count", "sum", "avg", "min", "max"},
-				},
-				"field": map[string]any{
-					"type": "string",
-					"enum": selectorEnum,
-				},
-				"group_by": map[string]any{
-					"type": "string",
-					"enum": selectorEnum,
-				},
-				"filter": map[string]any{"type": "string"},
-			}, "metric"),
+			InputSchema: ObjectSchema(queryMetricProperties, "metric"),
 		},
 	}
+	if len(fieldEnum) > 0 {
+		entries["save_entity_field"] = builtinToolDraft{
+			Category:    "entity_persistence",
+			Description: "Write a single declared field or dotted subfield path on an entity.",
+			InputSchema: ObjectSchema(map[string]any{
+				"flow_instance": existingEntityFlowInstanceSchema(),
+				"entity_id":     map[string]any{"type": "string"},
+				"field": map[string]any{
+					"type": "string",
+					"enum": fieldEnum,
+				},
+				"value": map[string]any{},
+			}, "entity_id", "field", "value"),
+		}
+	}
+	return entries
 }
 
 func entityReadTargetInputSchema(source semanticview.Source) map[string]any {
