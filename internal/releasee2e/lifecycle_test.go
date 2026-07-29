@@ -224,15 +224,15 @@ func assertReleaseExternalProcessesExited(t *testing.T, root string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		entries, err := os.ReadDir(filepath.Join(root, "active"))
+		live, err := liveFakeDockerProcesses(root)
 		if err != nil {
-			t.Fatalf("read fake Docker process activity: %v", err)
+			t.Fatalf("probe fake Docker process activity: %v", err)
 		}
-		if len(entries) == 0 {
+		if len(live) == 0 {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("fake Docker/Claude processes survived foreground shutdown convergence: %v", entries)
+			t.Fatalf("fake Docker/Claude processes survived foreground shutdown convergence: %v", live)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
