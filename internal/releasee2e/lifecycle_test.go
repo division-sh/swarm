@@ -64,7 +64,7 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	if verify.err != nil {
 		t.Fatalf("release verify failed: %v\n%s", verify.err, verify.output)
 	}
-	secret := "release-e2e-oauth-value"
+	secret := releaseE2EOAuthToken
 	secrets := runReleaseCommand(t, 45*time.Second, releaseRoot, env, secret+"\n",
 		binaryPath, "secrets", "set", "CLAUDE_CODE_OAUTH_TOKEN", "--stdin")
 	if secrets.err != nil {
@@ -109,6 +109,9 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	}
 
 	records := readFakeDockerRecords(t, fakeRoot)
+	if log := fakeDockerLogText(t, fakeRoot); strings.Contains(log, secret) {
+		t.Fatalf("fake Docker evidence leaked credential value:\n%s", log)
+	}
 	assertReleaseDockerEvidence(t, records)
 	assertReleaseExternalProcessesExited(t, fakeRoot)
 	assertReleasePersistentWorkspacesPreserved(t, fakeRoot)
@@ -138,74 +141,100 @@ func runReleaseCommand(t *testing.T, timeout time.Duration, dir string, env []st
 
 func assertReleaseDockerEvidence(t *testing.T, records []fakeDockerRecord) {
 	t.Helper()
-	required := map[string]bool{
-		"docker_version":   false,
-		"network_inspect":  false,
-		"image_inspect":    false,
-		"cli_preflight":    false,
-		"container_create": false,
-		"container_start":  false,
-		"network_connect":  false,
-		"claude_startup":   false,
-		"claude_live":      false,
-		"mcp_emit":         false,
+	if err := validateReleaseDockerEvidence(records); err != nil {
+		t.Fatal(err)
 	}
-	startupIndex, liveIndex := -1, -1
+}
+
+func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
+	required := map[string]int{
+		"docker_version":   0,
+		"network_inspect":  0,
+		"image_inspect":    0,
+		"cli_preflight":    0,
+		"container_create": 0,
+		"container_start":  0,
+		"network_connect":  0,
+		"claude_startup":   0,
+		"claude_live":      0,
+		"mcp_emit":         0,
+	}
+	startupIndex, liveIndex, emitIndex := -1, -1, -1
 	startupSession, liveSession := "", ""
 	for index, record := range records {
 		if record.Class == "unexpected" {
-			t.Fatalf("strict Docker emulator observed an unexpected command: %#v", record.Args)
+			return fmt.Errorf("strict Docker emulator observed an unexpected command: %#v", record.Args)
 		}
 		if _, ok := required[record.Class]; ok {
-			required[record.Class] = true
+			required[record.Class]++
 		}
 		switch record.Class {
 		case "claude_startup":
-			if startupIndex == -1 {
-				startupIndex, startupSession = index, record.SessionID
+			startupIndex, startupSession = index, record.SessionID
+			wantTools := []string{"ExitPlanMode", "mcp__runtime-tools__emit_work_completed"}
+			if allowed := splitAllowedTools(dockerOptionValue(record.Args, "--allowedTools")); !equalStrings(allowed, wantTools) {
+				return fmt.Errorf("startup accepted tools = %q, want exact fixture tool surface", allowed)
 			}
-			if allowed := dockerOptionValue(record.Args, "--allowedTools"); !strings.Contains(allowed, "mcp__runtime-tools__emit_work_completed") {
-				t.Fatalf("startup accepted tools = %q, want authored emit tool", allowed)
+			if record.RawMCPURL != releaseE2ERawMCPURL || record.MCPURL != releaseE2EHostMCPURL {
+				return fmt.Errorf("startup MCP endpoints = %q/%q, want raw container and translated host defaults", record.RawMCPURL, record.MCPURL)
 			}
 		case "claude_live":
-			if liveIndex == -1 {
-				liveIndex, liveSession = index, record.SessionID
+			liveIndex, liveSession = index, record.SessionID
+			if record.RawMCPURL != releaseE2ERawMCPURL || record.MCPURL != releaseE2EHostMCPURL {
+				return fmt.Errorf("live MCP endpoints = %q/%q, want raw container and translated host defaults", record.RawMCPURL, record.MCPURL)
 			}
 		case "mcp_emit":
+			emitIndex = index
 			if record.ToolName != "emit_work_completed" {
-				t.Fatalf("MCP emit tool = %q, want emit_work_completed", record.ToolName)
+				return fmt.Errorf("MCP emit tool = %q, want emit_work_completed", record.ToolName)
 			}
-			if !strings.HasPrefix(record.MCPURL, "http://127.0.0.1:8082/mcp") {
-				t.Fatalf("MCP URL = %q, want runtime default listener", record.MCPURL)
+			if record.RawMCPURL != releaseE2ERawMCPURL || record.MCPURL != releaseE2EHostMCPURL {
+				return fmt.Errorf("MCP emit endpoints = %q/%q, want raw container and translated host defaults", record.RawMCPURL, record.MCPURL)
 			}
 		}
 	}
 	var missing []string
-	for class, seen := range required {
-		if !seen {
+	for class, count := range required {
+		if count == 0 {
 			missing = append(missing, class)
 		}
 	}
 	sort.Strings(missing)
 	if len(missing) > 0 {
-		t.Fatalf("release lifecycle is missing Docker/Claude evidence %v; records=%#v", missing, records)
+		return fmt.Errorf("release lifecycle is missing Docker/Claude evidence %v; records=%#v", missing, records)
+	}
+	for _, class := range []string{"claude_startup", "claude_live", "mcp_emit"} {
+		if required[class] != 1 {
+			return fmt.Errorf("release lifecycle %s count = %d, want exactly 1", class, required[class])
+		}
 	}
 	if startupIndex >= liveIndex || startupIndex < 0 {
-		t.Fatalf("startup/live ordering = %d/%d, want startup before post-readiness live delivery", startupIndex, liveIndex)
+		return fmt.Errorf("startup/live ordering = %d/%d, want startup before post-readiness live delivery", startupIndex, liveIndex)
+	}
+	if liveIndex >= emitIndex {
+		return fmt.Errorf("live/emit ordering = %d/%d, want provider attempt before authored emit", liveIndex, emitIndex)
 	}
 	if startupSession == "" || liveSession == "" || startupSession == liveSession {
-		t.Fatalf("startup/live attempt identities = %q/%q, want distinct non-empty identities", startupSession, liveSession)
+		return fmt.Errorf("startup/live attempt identities = %q/%q, want distinct non-empty identities", startupSession, liveSession)
 	}
+	return nil
 }
 
 func assertReleaseExternalProcessesExited(t *testing.T, root string) {
 	t.Helper()
-	entries, err := os.ReadDir(filepath.Join(root, "active"))
-	if err != nil {
-		t.Fatalf("read fake Docker process activity: %v", err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("fake Docker/Claude processes survived foreground shutdown: %v", entries)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		entries, err := os.ReadDir(filepath.Join(root, "active"))
+		if err != nil {
+			t.Fatalf("read fake Docker process activity: %v", err)
+		}
+		if len(entries) == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("fake Docker/Claude processes survived foreground shutdown convergence: %v", entries)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
