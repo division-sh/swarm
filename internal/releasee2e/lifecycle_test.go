@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -12,7 +13,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -400,12 +403,70 @@ func acquireReleaseMCPPortLock(t *testing.T) func() {
 	path := filepath.Join(os.TempDir(), "swarm-release-e2e-mcp-8082.lock")
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		if err := os.Mkdir(path, 0o700); err == nil {
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			if _, err := fmt.Fprintln(file, os.Getpid()); err != nil {
+				file.Close()
+				_ = os.Remove(path)
+				t.Fatalf("record release E2E MCP port lock owner: %v", err)
+			}
+			if err := file.Close(); err != nil {
+				_ = os.Remove(path)
+				t.Fatalf("close release E2E MCP port lock: %v", err)
+			}
 			return func() { _ = os.Remove(path) }
+		}
+		if !errors.Is(err, os.ErrExist) {
+			t.Fatalf("acquire release E2E MCP port lock: %v", err)
+		}
+		if reclaimStaleReleaseMCPPortLock(path) {
+			continue
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for release E2E MCP port lock")
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+func TestReleaseMCPPortLockReclaimsOnlyDeadOwners(t *testing.T) {
+	t.Run("dead owner", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "mcp.lock")
+		writeReleaseFile(t, path, strconv.Itoa(1<<30)+"\n")
+		if !reclaimStaleReleaseMCPPortLock(path) {
+			t.Fatal("dead process lock was not reclaimed")
+		}
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("dead process lock still exists: %v", err)
+		}
+	})
+	t.Run("live owner", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "mcp.lock")
+		writeReleaseFile(t, path, strconv.Itoa(os.Getpid())+"\n")
+		if reclaimStaleReleaseMCPPortLock(path) {
+			t.Fatal("live process lock was reclaimed")
+		}
+	})
+}
+
+func reclaimStaleReleaseMCPPortLock(path string) bool {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || pid <= 0 || releaseProcessAlive(pid) {
+		return false
+	}
+	removeErr := os.Remove(path)
+	return removeErr == nil || errors.Is(removeErr, os.ErrNotExist)
+}
+
+func releaseProcessAlive(pid int) bool {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = process.Signal(syscall.Signal(0))
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
