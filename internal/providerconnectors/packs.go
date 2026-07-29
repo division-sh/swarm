@@ -388,8 +388,8 @@ func DerivedRequires(manifest ConnectorManifest) packs.Requires {
 			seenSecrets[credential] = struct{}{}
 			secrets = append(secrets, credential)
 		}
-		if managed, ok := tool.ManagedCredential(); ok {
-			credential := strings.TrimSpace(managed.Key)
+		if managed, ok := tool.ManagedCredentialExecution(); ok {
+			credential := managed.Key()
 			if credential != "" {
 				if _, exists := seenManaged[credential]; !exists {
 					seenManaged[credential] = struct{}{}

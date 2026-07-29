@@ -8,6 +8,11 @@ import (
 )
 
 const (
+	GrantAuthorizationCode     = "authorization_code"
+	GrantAuthorizationCodePKCE = "authorization_code_pkce"
+	GrantClientCredentials     = "client_credentials"
+	GrantGitHubAppInstallation = "github_app_installation"
+
 	TokenClientAuthPost  = "post"
 	TokenClientAuthBasic = "basic"
 
@@ -18,6 +23,23 @@ const (
 	GrantModelWorkspace    = "workspace_grant"
 	GrantModelInstallation = "installation_grant"
 )
+
+func NormalizeGrantType(raw string) string {
+	return strings.TrimSpace(strings.ToLower(raw))
+}
+
+func ValidateRequiredGrantType(raw string) error {
+	normalized := NormalizeGrantType(raw)
+	if normalized == "" {
+		return nil
+	}
+	switch normalized {
+	case GrantAuthorizationCode, GrantAuthorizationCodePKCE, GrantClientCredentials, GrantGitHubAppInstallation:
+		return nil
+	default:
+		return fmt.Errorf("grant_type %q is not supported", normalized)
+	}
+}
 
 type TokenRequestProfile struct {
 	ClientAuth    string            `yaml:"client_auth,omitempty" json:"client_auth"`

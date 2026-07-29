@@ -46,7 +46,8 @@ type webSearchProviderConfig struct {
 	Provider          string
 	CredentialsKey    string
 	MaxResultsDefault int
-	HTTP              *runtimecontracts.HTTPToolSpec
+	HTTP              runtimecontracts.ToolHTTPExecution
+	HasHTTP           bool
 	ResponsePath      string
 	FieldMapping      map[string]string
 	PolicyOwnerKey    string
@@ -216,57 +217,24 @@ func (e *Executor) executeWebSearch(ctx context.Context, cfg webSearchProviderCo
 }
 
 func (e *Executor) executeCustomWebSearch(ctx context.Context, cfg webSearchProviderConfig, query string, maxResults int, credentialValue string) ([]map[string]any, error) {
-	if cfg.HTTP == nil {
+	if !cfg.HasHTTP {
 		return nil, fmt.Errorf("custom web_search provider requires http configuration")
 	}
 	credentials := map[string]any{}
 	if strings.TrimSpace(cfg.CredentialsKey) != "" {
 		credentials[cfg.CredentialsKey] = credentialValue
 	}
-	templateEnv := map[string]any{
-		"input": map[string]any{
-			"query":       query,
-			"max_results": maxResults,
-		},
-		"credentials": credentials,
-	}
-	resolvedURL, err := resolveHTTPURLTemplate(cfg.HTTP.URL, templateEnv)
+	requestPlan, err := cfg.HTTP.Prepare(map[string]any{
+		"query": query, "max_results": maxResults,
+	}, credentials)
 	if err != nil {
 		return nil, err
 	}
-	url := strings.TrimSpace(resolvedURL)
-	headers := make(http.Header, len(cfg.HTTP.Headers))
-	for key, value := range cfg.HTTP.Headers {
-		resolved, err := resolveTemplateValue(value, templateEnv)
-		if err != nil {
-			return nil, err
-		}
-		headers.Set(strings.TrimSpace(key), strings.TrimSpace(asString(resolved)))
-	}
-	var body bytes.Buffer
-	if cfg.HTTP.Body != nil {
-		resolvedBody, err := resolveTemplateTree(cfg.HTTP.Body, templateEnv)
-		if err != nil {
-			return nil, err
-		}
-		raw, err := json.Marshal(resolvedBody)
-		if err != nil {
-			return nil, err
-		}
-		body.Write(raw)
-		if headers.Get("Content-Type") == "" {
-			headers.Set("Content-Type", "application/json")
-		}
-	}
-	method := strings.ToUpper(strings.TrimSpace(cfg.HTTP.Method))
-	if method == "" {
-		method = http.MethodGet
-	}
-	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body.Bytes()))
+	req, err := http.NewRequestWithContext(ctx, requestPlan.Method(), requestPlan.URL(), bytes.NewReader(requestPlan.Body()))
 	if err != nil {
 		return nil, err
 	}
-	req.Header = headers
+	req.Header = requestPlan.Headers()
 	return e.doNormalizedSearch(ctx, req, cfg.ResponsePath, cfg.FieldMapping, e.webSearchExternalDispatchPolicy(cfg))
 }
 
@@ -555,10 +523,14 @@ func resolveWebSearchProviderConfigFromSourceForFlow(source semanticview.Source,
 		cfg.MaxResultsDefault = 10
 	}
 	if httpRaw, ok := normalizeAnyMap(root["http"]); ok {
-		spec := &runtimecontracts.HTTPToolSpec{}
+		spec := runtimecontracts.HTTPToolSpec{}
 		raw, err := json.Marshal(httpRaw)
-		if err == nil && json.Unmarshal(raw, spec) == nil {
-			cfg.HTTP = spec
+		if err == nil && json.Unmarshal(raw, &spec) == nil {
+			cfg.HTTP, err = runtimecontracts.AdmitToolHTTPExecution(spec)
+			if err != nil {
+				return webSearchProviderConfig{}, fmt.Errorf("policy.web_search_provider.http: %w", err)
+			}
+			cfg.HasHTTP = true
 		}
 	}
 	if mappingRaw, ok := normalizeAnyMap(root["field_mapping"]); ok {
@@ -570,7 +542,7 @@ func resolveWebSearchProviderConfigFromSourceForFlow(source semanticview.Source,
 	case "brave", "serper", "tavily":
 		return cfg, nil
 	case "custom":
-		if cfg.HTTP == nil {
+		if !cfg.HasHTTP {
 			return webSearchProviderConfig{}, fmt.Errorf("custom web_search provider requires http configuration")
 		}
 		if cfg.ResponsePath == "" {
@@ -608,7 +580,7 @@ func nestedValue(root any, path string) (any, error) {
 		return root, nil
 	}
 	current := root
-	for _, part := range splitTemplatePath(path) {
+	for _, part := range strings.Split(path, ".") {
 		switch typed := current.(type) {
 		case map[string]any:
 			next, ok := typed[part]

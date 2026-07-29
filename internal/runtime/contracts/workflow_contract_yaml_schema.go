@@ -219,20 +219,20 @@ func (s *ToolInputSchema) UnmarshalYAML(node *yaml.Node) error {
 		}
 	}
 	type wire struct {
-		Type        string                     `yaml:"type"`
-		Description string                     `yaml:"description"`
-		Properties  map[string]ToolInputSchema `yaml:"properties"`
-		Required    []string                   `yaml:"required"`
-		Items       *ToolInputSchema           `yaml:"items"`
-		Minimum     *float64                   `yaml:"minimum"`
-		Maximum     *float64                   `yaml:"maximum"`
-		Pattern     string                     `yaml:"pattern"`
-		Format      string                     `yaml:"format"`
-		EqualTo     string                     `yaml:"x-swarm-equalTo"`
-		MinLength   *int                       `yaml:"minLength"`
-		MaxLength   *int                       `yaml:"maxLength"`
-		MinItems    *int                       `yaml:"minItems"`
-		MaxItems    *int                       `yaml:"maxItems"`
+		Type        string               `yaml:"type"`
+		Description string               `yaml:"description"`
+		Properties  map[string]yaml.Node `yaml:"properties"`
+		Required    []string             `yaml:"required"`
+		Items       *ToolInputSchema     `yaml:"items"`
+		Minimum     *float64             `yaml:"minimum"`
+		Maximum     *float64             `yaml:"maximum"`
+		Pattern     string               `yaml:"pattern"`
+		Format      string               `yaml:"format"`
+		EqualTo     string               `yaml:"x-swarm-equalTo"`
+		MinLength   *int                 `yaml:"minLength"`
+		MaxLength   *int                 `yaml:"maxLength"`
+		MinItems    *int                 `yaml:"minItems"`
+		MaxItems    *int                 `yaml:"maxItems"`
 	}
 	var decoded wire
 	if err := node.Decode(&decoded); err != nil {
@@ -240,7 +240,22 @@ func (s *ToolInputSchema) UnmarshalYAML(node *yaml.Node) error {
 	}
 	options := []ToolInputSchemaOption{ToolSchemaDescription(decoded.Description)}
 	if decoded.Properties != nil {
-		options = append(options, ToolSchemaProperties(decoded.Properties))
+		properties := make(map[string]ToolInputSchema, len(decoded.Properties))
+		equalities := make(map[string]string)
+		for name, propertyNode := range decoded.Properties {
+			property, equalTo, err := decodeToolSchemaProperty(propertyNode)
+			if err != nil {
+				return fmt.Errorf("tool schema property %q: %w", name, err)
+			}
+			properties[name] = property
+			if equalTo != "" {
+				equalities[name] = equalTo
+			}
+		}
+		options = append(options, ToolSchemaProperties(properties))
+		if len(equalities) > 0 {
+			options = append(options, toolSchemaPropertyEqualities(equalities))
+		}
 	}
 	if decoded.Required != nil {
 		options = append(options, ToolSchemaRequired(decoded.Required...))
@@ -327,6 +342,42 @@ func (s *ToolInputSchema) UnmarshalYAML(node *yaml.Node) error {
 	}
 	*s = admitted
 	return nil
+}
+
+func decodeToolSchemaProperty(node yaml.Node) (ToolInputSchema, string, error) {
+	resolved, err := resolveToolSchemaYAMLValue(&node)
+	if err != nil {
+		return ToolInputSchema{}, "", err
+	}
+	if resolved.Kind != yaml.MappingNode {
+		return ToolInputSchema{}, "", fmt.Errorf("must be a mapping")
+	}
+	copyNode := *resolved
+	copyNode.Content = make([]*yaml.Node, 0, len(resolved.Content))
+	equalTo := ""
+	for index := 0; index < len(resolved.Content); index += 2 {
+		key := strings.TrimSpace(resolved.Content[index].Value)
+		if key != "x-swarm-equalTo" {
+			copyNode.Content = append(copyNode.Content, resolved.Content[index], resolved.Content[index+1])
+			continue
+		}
+		value, err := resolveToolSchemaYAMLValue(resolved.Content[index+1])
+		if err != nil {
+			return ToolInputSchema{}, "", err
+		}
+		if err := value.Decode(&equalTo); err != nil {
+			return ToolInputSchema{}, "", err
+		}
+		equalTo = strings.TrimSpace(equalTo)
+		if equalTo == "" {
+			return ToolInputSchema{}, "", fmt.Errorf("x-swarm-equalTo requires a valid field name")
+		}
+	}
+	var property ToolInputSchema
+	if err := copyNode.Decode(&property); err != nil {
+		return ToolInputSchema{}, "", err
+	}
+	return property, equalTo, nil
 }
 
 func resolveToolSchemaYAMLValue(node *yaml.Node) (*yaml.Node, error) {

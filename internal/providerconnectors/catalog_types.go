@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/httpresponsesuccess"
 	"gopkg.in/yaml.v3"
 )
 
@@ -122,11 +121,12 @@ func (g GenerationEvidence) Validate(provider string, tools map[string]runtimeco
 			}
 			seenPermissions[permissionID] = struct{}{}
 		}
-		if err := httpresponsesuccess.Validate(operation.ResponseSuccess); err != nil {
+		expectedPolicy, err := runtimecontracts.AdmitToolResponseSuccessPolicy(operation.ResponseSuccess)
+		if err != nil {
 			return fmt.Errorf("generation operation %q: %w", operationID, err)
 		}
-		responseSuccess, ok := tool.ResponseSuccess()
-		if !ok || !httpresponsesuccess.Equivalent(responseSuccess, operation.ResponseSuccess) {
+		responseSuccess, ok := tool.ResponseSuccessPolicy()
+		if !ok || !responseSuccess.Equal(expectedPolicy) {
 			return fmt.Errorf("generation operation %q response_success does not match tool %q", operationID, toolID)
 		}
 		if strings.TrimSpace(operation.FixtureID) == "" || strings.TrimSpace(operation.FixtureStatus) != GenerationFixturePassing {

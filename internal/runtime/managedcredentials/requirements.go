@@ -52,11 +52,11 @@ func BuildRequirementIndex(source semanticview.Source) map[string][]Requirement 
 func appendToolRequirements(index map[string][]Requirement, source semanticview.Source, flowID string, entries map[string]runtimecontracts.ToolSchemaEntry) {
 	for name, entry := range entries {
 		name = strings.TrimSpace(name)
-		managed, ok := entry.ManagedCredential()
+		managed, ok := entry.ManagedCredentialExecution()
 		if name == "" || !ok {
 			continue
 		}
-		key := strings.TrimSpace(managed.Key)
+		key := managed.Key()
 		if key == "" {
 			continue
 		}
@@ -71,11 +71,11 @@ func appendToolRequirements(index map[string][]Requirement, source semanticview.
 		index[storeKey] = append(index[storeKey], Requirement{
 			Kind:                "tool",
 			Name:                name,
-			GrantType:           managed.GrantType,
-			Scopes:              append([]string{}, managed.Scopes...),
-			GrantModel:          managed.GrantModel,
-			TokenRequest:        managed.TokenRequest,
-			InstallationIDInput: managed.InstallationIDInput,
+			GrantType:           managed.GrantType(),
+			Scopes:              managed.Scopes(),
+			GrantModel:          managed.GrantModel(),
+			TokenRequest:        managed.TokenRequest(),
+			InstallationIDInput: managed.InstallationIDInput(),
 		})
 	}
 }

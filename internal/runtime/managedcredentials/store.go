@@ -28,10 +28,10 @@ import (
 )
 
 const (
-	GrantAuthorizationCode     = "authorization_code"
-	GrantAuthorizationCodePKCE = "authorization_code_pkce"
-	GrantClientCredentials     = "client_credentials"
-	GrantGitHubAppInstallation = "github_app_installation"
+	GrantAuthorizationCode     = managedcredentialmodel.GrantAuthorizationCode
+	GrantAuthorizationCodePKCE = managedcredentialmodel.GrantAuthorizationCodePKCE
+	GrantClientCredentials     = managedcredentialmodel.GrantClientCredentials
+	GrantGitHubAppInstallation = managedcredentialmodel.GrantGitHubAppInstallation
 
 	StatusUnconnected       = "unconnected"
 	StatusPendingConsent    = "pending_consent"
@@ -1201,20 +1201,11 @@ func normalizeRecord(record Record) Record {
 }
 
 func NormalizeGrantType(raw string) string {
-	return strings.TrimSpace(strings.ToLower(raw))
+	return managedcredentialmodel.NormalizeGrantType(raw)
 }
 
 func ValidateRequiredGrantType(raw string) error {
-	normalized := NormalizeGrantType(raw)
-	if normalized == "" {
-		return nil
-	}
-	switch normalized {
-	case GrantAuthorizationCode, GrantAuthorizationCodePKCE, GrantClientCredentials, GrantGitHubAppInstallation:
-		return nil
-	default:
-		return fmt.Errorf("grant_type %q is not supported", normalized)
-	}
+	return managedcredentialmodel.ValidateRequiredGrantType(raw)
 }
 
 func GrantTypeCovers(actual, required string) error {

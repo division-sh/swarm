@@ -35,6 +35,14 @@ func TestRegisteredToolSemanticReconstructionIsAbsent(t *testing.T) {
 		"BaseSemanticSource":           {},
 		"CloneEventCatalogEntry":       {},
 		"CloneEventCatalogEntries":     {},
+		"resolveCatalogTemplateValue":  {},
+		"resolveCatalogTemplateString": {},
+		"resolveCatalogTemplateToken":  {},
+		"channelValueAtPath":           {},
+		"setChannelValueAtPath":        {},
+		"splitTemplatePath":            {},
+		"resolveHTTPTemplate":          {},
+		"resolveActivityTemplate":      {},
 	}
 	inspectProductionGo(t, func(path string, file *ast.File) {
 		for _, declaration := range file.Decls {
@@ -109,14 +117,43 @@ func TestSemanticOwnershipProducerConsumerLedgerIsClosed(t *testing.T) {
 	actualExecutionProjectionCalls := map[string]int{}
 	requiredTypedFields := map[string]map[string]string{
 		"toolSchemaEntryValue": {
-			"category":   "ToolCategory",
-			"handler":    "ToolHandlerKind",
-			"effect":     "ActivityEffectClass",
-			"permission": "ToolPermission",
-			"ratePolicy": "ToolRatePolicy",
+			"category":          "ToolCategory",
+			"handler":           "ToolHandlerKind",
+			"effect":            "ActivityEffectClass",
+			"permission":        "ToolPermission",
+			"ratePolicy":        "ToolRatePolicy",
+			"inputSchema":       "ToolInputSchema",
+			"outputSchema":      "ToolInputSchema",
+			"http":              "ToolHTTPExecution",
+			"mcp":               "ToolMCPBinding",
+			"responseMapping":   "ToolResponseMapping",
+			"responseSuccess":   "ToolResponseSuccessPolicy",
+			"credentials":       "[]toolCredentialKey",
+			"managedCredential": "ToolManagedCredential",
+			"compiledResult":    "ToolCompiledResultProjection",
 		},
 		"compiledChannelOperation": {
-			"effect": "ActivityEffectClass",
+			"name":          "channelPlanIdentity",
+			"tool":          "channelPlanIdentity",
+			"toolSchema":    "ToolSchemaEntry",
+			"effect":        "ActivityEffectClass",
+			"inputSchema":   "ToolInputSchema",
+			"contextSchema": "ToolInputSchema",
+			"outputSchema":  "ToolInputSchema",
+			"input":         "[]compiledChannelMapping",
+			"output":        "[]compiledChannelMapping",
+		},
+		"SatisfactionPlan": {
+			"interfaceRef": "channelPlanIdentity",
+			"provider":     "channelPlanIdentity",
+			"generation":   "Generation",
+		},
+		"OutboundBindingPlan": {
+			"id": "channelPlanIdentity",
+		},
+		"PrivateActivityTargetIdentity": {
+			"toolID":     "channelPlanIdentity",
+			"generation": "Generation",
 		},
 		"Authorization": {
 			"generation": "Generation",
@@ -241,6 +278,10 @@ func astTypeName(expression ast.Expr) string {
 		return typed.Sel.Name
 	case *ast.StarExpr:
 		return astTypeName(typed.X)
+	case *ast.ArrayType:
+		return "[]" + astTypeName(typed.Elt)
+	case *ast.MapType:
+		return "map[" + astTypeName(typed.Key) + "]" + astTypeName(typed.Value)
 	default:
 		return ""
 	}

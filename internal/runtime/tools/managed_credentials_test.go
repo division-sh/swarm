@@ -84,23 +84,22 @@ func TestExecutorHTTPToolNeverRefreshesAndRedispatchesAfterUnauthorized(t *testi
 	}
 }
 
-func TestValidateToolImplementationsRejectsMalformedManagedCredentialReferences(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"bad_http": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://provider.example.test"}), runtimecontracts.WithToolManagedCredential(runtimecontracts.ManagedCredentialRef{})),
-		},
-	})
-	if _, err := ValidateToolImplementations(source); err == nil || !strings.Contains(err.Error(), "managed_credential.key is required") {
-		t.Fatalf("ValidateToolImplementations err = %v, want managed_credential.key failure", err)
+func TestToolAdmissionRejectsMalformedManagedCredentialReferences(t *testing.T) {
+	if _, err := runtimecontracts.NewToolSchemaEntry(
+		runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")),
+		runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
+		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://provider.example.test"}),
+		runtimecontracts.WithToolManagedCredential(runtimecontracts.ManagedCredentialRef{}),
+	); err == nil || !strings.Contains(err.Error(), "managed_credential.key is required") {
+		t.Fatalf("NewToolSchemaEntry err = %v, want managed_credential.key failure", err)
 	}
 
-	source = semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"bad_mcp": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("mcp")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolManagedCredential(runtimecontracts.ManagedCredentialRef{Key: "github"})),
-		},
-	})
-	if _, err := ValidateToolImplementations(source); err == nil || !strings.Contains(err.Error(), "managed_credential is only supported") {
-		t.Fatalf("ValidateToolImplementations err = %v, want HTTP-only managed credential failure", err)
+	if _, err := runtimecontracts.NewToolSchemaEntry(
+		runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("mcp")),
+		runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
+		runtimecontracts.WithToolManagedCredential(runtimecontracts.ManagedCredentialRef{Key: "github"}),
+	); err == nil || !strings.Contains(err.Error(), "managed_credential is only supported") {
+		t.Fatalf("NewToolSchemaEntry err = %v, want HTTP-only managed credential failure", err)
 	}
 }
 

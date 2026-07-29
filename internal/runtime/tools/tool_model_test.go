@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -14,9 +15,153 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
+
+func TestAdmittedToolMutationCannotChangeDefinitionAuthorizationRateOrDispatch(t *testing.T) {
+	properties := map[string]runtimecontracts.ToolInputSchema{
+		"domain": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString),
+	}
+	headers := map[string]string{"X-Owner": "{{input.domain}}"}
+	body := map[string]any{"domain": "{{input.domain}}"}
+	response := map[string]any{"ok": "{{response.body.ok}}"}
+	credentials := []string{"api_key"}
+	entry := runtimecontracts.MustToolSchemaEntry(
+		runtimecontracts.WithToolDescription("owned definition"),
+		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+		runtimecontracts.WithToolPermission("external_api_access"),
+		runtimecontracts.WithToolRateLimit("2/s", "250ms"),
+		runtimecontracts.WithToolSchemas(
+			runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject, runtimecontracts.ToolSchemaProperties(properties), runtimecontracts.ToolSchemaRequired("domain")),
+			runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
+		),
+		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+			Method: "POST", URL: "https://owner.example.test/{{input.domain}}", Headers: headers, Body: body,
+		}),
+		runtimecontracts.WithToolResponseMapping(response),
+		runtimecontracts.WithToolResponseSuccess(runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.ok", Equals: true}),
+		runtimecontracts.WithToolCredentials(credentials...),
+	)
+
+	properties["hijacked"] = runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaBoolean)
+	headers["X-Owner"] = "mutated"
+	body["domain"] = "mutated"
+	response["ok"] = false
+	credentials[0] = "mutated"
+	httpReadback, _ := entry.HTTP()
+	httpReadback.URL = "https://mutated.invalid"
+	httpReadback.Headers["X-Owner"] = "mutated-readback"
+	mappingReadback, _ := entry.ResponseMapping()
+	mappingReadback["ok"] = "mutated-readback"
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"owner_probe": entry}})
+	definitions, err := toolDefinitionsForRuntime(source, nil)
+	if err != nil {
+		t.Fatalf("toolDefinitionsForRuntime: %v", err)
+	}
+	var definition *llm.ToolDefinition
+	for index := range definitions {
+		if definitions[index].Name == "owner_probe" {
+			definition = &definitions[index]
+			break
+		}
+	}
+	if definition == nil || definition.Description != "owned definition" {
+		t.Fatalf("definition = %#v, want immutable owner definition", definitions)
+	}
+	definitionSchema, ok := definition.Schema.(map[string]any)
+	if !ok {
+		t.Fatalf("definition schema type = %T, want map", definition.Schema)
+	}
+	if properties, ok := definitionSchema["properties"].(map[string]any); !ok || properties["domain"] == nil || properties["hijacked"] != nil {
+		t.Fatalf("definition schema = %#v, want admitted domain only", definition.Schema)
+	}
+	execution, ok := executionToolFromAdmitted("owner_probe", entry)
+	if !ok {
+		t.Fatal("execution projection rejected admitted HTTP tool")
+	}
+	rate := execution.RateLimit()
+	if execution.RequiredPermission() != "external_api_access" || execution.Handler() != runtimecontracts.ToolHandlerHTTP ||
+		!rate.Enabled || rate.Limit != 2 || rate.Period.String() != "1s" || rate.MaxWait.String() != "250ms" {
+		t.Fatalf("execution authority changed: permission=%q handler=%q rate=%#v", execution.RequiredPermission(), execution.Handler(), rate)
+	}
+	httpExecution, ok := execution.HTTPExecution()
+	if !ok {
+		t.Fatal("execution projection lost admitted HTTP plan")
+	}
+	request, err := httpExecution.Prepare(map[string]any{"domain": "example.com"}, map[string]any{"api_key": "secret"})
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if request.URL() != "https://owner.example.test/example.com" || request.Headers().Get("X-Owner") != "example.com" ||
+		string(request.Body()) != `{"domain":"example.com"}` || execution.Credentials()[0] != "api_key" {
+		t.Fatalf("dispatch projection changed: url=%q headers=%v body=%s credentials=%v", request.URL(), request.Headers(), request.Body(), execution.Credentials())
+	}
+}
+
+func TestDirectAndDurableHTTPExecutionConsumeSameAdmittedToolSemantics(t *testing.T) {
+	entry := runtimecontracts.MustToolSchemaEntry(
+		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+		runtimecontracts.WithToolSchemas(
+			runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
+			runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
+		),
+		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+			Method: "POST",
+			URL:    "https://provider.example.test/{{input.path}}?q={{input.query}}",
+			Headers: map[string]string{
+				"X-Query": "{{input.query}}",
+			},
+			Body: map[string]any{"query": "{{input.query}}"},
+		}),
+		runtimecontracts.WithToolResponseSuccess(runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.ok", Equals: true}),
+		runtimecontracts.WithToolResponseMapping(map[string]any{"value": "{{response.body.value}}"}),
+	)
+	direct, ok := executionToolFromAdmitted("parity_probe", entry)
+	if !ok {
+		t.Fatal("direct execution projection rejected admitted tool")
+	}
+	directHTTP, _ := direct.HTTPExecution()
+	durableHTTP, _ := entry.HTTPExecution()
+	input := map[string]any{"path": "a/b", "query": "x y"}
+	directRequest, err := directHTTP.Prepare(input, nil)
+	if err != nil {
+		t.Fatalf("direct Prepare: %v", err)
+	}
+	durableRequest, err := durableHTTP.Prepare(input, nil)
+	if err != nil {
+		t.Fatalf("durable Prepare: %v", err)
+	}
+	if directRequest.Method() != durableRequest.Method() || directRequest.URL() != durableRequest.URL() ||
+		!reflect.DeepEqual(directRequest.Headers(), durableRequest.Headers()) || !reflect.DeepEqual(directRequest.Body(), durableRequest.Body()) ||
+		directRequest.Timeout() != durableRequest.Timeout() {
+		t.Fatalf("prepared request drift: direct=%#v durable=%#v", directRequest, durableRequest)
+	}
+	responseEnv := map[string]any{"response": map[string]any{"status": 200, "body": map[string]any{"ok": true, "value": "same"}}}
+	directSuccess, _ := direct.ResponseSuccessPolicy()
+	durableSuccess, _ := entry.ResponseSuccessPolicy()
+	if err := directSuccess.Evaluate(responseEnv); err != nil {
+		t.Fatalf("direct success policy: %v", err)
+	}
+	if err := durableSuccess.Evaluate(responseEnv); err != nil {
+		t.Fatalf("durable success policy: %v", err)
+	}
+	directMapping, _ := direct.CompiledResponseMapping()
+	durableMapping, _ := entry.CompiledResponseMapping()
+	directResult, err := directMapping.Render(responseEnv)
+	if err != nil {
+		t.Fatalf("direct response mapping: %v", err)
+	}
+	durableResult, err := durableMapping.Render(responseEnv)
+	if err != nil {
+		t.Fatalf("durable response mapping: %v", err)
+	}
+	if !reflect.DeepEqual(directResult, durableResult) {
+		t.Fatalf("response projection drift: direct=%#v durable=%#v", directResult, durableResult)
+	}
+}
 
 func TestExecutor_HTTPToolExecutesTemplateAndResponseMapping(t *testing.T) {
 	t.Setenv("TEST_HTTP_API_KEY", "secret-token")
@@ -221,30 +366,20 @@ func TestExecutor_HTTPToolEncodesURLTemplateComponentsAndPreservesRawHeaderBody(
 
 func TestResolveHTTPURLTemplatePreservesCompleteURL(t *testing.T) {
 	want := "https://example.test/search?q=to%3Akarpathy%20%28agent%29"
-	got, err := resolveHTTPURLTemplate("{{input.url}}", map[string]any{
-		"input": map[string]any{
-			"url": want,
-		},
-	})
+	execution := mustHTTPExecution(t, "{{input.url}}")
+	request, err := execution.Prepare(map[string]any{"url": want}, nil)
 	if err != nil {
-		t.Fatalf("resolveHTTPURLTemplate: %v", err)
+		t.Fatalf("Prepare: %v", err)
 	}
+	got := request.URL()
 	if got != want {
 		t.Fatalf("resolved URL = %q, want %q", got, want)
 	}
 }
 
 func TestResolveHTTPURLTemplatePreservesURLBaseAndAuthorityPlaceholders(t *testing.T) {
-	env := map[string]any{
-		"credentials": map[string]any{
-			"base_url": "https://api.example.com:8443",
-		},
-		"input": map[string]any{
-			"scheme": "https",
-			"host":   "api.example.com:8443",
-			"query":  "agentic orchestration",
-		},
-	}
+	credentials := map[string]any{"base_url": "https://api.example.com:8443"}
+	input := map[string]any{"scheme": "https", "host": "api.example.com:8443", "query": "agentic orchestration"}
 	for _, tt := range []struct {
 		name string
 		raw  string
@@ -267,10 +402,11 @@ func TestResolveHTTPURLTemplatePreservesURLBaseAndAuthorityPlaceholders(t *testi
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := resolveHTTPURLTemplate(tt.raw, env)
+			request, err := mustHTTPExecution(t, tt.raw).Prepare(input, credentials)
 			if err != nil {
-				t.Fatalf("resolveHTTPURLTemplate: %v", err)
+				t.Fatalf("Prepare: %v", err)
 			}
+			got := request.URL()
 			if got != tt.want {
 				t.Fatalf("resolved URL = %q, want %q", got, tt.want)
 			}
@@ -295,11 +431,10 @@ func TestExecutor_CustomWebSearchEncodesHTTPURLTemplateComponents(t *testing.T) 
 	defer server.Close()
 
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{})
+	httpExecution := mustHTTPExecution(t, server.URL+"/search/{{input.max_results}}?q={{input.query}}")
 	results, err := exec.executeCustomWebSearch(unmanagedToolTestContext(), webSearchProviderConfig{
-		HTTP: &runtimecontracts.HTTPToolSpec{
-			Method: "GET",
-			URL:    server.URL + "/search/{{input.max_results}}?q={{input.query}}",
-		},
+		HTTP:         httpExecution,
+		HasHTTP:      true,
 		ResponsePath: "results",
 		FieldMapping: map[string]string{
 			"title":   "title",
@@ -319,6 +454,15 @@ func TestExecutor_CustomWebSearchEncodesHTTPURLTemplateComponents(t *testing.T) 
 	if want := "q=to%3Akarpathy%20%28agent%20OR%20%22agentic%22%29"; sawRawQuery != want {
 		t.Fatalf("raw query = %q, want %q", sawRawQuery, want)
 	}
+}
+
+func mustHTTPExecution(t *testing.T, rawURL string) runtimecontracts.ToolHTTPExecution {
+	t.Helper()
+	execution, err := runtimecontracts.AdmitToolHTTPExecution(runtimecontracts.HTTPToolSpec{Method: "GET", URL: rawURL})
+	if err != nil {
+		t.Fatalf("AdmitToolHTTPExecution: %v", err)
+	}
+	return execution
 }
 
 func TestExecutor_HTTPToolUsesImportedPackageCredentialBinding(t *testing.T) {
@@ -629,15 +773,13 @@ func containsToolName(names []string, want string) bool {
 	return false
 }
 
-func TestValidateToolImplementations_RejectsMalformedHTTPTool(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"bad_http": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET"})),
-		},
-	})
-	_, err := ValidateToolImplementations(source)
-	if err == nil {
-		t.Fatal("expected malformed http tool to fail validation")
+func TestToolAdmissionRejectsMalformedHTTPTool(t *testing.T) {
+	if _, err := runtimecontracts.NewToolSchemaEntry(
+		runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")),
+		runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
+		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET"}),
+	); err == nil || !strings.Contains(err.Error(), "http.url is required") {
+		t.Fatalf("NewToolSchemaEntry error = %v, want missing URL rejection", err)
 	}
 }
 

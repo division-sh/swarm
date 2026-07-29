@@ -13,22 +13,26 @@ import (
 )
 
 type executionToolValue struct {
-	name               string
-	category           runtimecontracts.ToolCategory
-	description        string
-	usage              string
-	requiredPermission runtimecontracts.ToolPermission
-	handler            runtimecontracts.ToolHandlerKind
-	inputSchema        map[string]any
-	outputSchema       map[string]any
-	generatedSchema    bool
-	http               *runtimecontracts.HTTPToolSpec
-	responseMapping    map[string]any
-	responseSuccess    *runtimecontracts.HTTPResponseSuccess
-	credentials        []string
-	managedCredential  *runtimecontracts.ManagedCredentialRef
-	ratePolicy         runtimecontracts.ToolRatePolicy
-	mcp                runtimecontracts.ToolMCPBinding
+	name                 string
+	category             runtimecontracts.ToolCategory
+	description          string
+	usage                string
+	requiredPermission   runtimecontracts.ToolPermission
+	handler              runtimecontracts.ToolHandlerKind
+	inputSchema          map[string]any
+	outputSchema         map[string]any
+	generatedSchema      bool
+	http                 runtimecontracts.ToolHTTPExecution
+	hasHTTP              bool
+	responseMapping      runtimecontracts.ToolResponseMapping
+	hasResponseMapping   bool
+	responseSuccess      runtimecontracts.ToolResponseSuccessPolicy
+	hasResponseSuccess   bool
+	credentials          []string
+	managedCredential    runtimecontracts.ToolManagedCredential
+	hasManagedCredential bool
+	ratePolicy           runtimecontracts.ToolRatePolicy
+	mcp                  runtimecontracts.ToolMCPBinding
 }
 
 // ExecutionTool is an immutable runtime view derived from one admitted owner.
@@ -89,25 +93,42 @@ func (t ExecutionTool) GeneratedSchema() bool {
 	return t.value != nil && t.value.generatedSchema
 }
 func (t ExecutionTool) HTTP() (*runtimecontracts.HTTPToolSpec, bool) {
-	if t.value == nil || t.value.http == nil {
+	if t.value == nil || !t.value.hasHTTP {
 		return nil, false
 	}
-	spec := *t.value.http
-	spec.Headers = cloneRuntimeStringMap(spec.Headers)
-	spec.Body = deepCloneJSONValue(spec.Body)
+	spec := t.value.http.Readback()
 	return &spec, true
 }
+func (t ExecutionTool) HTTPExecution() (runtimecontracts.ToolHTTPExecution, bool) {
+	if t.value == nil || !t.value.hasHTTP {
+		return runtimecontracts.ToolHTTPExecution{}, false
+	}
+	return t.value.http, true
+}
 func (t ExecutionTool) ResponseMapping() map[string]any {
-	if t.value == nil {
+	if t.value == nil || !t.value.hasResponseMapping {
 		return nil
 	}
-	return deepCloneMap(t.value.responseMapping)
+	return t.value.responseMapping.Readback()
+}
+func (t ExecutionTool) CompiledResponseMapping() (runtimecontracts.ToolResponseMapping, bool) {
+	if t.value == nil || !t.value.hasResponseMapping {
+		return runtimecontracts.ToolResponseMapping{}, false
+	}
+	return t.value.responseMapping, true
 }
 func (t ExecutionTool) ResponseSuccess() *runtimecontracts.HTTPResponseSuccess {
-	if t.value == nil {
+	if t.value == nil || !t.value.hasResponseSuccess {
 		return nil
 	}
-	return cloneResponseSuccess(t.value.responseSuccess)
+	out := t.value.responseSuccess.Readback()
+	return &out
+}
+func (t ExecutionTool) ResponseSuccessPolicy() (runtimecontracts.ToolResponseSuccessPolicy, bool) {
+	if t.value == nil || !t.value.hasResponseSuccess {
+		return runtimecontracts.ToolResponseSuccessPolicy{}, false
+	}
+	return t.value.responseSuccess, true
 }
 func (t ExecutionTool) Credentials() []string {
 	if t.value == nil {
@@ -116,10 +137,17 @@ func (t ExecutionTool) Credentials() []string {
 	return append([]string(nil), t.value.credentials...)
 }
 func (t ExecutionTool) ManagedCredential() *runtimecontracts.ManagedCredentialRef {
-	if t.value == nil {
+	if t.value == nil || !t.value.hasManagedCredential {
 		return nil
 	}
-	return cloneManagedCredentialRef(t.value.managedCredential)
+	out := t.value.managedCredential.Readback()
+	return &out
+}
+func (t ExecutionTool) ManagedCredentialExecution() (runtimecontracts.ToolManagedCredential, bool) {
+	if t.value == nil || !t.value.hasManagedCredential {
+		return runtimecontracts.ToolManagedCredential{}, false
+	}
+	return t.value.managedCredential, true
 }
 func (t ExecutionTool) RateLimit() externalDispatchRateLimitConfig {
 	if t.value == nil {
@@ -316,50 +344,23 @@ func executionToolFromAdmitted(name string, entry runtimecontracts.ToolSchemaEnt
 	if handlerType == runtimecontracts.ToolHandlerMCP && !hasMCPBinding {
 		return ExecutionTool{}, false
 	}
-	httpSpec, hasHTTP := entry.HTTP()
-	var httpPtr *runtimecontracts.HTTPToolSpec
-	if hasHTTP {
-		httpPtr = &httpSpec
-	}
-	responseMapping, _ := entry.ResponseMapping()
-	responseSuccess, hasResponseSuccess := entry.ResponseSuccess()
-	var responseSuccessPtr *runtimecontracts.HTTPResponseSuccess
-	if hasResponseSuccess {
-		responseSuccessPtr = &responseSuccess
-	}
-	managed, hasManaged := entry.ManagedCredential()
-	var managedPtr *runtimecontracts.ManagedCredentialRef
-	if hasManaged {
-		managedPtr = &managed
-	}
+	httpExecution, hasHTTP := entry.HTTPExecution()
+	responseMapping, hasResponseMapping := entry.CompiledResponseMapping()
+	responseSuccess, hasResponseSuccess := entry.ResponseSuccessPolicy()
+	managed, hasManaged := entry.ManagedCredentialExecution()
 	value := executionToolValue{
 		name: name, category: entry.Category(), description: entry.Description(),
 		usage: runtimeOwnedToolUsage(name), requiredPermission: entry.Permission(),
 		handler: handlerType, inputSchema: entry.InputSchema().Projection(), outputSchema: entry.OutputSchema().Projection(),
 		generatedSchema: entry.GeneratedSchema(),
-		http:            httpPtr, responseMapping: responseMapping, responseSuccess: responseSuccessPtr,
-		credentials: entry.Credentials(), managedCredential: managedPtr, ratePolicy: entry.RatePolicy(),
-		mcp: mcpBinding,
+		http:            httpExecution, hasHTTP: hasHTTP,
+		responseMapping: responseMapping, hasResponseMapping: hasResponseMapping,
+		responseSuccess: responseSuccess, hasResponseSuccess: hasResponseSuccess,
+		credentials: entry.Credentials(), managedCredential: managed, hasManagedCredential: hasManaged,
+		ratePolicy: entry.RatePolicy(),
+		mcp:        mcpBinding,
 	}
 	return ExecutionTool{value: &value}, true
-}
-
-func cloneResponseSuccess(check *runtimecontracts.HTTPResponseSuccess) *runtimecontracts.HTTPResponseSuccess {
-	if check == nil {
-		return nil
-	}
-	out := *check
-	return &out
-}
-
-func cloneManagedCredentialRef(ref *runtimecontracts.ManagedCredentialRef) *runtimecontracts.ManagedCredentialRef {
-	if ref == nil {
-		return nil
-	}
-	out := *ref
-	out.Scopes = append([]string{}, ref.Scopes...)
-	out.TokenRequest.StaticHeaders = cloneRuntimeStringMap(ref.TokenRequest.StaticHeaders)
-	return &out
 }
 
 func cloneRuntimeStringMap(in map[string]string) map[string]string {

@@ -115,6 +115,21 @@ func ToolSchemaProperties(properties map[string]ToolInputSchema) ToolInputSchema
 	})
 }
 
+func toolSchemaPropertyEqualities(equalities map[string]string) ToolInputSchemaOption {
+	return toolInputSchemaOption(func(draft *toolInputSchemaDraft) error {
+		for name, target := range equalities {
+			property, exists := draft.value.properties[name]
+			if !exists || property.value == nil {
+				return fmt.Errorf("x-swarm-equalTo property %q is not declared", name)
+			}
+			copyValue := *property.value
+			copyValue.equalTo = target
+			draft.value.properties[name] = ToolInputSchema{value: &copyValue}
+		}
+		return nil
+	})
+}
+
 func ToolSchemaRequired(names ...string) ToolInputSchemaOption {
 	return toolInputSchemaOption(func(draft *toolInputSchemaDraft) error {
 		draft.value.required = append([]string(nil), names...)
@@ -294,10 +309,10 @@ func AdmitToolInputSchemaMap(raw map[string]any) (ToolInputSchema, error) {
 }
 
 func validateAdmittedToolInputSchema(path string, schema ToolInputSchema, depth int) error {
-	return validateAdmittedToolInputSchemaActive(path, schema, depth, map[*toolInputSchemaValue]struct{}{})
+	return validateAdmittedToolInputSchemaActive(path, schema, depth, false, map[*toolInputSchemaValue]struct{}{})
 }
 
-func validateAdmittedToolInputSchemaActive(path string, schema ToolInputSchema, depth int, active map[*toolInputSchemaValue]struct{}) error {
+func validateAdmittedToolInputSchemaActive(path string, schema ToolInputSchema, depth int, allowEqualTo bool, active map[*toolInputSchemaValue]struct{}) error {
 	if schema.value == nil {
 		return fmt.Errorf("%s schema is missing", path)
 	}
@@ -320,8 +335,11 @@ func validateAdmittedToolInputSchemaActive(path string, schema ToolInputSchema, 
 	if value.kind != ToolSchemaArray && (value.hasItems || value.hasMinItems || value.hasMaxItems) {
 		return fmt.Errorf("%s type %s cannot declare array constraints", path, value.kind)
 	}
-	if value.kind != ToolSchemaString && (value.pattern != "" || value.hasMinLength || value.hasMaxLength) {
+	if value.kind != ToolSchemaString && (value.pattern != "" || value.format != "" || value.hasMinLength || value.hasMaxLength) {
 		return fmt.Errorf("%s type %s cannot declare string constraints", path, value.kind)
+	}
+	if value.equalTo != "" && !allowEqualTo {
+		return fmt.Errorf("%s x-swarm-equalTo is only valid on a declared object property", path)
 	}
 	if value.kind != ToolSchemaInteger && value.kind != ToolSchemaNumber && (value.hasMinimum || value.hasMaximum) {
 		return fmt.Errorf("%s type %s cannot declare numeric constraints", path, value.kind)
@@ -365,7 +383,7 @@ func validateAdmittedToolInputSchemaActive(path string, schema ToolInputSchema, 
 		if !value.hasItems {
 			return fmt.Errorf("%s array requires items", path)
 		}
-		if err := validateAdmittedToolInputSchemaActive(path+".items", value.items, depth+1, active); err != nil {
+		if err := validateAdmittedToolInputSchemaActive(path+".items", value.items, depth+1, false, active); err != nil {
 			return err
 		}
 	}
@@ -377,8 +395,17 @@ func validateAdmittedToolInputSchemaActive(path string, schema ToolInputSchema, 
 			if name == "" || !utf8.ValidString(name) || name != strings.TrimSpace(name) {
 				return fmt.Errorf("%s property name %q is not canonical", path, name)
 			}
-			if err := validateAdmittedToolInputSchemaActive(path+".properties["+name+"]", property, depth+1, active); err != nil {
+			if err := validateAdmittedToolInputSchemaActive(path+".properties["+name+"]", property, depth+1, true, active); err != nil {
 				return err
+			}
+		}
+		for name, property := range value.properties {
+			target := property.value.equalTo
+			if target == "" {
+				continue
+			}
+			if _, exists := value.properties[target]; !exists {
+				return fmt.Errorf("%s property %q x-swarm-equalTo target %q is not declared", path, name, target)
 			}
 		}
 		seenRequired := map[string]struct{}{}
@@ -395,7 +422,7 @@ func validateAdmittedToolInputSchemaActive(path string, schema ToolInputSchema, 
 			}
 		}
 		if value.hasAdditionalSchema {
-			if err := validateAdmittedToolInputSchemaActive(path+".additionalProperties", value.additionalSchema, depth+1, active); err != nil {
+			if err := validateAdmittedToolInputSchemaActive(path+".additionalProperties", value.additionalSchema, depth+1, false, active); err != nil {
 				return err
 			}
 		}

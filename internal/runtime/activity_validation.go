@@ -7,7 +7,6 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
-	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -109,14 +108,11 @@ func validateActivitySpec(source semanticview.Source, flowID, nodeID, handlerEve
 	if handler != runtimecontracts.ToolHandlerHTTP {
 		errs = append(errs, fmt.Errorf("%s: tool %q handler_type %q is not supported for activities; MCP/platform/native/generated tools fail closed in Stage 1", context, toolID, handler.String()))
 	}
-	if _, hasHTTP := tool.HTTP(); !hasHTTP {
+	if _, hasHTTP := tool.HTTPExecution(); !hasHTTP {
 		errs = append(errs, fmt.Errorf("%s: tool %q is missing http block; activities support authored HTTP tools only", context, toolID))
 	}
 	if tool.RatePolicy().Enabled() {
 		errs = append(errs, fmt.Errorf("%s: tool %q uses rate_limit; activity HTTP rate-limit admission is split until the activity dispatcher consumes the external dispatch owner", context, toolID))
-	}
-	if responseMapping, ok := tool.ResponseMapping(); ok && len(responseMapping) > 0 {
-		errs = append(errs, fmt.Errorf("%s: tool %q uses response_mapping; activity HTTP response mapping is split until the activity dispatcher consumes the HTTP tool response-mapping owner", context, toolID))
 	}
 	effectClass := tool.Effect()
 	if effectClass == "" {
@@ -128,7 +124,7 @@ func validateActivitySpec(source semanticview.Source, flowID, nodeID, handlerEve
 	} else if !runtimecontracts.SupportedActivityEffectClass(effectClass) {
 		errs = append(errs, fmt.Errorf("%s: tool %q effect_class %q is not supported for activities", context, toolID, effectClass))
 	}
-	managedCredential, hasManagedCredential := tool.ManagedCredential()
+	_, hasManagedCredential := tool.ManagedCredentialExecution()
 	credentials := tool.Credentials()
 	if hasManagedCredential {
 		if len(credentials) > 0 {
@@ -136,15 +132,6 @@ func validateActivitySpec(source semanticview.Source, flowID, nodeID, handlerEve
 		}
 		if tool.Category() != runtimecontracts.ToolCategoryProviderConnector || effectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 			errs = append(errs, fmt.Errorf("%s: tool %q uses managed_credential; managed credential activity HTTP execution is supported only for non_idempotent_write provider connector tools", context, toolID))
-		}
-		if strings.TrimSpace(managedCredential.Key) == "" {
-			errs = append(errs, fmt.Errorf("%s: tool %q managed_credential.key is required", context, toolID))
-		}
-		if err := managedcredentialmodel.ValidateGrantModel(managedCredential.GrantModel); err != nil {
-			errs = append(errs, fmt.Errorf("%s: tool %q managed_credential.%s", context, toolID, err.Error()))
-		}
-		if err := managedcredentialmodel.ValidateTokenRequestProfile(managedCredential.TokenRequest); err != nil {
-			errs = append(errs, fmt.Errorf("%s: tool %q managed_credential.%s", context, toolID, err.Error()))
 		}
 	}
 	if len(credentials) > 0 && effectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {

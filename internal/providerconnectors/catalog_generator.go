@@ -16,7 +16,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/httpresponsesuccess"
 	"gopkg.in/yaml.v3"
 )
 
@@ -282,7 +281,7 @@ func (o GeneratorOperation) Validate(provider string) error {
 	if strings.TrimSpace(o.Output.Type) != "object" {
 		return fmt.Errorf("%s output.type must be object in the first slice", context)
 	}
-	if err := httpresponsesuccess.Validate(o.ResponseSuccess); err != nil {
+	if _, err := runtimecontracts.AdmitToolResponseSuccessPolicy(o.ResponseSuccess); err != nil {
 		return fmt.Errorf("%s: %w", context, err)
 	}
 	if strings.TrimSpace(o.Fixture.ID) == "" || strings.TrimSpace(o.Fixture.Status) != GenerationFixturePassing {

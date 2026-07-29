@@ -1,6 +1,7 @@
 package providerconnectors
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -12,7 +13,6 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/httpresponsesuccess"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 )
 
@@ -180,48 +180,47 @@ func validateCatalogFixtureBinding(artifact GeneratedCatalogArtifact, operation 
 	if strings.TrimSpace(fixture.FixtureStatus) != strings.TrimSpace(operation.FixtureStatus) || strings.TrimSpace(fixture.ReviewStatus) != strings.TrimSpace(operation.ReviewStatus) {
 		return fmt.Errorf("fixture/review status does not match generated evidence")
 	}
-	if !httpresponsesuccess.Equivalent(fixture.ResponseSuccess, operation.ResponseSuccess) {
+	fixturePolicy, err := runtimecontracts.AdmitToolResponseSuccessPolicy(fixture.ResponseSuccess)
+	if err != nil {
+		return fmt.Errorf("fixture response_success: %w", err)
+	}
+	operationPolicy, err := runtimecontracts.AdmitToolResponseSuccessPolicy(operation.ResponseSuccess)
+	if err != nil {
+		return fmt.Errorf("operation response_success: %w", err)
+	}
+	if !fixturePolicy.Equal(operationPolicy) {
 		return fmt.Errorf("response_success does not match generated evidence")
 	}
 	tool, exists := artifact.Manifest.Tools[strings.TrimSpace(operation.ToolID)]
-	httpSpec, hasHTTP := tool.HTTP()
+	httpExecution, hasHTTP := tool.HTTPExecution()
 	if !exists || !hasHTTP {
 		return fmt.Errorf("generated tool is unavailable or lacks HTTP declaration")
-	}
-	if strings.ToUpper(strings.TrimSpace(fixture.Expected.Method)) != strings.ToUpper(strings.TrimSpace(httpSpec.Method)) {
-		return fmt.Errorf("expected method does not match generated tool")
 	}
 	if err := validateCatalogFixtureCredentials(tool, fixture.Credentials, fixture.ManagedCredentials); err != nil {
 		return err
 	}
-	resolvedURL, err := resolveCatalogTemplateString(httpSpec.URL, fixture.Input, fixture.Credentials, true)
+	credentials := make(map[string]any, len(fixture.Credentials))
+	for key, value := range fixture.Credentials {
+		credentials[key] = value
+	}
+	request, err := httpExecution.Prepare(fixture.Input, credentials)
 	if err != nil {
-		return err
+		return fmt.Errorf("prepare catalog conformance request: %w", err)
 	}
-	if strings.TrimSpace(resolvedURL) != strings.TrimSpace(fixture.Expected.URL) {
-		return fmt.Errorf("expected URL %q does not match generated %q", fixture.Expected.URL, resolvedURL)
+	if strings.ToUpper(strings.TrimSpace(fixture.Expected.Method)) != request.Method() {
+		return fmt.Errorf("expected method does not match generated tool")
 	}
-	resolvedHeaders := make(http.Header, len(httpSpec.Headers)+1)
-	seenHeaders := map[string]string{}
-	for key, value := range httpSpec.Headers {
-		resolved, err := resolveCatalogTemplateString(value, fixture.Input, fixture.Credentials, false)
-		if err != nil {
-			return fmt.Errorf("resolve catalog conformance header %q: %w", key, err)
-		}
-		normalized := strings.ToLower(strings.TrimSpace(key))
-		if prior, exists := seenHeaders[normalized]; exists {
-			return fmt.Errorf("generated headers %q and %q are ambiguous", prior, key)
-		}
-		seenHeaders[normalized] = key
-		resolvedHeaders.Set(key, resolved)
+	if strings.TrimSpace(request.URL()) != strings.TrimSpace(fixture.Expected.URL) {
+		return fmt.Errorf("expected URL %q does not match generated %q", fixture.Expected.URL, request.URL())
 	}
-	if managed, ok := tool.ManagedCredential(); ok {
-		key := strings.TrimSpace(managed.Key)
+	resolvedHeaders := request.Headers()
+	if managed, ok := tool.ManagedCredentialExecution(); ok {
+		key := managed.Key()
 		if err := runtimemanagedcredentials.ApplyHTTPAuthorization(resolvedHeaders, runtimemanagedcredentials.HTTPAuthorization{
 			CredentialKey: key,
 			AccessToken:   fixture.ManagedCredentials[key],
-			Header:        managed.Header,
-			Prefix:        managed.Prefix,
+			Header:        managed.Header(),
+			Prefix:        managed.Prefix(),
 		}, false); err != nil {
 			return fmt.Errorf("apply catalog conformance managed credential: %w", err)
 		}
@@ -237,9 +236,11 @@ func validateCatalogFixtureBinding(artifact GeneratedCatalogArtifact, operation 
 	if !reflect.DeepEqual(generatedHeaderSet, expectedHeaderSet) {
 		return fmt.Errorf("expected resolved headers %#v do not match generated %#v", expectedHeaderSet, generatedHeaderSet)
 	}
-	resolvedBody, err := resolveCatalogTemplateValue(httpSpec.Body, fixture.Input, fixture.Credentials)
-	if err != nil {
-		return err
+	resolvedBody := any(nil)
+	if body := request.Body(); len(body) > 0 {
+		if err := json.Unmarshal(body, &resolvedBody); err != nil {
+			return fmt.Errorf("decode prepared catalog conformance body: %w", err)
+		}
 	}
 	if !reflect.DeepEqual(normalizeYAMLValue(resolvedBody), normalizeYAMLValue(fixture.Expected.Body)) {
 		return fmt.Errorf("expected body %#v does not match generated %#v", fixture.Expected.Body, resolvedBody)
@@ -267,8 +268,8 @@ func validateCatalogFixtureCredentials(tool runtimecontracts.ToolSchemaEntry, cr
 		}
 	}
 	expectedManaged := ""
-	if managed, ok := tool.ManagedCredential(); ok {
-		expectedManaged = strings.TrimSpace(managed.Key)
+	if managed, ok := tool.ManagedCredentialExecution(); ok {
+		expectedManaged = managed.Key()
 		if _, exists := managedCredentials[expectedManaged]; !exists {
 			return fmt.Errorf("catalog conformance managed credential %q is unavailable", expectedManaged)
 		}
@@ -306,87 +307,6 @@ func catalogConformanceKey(provider, operationID, toolID string) string {
 
 func normalizeSHA(raw string) string {
 	return strings.TrimPrefix(strings.TrimSpace(raw), "sha256:")
-}
-
-func resolveCatalogTemplateValue(value any, input map[string]any, credentials map[string]string) (any, error) {
-	switch typed := value.(type) {
-	case string:
-		trimmed := strings.TrimSpace(typed)
-		if strings.HasPrefix(trimmed, "{{") && strings.HasSuffix(trimmed, "}}") && strings.Count(trimmed, "{{") == 1 && strings.Count(trimmed, "}}") == 1 {
-			return resolveCatalogTemplateToken(strings.TrimSuffix(strings.TrimPrefix(trimmed, "{{"), "}}"), input, credentials)
-		}
-		return resolveCatalogTemplateString(typed, input, credentials, false)
-	case map[string]any:
-		out := make(map[string]any, len(typed))
-		for key, item := range typed {
-			resolved, err := resolveCatalogTemplateValue(item, input, credentials)
-			if err != nil {
-				return nil, err
-			}
-			out[key] = resolved
-		}
-		return out, nil
-	case []any:
-		out := make([]any, len(typed))
-		for i, item := range typed {
-			resolved, err := resolveCatalogTemplateValue(item, input, credentials)
-			if err != nil {
-				return nil, err
-			}
-			out[i] = resolved
-		}
-		return out, nil
-	default:
-		return value, nil
-	}
-}
-
-func resolveCatalogTemplateString(raw string, input map[string]any, credentials map[string]string, escapePath bool) (string, error) {
-	out := raw
-	for {
-		start := strings.Index(out, "{{")
-		if start < 0 {
-			break
-		}
-		endOffset := strings.Index(out[start:], "}}")
-		if endOffset < 0 {
-			return "", fmt.Errorf("unterminated catalog template in %q", raw)
-		}
-		end := start + endOffset + 2
-		token := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(out[start:end], "{{"), "}}"))
-		value, err := resolveCatalogTemplateToken(token, input, credentials)
-		if err != nil {
-			return "", err
-		}
-		replacement := fmt.Sprint(value)
-		if escapePath {
-			replacement = url.PathEscape(replacement)
-		}
-		out = out[:start] + replacement + out[end:]
-	}
-	return out, nil
-}
-
-func resolveCatalogTemplateToken(token string, input map[string]any, credentials map[string]string) (any, error) {
-	token = strings.TrimSpace(token)
-	switch {
-	case strings.HasPrefix(token, "input."):
-		key := strings.TrimSpace(strings.TrimPrefix(token, "input."))
-		value, exists := input[key]
-		if !exists {
-			return nil, fmt.Errorf("catalog conformance input %q is unavailable", key)
-		}
-		return value, nil
-	case strings.HasPrefix(token, "credentials."):
-		key := strings.TrimSpace(strings.TrimPrefix(token, "credentials."))
-		value, exists := credentials[key]
-		if !exists {
-			return nil, fmt.Errorf("catalog conformance credential %q is unavailable", key)
-		}
-		return value, nil
-	default:
-		return nil, fmt.Errorf("catalog conformance template %q is unsupported", token)
-	}
 }
 
 func normalizeYAMLValue(value any) any {
