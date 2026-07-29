@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -710,7 +711,7 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
+	pc := newPostgresPipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
 			Semantics: runtimecontracts.WorkflowSemanticView{
 				Name:    "validation",
@@ -784,7 +785,7 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
+	pc := newPostgresPipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
 			Semantics: runtimecontracts.WorkflowSemanticView{
 				Name:    "validation",
@@ -850,7 +851,7 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
+	pc := newPostgresPipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
 			Semantics: runtimecontracts.WorkflowSemanticView{
 				Name:    "validation",
@@ -981,7 +982,7 @@ func newEmitPersistenceTestCoordinator(db *sql.DB) (*PipelineCoordinator, *recor
 	pc := &PipelineCoordinator{
 		bus:            bus,
 		db:             db,
-		workflowStore:  NewWorkflowInstanceStore(db),
+		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
 		module: &previewWorkflowModule{
@@ -1382,7 +1383,7 @@ node-a:
 	pc := &PipelineCoordinator{
 		bus:            bus,
 		db:             db,
-		workflowStore:  NewWorkflowInstanceStore(db),
+		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
 		module: &previewWorkflowModule{
@@ -1513,7 +1514,7 @@ node-a:
 	pc := &PipelineCoordinator{
 		bus:            bus,
 		db:             db,
-		workflowStore:  NewWorkflowInstanceStore(db),
+		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
 		module: &previewWorkflowModule{
@@ -1525,13 +1526,7 @@ node-a:
 	}
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	const otherRunID = "88888888-8888-8888-8888-888888888888"
-	if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-		ON CONFLICT (run_id) DO NOTHING
-	`, otherRunID); err != nil {
-		t.Fatalf("seed other run: %v", err)
-	}
+	runlifecyclefixture.RequirePostgres(t, testAuthorActivityContext(t, context.Background()), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: otherRunID})
 	otherCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), otherRunID)
 	seedQueryEntitiesGuardInstance(t, pc.workflowStore, ctx, "11111111-1111-1111-1111-111111111111", "validation/existing-same", "req-existing")
 	seedQueryEntitiesGuardInstance(t, pc.workflowStore, otherCtx, "22222222-2222-2222-2222-222222222222", "validation/existing-other", "req-cross-run")
@@ -1641,7 +1636,7 @@ node-a:
 	pc := &PipelineCoordinator{
 		bus:            bus,
 		db:             db,
-		workflowStore:  NewWorkflowInstanceStore(db),
+		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
 		module: &previewWorkflowModule{
@@ -1775,7 +1770,7 @@ node-a:
 	pc := &PipelineCoordinator{
 		bus:            bus,
 		db:             db,
-		workflowStore:  NewWorkflowInstanceStore(db),
+		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
 		module: &previewWorkflowModule{
@@ -2162,7 +2157,7 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 	}
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	store := NewWorkflowInstanceStore(db)
+	store := newPostgresWorkflowInstanceStoreForTest(db)
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
 		bus:            bus,
@@ -2364,7 +2359,7 @@ func TestExecuteNodeContractHandlerOnCompleteDoesNotSeeCurrentHandlerTopLevelWri
 
 func TestExecuteNodeContractHandlerExecutesEmitInsideEngine(t *testing.T) {
 	bus := &recordingPipelineBus{}
-	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
+	pc := newPostgresPipelineCoordinatorForTest(bus, nil, PipelineCoordinatorOptions{
 		Module: NewGenericTestWorkflowModule(),
 	})
 	entityID := "ent-1"
@@ -2388,7 +2383,7 @@ func TestExecuteNodeContractHandlerExecutesEmitInsideEngine(t *testing.T) {
 
 func TestExecuteNodeContractHandlerOnSuccessRulesEmitsBothInOrder(t *testing.T) {
 	bus := &recordingPipelineBus{}
-	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
+	pc := newPostgresPipelineCoordinatorForTest(bus, nil, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{bundle: additiveOnSuccessContractBundle()},
 	})
 	entityID := "ent-1"
@@ -2418,7 +2413,7 @@ func TestExecuteNodeContractHandlerOnSuccessRulesEmitsBothInOrder(t *testing.T) 
 
 func TestExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEvent(t *testing.T) {
 	bus := &recordingPipelineBus{}
-	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
+	pc := newPostgresPipelineCoordinatorForTest(bus, nil, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{bundle: rulesEmitTemplateContractBundle()},
 	})
 	entityID := "ent-1"
@@ -2499,7 +2494,7 @@ func TestExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEvent(t *t
 
 func TestExecuteNodeContractHandlerOnSuccessOutboxFailureDoesNotPartiallyPublish(t *testing.T) {
 	bus := &recordingPipelineBus{outboxErr: errors.New("outbox failed")}
-	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
+	pc := newPostgresPipelineCoordinatorForTest(bus, nil, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{bundle: additiveOnSuccessContractBundle()},
 	})
 

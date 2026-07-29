@@ -12632,9 +12632,8 @@
             "$ref": "#/components/schemas/FailureEnvelope",
             "description": "Required exactly when status is failed; forbidden for every other status."
           },
-          "forked_from_run_id": {
-            "$ref": "#/components/schemas/OpaqueId",
-            "description": "Present only if status indicates a fork."
+          "origin": {
+            "$ref": "#/components/schemas/RunOrigin"
           },
           "run_id": {
             "$ref": "#/components/schemas/OpaqueId"
@@ -12644,24 +12643,100 @@
           },
           "status": {
             "$ref": "#/components/schemas/RunStatus"
-          },
-          "trigger_event_id": {
-            "$ref": "#/components/schemas/OpaqueId"
-          },
-          "trigger_event_type": {
-            "type": "string"
           }
         },
         "required": [
           "run_id",
           "status",
-          "trigger_event_type",
-          "trigger_event_id",
+          "origin",
           "entity_count",
           "event_count",
           "started_at"
         ],
         "type": "object"
+      },
+      "RunOrigin": {
+        "description": "Immutable, explicitly discriminated run creation provenance. Exactly one variant is present and readers never infer or coalesce it from event history.\n",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "event_id": {
+                "$ref": "#/components/schemas/OpaqueId"
+              },
+              "event_type": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "event",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "event_id",
+              "event_type"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "scenario_setup",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "generation": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "kind": {
+                "const": "standing_generation",
+                "type": "string"
+              },
+              "service_id": {
+                "$ref": "#/components/schemas/OpaqueId"
+              }
+            },
+            "required": [
+              "kind",
+              "service_id",
+              "generation"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "fork_materialization",
+                "type": "string"
+              },
+              "source_event_id": {
+                "$ref": "#/components/schemas/OpaqueId"
+              },
+              "source_run_id": {
+                "$ref": "#/components/schemas/OpaqueId"
+              }
+            },
+            "required": [
+              "kind",
+              "source_run_id",
+              "source_event_id"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "RunStatus": {
         "enum": [

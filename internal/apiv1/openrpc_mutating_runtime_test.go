@@ -880,7 +880,10 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 		idempotency: newMutatingProbeIdempotencyStore(),
 		runs: &fakeRunReadStore{
 			headers: map[string]store.RunHeader{
-				runID: {RunID: runID, Status: "running", TriggerEventType: "scan.requested", TriggerEventID: "evt-1", StartedAt: now},
+				runID: {
+					RunID: runID, Status: "running",
+					Origin: mustEventRunOrigin(t, "evt-1", "scan.requested"), StartedAt: now,
+				},
 			},
 		},
 		observability: &fakeObservabilityReadStore{events: map[string]store.OperatorEventFull{}},

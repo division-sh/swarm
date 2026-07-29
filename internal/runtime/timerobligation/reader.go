@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 type Dialect uint8
@@ -116,7 +118,8 @@ func Read(ctx context.Context, queryer Queryer, dialect Dialect, scope Scope, ob
 			if !fireAt.After(observedAt) {
 				target[index].DueCount++
 			}
-			if runID == "" || runStatus == "running" || runStatus == "paused" {
+			runState, runStateErr := runtimerunlifecycle.ParseState(runStatus)
+			if runID == "" || (runStateErr == nil && runState.Active()) {
 				target[index].RecoverableCount++
 			}
 		}

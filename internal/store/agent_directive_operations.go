@@ -16,7 +16,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -645,7 +644,7 @@ func (s *PostgresStore) ReconcileDirectiveOperations(ctx context.Context, now ti
 		SELECT o.operation_id::text
 		FROM agent_directive_operations o
 		JOIN runs run ON run.run_id = o.resolved_run_id
-		WHERE run.status IN ('running', 'paused')
+		WHERE run.status IN (`+runLifecycleActiveStateSQLValues+`)
 		  AND (o.state IN ('executed', 'succeeded') OR (o.state = 'executing' AND o.execution_lease_expires_at <= $1) OR (o.state = 'prepared' AND o.idempotency_key IS NULL) OR (o.state IN ('succeeded', 'failed') AND o.expires_at <= $1))
 		ORDER BY o.created_at
 	`, now.UTC())
@@ -671,7 +670,7 @@ func (s *SQLiteRuntimeStore) ReconcileDirectiveOperations(ctx context.Context, n
 		SELECT o.operation_id
 		FROM agent_directive_operations o
 		JOIN runs run ON run.run_id = o.resolved_run_id
-		WHERE run.status IN ('running', 'paused')
+		WHERE run.status IN (`+runLifecycleActiveStateSQLValues+`)
 		  AND (o.state IN ('executed', 'succeeded') OR (o.state = 'executing' AND o.execution_lease_expires_at <= ?) OR (o.state = 'prepared' AND o.idempotency_key IS NULL) OR (o.state IN ('succeeded', 'failed') AND o.expires_at <= ?))
 		ORDER BY o.created_at
 	`, now.UTC(), now.UTC())
@@ -717,7 +716,7 @@ func (s *PostgresStore) reconcilePostgresDirectiveOperationIDs(ctx context.Conte
 		}
 		switch {
 		case (op.State == runtimeagentcontrol.DirectiveOperationSucceeded || op.State == runtimeagentcontrol.DirectiveOperationFailed) && !op.ExpiresAt.IsZero() && !op.ExpiresAt.After(now):
-			res, err := s.DB.ExecContext(ctx, `DELETE FROM agent_directive_operations o WHERE o.operation_id = $1::uuid AND o.state IN ('succeeded', 'failed') AND o.expires_at <= $2 AND EXISTS (SELECT 1 FROM runs run WHERE run.run_id = o.resolved_run_id AND run.status IN ('running', 'paused'))`, id, now.UTC())
+			res, err := s.DB.ExecContext(ctx, `DELETE FROM agent_directive_operations o WHERE o.operation_id = $1::uuid AND o.state IN ('succeeded', 'failed') AND o.expires_at <= $2 AND EXISTS (SELECT 1 FROM runs run WHERE run.run_id = o.resolved_run_id AND run.status IN (`+runLifecycleActiveStateSQLValues+`))`, id, now.UTC())
 			if err != nil {
 				return out, err
 			}
@@ -762,7 +761,7 @@ func (s *SQLiteRuntimeStore) reconcileSQLiteDirectiveOperationIDs(ctx context.Co
 		switch {
 		case (op.State == runtimeagentcontrol.DirectiveOperationSucceeded || op.State == runtimeagentcontrol.DirectiveOperationFailed) && !op.ExpiresAt.IsZero() && !op.ExpiresAt.After(now):
 			err := s.runRuntimeMutation(ctx, "sqlite delete expired directive operation", func(txctx context.Context, tx *sql.Tx) error {
-				res, err := tx.ExecContext(txctx, `DELETE FROM agent_directive_operations AS o WHERE o.operation_id = ? AND o.state IN ('succeeded', 'failed') AND o.expires_at <= ? AND EXISTS (SELECT 1 FROM runs run WHERE run.run_id = o.resolved_run_id AND run.status IN ('running', 'paused'))`, id, now.UTC())
+				res, err := tx.ExecContext(txctx, `DELETE FROM agent_directive_operations AS o WHERE o.operation_id = ? AND o.state IN ('succeeded', 'failed') AND o.expires_at <= ? AND EXISTS (SELECT 1 FROM runs run WHERE run.run_id = o.resolved_run_id AND run.status IN (`+runLifecycleActiveStateSQLValues+`))`, id, now.UTC())
 				if err != nil {
 					return err
 				}
@@ -807,7 +806,7 @@ func purgeExpiredPostgresDirectiveOperations(ctx context.Context, tx *sql.Tx, no
 		  AND EXISTS (
 			SELECT 1 FROM runs run
 			WHERE run.run_id = o.resolved_run_id
-			  AND run.status IN ('running', 'paused')
+			  AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
 		  )
 	`, now.UTC())
 	return err
@@ -821,7 +820,7 @@ func purgeExpiredSQLiteDirectiveOperationsTx(ctx context.Context, tx *sql.Tx, no
 		  AND EXISTS (
 			SELECT 1 FROM runs run
 			WHERE run.run_id = agent_directive_operations.resolved_run_id
-			  AND run.status IN ('running', 'paused')
+			  AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
 		  )
 	`, now.UTC())
 	return err
@@ -855,7 +854,7 @@ func requireActivePostgresDirectiveOperation(ctx context.Context, tx *sql.Tx, op
 	if !ok {
 		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("directive operation not found")
 	}
-	if err := storerunlifecycle.RequireActive(ctx, tx, op.ResolvedRunID, storerunlifecycle.DialectPostgres); err != nil {
+	if err := requirePostgresRunActive(ctx, tx, op.ResolvedRunID); err != nil {
 		return runtimeagentcontrol.DirectiveOperation{}, err
 	}
 	locked, ok, err := loadPostgresDirectiveOperationByID(ctx, tx, operationID, true)
@@ -876,7 +875,7 @@ func requireActiveSQLiteDirectiveOperation(ctx context.Context, tx *sql.Tx, oper
 	if !ok {
 		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("directive operation not found")
 	}
-	if err := storerunlifecycle.RequireActive(ctx, tx, op.ResolvedRunID, storerunlifecycle.DialectSQLite); err != nil {
+	if err := requireSQLiteRunActive(ctx, tx, op.ResolvedRunID); err != nil {
 		return runtimeagentcontrol.DirectiveOperation{}, err
 	}
 	return op, nil

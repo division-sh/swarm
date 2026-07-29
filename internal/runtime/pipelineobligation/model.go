@@ -462,8 +462,28 @@ type RunSummary struct {
 	Deferred           int
 	ProcessedDeferred  int
 	DiagnosticExcluded int
-	RunInactive        bool
-	RunForked          bool
+}
+
+func (s RunSummary) Validate() error {
+	if strings.TrimSpace(s.RunID) == "" {
+		return fmt.Errorf("pipeline run summary requires run_id")
+	}
+	for _, count := range []int{
+		s.Replayable,
+		s.Acknowledged,
+		s.TerminalNonSuccess,
+		s.Deferred,
+		s.ProcessedDeferred,
+		s.DiagnosticExcluded,
+	} {
+		if count < 0 {
+			return fmt.Errorf("pipeline run summary counts cannot be negative")
+		}
+	}
+	if s.ProcessedDeferred > s.Deferred {
+		return fmt.Errorf("pipeline run summary processed deferred count exceeds deferred count")
+	}
+	return nil
 }
 
 func (s RunSummary) HasOpenWork() bool {

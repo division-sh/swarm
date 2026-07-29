@@ -12,8 +12,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -404,72 +404,34 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 		return RunDebugReport{}, fmt.Errorf("run_id is required")
 	}
 	opts = defaultRunDebugQueryOptions(opts)
-	report := RunDebugReport{RunID: runID}
-
-	var (
-		runStatus     string
-		failureRaw    []byte
-		controlReason string
-		started       sql.NullTime
-		ended         sql.NullTime
-		entityCount   sql.NullInt64
-	)
-	if err := s.DB.QueryRowContext(ctx, `
-		SELECT
-			COALESCE(r.status, ''),
-			r.failure,
-			COALESCE(rc.reason, ''),
-			r.started_at,
-			r.ended_at,
-			COALESCE(entity_summary.entity_count, 0)
-		FROM runs r
-		LEFT JOIN run_control_state rc ON rc.run_id = r.run_id
-		LEFT JOIN LATERAL (
-			SELECT COUNT(DISTINCT es.entity_id)::int AS entity_count
-			FROM entity_state es
-			WHERE es.run_id = r.run_id
-		) entity_summary ON TRUE
-		WHERE r.run_id = $1::uuid
-	`, report.RunID).Scan(&runStatus, &failureRaw, &controlReason, &started, &ended, &entityCount); err == nil {
-		report.RunTableStatus = strings.TrimSpace(runStatus)
-		report.ControlReason = strings.TrimSpace(controlReason)
-		failure, decodeErr := decodeStoredFailure(failureRaw)
-		if decodeErr != nil {
-			return RunDebugReport{}, decodeErr
-		}
-		report.Failure = failure
-		if evidenceErr := storerunlifecycle.ValidateStatusFailure(report.RunTableStatus, report.Failure); evidenceErr != nil {
-			return RunDebugReport{}, fmt.Errorf("run %s terminal evidence: %w", report.RunID, evidenceErr)
-		}
-		if started.Valid {
-			report.StartedAt = started.Time
-		}
-		if ended.Valid {
-			tm := ended.Time
-			report.EndedAt = &tm
-		}
-		if entityCount.Valid {
-			report.EntityCount = int(entityCount.Int64)
-		}
-	} else if err != sql.ErrNoRows {
-		return RunDebugReport{}, fmt.Errorf("load run row: %w", err)
+	header, err := s.LoadRunHeader(ctx, runID)
+	if err != nil {
+		return RunDebugReport{}, err
 	}
-
-	if err := s.DB.QueryRowContext(ctx, `
-		SELECT event_id::text, event_name, created_at
-		FROM events
-		WHERE run_id = $1::uuid
-		ORDER BY created_at ASC, event_id ASC
-		LIMIT 1
-	`, report.RunID).Scan(&report.RootEventID, &report.RootEventType, &report.StartedAt); err != nil {
-		return RunDebugReport{}, fmt.Errorf("load root event: %w", err)
+	report := RunDebugReport{
+		RunID:          header.RunID,
+		RunTableStatus: header.Status,
+		Failure:        runtimefailures.CloneEnvelope(header.Failure),
+		ControlReason:  header.ControlReason,
+		StartedAt:      header.StartedAt,
+		EndedAt:        header.EndedAt,
+		EventCount:     header.EventCount,
+		EntityCount:    header.EntityCount,
 	}
+	if header.Origin.Kind() == runtimerunlifecycle.OriginEvent {
+		report.RootEventID = header.Origin.EventID()
+		report.RootEventType = header.Origin.EventType()
+	}
+	var lastEventAt sql.NullTime
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*), MAX(created_at)
 		FROM events
 		WHERE run_id = $1::uuid
-	`, report.RunID).Scan(&report.EventCount, &report.LastEventAt); err != nil {
+	`, report.RunID).Scan(&report.EventCount, &lastEventAt); err != nil {
 		return RunDebugReport{}, fmt.Errorf("load event summary: %w", err)
+	}
+	if lastEventAt.Valid {
+		report.LastEventAt = lastEventAt.Time.UTC()
 	}
 
 	eventCountRows, err := s.DB.QueryContext(ctx, `

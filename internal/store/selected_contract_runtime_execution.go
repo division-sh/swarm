@@ -11,7 +11,6 @@ import (
 	"time"
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -462,11 +461,13 @@ func (s *SQLiteRuntimeStore) FailRunForkSelectedContractRuntimeExecution(ctx con
 }
 
 func requireSelectedRuntimeRunActive(ctx context.Context, tx *sql.Tx, runID string, dialect selectedRuntimeDialect) error {
-	storeDialect := storerunlifecycle.DialectPostgres
+	var err error
 	if _, ok := dialect.(sqliteDialect); ok {
-		storeDialect = storerunlifecycle.DialectSQLite
+		err = requireSQLiteRunActive(ctx, tx, runID)
+	} else {
+		err = requirePostgresRunActive(ctx, tx, runID)
 	}
-	if err := storerunlifecycle.RequireActive(ctx, tx, runID, storeDialect); err != nil {
+	if err != nil {
 		return fmt.Errorf("admit selected-contract runtime mutation: %w", err)
 	}
 	return nil

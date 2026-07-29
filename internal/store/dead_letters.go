@@ -11,7 +11,6 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -28,7 +27,7 @@ func (s *PostgresStore) RecordDeadLetterTx(ctx context.Context, tx *sql.Tx, rec 
 	if err := runtimeauthoractivity.Require(ctx); err != nil {
 		return err
 	}
-	if err := requireActiveRunForEvent(ctx, tx, rec.OriginalEventID, storerunlifecycle.DialectPostgres); err != nil {
+	if err := requireActiveRunForEvent(ctx, tx, rec.OriginalEventID, true); err != nil {
 		return err
 	}
 	return s.insertPostgresDeadLetterTx(ctx, tx, rec)
@@ -75,7 +74,7 @@ func (s *SQLiteRuntimeStore) RecordDeadLetterTx(ctx context.Context, tx *sql.Tx,
 	if err := runtimeauthoractivity.Require(ctx); err != nil {
 		return err
 	}
-	if err := requireActiveRunForEvent(ctx, tx, rec.OriginalEventID, storerunlifecycle.DialectSQLite); err != nil {
+	if err := requireActiveRunForEvent(ctx, tx, rec.OriginalEventID, false); err != nil {
 		return err
 	}
 	return s.insertSQLiteDeadLetterTx(ctx, tx, rec)

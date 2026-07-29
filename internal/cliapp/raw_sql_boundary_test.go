@@ -392,6 +392,12 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1943,
 			Reason:         "testutil is the thin testing adapter over the canonical testpostgres lifecycle owner",
 		},
+		"internal/testutil/runlifecyclefixture/fixture.go": {
+			Classification: rawSQLTestSupportBoundary,
+			Issue:          2111,
+			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.run_lifecycle_authority",
+			Reason:         "test-only hostile readback fixtures deliberately materialize persisted run states that valid lifecycle construction forbids",
+		},
 		"internal/testpostgres/connection.go": {
 			Classification: rawSQLTestSupportBoundary,
 			Issue:          1943,

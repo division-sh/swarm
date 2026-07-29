@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"strings"
 	"testing"
 	"time"
@@ -24,22 +25,13 @@ func seedPipelineEventRecord(t testing.TB, ctx context.Context, db *sql.DB, even
 func seedPipelineEventRecordForDialect(t testing.TB, ctx context.Context, db *sql.DB, dialect runtimeauthoractivity.Dialect, event events.Event) {
 	t.Helper()
 	if runID := strings.TrimSpace(event.RunID()); runID != "" {
-		var (
-			query string
-			args  []any
-		)
 		switch dialect {
 		case runtimeauthoractivity.DialectPostgres:
-			query = `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral') ON CONFLICT (run_id) DO NOTHING`
-			args = []any{runID}
+			runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
 		case runtimeauthoractivity.DialectSQLite:
-			query = `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral') ON CONFLICT (run_id) DO NOTHING`
-			args = []any{runID}
+			runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
 		default:
 			t.Fatalf("seed canonical pipeline event %s: unsupported dialect %q", event.ID(), dialect)
-		}
-		if _, err := db.ExecContext(ctx, query, args...); err != nil {
-			t.Fatalf("seed canonical pipeline run %s: %v", runID, err)
 		}
 	}
 	if err := eventfixture.Insert(ctx, db, dialect, event); err != nil {
@@ -53,13 +45,7 @@ func testPipelineRunContext(t *testing.T, db *sql.DB) context.Context {
 		t.Fatal("test pipeline run context requires db")
 	}
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), testPipelineRunID)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-		ON CONFLICT (run_id) DO NOTHING
-	`, testPipelineRunID); err != nil {
-		t.Fatalf("seed pipeline test run: %v", err)
-	}
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: testPipelineRunID})
 	return ctx
 }
 
@@ -158,13 +144,7 @@ func seedPipelineNodeDeliveryAuthority(t *testing.T, db *sql.DB, evt events.Even
 		t.Fatalf("seed pipeline node delivery authority run id = %q: %v", runID, err)
 	}
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-		ON CONFLICT (run_id) DO NOTHING
-	`, runID); err != nil {
-		t.Fatalf("seed pipeline node delivery authority run: %v", err)
-	}
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
 	entityID := ""
 	if raw := strings.TrimSpace(evt.EntityID()); raw != "" {
 		if _, err := uuid.Parse(raw); err == nil {

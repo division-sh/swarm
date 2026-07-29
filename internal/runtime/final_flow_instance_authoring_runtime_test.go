@@ -70,7 +70,7 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		DeliveryStore:     pg,
 	})
 
-	evt := eventtest.RunCreatingRootIngress(
+	evt := eventtest.ExistingRunRootIngress(
 		"99999999-9999-4999-8999-999999999955",
 		events.EventType(finalflowinstanceauthoring.ProducerFlowID+"/"+finalflowinstanceauthoring.ProducerOutput),
 		finalflowinstanceauthoring.ProducerFlowID,
@@ -78,7 +78,6 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		json.RawMessage(`{"account_id":"acct-42","score":"91","decision":"approved"}`),
 		0,
 		templateInstanceDeliveryRunID,
-		"",
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
 			FlowID: finalflowinstanceauthoring.ProducerFlowID, FlowInstance: finalflowinstanceauthoring.ProducerFlowID, EntityID: "88888888-8888-4888-8888-888888888888",
 		}),

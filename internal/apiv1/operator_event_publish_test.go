@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -26,10 +27,10 @@ import (
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -359,12 +360,7 @@ func TestOperatorEventPublishSQLiteRejectsExistingRunSameHashDifferentSourceBefo
 	`, runStartTestBundleHash); err != nil {
 		t.Fatalf("seed SQLite bundle row: %v", err)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES (?, 'running', ?, 'persisted', ?)
-	`, runID, runStartTestBundleHash, time.Now().UTC()); err != nil {
-		t.Fatalf("seed source-mismatched SQLite run: %v", err)
-	}
+	runlifecyclefixture.RequireSQLite(t, ctx, sqliteStore.DB, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: runStartTestBundleHash, BundleSource: "persisted"})
 
 	body := fmt.Sprintf(
 		`{"jsonrpc":"2.0","id":"publish","method":"event.publish","params":{"run_id":%q,"event_name":"scan.requested","payload":{"topic":"source-mismatch"},"idempotency_key":"idem-sqlite-source-mismatch"}}`,
@@ -1001,7 +997,11 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 		t.Fatalf("missing run data = %#v, want %s", data, RunNotFoundCode)
 	}
 
-	if _, err := db.Exec(`UPDATE runs SET status = 'completed', ended_at = now() WHERE run_id = $1::uuid`, runID); err != nil {
+	if _, _, err := storetest.TerminalizeRun(testAuthorActivityContext(context.Background()), pg, storerunlifecycle.TerminalRequest{
+		RunID:   runID,
+		State:   storerunlifecycle.StateCancelled,
+		EndedAt: time.Now().UTC(),
+	}); err != nil {
 		t.Fatalf("mark run terminal: %v", err)
 	}
 	terminal := rpcCall(t, handler, eventPublishBody(runID, runStartTestBundleHash, "scan.requested", `{"topic":"terminal"}`, "", "idem-terminal-run"))
@@ -1615,7 +1615,11 @@ func TestOperatorEventPublishOperatorReferenceRejectsInvalidReferenceBeforePersi
 			name: "terminal run with source",
 			body: eventPublishBodyWithSource(firstRunID, firstEventID, runStartTestBundleHash, "scan.requested", `{"topic":"terminal"}`, "", "idem-source-terminal"),
 			mutateBefore: func() {
-				if _, err := db.Exec(`UPDATE runs SET status = 'completed', ended_at = now() WHERE run_id = $1::uuid`, firstRunID); err != nil {
+				if _, _, err := storetest.TerminalizeRun(testAuthorActivityContext(context.Background()), pg, storerunlifecycle.TerminalRequest{
+					RunID:   firstRunID,
+					State:   storerunlifecycle.StateCancelled,
+					EndedAt: time.Now().UTC(),
+				}); err != nil {
 					t.Fatalf("mark run terminal: %v", err)
 				}
 			},

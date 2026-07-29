@@ -26,6 +26,7 @@ import (
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -138,6 +139,10 @@ type pipelineObligationOwnerProvider interface {
 	PipelineObligationOwner() runtimepipelineobligation.Store
 }
 
+type runLifecycleCandidateOwnerProvider interface {
+	RunLifecycleCandidateOwner() runtimerunlifecycle.OperationOwner
+}
+
 func copyActivityToolEntries(in map[string]ChannelActivityTarget) map[string]ChannelActivityTarget {
 	out := make(map[string]ChannelActivityTarget, len(in))
 	for name, target := range in {
@@ -168,6 +173,9 @@ func newPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 	}
 	if provider, ok := bus.(runtimeMutationRunnerProvider); ok {
 		workflowStore.ConfigureRuntimeMutationRunner(provider.RuntimeMutationRunner())
+	}
+	if provider, ok := bus.(runLifecycleCandidateOwnerProvider); ok {
+		workflowStore.ConfigureRunLifecycle(provider.RunLifecycleCandidateOwner())
 	}
 	if opts.PipelineObligations == nil {
 		if provider, ok := bus.(pipelineObligationOwnerProvider); ok {
@@ -581,7 +589,6 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 			if err := errors.Join(settleErr, finishErr); err != nil {
 				return false, fmt.Errorf("settle workflow node delivery: %w", err)
 			}
-			pc.convergeWorkflowNodeNormalRunCompletion(attemptCtx, nodeID, evt)
 			pc.notifyTestLifecycleDeliveryStatus(attemptCtx, nodeID, evt, "delivered")
 			return result.Handled, nil
 		}
@@ -612,7 +619,6 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 		pc.notifyTestLifecycleDeliveryStatus(attemptCtx, nodeID, evt, string(snapshot.Status))
 		if snapshot.Status == runtimedelivery.StatusDeadLetter {
 			pc.recordWorkflowHandlerFailure(attemptCtx, evt, nodeID, err)
-			pc.convergeWorkflowNodeNormalRunCompletion(attemptCtx, nodeID, evt)
 			if recoveryClaim {
 				// The recovered handler failure is now durable terminal evidence.
 				// Only claim or settlement failures make readiness unsafe.

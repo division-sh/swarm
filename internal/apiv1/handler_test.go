@@ -21,11 +21,21 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/gorilla/websocket"
 )
 
 const testToken = "test-v1-token"
+
+func mustEventRunOrigin(t testing.TB, eventID, eventType string) runtimerunlifecycle.RunOrigin {
+	t.Helper()
+	origin, err := runtimerunlifecycle.EventRunOrigin(eventID, eventType)
+	if err != nil {
+		t.Fatalf("construct event run origin: %v", err)
+	}
+	return origin
+}
 
 func TestRegistryMethodNamesMatchGeneratedOpenRPC(t *testing.T) {
 	registry := testRegistry(t)
@@ -516,13 +526,12 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 	fakeRuns := &fakeRunReadStore{
 		headers: map[string]store.RunHeader{
 			runID: {
-				RunID:            runID,
-				Status:           "running",
-				TriggerEventType: "scan.requested",
-				TriggerEventID:   eventID,
-				EntityCount:      2,
-				EventCount:       1,
-				StartedAt:        now.Add(-time.Hour),
+				RunID:       runID,
+				Status:      "running",
+				Origin:      mustEventRunOrigin(t, eventID, "scan.requested"),
+				EntityCount: 2,
+				EventCount:  1,
+				StartedAt:   now.Add(-time.Hour),
 			},
 		},
 		reports: map[string]store.RunDebugReport{

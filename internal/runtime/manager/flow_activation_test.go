@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -31,12 +32,74 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+type flowActivationTestRunLifecycleOwner struct {
+	db *sql.DB
+}
+
+func (o flowActivationTestRunLifecycleOwner) RunRuntimeMutationContext(
+	ctx context.Context,
+	fn func(context.Context) error,
+) error {
+	postCommit := make([]runtimepipeline.OwnerAction, 0, 2)
+	rollback := make([]runtimepipeline.OwnerAction, 0, 2)
+	err := runlifecyclefixture.RunPostgresMutation(ctx, o.db, func(txctx context.Context, tx *sql.Tx) error {
+		txctx = runtimepipeline.WithPipelineSQLTxContext(txctx, tx)
+		txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
+		txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollback)
+		return fn(txctx)
+	})
+	if err != nil {
+		runtimepipeline.FlushPipelineRollbackActions(rollback)
+		return err
+	}
+	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	return nil
+}
+
+func (flowActivationTestRunLifecycleOwner) RequestCompletionCandidate(
+	ctx context.Context,
+	request runtimerunlifecycle.CandidateRequest,
+) (runtimerunlifecycle.CandidateRequestDisposition, error) {
+	if err := request.Validate(); err != nil {
+		return "", err
+	}
+	if _, err := runtimerunlifecycle.RequirePresentSource(ctx, request.RunID); err != nil {
+		return "", err
+	}
+	return runtimerunlifecycle.CandidateRequested, nil
+}
+
+func (flowActivationTestRunLifecycleOwner) TransitionActiveRun(
+	ctx context.Context,
+	request runtimerunlifecycle.ActiveTransitionRequest,
+) (runtimerunlifecycle.MutationDisposition, error) {
+	return runtimerunlifecycle.TransitionActive(ctx, request)
+}
+
+func (flowActivationTestRunLifecycleOwner) MarkTerminalRun(
+	ctx context.Context,
+	request runtimerunlifecycle.TerminalRequest,
+) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return runtimerunlifecycle.MarkTerminal(ctx, request)
+}
+
+func configureFlowActivationWorkflowStore(
+	db *sql.DB,
+	workflowStore *runtimepipeline.WorkflowInstanceStore,
+) *runtimepipeline.WorkflowInstanceStore {
+	owner := flowActivationTestRunLifecycleOwner{db: db}
+	workflowStore.ConfigureRuntimeMutationRunner(owner)
+	workflowStore.ConfigureRunLifecycle(owner)
+	return workflowStore
+}
 
 func TestRebuildPendingDynamicFlowRuntimeCreationEventPlanUsesRevisedCanonicalSchema(t *testing.T) {
 	sourceV2 := notifyallchildren.LoadSource(t, notifyallchildren.Options{
@@ -3044,18 +3107,12 @@ func TestActivateFlowInstanceCanonicalStoreFinalizesIdenticalReplayWithoutDuplic
 		t.Fatal("canonical readiness test context missing bundle source fact")
 	}
 	bundleHash, bundleSource := sourceFact.StorageValues()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, $3)
-		ON CONFLICT (run_id) DO NOTHING
-	`, runID, bundleHash, bundleSource); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource})
 
 	routeStore := &flowActivationTestRouteStore{}
 	bus := &flowActivationTestBus{routeStore: routeStore}
 	agentStore := &flowActivationTestStore{}
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	workflowStore := configureFlowActivationWorkflowStore(db, runtimepipeline.NewWorkflowInstanceStore(db))
 	bundle := testFlowBundle("task.started")
 	runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 		Module:        newFlowActivationWorkflowModule(t, bundle),
@@ -3580,17 +3637,11 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 	t.Cleanup(cleanup)
 	const runID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-		ON CONFLICT (run_id) DO NOTHING
-	`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
 
 	routeStore := &flowActivationTestRouteStore{}
 	bus := &flowActivationTestBus{routeStore: routeStore}
-	store := runtimepipeline.NewWorkflowInstanceStore(db)
+	store := configureFlowActivationWorkflowStore(db, runtimepipeline.NewWorkflowInstanceStore(db))
 	bundle := testFlowBundle("")
 	runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 		Module:        newFlowActivationWorkflowModule(t, bundle),
@@ -3598,6 +3649,7 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 		WorkOwner:     newTestManagerWorkOwner(t),
 	})
 	am := newFlowActivationManager(t, bus, store)
+	ctx = worklifetime.WithOccurrence(ctx, am.workOwner)
 	const subjectID = "11111111-1111-1111-1111-111111111111"
 	req := testActivationRequest(bundle, "review", "inst-1", subjectID, "review/inst-1")
 	req.TriggerEvent = testFlowActivationTriggerEvent(req.TriggerEvent.ID(), runID)
@@ -3680,18 +3732,12 @@ func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t
 	t.Cleanup(cleanup)
 	const runID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-		ON CONFLICT (run_id) DO NOTHING
-	`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
 
 	routeStore := &flowActivationTestRouteStore{}
 	bus := &flowActivationTestBus{routeStore: routeStore}
 	managerStore := &flowActivationTestStore{}
-	store := runtimepipeline.NewWorkflowInstanceStore(db)
+	store := configureFlowActivationWorkflowStore(db, runtimepipeline.NewWorkflowInstanceStore(db))
 	bundle := testFlowBundle("")
 	runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 		Module:        newFlowActivationWorkflowModule(t, bundle),
@@ -3699,6 +3745,7 @@ func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t
 		WorkOwner:     newTestManagerWorkOwner(t),
 	})
 	am := newFlowActivationManager(t, bus, store, managerStore)
+	ctx = worklifetime.WithOccurrence(ctx, am.workOwner)
 	const subjectID = "22222222-2222-2222-2222-222222222222"
 	req := testActivationRequest(bundle, "review", "inst-1", subjectID, "review/inst-1")
 	req.TriggerEvent = testFlowActivationTriggerEvent(req.TriggerEvent.ID(), runID)

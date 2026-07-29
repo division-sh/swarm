@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"strings"
 	"sync"
 	"testing"
@@ -144,11 +145,9 @@ func TestArmWorkflowJoinPostgresParity(t *testing.T) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-				t.Fatal(err)
-			}
+			runlifecyclefixture.RequirePostgres(t, testAuthorActivityContext(t, context.Background()), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
-			store := NewWorkflowInstanceStore(db)
+			store := newPostgresWorkflowInstanceStoreForTest(db)
 			schedules := &recordingSchedulePersistence{}
 			pc := &PipelineCoordinator{module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(workflowJoinLifecycleBundle())}, workflowStore: store, timerScheduleStore: schedules}
 			path := "orders/" + uuid.NewString()
@@ -353,11 +352,9 @@ func workflowJoinStoreCases() []workflowJoinStoreCase {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-				t.Fatal(err)
-			}
+			runlifecyclefixture.RequirePostgres(t, testAuthorActivityContext(t, context.Background()), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
-			return NewWorkflowInstanceStore(db), runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
+			return newPostgresWorkflowInstanceStoreForTest(db), runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 		}},
 	}
 }
@@ -383,10 +380,8 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-				t.Fatal(err)
-			}
-			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+			runlifecyclefixture.RequirePostgres(t, testAuthorActivityContext(t, context.Background()), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
+			return newPostgresWorkflowInstanceStoreForTest(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 		}},
 	}
 	for _, tc := range tests {
@@ -480,10 +475,8 @@ func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-				t.Fatal(err)
-			}
-			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+			runlifecyclefixture.RequirePostgres(t, testAuthorActivityContext(t, context.Background()), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
+			return newPostgresWorkflowInstanceStoreForTest(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 		}},
 	}
 	for _, tc := range tests {
@@ -564,10 +557,8 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-				t.Fatal(err)
-			}
-			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+			runlifecyclefixture.RequirePostgres(t, testAuthorActivityContext(t, context.Background()), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
+			return newPostgresWorkflowInstanceStoreForTest(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 		}},
 	}
 	for _, tc := range tests {
@@ -655,10 +646,8 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-				t.Fatal(err)
-			}
-			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+			runlifecyclefixture.RequirePostgres(t, testAuthorActivityContext(t, context.Background()), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
+			return newPostgresWorkflowInstanceStoreForTest(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 		}},
 	}
 	for _, tc := range tests {
@@ -742,10 +731,8 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-				t.Fatal(err)
-			}
-			return NewWorkflowInstanceStore(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+			runlifecyclefixture.RequirePostgres(t, testAuthorActivityContext(t, context.Background()), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
+			return newPostgresWorkflowInstanceStoreForTest(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 		}},
 	}
 	for _, tc := range tests {

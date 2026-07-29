@@ -11,7 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -256,11 +256,7 @@ func (s *WorkflowInstanceStore) CompleteActivityAttempt(ctx context.Context, rec
 }
 
 func requireActiveActivityRun(ctx context.Context, tx *sql.Tx, runID string, sqlite bool) error {
-	dialect := storerunlifecycle.DialectPostgres
-	if sqlite {
-		dialect = storerunlifecycle.DialectSQLite
-	}
-	return storerunlifecycle.RequireActive(ctx, tx, runID, dialect)
+	return runtimerunlifecycle.RequireActive(ctx, runID)
 }
 
 func (s *WorkflowInstanceStore) MarkActivityAttemptUncertain(ctx context.Context, rec ActivityAttemptRecord) (ActivityAttemptRecord, error) {

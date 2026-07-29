@@ -28,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -777,12 +778,14 @@ func TestReplayEventFromOriginalUsesCanonicalEventEntityOnly(t *testing.T) {
 
 func seedCompleteReplayRun(t testing.TB, ctx context.Context, db *sql.DB, sqlite bool, runID string, startedAt time.Time) {
 	t.Helper()
-	query := `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
 	if sqlite {
-		query = `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
-	}
-	if _, err := db.ExecContext(ctx, query, runID, startedAt); err != nil {
-		t.Fatalf("seed complete replay run: %v", err)
+		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+			RunID: runID, StartedAt: startedAt,
+		})
+	} else {
+		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+			RunID: runID, StartedAt: startedAt,
+		})
 	}
 }
 
@@ -942,6 +945,7 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 		bus := eventReplayTestBus(t, pg)
 		eventID := uuid.NewString()
 		runID := uuid.NewString()
+		seedCompleteReplayRun(t, ctx, db, false, runID, time.Now().UTC())
 		nodeOnlyEvent := eventtest.PersistedProjection(
 			eventID,
 			events.EventType("scan.requested"),
@@ -1316,6 +1320,7 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 	t.Helper()
 	eventID := uuid.NewString()
 	runID := uuid.NewString()
+	storetest.RequirePostgresRun(t, ctx, pg.DB, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	semanticEvent := eventtest.PersistedProjection(
 		eventID,
 		events.EventType(eventName),

@@ -894,34 +894,6 @@ func (pc *PipelineCoordinator) workflowNodeDeliveryRouteMatches(ctx context.Cont
 	return pc.workflowNodeMatchesDeliveryTarget(nodeID, eventTarget)
 }
 
-func (pc *PipelineCoordinator) convergeWorkflowNodeNormalRunCompletion(ctx context.Context, nodeID string, evt events.Event) {
-	if pc == nil || pc.bus == nil {
-		return
-	}
-	eventID := strings.TrimSpace(evt.ID())
-	if eventID == "" {
-		return
-	}
-	converger, ok := pc.bus.(systemNodeDeliveryRunCompletionConverger)
-	if !ok || converger == nil {
-		return
-	}
-	if err := converger.ConvergeDeliveryRunCompletion(ctx, evt); err != nil {
-		if logger, ok := pc.bus.(systemNodeRuntimeLogger); ok && logger != nil {
-			logger.LogRuntime(ctx, RuntimeLogEntry{
-				Level:     "error",
-				Message:   "Converging normal run completion after workflow node receipt failed",
-				Component: nodeID,
-				Action:    "delivery_run_completion_failed",
-				EventID:   eventID,
-				EventType: strings.TrimSpace(string(evt.Type())),
-				EntityID:  workflowEventEntityID(evt),
-				Failure:   pipelineDependencyFailure(err, "delivery_run_completion_failed", nodeID, "converge_delivery_run_completion"),
-			})
-		}
-	}
-}
-
 func (pc *PipelineCoordinator) workflowNodeMatchesDeliveryTarget(nodeID string, target events.RouteIdentity) bool {
 	target = target.Normalized()
 	if target.Empty() {

@@ -11,9 +11,11 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -31,7 +33,7 @@ func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
 	ctx := withStoreTestPersistedBundleSource(testAuthorActivityContextForBundle(bundleDeleteTestHash), bundleDeleteTestHash)
-	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
+	now := time.Now().UTC().Add(time.Minute)
 	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source) VALUES ('agent-a', 'bundle-delete', 'operator', 'regular', TRUE, 'authored')`); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
@@ -230,12 +232,11 @@ func TestPostgresStore_BundleDeleteFinalMutationSerializesConcurrentRunCreation(
 	}
 
 	runID := uuid.NewString()
-	if _, err := runCreationTx.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES ($1::uuid, 'running', $2, $3, now())
-	`, runID, bundleDeleteTestHash, storerunlifecycle.BundleSourcePersisted); err != nil {
-		t.Fatalf("insert concurrent run: %v", err)
-	}
+	requirePostgresRunFixtureInRawTxForTest(t, ctx, runCreationTx, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		RunID:        runID,
+		BundleHash:   bundleDeleteTestHash,
+		BundleSource: storerunlifecycle.BundleSourcePersisted,
+	})
 	if err := runCreationTx.Commit(); err != nil {
 		t.Fatalf("commit concurrent run: %v", err)
 	}
@@ -308,9 +309,9 @@ func seedBundleDeleteBundle(t *testing.T, ctx context.Context, pg *PostgresStore
 func seedBundleDeleteDelivery(t *testing.T, ctx context.Context, pg *PostgresStore, runID, agentID string) string {
 	t.Helper()
 	eventID := uuid.NewString()
-	event := eventtest.RunCreatingRootIngress(
+	event := eventtest.ExistingRunRootIngress(
 		eventID, events.EventType("bundle.delete.pending"), "test", "", []byte(`{}`), 0,
-		runID, "", events.EventEnvelope{}, time.Now().UTC(),
+		runID, events.EventEnvelope{}, time.Now().UTC(),
 	)
 	if err := commitSemanticEventFixtureWithAgents(ctx, pg, event, []string{agentID}); err != nil {
 		t.Fatalf("seed bundle delete delivery: %v", err)
@@ -325,28 +326,42 @@ func seedBundleDeleteRun(t *testing.T, ctx context.Context, pg *PostgresStore, r
 
 func seedBundleDeleteRunWithSource(t *testing.T, ctx context.Context, pg *PostgresStore, runID, status, bundleHash, bundleSource string) {
 	t.Helper()
-	if status == "forked" {
+	state, err := storerunlifecycle.ParseState(status)
+	if err != nil {
+		t.Fatalf("parse bundle delete run state %q: %v", status, err)
+	}
+	if bundleSource == storerunlifecycle.BundleSourceDeleted {
+		runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, pg.DB, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
+			RunID: runID, State: status, BundleHash: bundleHash, BundleSource: bundleSource,
+		})
+		return
+	}
+	if state == storerunlifecycle.StateForked {
 		continuedAsRunID := uuid.NewString()
-		if _, err := pg.DB.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at, ended_at)
-			VALUES ($1::uuid, 'completed', $2, $3, now(), now())
-		`, continuedAsRunID, bundleHash, bundleSource); err != nil {
-			t.Fatalf("seed bundle delete continuation run %s: %v", continuedAsRunID, err)
-		}
-		if _, err := pg.DB.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at, ended_at, continued_as_run_id)
-			VALUES ($1::uuid, $2, $3, $4, now(), now(), $5::uuid)
-		`, runID, status, bundleHash, bundleSource, continuedAsRunID); err != nil {
-			t.Fatalf("seed bundle delete run %s: %v", runID, err)
+		requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+			RunID: continuedAsRunID, State: storerunlifecycle.StateCompleted,
+			BundleHash: bundleHash, BundleSource: bundleSource,
+		})
+		requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+			RunID: runID, State: storerunlifecycle.StateRunning,
+			BundleHash: bundleHash, BundleSource: bundleSource,
+		})
+		if _, _, err := forkRunForTest(ctx, pg, storerunlifecycle.ForkSourceRequest{
+			RunID: runID, ContinuedAsRunID: continuedAsRunID, EndedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("fork bundle delete run %s: %v", runID, err)
 		}
 		return
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES ($1::uuid, $2, $3, $4, now())
-	`, runID, status, bundleHash, bundleSource); err != nil {
-		t.Fatalf("seed bundle delete run %s: %v", runID, err)
+	var failure *runtimefailures.Envelope
+	if state == storerunlifecycle.StateFailed {
+		value := testFailureEnvelope(runtimefailures.ClassInternalFailure, "bundle_delete_fixture_failed", nil)
+		failure = &value
 	}
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		RunID: runID, State: state, BundleHash: bundleHash,
+		BundleSource: bundleSource, Failure: failure,
+	})
 }
 
 func assertBundleDeleteRunBundle(t *testing.T, ctx context.Context, pg *PostgresStore, runID, wantStatus, wantSource, wantHash string) {

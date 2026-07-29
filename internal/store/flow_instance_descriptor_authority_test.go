@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -226,12 +227,12 @@ func seedFlowInstanceDescriptorAuthorityCase(
 	stagedEntityID := uuid.NewString()
 	if sqlite {
 		now := time.Now().UTC()
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-			VALUES (?, 'running', ?, ?, ?), (?, 'running', ?, ?, ?)
-		`, runID, now, bundleHash, bundleSource, wrongRunID, now, bundleHash, bundleSource); err != nil {
-			t.Fatalf("seed sqlite runs: %v", err)
-		}
+		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+			RunID: runID, StartedAt: now, BundleHash: bundleHash, BundleSource: bundleSource,
+		})
+		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+			RunID: wrongRunID, StartedAt: now, BundleHash: bundleHash, BundleSource: bundleSource,
+		})
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 			VALUES
@@ -269,12 +270,12 @@ func seedFlowInstanceDescriptorAuthorityCase(
 		return
 	}
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', now(), $2, $3), ($4::uuid, 'running', now(), $2, $3)
-	`, runID, bundleHash, bundleSource, wrongRunID); err != nil {
-		t.Fatalf("seed postgres runs: %v", err)
-	}
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+		RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource,
+	})
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+		RunID: wrongRunID, BundleHash: bundleHash, BundleSource: bundleSource,
+	})
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 		VALUES

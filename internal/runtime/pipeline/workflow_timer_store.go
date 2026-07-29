@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runforkrevision"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 const (
@@ -311,9 +312,17 @@ func (s *WorkflowInstanceStore) listWorkflowTimerActivations(ctx context.Context
 	query := workflowTimerActivationSelect(true, s.isSQLite())
 	runID = strings.TrimSpace(runID)
 	entityID = strings.TrimSpace(entityID)
-	args := []any{runID, entityID}
+	activeStates := runtimerunlifecycle.ActiveStates()
+	args := []any{runID, entityID, string(activeStates[0]), string(activeStates[1])}
 	if s.isSQLite() {
-		args = []any{runID, runID, entityID, entityID}
+		args = []any{
+			runID,
+			runID,
+			entityID,
+			entityID,
+			string(activeStates[0]),
+			string(activeStates[1]),
+		}
 	}
 	if activeOnly {
 		query += " AND t.status = 'active'"
@@ -354,11 +363,11 @@ func workflowTimerActivationSelect(list bool, sqlite bool) string {
 	}
 	if list {
 		if sqlite {
-			where = "(? = '' OR t.run_id = ?) AND (? = '' OR t.entity_id = ?) AND t.task_type = 'workflow_timer' AND run.status IN ('running', 'paused')"
+			where = "(? = '' OR t.run_id = ?) AND (? = '' OR t.entity_id = ?) AND t.task_type = 'workflow_timer' AND run.status IN (?, ?)"
 			// Duplicate run/entity arguments are expanded by the caller below.
 			return workflowTimerSelectColumns() + " WHERE " + where
 		}
-		where = "(NULLIF($1, '') IS NULL OR t.run_id = NULLIF($1, '')::uuid) AND (NULLIF($2, '') IS NULL OR t.entity_id = NULLIF($2, '')::uuid) AND t.task_type = 'workflow_timer' AND run.status IN ('running', 'paused')"
+		where = "(NULLIF($1, '') IS NULL OR t.run_id = NULLIF($1, '')::uuid) AND (NULLIF($2, '') IS NULL OR t.entity_id = NULLIF($2, '')::uuid) AND t.task_type = 'workflow_timer' AND run.status IN ($3, $4)"
 	} else {
 		where += " AND t.task_type = 'workflow_timer'"
 	}
@@ -467,6 +476,9 @@ func (s *WorkflowInstanceStore) cancelWorkflowTimerActivation(ctx context.Contex
 	if err := declarePipelineRunForkRevisionChange(ctx, activation.RunID, runforkrevision.FamilyTimers); err != nil {
 		return WorkflowTimerActivation{}, false, err
 	}
+	if err := s.requestRunCompletionCandidate(ctx, activation.RunID); err != nil {
+		return WorkflowTimerActivation{}, false, err
+	}
 	activation.Status = workflowTimerStatusCancelled
 	return activation, true, nil
 }
@@ -517,6 +529,11 @@ func (s *WorkflowInstanceStore) completeWorkflowTimerOccurrence(ctx context.Cont
 	}
 	if err := declarePipelineRunForkRevisionChange(ctx, activation.RunID, runforkrevision.FamilyTimers); err != nil {
 		return WorkflowTimerActivation{}, err
+	}
+	if !activation.Recurring {
+		if err := s.requestRunCompletionCandidate(ctx, activation.RunID); err != nil {
+			return WorkflowTimerActivation{}, err
+		}
 	}
 	next.Status = nextStatus
 	return next.normalized(), nil

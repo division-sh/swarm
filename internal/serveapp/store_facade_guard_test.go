@@ -58,7 +58,7 @@ func selectedStoreFacadeProducerBackendReferences(path, body string) []string {
 			"store.NewSQLiteRuntimeStore",
 		},
 		filepath.Join("internal", "serveapp", "store_facade.go"): {
-			"SQLDB:               s.RuntimeSQLDB",
+			"s.RuntimeSQLDB",
 			"f.stores.SQLDB == nil",
 			"f.stores.SQLDB.Close()",
 			"return f.stores.SQLDB",

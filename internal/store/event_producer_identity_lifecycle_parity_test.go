@@ -61,6 +61,9 @@ func TestEventProducerIdentityPersistenceToReadbackParity(t *testing.T) {
 				envelope,
 				createdAt,
 			)
+			requireRunFixtureForTest(t, ctx, fixture.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+				RunID: runID, StartedAt: createdAt.Add(-time.Second),
+			})
 			if err := commitSemanticParentFixture(ctx, surface, runID, parentID, createdAt.Add(-time.Microsecond)); err != nil {
 				t.Fatalf("persist source parent: %v", err)
 			}
@@ -241,6 +244,11 @@ func loadEventProducerIdentityRecord(ctx context.Context, fixture authorActivity
 func insertProducerIdentityDecisionObligation(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context, eventID, runID string, at time.Time) {
 	t.Helper()
 	cardID := uuid.NewString()
+	anchor := fmt.Sprintf(
+		`{"flow_instance":"review/fixture","flow_id":"review","entity_id":%q,"stage":"review","stage_activation_id":%q}`,
+		eventID,
+		cardID,
+	)
 	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
 		if _, err := fixture.db.ExecContext(ctx, `
 			INSERT INTO decision_cards (
@@ -249,11 +257,11 @@ func insertProducerIdentityDecisionObligation(t *testing.T, fixture authorActivi
 				provenance, verdict, fields, decided_by, decided_at, decision_event_id,
 				created_at, updated_at
 			) VALUES (
-				$1::uuid, $2::uuid, 'stage_gate', '{}'::jsonb, 'decided', 'live', '{}'::jsonb,
-				'card-hash', 'schema-hash', 'bundle-hash', '{}'::jsonb,
-				'{}'::jsonb, 'approve', '{}'::jsonb, 'test', $3, $4::uuid, $3, $3
-			)
-		`, cardID, runID, at.UTC(), eventID); err != nil {
+					$1::uuid, $2::uuid, 'stage_gate', $3::jsonb, 'decided', 'live', '{}'::jsonb,
+					'card-hash', 'schema-hash', 'bundle-hash', '{}'::jsonb,
+					'{}'::jsonb, 'approve', '{}'::jsonb, 'test', $4, $5::uuid, $4, $4
+				)
+			`, cardID, runID, anchor, at.UTC(), eventID); err != nil {
 			t.Fatalf("insert postgres decision card: %v", err)
 		}
 		if _, err := fixture.db.ExecContext(ctx, `
@@ -271,10 +279,10 @@ func insertProducerIdentityDecisionObligation(t *testing.T, fixture authorActivi
 			card_content_hash, decision_schema_hash, bundle_hash, effective_cadence,
 			provenance, verdict, fields, decided_by, decided_at, decision_event_id,
 			created_at, updated_at
-		) VALUES (?, ?, 'stage_gate', '{}', 'decided', 'live', '{}',
-			'card-hash', 'schema-hash', 'bundle-hash', '{}', '{}', 'approve', '{}',
-			'test', ?, ?, ?, ?)
-	`, cardID, runID, at.UTC(), eventID, at.UTC(), at.UTC()); err != nil {
+			) VALUES (?, ?, 'stage_gate', ?, 'decided', 'live', '{}',
+				'card-hash', 'schema-hash', 'bundle-hash', '{}', '{}', 'approve', '{}',
+				'test', ?, ?, ?, ?)
+		`, cardID, runID, anchor, at.UTC(), eventID, at.UTC(), at.UTC()); err != nil {
 		t.Fatalf("insert sqlite decision card: %v", err)
 	}
 	if _, err := fixture.db.ExecContext(ctx, `
@@ -300,6 +308,9 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 		sourceEventID, events.EventType("test.node_emitted"), producer, "event-owned-task",
 		[]byte(`{"task_id":"payload-owned-task"}`), 2, sourceRunID, parentID, sourceEnvelope, createdAt,
 	), executionmode.Mock)
+	requireRunFixtureForTest(t, ctx, fixture.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		RunID: sourceRunID, StartedAt: createdAt.Add(-time.Second),
+	})
 	if err := commitSemanticParentFixture(ctx, surface, sourceRunID, parentID, createdAt.Add(-time.Microsecond)); err != nil {
 		t.Fatalf("persist source parent: %v", err)
 	}

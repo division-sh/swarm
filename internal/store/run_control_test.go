@@ -18,9 +18,7 @@ func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testin
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	event := seedPostgresSemanticEventRecordFixture(
 		t, ctx, db, eventID, runID, events.EventType("custom.stop"),
 		events.EventProducerPlatform, "test", "", "", time.Now().UTC(),
@@ -112,9 +110,7 @@ func TestPostgresStore_RunControlContinueRequiresOperatorPauseOwner(t *testing.T
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'paused', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed paused run: %v", err)
-	}
+	requirePausedRunForTest(t, ctx, pg, runID, time.Now().UTC())
 	if _, err := pg.ContinueRunControl(ctx, runtimeruncontrol.TransitionRequest{RunID: runID}); !errors.Is(err, runtimeruncontrol.ErrNotPaused) {
 		t.Fatalf("ContinueRunControl without operator pause owner err = %v, want ErrNotPaused", err)
 	}

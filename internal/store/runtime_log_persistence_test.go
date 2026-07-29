@@ -14,7 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -86,12 +86,7 @@ func TestSQLiteRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t *
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, time.Now().UTC()); err != nil {
-		t.Fatalf("seed sqlite run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC()})
 
 	envelope := computeModuleReplayEvidenceTestEnvelope()
 	detail := computemodule.NewReplayEvidenceDetail([]computemodule.ReplayEnvelope{envelope})
@@ -132,12 +127,7 @@ func TestPostgresRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t
 	defer cleanup()
 	pg := newTestPostgresStore(t, db)
 	runID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', NOW(), 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID); err != nil {
-		t.Fatalf("seed postgres run: %v", err)
-	}
+	requireRunningRunForTest(t, ctx, pg, runID, time.Now().UTC())
 	envelope := computeModuleReplayEvidenceTestEnvelope()
 	detail := computemodule.NewReplayEvidenceDetail([]computemodule.ReplayEnvelope{envelope})
 	detail["component"] = "compute_module"
@@ -198,12 +188,7 @@ func TestSQLiteRuntimeLogSourceProjectionAndFilterParity(t *testing.T) {
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 
-	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, time.Now().UTC()); err != nil {
-		t.Fatalf("seed sqlite run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC()})
 	direct := eventtest.DiagnosticDirect(
 		uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "",
 		json.RawMessage(`{"log_level":"warn","message":"direct fallback source","details":{"component":"source-parity","action":"direct_runtime_source"}}`),

@@ -19,7 +19,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -105,6 +105,7 @@ type terminalEventAdmissionState struct {
 }
 
 type terminalEventAdmissionHarness struct {
+	statuses         []string
 	append           func(context.Context, events.Event) error
 	appendTx         func(context.Context, events.Event) error
 	appendDiagnostic func(context.Context, events.Event) error
@@ -130,6 +131,7 @@ type runtimeLogStatusState struct {
 }
 
 type runtimeLogStatusHarness struct {
+	statuses       []string
 	appendOrdinary func(context.Context, events.Event) error
 	transition     func(context.Context, string, string, string) error
 	persistLog     func(context.Context, runtimepkg.RuntimeLogPersistenceRecord) error
@@ -138,23 +140,22 @@ type runtimeLogStatusHarness struct {
 
 type terminalAdmissionCompletionOwner interface {
 	PipelineObligations() runtimepipelineobligation.Store
-	ConvergeNormalRunCompletion(context.Context, string, []string, map[string][]string) error
 }
 
-func seedCanonicalForkedRunForAdmissionTest(ctx context.Context, db *sql.DB, postgres bool, runID string) error {
+func seedCanonicalForkedRunForAdmissionTest(ctx context.Context, selected any, runID string) error {
 	continuedAsRunID := uuid.NewString()
 	now := time.Now().UTC()
-	if postgres {
-		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, ended_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'completed', $2, $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, continuedAsRunID, now); err != nil {
-			return err
-		}
-		_, err := db.ExecContext(ctx, `UPDATE runs SET status = 'forked', ended_at = $2, continued_as_run_id = $3::uuid WHERE run_id = $1::uuid`, runID, now, continuedAsRunID)
+	if err := materializeRunFixtureForTest(ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		RunID: continuedAsRunID,
+		State: storerunlifecycle.StateCompleted,
+	}); err != nil {
 		return err
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, ended_at, bundle_hash, bundle_source) VALUES (?, 'completed', ?, ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, continuedAsRunID, now, now); err != nil {
-		return err
-	}
-	_, err := db.ExecContext(ctx, `UPDATE runs SET status = 'forked', ended_at = ?, continued_as_run_id = ? WHERE run_id = ?`, now, continuedAsRunID, runID)
+	_, _, err := forkRunForTest(ctx, selected, storerunlifecycle.ForkSourceRequest{
+		RunID:            runID,
+		ContinuedAsRunID: continuedAsRunID,
+		EndedAt:          now,
+	})
 	return err
 }
 
@@ -195,7 +196,7 @@ func convergeTerminalAdmissionRun(
 	if err := owner.PipelineObligations().Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
 		return fmt.Errorf("settle terminal completion event: %w", err)
 	}
-	if err := owner.ConvergeNormalRunCompletion(ctx, eventID, nil, map[string][]string{"terminal-admission": {"done"}}); err != nil {
+	if err := executeRunCompletionCandidateForEvent(ctx, owner, eventID, nil, map[string][]string{"terminal-admission": {"done"}}); err != nil {
 		return fmt.Errorf("converge terminal completion run: %w", err)
 	}
 	return nil
@@ -205,6 +206,7 @@ func TestPostgresTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	harness := terminalEventAdmissionHarness{
+		statuses: []string{"completed", "cancelled", "failed", "forked"},
 		append: func(ctx context.Context, evt events.Event) error {
 			return commitSemanticEventFixture(ctx, pg, evt)
 		},
@@ -215,13 +217,13 @@ func TestPostgresTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 		},
 		markTerminal: func(ctx context.Context, runID, eventID, status string) error {
 			if status == "forked" {
-				return seedCanonicalForkedRunForAdmissionTest(ctx, db, true, runID)
+				return seedCanonicalForkedRunForAdmissionTest(ctx, pg, runID)
 			}
 			if status == "completed" {
 				return convergeTerminalAdmissionRun(ctx, db, true, pg, runID, eventID)
 			}
 			failure := terminalEventAdmissionFailure(status)
-			_, err := pg.MarkRunTerminal(ctx, runID, status, failure, time.Now().UTC())
+			_, err := markRunTerminalStatusForTest(ctx, pg, runID, status, failure, time.Now().UTC())
 			return err
 		},
 		loadState: func(ctx context.Context, runID, eventID string) (terminalEventAdmissionState, error) {
@@ -251,6 +253,7 @@ func TestPostgresTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 func TestSQLiteTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	harness := terminalEventAdmissionHarness{
+		statuses: []string{"completed", "cancelled", "failed"},
 		append: func(ctx context.Context, evt events.Event) error {
 			return commitSemanticEventFixture(ctx, sqliteStore, evt)
 		},
@@ -261,13 +264,13 @@ func TestSQLiteTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 		},
 		markTerminal: func(ctx context.Context, runID, eventID, status string) error {
 			if status == "forked" {
-				return seedCanonicalForkedRunForAdmissionTest(ctx, sqliteStore.DB, false, runID)
+				return seedCanonicalForkedRunForAdmissionTest(ctx, sqliteStore, runID)
 			}
 			if status == "completed" {
 				return convergeTerminalAdmissionRun(ctx, sqliteStore.DB, false, sqliteStore, runID, eventID)
 			}
 			failure := terminalEventAdmissionFailure(status)
-			_, err := sqliteStore.MarkRunTerminal(ctx, runID, status, failure, time.Now().UTC())
+			_, err := markRunTerminalStatusForTest(ctx, sqliteStore, runID, status, failure, time.Now().UTC())
 			return err
 		},
 		loadState: func(ctx context.Context, runID, eventID string) (terminalEventAdmissionState, error) {
@@ -298,6 +301,7 @@ func TestPostgresRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := newTestPostgresStore(t, db)
 	assertRuntimeLogAdmissionPreservesEveryRunStatus(t, runtimeLogStatusHarness{
+		statuses: []string{"running", "paused", "completed", "cancelled", "failed", "forked"},
 		appendOrdinary: func(ctx context.Context, evt events.Event) error {
 			return commitSemanticEventFixture(ctx, store, evt)
 		},
@@ -318,10 +322,10 @@ func TestPostgresRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 			case "completed":
 				return convergeTerminalAdmissionRun(ctx, db, true, store, runID, eventID)
 			case "forked":
-				return seedCanonicalForkedRunForAdmissionTest(ctx, db, true, runID)
+				return seedCanonicalForkedRunForAdmissionTest(ctx, store, runID)
 			default:
 				failure := terminalEventAdmissionFailure(status)
-				_, err := store.MarkRunTerminal(ctx, runID, status, failure, time.Now().UTC())
+				_, err := markRunTerminalStatusForTest(ctx, store, runID, status, failure, time.Now().UTC())
 				return err
 			}
 		},
@@ -383,6 +387,7 @@ func TestPostgresRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 func TestSQLiteRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	assertRuntimeLogAdmissionPreservesEveryRunStatus(t, runtimeLogStatusHarness{
+		statuses: []string{"running", "paused", "completed", "cancelled", "failed"},
 		appendOrdinary: func(ctx context.Context, evt events.Event) error {
 			return commitSemanticEventFixture(ctx, store, evt)
 		},
@@ -403,10 +408,10 @@ func TestSQLiteRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 			case "completed":
 				return convergeTerminalAdmissionRun(ctx, store.DB, false, store, runID, eventID)
 			case "forked":
-				return seedCanonicalForkedRunForAdmissionTest(ctx, store.DB, false, runID)
+				return seedCanonicalForkedRunForAdmissionTest(ctx, store, runID)
 			default:
 				failure := terminalEventAdmissionFailure(status)
-				_, err := store.MarkRunTerminal(ctx, runID, status, failure, time.Now().UTC())
+				_, err := markRunTerminalStatusForTest(ctx, store, runID, status, failure, time.Now().UTC())
 				return err
 			}
 		},
@@ -468,7 +473,7 @@ func TestSQLiteRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 func assertRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T, harness runtimeLogStatusHarness) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
-	for _, status := range []string{"running", "paused", "completed", "cancelled", "failed", "forked"} {
+	for _, status := range harness.statuses {
 		status := status
 		t.Run(status, func(t *testing.T) {
 			runID := uuid.NewString()
@@ -550,7 +555,7 @@ func TestJSONSemanticallyEqualPreservesExactNumbers(t *testing.T) {
 func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHarness) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
-	for _, status := range []string{"completed", "cancelled", "failed", "forked"} {
+	for _, status := range harness.statuses {
 		status := status
 		t.Run(status, func(t *testing.T) {
 			runID := uuid.NewString()
@@ -604,7 +609,7 @@ func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHa
 		})
 	}
 
-	for _, status := range []string{"completed", "cancelled", "failed", "forked"} {
+	for _, status := range harness.statuses {
 		status := status
 		for name, persist := range harness.persistVariants {
 			name, persist := name, persist

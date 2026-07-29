@@ -35,7 +35,7 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 			setup: func(t *testing.T) (*PipelineCoordinator, context.Context, *recordingPipelineBus, *recordingScheduleStore, *recordingMailboxWriteMaterializer) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				pc := newExactOnceCoordinator(t, db, NewWorkflowInstanceStore(db))
+				pc := newExactOnceCoordinator(t, db, newPostgresWorkflowInstanceStoreForTest(db))
 				return pc, testPipelineCoordinatorRunContext(t, pc), nil, nil, nil
 			},
 		},
@@ -130,7 +130,7 @@ func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *te
 			setup: func(t *testing.T) (*PipelineCoordinator, context.Context) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				pc := newExactOnceCoordinator(t, db, NewWorkflowInstanceStore(db))
+				pc := newExactOnceCoordinator(t, db, newPostgresWorkflowInstanceStoreForTest(db))
 				return pc, testPipelineCoordinatorRunContext(t, pc)
 			},
 		},

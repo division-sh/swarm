@@ -11,6 +11,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/runbundle"
 	"github.com/lib/pq"
 )
@@ -98,7 +99,7 @@ func (s *PostgresStore) applyPreservationCleanup(ctx context.Context, req preser
 	if err != nil {
 		return preservationcleanup.Result{}, err
 	}
-	ctx = storyctx
+	ctx = s.bindRunLifecycleMutation(storyctx, tx)
 
 	runs, err := lockUnavailableBundlePreservationRunsTx(ctx, tx, runIDs)
 	if err != nil {
@@ -212,7 +213,9 @@ func (s *PostgresStore) applyPreservationCleanup(ctx context.Context, req preser
 	}
 	for _, run := range runs {
 		target := targetByRun[run.RunID]
-		if err := markUnavailableBundlePreservationRunTx(ctx, tx, run.RunID, now); err != nil {
+		if _, _, err := runtimerunlifecycle.MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
+			RunID: run.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: now,
+		}); err != nil {
 			return preservationcleanup.Result{}, err
 		}
 		if err := upsertActiveRunQuiescenceRunControlTx(ctx, tx, run.RunID, target.ReasonCode, controlledBy, now); err != nil {
@@ -353,21 +356,6 @@ func cancelUnavailableBundlePreservationTimerTx(ctx context.Context, tx *sql.Tx,
 		  AND status = 'active'
 	`, timerID); err != nil {
 		return fmt.Errorf("cancel unavailable bundle preservation timer %s: %w", timerID, err)
-	}
-	return nil
-}
-
-func markUnavailableBundlePreservationRunTx(ctx context.Context, tx *sql.Tx, runID string, at time.Time) error {
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE runs
-		SET
-			status = 'cancelled',
-			failure = NULL,
-			ended_at = COALESCE(ended_at, $2)
-		WHERE run_id = $1::uuid
-		  AND lower(COALESCE(status, '')) IN ('running', 'paused')
-	`, runID, at.UTC()); err != nil {
-		return fmt.Errorf("mark unavailable bundle preservation run %s: %w", runID, err)
 	}
 	return nil
 }

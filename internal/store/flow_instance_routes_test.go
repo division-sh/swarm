@@ -23,8 +23,13 @@ func seedFlowRouteTestAuthority(t *testing.T, ctx context.Context, exec flowRout
 	t.Helper()
 	runID := uuid.NewString()
 	if postgres {
-		if _, err := exec.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', now(), 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-			t.Fatalf("seed flow route run: %v", err)
+		switch selected := exec.(type) {
+		case *sql.DB:
+			requireRunningPostgresRunForTest(t, ctx, selected, runID, time.Now().UTC())
+		case *sql.Tx:
+			requirePostgresRunFixtureInRawTxForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+		default:
+			t.Fatalf("seed flow route run requires PostgreSQL lifecycle owner, got %T", exec)
 		}
 		for _, flowInstance := range flowInstances {
 			if _, err := exec.ExecContext(ctx, `INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'flow-route-test', 'active', '{}'::jsonb, now(), now())`, uuid.NewString(), runID, flowInstance); err != nil {
@@ -33,8 +38,13 @@ func seedFlowRouteTestAuthority(t *testing.T, ctx context.Context, exec flowRout
 		}
 	} else {
 		now := time.Now().UTC()
-		if _, err := exec.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, now); err != nil {
-			t.Fatalf("seed sqlite flow route run: %v", err)
+		switch selected := exec.(type) {
+		case *sql.DB:
+			requireRunningSQLiteRunForTest(t, ctx, selected, runID, now)
+		case *sql.Tx:
+			requireSQLiteRunFixtureInRawTxForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
+		default:
+			t.Fatalf("seed flow route run requires SQLite lifecycle owner, got %T", exec)
 		}
 		for _, flowInstance := range flowInstances {
 			if _, err := exec.ExecContext(ctx, `INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at) VALUES (?, ?, ?, 'flow-route-test', 'active', '{}', ?, ?)`, uuid.NewString(), runID, flowInstance, now, now); err != nil {
@@ -698,12 +708,10 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(
 	`); err != nil {
 		t.Fatalf("seed flow_instances: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'), ('44444444-4444-4444-8444-444444444444'::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID); err != nil {
-		t.Fatalf("seed runs: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		RunID: "44444444-4444-4444-8444-444444444444",
+	})
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO flow_instance_runtime_readiness (run_id, instance_id, plan, created_at, updated_at)
 		VALUES ($1::uuid, 'component-scaffold/active', '{"workflow_version":"1.0.0"}'::jsonb, NOW(), NOW())
@@ -776,12 +784,7 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsReadsPipelineTransaction(
 		t.Fatalf("BeginTx: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID); err != nil {
-		t.Fatalf("seed run in tx: %v", err)
-	}
+	requirePostgresRunFixtureInRawTxForTest(t, ctx, tx, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 		VALUES ('component-scaffold/uncommitted', 'component-scaffold', 'template', '{}'::jsonb, 'active', NOW())

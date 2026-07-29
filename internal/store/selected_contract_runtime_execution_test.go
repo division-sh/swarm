@@ -16,6 +16,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -402,7 +403,9 @@ func TestSelectedForkCompletionAuthorityCleanupPreservesEvidencePostgres(t *test
 	if err := store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); err != nil {
 		t.Fatalf("close selected completion authority: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE runs SET status=$2 WHERE run_id=$1::uuid`, fixture.forkRun, RunForkMaterializedStatus); err != nil {
+	if _, err := transitionRunForTest(ctx, store, runtimerunlifecycle.ActiveTransitionRequest{
+		RunID: fixture.forkRun, State: runtimerunlifecycle.StatePaused,
+	}); err != nil {
 		t.Fatalf("mark selected fork materialized for cleanup: %v", err)
 	}
 	assertSelectedCompletionEvidencePresent(t, db, "pre-cleanup fork revision", `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1::uuid`, fixture.forkRun)
@@ -455,7 +458,9 @@ func TestSelectedForkDiscardDeletesClaimedAndSettledDeliveryHistoryPostgres(t *t
 	if claimed.Claim.DeliveryID() == "" {
 		t.Fatal("claimed selected-fork delivery has no durable identity")
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE runs SET status=$2 WHERE run_id=$1::uuid`, fixture.forkRun, RunForkMaterializedStatus); err != nil {
+	if _, err := transitionRunForTest(ctx, store, runtimerunlifecycle.ActiveTransitionRequest{
+		RunID: fixture.forkRun, State: runtimerunlifecycle.StatePaused,
+	}); err != nil {
 		t.Fatalf("mark selected fork materialized: %v", err)
 	}
 	if err := store.DiscardMaterializedSelectedContractExecutionFork(ctx, fixture.forkRun); err != nil {
@@ -480,7 +485,7 @@ func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing
 	_, db, _ := testutil.StartPostgres(t)
 	store := admitTestPostgresStore(t, db)
 	fixture := newSelectedCompletionFixture(t, store, db, false)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
 	defer cancel()
 
 	issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
@@ -490,7 +495,9 @@ func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing
 	seedEventID := uuid.NewString()
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, seedEventID, fixture.forkRun, "selected.discard.seed", events.EventProducerPlatform, "selected-discard", "", "", time.Now().UTC())
 	firstRevision := captureRunForkTestRevision(t, db, fixture.forkRun, runforkrevision.FamilyEvents)
-	if _, err := db.ExecContext(ctx, `UPDATE runs SET status=$2 WHERE run_id=$1::uuid`, fixture.forkRun, RunForkMaterializedStatus); err != nil {
+	if _, err := transitionRunForTest(ctx, store, runtimerunlifecycle.ActiveTransitionRequest{
+		RunID: fixture.forkRun, State: runtimerunlifecycle.StatePaused,
+	}); err != nil {
 		t.Fatalf("mark selected fork materialized: %v", err)
 	}
 
@@ -513,7 +520,7 @@ func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing
 	go func() {
 		discardDone <- store.DiscardMaterializedSelectedContractExecutionFork(ctx, fixture.forkRun)
 	}()
-	waitForPostgresQueryLock(t, ctx, db, "SELECT status FROM runs WHERE run_id = $1::uuid FOR UPDATE")
+	waitForPostgresQueryLock(t, ctx, db, "SELECT run_id::text, status, bundle_hash, bundle_source")
 
 	var status string
 	var committedRevisionRows int
@@ -600,22 +607,20 @@ func TestSelectedForkDiscardRejectsLiveDependentForkPostgres(t *testing.T) {
 	forkRunID := uuid.NewString()
 	dependentRunID := uuid.NewString()
 	forkEventID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id,status,started_at, bundle_hash, bundle_source) VALUES
-			($1::uuid,'running',$3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),
-			($2::uuid,'paused',$3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, sourceRunID, forkRunID, now); err != nil {
-		t.Fatalf("seed selected fork lineage: %v", err)
-	}
+	requireRunningRunForTest(t, ctx, store, sourceRunID, now)
+	requirePausedRunForTest(t, ctx, store, forkRunID, now)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, forkEventID, forkRunID, "fork.dependency", events.EventProducerPlatform, "selected-discard", "", "", now)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id,status,started_at,forked_from_run_id,forked_from_event_id, bundle_hash, bundle_source)
-		VALUES ($1::uuid,'paused',$4,$2::uuid,$3::uuid, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, dependentRunID, forkRunID, forkEventID, now); err != nil {
-		t.Fatalf("seed dependent fork: %v", err)
+	captureRunForkTestRevision(t, db, forkRunID, runforkrevision.FamilyEvents)
+	dependent, err := store.MaterializeRunFork(ctx, RunForkMaterializeRequest{
+		SourceRunID: forkRunID,
+		At:          forkEventID,
+	})
+	if err != nil {
+		t.Fatalf("materialize dependent fork: %v", err)
 	}
+	dependentRunID = dependent.ForkRunID
 
-	err := store.DiscardMaterializedSelectedContractExecutionFork(ctx, forkRunID)
+	err = store.DiscardMaterializedSelectedContractExecutionFork(ctx, forkRunID)
 	if err == nil || !strings.Contains(err.Error(), dependentRunID) {
 		t.Fatalf("discard error = %v, want dependent fork %s", err, dependentRunID)
 	}
@@ -709,15 +714,8 @@ func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorit
 		t.Fatal("selected completion fixture store has no author activity catalog")
 	}
 	registerTestAuthorActivityCatalog(t, registrar)
-	if sqlite {
-		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at, bundle_hash, bundle_source) VALUES (?,'running',?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),(?,'paused',?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, sourceRun, now, forkRun, now); err != nil {
-			t.Fatalf("seed selected runs: %v", err)
-		}
-	} else {
-		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,started_at, bundle_hash, bundle_source) VALUES ($1::uuid,'running',$3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),($2::uuid,'paused',$3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, sourceRun, forkRun, now); err != nil {
-			t.Fatalf("seed selected runs: %v", err)
-		}
-	}
+	requireRunningRunForTest(t, ctx, store, sourceRun, now)
+	requirePausedRunForTest(t, ctx, store, forkRun, now)
 	eventStore, ok := any(store).(semanticEventFixtureStore)
 	if !ok {
 		t.Fatal("selected completion fixture store has no event commit owner")

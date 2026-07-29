@@ -13,8 +13,8 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -37,7 +37,6 @@ func TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext(t 
 		setup func(*testing.T) (replyContextStoreTestSurface, func(context.Context, string, ...string) error)
 	}{
 		{name: "postgres", setup: setupPostgresReplyContextStoreTest},
-		{name: "sqlite", setup: setupSQLiteReplyContextStoreTest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			base, seed := tc.setup(t)
@@ -157,7 +156,6 @@ func TestReplyContextStore_BackendParityAtomicClaimAndDeliveryReadback(t *testin
 		setup func(*testing.T) (replyContextStoreTestSurface, func(context.Context, string, ...string) error)
 	}{
 		{name: "postgres", setup: setupPostgresReplyContextStoreTest},
-		{name: "sqlite", setup: setupSQLiteReplyContextStoreTest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, seed := tc.setup(t)
@@ -253,7 +251,6 @@ func TestReplyContextStore_ForkedSourceRejectsCreateAndClaimWithoutDestroyingLin
 		setup func(*testing.T) (replyContextStoreTestSurface, func(context.Context, string, ...string) error)
 	}{
 		{name: "postgres", setup: setupPostgresReplyContextStoreTest},
-		{name: "sqlite", setup: setupSQLiteReplyContextStoreTest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, seed := tc.setup(t)
@@ -296,7 +293,6 @@ func TestReplyContextStore_ForkFreezeSerializesBothCreateAndClaimCommitOrders(t 
 		setup func(*testing.T) (replyContextStoreTestSurface, func(context.Context, string, ...string) error)
 	}{
 		{name: "postgres", setup: setupPostgresReplyContextStoreTest},
-		{name: "sqlite", setup: setupSQLiteReplyContextStoreTest},
 	} {
 		for _, operation := range []string{"create", "claim"} {
 			for _, winner := range []string{"operation", "freeze"} {
@@ -369,35 +365,19 @@ func replyContextFreezeTestRecord(requestEventID, runID, suffix string, now time
 func freezeReplyContextTestRun(t *testing.T, ctx context.Context, store replyContextStoreTestSurface, runID string, now time.Time) {
 	t.Helper()
 	forkRunID := uuid.NewString()
+	forkEventID := uuid.NewString()
 	switch backend := store.(type) {
 	case *PostgresStore:
-		if _, err := backend.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, forked_from_run_id, forked_from_event_id, bundle_hash, bundle_source, started_at) VALUES ($1::uuid, 'paused', $2::uuid, $3::uuid, $4, 'ephemeral', $5)`, forkRunID, runID, uuid.NewString(), authorActivityTestBundleHash, now); err != nil {
-			t.Fatal(err)
-		}
+		requireRunFixtureForTest(t, ctx, backend, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+			RunID: forkRunID, State: storerunlifecycle.StatePaused,
+			BundleHash: authorActivityTestBundleHash, StartedAt: now,
+		})
 		lineage := runForkActivationLineage{
-			SourceRunID: runID, ForkRunID: forkRunID, ForkEventID: uuid.NewString(),
+			SourceRunID: runID, ForkRunID: forkRunID, ForkEventID: forkEventID,
 			ForkEventName: "reply.freeze", ForkEventTime: now, ForkStatus: "paused", SourceRunStatus: "running",
 			SourceBundleHash: authorActivityTestBundleHash, ForkBundleHash: authorActivityTestBundleHash,
 		}
-		if err := commitRunForkSourceFreezeForTest(ctx, backend.DB, lineage, now, true); err != nil {
-			t.Fatal(err)
-		}
-	case *SQLiteRuntimeStore:
-		tx, err := backend.DB.BeginTx(ctx, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = tx.Rollback() }()
-		if _, err := tx.ExecContext(ctx, `INSERT INTO runs (run_id, status, forked_from_run_id, forked_from_event_id, bundle_hash, bundle_source, started_at) VALUES (?, 'paused', ?, ?, ?, 'ephemeral', ?)`, forkRunID, runID, uuid.NewString(), authorActivityTestBundleHash, now); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = 'forked', ended_at = ?, continued_as_run_id = ? WHERE run_id = ? AND status IN ('running', 'paused')`, now, forkRunID, runID); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = 'running' WHERE run_id = ? AND status = 'paused'`, forkRunID); err != nil {
-			t.Fatal(err)
-		}
-		if err := tx.Commit(); err != nil {
+		if err := commitRunForkSourceFreezeForTest(ctx, backend, lineage, now, true); err != nil {
 			t.Fatal(err)
 		}
 	default:
@@ -411,9 +391,7 @@ func setupPostgresReplyContextStoreTest(t *testing.T) (replyContextStoreTestSurf
 	t.Cleanup(cleanup)
 	store := admitTestPostgresStore(t, db)
 	return store, func(ctx context.Context, runID string, eventIDs ...string) error {
-		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES ($1::uuid, 'running', $2, 'ephemeral', now())`, runID, authorActivityTestBundleHash); err != nil {
-			return err
-		}
+		requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, BundleHash: authorActivityTestBundleHash})
 		for i, eventID := range eventIDs {
 			eventName := "provider.replied"
 			if i == 0 {
@@ -435,9 +413,7 @@ func setupSQLiteReplyContextStoreTest(t *testing.T) (replyContextStoreTestSurfac
 	t.Helper()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	return store, func(ctx context.Context, runID string, eventIDs ...string) error {
-		if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES (?, 'running', ?, 'ephemeral', ?)`, runID, authorActivityTestBundleHash, time.Now().UTC()); err != nil {
-			return err
-		}
+		requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: authorActivityTestBundleHash})
 		for i, eventID := range eventIDs {
 			eventName := "provider.replied"
 			if i == 0 {

@@ -3,6 +3,7 @@ package bus_test
 import (
 	"context"
 	"database/sql"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"sync"
 	"testing"
 	"time"
@@ -48,7 +49,7 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	}
 
 	pausedEventID := uuid.NewString()
-	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
+	if err := eb.Publish(ctx, eventtest.ExistingRunRootIngress(
 		pausedEventID,
 		eventType,
 		"api.v1",
@@ -56,7 +57,6 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 		[]byte(`{"entity_id":"21000000-0000-0000-0000-000000000002"}`),
 		0,
 		pausedRunID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "21000000-0000-0000-0000-000000000002"),
 		time.Now().UTC(),
 	)); err != nil {
@@ -68,7 +68,7 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	}
 
 	otherEventID := uuid.NewString()
-	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
+	if err := eb.Publish(ctx, eventtest.ExistingRunRootIngress(
 		otherEventID,
 		eventType,
 		"api.v1",
@@ -76,7 +76,6 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 		[]byte(`{"entity_id":"21000000-0000-0000-0000-000000000003"}`),
 		0,
 		otherRunID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "21000000-0000-0000-0000-000000000003"),
 		time.Now().UTC(),
 	)); err != nil {
@@ -91,8 +90,8 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	if err != nil {
 		t.Fatalf("Continue: %v", err)
 	}
-	if result.ReleasedDeliveries != 1 {
-		t.Fatalf("released deliveries = %d, want 1", result.ReleasedDeliveries)
+	if result.Recovery.Sweep.Settled != 1 {
+		t.Fatalf("released deliveries = %d, want 1", result.Recovery.Sweep.Settled)
 	}
 	got = requireBusEvent(t, ch, "paused run release")
 	if got.ID() != pausedEventID {
@@ -129,7 +128,7 @@ func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t 
 	}
 
 	eventID := uuid.NewString()
-	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
+	if err := eb.Publish(ctx, eventtest.ExistingRunRootIngress(
 		eventID,
 		eventType,
 		"api.v1",
@@ -137,7 +136,6 @@ func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t 
 		[]byte(`{"entity_id":"21000000-0000-0000-0000-000000000004"}`),
 		0,
 		runID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "21000000-0000-0000-0000-000000000004"),
 		time.Now().UTC(),
 	)); err != nil {
@@ -153,8 +151,8 @@ func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t 
 	if err != nil {
 		t.Fatalf("Continue: %v", err)
 	}
-	if result.ReleasedDeliveries != 0 {
-		t.Fatalf("released pipeline obligations = %d, want 0 for already acknowledged event", result.ReleasedDeliveries)
+	if result.Recovery.Sweep.Settled != 0 {
+		t.Fatalf("released pipeline obligations = %d, want 0 for already acknowledged event", result.Recovery.Sweep.Settled)
 	}
 	requireNoBusEvent(t, ch, "acknowledged event is not re-dispatched by the pipeline owner")
 }
@@ -192,7 +190,7 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 	}
 
 	queuedEventID := uuid.NewString()
-	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
+	if err := eb.Publish(ctx, eventtest.ExistingRunRootIngress(
 		queuedEventID,
 		eventType,
 		"api.v1",
@@ -200,7 +198,6 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 		[]byte(`{"entity_id":"22000000-0000-0000-0000-000000000001"}`),
 		0,
 		runID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "22000000-0000-0000-0000-000000000001"),
 		time.Now().UTC(),
 	)); err != nil {
@@ -218,8 +215,8 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 	if err != nil {
 		t.Fatalf("Continue: %v", err)
 	}
-	if result.ReleasedDeliveries != 1 {
-		t.Fatalf("released deliveries = %d, want 1", result.ReleasedDeliveries)
+	if result.Recovery.Sweep.Settled != 1 {
+		t.Fatalf("released deliveries = %d, want 1", result.Recovery.Sweep.Settled)
 	}
 	if got := recorder.count(); got != 1 {
 		t.Fatalf("interceptor executions after continue = %d, want 1", got)
@@ -261,7 +258,7 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 	seedRunControlTestRun(t, ctx, db, runID)
 
 	intent := runtimeengine.EmitIntent{
-		Event: eventtest.RunCreatingRootIngress(
+		Event: eventtest.ExistingRunRootIngress(
 			uuid.NewString(),
 			eventType,
 			"runtime",
@@ -269,7 +266,6 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 			[]byte(`{"entity_id":"23000000-0000-0000-0000-000000000001"}`),
 			0,
 			runID,
-			"",
 			events.EnvelopeForEntityID(events.EventEnvelope{}, "23000000-0000-0000-0000-000000000001"),
 			time.Now().UTC(),
 		),
@@ -298,8 +294,8 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 	if err != nil {
 		t.Fatalf("Continue: %v", err)
 	}
-	if result.ReleasedDeliveries != 1 {
-		t.Fatalf("released deliveries = %d, want 1", result.ReleasedDeliveries)
+	if result.Recovery.Sweep.Settled != 1 {
+		t.Fatalf("released deliveries = %d, want 1", result.Recovery.Sweep.Settled)
 	}
 	if got := recorder.count(); got != 1 {
 		t.Fatalf("post-commit interceptor executions after continue = %d, want 1", got)
@@ -312,12 +308,7 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 
 func seedRunControlTestRun(t *testing.T, ctx context.Context, db *sql.DB, runID string) {
 	t.Helper()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, $3)
-	`, runID, authorActivityTestBundleHash, authorActivityTestBundleSource); err != nil {
-		t.Fatalf("seed run %s: %v", runID, err)
-	}
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource})
 }
 
 type runControlRecordingInterceptor struct {
@@ -334,15 +325,15 @@ func (i *runControlRecordingInterceptor) Intercept(_ context.Context, evt events
 	i.mu.Lock()
 	i.seen = append(i.seen, evt.ID())
 	i.mu.Unlock()
-	return true, []events.Event{eventtest.RunCreatingRootIngress(
+	return true, []events.Event{eventtest.PersistedChildForProducer(
 		uuid.NewString(),
 		i.deferredType,
-		"runtime",
+		eventtest.Producer(events.EventProducerPlatform, "runtime"),
 		"",
 		[]byte(`{"entity_id":"22000000-0000-0000-0000-000000000002"}`),
-		0,
+		evt.ChainDepth()+1,
 		evt.RunID(),
-		"",
+		evt.ID(),
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "22000000-0000-0000-0000-000000000002"),
 		time.Now().UTC(),
 	)}, runtimepipelineobligation.Continue(), nil

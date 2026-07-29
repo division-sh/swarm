@@ -210,10 +210,19 @@ func TestEventRecordBatchHydrationContractParity(t *testing.T) {
 			ids := make([]string, batchSize*2+3)
 			for index := range ids {
 				ids[index] = uuid.NewString()
-				event := eventtest.RunCreatingRootIngress(
-					ids[index], "batch.contract", "gateway", fmt.Sprintf("task-%d", index),
-					[]byte(fmt.Sprintf(`{"index":%d}`, index)), 0, runID, "", events.EventEnvelope{}, createdAt.Add(time.Duration(index)*time.Microsecond),
-				)
+				eventAt := createdAt.Add(time.Duration(index) * time.Microsecond)
+				var event events.Event
+				if index == 0 {
+					event = eventtest.RunCreatingRootIngress(
+						ids[index], "batch.contract", "gateway", fmt.Sprintf("task-%d", index),
+						[]byte(fmt.Sprintf(`{"index":%d}`, index)), 0, runID, "", events.EventEnvelope{}, eventAt,
+					)
+				} else {
+					event = eventtest.ExistingRunRootIngress(
+						ids[index], "batch.contract", "gateway", fmt.Sprintf("task-%d", index),
+						[]byte(fmt.Sprintf(`{"index":%d}`, index)), 0, runID, events.EventEnvelope{}, eventAt,
+					)
+				}
 				if err := commitSemanticEventFixture(ctx, store, event); err != nil {
 					t.Fatalf("commit event %d: %v", index, err)
 				}

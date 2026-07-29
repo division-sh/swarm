@@ -233,7 +233,7 @@ func loadDynamicAgentTopologyOwners(
 		JOIN runs run ON run.run_id = readiness.run_id
 		JOIN flow_instances instance ON instance.instance_id = readiness.instance_id
 		WHERE readiness.instance_id = $1
-		  AND run.status IN ('running', 'paused')
+		  AND run.status IN (` + runLifecycleActiveStateSQLValues + `)
 		  AND instance.status = 'active'
 		  AND instance.terminated_at IS NULL
 		ORDER BY readiness.run_id
@@ -246,7 +246,7 @@ func loadDynamicAgentTopologyOwners(
 			JOIN runs run ON run.run_id = readiness.run_id
 			JOIN flow_instances instance ON instance.instance_id = readiness.instance_id
 			WHERE readiness.instance_id = ?
-			  AND run.status IN ('running', 'paused')
+			  AND run.status IN (` + runLifecycleActiveStateSQLValues + `)
 			  AND instance.status = 'active'
 			  AND instance.terminated_at IS NULL
 			ORDER BY readiness.run_id
@@ -281,7 +281,7 @@ func loadDynamicAgentTopologyOwnersForAgent(
 		FROM flow_instance_runtime_readiness readiness
 		JOIN runs run ON run.run_id = readiness.run_id
 		JOIN flow_instances instance ON instance.instance_id = readiness.instance_id
-		WHERE run.status IN ('running', 'paused')
+		WHERE run.status IN (` + runLifecycleActiveStateSQLValues + `)
 		  AND instance.status = 'active'
 		  AND instance.terminated_at IS NULL
 		  AND readiness.plan @> jsonb_build_object(
@@ -297,7 +297,7 @@ func loadDynamicAgentTopologyOwnersForAgent(
 			FROM flow_instance_runtime_readiness readiness
 			JOIN runs run ON run.run_id = readiness.run_id
 			JOIN flow_instances instance ON instance.instance_id = readiness.instance_id
-			WHERE run.status IN ('running', 'paused')
+			WHERE run.status IN (` + runLifecycleActiveStateSQLValues + `)
 			  AND instance.status = 'active'
 			  AND instance.terminated_at IS NULL
 			  AND EXISTS (

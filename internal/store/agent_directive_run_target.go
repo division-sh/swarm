@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -125,17 +126,16 @@ func validateDirectiveRunTarget(ctx context.Context, db *sql.DB, agentID, runID 
 	if err != nil {
 		return fmt.Errorf("load directive run target: %w", err)
 	}
-	status = strings.TrimSpace(strings.ToLower(status))
-	switch status {
-	case "running", "paused":
+	status = strings.TrimSpace(status)
+	state, parseErr := runtimerunlifecycle.ParseState(status)
+	if parseErr == nil && state.Active() {
 		return nil
-	default:
-		return &runtimeagentcontrol.StateError{
-			Err:           runtimeagentcontrol.ErrRunAlreadyTerminal,
-			AgentID:       agentID,
-			RunID:         runID,
-			CurrentStatus: status,
-		}
+	}
+	return &runtimeagentcontrol.StateError{
+		Err:           runtimeagentcontrol.ErrRunAlreadyTerminal,
+		AgentID:       agentID,
+		RunID:         runID,
+		CurrentStatus: status,
 	}
 }
 

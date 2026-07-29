@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"io"
 	"net"
 	"net/http"
@@ -36,6 +37,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -51,6 +53,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -60,7 +63,6 @@ import (
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -443,18 +445,15 @@ func TestServeBundleMatchAdmissionRejectsActiveAvailabilityConflicts(t *testing.
 	persistedMissingRunID := uuid.NewString()
 	deletedRunID := uuid.NewString()
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222', 'persisted', now())
-	`, persistedMissingRunID); err != nil {
-		t.Fatalf("seed active persisted missing run: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES ($1::uuid, 'paused', $2, 'deleted', now())
-	`, deletedRunID, bootHash); err != nil {
-		t.Fatalf("seed active deleted run: %v", err)
-	}
+	runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
+		RunID: persistedMissingRunID, State: "running",
+		BundleHash:   "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222",
+		BundleSource: storerunlifecycle.BundleSourcePersisted,
+	})
+	runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
+		RunID: deletedRunID, State: "paused",
+		BundleHash: bootHash, BundleSource: storerunlifecycle.BundleSourceDeleted,
+	})
 
 	err := enforceServeBundleMatchAdmission(ctx, pg, bootHash, true, "")
 	if err == nil {
@@ -496,24 +495,23 @@ func TestServeBundleMatchAdmissionAllowsPersistedPresentAndDisabled(t *testing.T
 	`, persistedHash); err != nil {
 		t.Fatalf("seed bundle row: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES
-			($1::uuid, 'running', $2, 'persisted', now()),
-			($3::uuid, 'completed', $4, 'persisted', now())
-	`, uuid.NewString(), persistedHash, uuid.NewString(), missingHash); err != nil {
-		t.Fatalf("seed persisted-present and completed-missing runs: %v", err)
-	}
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
+		RunID: uuid.NewString(), BundleHash: persistedHash,
+		BundleSource: storerunlifecycle.BundleSourcePersisted,
+	})
+	runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
+		RunID: uuid.NewString(), State: "completed",
+		BundleHash: missingHash, BundleSource: storerunlifecycle.BundleSourcePersisted,
+		EndedAt: time.Now().UTC(),
+	})
 	if err := enforceServeBundleMatchAdmission(ctx, pg, bootFingerprint, true, ""); err != nil {
 		t.Fatalf("enforceServeBundleMatchAdmission persisted-present/completed-missing: %v", err)
 	}
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES ($1::uuid, 'running', $2, 'persisted', now())
-	`, uuid.NewString(), missingHash); err != nil {
-		t.Fatalf("seed disabled persisted-missing run: %v", err)
-	}
+	runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
+		RunID: uuid.NewString(), State: "running",
+		BundleHash: missingHash, BundleSource: storerunlifecycle.BundleSourcePersisted,
+	})
 	if err := enforceServeBundleMatchAdmission(ctx, pg, bootFingerprint, false, ""); err != nil {
 		t.Fatalf("enforceServeBundleMatchAdmission disabled: %v", err)
 	}
@@ -535,15 +533,18 @@ func TestServeBundleMatchAdmissionRejectsDifferentPersistedActiveRunInDBLoadedMo
 	`, pinnedHash, otherHash); err != nil {
 		t.Fatalf("seed bundle rows: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES
-			($1::uuid, 'running', $2, 'persisted', now()),
-			($3::uuid, 'paused', $4, 'persisted', now()),
-			($5::uuid, 'completed', $4, 'persisted', now())
-	`, uuid.NewString(), pinnedHash, otherRunID, otherHash, uuid.NewString()); err != nil {
-		t.Fatalf("seed active persisted runs: %v", err)
-	}
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
+		RunID: uuid.NewString(), BundleHash: pinnedHash,
+		BundleSource: storerunlifecycle.BundleSourcePersisted,
+	})
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
+		RunID: otherRunID, State: storerunlifecycle.StatePaused,
+		BundleHash: otherHash, BundleSource: storerunlifecycle.BundleSourcePersisted,
+	})
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
+		RunID: uuid.NewString(), State: storerunlifecycle.StateCancelled,
+		BundleHash: otherHash, BundleSource: storerunlifecycle.BundleSourcePersisted,
+	})
 
 	err := enforceServeBundleMatchAdmission(ctx, pg, pinnedHash, true, pinnedHash)
 	if err == nil {
@@ -757,7 +758,7 @@ func TestRunServeRuntimeDBLoadedExecutesDockerManagerRecovery(t *testing.T) {
 }
 
 func TestRunServeRuntimeDiskLoadedRunForkSupportedSurfaceExecutesAndStampsEphemeralIdentity(t *testing.T) {
-	_, db, _ := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
+	_, db, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
 	ctx := context.Background()
@@ -787,14 +788,7 @@ func TestRunServeRuntimeDiskLoadedRunForkSupportedSurfaceExecutesAndStampsEpheme
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700000335, 0).UTC()
 	seedRunForkSelectedExecutionSourceEvent(t, db, sourceRunID, entityID, sourceEventID, "task.requested", "complete-task", "pending", "Serve Disk Loaded Entity", "serve-disk-loaded-test", at)
-	if _, err := db.ExecContext(ctx, `
-		UPDATE runs
-		SET bundle_hash = $2,
-		    bundle_source = $3
-		WHERE run_id = $1::uuid
-	`, sourceRunID, projection.BundleHash, storerunlifecycle.BundleSourcePersisted); err != nil {
-		t.Fatalf("stamp source run bundle identity: %v", err)
-	}
+	reviseServeTestRunSource(t, serve.runtimeWorkContext(ctx), pg, sourceRunID, projection.BundleHash)
 
 	response := requestServedJSONRPCWithTimeout(t, endpoint, "run.fork", map[string]any{
 		"source_run_id":         sourceRunID,
@@ -874,14 +868,7 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700000340, 0).UTC()
 	seedRunForkSelectedExecutionSourceEvent(t, db, sourceRunID, entityID, sourceEventID, "task.requested", "complete-task", "pending", "Serve DB Loaded Entity", "serve-db-loaded-test", at)
-	if _, err := db.ExecContext(ctx, `
-		UPDATE runs
-		SET bundle_hash = $2,
-		    bundle_source = $3
-		WHERE run_id = $1::uuid
-	`, sourceRunID, projection.BundleHash, storerunlifecycle.BundleSourcePersisted); err != nil {
-		t.Fatalf("stamp source run bundle identity: %v", err)
-	}
+	reviseServeTestRunSource(t, serve.runtimeWorkContext(ctx), pg, sourceRunID, projection.BundleHash)
 
 	body := fmt.Sprintf(
 		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"confirm_source_freeze":true,"idempotency_key":"db-loaded-serve-fork"}}`,
@@ -954,14 +941,7 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 	advancedAfterEventID := uuid.NewString()
 	advancedAt := at.Add(10 * time.Second)
 	seedRunForkSelectedExecutionSourceEvent(t, db, advancedSourceRunID, advancedEntityID, advancedSourceEventID, "task.requested", "complete-task", "pending", "Serve Advanced Entity", "serve-advanced-test", advancedAt)
-	if _, err := db.ExecContext(ctx, `
-		UPDATE runs
-		SET bundle_hash = $2,
-		    bundle_source = $3
-		WHERE run_id = $1::uuid
-	`, advancedSourceRunID, projection.BundleHash, storerunlifecycle.BundleSourcePersisted); err != nil {
-		t.Fatalf("stamp advanced source run bundle identity: %v", err)
-	}
+	reviseServeTestRunSource(t, serve.runtimeWorkContext(ctx), pg, advancedSourceRunID, projection.BundleHash)
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
 		advancedAfterEventID, advancedSourceRunID, "source.after", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{EntityID: advancedEntityID, FlowInstance: "flow-a/1", Scope: events.EventScopeEntity}, advancedAt.Add(time.Second))
@@ -1248,14 +1228,7 @@ func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetI
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700000345, 0).UTC()
 	seedRunForkSelectedExecutionSourceEvent(t, db, sourceRunID, entityID, sourceEventID, "task.requested", "complete-task", "pending", "Serve Cross Bundle Entity", "serve-cross-bundle-test", at)
-	if _, err := db.ExecContext(ctx, `
-		UPDATE runs
-		SET bundle_hash = $2,
-		    bundle_source = $3
-		WHERE run_id = $1::uuid
-	`, sourceRunID, sourceProjection.BundleHash, storerunlifecycle.BundleSourcePersisted); err != nil {
-		t.Fatalf("stamp source run bundle identity: %v", err)
-	}
+	reviseServeTestRunSource(t, serve.runtimeWorkContext(ctx), pg, sourceRunID, sourceProjection.BundleHash)
 
 	var stdout, stderr bytes.Buffer
 	code := cliapp.Execute(ctx, t.TempDir(), []string{
@@ -1866,7 +1839,11 @@ func servedControlProofAuthorActivityContext(t *testing.T, rt servedControlProof
 	}
 	ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runtimeInstanceID)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
-	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash()))
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash()))
+	if rt.Runtime.WorkOccurrence() == nil {
+		t.Fatal("served control proof runtime work occurrence is required")
+	}
+	return worklifetime.WithOccurrence(ctx, rt.Runtime.WorkOccurrence())
 }
 
 type servedConversationForkProofRuntime struct {
@@ -3033,17 +3010,8 @@ func requireServedMailboxSubscription(t *testing.T, endpoint, cardID string) {
 func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
 	t.Helper()
 	keyPrefix := "issue-1386-" + rt.Backend + "-test-setup"
-	initial := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name":      "widget.started",
-		"bundle_hash":     rt.BundleHash,
-		"payload":         map[string]any{"seed": true},
-		"idempotency_key": keyPrefix + "-run",
-	})
-	if !initial.NewRunCreated || initial.RunID == "" || initial.EventID == "" {
-		t.Fatalf("%s setup trigger event.publish result = %#v, want new run", rt.Backend, initial)
-	}
-	runID := initial.RunID
-	entityID := uuid.NewString()
+	runID := uuid.NewString()
+	entityID := runID
 	key := keyPrefix + "-entities"
 	params := map[string]any{
 		"bundle_hash":     rt.BundleHash,
@@ -3078,6 +3046,7 @@ func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProo
 		t.Fatalf("%s test.setup_entities entity result = %#v", rt.Backend, entity)
 	}
 	requireServedTestSetupPersistence(t, rt.DB, rt.Backend, runID, entityID, rt.BundleHash)
+	requireServedScenarioRunOriginSurfaces(t, rt.Endpoint, runID)
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "test.setup_entities", key, 1)
 
 	var replay struct {
@@ -3092,33 +3061,89 @@ func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProo
 	}
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "test.setup_entities", key, 1)
 	requireServedTestSetupPersistence(t, rt.DB, rt.Backend, runID, entityID, rt.BundleHash)
+
+	published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+		"event_name":      "widget.scored",
+		"bundle_hash":     rt.BundleHash,
+		"run_id":          runID,
+		"payload":         map[string]any{"delta": 1},
+		"idempotency_key": keyPrefix + "-later-event",
+	})
+	if published.RunID != runID || published.NewRunCreated || published.EventID == "" {
+		t.Fatalf("%s scenario event.publish result = %#v, want existing run", rt.Backend, published)
+	}
+	requireServedScenarioRunOriginSurfaces(t, rt.Endpoint, runID)
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioTestSetupEntitiesLifecycle))
+}
+
+func requireServedScenarioRunOriginSurfaces(t *testing.T, endpoint, runID string) {
+	t.Helper()
+	requireOrigin := func(surface string, header store.RunHeader) {
+		t.Helper()
+		if header.RunID != runID ||
+			header.Origin.Kind() != storerunlifecycle.OriginScenarioSetup ||
+			!header.Origin.Equal(storerunlifecycle.ScenarioSetupRunOrigin()) {
+			t.Fatalf("%s run %s origin = %#v, want scenario setup", surface, runID, header.Origin)
+		}
+	}
+
+	var get struct {
+		Run store.RunHeader `json:"run"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "run.get", map[string]any{"run_id": runID}, &get)
+	requireOrigin("run.get", get.Run)
+
+	var list struct {
+		Runs []store.RunHeader `json:"runs"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"limit": 500}, &list)
+	found := false
+	for _, header := range list.Runs {
+		if header.RunID == runID {
+			requireOrigin("run.list", header)
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("run.list omitted eventless scenario run %s", runID)
+	}
+
+	var diagnosis struct {
+		Run store.RunHeader `json:"run"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis)
+	requireOrigin("run.diagnose", diagnosis.Run)
 }
 
 func requireServedTestSetupPersistence(t *testing.T, db *sql.DB, backend, runID, entityID, bundleHash string) {
 	t.Helper()
-	var status, trigger, gotHash, source string
+	var status, originKind, trigger, gotHash, source string
 	var runQuery string
 	var runArgs []any
 	switch backend {
 	case "postgres":
-		runQuery = `SELECT status, trigger_event_type, COALESCE(bundle_hash, ''), bundle_source FROM runs WHERE run_id = $1::uuid`
+		runQuery = `SELECT status, origin_kind, COALESCE(trigger_event_type, ''), COALESCE(bundle_hash, ''), bundle_source FROM runs WHERE run_id = $1::uuid`
 		runArgs = []any{runID}
 	case "sqlite":
-		runQuery = `SELECT status, trigger_event_type, COALESCE(bundle_hash, ''), bundle_source FROM runs WHERE run_id = ?`
+		runQuery = `SELECT status, origin_kind, COALESCE(trigger_event_type, ''), COALESCE(bundle_hash, ''), bundle_source FROM runs WHERE run_id = ?`
 		runArgs = []any{runID}
 	default:
 		t.Fatalf("unknown test.setup_entities proof backend %q", backend)
 	}
-	if err := db.QueryRowContext(context.Background(), runQuery, runArgs...).Scan(&status, &trigger, &gotHash, &source); err != nil {
+	if err := db.QueryRowContext(context.Background(), runQuery, runArgs...).Scan(&status, &originKind, &trigger, &gotHash, &source); err != nil {
 		t.Fatalf("%s load test.setup_entities run %s: %v", backend, runID, err)
 	}
 	wantSource := storerunlifecycle.BundleSourceEphemeral
 	if backend == "postgres" {
 		wantSource = storerunlifecycle.BundleSourcePersisted
 	}
-	if status != "running" || trigger != "widget.started" || gotHash != bundleHash || source != wantSource {
-		t.Fatalf("%s setup run row = status:%q trigger:%q hash:%q source:%q", backend, status, trigger, gotHash, source)
+	if status != "running" || originKind != string(storerunlifecycle.OriginScenarioSetup) ||
+		trigger != "" || gotHash != bundleHash || source != wantSource {
+		t.Fatalf(
+			"%s setup run row = status:%q origin:%q trigger:%q hash:%q source:%q",
+			backend, status, originKind, trigger, gotHash, source,
+		)
 	}
 
 	var flow, typ, state string
@@ -3207,21 +3232,19 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	runID, entityID, sourceEventID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	bundleFact := rt.Runtime.Options.BundleSourceFact
 	bundleHash := bundleFact.BundleHash()
-	_, bundleSource := bundleFact.StorageValues()
 	var cards decisioncard.Store
 	var workflow *runtimepipeline.WorkflowInstanceStore
 	var seedEvent func(context.Context, events.Event) error
 	var insertNotice func(context.Context, runtimetools.MailboxItem) (string, error)
 	switch rt.Backend {
 	case "postgres":
-		if _, err := rt.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES ($1::uuid, 'running', $2, $3, $4)`, runID, bundleHash, bundleSource, now); err != nil {
-			t.Fatalf("seed postgres decision-card run: %v", err)
-		}
 		pg := rt.Postgres
 		if pg == nil {
 			t.Fatal("accepted Postgres store owner is required")
 		}
-		cards, workflow, insertNotice = pg, runtimepipeline.NewWorkflowInstanceStore(rt.DB), pg.InsertMailboxItem
+		workflow = runtimepipeline.NewWorkflowInstanceStore(rt.DB)
+		workflow.ConfigureRuntimeMutationRunner(pg)
+		cards, insertNotice = pg, pg.InsertMailboxItem
 		seedEvent = func(ctx context.Context, evt events.Event) error {
 			storetest.CommitSemanticEventWithInitialFacts(t, ctx, pg, evt, nil,
 				runtimepipelineobligation.ScopeSubscribed,
@@ -3229,9 +3252,6 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 			return nil
 		}
 	case "sqlite":
-		if _, err := rt.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES (?, 'running', ?, ?, ?)`, runID, bundleHash, bundleSource, now); err != nil {
-			t.Fatalf("seed sqlite decision-card run: %v", err)
-		}
 		sqlite := rt.SQLite
 		if sqlite == nil {
 			t.Fatal("accepted SQLite store owner is required")
@@ -4391,23 +4411,13 @@ func seedServedLiveAgentPendingBacklogDelivery(t *testing.T, rt servedControlPro
 	var selectedStore any
 	switch backend {
 	case "postgres":
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-			VALUES ($1::uuid, 'running', $2, 'ephemeral', $3)
-		`, runID, serveRuntimeTestBundleHash, now); err != nil {
-			t.Fatalf("seed postgres live-agent backlog run: %v", err)
-		}
+		storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: serveRuntimeTestBundleHash})
 		if rt.Postgres == nil {
 			t.Fatal("served postgres store owner is required for live-agent backlog seed")
 		}
 		selectedStore = rt.Postgres
 	case "sqlite":
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-			VALUES (?, 'running', ?, 'ephemeral', ?)
-		`, runID, serveRuntimeTestBundleHash, now); err != nil {
-			t.Fatalf("seed sqlite live-agent backlog run: %v", err)
-		}
+		storetest.RequireSQLiteRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: serveRuntimeTestBundleHash})
 		if rt.SQLite == nil {
 			t.Fatal("served sqlite store owner is required for live-agent backlog seed")
 		}
@@ -4506,23 +4516,13 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 	var selectedStore any
 	switch backend {
 	case "postgres":
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-			VALUES ($1::uuid, 'running', $2, 'persisted', $3)
-		`, runID, rt.BundleHash, now); err != nil {
-			t.Fatalf("seed postgres run-control pending run: %v", err)
-		}
+		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: rt.BundleHash, BundleSource: "persisted"})
 		if rt.Postgres == nil {
 			t.Fatal("served postgres store owner is required for run-control seed")
 		}
 		selectedStore = rt.Postgres
 	case "sqlite":
-		if _, err := db.ExecContext(ctx, `
-				INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-				VALUES (?, 'running', ?, 'ephemeral', ?)
-			`, runID, rt.BundleHash, now); err != nil {
-			t.Fatalf("seed sqlite run-control pending run: %v", err)
-		}
+		storetest.RequireSQLiteRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: rt.BundleHash})
 		if rt.SQLite == nil {
 			t.Fatal("served sqlite store owner is required for run-control seed")
 		}
@@ -4577,6 +4577,7 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 		}
 		cards = rt.Postgres
 		workflow = runtimepipeline.NewWorkflowInstanceStore(rt.DB)
+		workflow.ConfigureRuntimeMutationRunner(rt.Postgres)
 	case "sqlite":
 		sqlite := rt.SQLite
 		if sqlite == nil {
@@ -5250,7 +5251,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, followUpEventID, "item-observer", probe)
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "done")
-	requireServedRunStatus(t, endpoint, runID, "completed")
+	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
 	requireServedEventReadback(t, endpoint, followUpEventID, runID, entityID, "item.processed", "item-observer")
 	requireServedTraceReadback(t, endpoint, runID, followUpEventID, "item.processed", "item-observer")
 
@@ -5379,7 +5380,7 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 	waitServedEventPublishDeliveryStatusCount(t, db, backend, targetEventID, "node", "lifecycle-orchestrator", "delivered", 1)
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "ready")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "ready")
-	requireServedRunStatus(t, endpoint, runID, "completed")
+	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
 	requireServedEventReadback(t, endpoint, targetEventID, runID, entityID, "operating/opco.product_review_requested", "lifecycle-orchestrator")
 	requireServedTraceReadback(t, endpoint, runID, targetEventID, "operating/opco.product_review_requested", "lifecycle-orchestrator")
 
@@ -5515,7 +5516,7 @@ func runServedEventPublishActiveLoadProof(
 	waitServedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "delivered", 1)
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, followUp.EventID, "item-observer", probe)
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
-	requireServedRunStatus(t, endpoint, runID, "completed")
+	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
 	requireServedTraceReadback(t, endpoint, runID, followUp.EventID, "item.processed", "item-observer")
 }
 
@@ -5931,7 +5932,9 @@ func requireServedEventPublishRouteJSON(t *testing.T, backend, field, raw, flowI
 func servedEventPublishDebugSummary(t *testing.T, db *sql.DB, backend, runID string) string {
 	t.Helper()
 	sections := []string{
+		servedEventPublishDebugQuery(t, db, backend, "runs", runID),
 		servedEventPublishDebugQuery(t, db, backend, "entity_state", runID),
+		servedEventPublishDebugQuery(t, db, backend, "flow_instances", runID),
 		servedEventPublishDebugQuery(t, db, backend, "events", runID),
 		servedEventPublishDebugQuery(t, db, backend, "event_deliveries", runID),
 		servedEventPublishDebugQuery(t, db, backend, "event_delivery_outcomes", runID),
@@ -5948,8 +5951,12 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 	switch backend {
 	case "postgres":
 		switch scope {
+		case "runs":
+			sqlText = `SELECT status, completion_revision, COALESCE(completion_due_at::text, ''), bundle_hash FROM runs WHERE run_id = $1::uuid`
 		case "entity_state":
 			sqlText = `SELECT entity_id::text, COALESCE(flow_instance, ''), COALESCE(current_state, '') FROM entity_state WHERE run_id = $1::uuid ORDER BY created_at, entity_id LIMIT 5`
+		case "flow_instances":
+			sqlText = `SELECT DISTINCT fi.instance_id, fi.flow_template, COALESCE(fi.status, '') FROM flow_instances fi JOIN entity_state es ON es.flow_instance = fi.instance_id WHERE es.run_id = $1::uuid ORDER BY fi.instance_id LIMIT 5`
 		case "events":
 			sqlText = `SELECT event_id::text, event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = $1::uuid ORDER BY created_at, event_id LIMIT 5`
 		case "event_deliveries":
@@ -5963,8 +5970,12 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 		}
 	case "sqlite":
 		switch scope {
+		case "runs":
+			sqlText = `SELECT status, completion_revision, COALESCE(completion_due_at, ''), bundle_hash FROM runs WHERE run_id = ?`
 		case "entity_state":
 			sqlText = `SELECT entity_id, COALESCE(flow_instance, ''), COALESCE(current_state, '') FROM entity_state WHERE run_id = ? ORDER BY created_at, entity_id LIMIT 5`
+		case "flow_instances":
+			sqlText = `SELECT DISTINCT fi.instance_id, fi.flow_template, COALESCE(fi.status, '') FROM flow_instances fi JOIN entity_state es ON es.flow_instance = fi.instance_id WHERE es.run_id = ? ORDER BY fi.instance_id LIMIT 5`
 		case "events":
 			sqlText = `SELECT event_id, event_name, COALESCE(entity_id, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = ? ORDER BY created_at, event_id LIMIT 5`
 		case "event_deliveries":
@@ -7320,12 +7331,10 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBef
 	ctx := context.Background()
 	persistedMissingRunID := uuid.NewString()
 	missingHash := "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222"
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES ($1::uuid, 'running', $2, 'persisted', now())
-	`, persistedMissingRunID, missingHash); err != nil {
-		t.Fatalf("seed persisted-missing active run: %v", err)
-	}
+	runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
+		RunID: persistedMissingRunID, State: "running",
+		BundleHash: missingHash, BundleSource: storerunlifecycle.BundleSourcePersisted,
+	})
 
 	var out lockedBuffer
 	code := Run(context.Background(), cliapp.RepoRoot(), cliapp.ServeOptions{
@@ -7385,12 +7394,7 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 	`, persistedHash); err != nil {
 		t.Fatalf("seed bundle row: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES ($1::uuid, 'running', $2, 'persisted', now())
-	`, persistedRunID, persistedHash); err != nil {
-		t.Fatalf("seed persisted-present run: %v", err)
-	}
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: persistedRunID, BundleHash: persistedHash, BundleSource: "persisted"})
 
 	orphanTargets := []struct {
 		runID  string
@@ -7475,13 +7479,7 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	activeSessionID := uuid.NewString()
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES (?, 'running', ?, ?, ?)
-	`, runID, bundleHash, storerunlifecycle.BundleSourceEphemeral, now.Add(-time.Hour)); err != nil {
-		_ = sqliteStore.Close()
-		t.Fatalf("seed sqlite active run: %v", err)
-	}
+	runlifecyclefixture.RequireSQLite(t, ctx, sqliteStore.DB, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now.Add(-time.Hour), BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, sqliteStore.DB, runtimeauthoractivity.DialectSQLite,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
@@ -7594,12 +7592,7 @@ func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context
 	sessionID := uuid.NewString()
 	timerID := uuid.NewString()
 	eventID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES ($1::uuid, 'running', $2, $3, now())
-	`, runID, bundleHash, admissionSource); err != nil {
-		t.Fatalf("seed unavailable bundle run %s: %v", source, err)
-	}
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, BundleSource: admissionSource})
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
 		eventID, runID, events.EventType("startup."+source+".event"), eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
@@ -7626,13 +7619,33 @@ func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context
 		t.Fatalf("seed timer %s: %v", source, err)
 	}
 	if source == storerunlifecycle.BundleSourceDeleted {
-		if _, err := db.ExecContext(ctx, `
-			UPDATE runs
-			SET bundle_source = $2
-			WHERE run_id = $1::uuid
-		`, runID, storerunlifecycle.BundleSourceDeleted); err != nil {
-			t.Fatalf("mark unavailable bundle run deleted: %v", err)
-		}
+		runlifecyclefixture.CorruptPostgresSource(
+			t,
+			ctx,
+			db,
+			runID,
+			bundleHash,
+			storerunlifecycle.BundleSourceDeleted,
+		)
+	}
+}
+
+func reviseServeTestRunSource(
+	t *testing.T,
+	ctx context.Context,
+	pg *store.PostgresStore,
+	runID string,
+	bundleHash string,
+) {
+	t.Helper()
+	source, err := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storetest.ReviseRunSource(ctx, pg, storerunlifecycle.SourceRevisionRequest{
+		RunID: runID, Source: source,
+	}); err != nil {
+		t.Fatalf("revise source run bundle identity: %v", err)
 	}
 }
 
@@ -7902,12 +7915,7 @@ func TestServeListenerServersPartitionAPIAndMCPRoutes(t *testing.T) {
 func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, entityID, eventID, eventName, subscriberID, currentState, entityName, writerID string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES ($1::uuid, 'running', $2, 'ephemeral', $3)
-	`, runID, serveRuntimeTestBundleHash, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute), BundleHash: serveRuntimeTestBundleHash})
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
 		eventID, runID, events.EventType(eventName), eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(fmt.Sprintf(`{"entity_id":%q}`, entityID)),
@@ -8814,12 +8822,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	activeSessionID := uuid.NewString()
 	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
 	bundleHash := servedEventPublishFixtureBundleHash(t, filepath.Join(cliapp.RepoRoot(), contractsPath))
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES ($1::uuid, 'running', $2, $3, now())
-	`, runID, bundleHash, storerunlifecycle.BundleSourceEphemeral); err != nil {
-		t.Fatalf("seed active mismatched run: %v", err)
-	}
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
@@ -9026,6 +9029,7 @@ type serveRuntimeTestProcess struct {
 	mu      sync.Mutex
 	stopped bool
 	code    int
+	runtime *runtimepkg.Runtime
 }
 
 func startServeRuntimeTestProcess(t *testing.T, opts cliapp.ServeOptions) *serveRuntimeTestProcess {
@@ -9040,11 +9044,41 @@ func startServeRuntimeTestProcess(t *testing.T, opts cliapp.ServeOptions) *serve
 		done:   done,
 		out:    out,
 	}
+	priorRuntimeReadyHook := opts.TestRuntimeReadyHook
+	opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) {
+		process.mu.Lock()
+		process.runtime = rt
+		process.mu.Unlock()
+		if priorRuntimeReadyHook != nil {
+			priorRuntimeReadyHook(rt)
+		}
+	}
 	t.Cleanup(process.cleanup)
 	go func() {
 		done <- Run(ctx, cliapp.RepoRoot(), opts)
 	}()
 	return process
+}
+
+func (p *serveRuntimeTestProcess) runtimeWorkContext(ctx context.Context) context.Context {
+	p.t.Helper()
+	p.mu.Lock()
+	rt := p.runtime
+	p.mu.Unlock()
+	if rt == nil || rt.WorkOccurrence() == nil {
+		p.t.Fatal("serve runtime work occurrence is not ready")
+	}
+	fact := rt.Options.BundleSourceFact
+	if err := fact.Validate(); err != nil {
+		p.t.Fatalf("serve runtime bundle source fact: %v", err)
+	}
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, rt.Options.RuntimeInstanceID)
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
+		rt.Options.RuntimeInstanceID,
+		fact.BundleHash(),
+	))
+	return worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
 }
 
 func (p *serveRuntimeTestProcess) waitForReadyLine() {

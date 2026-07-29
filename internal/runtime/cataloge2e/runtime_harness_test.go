@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"os"
 	"path/filepath"
 	"strings"
@@ -180,13 +181,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), catalogRuntimeRunID))
 	t.Cleanup(cancel)
 	processOwner := worklifetime.NewProcess()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, $3)
-		ON CONFLICT (run_id) DO NOTHING
-	`, catalogRuntimeRunID, authorActivityTestBundleSourceFact.BundleHash(), "ephemeral"); err != nil {
-		t.Fatalf("seed catalog runtime run: %v", err)
-	}
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID, BundleHash: authorActivityTestBundleSourceFact.BundleHash(), BundleSource: "ephemeral"})
 
 	rt, err := runtime.NewRuntime(ctx, runtime.RuntimeDeps{Config: cfg, Stores: runtime.Stores{
 		SQLDB:               db,
@@ -353,9 +348,9 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 		} else {
 			eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, runtimepipeline.FlowInstanceEntityID(catalogRuntimeRunID))
 		}
-		evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
+		evt := eventtest.ExistingRunRootIngress(uuid.NewString(),
 			events.EventType(strings.TrimSpace(step.Event)),
-			"cataloge2e", "", raw, 0, catalogRuntimeRunID, "", eventEnvelope, time.Now().UTC())
+			"cataloge2e", "", raw, 0, catalogRuntimeRunID, eventEnvelope, time.Now().UTC())
 		if preview, ok := h.previewHandlerOutcome(evt); ok {
 			h.mu.Lock()
 			h.previews[evt.ID()] = preview
@@ -413,9 +408,9 @@ func (h *runtimeHarness) publishRuntimeEventResult(eventType, sourceAgent string
 	} else {
 		eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, runtimepipeline.FlowInstanceEntityID(catalogRuntimeRunID))
 	}
-	evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
+	evt := eventtest.ExistingRunRootIngress(uuid.NewString(),
 		events.EventType(strings.TrimSpace(eventType)),
-		strings.TrimSpace(sourceAgent), "", raw, 0, catalogRuntimeRunID, "", eventEnvelope, time.Now().UTC())
+		strings.TrimSpace(sourceAgent), "", raw, 0, catalogRuntimeRunID, eventEnvelope, time.Now().UTC())
 	if recordOutcome {
 		if preview, ok := h.previewHandlerOutcome(evt); ok {
 			h.mu.Lock()

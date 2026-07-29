@@ -12,7 +12,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -76,7 +76,7 @@ func Insert(ctx context.Context, db DBTX, rec Record) error {
 	if err != nil {
 		return ErrInvalidMutationLogWriter(err.Error())
 	}
-	runFact, err := storerunlifecycle.RequireActiveSource(ctx, tx, runID, storerunlifecycle.DialectPostgres)
+	runFact, err := runtimerunlifecycle.RequireActiveSource(ctx, runID)
 	if err != nil {
 		return err
 	}

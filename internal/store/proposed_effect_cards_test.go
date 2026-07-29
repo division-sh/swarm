@@ -402,7 +402,9 @@ func proposedEffectTestJournal(cards decisioncard.Store) *runtimepipeline.Workfl
 	case *SQLiteRuntimeStore:
 		return runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(selected.DB, selected)
 	case *PostgresStore:
-		return runtimepipeline.NewWorkflowInstanceStore(selected.DB)
+		store := runtimepipeline.NewWorkflowInstanceStore(selected.DB)
+		store.ConfigureRuntimeMutationRunner(selected)
+		return store
 	default:
 		panic("unsupported proposed-effect test store")
 	}

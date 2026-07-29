@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -12,7 +13,9 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -38,6 +41,7 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	lifecycleExecutor := startAPIRunLifecycleExecutor(t, pg, source)
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	module := newRunCompletionSystemNodeModule(t, source)
@@ -55,8 +59,7 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	if result := asMap(t, started.Result); result["run_id"] != runID || result["status"] != "running" {
 		t.Fatalf("run.start result = %#v, want running run %s", result, runID)
 	}
-
-	run := waitForRunGetStatus(t, handler, runID, "completed")
+	run := waitForRunGetStatus(t, handler, db, lifecycleExecutor, runID, "completed")
 	if run["run_id"] != runID {
 		t.Fatalf("run.get run_id = %#v, want %s", run["run_id"], runID)
 	}
@@ -90,6 +93,55 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	if count := countEventsByName(t, db, "flow.started"); count != 1 {
 		t.Fatalf("flow.started event count after terminal publish = %d, want 1", count)
 	}
+}
+
+func startAPIRunLifecycleExecutor(
+	t *testing.T,
+	pg *store.PostgresStore,
+	source semanticview.Source,
+) *runtimerunlifecycle.Executor {
+	t.Helper()
+	scope := runtimerunlifecycle.CandidateScope{BundleHash: runStartTestBundleHash}
+	occurrence := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, runStartTestBundleHash)
+	executor, err := runtimerunlifecycle.NewExecutor(
+		pg,
+		scope,
+		runCompletionTerminalCatalog(source),
+		occurrence,
+		runtimerunlifecycle.ExecutorOptions{},
+	)
+	if err != nil {
+		t.Fatalf("NewExecutor: %v", err)
+	}
+	registration, err := pg.RegisterCompletionCandidateSink(scope, executor)
+	if err != nil {
+		t.Fatalf("RegisterCompletionCandidateSink: %v", err)
+	}
+	if err := executor.Start(context.Background()); err != nil {
+		registration.Release()
+		t.Fatalf("start completion candidate executor: %v", err)
+	}
+	t.Cleanup(func() {
+		executor.Retire()
+		registration.Release()
+	})
+	return executor
+}
+
+func runCompletionTerminalCatalog(source semanticview.Source) runtimerunlifecycle.TerminalCatalog {
+	flows := make(map[string][]string)
+	for flowID := range source.FlowSchemaEntries() {
+		states := source.FlowTerminalStages(flowID)
+		flows[flowID] = states
+		flows[source.FlowPath(flowID)] = states
+	}
+	for _, scope := range source.FlowScopes() {
+		states := source.FlowTerminalStages(scope.ID)
+		flows[scope.ID] = states
+		flows[scope.Path] = states
+		flows[scope.OwningFlowID] = states
+	}
+	return runtimerunlifecycle.NewTerminalCatalog(source.FlowTerminalStages(""), flows)
 }
 
 type runCompletionSystemNodeModule struct {
@@ -139,7 +191,14 @@ func (m runCompletionSystemNodeModule) ActionRegistry() runtimepipeline.ActionRe
 	return m.actions
 }
 
-func waitForRunGetStatus(t *testing.T, handler *Handler, runID, wantStatus string) map[string]any {
+func waitForRunGetStatus(
+	t *testing.T,
+	handler *Handler,
+	db *sql.DB,
+	executor *runtimerunlifecycle.Executor,
+	runID,
+	wantStatus string,
+) map[string]any {
 	t.Helper()
 	var run map[string]any
 	requireAPIV1Convergence(t, fmt.Sprintf("run.get status for %s", runID), func() (bool, error) {
@@ -151,7 +210,15 @@ func waitForRunGetStatus(t *testing.T, handler *Handler, runID, wantStatus strin
 		if run["status"] == wantStatus {
 			return true, nil
 		}
-		return false, fmt.Errorf("status=%#v, want %s", run["status"], wantStatus)
+		var revision int64
+		var dueAt sql.NullTime
+		if err := db.QueryRow(`SELECT completion_revision, completion_due_at FROM runs WHERE run_id = $1::uuid`, runID).Scan(&revision, &dueAt); err != nil {
+			return false, err
+		}
+		return false, fmt.Errorf(
+			"status=%#v, want %s; completion_revision=%d due_present=%t active_candidates=%d",
+			run["status"], wantStatus, revision, dueAt.Valid, executor.ActiveCandidates(),
+		)
 	})
 	return run
 }

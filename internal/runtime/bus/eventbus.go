@@ -19,6 +19,7 @@ import (
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -103,6 +104,14 @@ func (eb *EventBus) PipelineObligationOwner() runtimepipelineobligation.Store {
 		return nil
 	}
 	return eb.pipelineObligations
+}
+
+func (eb *EventBus) RunLifecycleCandidateOwner() runtimerunlifecycle.OperationOwner {
+	if eb == nil {
+		return nil
+	}
+	owner, _ := eb.store.(runtimerunlifecycle.OperationOwner)
+	return owner
 }
 
 type transactionRouteOverlay struct {

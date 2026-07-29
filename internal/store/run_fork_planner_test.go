@@ -22,12 +22,7 @@ func TestRunForkPlanner_ResolvesCommitOrderedEventRevisionsAndRejectsTimestampSe
 	firstEventID := "00000000-0000-0000-0000-000000000001"
 	secondEventID := "00000000-0000-0000-0000-000000000002"
 	at := time.Unix(1700000000, 0).UTC()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, firstEventID, runID, "fork.first", events.EventProducerPlatform, "test", "", "", at)
 	firstRevision := captureRunForkTestRevision(t, db, runID)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, secondEventID, runID, "fork.second", events.EventProducerPlatform, "test", "", "", at)
@@ -70,12 +65,7 @@ func TestRunForkPlanner_FailsClosedForOpenReplyContextAtForkPoint(t *testing.T) 
 	runID := uuid.NewString()
 	requestEventID := uuid.NewString()
 	at := time.Unix(1700000050, 0).UTC()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, requestEventID, runID, "provider.requested", events.EventProducerPlatform, "test", "", "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO reply_contexts (
@@ -115,12 +105,7 @@ func TestRunForkPlanner_ReconstructsEntityStateAtForkPointFromMutations(t *testi
 	firstEventID := uuid.NewString()
 	secondEventID := uuid.NewString()
 	at := time.Unix(1700000100, 0).UTC()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, firstEventID, runID, "fork.before", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
@@ -180,12 +165,7 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000200, 0).UTC()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "review/inst-1", at)
 	retryFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "retryable_error", nil)
 	deadFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "dead_letter", nil)
@@ -277,12 +257,7 @@ func TestRunForkPlanner_PendingUnstartedDeliveryIsDeliveryEventReplayReady(t *te
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000250, 0).UTC()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.safe_pending", events.EventProducerPlatform, "test", "", "", at)
 	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "safe-agent"}, runtimedelivery.StateQueued, nil)
 
@@ -319,12 +294,7 @@ func TestRunForkPlanner_NodePendingDeliveryRemainsBlocked(t *testing.T) {
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000260, 0).UTC()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.node_pending", events.EventProducerPlatform, "test", "", "", at)
 	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-handler"}, runtimedelivery.StateQueued, nil)
 
@@ -389,12 +359,7 @@ func TestRunForkPlanner_NonAgentDeliveryStatesRemainNamedBlockers(t *testing.T) 
 			runID := uuid.NewString()
 			eventID := uuid.NewString()
 			at := time.Unix(1700000265, 0).UTC()
-			if _, err := db.ExecContext(ctx, `
-				INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-				VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-			`, runID, at.Add(-time.Minute)); err != nil {
-				t.Fatalf("seed run: %v", err)
-			}
+			requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 			event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.non_agent", events.EventProducerPlatform, "test", "", "", at)
 			seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-handler"}, tc.state, tc.failure)
 
@@ -430,12 +395,7 @@ func TestRunForkPlanner_CommittedReplayScopeDoesNotMasqueradeAsExecutableDeliver
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000266, 0).UTC()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.replay_scope", events.EventProducerPlatform, "test", "", "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO committed_replay_scopes (event_id, run_id, scope, created_at, updated_at)
@@ -465,12 +425,7 @@ func TestRunForkPlanner_SystemDeliveryRowsAreNotCanonicalEventDeliveries(t *test
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000267, 0).UTC()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.system_delivery", events.EventProducerPlatform, "test", "", "", at)
 	err := commitDeliveryObligationFixture(ctx, pg, event, events.DeliveryRoute{SubscriberType: "system", SubscriberID: "system-handler"})
 	if err == nil {
@@ -490,12 +445,7 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000210, 0).UTC()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.state", events.EventProducerPlatform, "test", entityID, "flow-a/1", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
@@ -603,12 +553,7 @@ func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000220, 0).UTC()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.timer_route", events.EventProducerPlatform, "test", entityID, "flow-a/1", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
@@ -663,12 +608,7 @@ func TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery(t *testing.T) {
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000250, 0).UTC()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
 	retryFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "retryable_error", nil)
 	nodeDead := seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-dead"}, runtimedelivery.StateRetrying, &retryFailure)
@@ -724,12 +664,7 @@ func TestRunForkPlanner_DeadLetterClassificationUsesExactSiblingDeliveryID(t *te
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000255, 0).UTC()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
 	deadRoute := events.DeliveryRoute{
 		SubscriberType: "agent", SubscriberID: "agent-shared",
@@ -770,12 +705,7 @@ func TestRunForkPlanner_DoesNotReportPostForkCompletionAsCompletedAtFork(t *test
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000260, 0).UTC()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
 	completedRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "completed-after-fork"}
 	pendingRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "started-after-fork"}
@@ -839,12 +769,7 @@ func TestRunForkPlanner_SuppressesPostForkTerminalMetadata(t *testing.T) {
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000270, 0).UTC()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
 	failedRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "failed-after-fork"}
 	pendingRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "pending-then-failed-after-fork"}
@@ -904,12 +829,7 @@ func TestRunForkPlanner_AccountsForPlatformReceiptAndExactDeliveryOutcomes(t *te
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000280, 0).UTC()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_receipts (
@@ -974,12 +894,7 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 	sessionID := uuid.NewString()
 	turnID := uuid.NewString()
 	at := time.Unix(1700000290, 0).UTC()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.session", events.EventProducerPlatform, "test", "", "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (
@@ -1036,12 +951,7 @@ func TestRunForkPlanner_ActiveConversationAuditRemainsPolicyBlocker(t *testing.T
 	eventID := uuid.NewString()
 	auditSessionID := uuid.NewString()
 	at := time.Unix(1700000295, 0).UTC()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.task_audit", events.EventProducerPlatform, "test", "", "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
@@ -1077,12 +987,7 @@ func TestRunForkPlanner_TerminatedSessionBeforeForkIsLineageOnly(t *testing.T) {
 	eventID := uuid.NewString()
 	sessionID := uuid.NewString()
 	at := time.Unix(1700000297, 0).UTC()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.completed_session", events.EventProducerPlatform, "test", "", "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (
@@ -1124,12 +1029,7 @@ func TestRunForkPlanner_TerminatedAuditStillBlocksWithoutAtForkTerminationProof(
 	eventID := uuid.NewString()
 	auditSessionID := uuid.NewString()
 	at := time.Unix(1700000298, 0).UTC()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.terminated_audit", events.EventProducerPlatform, "test", "", "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (

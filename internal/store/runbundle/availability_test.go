@@ -6,6 +6,7 @@ import (
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -122,15 +123,13 @@ func TestListActiveConflictsUsesAvailabilityOwner(t *testing.T) {
 func seedRunBundleAvailability(t *testing.T, db *sql.DB, status, bundleHash, bundleSource string) string {
 	t.Helper()
 	runID := uuid.NewString()
-	var hash sql.NullString
-	if bundleHash != "" {
-		hash = sql.NullString{String: bundleHash, Valid: true}
-	}
-	if _, err := db.Exec(`
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, $2, $3, $4)
-	`, runID, status, hash, bundleSource); err != nil {
-		t.Fatalf("seed run availability %s: %v", status, err)
-	}
+	runlifecyclefixture.RequireCorruptPostgresSnapshot(
+		t,
+		testAuthorActivityContext(),
+		db,
+		runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
+			RunID: runID, State: status, BundleHash: bundleHash, BundleSource: bundleSource,
+		},
+	)
 	return runID
 }

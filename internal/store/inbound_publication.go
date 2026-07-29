@@ -14,6 +14,7 @@ import (
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 var errInboundPublicationNotFound = errors.New("inbound publication not found")
@@ -366,12 +367,8 @@ func admitPostgresInboundStandingTargetTx(ctx context.Context, tx *sql.Tx, reque
 	if effectiveState != "active" || publicationState != "published" {
 		return false, fmt.Errorf("standing service %s is %s/%s and cannot accept inbound publication", request.StableServiceID, effectiveState, publicationState)
 	}
-	var runStatus string
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid FOR UPDATE`, request.ResolvedRunID).Scan(&runStatus); err != nil {
-		return false, fmt.Errorf("lock inbound target run: %w", err)
-	}
-	if runStatus != "running" && runStatus != "paused" {
-		return false, fmt.Errorf("inbound target run %s has terminal status %s", request.ResolvedRunID, runStatus)
+	if err := runtimerunlifecycle.RequireActive(ctx, request.ResolvedRunID); err != nil {
+		return false, fmt.Errorf("admit inbound target run lifecycle: %w", err)
 	}
 	var generationRunID string
 	if err := tx.QueryRowContext(ctx, `SELECT run_id::text FROM standing_service_generations WHERE service_id = $1::uuid AND generation = $2 AND retired_at IS NULL FOR UPDATE`, request.StableServiceID, generation).Scan(&generationRunID); err != nil {
@@ -433,7 +430,7 @@ func (s *PostgresStore) finalizeInboundPublicationTx(ctx context.Context, tx *sq
 	if affected, _ := res.RowsAffected(); affected != 1 {
 		return runtimeinbound.Record{}, fmt.Errorf("prepared inbound publication %s was not finalized", request.PublicationID)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE runs SET event_count = (SELECT COUNT(*) FROM events WHERE run_id = $1::uuid) WHERE run_id = $1::uuid`, request.ResolvedRunID); err != nil {
+	if err := runtimerunlifecycle.SyncCounters(ctx, request.ResolvedRunID); err != nil {
 		return runtimeinbound.Record{}, fmt.Errorf("synchronize inbound publication event count: %w", err)
 	}
 	record, found, err := loadPostgresInboundPublicationTx(ctx, tx, request.Provider, request.EntityID, request.ProviderEventID, false)

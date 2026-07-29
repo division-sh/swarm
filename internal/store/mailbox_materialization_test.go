@@ -22,6 +22,9 @@ func TestPostgresStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner(t *t
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
 	parentID := eventtest.UUID("mailbox-parent:" + eventID)
+	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		RunID: runID, StartedAt: time.Now().UTC().Add(-time.Second),
+	})
 	if err := commitSemanticParentFixture(ctx, store, runID, parentID, time.Now().UTC().Add(-time.Microsecond)); err != nil {
 		t.Fatalf("seed mailbox parent: %v", err)
 	}
@@ -89,6 +92,9 @@ func TestSQLiteRuntimeStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
 	parentID := eventtest.UUID("mailbox-parent:" + eventID)
+	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		RunID: runID, StartedAt: time.Now().UTC().Add(-time.Second),
+	})
 	if err := commitSemanticParentFixture(ctx, store, runID, parentID, time.Now().UTC().Add(-time.Microsecond)); err != nil {
 		t.Fatalf("seed mailbox parent: %v", err)
 	}

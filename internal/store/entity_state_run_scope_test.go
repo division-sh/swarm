@@ -14,9 +14,7 @@ func TestEntityStateSchema_AllowsSameEntityIDInDifferentRuns(t *testing.T) {
 	runB := uuid.NewString()
 	entityID := uuid.NewString()
 	for _, runID := range []string{runA, runB} {
-		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-			t.Fatalf("seed run %s: %v", runID, err)
-		}
+		requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (

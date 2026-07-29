@@ -10,9 +10,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/runbundle"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -63,10 +64,10 @@ func TestRunLifecycleOwnerRejectsPersistedSourceWithoutBundleRow(t *testing.T) {
 	runID := uuid.NewString()
 
 	err := pg.runAuthorActivityMutation(testAuthorActivityContext(), "test ensure missing persisted run bundle", func(txctx context.Context, tx *sql.Tx) error {
-		return storerunlifecycle.EnsureActive(txctx, tx, runID, "", "", storerunlifecycle.EnsureActiveOptions{
-			HasStartedAtCol:  true,
-			BundleSourceFact: mustStoreTestPersistedBundleSourceFact(testCanonicalBundleHash),
+		_, err := (postgresRunLifecycleMutation{store: pg, tx: tx}).Create(txctx, storerunlifecycle.CreateRequest{
+			RunID: runID, Source: mustStoreTestPersistedBundleSourceFact(testCanonicalBundleHash), StartedAt: time.Now().UTC(),
 		})
+		return err
 	})
 	if !errors.Is(err, storerunlifecycle.ErrPersistedBundleUnavailable) {
 		t.Fatalf("EnsureActive error = %v, want ErrPersistedBundleUnavailable", err)
@@ -90,12 +91,14 @@ func TestPostgresStore_ActiveRunBundleAvailabilityConflicts(t *testing.T) {
 		{runID: deletedRunID, status: "paused", hash: testCanonicalBundleHash, source: storerunlifecycle.BundleSourceDeleted},
 		{runID: completedDeletedRunID, status: "completed", hash: testCanonicalBundleHash, source: storerunlifecycle.BundleSourceDeleted},
 	} {
-		if _, err := db.ExecContext(testAuthorActivityContext(), `
-			INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-			VALUES ($1::uuid, $2, $3, $4)
-		`, seed.runID, seed.status, seed.hash, seed.source); err != nil {
-			t.Fatalf("seed run %s: %v", seed.runID, err)
-		}
+		runlifecyclefixture.RequireCorruptPostgresSnapshot(
+			t,
+			testAuthorActivityContext(),
+			db,
+			runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
+				RunID: seed.runID, State: seed.status, BundleHash: seed.hash, BundleSource: seed.source,
+			},
+		)
 	}
 
 	conflicts, err := pg.ActiveRunBundleAvailabilityConflicts(testAuthorActivityContext())

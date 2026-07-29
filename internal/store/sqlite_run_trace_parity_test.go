@@ -144,9 +144,7 @@ func TestSQLiteRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 	businessEvent := "00000000-0000-0000-0000-000000001817"
 	runtimeLogEvent := "00000000-0000-0000-0000-000000001818"
 	base := time.Unix(1700000600, 0).UTC()
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: sqliteStore.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	if err := commitSemanticEventFixture(ctx, sqliteStore, eventtest.PersistedProjection(
 		businessEvent, events.EventType("item.received"), "runtime", "", json.RawMessage(`{}`), 0,
 		runID, "", events.EventEnvelope{}, base,
@@ -186,9 +184,7 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 	turnID := "00000000-0000-0000-0000-000000001434"
 	agentID := "agent-task"
 
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: sqliteStore.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base.Add(-time.Minute)})
 	if err := commitSemanticEventFixture(ctx, sqliteStore, eventtest.PersistedProjection(
 		eventID, events.EventType("trace.task_audit"), "runtime", "", json.RawMessage(`{}`), 0,
 		runID, "", events.EventEnvelope{}, base,
@@ -276,9 +272,7 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 		tieTurnBID:        "00000000-0000-0000-0000-000000000203",
 		base:              base,
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, fixture.runID, base.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: sqliteStore.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, StartedAt: base.Add(-time.Minute)})
 	eventRows := []struct {
 		id   string
 		name string

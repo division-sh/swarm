@@ -70,7 +70,26 @@ type TransitionResult struct {
 	RunID               string
 	Status              string
 	AbandonedDeliveries int
-	ReleasedDeliveries  int
+	Recovery            PostCommitRecovery
+}
+
+type RecoveryDisposition string
+
+const (
+	RecoveryNotConfigured RecoveryDisposition = "not_configured"
+	RecoveryExhausted     RecoveryDisposition = "exhausted"
+	RecoveryBlocked       RecoveryDisposition = "blocked"
+	RecoveryFailed        RecoveryDisposition = "failed"
+	RecoveryCancelled     RecoveryDisposition = "cancelled"
+)
+
+// PostCommitRecovery reports the immediate durable-recovery attempt after a
+// successful continue. Its error is diagnostic: the run transition is already
+// committed and must not be replayed.
+type PostCommitRecovery struct {
+	Disposition RecoveryDisposition
+	Sweep       runtimepipelineobligation.SweepResult
+	Err         error
 }
 
 type Store interface {
@@ -153,26 +172,45 @@ func (c *Controller) Continue(ctx context.Context, req TransitionRequest) (Trans
 	if err != nil {
 		return TransitionResult{}, err
 	}
-	result := TransitionResult{RunID: state.RunID, Status: StatusRunning}
+	result := TransitionResult{
+		RunID:  state.RunID,
+		Status: StatusRunning,
+		Recovery: PostCommitRecovery{
+			Disposition: RecoveryNotConfigured,
+		},
+	}
 	if c.queue != nil {
-		result.ReleasedDeliveries = c.releaseQueuedAfterContinue(ctx, state.RunID)
+		result.Recovery = c.releaseQueuedAfterContinue(ctx, state.RunID)
 	}
 	return result, nil
 }
 
-func (c *Controller) releaseQueuedAfterContinue(ctx context.Context, runID string) int {
+func (c *Controller) releaseQueuedAfterContinue(ctx context.Context, runID string) PostCommitRecovery {
 	if c == nil || c.queue == nil {
-		return 0
+		return PostCommitRecovery{Disposition: RecoveryNotConfigured}
 	}
-	releasedTotal := 0
+	recovery := PostCommitRecovery{}
 	for {
 		result, err := c.queue.ReleaseRunQueue(ctx, runID, c.releaseLimit)
-		releasedTotal += result.Settled
+		recovery.Sweep.Settled += result.Settled
+		recovery.Sweep.Examined += result.Examined
+		recovery.Sweep.Exhausted = recovery.Sweep.Exhausted || result.Exhausted
+		recovery.Sweep.Blocked = recovery.Sweep.Blocked || result.Blocked
 		if err != nil {
-			return releasedTotal
+			recovery.Err = err
+			recovery.Disposition = RecoveryFailed
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				recovery.Disposition = RecoveryCancelled
+			}
+			return recovery
 		}
-		if result.Exhausted || result.Blocked {
-			return releasedTotal
+		if result.Blocked {
+			recovery.Disposition = RecoveryBlocked
+			return recovery
+		}
+		if result.Exhausted {
+			recovery.Disposition = RecoveryExhausted
+			return recovery
 		}
 	}
 }

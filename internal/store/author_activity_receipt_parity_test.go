@@ -63,12 +63,13 @@ func TestAuthorActivityDuplicateTerminalReceiptIsNoOpParity(t *testing.T) {
 			}
 
 			before := listAuthorActivityForReceiptParity(t, fixture, ctx)
-			if len(before) != 3 || before[0].Kind != runtimeauthoractivity.KindEventEmitted ||
-				before[1].Kind != runtimeauthoractivity.KindDeliveryLifecycle || before[1].Transition != "in_progress" ||
-				before[2].Kind != runtimeauthoractivity.KindDeliveryLifecycle || before[2].Transition != "delivered" {
-				t.Fatalf("first receipt occurrences = %#v, want emitted, in-progress, and delivered occurrences", before)
+			if len(before) != 4 || before[0].Kind != runtimeauthoractivity.KindRunLifecycle ||
+				before[1].Kind != runtimeauthoractivity.KindEventEmitted ||
+				before[2].Kind != runtimeauthoractivity.KindDeliveryLifecycle || before[2].Transition != "in_progress" ||
+				before[3].Kind != runtimeauthoractivity.KindDeliveryLifecycle || before[3].Transition != "delivered" {
+				t.Fatalf("first receipt occurrences = %#v, want run-started, emitted, in-progress, and delivered occurrences", before)
 			}
-			for _, occurrence := range before {
+			for _, occurrence := range before[1:] {
 				if occurrence.AuthorSafeSummary != "how are you" {
 					t.Fatalf("%s summary = %q, want persisted safe source summary", occurrence.Kind, occurrence.AuthorSafeSummary)
 				}
@@ -129,12 +130,18 @@ func TestAuthoredNodeEventProducerTypeParity(t *testing.T) {
 				t.Fatalf("persisted producer = %q/%q, want declarative-node/node", producedBy, producedByType)
 			}
 			occurrences := listAuthorActivityForReceiptParity(t, fixture, ctx)
-			if len(occurrences) != 1 {
+			var emitted []runtimeauthoractivity.Occurrence
+			for _, occurrence := range occurrences {
+				if occurrence.Kind == runtimeauthoractivity.KindEventEmitted {
+					emitted = append(emitted, occurrence)
+				}
+			}
+			if len(emitted) != 1 {
 				t.Fatalf("occurrences = %#v, want one emitted occurrence", occurrences)
 			}
-			projection := occurrences[0].Projection
-			if occurrences[0].Kind != runtimeauthoractivity.KindEventEmitted || projection.ProducerID != "declarative-node" || projection.ProducerType != "node" {
-				t.Fatalf("emitted occurrence = %#v, want exact declarative-node/node producer", occurrences[0])
+			projection := emitted[0].Projection
+			if projection.ProducerID != "declarative-node" || projection.ProducerType != "node" {
+				t.Fatalf("emitted occurrence = %#v, want exact declarative-node/node producer", emitted[0])
 			}
 		})
 	}
@@ -142,12 +149,11 @@ func TestAuthoredNodeEventProducerTypeParity(t *testing.T) {
 
 func seedAuthorActivityReceiptRun(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context, runID string) {
 	t.Helper()
-	query := `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
+	startedAt := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
 	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
-		query = `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`
-	}
-	if _, err := fixture.db.ExecContext(ctx, query, runID, time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)); err != nil {
-		t.Fatalf("seed author activity receipt run: %v", err)
+		requireRunningPostgresRunForTest(t, ctx, fixture.db, runID, startedAt)
+	} else {
+		requireRunningSQLiteRunForTest(t, ctx, fixture.db, runID, startedAt)
 	}
 }
 

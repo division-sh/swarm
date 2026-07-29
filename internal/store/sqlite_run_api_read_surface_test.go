@@ -10,6 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -32,16 +34,21 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	runtimeLogFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassInternalFailure, "proof_failure", nil))
 	runtimeLogPayload := `{"log_level":"error","message":"boom","details":{"component":"runtime","action":"proof","failure":` + runtimeLogFailure + `}}`
 
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO runs (
-			run_id, status, bundle_hash, bundle_source, trigger_event_id, trigger_event_type,
-			forked_from_run_id, entity_count, event_count, failure, started_at, ended_at
-		)
-		VALUES
-			(?, 'running', ?, 'ephemeral', ?, 'scan.requested', NULL, 3, 0, NULL, ?, NULL),
-			(?, 'running', ?, 'ephemeral', ?, 'scan.completed', ?, 5, 0, NULL, ?, NULL)
-	`, newer, bundleA, newerEvent, now, older, bundleB, olderEvent, newer, now.Add(-time.Hour)); err != nil {
-		t.Fatalf("seed sqlite runs: %v", err)
+	for _, snapshot := range []runlifecyclefixture.CorruptSnapshot{
+		{
+			RunID: newer, State: "running", BundleHash: bundleA, BundleSource: "ephemeral",
+			OriginKind:     string(runtimerunlifecycle.OriginEvent),
+			TriggerEventID: newerEvent, TriggerEventType: "scan.requested",
+			EntityCount: 3, StartedAt: now,
+		},
+		{
+			RunID: older, State: "running", BundleHash: bundleB, BundleSource: "ephemeral",
+			OriginKind:      string(runtimerunlifecycle.OriginForkMaterialization),
+			ForkedFromRunID: newer, ForkedFromEventID: newerEvent,
+			EntityCount: 5, StartedAt: now.Add(-time.Hour),
+		},
+	} {
+		runlifecyclefixture.RequireCorruptSQLiteSnapshot(t, ctx, sqliteStore.DB, snapshot)
 	}
 	for _, fixture := range []struct {
 		id, runID, name, entityID string
@@ -70,11 +77,9 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	)); err != nil {
 		t.Fatalf("seed sqlite runtime log: %v", err)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		UPDATE runs SET status = 'completed', ended_at = ? WHERE run_id = ?
-	`, now.Add(-30*time.Minute), older); err != nil {
-		t.Fatalf("terminalize older sqlite run: %v", err)
-	}
+	runlifecyclefixture.CorruptSQLiteState(
+		t, ctx, sqliteStore.DB, older, "completed", now.Add(-30*time.Minute),
+	)
 	seedSQLiteEntityStateRows(t, sqliteStore.DB, ctx, newer, newerEntityA, newerEntityB)
 	seedSQLiteEntityStateRows(t, sqliteStore.DB, ctx, older, olderEntity)
 	rootEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, newerEvent)
@@ -135,7 +140,10 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadRunHeader: %v", err)
 	}
-	if header.RunID != older || header.Status != "completed" || header.TriggerEventID != olderEvent || header.ForkedFromRunID != newer {
+	if header.RunID != older || header.Status != "completed" ||
+		header.Origin.Kind() != runtimerunlifecycle.OriginForkMaterialization ||
+		header.Origin.SourceRunID() != newer ||
+		header.Origin.SourceEventID() != newerEvent {
 		t.Fatalf("header = %#v", header)
 	}
 	if header.EndedAt == nil {
@@ -246,14 +254,14 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 	runtimeLogEventID := uuid.NewString()
 	readyEventID := uuid.NewString()
 
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES
-			(?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'),
-			(?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, blockedRunID, now.Add(-time.Minute), readyRunID, now.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed sqlite runs: %v", err)
-	}
+	runlifecyclefixture.RequireSQLite(t, ctx, sqliteStore.DB, runlifecyclefixture.Fixture{
+		RunID: blockedRunID, Origin: runlifecyclefixture.EventOrigin(t, activeEventID, "quiescence.active_delivery"),
+		StartedAt: now.Add(-time.Minute),
+	})
+	runlifecyclefixture.RequireSQLite(t, ctx, sqliteStore.DB, runlifecyclefixture.Fixture{
+		RunID: readyRunID, Origin: runlifecyclefixture.EventOrigin(t, readyEventID, "quiescence.ready"),
+		StartedAt: now.Add(-time.Minute),
+	})
 	for _, fixture := range []struct {
 		id, runID, name string
 		at              time.Time

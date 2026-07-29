@@ -17,8 +17,8 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -38,7 +38,7 @@ func (s *PostgresStore) CreateDecisionCard(ctx context.Context, card decisioncar
 		}
 		return insertDecisionCard(ctx, tx, card, true)
 	}
-	return runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
+	return runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx) error {
 		if err := requireActiveDecisionRun(txctx, tx, card.RunID, true); err != nil {
 			return err
 		}
@@ -168,11 +168,7 @@ func loadDecisionCard(ctx context.Context, db decisionCardSQL, id string, postgr
 }
 
 func requireActiveDecisionRun(ctx context.Context, db decisionCardSQL, runID string, postgres bool) error {
-	dialect := storerunlifecycle.DialectSQLite
-	if postgres {
-		dialect = storerunlifecycle.DialectPostgres
-	}
-	return storerunlifecycle.RequireActive(ctx, db, runID, dialect)
+	return runtimerunlifecycle.RequireActive(ctx, runID)
 }
 
 func requireActiveDecisionCardRun(ctx context.Context, db decisionCardSQL, cardID string, postgres bool) error {
@@ -188,7 +184,7 @@ func requireActiveDecisionCardRun(ctx context.Context, db decisionCardSQL, cardI
 		return err
 	}
 	if err := requireActiveDecisionRun(ctx, db, runID, postgres); err != nil {
-		if errors.Is(err, storerunlifecycle.ErrRunNotActive) {
+		if errors.Is(err, runtimerunlifecycle.ErrRunNotActive) {
 			return decisioncard.ErrAlreadyTerminal
 		}
 		return err
@@ -209,7 +205,7 @@ func requireActiveDecisionDraftRun(ctx context.Context, db decisionCardSQL, draf
 		return err
 	}
 	if err := requireActiveDecisionRun(ctx, db, runID, postgres); err != nil {
-		if errors.Is(err, storerunlifecycle.ErrRunNotActive) {
+		if errors.Is(err, runtimerunlifecycle.ErrRunNotActive) {
 			return decisioncard.ErrDraftNotAuthority
 		}
 		return err
@@ -429,7 +425,7 @@ func (s *PostgresStore) DecideDecisionCard(ctx context.Context, req decisioncard
 		return decideDecisionCard(ctx, tx, req, true)
 	}
 	var out decisioncard.DecisionOutcome
-	err := runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
+	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		out, err = decideDecisionCard(txctx, tx, req, true)
 		return err
@@ -574,7 +570,7 @@ func (s *PostgresStore) DeferDecisionCard(ctx context.Context, req decisioncard.
 		return deferDecisionCard(ctx, tx, req, true)
 	}
 	var out decisioncard.DecisionOutcome
-	err := runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
+	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		out, err = deferDecisionCard(txctx, tx, req, true)
 		return err
@@ -640,7 +636,7 @@ func (s *PostgresStore) BeginDecisionCardInput(ctx context.Context, req decision
 		return beginDecisionCardInput(ctx, tx, req, true)
 	}
 	var draft decisioncard.InputDraft
-	err := runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
+	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		draft, err = beginDecisionCardInput(txctx, tx, req, true)
 		return err
@@ -721,7 +717,7 @@ func (s *PostgresStore) CancelDecisionCardInput(ctx context.Context, req decisio
 		return cancelDecisionCardInput(ctx, tx, req, true)
 	}
 	var draft decisioncard.InputDraft
-	err := runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
+	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		draft, err = cancelDecisionCardInput(txctx, tx, req, true)
 		return err
@@ -859,7 +855,7 @@ func transitionDecisionCardDrafts(ctx context.Context, tx *sql.Tx, filter draftT
 			placeholder = "$" + strconv.Itoa(len(args))
 		}
 		clauses = append(clauses, "expires_at <= "+placeholder)
-		clauses = append(clauses, "EXISTS (SELECT 1 FROM runs run WHERE run.run_id = decision_card_input_drafts.run_id AND run.status IN ('running', 'paused'))")
+		clauses = append(clauses, "EXISTS (SELECT 1 FROM runs run WHERE run.run_id = decision_card_input_drafts.run_id AND run.status IN ("+runLifecycleActiveStateSQLValues+"))")
 	}
 	query := `SELECT input_draft_id, run_id, card_id, expires_at FROM decision_card_input_drafts WHERE ` + strings.Join(clauses, " AND ") + ` ORDER BY input_draft_id`
 	if postgres {
@@ -913,50 +909,60 @@ func transitionDecisionCardDrafts(ctx context.Context, tx *sql.Tx, filter draftT
 }
 
 func (s *PostgresStore) SupersedeDecisionCardsForStage(ctx context.Context, runID, entityID, activationID, reason string, now time.Time) error {
-	return runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
-		return supersedeDecisionCardsForStage(txctx, tx, runID, entityID, activationID, reason, now, true)
+	return runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx) error {
+		changed, err := supersedeDecisionCardsForStage(txctx, tx, runID, entityID, activationID, reason, now, true)
+		if err != nil || !changed {
+			return err
+		}
+		_, err = s.requestCompletionCandidateTx(txctx, tx, runID, nil)
+		return err
 	})
 }
 
 func (s *SQLiteRuntimeStore) SupersedeDecisionCardsForStage(ctx context.Context, runID, entityID, activationID, reason string, now time.Time) error {
 	return s.runDecisionCardMutation(ctx, "sqlite supersede decision card", func(txctx context.Context, tx *sql.Tx) error {
-		return supersedeDecisionCardsForStage(txctx, tx, runID, entityID, activationID, reason, now, false)
+		changed, err := supersedeDecisionCardsForStage(txctx, tx, runID, entityID, activationID, reason, now, false)
+		if err != nil || !changed {
+			return err
+		}
+		_, err = s.requestCompletionCandidateTx(txctx, tx, runID, nil)
+		return err
 	})
 }
 
-func supersedeDecisionCardsForStage(ctx context.Context, tx *sql.Tx, runID, entityID, activationID, reason string, now time.Time, postgres bool) error {
+func supersedeDecisionCardsForStage(ctx context.Context, tx *sql.Tx, runID, entityID, activationID, reason string, now time.Time, postgres bool) (bool, error) {
 	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return err
+		return false, err
 	}
 	now = decisioncard.CanonicalTimestamp(now)
 	if now.IsZero() {
 		now = decisioncard.CanonicalTimestamp(time.Now())
 	}
 	if err := requireActiveDecisionRun(ctx, tx, runID, postgres); err != nil {
-		return err
+		return false, err
 	}
 	card, err := loadDecisionCardByActivation(ctx, tx, runID, entityID, activationID, postgres)
 	if errors.Is(err, decisioncard.ErrNotFound) {
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	if card.Status != decisioncard.StatusPending {
-		return nil
+		return false, nil
 	}
 	if _, err := transitionDecisionCardDrafts(ctx, tx, draftTransitionFilter{cardID: card.CardID}, now, false, postgres); err != nil {
-		return err
+		return false, err
 	}
 	query := `UPDATE decision_cards SET status = ?, superseded_reason = ?, updated_at = ? WHERE card_id = ? AND status = 'pending'`
 	if postgres {
 		query = `UPDATE decision_cards SET status = $1, superseded_reason = $2, updated_at = $3 WHERE card_id = $4 AND status = 'pending'`
 	}
 	if _, err := tx.ExecContext(ctx, query, decisioncard.StatusSuperseded, strings.TrimSpace(reason), now, card.CardID); err != nil {
-		return err
+		return false, err
 	}
 	_, err = appendDecisionCardChangeDTO(ctx, tx, card.RunID, card.CardID, decisioncard.ChangeSuperseded, map[string]any{"reason": strings.TrimSpace(reason)}, now, postgres)
-	return err
+	return err == nil, err
 }
 
 func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
@@ -1050,7 +1056,7 @@ func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason
 
 func (s *PostgresStore) ExpireDecisionCardInputDrafts(ctx context.Context, now time.Time) (int, error) {
 	count := 0
-	err := runPostgresDecisionCardMutation(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
+	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		count, err = transitionDecisionCardDrafts(txctx, tx, draftTransitionFilter{}, now.UTC(), true, true)
 		return err
@@ -1321,17 +1327,20 @@ func decisionCardAuthorActivityIdentity(anchor decisioncard.Anchor) (anchorID, e
 	}
 }
 
-func runPostgresDecisionCardMutation(ctx context.Context, db *sql.DB, fn func(context.Context, *sql.Tx) error) error {
+func runPostgresDecisionCardMutation(ctx context.Context, selected *PostgresStore, fn func(context.Context, *sql.Tx) error) error {
+	if selected == nil || selected.DB == nil {
+		return errors.New("PostgreSQL decision card mutation requires selected store")
+	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		if !runtimeauthoractivity.InMutation(ctx, tx) {
 			return fmt.Errorf("decision card mutation entered from a raw transaction without author activity ownership")
 		}
-		return fn(ctx, tx)
+		return fn(selected.bindRunLifecycleMutation(ctx, tx), tx)
 	}
 	conn, borrowed := runtimepipeline.PipelineSQLConnFromContext(ctx)
 	if !borrowed {
 		var err error
-		conn, err = db.Conn(ctx)
+		conn, err = selected.DB.Conn(ctx)
 		if err != nil {
 			return err
 		}
@@ -1341,23 +1350,35 @@ func runPostgresDecisionCardMutation(ctx context.Context, db *sql.DB, fn func(co
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
+	postCommit := make([]runtimepipeline.OwnerAction, 0, 4)
+	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 4)
 	txctx := runtimepipeline.WithPipelineSQLConnContext(ctx, conn)
 	txctx = runtimepipeline.WithPipelineSQLTxContext(txctx, tx)
+	txctx = selected.bindRunLifecycleMutation(txctx, tx)
+	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
+	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
 	storyctx, err := runtimeauthoractivity.Begin(txctx, tx, runtimeauthoractivity.DialectPostgres)
 	if err != nil {
-		return err
+		return errors.Join(err, rollbackSQLTransaction(tx))
 	}
 	if err := fn(storyctx, tx); err != nil {
-		return err
+		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
+		return errors.Join(err, rollbackSQLTransaction(tx))
 	}
 	if err := runtimepipeline.CapturePipelineRunForkRevisionChanges(storyctx, tx); err != nil {
-		return err
+		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
+		return errors.Join(err, rollbackSQLTransaction(tx))
 	}
 	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
-		return err
+		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
+		return errors.Join(err, rollbackSQLTransaction(tx))
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
+		return errors.Join(err, rollbackSQLTransaction(tx))
+	}
+	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	return nil
 }
 
 func (s *SQLiteRuntimeStore) runDecisionCardMutation(ctx context.Context, label string, fn func(context.Context, *sql.Tx) error) error {
@@ -1365,7 +1386,7 @@ func (s *SQLiteRuntimeStore) runDecisionCardMutation(ctx context.Context, label 
 		if !runtimeauthoractivity.InMutation(ctx, tx) {
 			return fmt.Errorf("%s entered from a raw transaction without author activity ownership", label)
 		}
-		return fn(ctx, tx)
+		return fn(s.bindRunLifecycleMutation(ctx, tx), tx)
 	}
 	return s.runAuthorActivityMutation(ctx, label, fn)
 }

@@ -15,7 +15,6 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -640,6 +639,11 @@ func (s *postgresPipelineObligationStore) MarkDecisionProcessed(ctx context.Cont
 		return err
 	}
 	defer state.operationMu.Unlock()
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
+		return err
+	}
+	defer handoff.rollback()
 	lease := state.postgresLease
 	tx, err := lease.session.beginTx(ctx)
 	if err != nil {
@@ -648,10 +652,26 @@ func (s *postgresPipelineObligationStore) MarkDecisionProcessed(ctx context.Cont
 	if err := markDecisionRouteProcessedTx(ctx, tx, claim.EventID(), true, time.Now().UTC()); err != nil {
 		return errors.Join(err, rollbackPostgresSessionTransaction(tx, lease.session))
 	}
+	runID, err := eventRunIDForCompletionCandidateTx(ctx, tx, claim.EventID(), true)
+	if err != nil {
+		return errors.Join(err, rollbackPostgresSessionTransaction(tx, lease.session))
+	}
+	if runID != "" {
+		request, err := requestPostgresCompletionCandidateTx(ctx, tx, runID, nil, false)
+		if err != nil {
+			return errors.Join(err, rollbackPostgresSessionTransaction(tx, lease.session))
+		}
+		if err := handoff.prepare(&s.runLifecycleSinks, request); err != nil {
+			return errors.Join(err, rollbackPostgresSessionTransaction(tx, lease.session))
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return errors.Join(err, rollbackPostgresSessionTransaction(tx, lease.session))
 	}
-	return lease.session.endTx(tx)
+	if err := lease.session.endTx(tx); err != nil {
+		return err
+	}
+	return handoff.commit()
 }
 
 func (s *sqlitePipelineObligationStore) MarkDecisionProcessed(ctx context.Context, claim runtimepipelineobligation.Claim) error {
@@ -670,7 +690,18 @@ func (s *sqlitePipelineObligationStore) MarkDecisionProcessed(ctx context.Contex
 			}
 			return runtimepipelineobligation.ErrStaleClaim
 		}
-		return markDecisionRouteProcessedTx(txctx, tx, claim.EventID(), false, s.now())
+		if err := markDecisionRouteProcessedTx(txctx, tx, claim.EventID(), false, s.now()); err != nil {
+			return err
+		}
+		runID, err := eventRunIDForCompletionCandidateTx(txctx, tx, claim.EventID(), false)
+		if err != nil {
+			return err
+		}
+		if runID == "" {
+			return nil
+		}
+		_, err = s.requestCompletionCandidateTx(txctx, tx, runID, nil)
+		return err
 	})
 }
 
@@ -931,7 +962,7 @@ func (s *PostgresStore) commitInitialPipelineScopeTx(ctx context.Context, tx *sq
 	if tx == nil {
 		return errors.New("initial pipeline scope transaction is required")
 	}
-	if err := requireActiveRunForEvent(ctx, tx, eventID, storerunlifecycle.DialectPostgres); err != nil {
+	if err := requireActiveRunForEvent(ctx, tx, eventID, true); err != nil {
 		return err
 	}
 	return insertCommittedPipelineScopeTx(ctx, tx, eventID, scope, true, time.Now().UTC())
@@ -941,7 +972,7 @@ func (s *SQLiteRuntimeStore) commitInitialPipelineScopeTx(ctx context.Context, t
 	if tx == nil {
 		return errors.New("initial sqlite pipeline scope transaction is required")
 	}
-	if err := requireActiveRunForEvent(ctx, tx, eventID, storerunlifecycle.DialectSQLite); err != nil {
+	if err := requireActiveRunForEvent(ctx, tx, eventID, false); err != nil {
 		return err
 	}
 	return insertCommittedPipelineScopeTx(ctx, tx, eventID, scope, false, s.now())
@@ -1137,7 +1168,7 @@ func postgresPipelineEligible(ctx context.Context, q pipelineQueryer, eventID st
 				 AND receipt.subscriber_type = 'platform'
 				 AND receipt.subscriber_id = 'pipeline'
 					WHERE e.event_id = $1::uuid
-					  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
+					  AND (e.run_id IS NULL OR run.status IN (`+runLifecycleActiveStateSQLValues+`))
 					  AND receipt.event_id IS NULL
 					  AND %s
 					  AND NOT EXISTS (
@@ -1155,7 +1186,7 @@ func postgresPipelineEligible(ctx context.Context, q pipelineQueryer, eventID st
 					JOIN runs run ON run.run_id = route.run_id
 					WHERE route.event_id = $1::uuid
 					  AND route.status = 'pending'
-					  AND run.status IN ('running', 'paused')
+					  AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
 				)`, eventID).Scan(&eligible)
 		return eligible, err
 	default:
@@ -1177,7 +1208,7 @@ func sqlitePipelineEligible(ctx context.Context, q pipelineQueryer, eventID stri
 				 AND receipt.subscriber_type = 'platform'
 				 AND receipt.subscriber_id = 'pipeline'
 					WHERE e.event_id = ?
-					  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
+					  AND (e.run_id IS NULL OR run.status IN (` + runLifecycleActiveStateSQLValues + `))
 					  AND receipt.event_id IS NULL
 					  AND ` + sqliteDiagnosticDirectReplayExclusionSQL("e") + `
 					  AND NOT EXISTS (
@@ -1195,7 +1226,7 @@ func sqlitePipelineEligible(ctx context.Context, q pipelineQueryer, eventID stri
 					JOIN runs run ON run.run_id = route.run_id
 					WHERE route.event_id = ?
 					  AND route.status = 'pending'
-					  AND run.status IN ('running', 'paused')
+					  AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
 				)`, eventID).Scan(&eligible)
 		return eligible, err
 	default:
@@ -1281,7 +1312,7 @@ func (s *PostgresStore) postgresPipelineCandidatePage(
 				JOIN runs run ON run.run_id = route.run_id
 				WHERE route.status = 'pending'
 				  AND route.next_attempt_at <= now()
-				  AND run.status IN ('running', 'paused')
+				  AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
 				  %s
 				  %s
 				  %s
@@ -1328,7 +1359,7 @@ func (s *PostgresStore) postgresPipelineCandidatePage(
 		 AND receipt.subscriber_type = 'platform'
 		 AND receipt.subscriber_id = 'pipeline'
 		WHERE receipt.event_id IS NULL
-			  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
+			  AND (e.run_id IS NULL OR run.status IN (`+runLifecycleActiveStateSQLValues+`))
 			  %s
 			  %s
 			  %s
@@ -1407,7 +1438,7 @@ func (s *SQLiteRuntimeStore) sqlitePipelineCandidatePage(
 				JOIN runs run ON run.run_id = route.run_id
 				WHERE route.status = 'pending'
 				  AND route.next_attempt_at <= ?
-				  AND run.status IN ('running', 'paused')
+				  AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
 				  `+whereRun+`
 				  `+whereAfter+`
 				  `+whereThrough+`
@@ -1449,7 +1480,7 @@ func (s *SQLiteRuntimeStore) sqlitePipelineCandidatePage(
 		 AND receipt.subscriber_type = 'platform'
 		 AND receipt.subscriber_id = 'pipeline'
 			WHERE receipt.event_id IS NULL
-			  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
+			  AND (e.run_id IS NULL OR run.status IN (`+runLifecycleActiveStateSQLValues+`))
 			  `+whereRun+`
 			  `+whereAfter+`
 			  `+whereThrough+`
@@ -1546,6 +1577,11 @@ func (s *postgresPipelineObligationStore) Settle(ctx context.Context, claim runt
 		return err
 	}
 	defer state.operationMu.Unlock()
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
+		return err
+	}
+	defer handoff.rollback()
 	lease := state.postgresLease
 	tx, err := lease.session.beginTx(ctx)
 	if err != nil {
@@ -1554,10 +1590,26 @@ func (s *postgresPipelineObligationStore) Settle(ctx context.Context, claim runt
 	if err := writePipelineDispositionTx(ctx, tx, claim.EventID(), claim.Purpose(), disposition, true, time.Now().UTC()); err != nil {
 		return errors.Join(err, rollbackPostgresSessionTransaction(tx, lease.session))
 	}
+	runID, err := eventRunIDForCompletionCandidateTx(ctx, tx, claim.EventID(), true)
+	if err != nil {
+		return errors.Join(err, rollbackPostgresSessionTransaction(tx, lease.session))
+	}
+	if runID != "" {
+		request, err := requestPostgresCompletionCandidateTx(ctx, tx, runID, nil, false)
+		if err != nil {
+			return errors.Join(err, rollbackPostgresSessionTransaction(tx, lease.session))
+		}
+		if err := handoff.prepare(&s.runLifecycleSinks, request); err != nil {
+			return errors.Join(err, rollbackPostgresSessionTransaction(tx, lease.session))
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return errors.Join(err, rollbackPostgresSessionTransaction(tx, lease.session))
 	}
 	if err := lease.session.endTx(tx); err != nil {
+		return err
+	}
+	if err := handoff.commit(); err != nil {
 		return err
 	}
 	return s.releasePostgresPipelineClaimLocked(context.WithoutCancel(ctx), claim, state)
@@ -1579,7 +1631,18 @@ func (s *sqlitePipelineObligationStore) Settle(ctx context.Context, claim runtim
 			}
 			return runtimepipelineobligation.ErrStaleClaim
 		}
-		return writePipelineDispositionTx(txctx, tx, claim.EventID(), claim.Purpose(), disposition, false, s.now())
+		if err := writePipelineDispositionTx(txctx, tx, claim.EventID(), claim.Purpose(), disposition, false, s.now()); err != nil {
+			return err
+		}
+		runID, err := eventRunIDForCompletionCandidateTx(txctx, tx, claim.EventID(), false)
+		if err != nil {
+			return err
+		}
+		if runID == "" {
+			return nil
+		}
+		_, err = s.requestCompletionCandidateTx(txctx, tx, runID, nil)
+		return err
 	}); err != nil {
 		return err
 	}
@@ -2136,18 +2199,18 @@ func (s *postgresPipelineObligationStore) GlobalWorkPresence(ctx context.Context
 			LEFT JOIN runs run ON run.run_id = e.run_id
 			LEFT JOIN event_receipts receipt ON receipt.event_id = e.event_id AND receipt.subscriber_type = 'platform' AND receipt.subscriber_id = 'pipeline'
 			WHERE receipt.event_id IS NULL
-			  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
+			  AND (e.run_id IS NULL OR run.status IN (`+runLifecycleActiveStateSQLValues+`))
 			  AND NOT EXISTS (SELECT 1 FROM decision_card_route_obligations route WHERE route.event_id = e.event_id AND route.status <> 'completed')
 			  AND %s
 		), EXISTS (
 			SELECT 1 FROM decision_card_route_obligations route JOIN runs run ON run.run_id = route.run_id
-				WHERE route.status = 'pending' AND route.next_attempt_at <= now() AND run.status IN ('running', 'paused')
+				WHERE route.status = 'pending' AND route.next_attempt_at <= now() AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
 		), COALESCE((
 			SELECT MIN(e.created_at) FROM events e
 				LEFT JOIN runs run ON run.run_id = e.run_id
 				LEFT JOIN event_receipts receipt ON receipt.event_id = e.event_id AND receipt.subscriber_type = 'platform' AND receipt.subscriber_id = 'pipeline'
 				WHERE receipt.event_id IS NULL
-				  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
+				  AND (e.run_id IS NULL OR run.status IN (`+runLifecycleActiveStateSQLValues+`))
 				  AND NOT EXISTS (SELECT 1 FROM decision_card_route_obligations route WHERE route.event_id = e.event_id AND route.status <> 'completed')
 				  AND %s
 		), '0001-01-01'::timestamptz)`,
@@ -2172,18 +2235,18 @@ func (s *sqlitePipelineObligationStore) GlobalWorkPresence(ctx context.Context) 
 			LEFT JOIN runs run ON run.run_id = e.run_id
 			LEFT JOIN event_receipts receipt ON receipt.event_id = e.event_id AND receipt.subscriber_type = 'platform' AND receipt.subscriber_id = 'pipeline'
 			WHERE receipt.event_id IS NULL
-			  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
+			  AND (e.run_id IS NULL OR run.status IN (`+runLifecycleActiveStateSQLValues+`))
 			  AND NOT EXISTS (SELECT 1 FROM decision_card_route_obligations route WHERE route.event_id = e.event_id AND route.status <> 'completed')
 			  AND `+sqliteDiagnosticDirectReplayExclusionSQL("e")+`
 		), EXISTS (
 			SELECT 1 FROM decision_card_route_obligations route JOIN runs run ON run.run_id = route.run_id
-				WHERE route.status = 'pending' AND route.next_attempt_at <= ? AND run.status IN ('running', 'paused')
+				WHERE route.status = 'pending' AND route.next_attempt_at <= ? AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
 		), (
 			SELECT MIN(e.created_at) FROM events e
 				LEFT JOIN runs run ON run.run_id = e.run_id
 				LEFT JOIN event_receipts receipt ON receipt.event_id = e.event_id AND receipt.subscriber_type = 'platform' AND receipt.subscriber_id = 'pipeline'
 				WHERE receipt.event_id IS NULL
-				  AND (e.run_id IS NULL OR run.status IN ('running', 'paused'))
+				  AND (e.run_id IS NULL OR run.status IN (`+runLifecycleActiveStateSQLValues+`))
 				  AND NOT EXISTS (SELECT 1 FROM decision_card_route_obligations route WHERE route.event_id = e.event_id AND route.status <> 'completed')
 				  AND `+sqliteDiagnosticDirectReplayExclusionSQL("e")+`
 			)`, args...).Scan(
@@ -2349,8 +2412,6 @@ func summarizePipelineRun(ctx context.Context, q pipelineQueryer, runID string, 
 	if postgres {
 		diagnosticPredicate = postgresDiagnosticDirectReplayExclusionSQL("e", 1)
 		runPlaceholder = fmt.Sprintf("$%d::uuid", len(diagnostics)+1)
-	} else {
-		args = append(args, out.RunID)
 	}
 	query := fmt.Sprintf(`
 			WITH classified AS (
@@ -2375,19 +2436,14 @@ func summarizePipelineRun(ctx context.Context, q pipelineQueryer, runID string, 
 				COALESCE(SUM(CASE WHEN NOT classified.diagnostic AND classified.receipt_id IS NOT NULL AND classified.receipt_outcome <> 'success' THEN 1 ELSE 0 END), 0),
 				COALESCE(SUM(CASE WHEN NOT classified.diagnostic AND classified.route_id IS NOT NULL AND classified.route_status = 'pending' THEN 1 ELSE 0 END), 0),
 				COALESCE(SUM(CASE WHEN NOT classified.diagnostic AND classified.route_id IS NOT NULL AND classified.route_status = 'pending' AND classified.receipt_outcome = 'success' THEN 1 ELSE 0 END), 0),
-				COALESCE(SUM(CASE WHEN classified.diagnostic THEN 1 ELSE 0 END), 0),
-				run.status NOT IN ('running', 'paused'),
-				run.status = 'forked'
-			FROM runs run
-			LEFT JOIN classified ON TRUE
-			WHERE run.run_id = %s
-			GROUP BY run.status`,
-		diagnosticPredicate, runPlaceholder, runPlaceholder)
+				COALESCE(SUM(CASE WHEN classified.diagnostic THEN 1 ELSE 0 END), 0)
+			FROM classified`,
+		diagnosticPredicate, runPlaceholder)
 	err := q.QueryRowContext(ctx, query, args...).Scan(
 		&out.Replayable, &out.Acknowledged, &out.TerminalNonSuccess, &out.Deferred,
-		&out.ProcessedDeferred, &out.DiagnosticExcluded, &out.RunInactive, &out.RunForked)
-	if errors.Is(err, sql.ErrNoRows) {
-		return out, fmt.Errorf("pipeline run %s not found", out.RunID)
+		&out.ProcessedDeferred, &out.DiagnosticExcluded)
+	if err != nil {
+		return out, err
 	}
-	return out, err
+	return out, out.Validate()
 }

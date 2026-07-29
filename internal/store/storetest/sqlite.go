@@ -99,6 +99,27 @@ func AdmitPostgresRuntimeStore(t testing.TB, db *sql.DB) *store.PostgresStore {
 	return postgresStore
 }
 
+// AdmitSQLiteRuntimeStore runs the production bootstrap against an existing
+// SQLite test database and returns the admitted store object.
+func AdmitSQLiteRuntimeStore(t testing.TB, db *sql.DB) *store.SQLiteRuntimeStore {
+	t.Helper()
+	sqliteStore := &store.SQLiteRuntimeStore{
+		SQLiteSchemaStore: &store.SQLiteSchemaStore{DB: db},
+	}
+	platformSpec, plans := canonicalPlatformPlans(t)
+	if err := sqliteStore.BootstrapSchema(context.Background(), store.SchemaBootstrapRequest{
+		PlatformPlans: plans,
+		Origin: store.RuntimeStoreOrigin{
+			SwarmVersion:    "storetest",
+			PlatformVersion: platformSpec.Platform.Version,
+			CreatedAt:       time.Now().UTC(),
+		},
+	}); err != nil {
+		t.Fatalf("BootstrapSchema: %v", err)
+	}
+	return sqliteStore
+}
+
 // BootstrapPostgresRuntimeStore admits an existing PostgreSQL store through
 // the same production bootstrap used at serve startup.
 func BootstrapPostgresRuntimeStore(t testing.TB, postgresStore *store.PostgresStore) {

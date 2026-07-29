@@ -15,12 +15,13 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -227,12 +228,10 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		}
 		handler := runStartTestHandler(t, pg, bus, source)
 		runID := uuid.NewString()
-		if _, err := db.Exec(`
-			INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-			VALUES ($1::uuid, 'running', $2, $3)
-		`, runID, runStartTestBundleHash, storerunlifecycle.BundleSourceEphemeral); err != nil {
-			t.Fatalf("seed run bundle context: %v", err)
-		}
+		runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+			RunID:      runID,
+			BundleHash: runStartTestBundleHash,
+		})
 
 		resp := rpcCall(t, handler, runStartBody(runID, "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "scan.requested", `{"topic":"medicine"}`, "idem-existing-mismatch"))
 		if resp.Error == nil {

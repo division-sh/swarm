@@ -19,7 +19,7 @@ func (s *PostgresStore) runAuthorActivityMutation(ctx context.Context, label str
 			if !attached {
 				return fmt.Errorf("%s could not attach the event commit owner", label)
 			}
-			return fn(eventCtx, tx)
+			return fn(s.bindRunLifecycleMutation(eventCtx, tx), tx)
 		}
 		if !runtimeauthoractivity.FinalizedMutation(ctx, tx) {
 			return fmt.Errorf("%s entered from a raw transaction without author activity ownership", label)
@@ -51,7 +51,7 @@ func (s *SQLiteRuntimeStore) runAuthorActivityMutation(ctx context.Context, labe
 			if !attached {
 				return fmt.Errorf("%s could not attach the event commit owner", label)
 			}
-			return fn(eventCtx, tx)
+			return fn(s.bindRunLifecycleMutation(eventCtx, tx), tx)
 		}
 		if !runtimeauthoractivity.FinalizedMutation(ctx, tx) {
 			return fmt.Errorf("%s entered from a raw transaction without author activity ownership", label)

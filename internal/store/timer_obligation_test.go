@@ -8,6 +8,7 @@ import (
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/google/uuid"
 )
@@ -31,9 +32,9 @@ func TestTimerObligationSnapshotObservationBoundaryOnBothStores(t *testing.T) {
 				t.Fatalf("insert workflow timer obligation: %v", err)
 			}
 
-			completedRunID := uuid.NewString()
-			insertTimerObligationProofRun(t, ctx, db, selected, completedRunID, "completed")
-			insertTimerObligationProofRow(t, ctx, db, selected, completedRunID, "deadline", observedAt)
+			terminalRunID := uuid.NewString()
+			insertTimerObligationProofRun(t, ctx, db, selected, terminalRunID, "cancelled")
+			insertTimerObligationProofRow(t, ctx, db, selected, terminalRunID, "deadline", observedAt)
 			insertTimerObligationProofRow(t, ctx, db, selected, "", "global_recurring", observedAt.Add(time.Hour))
 
 			snapshot, err := reader.ReadTimerObligations(ctx, runtimetimerobligation.All(), observedAt)
@@ -49,9 +50,9 @@ func TestTimerObligationSnapshotObservationBoundaryOnBothStores(t *testing.T) {
 			}
 			assertTimerFamilyObligation(t, running.Families, runtimetimerobligation.FamilyTimer, 1, 1, 1)
 			assertTimerFamilyObligation(t, running.Families, runtimetimerobligation.FamilyWorkflowTimer, 1, 0, 1)
-			completed, ok := snapshot.Run(completedRunID)
+			completed, ok := snapshot.Run(terminalRunID)
 			if !ok {
-				t.Fatalf("snapshot omitted completed run %s", completedRunID)
+				t.Fatalf("snapshot omitted terminal run %s", terminalRunID)
 			}
 			assertTimerFamilyObligation(t, completed.Families, runtimetimerobligation.FamilyDeadline, 1, 1, 0)
 			assertTimerFamilyObligation(t, snapshot.GlobalFamilies, runtimetimerobligation.FamilyGlobalRecurring, 1, 0, 1)
@@ -148,15 +149,15 @@ func insertTimerObligationProofRun(
 	if !ok {
 		t.Fatal("timer obligation proof context lacks bundle source fact")
 	}
+	state, err := storerunlifecycle.ParseState(status)
+	if err != nil {
+		t.Fatalf("parse %s timer obligation run state: %v", status, err)
+	}
 	bundleHash, bundleSource := sourceFact.StorageValues()
-	query := `INSERT INTO runs (run_id, status, started_at, ended_at, bundle_hash, bundle_source) VALUES (?, ?, ?, ?, ?, ?)`
-	args := []any{runID, status, time.Now().UTC().Add(-time.Hour), time.Now().UTC(), bundleHash, bundleSource}
-	if _, ok := selected.(*PostgresStore); ok {
-		query = `INSERT INTO runs (run_id, status, started_at, ended_at, bundle_hash, bundle_source) VALUES ($1::uuid, $2, $3, $4, $5, $6)`
-	}
-	if _, err := db.ExecContext(ctx, query, args...); err != nil {
-		t.Fatalf("insert %s timer obligation run: %v", status, err)
-	}
+	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		RunID: runID, State: state, BundleHash: bundleHash, BundleSource: bundleSource,
+		StartedAt: time.Now().UTC().Add(-time.Hour), EndedAt: time.Now().UTC(),
+	})
 }
 
 func insertTimerObligationProofRow(

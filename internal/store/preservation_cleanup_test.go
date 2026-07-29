@@ -10,9 +10,10 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/runbundle"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -27,7 +28,7 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 	t.Cleanup(func() { _ = pg.DB.Close() })
 
 	ctx := testAuthorActivityContextForBundle(testCanonicalBundleHash)
-	now := time.Date(2026, 5, 27, 9, 30, 0, 0, time.UTC)
+	now := time.Now().UTC().Add(time.Minute)
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source)
 		VALUES ('agent-a', 'preservation', 'operator', 'regular', TRUE, 'authored')
@@ -52,16 +53,7 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 		runID := uuid.NewString()
 		sessionID := uuid.NewString()
 		timerID := uuid.NewString()
-		if _, err := pg.DB.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-			VALUES ($1::uuid, 'running', $2, $3, now())
-			ON CONFLICT (run_id) DO UPDATE SET
-				status = 'running',
-				bundle_hash = EXCLUDED.bundle_hash,
-				bundle_source = EXCLUDED.bundle_source
-		`, runID, testCanonicalBundleHash, storerunlifecycle.BundleSourceEphemeral); err != nil {
-			t.Fatalf("seed run %s: %v", source, err)
-		}
+		requireRunFixtureForTest(t, ctx, &PostgresStore{DB: pg.DB}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, BundleHash: testCanonicalBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
 		if _, err := pg.DB.ExecContext(ctx, `
 			INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status)
 			VALUES ($1::uuid, $2::uuid, 'agent-a', 'preservation', TRUE, 'authored', 'active')
@@ -87,9 +79,9 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 			t.Fatalf("seed timer %s: %v", source, err)
 		}
 		if source.IsDeleted() {
-			if _, err := pg.DB.ExecContext(ctx, `UPDATE runs SET bundle_source = $2 WHERE run_id = $1::uuid`, runID, source.String()); err != nil {
-				t.Fatalf("mark run %s deleted: %v", runID, err)
-			}
+			runlifecyclefixture.CorruptPostgresSource(
+				t, ctx, pg.DB, runID, testCanonicalBundleHash, source.String(),
+			)
 		}
 		cause, ok := preservationcleanup.CauseForBundleSource(source)
 		if !ok {
@@ -234,9 +226,9 @@ func assertUnavailableBundlePreservationTimer(t *testing.T, ctx context.Context,
 
 func seedPreservationClaimedDelivery(t *testing.T, ctx context.Context, pg *PostgresStore, runID, eventName string) (string, runtimedelivery.Claim) {
 	t.Helper()
-	event := eventtest.RunCreatingRootIngress(
+	event := eventtest.ExistingRunRootIngress(
 		uuid.NewString(), events.EventType(eventName), "test", "", []byte(`{}`), 0,
-		runID, "", events.EventEnvelope{}, time.Now().UTC(),
+		runID, events.EventEnvelope{}, time.Now().UTC(),
 	)
 	if err := commitSemanticEventFixtureWithAgents(ctx, pg, event, []string{"agent-a"}); err != nil {
 		t.Fatalf("commit preservation delivery %s: %v", eventName, err)

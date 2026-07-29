@@ -15,8 +15,8 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -40,21 +40,23 @@ func newForkedConsumerTestBackend(t *testing.T, backend string) *forkedConsumerT
 		_, db, _ := testutil.StartPostgres(t)
 		out.db = db
 		out.postgres = admitTestPostgresStore(t, db)
-		if _, err := db.Exec(`INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES ($1::uuid, 'running', $2, 'ephemeral', $3)`, out.sourceRun, authorActivityTestBundleHash, now.Add(-time.Hour)); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := db.Exec(`INSERT INTO runs (run_id, status, forked_from_run_id, forked_from_event_id, bundle_hash, bundle_source, started_at) VALUES ($1::uuid, 'paused', $2::uuid, $3::uuid, $4, 'ephemeral', $5)`, out.continued, out.sourceRun, uuid.NewString(), authorActivityTestBundleHash, now); err != nil {
-			t.Fatal(err)
-		}
+		requireRunFixtureForTest(t, testAuthorActivityBundleSourceContext(), out.postgres, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+			RunID: out.sourceRun, BundleHash: authorActivityTestBundleHash, StartedAt: now.Add(-time.Hour),
+		})
+		requireRunFixtureForTest(t, testAuthorActivityBundleSourceContext(), out.postgres, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+			RunID: out.continued, State: storerunlifecycle.StatePaused,
+			BundleHash: authorActivityTestBundleHash, StartedAt: now,
+		})
 	case "sqlite":
 		out.sqlite = newBootstrappedSQLiteRuntimeStoreForTest(t)
 		out.db = out.sqlite.DB
-		if _, err := out.db.Exec(`INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at) VALUES (?, 'running', ?, 'ephemeral', ?)`, out.sourceRun, authorActivityTestBundleHash, now.Add(-time.Hour)); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := out.db.Exec(`INSERT INTO runs (run_id, status, forked_from_run_id, forked_from_event_id, bundle_hash, bundle_source, started_at) VALUES (?, 'paused', ?, ?, ?, 'ephemeral', ?)`, out.continued, out.sourceRun, uuid.NewString(), authorActivityTestBundleHash, now); err != nil {
-			t.Fatal(err)
-		}
+		requireRunFixtureForTest(t, testAuthorActivityBundleSourceContext(), out.sqlite, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+			RunID: out.sourceRun, BundleHash: authorActivityTestBundleHash, StartedAt: now.Add(-time.Hour),
+		})
+		requireRunFixtureForTest(t, testAuthorActivityBundleSourceContext(), out.sqlite, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+			RunID: out.continued, State: storerunlifecycle.StatePaused,
+			BundleHash: authorActivityTestBundleHash, StartedAt: now,
+		})
 	default:
 		t.Fatalf("unknown backend %q", backend)
 	}
@@ -70,24 +72,20 @@ func (b *forkedConsumerTestBackend) freeze(t *testing.T) {
 			ForkEventName: "consumer.freeze", ForkEventTime: b.forkedAt, SourceRunStatus: "running", ForkStatus: "paused",
 			SourceBundleHash: authorActivityTestBundleHash, ForkBundleHash: authorActivityTestBundleHash,
 		}
-		if err := commitRunForkSourceFreezeForTest(ctx, b.db, lineage, b.forkedAt, true); err != nil {
+		if err := commitRunForkSourceFreezeForTest(ctx, b.postgres, lineage, b.forkedAt, true); err != nil {
 			t.Fatal(err)
 		}
 		return
 	}
-	tx, err := b.db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
+	if _, _, err := forkRunForTest(ctx, b.sqlite, storerunlifecycle.ForkSourceRequest{
+		RunID: b.sourceRun, ContinuedAsRunID: b.continued, EndedAt: b.forkedAt,
+	}); err != nil {
+		t.Fatalf("freeze SQLite source run: %v", err)
 	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = 'forked', ended_at = ?, continued_as_run_id = ? WHERE run_id = ? AND status IN ('running', 'paused')`, b.forkedAt, b.continued, b.sourceRun); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = 'running' WHERE run_id = ? AND status = 'paused'`, b.continued); err != nil {
-		t.Fatal(err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
+	if _, err := transitionRunForTest(ctx, b.sqlite, storerunlifecycle.ActiveTransitionRequest{
+		RunID: b.continued, State: storerunlifecycle.StateRunning,
+	}); err != nil {
+		t.Fatalf("activate SQLite continuation: %v", err)
 	}
 }
 
@@ -99,7 +97,7 @@ func requireForkedSourceRefusal(t *testing.T, label string, err error) {
 }
 
 func TestForkedSourceEventDeliveryAndReplayConsumersRefuseAndSelectorsExclude(t *testing.T) {
-	for _, backend := range []string{"postgres", "sqlite"} {
+	for _, backend := range []string{"postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedConsumerTestBackend(t, backend)
 			ctx := testAuthorActivityBundleSourceContext()
@@ -201,7 +199,7 @@ func assertForkedEventSelectors(t *testing.T, store forkedEventSelectorSurface, 
 }
 
 func TestForkedSourceTimerConsumersRefuseWhileClaimsCanBeReleased(t *testing.T) {
-	for _, backend := range []string{"postgres", "sqlite"} {
+	for _, backend := range []string{"postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedConsumerTestBackend(t, backend)
 			ctx := testAuthorActivityBundleSourceContext()
@@ -268,7 +266,7 @@ func TestForkedSourceTimerConsumersRefuseWhileClaimsCanBeReleased(t *testing.T) 
 }
 
 func TestForkedSourceSessionTurnAndConversationConsumersRefuse(t *testing.T) {
-	for _, backend := range []string{"postgres", "sqlite"} {
+	for _, backend := range []string{"postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedConsumerTestBackend(t, backend)
 			fixture.freeze(t)

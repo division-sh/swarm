@@ -346,6 +346,19 @@ func commitSemanticEventWithInitialFacts(
 	if db == nil || deliveryAdapter == nil {
 		t.Fatalf("semantic event fixture store %T is not initialized", selectedStore)
 	}
+	runner, ok := selectedStore.(runLifecycleMutationRunner)
+	if !ok {
+		t.Fatalf("semantic event fixture store %T has no run lifecycle mutation owner", selectedStore)
+	}
+	if admitted.RunDisposition() != events.AdmittedRunless {
+		startedAt := record.CreatedAt
+		if startedAt.IsZero() {
+			startedAt = time.Now().UTC()
+		}
+		if err := EnsureRunForAdmittedEvent(ctx, runner, admitted, startedAt); err != nil {
+			t.Fatalf("ensure semantic event fixture run: %v", err)
+		}
+	}
 	obligationProvider, ok := selectedStore.(interface {
 		PipelineObligations() runtimepipelineobligation.Store
 	})
@@ -368,9 +381,6 @@ func commitSemanticEventWithInitialFacts(
 		t.Fatalf("begin semantic event fixture: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := ensureSemanticFixtureRun(ctx, tx, record, selectedStore); err != nil {
-		t.Fatalf("insert semantic event fixture run: %v", err)
-	}
 	inserted, err := insert(ctx, tx, record)
 	if err != nil {
 		t.Fatalf("insert semantic event fixture: %v", err)
@@ -530,32 +540,4 @@ func insertPipelineDispositionFixture(
 		return fmt.Errorf("pipeline disposition fixture affected %d rows, want 1", rows)
 	}
 	return nil
-}
-
-func ensureSemanticFixtureRun(ctx context.Context, tx *sql.Tx, record eventrecord.Record, selectedStore any) error {
-	if record.RunID == "" {
-		return nil
-	}
-	startedAt := record.CreatedAt
-	if startedAt.IsZero() {
-		startedAt = time.Now().UTC()
-	}
-	switch selectedStore.(type) {
-	case *store.PostgresStore:
-		_, err := tx.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-			VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-			ON CONFLICT (run_id) DO NOTHING
-		`, record.RunID, startedAt)
-		return err
-	case *store.SQLiteRuntimeStore:
-		_, err := tx.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-			VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-			ON CONFLICT (run_id) DO NOTHING
-		`, record.RunID, startedAt)
-		return err
-	default:
-		return fmt.Errorf("semantic event fixture store %T is unsupported", selectedStore)
-	}
 }

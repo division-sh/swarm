@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -168,13 +169,6 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 		t.Fatalf("paused ingress state=%+v changed=%v, want paused changed", pausedIngress, changed)
 	}
 
-	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_source, started_at, bundle_hash)
-		VALUES (?, 'running', 'ephemeral', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
-		ON CONFLICT(run_id) DO UPDATE SET status = 'running'
-	`, runID, time.Now().UTC()); err != nil {
-		t.Fatalf("seed sqlite run row: %v", err)
-	}
 	pausedRun, err := store.PauseRunControl(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "pause", ControlledBy: "operator", Now: time.Now().UTC()})
 	if err != nil {
 		t.Fatalf("PauseRunControl: %v", err)
@@ -244,12 +238,7 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	now := time.Now().UTC()
-	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_source, started_at, bundle_hash)
-		VALUES (?, 'running', 'ephemeral', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
-	`, runID, now); err != nil {
-		t.Fatalf("seed sqlite run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 	event := eventtest.PersistedProjection(
 		eventID, events.EventType("custom.stop"), "test", "", json.RawMessage(`{}`), 0,
 		runID, "", events.EventEnvelope{}, now,
@@ -374,14 +363,13 @@ func TestSQLiteRuntimeStoreUpsertAgentConsumesActivePipelineTransaction(t *testi
 	})
 
 	now := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runtimecorrelation.RunIDFromContext(ctx), now); err != nil {
-		t.Fatalf("seed active sqlite write transaction: %v", err)
+	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectSQLite)
+	if err != nil {
+		t.Fatalf("begin SQLite pipeline transaction author activity: %v", err)
 	}
+	requireSQLiteRunFixtureTxForTest(t, storyctx, tx, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runtimecorrelation.RunIDFromContext(ctx), StartedAt: now})
 
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx := runtimepipeline.WithPipelineSQLTxContext(storyctx, tx)
 	if err := store.UpsertAgent(txctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:            "agent-in-pipeline-tx",
@@ -397,6 +385,9 @@ func TestSQLiteRuntimeStoreUpsertAgentConsumesActivePipelineTransaction(t *testi
 		StartedAt: now,
 	}); err != nil {
 		t.Fatalf("UpsertAgent with active pipeline transaction: %v", err)
+	}
+	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
+		t.Fatalf("finalize SQLite pipeline transaction author activity: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit sqlite tx: %v", err)
@@ -416,9 +407,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContext()), runID)
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed activation run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: sqliteStore.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 	bus := &sqliteFlowActivationBus{}
 	bundle := sqliteFlowActivationBundle()
@@ -464,9 +453,7 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContext()), runID)
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed fan-out run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: sqliteStore.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 	bus := &sqliteFlowActivationBus{}
 	bundle := sqliteFlowActivationBundle()
@@ -1058,12 +1045,7 @@ func TestSQLiteRuntimeStoreRuntimeIngressReadDuringPublishDoesNotReenterWrite(t 
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
-	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	bus, err := newStoreTestEventBus(t, store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -1075,7 +1057,7 @@ func TestSQLiteRuntimeStoreRuntimeIngressReadDuringPublishDoesNotReenterWrite(t 
 	bus.SetRuntimeIngressDispatchGate(controller)
 
 	eventID := uuid.NewString()
-	err = bus.Publish(ctx, eventtest.RunCreatingRootIngress(
+	err = bus.Publish(ctx, eventtest.ExistingRunRootIngress(
 		eventID,
 		events.EventType("item.received"),
 		"api.v1",
@@ -1083,7 +1065,6 @@ func TestSQLiteRuntimeStoreRuntimeIngressReadDuringPublishDoesNotReenterWrite(t 
 		[]byte(`{"entity_id":"11111111-1111-1111-1111-111111111111"}`),
 		0,
 		runID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-1111-1111-111111111111"),
 		time.Now().UTC(),
 	))
@@ -1115,9 +1096,7 @@ func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed workflow instance run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	owner := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
 	entityID := runtimepipeline.FlowInstanceEntityID("root/acme")
 	if err := owner.Create(ctx, runtimepipeline.WorkflowInstance{
@@ -1173,9 +1152,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	store.SetNowFnForTest(func() time.Time { return now })
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, now); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
@@ -1320,9 +1297,7 @@ func TestSQLiteRuntimeStore_StatelessAuditUsesExplicitMemoryPlan(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	sessionID := uuid.NewString()
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 
 	if err := store.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
 		AgentID:        "task-agent",
@@ -1381,9 +1356,7 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsEntityMetadata(t *testing.T) {
 	runID := uuid.NewString()
 	sessionID := uuid.NewString()
 	entityID := uuid.NewString()
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 
 	if err := store.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
 		AgentID:        "task-agent",
@@ -1439,9 +1412,7 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsFlowInstanceMetadata(t *testin
 	runID := uuid.NewString()
 	sessionID := uuid.NewString()
 	flowInstance := "review/inst-1"
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 
 	if err := store.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
 		AgentID:        "task-agent",
@@ -1497,9 +1468,7 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
 	store.SetNowFnForTest(func() time.Time { return now })
 	runID := uuid.NewString()
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, now); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
@@ -1775,12 +1744,7 @@ func TestSQLiteRuntimeStoreScheduleUsesPipelineTransactionForRollbackVisibility(
 
 func seedSQLiteScheduleRun(t *testing.T, store *SQLiteRuntimeStore, ctx context.Context, runID string) {
 	t.Helper()
-	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_source, started_at, bundle_hash)
-		VALUES (?, 'running', 'ephemeral', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
-	`, runID, time.Now().UTC()); err != nil {
-		t.Fatalf("seed sqlite run row: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC()})
 }
 
 func sqliteScheduleTransactionTestSchedule(runID, taskID string) runtimepipeline.Schedule {

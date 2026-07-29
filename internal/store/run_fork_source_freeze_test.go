@@ -16,7 +16,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -33,27 +33,23 @@ func TestRunForkSourceFreezeIsTheOnlyForkedStatusWriter(t *testing.T) {
 			if backend == "postgres" {
 				_, db, _ = testutil.StartPostgres(t)
 				pg := admitTestPostgresStore(t, db)
-				if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, now); err != nil {
-					t.Fatal(err)
-				}
+				requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 				mark = func(ctx context.Context, runID, status string, at time.Time) error {
-					_, err := pg.MarkRunTerminal(ctx, runID, status, nil, at)
+					_, err := markRunTerminalStatusForTest(ctx, pg, runID, status, nil, at)
 					return err
 				}
 			} else {
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 				db = store.DB
-				if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, now); err != nil {
-					t.Fatal(err)
-				}
+				requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 				mark = func(ctx context.Context, runID, status string, at time.Time) error {
-					_, err := store.MarkRunTerminal(ctx, runID, status, nil, at)
+					_, err := markRunTerminalStatusForTest(ctx, store, runID, status, nil, at)
 					return err
 				}
 			}
 
 			err := mark(ctx, runID, RunForkSourceFrozenStatus, now.Add(time.Minute))
-			if err == nil || !strings.Contains(err.Error(), `unsupported terminal run status "forked"`) {
+			if !errors.Is(err, storerunlifecycle.ErrForkSourceUnsupported) {
 				t.Fatalf("generic forked transition error = %v", err)
 			}
 			var status string
@@ -69,6 +65,22 @@ func TestRunForkSourceFreezeIsTheOnlyForkedStatusWriter(t *testing.T) {
 				t.Fatalf("generic writer mutated run to status=%q continued_as=%v", status, continuedAs)
 			}
 		})
+	}
+}
+
+func TestRunForkMutationUnsupportedSQLite(t *testing.T) {
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx := testAuthorActivityBundleSourceContext()
+	err := store.runAuthorActivityMutation(ctx, "sqlite fork source rejection", func(txctx context.Context, _ *sql.Tx) error {
+		_, _, err := storerunlifecycle.ForkSource(txctx, storerunlifecycle.ForkSourceRequest{
+			RunID:            uuid.NewString(),
+			ContinuedAsRunID: uuid.NewString(),
+			EndedAt:          time.Now().UTC(),
+		})
+		return err
+	})
+	if !errors.Is(err, storerunlifecycle.ErrForkSourceUnsupported) {
+		t.Fatalf("fork source mutation error = %v, want typed unsupported", err)
 	}
 }
 
@@ -107,7 +119,7 @@ func TestRunForkSourceFreezeCommitsCoupledLifecycleDecisionAndActivityOutcome(t 
 		t.Fatal(err)
 	}
 
-	if err := commitRunForkSourceFreezeForTest(ctx, db, lineage, now.Add(2*time.Second), true); err != nil {
+	if err := commitRunForkSourceFreezeForTest(ctx, pg, lineage, now.Add(2*time.Second), true); err != nil {
 		t.Fatalf("source freeze: %v", err)
 	}
 
@@ -169,9 +181,17 @@ func TestRunForkSourceFreezeRollbackLeavesNoPartialOutcome(t *testing.T) {
 	if err := pg.CreateDecisionCard(ctx, card); err != nil {
 		t.Fatal(err)
 	}
+	var baselineActivities int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM author_activity_occurrences
+		WHERE run_id IN ($1::uuid, $2::uuid)
+	`, lineage.SourceRunID, lineage.ForkRunID).Scan(&baselineActivities); err != nil {
+		t.Fatal(err)
+	}
 
-	err := commitRunForkSourceFreezeForTest(ctx, db, lineage, now.Add(time.Second), true)
-	if err == nil || !strings.Contains(err.Error(), "fork_run_activation_not_applied") {
+	err := commitRunForkSourceFreezeForTest(ctx, pg, lineage, now.Add(time.Second), true)
+	if !errors.Is(err, storerunlifecycle.ErrRunNotActive) {
 		t.Fatalf("source freeze injected failure = %v", err)
 	}
 	var sourceStatus, childStatus string
@@ -190,19 +210,19 @@ func TestRunForkSourceFreezeRollbackLeavesNoPartialOutcome(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM author_activity_occurrences WHERE run_id IN ($1::uuid, $2::uuid)`, lineage.SourceRunID, lineage.ForkRunID).Scan(&activities); err != nil {
 		t.Fatal(err)
 	}
-	if sourceStatus != "running" || childStatus != "completed" || continuedAs.Valid || persisted.Status != decisioncard.StatusPending || activities != 1 {
-		// The pending card's create occurrence is the only expected activity.
-		t.Fatalf("rollback outcome source=%s child=%s continued_as=%v card=%s activities=%d", sourceStatus, childStatus, continuedAs, persisted.Status, activities)
+	if sourceStatus != "running" || childStatus != "completed" || continuedAs.Valid || persisted.Status != decisioncard.StatusPending || activities != baselineActivities {
+		t.Fatalf("rollback outcome source=%s child=%s continued_as=%v card=%s activities=%d baseline=%d", sourceStatus, childStatus, continuedAs, persisted.Status, activities, baselineActivities)
 	}
 }
 
 func TestRunForkSourceFreezeRequiresConfirmationBeforeMutation(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityBundleSourceContext()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	lineage := seedRunForkSourceFreezePair(t, db, "running", RunForkMaterializedStatus, now)
 
-	err := commitRunForkSourceFreezeForTest(ctx, db, lineage, now.Add(time.Second), false)
+	err := commitRunForkSourceFreezeForTest(ctx, pg, lineage, now.Add(time.Second), false)
 	if !errors.Is(err, ErrRunForkSourceFreezeConfirmationRequired) {
 		t.Fatalf("missing confirmation error = %v", err)
 	}
@@ -211,11 +231,12 @@ func TestRunForkSourceFreezeRequiresConfirmationBeforeMutation(t *testing.T) {
 
 func TestRunForkSourceFreezeRejectsCompletedSourceWithoutConfirmationCeremony(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
+	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityBundleSourceContext()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	lineage := seedRunForkSourceFreezePair(t, db, "completed", RunForkMaterializedStatus, now)
 
-	err := commitRunForkSourceFreezeForTest(ctx, db, lineage, now.Add(time.Second), false)
+	err := commitRunForkSourceFreezeForTest(ctx, pg, lineage, now.Add(time.Second), false)
 	if !errors.Is(err, storerunlifecycle.ErrRunNotActive) || errors.Is(err, ErrRunForkSourceFreezeConfirmationRequired) {
 		t.Fatalf("completed source error = %v", err)
 	}
@@ -244,12 +265,13 @@ func TestRunForkSourceFreezeBlocksOnlyLiveExecutionAuthority(t *testing.T) {
 			}
 			t.Run(test.name+"/"+label, func(t *testing.T) {
 				_, db, _ := testutil.StartPostgres(t)
+				pg := admitTestPostgresStore(t, db)
 				ctx := testAuthorActivityBundleSourceContext()
 				now := time.Now().UTC().Truncate(time.Microsecond)
 				lineage := seedRunForkSourceFreezePair(t, db, "running", RunForkMaterializedStatus, now)
 				test.seed(t, ctx, db, lineage, now, live)
 
-				err := commitRunForkSourceFreezeForTest(ctx, db, lineage, now.Add(time.Second), true)
+				err := commitRunForkSourceFreezeForTest(ctx, pg, lineage, now.Add(time.Second), true)
 				if live {
 					if !errors.Is(err, ErrRunForkSourceFreezeBusy) || !strings.Contains(err.Error(), test.blockerName) {
 						t.Fatalf("live authority error = %v, want %s", err, test.blockerName)
@@ -429,26 +451,29 @@ func seedRunForkSourceFreezePair(t *testing.T, db *sql.DB, sourceStatus, forkSta
 		SourceRunStatus: sourceStatus, ForkStatus: forkStatus,
 		SourceBundleHash: authorActivityTestBundleHash, ForkBundleHash: authorActivityTestBundleHash,
 	}
-	endedAt := any(nil)
-	if sourceStatus != "running" && sourceStatus != "paused" {
-		endedAt = now
+	sourceState, err := storerunlifecycle.ParseState(sourceStatus)
+	if err != nil {
+		t.Fatalf("parse source run state %q: %v", sourceStatus, err)
 	}
-	if _, err := db.ExecContext(context.Background(), `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at, ended_at)
-		VALUES ($1::uuid, $2, $3, 'ephemeral', $4, $5)
-	`, lineage.SourceRunID, sourceStatus, authorActivityTestBundleHash, now.Add(-time.Hour), endedAt); err != nil {
-		t.Fatalf("seed source run: %v", err)
+	forkState, err := storerunlifecycle.ParseState(forkStatus)
+	if err != nil {
+		t.Fatalf("parse fork run state %q: %v", forkStatus, err)
 	}
-	if _, err := db.ExecContext(context.Background(), `
-		INSERT INTO runs (run_id, status, forked_from_run_id, forked_from_event_id, bundle_hash, bundle_source, started_at, ended_at)
-		VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5, 'ephemeral', $6::timestamptz, CASE WHEN $2 IN ('running', 'paused') THEN NULL ELSE $6::timestamptz END)
-	`, lineage.ForkRunID, forkStatus, lineage.SourceRunID, lineage.ForkEventID, authorActivityTestBundleHash, now); err != nil {
-		t.Fatalf("seed fork run: %v", err)
-	}
+	selected := &PostgresStore{DB: db}
+	ctx := testAuthorActivityBundleSourceContext()
+	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		RunID: lineage.SourceRunID, State: sourceState,
+		BundleHash: authorActivityTestBundleHash, StartedAt: now.Add(-time.Hour), EndedAt: now,
+	})
+	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		RunID: lineage.ForkRunID, State: forkState,
+		BundleHash: authorActivityTestBundleHash, StartedAt: now, EndedAt: now,
+	})
 	return lineage
 }
 
-func commitRunForkSourceFreezeForTest(ctx context.Context, db *sql.DB, lineage runForkActivationLineage, now time.Time, confirmed bool) error {
+func commitRunForkSourceFreezeForTest(ctx context.Context, store *PostgresStore, lineage runForkActivationLineage, now time.Time, confirmed bool) error {
+	db := store.DB
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -458,7 +483,7 @@ func commitRunForkSourceFreezeForTest(ctx context.Context, db *sql.DB, lineage r
 	if err != nil {
 		return err
 	}
-	if err := applyRunForkSourceFreeze(storyctx, tx, lineage, now, confirmed); err != nil {
+	if err := store.applyRunForkSourceFreeze(storyctx, tx, lineage, now, confirmed); err != nil {
 		return err
 	}
 	return commitRunForkAuthorActivityTransaction(storyctx, tx)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -184,12 +185,7 @@ func seedProviderTriggerSmokeRuntime(
 ) {
 	t.Helper()
 	now := time.Now().UTC()
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, now); err != nil {
-		t.Fatalf("seed sqlite run: %v", err)
-	}
+	storetest.RequireSQLiteRun(t, ctx, sqliteStore.DB, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now})
 	configBytes, err := json.Marshal(map[string]any{
 		"secrets": map[string]any{
 			"webhook_signing": map[string]string{

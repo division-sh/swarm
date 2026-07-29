@@ -10,8 +10,8 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 const runStartIDempotencyTTL = 24 * time.Hour
@@ -111,8 +111,8 @@ func runStartIdempotencyError(err error) error {
 }
 
 func publicationApplicationError(eventName string, err error) error {
-	var bundleUnavailable *storerunlifecycle.PersistedBundleUnavailableError
-	if errors.As(err, &bundleUnavailable) || errors.Is(err, storerunlifecycle.ErrPersistedBundleUnavailable) {
+	var bundleUnavailable *runtimerunlifecycle.PersistedBundleUnavailableError
+	if errors.As(err, &bundleUnavailable) || errors.Is(err, runtimerunlifecycle.ErrPersistedBundleUnavailable) {
 		details := map[string]any{"event_name": eventName}
 		if bundleUnavailable != nil {
 			details["bundle_hash"] = bundleUnavailable.BundleHash

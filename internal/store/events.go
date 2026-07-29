@@ -19,9 +19,9 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -44,26 +44,24 @@ type execQueryer interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-func requireActiveRunForEvent(ctx context.Context, db storerunlifecycle.DBTX, eventID string, dialect storerunlifecycle.Dialect) error {
-	return requireActiveRunForEventMode(ctx, db, eventID, dialect, false)
+func requireActiveRunForEvent(ctx context.Context, tx *sql.Tx, eventID string, postgres bool) error {
+	return requireActiveRunForEventMode(ctx, tx, eventID, postgres, false)
 }
 
-func requireActiveRunForEventMode(ctx context.Context, db storerunlifecycle.DBTX, eventID string, dialect storerunlifecycle.Dialect, allowMissing bool) error {
+func requireActiveRunForEventMode(ctx context.Context, tx *sql.Tx, eventID string, postgres, allowMissing bool) error {
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
 		return fmt.Errorf("event_id is required")
 	}
-	var query string
-	switch dialect {
-	case storerunlifecycle.DialectPostgres:
+	if tx == nil {
+		return errors.New("require active event run: transaction is required")
+	}
+	query := `SELECT COALESCE(CAST(run_id AS TEXT), '') FROM events WHERE event_id = ?`
+	if postgres {
 		query = `SELECT COALESCE(run_id::text, '') FROM events WHERE event_id = $1::uuid`
-	case storerunlifecycle.DialectSQLite:
-		query = `SELECT COALESCE(CAST(run_id AS TEXT), '') FROM events WHERE event_id = ?`
-	default:
-		return fmt.Errorf("require active event run: unsupported dialect %q", dialect)
 	}
 	var runID string
-	if err := db.QueryRowContext(ctx, query, eventID).Scan(&runID); err != nil {
+	if err := tx.QueryRowContext(ctx, query, eventID).Scan(&runID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			if allowMissing {
 				return nil
@@ -75,51 +73,10 @@ func requireActiveRunForEventMode(ctx context.Context, db storerunlifecycle.DBTX
 	if strings.TrimSpace(runID) == "" {
 		return nil
 	}
-	return storerunlifecycle.RequireActive(ctx, db, runID, dialect)
-}
-
-func requireEventRunNotForked(ctx context.Context, db storerunlifecycle.DBTX, eventID string, dialect storerunlifecycle.Dialect, allowMissing bool) error {
-	eventID = strings.TrimSpace(eventID)
-	if eventID == "" {
-		return fmt.Errorf("event_id is required")
+	if postgres {
+		return requirePostgresRunActive(ctx, tx, runID)
 	}
-	var eventQuery, runQuery string
-	switch dialect {
-	case storerunlifecycle.DialectPostgres:
-		eventQuery = `SELECT COALESCE(run_id::text, '') FROM events WHERE event_id = $1::uuid`
-		runQuery = `SELECT COALESCE(status, '') FROM runs WHERE run_id = $1::uuid FOR UPDATE`
-	case storerunlifecycle.DialectSQLite:
-		eventQuery = `SELECT COALESCE(CAST(run_id AS TEXT), '') FROM events WHERE event_id = ?`
-		runQuery = `SELECT COALESCE(status, '') FROM runs WHERE run_id = ?`
-	default:
-		return fmt.Errorf("require non-forked event run: unsupported dialect %q", dialect)
-	}
-	var runID string
-	if err := db.QueryRowContext(ctx, eventQuery, eventID).Scan(&runID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) && allowMissing {
-			return nil
-		}
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("require non-forked event run: event %s not found", eventID)
-		}
-		return fmt.Errorf("require non-forked event run: %w", err)
-	}
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return nil
-	}
-	var status string
-	if err := db.QueryRowContext(ctx, runQuery, runID).Scan(&status); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return &storerunlifecycle.RunNotFoundError{RunID: runID}
-		}
-		return fmt.Errorf("require non-forked event run: %w", err)
-	}
-	status = strings.ToLower(strings.TrimSpace(status))
-	if status == RunForkSourceFrozenStatus {
-		return &storerunlifecycle.RunNotActiveError{RunID: runID, Status: status}
-	}
-	return nil
+	return requireSQLiteRunActive(ctx, tx, runID)
 }
 
 func eventReadQueryerFromContext(ctx context.Context, db *sql.DB) eventReadQueryer {
@@ -321,7 +278,7 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, admitte
 	case events.AdmittedRunCreateAuthorized:
 		ensureErr = s.ensureRunRow(ctx, tx, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName)
 	case events.AdmittedRunRequireActive:
-		ensureErr = storerunlifecycle.RequireActive(ctx, chooseExecQueryer(s.DB, tx), wantIdentity.RunID, storerunlifecycle.DialectPostgres)
+		ensureErr = requirePostgresRunActive(ctx, tx, wantIdentity.RunID)
 	case events.AdmittedRunRequirePresent:
 		if evt.AdmissionClass() != events.EventAdmissionDiagnosticDirect || evt.Type() != events.EventTypePlatformRuntimeLog || strings.TrimSpace(wantIdentity.RunID) == "" {
 			ensureErr = fmt.Errorf("event %s has invalid require-present run disposition", wantIdentity.EventID)
@@ -336,7 +293,7 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, admitte
 		ensureErr = fmt.Errorf("event %s has invalid admitted run disposition %q", wantIdentity.EventID, admitted.RunDisposition())
 	}
 	if ensureErr != nil {
-		if errors.Is(ensureErr, storerunlifecycle.ErrRunNotActive) {
+		if errors.Is(ensureErr, runtimerunlifecycle.ErrRunNotActive) {
 			existingIdentity, found, loadErr := loadPostgresEventIdentity(ctx, queryer, wantIdentity.EventID)
 			if loadErr != nil {
 				return runtimebus.EventAppendOutcomeUnknown, loadErr
@@ -351,7 +308,7 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, admitte
 		}
 		return runtimebus.EventAppendOutcomeUnknown, ensureErr
 	}
-	if err := requireEventOwnedReferences(ctx, chooseExecQueryer(s.DB, tx), storerunlifecycle.DialectPostgres, wantIdentity); err != nil {
+	if err := requireEventOwnedReferences(ctx, tx, true, wantIdentity); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	inserted, err := eventrecordpostgres.Insert(ctx, recordExec, wantIdentity)
@@ -372,11 +329,24 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, admitte
 		}
 		return runtimebus.EventAppendExactDuplicate, nil
 	}
-	if err := storerunlifecycle.SyncCounts(ctx, chooseExecQueryer(s.DB, tx), wantIdentity.RunID); err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
+	if admitted.RunDisposition() != events.AdmittedRunless {
+		if err := (postgresRunLifecycleMutation{tx: tx}).SyncCounters(ctx, wantIdentity.RunID); err != nil {
+			return runtimebus.EventAppendOutcomeUnknown, err
+		}
 	}
 	if err := recordPersistedEventAuthorActivity(ctx, s, evt, wantIdentity.ProducedBy, string(wantIdentity.ProducedByType)); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
+	}
+	if admitted.RunDisposition() == events.AdmittedRunCreateAuthorized {
+		rec, found, err := loadStandaloneRuntimePlatformRunRecord(ctx, chooseExecQueryer(s.DB, tx), wantIdentity.EventID)
+		if err != nil {
+			return runtimebus.EventAppendOutcomeUnknown, err
+		}
+		if found && isStandaloneRuntimePlatformRunRecord(rec) {
+			if _, err := s.requestCompletionCandidateTx(ctx, tx, wantIdentity.RunID, nil); err != nil {
+				return runtimebus.EventAppendOutcomeUnknown, err
+			}
+		}
 	}
 	return runtimebus.EventAppendInserted, nil
 }
@@ -531,13 +501,18 @@ func (s *PostgresStore) ensureRunRow(ctx context.Context, tx *sql.Tx, runID, tri
 	if runID == "" {
 		return nil
 	}
-	opts := runLifecycleOptions()
-	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
-		opts.BundleSourceFact = fact
-	} else {
+	fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	if !ok {
 		return fmt.Errorf("ensure run row: executable bundle source fact is required")
 	}
-	return storerunlifecycle.EnsureActive(ctx, chooseExecQueryer(s.DB, tx), runID, triggerEventID, triggerEventType, opts)
+	origin, err := runtimerunlifecycle.EventRunOrigin(triggerEventID, triggerEventType)
+	if err != nil {
+		return fmt.Errorf("ensure run row origin: %w", err)
+	}
+	_, err = (postgresRunLifecycleMutation{store: s, tx: tx}).Create(ctx, runtimerunlifecycle.CreateRequest{
+		RunID: runID, Origin: origin, Source: fact, StartedAt: time.Now().UTC(),
+	})
+	return err
 }
 
 func (s *PostgresStore) ensureRuntimeLogRunRow(ctx context.Context, tx *sql.Tx, runID, triggerEventID, triggerEventType string) error {
@@ -545,119 +520,33 @@ func (s *PostgresStore) ensureRuntimeLogRunRow(ctx context.Context, tx *sql.Tx, 
 	if runID == "" {
 		return nil
 	}
-	return storerunlifecycle.RequirePresent(ctx, chooseExecQueryer(s.DB, tx), runID)
-}
-
-func canonicalRunTerminalStatus(raw string) (string, error) {
-	return storerunlifecycle.CanonicalTerminalStatus(raw)
+	return requirePostgresRunPresent(ctx, tx, runID)
 }
 
 func (s *PostgresStore) LoadRunLifecycleSnapshot(ctx context.Context, runID string) (runtimebus.RunLifecycleSnapshot, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimebus.RunLifecycleSnapshot{}, err
 	}
-	snap, err := storerunlifecycle.LoadSnapshot(ctx, s.DB, nullUUIDString(runID), runLifecycleOptions())
+	snap, err := loadPostgresRunLifecycleSnapshot(ctx, s.DB, runID, false)
 	if err != nil {
 		return runtimebus.RunLifecycleSnapshot{}, err
 	}
-	return runtimebus.RunLifecycleSnapshot{
-		RunID:       snap.RunID,
-		Status:      snap.Status,
-		EventCount:  snap.EventCount,
-		EntityCount: snap.EntityCount,
-		Failure:     runtimefailures.CloneEnvelope(snap.Failure),
-		StartedAt:   snap.StartedAt,
-		EndedAt:     snap.EndedAt,
-	}, nil
-}
-
-func (s *PostgresStore) MarkRunTerminal(ctx context.Context, runID, status string, failure *runtimefailures.Envelope, endedAt time.Time) (runtimebus.RunLifecycleSnapshot, error) {
-	if err := s.requireCurrentSchema(); err != nil {
-		return runtimebus.RunLifecycleSnapshot{}, err
-	}
-	runID = nullUUIDString(runID)
-	if runID == "" {
-		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run_id is required")
-	}
-	var err error
-	status, err = canonicalRunTerminalStatus(status)
-	if err != nil {
-		return runtimebus.RunLifecycleSnapshot{}, err
-	}
-	if status == "completed" {
-		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("completed run terminalization is owned by normal run completion convergence")
-	}
-	if endedAt.IsZero() {
-		endedAt = time.Now().UTC()
-	}
-	var snap storerunlifecycle.Snapshot
-	err = s.runAuthorActivityMutation(ctx, "postgres mark run terminal", func(txctx context.Context, tx *sql.Tx) error {
-		var err error
-		snap, err = s.markRunTerminalTx(txctx, tx, runID, status, failure, endedAt)
-		return err
-	})
-	if err != nil {
-		return runtimebus.RunLifecycleSnapshot{}, err
-	}
-	return runtimebus.RunLifecycleSnapshot{
-		RunID:       snap.RunID,
-		Status:      snap.Status,
-		EventCount:  snap.EventCount,
-		EntityCount: snap.EntityCount,
-		Failure:     runtimefailures.CloneEnvelope(snap.Failure),
-		StartedAt:   snap.StartedAt,
-		EndedAt:     snap.EndedAt,
-	}, nil
-}
-
-func (s *PostgresStore) markRunTerminalTx(ctx context.Context, tx *sql.Tx, runID, status string, failure *runtimefailures.Envelope, endedAt time.Time) (storerunlifecycle.Snapshot, error) {
-	snapshot, err := storerunlifecycle.MarkTerminal(ctx, tx, runID, status, failure, endedAt, runLifecycleOptions())
-	if err != nil {
-		return storerunlifecycle.Snapshot{}, err
-	}
-	if _, err := s.terminalizeRunDeliveriesTx(ctx, tx, runID, "run_"+status); err != nil {
-		return storerunlifecycle.Snapshot{}, err
-	}
-	if err := supersedeDecisionCardsForRun(ctx, tx, runID, "run_"+status, endedAt, false, true); err != nil {
-		return storerunlifecycle.Snapshot{}, err
-	}
-	return snapshot, nil
-}
-
-func (s *PostgresStore) ConvergeStandaloneRuntimePlatformRun(ctx context.Context, evt events.Event) error {
-	if err := s.requireCurrentSchema(); err != nil {
-		return err
-	}
-	return s.runAuthorActivityMutation(ctx, "postgres standalone platform run convergence", func(txctx context.Context, tx *sql.Tx) error {
-		return s.convergeStandaloneRuntimePlatformRunByEventID(txctx, tx, strings.TrimSpace(evt.ID()))
-	})
-}
-
-func runLifecycleOptions() storerunlifecycle.EnsureActiveOptions {
-	return storerunlifecycle.EnsureActiveOptions{
-		HasStartedAtCol:         true,
-		HasTriggerCols:          true,
-		HasCounterCols:          true,
-		HasEntityStateCountSrc:  true,
-		RequireEntityStateCount: true,
-		HasTerminalCols:         true,
-	}
+	return projectBusRunLifecycleSnapshot(snap), nil
 }
 
 type standaloneRuntimePlatformRunRecord struct {
-	RunID            string
-	RunStatus        string
-	EventID          string
-	EventClass       string
-	EventType        string
-	ProducedBy       string
-	ProducedByType   string
-	SourceEventID    string
-	TriggerEventID   string
-	TriggerEventType string
+	RunID          string
+	RunStatus      string
+	Origin         runtimerunlifecycle.RunOrigin
+	EventID        string
+	EventClass     string
+	EventType      string
+	ProducedBy     string
+	ProducedByType string
+	SourceEventID  string
 }
 
-func loadStandaloneRuntimePlatformRunRecord(ctx context.Context, db storerunlifecycle.DBTX, eventID string) (standaloneRuntimePlatformRunRecord, bool, error) {
+func loadStandaloneRuntimePlatformRunRecord(ctx context.Context, db rowQueryer, eventID string) (standaloneRuntimePlatformRunRecord, bool, error) {
 	eventID = sanitizeOptionalUUID(eventID)
 	if db == nil || eventID == "" {
 		return standaloneRuntimePlatformRunRecord{}, false, nil
@@ -676,16 +565,15 @@ func loadStandaloneRuntimePlatformRunRecord(ctx context.Context, db storerunlife
 		EventType: string(event.Type()), ProducedBy: event.SourceAgent(), ProducedByType: string(event.ProducerType()),
 		SourceEventID: event.ParentEventID(),
 	}
-	err = db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), COALESCE(trigger_event_id::text, ''), COALESCE(trigger_event_type, '')
-		FROM runs WHERE run_id = $1::uuid
-	`, rec.RunID).Scan(&rec.RunStatus, &rec.TriggerEventID, &rec.TriggerEventType)
+	snapshot, err := loadPostgresRunLifecycleSnapshot(ctx, db, rec.RunID, false)
 	switch {
-	case errors.Is(err, sql.ErrNoRows):
+	case errors.Is(err, runtimerunlifecycle.ErrRunNotFound):
 		return standaloneRuntimePlatformRunRecord{}, false, nil
 	case err != nil:
 		return standaloneRuntimePlatformRunRecord{}, false, fmt.Errorf("load standalone runtime platform run candidate: %w", err)
 	default:
+		rec.RunStatus = string(snapshot.State)
+		rec.Origin = snapshot.Origin
 		return rec, true, nil
 	}
 }
@@ -703,46 +591,25 @@ func isStandaloneRuntimePlatformRunRecord(rec standaloneRuntimePlatformRunRecord
 	if strings.TrimSpace(rec.SourceEventID) != "" {
 		return false
 	}
-	if strings.TrimSpace(rec.TriggerEventID) != strings.TrimSpace(rec.EventID) {
+	if rec.Origin.Kind() != runtimerunlifecycle.OriginEvent {
 		return false
 	}
-	if strings.TrimSpace(rec.TriggerEventType) != strings.TrimSpace(rec.EventType) {
+	if rec.Origin.EventID() != strings.TrimSpace(rec.EventID) {
+		return false
+	}
+	if rec.Origin.EventType() != strings.TrimSpace(rec.EventType) {
 		return false
 	}
 	return true
 }
 
-func (s *PostgresStore) convergeStandaloneRuntimePlatformRunByEventID(
-	ctx context.Context,
-	db *sql.Tx,
-	eventID string,
-) error {
-	eventID = sanitizeOptionalUUID(eventID)
-	if db == nil || eventID == "" {
-		return nil
+func projectBusRunLifecycleSnapshot(snapshot runtimerunlifecycle.Snapshot) runtimebus.RunLifecycleSnapshot {
+	return runtimebus.RunLifecycleSnapshot{
+		RunID: snapshot.RunID, Status: string(snapshot.State),
+		EventCount: snapshot.EventCount, EntityCount: snapshot.EntityCount,
+		Failure:   runtimefailures.CloneEnvelope(snapshot.Failure),
+		StartedAt: snapshot.StartedAt, EndedAt: snapshot.EndedAt,
 	}
-	rec, found, err := loadStandaloneRuntimePlatformRunRecord(ctx, db, eventID)
-	if err != nil || !found || !isStandaloneRuntimePlatformRunRecord(rec) {
-		return err
-	}
-	switch strings.TrimSpace(rec.RunStatus) {
-	case "completed":
-		return nil
-	case "failed", "cancelled", "forked":
-		return fmt.Errorf("standalone runtime platform run %s already terminal with status %s", rec.RunID, strings.TrimSpace(rec.RunStatus))
-	}
-	summary, err := postgresDeliveryAdapter.SummarizeRun(ctx, db, rec.RunID)
-	if err != nil {
-		return err
-	}
-	if !summary.Settled() {
-		return nil
-	}
-	_, err = storerunlifecycle.MarkTerminal(ctx, db, rec.RunID, "completed", nil, time.Now().UTC(), runLifecycleOptions())
-	if err != nil {
-		return fmt.Errorf("converge standalone runtime platform run: %w", err)
-	}
-	return nil
 }
 
 func eventRouteStorageEnvelope(evt events.Event) (sourceRoute, targetRoute, targetSet []byte) {

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/bundledelete"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/lib/pq"
 )
 
@@ -46,7 +46,7 @@ func (s *PostgresStore) PlanBundleDelete(ctx context.Context, req bundledelete.R
 		WHERE bundle_hash = $1
 		  AND bundle_source = $2
 		ORDER BY run_id::text
-	`, bundleHash, storerunlifecycle.BundleSourcePersisted)
+	`, bundleHash, runtimerunlifecycle.BundleSourcePersisted)
 	if err != nil {
 		return bundledelete.Plan{}, fmt.Errorf("plan bundle delete runs: %w", err)
 	}
@@ -158,19 +158,9 @@ func (s *PostgresStore) ApplyBundleDeleteFinalMutation(ctx context.Context, req 
 			ActiveRuns: activeRemainingRuns,
 		}
 	}
-	updateResult, err := tx.ExecContext(ctx, `
-		UPDATE runs
-		SET bundle_source = $2
-		WHERE bundle_hash = $1
-		  AND bundle_source = $3
-		  AND lower(COALESCE(status, '')) NOT IN ('running', 'paused')
-	`, bundleHash, storerunlifecycle.BundleSourceDeleted, storerunlifecycle.BundleSourcePersisted)
+	updated, err := markDeletedPersistedBundleRunsTx(ctx, tx, bundleHash)
 	if err != nil {
-		return bundledelete.FinalMutationResult{}, fmt.Errorf("mark bundle delete runs deleted: %w", err)
-	}
-	updated, err := updateResult.RowsAffected()
-	if err != nil {
-		return bundledelete.FinalMutationResult{}, fmt.Errorf("count bundle delete run source updates: %w", err)
+		return bundledelete.FinalMutationResult{}, err
 	}
 	deleteResult, err := tx.ExecContext(ctx, `DELETE FROM bundles WHERE bundle_hash = $1`, bundleHash)
 	if err != nil {
@@ -305,7 +295,7 @@ func lockBundleDeleteReferencingRunsTx(ctx context.Context, tx *sql.Tx, bundleHa
 		  AND bundle_source = $2
 		ORDER BY run_id::text
 		FOR UPDATE
-	`, bundleHash, storerunlifecycle.BundleSourcePersisted)
+	`, bundleHash, runtimerunlifecycle.BundleSourcePersisted)
 	if err != nil {
 		return nil, fmt.Errorf("lock bundle delete referencing runs: %w", err)
 	}
@@ -344,10 +334,6 @@ func normalizeBundleDeleteDeliveryRef(delivery *bundledelete.DeliveryRef) {
 }
 
 func bundleDeleteRunStatusActive(status string) bool {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "running", "paused":
-		return true
-	default:
-		return false
-	}
+	state, err := runtimerunlifecycle.ParseState(status)
+	return err == nil && state.Active()
 }

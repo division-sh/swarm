@@ -66,7 +66,11 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+			workflowStore := configureRuntimeTestWorkflowStore(
+				t,
+				runtimepipeline.NewWorkflowInstanceStore(db),
+				pg,
+			)
 			if err := workflowStore.Upsert(ctx, artifactActionResultWorkflowInstance()); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
@@ -99,7 +103,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 			if err != nil {
 				t.Fatalf("marshal request payload: %v", err)
 			}
-			requestEvent := eventtest.RunCreatingRootIngress(
+			requestEvent := eventtest.ExistingRunRootIngress(
 				tc.requestEventID,
 				events.EventType("repo-scaffold/inst-1/repo_scaffold.repo_commit_requested"),
 				"test",
@@ -107,7 +111,6 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 				requestPayload,
 				0,
 				templateInstanceDeliveryRunID,
-				"",
 				events.EnvelopeForSourceRoute(
 					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, artifactActionResultEntityID), "repo-scaffold/inst-1"),
 					events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: "repo-scaffold/inst-1", EntityID: artifactActionResultEntityID},
@@ -215,7 +218,11 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+			workflowStore := configureRuntimeTestWorkflowStore(
+				t,
+				runtimepipeline.NewWorkflowInstanceStore(db),
+				pg,
+			)
 			if err := workflowStore.Upsert(ctx, artifactActionResultStaticWorkflowInstance()); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
@@ -245,7 +252,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 			if err != nil {
 				t.Fatalf("marshal request payload: %v", err)
 			}
-			requestEvent := eventtest.RunCreatingRootIngress(
+			requestEvent := eventtest.ExistingRunRootIngress(
 				tc.requestEventID,
 				events.EventType("repo-scaffold/repo_scaffold.repo_commit_requested"),
 				"test",
@@ -253,7 +260,6 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 				requestPayload,
 				0,
 				templateInstanceDeliveryRunID,
-				"",
 				events.EnvelopeForSourceRoute(
 					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, artifactActionResultEntityID), tc.requestFlowPath),
 					events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: tc.requestFlowPath, EntityID: artifactActionResultEntityID},

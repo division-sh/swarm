@@ -9,7 +9,7 @@ import (
 	"time"
 
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 var ErrRunForkSourceFreezeConfirmationRequired = errors.New("run fork source freeze confirmation required")
@@ -49,11 +49,12 @@ func (e *RunForkSourceFreezeBusyError) Unwrap() error {
 
 // applyRunForkSourceFreeze is the only writer of the terminal forked source
 // state. The caller owns the surrounding serializable transaction.
-func applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage, now time.Time, confirmed bool) error {
+func (s *PostgresStore) applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage, now time.Time, confirmed bool) error {
 	if tx == nil {
 		return fmt.Errorf("run fork source freeze transaction is required")
 	}
-	if err := storerunlifecycle.RequireActive(ctx, tx, lineage.SourceRunID, storerunlifecycle.DialectPostgres); err != nil {
+	ctx = s.bindRunLifecycleMutation(ctx, tx)
+	if err := requirePostgresRunActive(ctx, tx, lineage.SourceRunID); err != nil {
 		return fmt.Errorf("admit run fork source freeze: %w", err)
 	}
 	if !confirmed {
@@ -67,41 +68,20 @@ func applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx, lineage runForkAc
 	if err := requireRunForkSourceFreezeReady(ctx, tx, lineage.SourceRunID, now); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `
-		UPDATE runs
-		SET status = $2,
-		    ended_at = COALESCE(ended_at, $3),
-		    continued_as_run_id = $4::uuid
-		WHERE run_id = $1::uuid
-		  AND status IN ('running', 'paused')
-		  AND (continued_as_run_id IS NULL OR continued_as_run_id = $4::uuid)
-	`, lineage.SourceRunID, RunForkSourceFrozenStatus, now, lineage.ForkRunID)
-	if err != nil {
-		return fmt.Errorf("freeze source run: %w", err)
+	if _, _, err := runtimerunlifecycle.ForkSource(ctx, runtimerunlifecycle.ForkSourceRequest{
+		RunID:            lineage.SourceRunID,
+		ContinuedAsRunID: lineage.ForkRunID,
+		EndedAt:          now,
+	}); err != nil {
+		return fmt.Errorf("freeze source run lifecycle: %w", err)
 	}
-	if affected, err := result.RowsAffected(); err != nil {
-		return fmt.Errorf("confirm source freeze: %w", err)
-	} else if affected != 1 {
-		return fmt.Errorf("fork activation blocked: source_run_freeze_not_applied")
+	if _, err := runtimerunlifecycle.TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
+		RunID: lineage.ForkRunID,
+		State: runtimerunlifecycle.StateRunning,
+	}); err != nil {
+		return fmt.Errorf("activate fork run lifecycle: %w", err)
 	}
-	if err := supersedeDecisionCardsForRun(ctx, tx, lineage.SourceRunID, "run_forked", now, true, true); err != nil {
-		return fmt.Errorf("supersede frozen source decision authority: %w", err)
-	}
-	result, err = tx.ExecContext(ctx, `
-		UPDATE runs
-		SET status = $2, ended_at = NULL
-		WHERE run_id = $1::uuid
-		  AND status = $3
-	`, lineage.ForkRunID, RunForkActivatedStatus, RunForkMaterializedStatus)
-	if err != nil {
-		return fmt.Errorf("activate fork run: %w", err)
-	}
-	if affected, err := result.RowsAffected(); err != nil {
-		return fmt.Errorf("confirm fork activation: %w", err)
-	} else if affected != 1 {
-		return fmt.Errorf("fork activation blocked: fork_run_activation_not_applied")
-	}
-	if err := recordRunForkActivationAuthorActivity(ctx, lineage, now, true); err != nil {
+	if err := recordRunForkActivationAuthorActivity(ctx, lineage, now); err != nil {
 		return err
 	}
 	return nil

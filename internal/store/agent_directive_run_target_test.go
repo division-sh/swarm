@@ -6,6 +6,9 @@ import (
 	"testing"
 
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -14,14 +17,13 @@ func TestPostgresStoreResolveAgentDirectiveRunTarget(t *testing.T) {
 	t.Cleanup(cleanup)
 	ctx := testAuthorActivityContext()
 	pg := admitTestPostgresStore(t, db)
-	createDirectiveRunTargetTables(t, ctx, pg)
 
 	runA := "00000000-0000-0000-0000-0000000000a1"
 	runB := "00000000-0000-0000-0000-0000000000b1"
 	runDone := "00000000-0000-0000-0000-0000000000c1"
 	insertDirectiveRun(t, ctx, pg, runA, "running")
 	insertDirectiveRun(t, ctx, pg, runB, "paused")
-	insertDirectiveRun(t, ctx, pg, runDone, "completed")
+	insertDirectiveRun(t, ctx, pg, runDone, "cancelled")
 
 	explicit, err := pg.ResolveAgentDirectiveRunTarget(ctx, "agent-a", runA)
 	if err != nil {
@@ -68,59 +70,30 @@ func TestPostgresStoreResolveAgentDirectiveRunTarget(t *testing.T) {
 
 }
 
-func createDirectiveRunTargetTables(t *testing.T, ctx context.Context, pg *PostgresStore) {
-	t.Helper()
-	if _, err := pg.DB.ExecContext(ctx, `DROP TABLE IF EXISTS agent_sessions CASCADE; DROP TABLE IF EXISTS runs CASCADE;`); err != nil {
-		t.Fatalf("drop directive target tables: %v", err)
-	}
-	if _, err := pg.DB.ExecContext(ctx, `
-		CREATE TABLE runs (
-			run_id UUID PRIMARY KEY,
-			status TEXT NOT NULL,
-			started_at TIMESTAMPTZ,
-			trigger_event_id UUID,
-			trigger_event_type TEXT,
-			event_count INTEGER NOT NULL DEFAULT 0,
-			entity_count INTEGER NOT NULL DEFAULT 0,
-			failure JSONB,
-			ended_at TIMESTAMPTZ,
-			bundle_hash TEXT NOT NULL,
-			bundle_source TEXT NOT NULL
-		);
-		CREATE TABLE agent_sessions (
-			session_id UUID PRIMARY KEY,
-			run_id UUID NOT NULL REFERENCES runs(run_id),
-			agent_id TEXT NOT NULL,
-			flow_instance TEXT NOT NULL,
-			memory_enabled BOOLEAN NOT NULL DEFAULT TRUE,
-			memory_source TEXT NOT NULL DEFAULT 'authored',
-			conversation JSONB NOT NULL DEFAULT '[]'::jsonb,
-			turn_count INTEGER NOT NULL DEFAULT 0,
-			runtime_state JSONB NOT NULL DEFAULT '{}'::jsonb,
-			lease_holder TEXT,
-			lease_expires_at TIMESTAMPTZ,
-			status TEXT NOT NULL DEFAULT 'active',
-			termination_reason TEXT,
-			termination_detail TEXT,
-			successor_session_id UUID,
-			terminated_at TIMESTAMPTZ,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-		);
-	`); err != nil {
-		t.Fatalf("create directive target tables: %v", err)
-	}
-}
-
 func insertDirectiveRun(t *testing.T, ctx context.Context, pg *PostgresStore, runID, status string) {
 	t.Helper()
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, $2, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, status); err != nil {
-		t.Fatalf("insert run %s: %v", runID, err)
+	state, err := runtimerunlifecycle.ParseState(status)
+	if err != nil {
+		t.Fatalf("parse run state %q: %v", status, err)
 	}
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, State: state})
 }
 
 func insertDirectiveSession(t *testing.T, ctx context.Context, pg *PostgresStore, sessionID, agentID, runID string) {
 	t.Helper()
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ExecutionMode: "live",
+			ID:            agentID,
+			Type:          "worker",
+			Role:          agentID,
+			FlowID:        "global",
+			Model:         "regular",
+		},
+		Status: "active",
+	}); err != nil {
+		t.Fatalf("upsert agent %s: %v", agentID, err)
+	}
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status)
 		VALUES ($1::uuid, $2::uuid, $3, 'directive', TRUE, 'authored', 'active')

@@ -8,10 +8,9 @@ import (
 	"strings"
 	"time"
 
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
@@ -53,75 +52,60 @@ func (s *PostgresStore) SetupScenarioEntities(ctx context.Context, req ScenarioS
 		return ScenarioSetupResult{}, err
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
-	if err := s.requireCurrentSchema(); err != nil {
-		return ScenarioSetupResult{}, err
-	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return ScenarioSetupResult{}, fmt.Errorf("begin postgres scenario setup: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+	if err := s.runAuthorActivityMutation(ctx, "postgres scenario setup", func(txctx context.Context, tx *sql.Tx) error {
+		fact, ok := runtimecorrelation.BundleSourceFactFromContext(txctx)
+		if !ok {
+			return fmt.Errorf("postgres scenario setup requires executable bundle source fact")
 		}
-	}()
-	ctx, err = runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
-	if err != nil {
-		return ScenarioSetupResult{}, err
-	}
-	if err := s.ensureRunRow(ctx, tx, req.RunID, "", "test.setup_entities"); err != nil {
-		return ScenarioSetupResult{}, err
-	}
-	for _, entity := range req.Entities {
-		fieldsJSON, gatesJSON, fieldsAny, gatesAny, err := scenarioSetupEntityJSON(entity)
-		if err != nil {
-			return ScenarioSetupResult{}, err
+		if _, err := (postgresRunLifecycleMutation{store: s, tx: tx}).Create(txctx, runtimerunlifecycle.CreateRequest{
+			RunID: req.RunID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
+			Source: fact, StartedAt: req.CreatedAt,
+		}); err != nil {
+			return err
 		}
-		res, err := tx.ExecContext(ctx, `
-			INSERT INTO entity_state (
-				run_id, entity_id, flow_instance, entity_type, name,
-				current_state, gates, fields, accumulator, revision,
-				entered_state_at, created_at, updated_at
-			)
-			VALUES (
-				$1::uuid, $2::uuid, $3, $4, NULL,
-				$5, $6::jsonb, $7::jsonb, '{}'::jsonb, 1,
-				$8, $8, $8
-			)
-			ON CONFLICT (run_id, entity_id) DO NOTHING
-		`, req.RunID, entity.EntityID, entity.FlowInstance, entity.EntityType, entity.CurrentState, string(gatesJSON), string(fieldsJSON), req.CreatedAt)
-		if err != nil {
-			return ScenarioSetupResult{}, fmt.Errorf("insert postgres scenario setup entity %s: %w", entity.Alias, err)
-		}
-		rows, err := res.RowsAffected()
-		if err != nil {
-			return ScenarioSetupResult{}, fmt.Errorf("inspect postgres scenario setup entity insert %s: %w", entity.Alias, err)
-		}
-		if rows == 0 {
-			if err := validateExistingPostgresScenarioSetupEntity(ctx, tx, req.RunID, entity, fieldsJSON, gatesJSON); err != nil {
-				return ScenarioSetupResult{}, err
+		for _, entity := range req.Entities {
+			fieldsJSON, gatesJSON, fieldsAny, gatesAny, err := scenarioSetupEntityJSON(entity)
+			if err != nil {
+				return err
 			}
-			continue
+			res, err := tx.ExecContext(txctx, `
+				INSERT INTO entity_state (
+					run_id, entity_id, flow_instance, entity_type, name,
+					current_state, gates, fields, accumulator, revision,
+					entered_state_at, created_at, updated_at
+				)
+				VALUES (
+					$1::uuid, $2::uuid, $3, $4, NULL,
+					$5, $6::jsonb, $7::jsonb, '{}'::jsonb, 1,
+					$8, $8, $8
+				)
+				ON CONFLICT (run_id, entity_id) DO NOTHING
+			`, req.RunID, entity.EntityID, entity.FlowInstance, entity.EntityType, entity.CurrentState, string(gatesJSON), string(fieldsJSON), req.CreatedAt)
+			if err != nil {
+				return fmt.Errorf("insert postgres scenario setup entity %s: %w", entity.Alias, err)
+			}
+			rows, err := res.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("inspect postgres scenario setup entity insert %s: %w", entity.Alias, err)
+			}
+			if rows == 0 {
+				if err := validateExistingPostgresScenarioSetupEntity(txctx, tx, req.RunID, entity, fieldsJSON, gatesJSON); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := runtimemutationlog.InsertEntityStateDiff(txctx, tx, entity.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
+				CurrentState: entity.CurrentState,
+				Fields:       fieldsAny,
+				Gates:        gatesAny,
+			}, scenarioSetupMutationWriter()); err != nil {
+				return fmt.Errorf("record postgres scenario setup entity mutation %s: %w", entity.Alias, err)
+			}
 		}
-		if err := runtimemutationlog.InsertEntityStateDiff(ctx, tx, entity.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
-			CurrentState: entity.CurrentState,
-			Fields:       fieldsAny,
-			Gates:        gatesAny,
-		}, scenarioSetupMutationWriter()); err != nil {
-			return ScenarioSetupResult{}, fmt.Errorf("record postgres scenario setup entity mutation %s: %w", entity.Alias, err)
-		}
+		return nil
+	}); err != nil {
+		return ScenarioSetupResult{}, err
 	}
-	if err := runtimepipeline.CapturePipelineRunForkRevisionChanges(ctx, tx); err != nil {
-		return ScenarioSetupResult{}, fmt.Errorf("capture postgres scenario setup revisions: %w", err)
-	}
-	if err := runtimeauthoractivity.Finalize(ctx); err != nil {
-		return ScenarioSetupResult{}, fmt.Errorf("finalize postgres scenario setup story: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return ScenarioSetupResult{}, fmt.Errorf("commit postgres scenario setup: %w", err)
-	}
-	committed = true
 	return scenarioSetupResult(req), nil
 }
 
@@ -135,7 +119,14 @@ func (s *SQLiteRuntimeStore) SetupScenarioEntities(ctx context.Context, req Scen
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
 	if err := s.runAuthorActivityMutation(ctx, "sqlite scenario setup", func(txctx context.Context, tx *sql.Tx) error {
-		if err := sqliteEnsureActiveRunRow(txctx, tx, req.RunID, "", "test.setup_entities", req.CreatedAt); err != nil {
+		fact, ok := runtimecorrelation.BundleSourceFactFromContext(txctx)
+		if !ok {
+			return fmt.Errorf("sqlite scenario setup requires executable bundle source fact")
+		}
+		if _, err := (sqliteRunLifecycleMutation{store: s, tx: tx}).Create(txctx, runtimerunlifecycle.CreateRequest{
+			RunID: req.RunID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
+			Source: fact, StartedAt: req.CreatedAt,
+		}); err != nil {
 			return err
 		}
 		for _, entity := range req.Entities {

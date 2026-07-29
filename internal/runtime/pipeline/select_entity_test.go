@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"strings"
 	"sync"
 	"testing"
@@ -12,8 +13,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -211,30 +212,28 @@ func TestRepairContractEntityTypesUsesBundleAvailabilityAndDoesNotPromoteUnavail
 	ephemeralRunID := "99999999-9999-9999-9999-999999999999"
 	ephemeralBundleID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		UPDATE runs
-		SET bundle_hash = $2, bundle_source = 'persisted'
-		WHERE run_id = $1::uuid
-	`, testPipelineRunID, persistedHash); err != nil {
-		t.Fatalf("seed current run bundle source: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
 		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
 		VALUES ($1, 'name: runtime-test', '{}'::jsonb)
 	`, persistedHash); err != nil {
 		t.Fatalf("seed current bundle row: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_source, bundle_hash)
-		VALUES ($1::uuid, 'running', 'deleted', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
-	`, legacyRunID); err != nil {
-		t.Fatalf("seed legacy bundle run: %v", err)
+	persistedSource, err := testRunLifecycleSource(persistedHash, storerunlifecycle.BundleSourcePersisted)
+	if err != nil {
+		t.Fatalf("construct persisted current run source: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:9999999999999999999999999999999999999999999999999999999999999999', 'ephemeral')
-	`, ephemeralRunID); err != nil {
-		t.Fatalf("seed ephemeral bundle run: %v", err)
+	if err := runlifecyclefixture.RevisePostgresSource(ctx, db, testPipelineRunID, persistedSource); err != nil {
+		t.Fatalf("revise current run bundle source: %v", err)
 	}
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: legacyRunID})
+	runlifecyclefixture.CorruptPostgresSource(
+		t,
+		ctx,
+		db,
+		legacyRunID,
+		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		storerunlifecycle.BundleSourceDeleted,
+	)
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: ephemeralRunID, BundleHash: "bundle-v1:sha256:9999999999999999999999999999999999999999999999999999999999999999"})
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 		VALUES
@@ -285,14 +284,14 @@ func TestRepairContractEntityTypesBlocksPersistedMissingBundleRow(t *testing.T) 
 	pc, _ := newSelectEntityTestCoordinator(t, db)
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	entityID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		UPDATE runs
-		SET bundle_hash = 'bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-		    bundle_source = $2
-		WHERE run_id = $1::uuid
-	`, testPipelineRunID, storerunlifecycle.BundleSourcePersisted); err != nil {
-		t.Fatalf("seed persisted-missing run bundle source: %v", err)
-	}
+	runlifecyclefixture.CorruptPostgresSource(
+		t,
+		ctx,
+		db,
+		testPipelineRunID,
+		"bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		storerunlifecycle.BundleSourcePersisted,
+	)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 		VALUES ('treasury/missing-bundle', 'treasury', 'template', '{"workflow_version":"1.0.0"}'::jsonb, 'active', now())
@@ -714,7 +713,7 @@ opco_budget:
 	pc := &PipelineCoordinator{
 		bus:            &recordingPipelineBus{},
 		db:             db,
-		workflowStore:  NewWorkflowInstanceStore(db),
+		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
 		module: &previewWorkflowModule{

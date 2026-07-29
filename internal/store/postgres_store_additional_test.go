@@ -26,9 +26,9 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -92,20 +92,14 @@ func acquireLiveTestSession(t *testing.T, ctx context.Context, db *sql.DB, agent
 	return lease.SessionID
 }
 
-func seedSpecMemoryRun(t *testing.T, ctx context.Context, db execer) {
+func seedSpecMemoryRun(t *testing.T, ctx context.Context, db *sql.DB) {
 	t.Helper()
 	seedManagerRun(t, ctx, db, specEntityStateRunID)
 }
 
-func seedManagerRun(t *testing.T, ctx context.Context, db execer, runID string) {
+func seedManagerRun(t *testing.T, ctx context.Context, db *sql.DB, runID string) {
 	t.Helper()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-		ON CONFLICT (run_id) DO NOTHING
-	`, runID); err != nil {
-		t.Fatalf("seed agent memory run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 }
 
 func specMemoryIdentity(agentID, flowInstance string) agentmemory.Identity {
@@ -152,12 +146,7 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	seedPostgresStoreEvent(t, ctx, pg, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", time.Now().UTC())
 	seedPostgresEntityStateRows(t, db, ctx, runID, entityID)
 	event := commitPostgresDeliveryFixture(t, ctx, db, eventID, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"})
@@ -165,10 +154,10 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 		t.Fatalf("seed pipeline receipt: %v", err)
 	}
 
-	if _, err := pg.MarkRunTerminal(ctx, runID, "completed", nil, time.Now().UTC()); err == nil || !strings.Contains(err.Error(), "normal run completion convergence") {
-		t.Fatalf("MarkRunTerminal(completed) error = %v, want canonical convergence refusal", err)
+	if _, err := markRunTerminalStatusForTest(ctx, pg, runID, "completed", nil, time.Now().UTC()); err == nil || !strings.Contains(err.Error(), "requires failed or cancelled") {
+		t.Fatalf("typed explicit terminal operation(completed) error = %v, want canonical completion-owner refusal", err)
 	}
-	if err := pg.ConvergeNormalRunCompletion(ctx, eventID, []string{"ready"}, map[string][]string{"test-flow": {"ready"}}); err != nil {
+	if err := executeRunCompletionCandidateForEvent(ctx, pg, eventID, []string{"ready"}, map[string][]string{"test-flow": {"ready"}}); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion(active delivery): %v", err)
 	}
 	var activeStatus string
@@ -184,7 +173,7 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 		t.Fatalf("deliver completion: %v", err)
 	}
 
-	if err := pg.ConvergeNormalRunCompletion(ctx, eventID, []string{"ready"}, map[string][]string{"test-flow": {"ready"}}); err != nil {
+	if err := executeRunCompletionCandidateForEvent(ctx, pg, eventID, []string{"ready"}, map[string][]string{"test-flow": {"ready"}}); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion: %v", err)
 	}
 
@@ -224,12 +213,7 @@ func TestPostgresRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 	eventEntityA := uuid.NewString()
 	eventEntityB := uuid.NewString()
 	currentEntity := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, event_count, entity_count, started_at, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', 99, 9, now(), 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunningRunForTest(t, ctx, pg, runID, time.Now().UTC())
 	seedPostgresStoreEvent(t, ctx, pg, uuid.NewString(), runID, "scan.requested", events.EventProducerAgent, "test", eventEntityA, "", time.Now().UTC())
 	seedPostgresStoreEvent(t, ctx, pg, uuid.NewString(), runID, "scan.replayed", events.EventProducerAgent, "test", eventEntityB, "", time.Now().UTC())
 	seedPostgresEntityStateRows(t, db, ctx, runID, currentEntity)
@@ -242,7 +226,9 @@ func TestPostgresRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 		t.Fatalf("snapshot entity_count = %d, want entity_state count 1 despite stale run/event overcount", snap.EntityCount)
 	}
 
-	if err := storerunlifecycle.SyncCounts(ctx, db, runID); err != nil {
+	if err := pg.runAuthorActivityMutation(ctx, "test synchronize PostgreSQL lifecycle counters", func(txctx context.Context, tx *sql.Tx) error {
+		return (postgresRunLifecycleMutation{store: pg, tx: tx}).SyncCounters(txctx, runID)
+	}); err != nil {
 		t.Fatalf("SyncCounts: %v", err)
 	}
 	var eventCount, entityCount int
@@ -265,13 +251,19 @@ func TestPostgresStore_AppendEventRejectsNewEventForCompletedRun(t *testing.T) {
 
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, ended_at, event_count, entity_count, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'completed', now(), 0, 0, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID); err != nil {
-		t.Fatalf("seed completed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		RunID: runID,
+		State: storerunlifecycle.StateCompleted,
+	})
 	seedPostgresEntityStateRows(t, db, ctx, runID, entityID)
+	var baselineEventCount, baselineEntityCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT event_count, entity_count
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&baselineEventCount, &baselineEntityCount); err != nil {
+		t.Fatalf("load run counter baseline: %v", err)
+	}
 
 	evt := eventtest.PersistedProjection(
 		uuid.NewString(),
@@ -306,11 +298,11 @@ func TestPostgresStore_AppendEventRejectsNewEventForCompletedRun(t *testing.T) {
 	if status != "completed" {
 		t.Fatalf("run status = %q, want completed", status)
 	}
-	if eventCount != 0 {
-		t.Fatalf("event_count = %d, want 0", eventCount)
+	if eventCount != baselineEventCount {
+		t.Fatalf("event_count = %d, want unchanged %d", eventCount, baselineEventCount)
 	}
-	if entityCount != 0 {
-		t.Fatalf("entity_count = %d, want unchanged 0", entityCount)
+	if entityCount != baselineEntityCount {
+		t.Fatalf("entity_count = %d, want unchanged %d", entityCount, baselineEntityCount)
 	}
 	if !endedAt.Valid {
 		t.Fatal("ended_at was cleared by rejected append")
@@ -325,14 +317,10 @@ func TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun(t *testing
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
-	completedAt := time.Now().UTC().Add(-time.Minute).Round(time.Second)
 	createdAt := time.Now().UTC().Add(-2 * time.Minute).Truncate(time.Microsecond)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, ended_at, event_count, entity_count, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'completed', $2, 1, 1, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID, completedAt); err != nil {
-		t.Fatalf("seed completed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		RunID: runID, StartedAt: createdAt.Add(-time.Minute),
+	})
 	parentEventID := eventtest.UUID("completed-run-parent:" + eventID)
 	duplicate := eventtest.PersistedChildForProducer(
 		eventID, "scan.completed", eventtest.Producer(events.EventProducerAgent, "agent-1"), "",
@@ -342,6 +330,34 @@ func TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun(t *testing
 		t.Fatalf("seed duplicate event: %v", err)
 	}
 	seedPostgresEntityStateRows(t, db, ctx, runID, entityID)
+	work, err := pg.PipelineObligations().ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
+	if err != nil {
+		t.Fatalf("claim completed-run event: %v", err)
+	}
+	if err := pg.PipelineObligations().Settle(
+		ctx,
+		work.Claim,
+		runtimepipelineobligation.Acknowledged("pipeline_persisted"),
+	); err != nil {
+		t.Fatalf("settle completed-run event: %v", err)
+	}
+	if err := executeRunCompletionCandidateForEvent(
+		ctx,
+		pg,
+		eventID,
+		nil,
+		map[string][]string{"test-flow": {"ready"}},
+	); err != nil {
+		t.Fatalf("complete run through lifecycle owner: %v", err)
+	}
+	var completedAt time.Time
+	if err := db.QueryRowContext(ctx, `
+		SELECT ended_at
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&completedAt); err != nil {
+		t.Fatalf("load canonical completion time: %v", err)
+	}
 
 	evt := eventtest.PersistedChildForProducer(
 		eventID,
@@ -558,15 +574,9 @@ func TestPostgresStore_AgentSessionSuccessorInvariantsRejectInvalidCanonicalWrit
 	}
 }
 
-func seedSpecEntityState(t *testing.T, ctx context.Context, db execer, entityID, flowInstance, slug, name, state string) {
+func seedSpecEntityState(t *testing.T, ctx context.Context, db *sql.DB, entityID, flowInstance, slug, name, state string) {
 	t.Helper()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-		ON CONFLICT (run_id) DO NOTHING
-	`, specEntityStateRunID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: specEntityStateRunID})
 	if strings.TrimSpace(flowInstance) == "" {
 		flowInstance = strings.TrimSpace(slug)
 	}
@@ -618,10 +628,6 @@ func seedSpecAgent(t *testing.T, ctx context.Context, pg *PostgresStore, agentID
 	}); err != nil {
 		t.Fatalf("seed agent %s: %v", agentID, err)
 	}
-}
-
-type execer interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
 func installFailAgentTurnInsertTrigger(t *testing.T, ctx context.Context, db *sql.DB) {
@@ -699,9 +705,9 @@ func TestPostgresStore_AppendEvent_EntityIDBoundaryContract(t *testing.T) {
 	}
 
 	emptyEventID := uuid.NewString()
-	if err := commitSemanticEventFixture(ctx, pg, eventtest.RunCreatingRootIngress(emptyEventID,
+	if err := commitSemanticEventFixture(ctx, pg, eventtest.ExistingRunRootIngress(emptyEventID,
 		events.EventType("review.requested"),
-		"control-plane", "", []byte(`{"name":"Telemedicine Platform"}`), 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, time.Now())); err != nil {
+		"control-plane", "", []byte(`{"name":"Telemedicine Platform"}`), 0, eventtest.UUID("persisted-projection-run"), events.EventEnvelope{}, time.Now())); err != nil {
 		t.Fatalf("AppendEvent(empty entity_id): %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `
@@ -719,7 +725,7 @@ func TestPostgresStore_AppendEvent_EntityIDBoundaryContract(t *testing.T) {
 	}
 
 	invalidEventID := uuid.NewString()
-	err := commitSemanticEventFixture(ctx, pg, eventtest.RunCreatingRootIngress(
+	err := commitSemanticEventFixture(ctx, pg, eventtest.ExistingRunRootIngress(
 		invalidEventID,
 		events.EventType("review.requested"),
 		"control-plane",
@@ -727,7 +733,6 @@ func TestPostgresStore_AppendEvent_EntityIDBoundaryContract(t *testing.T) {
 		[]byte(`{"name":"Telemedicine Platform"}`),
 		0,
 		eventtest.UUID("persisted-projection-run"),
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "pry_hc_telemedicine_001"),
 		time.Now(),
 	))
@@ -858,7 +863,7 @@ func TestPostgresStore_RunTerminalOwnersPersistCanonicalLifecycle(t *testing.T) 
 	if err := acknowledgePipelineEventFixture(ctx, pg, completedFixture.EventID); err != nil {
 		t.Fatalf("seed completed run receipt: %v", err)
 	}
-	if err := pg.ConvergeNormalRunCompletion(ctx, completedFixture.EventID, []string{"done"}, map[string][]string{"review": {"done"}}); err != nil {
+	if err := executeRunCompletionCandidateForEvent(ctx, pg, completedFixture.EventID, []string{"done"}, map[string][]string{"review": {"done"}}); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion: %v", err)
 	}
 
@@ -885,12 +890,12 @@ func TestPostgresStore_RunTerminalOwnersPersistCanonicalLifecycle(t *testing.T) 
 	}
 
 	failedRunID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, failedRunID); err != nil {
-		t.Fatalf("seed failed run: %v", err)
-	}
 	failedAt := time.Now().UTC().Round(time.Second)
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		RunID: failedRunID, StartedAt: failedAt.Add(-time.Minute),
+	})
 	failure := testFailureEnvelope(runtimefailures.ClassInternalFailure, "run_quiescence_failed", nil)
-	if _, err := pg.MarkRunTerminal(ctx, failedRunID, "failed", &failure, failedAt); err != nil {
+	if _, err := markRunTerminalStatusForTest(ctx, pg, failedRunID, "failed", &failure, failedAt); err != nil {
 		t.Fatalf("MarkRunTerminal(failed): %v", err)
 	}
 
@@ -916,14 +921,14 @@ func TestPostgresStore_RunTerminalOwnersPersistCanonicalLifecycle(t *testing.T) 
 	if failedEnded.IsZero() {
 		t.Fatal("failed run ended_at not persisted")
 	}
-	if _, err := pg.MarkRunTerminal(ctx, failedRunID, "failed", &failure, failedAt.Add(time.Minute)); err != nil {
+	if _, err := markRunTerminalStatusForTest(ctx, pg, failedRunID, "failed", &failure, failedAt.Add(time.Minute)); err != nil {
 		t.Fatalf("idempotent failed terminal write: %v", err)
 	}
 	conflicting := testFailureEnvelope(runtimefailures.ClassInternalFailure, "different_run_failure", nil)
-	if _, err := pg.MarkRunTerminal(ctx, failedRunID, "failed", &conflicting, failedAt.Add(time.Minute)); err == nil || !strings.Contains(err.Error(), "conflicting failure") {
+	if _, err := markRunTerminalStatusForTest(ctx, pg, failedRunID, "failed", &conflicting, failedAt.Add(time.Minute)); err == nil || !strings.Contains(err.Error(), "already terminal with state failed") {
 		t.Fatalf("conflicting terminal write error = %v, want rejection", err)
 	}
-	if _, err := pg.MarkRunTerminal(ctx, uuid.NewString(), "failed", nil, failedAt); err == nil || !strings.Contains(err.Error(), "requires canonical failure") {
+	if _, err := markRunTerminalStatusForTest(ctx, pg, uuid.NewString(), "failed", nil, failedAt); err == nil || !strings.Contains(err.Error(), "requires canonical failure") {
 		t.Fatalf("missing failed evidence error = %v", err)
 	}
 }
@@ -944,12 +949,10 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 		"human", "", []byte(`{"directive":"x"}`), 0, runID,
 		parentID, events.EventEnvelope{}, time.Now().Add(-1*time.Minute))
 
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral') ON CONFLICT (run_id) DO NOTHING`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
-	if err := commitSemanticEventFixture(ctx, pg, eventtest.RunCreatingRootIngress(parentID,
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	if err := commitSemanticEventFixture(ctx, pg, eventtest.ExistingRunRootIngress(parentID,
 		events.EventType("system.parent"),
-		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute))); err != nil {
+		"runtime", "", []byte(`{"ok":true}`), 0, runID, events.EventEnvelope{}, time.Now().Add(-3*time.Minute))); err != nil {
 		t.Fatalf("append parent event: %v", err)
 	}
 	if err := commitSemanticEventFixture(ctx, pg, eventProcessed); err != nil {
@@ -1012,9 +1015,9 @@ func TestPostgresStore_PersistEventWithDeliveries_SuccessAndRollbackOnFailure(t 
 	}
 
 	failedEventID := uuid.NewString()
-	err := commitSemanticEventFixtureWithAgents(ctx, pg, eventtest.RunCreatingRootIngress(failedEventID,
+	err := commitSemanticEventFixtureWithAgents(ctx, pg, eventtest.ExistingRunRootIngress(failedEventID,
 		events.EventType("system.directive"),
-		"human", "", []byte(`{"directive":"fail path"}`), 0, eventtest.UUID("persisted-projection-run"), "", events.EventEnvelope{}, time.Now().UTC()),
+		"human", "", []byte(`{"directive":"fail path"}`), 0, eventtest.UUID("persisted-projection-run"), events.EventEnvelope{}, time.Now().UTC()),
 
 		[]string{"missing-agent"})
 	if err != nil {
@@ -1255,9 +1258,7 @@ func TestSchedules_RunScopedWritesUsePipelineTransaction(t *testing.T) {
 	runID := uuid.NewString()
 	ctx, cancel := context.WithTimeout(runtimecorrelation.WithRunID(context.Background(), runID), 3*time.Second)
 	defer cancel()
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', now(), 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunningRunForTest(t, ctx, pg, runID, time.Now().UTC())
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin pipeline transaction: %v", err)
@@ -1467,12 +1468,8 @@ func TestSchedules_ExactIdentityUsesRunID(t *testing.T) {
 	runA := uuid.NewString()
 	runB := uuid.NewString()
 	entityID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'), ($2::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runA, runB); err != nil {
-		t.Fatalf("seed runs: %v", err)
-	}
+	requireRunningRunForTest(t, ctx, pg, runA, time.Now().UTC())
+	requireRunningRunForTest(t, ctx, pg, runB, time.Now().UTC())
 	base := runtimepipeline.Schedule{
 		AgentID:      "validation-orchestrator",
 		EventType:    "timer.validation_timeout",
@@ -1584,12 +1581,7 @@ func TestSchedules_LoadActiveSchedulesIgnoresWorkflowSidecarRows(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
 			run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
@@ -2028,11 +2020,8 @@ func TestManagerStore_LoadRoutingRules_DoesNotJoinRunScopedEntityState(t *testin
 	runA := uuid.NewString()
 	runB := uuid.NewString()
 	entityID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'), ($2::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, runA, runB); err != nil {
-		t.Fatalf("insert runs: %v", err)
-	}
+	requireRunningRunForTest(t, ctx, pg, runA, time.Now().UTC())
+	requireRunningRunForTest(t, ctx, pg, runB, time.Now().UTC())
 	for _, runID := range []string{runA, runB} {
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO entity_state (

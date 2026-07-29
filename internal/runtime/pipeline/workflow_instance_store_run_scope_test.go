@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"strings"
 	"testing"
 
@@ -12,7 +13,7 @@ import (
 
 func TestWorkflowInstanceStore_RequiresRunContext(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	store := NewWorkflowInstanceStore(db)
+	store := newPostgresWorkflowInstanceStoreForTest(db)
 
 	err := store.Upsert(testAuthorActivityContext(t, context.Background()), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      uuid.NewString(),
@@ -28,14 +29,12 @@ func TestWorkflowInstanceStore_RequiresRunContext(t *testing.T) {
 
 func TestWorkflowInstanceStore_RunScopedCurrentStateRowsDoNotBleed(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	store := NewWorkflowInstanceStore(db)
+	store := newPostgresWorkflowInstanceStoreForTest(db)
 	runA := uuid.NewString()
 	runB := uuid.NewString()
 	entityID := uuid.NewString()
 	for _, runID := range []string{runA, runB} {
-		if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID); err != nil {
-			t.Fatalf("seed run %s: %v", runID, err)
-		}
+		runlifecyclefixture.RequirePostgres(t, testAuthorActivityContext(t, context.Background()), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
 	}
 	ctxA := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runA)
 	ctxB := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runB)

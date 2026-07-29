@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -40,13 +41,14 @@ func (a *Adapter) PendingRunEventIDs(ctx context.Context, q queryer, page Pendin
 		query string
 		args  []any
 	)
+	activeStates := runtimerunlifecycle.ActiveStates()
 	if a.dialect == DialectPostgres {
-		args = []any{page.RunID, page.Since.UTC()}
+		args = []any{page.RunID, string(activeStates[0]), string(activeStates[1]), page.Since.UTC()}
 		where := []string{
 			"d.run_id = $1::uuid",
-			"run.status IN ('running', 'paused')",
+			"run.status IN ($2, $3)",
 			"d.status = 'pending'",
-			"d.created_at >= $2::timestamptz",
+			"d.created_at >= $4::timestamptz",
 		}
 		if len(excluded) > 0 {
 			placeholders := make([]string, 0, len(excluded))
@@ -67,10 +69,10 @@ func (a *Adapter) PendingRunEventIDs(ctx context.Context, q queryer, page Pendin
 			ORDER BY MIN(d.created_at), e.event_id
 			LIMIT $%d`, strings.Join(where, " AND "), len(args))
 	} else {
-		args = []any{page.RunID, page.Since.UTC()}
+		args = []any{page.RunID, string(activeStates[0]), string(activeStates[1]), page.Since.UTC()}
 		where := []string{
 			"d.run_id = ?",
-			"run.status IN ('running', 'paused')",
+			"run.status IN (?, ?)",
 			"d.status = 'pending'",
 			"d.created_at >= ?",
 		}
@@ -130,6 +132,7 @@ func (a *Adapter) AgentPendingAggregates(ctx context.Context, q queryer, agentID
 		query string
 		args  []any
 	)
+	activeStates := runtimerunlifecycle.ActiveStates()
 	if a.dialect == DialectPostgres {
 		placeholders := make([]string, 0, len(agentIDs))
 		for _, agentID := range agentIDs {
@@ -137,6 +140,8 @@ func (a *Adapter) AgentPendingAggregates(ctx context.Context, q queryer, agentID
 			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
 		}
 		args = append(args, since.UTC())
+		sinceIndex := len(args)
+		args = append(args, string(activeStates[0]), string(activeStates[1]))
 		query = fmt.Sprintf(`
 			SELECT d.subscriber_id, COUNT(*), MIN(e.created_at)
 			FROM event_deliveries d
@@ -145,10 +150,16 @@ func (a *Adapter) AgentPendingAggregates(ctx context.Context, q queryer, agentID
 			WHERE d.subscriber_type = 'agent'
 			  AND d.subscriber_id IN (%s)
 			  AND e.created_at >= $%d::timestamptz
-			  AND (e.run_id IS NULL OR r.status IN ('running', 'paused'))
+			  AND (e.run_id IS NULL OR r.status IN ($%d, $%d))
 			  AND %s
 			GROUP BY d.subscriber_id
-			ORDER BY d.subscriber_id`, strings.Join(placeholders, ","), len(args), postgresAgentPendingEligibility)
+			ORDER BY d.subscriber_id`,
+			strings.Join(placeholders, ","),
+			sinceIndex,
+			sinceIndex+1,
+			sinceIndex+2,
+			postgresAgentPendingEligibility,
+		)
 	} else {
 		placeholders := make([]string, 0, len(agentIDs))
 		for _, agentID := range agentIDs {
@@ -156,6 +167,7 @@ func (a *Adapter) AgentPendingAggregates(ctx context.Context, q queryer, agentID
 			placeholders = append(placeholders, "?")
 		}
 		args = append(args, since.UTC())
+		args = append(args, string(activeStates[0]), string(activeStates[1]))
 		query = fmt.Sprintf(`
 			SELECT d.subscriber_id, COUNT(*), MIN(e.created_at)
 			FROM event_deliveries d
@@ -164,7 +176,7 @@ func (a *Adapter) AgentPendingAggregates(ctx context.Context, q queryer, agentID
 			WHERE d.subscriber_type = 'agent'
 			  AND d.subscriber_id IN (%s)
 			  AND e.created_at >= ?
-			  AND (e.run_id IS NULL OR r.status IN ('running', 'paused'))
+			  AND (e.run_id IS NULL OR r.status IN (?, ?))
 			  AND %s
 			GROUP BY d.subscriber_id
 			ORDER BY d.subscriber_id`, strings.Join(placeholders, ","), sqliteAgentPendingEligibility)
@@ -230,13 +242,14 @@ func (a *Adapter) AgentPendingReferencePage(ctx context.Context, q queryer, page
 		query string
 		args  []any
 	)
+	activeStates := runtimerunlifecycle.ActiveStates()
 	if a.dialect == DialectPostgres {
-		args = []any{page.AgentID, page.Since.UTC()}
+		args = []any{page.AgentID, page.Since.UTC(), string(activeStates[0]), string(activeStates[1])}
 		where := []string{
 			"d.subscriber_type = 'agent'",
 			"d.subscriber_id = $1",
 			"e.created_at >= $2::timestamptz",
-			"(e.run_id IS NULL OR r.status IN ('running', 'paused'))",
+			"(e.run_id IS NULL OR r.status IN ($3, $4))",
 			postgresAgentPendingEligibility,
 		}
 		if page.After != nil {
@@ -256,12 +269,12 @@ func (a *Adapter) AgentPendingReferencePage(ctx context.Context, q queryer, page
 			ORDER BY e.created_at, e.event_id, d.delivery_id
 			LIMIT $%d`, strings.Join(where, " AND "), len(args))
 	} else {
-		args = []any{page.AgentID, page.Since.UTC()}
+		args = []any{page.AgentID, page.Since.UTC(), string(activeStates[0]), string(activeStates[1])}
 		where := []string{
 			"d.subscriber_type = 'agent'",
 			"d.subscriber_id = ?",
 			"e.created_at >= ?",
-			"(e.run_id IS NULL OR r.status IN ('running', 'paused'))",
+			"(e.run_id IS NULL OR r.status IN (?, ?))",
 			sqliteAgentPendingEligibility,
 		}
 		if page.After != nil {

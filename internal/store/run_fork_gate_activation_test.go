@@ -22,9 +22,8 @@ func TestMaterializeRunForkDecisionCardsCreatesForkLocalPendingAuthority(t *test
 	ctx := testAuthorActivityContext()
 	sourceRunID, forkRunID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	now := time.Date(2026, 7, 12, 15, 0, 0, 0, time.UTC)
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'), ($2::uuid, 'running', $3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, sourceRunID, forkRunID, now); err != nil {
-		t.Fatalf("seed runs: %v", err)
-	}
+	requireRunningPostgresRunForTest(t, ctx, db, sourceRunID, now)
+	requireRunningPostgresRunForTest(t, ctx, db, forkRunID, now)
 	sourceActivation, err := gateruntime.New(sourceRunID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", authorActivityTestBundleHash, testGateRoutes(t), "event-1", now)
 	if err != nil {
 		t.Fatal(err)
@@ -88,9 +87,8 @@ func TestMaterializeRunForkDecisionCardsPreservesCommittedSemanticFields(t *test
 	ctx := testAuthorActivityContext()
 	sourceRunID, forkRunID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	now := time.Date(2026, 7, 13, 15, 0, 0, 0, time.UTC)
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'), ($2::uuid, 'running', $3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, sourceRunID, forkRunID, now); err != nil {
-		t.Fatalf("seed runs: %v", err)
-	}
+	requireRunningPostgresRunForTest(t, ctx, db, sourceRunID, now)
+	requireRunningPostgresRunForTest(t, ctx, db, forkRunID, now)
 	sourceActivation, err := gateruntime.New(sourceRunID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", authorActivityTestBundleHash, testGateRoutes(t), "event-1", now)
 	if err != nil {
 		t.Fatal(err)
@@ -154,9 +152,8 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 	ctx := testAuthorActivityContext()
 	sourceRunID, forkRunID := uuid.NewString(), uuid.NewString()
 	now := time.Date(2026, 7, 14, 18, 0, 0, 0, time.UTC)
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'), ($2::uuid, 'running', $3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, sourceRunID, forkRunID, now); err != nil {
-		t.Fatal(err)
-	}
+	requireRunningPostgresRunForTest(t, ctx, db, sourceRunID, now)
+	requireRunningPostgresRunForTest(t, ctx, db, forkRunID, now)
 	cards := admitTestPostgresStore(t, db)
 	sourceCard, sourceContinuation := newProposedEffectTestCard(t, sourceRunID, now, attemptgeneration.Generation{})
 	if err := cards.CreateProposedEffectCard(ctx, sourceCard, sourceContinuation); err != nil {
@@ -219,9 +216,8 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 			ctx := testAuthorActivityContext()
 			sourceRunID, forkRunID := uuid.NewString(), uuid.NewString()
 			now := time.Date(2026, 7, 14, 19, 0, 0, 0, time.UTC)
-			if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral'), ($2::uuid, 'running', $3, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, sourceRunID, forkRunID, now); err != nil {
-				t.Fatal(err)
-			}
+			requireRunningPostgresRunForTest(t, ctx, db, sourceRunID, now)
+			requireRunningPostgresRunForTest(t, ctx, db, forkRunID, now)
 			cards := admitTestPostgresStore(t, db)
 			card, continuation := newProposedEffectTestCard(t, sourceRunID, now, attemptgeneration.Generation{})
 			if err := cards.CreateProposedEffectCard(ctx, card, continuation); err != nil {

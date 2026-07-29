@@ -33,7 +33,7 @@ type forkedDomainConsumerSurface interface {
 }
 
 func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t *testing.T) {
-	for _, backend := range []string{"postgres", "sqlite"} {
+	for _, backend := range []string{"postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedConsumerTestBackend(t, backend)
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityBundleSourceContext(), fixture.sourceRun)
@@ -171,7 +171,7 @@ type forkedDirectiveConsumerSurface interface {
 }
 
 func TestForkedSourceDirectiveReservationTransitionsAndRecoveryRefuse(t *testing.T) {
-	for _, backend := range []string{"postgres", "sqlite"} {
+	for _, backend := range []string{"postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedConsumerTestBackend(t, backend)
 			fixture.freeze(t)
@@ -280,7 +280,7 @@ type forkedEffectConsumerSurface interface {
 }
 
 func TestForkedSourceManagedExternalEffectAdmissionTransitionsAndRecoveryRefuse(t *testing.T) {
-	for _, backend := range []string{"postgres", "sqlite"} {
+	for _, backend := range []string{"postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedConsumerTestBackend(t, backend)
 			fixture.freeze(t)

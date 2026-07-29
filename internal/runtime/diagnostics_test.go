@@ -17,9 +17,10 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -90,7 +91,7 @@ func (s runtimeLogPersistenceStub) PersistRuntimeLog(ctx context.Context, record
 		if err := eventfixture.Insert(storyctx, tx, runtimeauthoractivity.DialectPostgres, constructed); err != nil {
 			return err
 		}
-		return storerunlifecycle.SyncCounts(storyctx, tx, runID)
+		return syncRuntimeLogRunCountsForTest(storyctx, tx, runID)
 	})
 }
 
@@ -999,34 +1000,12 @@ func runRuntimeLogStoryForTest(ctx context.Context, db *sql.DB, fn func(context.
 	if db == nil {
 		return nil
 	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-	storyctx, err := runtimeauthoractivity.Begin(runtimepipeline.WithPipelineSQLTxContext(ctx, tx), tx, runtimeauthoractivity.DialectPostgres)
-	if err != nil {
-		return err
-	}
-	if err := fn(storyctx, tx); err != nil {
-		return err
-	}
-	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	committed = true
-	return nil
+	return runlifecyclefixture.RunPostgresMutation(ctx, db, func(txctx context.Context, tx *sql.Tx) error {
+		return fn(runtimepipeline.WithPipelineSQLTxContext(txctx, tx), tx)
+	})
 }
 
-func ensureRuntimeLogRunRowInStoryForTest(ctx context.Context, db storerunlifecycle.DBTX, runID string) error {
+func ensureRuntimeLogRunRowInStoryForTest(ctx context.Context, _ any, runID string) error {
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
 		return nil
@@ -1034,11 +1013,23 @@ func ensureRuntimeLogRunRowInStoryForTest(ctx context.Context, db storerunlifecy
 	if _, err := uuid.Parse(runID); err != nil {
 		return err
 	}
-	opts := storerunlifecycle.EnsureActiveOptions{}
-	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
-		opts.BundleSourceFact = fact
+	source, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	if !ok {
+		return errors.New("runtime log run fixture requires bundle source fact")
 	}
-	return storerunlifecycle.EnsureActive(ctx, db, runID, "", "", opts)
+	if err := source.Validate(); err != nil {
+		return err
+	}
+	_, err := storerunlifecycle.Create(ctx, storerunlifecycle.CreateRequest{
+		RunID:     runID,
+		Source:    source,
+		StartedAt: time.Now().UTC(),
+	})
+	return err
+}
+
+func syncRuntimeLogRunCountsForTest(ctx context.Context, _ any, runID string) error {
+	return storerunlifecycle.SyncCounters(ctx, runID)
 }
 
 type runtimeLogPayloadArg struct {

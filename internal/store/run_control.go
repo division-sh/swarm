@@ -10,7 +10,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -158,22 +158,22 @@ func lockRunControlState(ctx context.Context, tx *sql.Tx, runID string) (runtime
 }
 
 func pauseRunControlTx(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
-	switch state.Status {
-	case "running":
-	case "paused":
-		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyPaused, RunID: state.RunID, CurrentStatus: state.Status}
-	case "completed", "failed", "cancelled", "forked":
-		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyTerminal, RunID: state.RunID, CurrentStatus: state.Status}
-	default:
-		return runtimeruncontrol.State{}, fmt.Errorf("unsupported run status %q", state.Status)
+	lifecycleState, err := runtimerunlifecycle.ParseState(state.Status)
+	if err != nil {
+		return runtimeruncontrol.State{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE runs
-		SET status = 'paused'
-		WHERE run_id = $1::uuid
-		  AND status = 'running'
-	`, state.RunID); err != nil {
-		return runtimeruncontrol.State{}, fmt.Errorf("pause run: %w", err)
+	switch lifecycleState {
+	case runtimerunlifecycle.StateRunning:
+	case runtimerunlifecycle.StatePaused:
+		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyPaused, RunID: state.RunID, CurrentStatus: state.Status}
+	default:
+		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyTerminal, RunID: state.RunID, CurrentStatus: state.Status}
+	}
+	if _, err := runtimerunlifecycle.TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
+		RunID: state.RunID,
+		State: runtimerunlifecycle.StatePaused,
+	}); err != nil {
+		return runtimeruncontrol.State{}, fmt.Errorf("pause run lifecycle: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, updated_at, paused_at, stopped_at)
@@ -188,7 +188,7 @@ func pauseRunControlTx(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.
 	`, state.RunID, req.Reason, req.ControlledBy, req.Now.UTC()); err != nil {
 		return runtimeruncontrol.State{}, fmt.Errorf("persist run pause control state: %w", err)
 	}
-	state.Status = "paused"
+	state.Status = string(runtimerunlifecycle.StatePaused)
 	state.ControlStatus = "paused"
 	state.Reason = req.Reason
 	state.ControlledBy = req.ControlledBy
@@ -197,17 +197,18 @@ func pauseRunControlTx(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.
 }
 
 func continueRunControlTx(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
-	if state.Status != "paused" || state.ControlStatus != "paused" {
+	lifecycleState, err := runtimerunlifecycle.ParseState(state.Status)
+	if err != nil {
+		return runtimeruncontrol.State{}, err
+	}
+	if lifecycleState != runtimerunlifecycle.StatePaused || state.ControlStatus != "paused" {
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrNotPaused, RunID: state.RunID, CurrentStatus: state.Status}
 	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE runs
-		SET status = 'running',
-		    ended_at = NULL
-		WHERE run_id = $1::uuid
-		  AND status = 'paused'
-	`, state.RunID); err != nil {
-		return runtimeruncontrol.State{}, fmt.Errorf("continue run: %w", err)
+	if _, err := runtimerunlifecycle.TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
+		RunID: state.RunID,
+		State: runtimerunlifecycle.StateRunning,
+	}); err != nil {
+		return runtimeruncontrol.State{}, fmt.Errorf("continue run lifecycle: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE run_control_state
@@ -222,7 +223,7 @@ func continueRunControlTx(ctx context.Context, tx *sql.Tx, state runtimeruncontr
 	`, state.RunID, req.Reason, req.ControlledBy, req.Now.UTC()); err != nil {
 		return runtimeruncontrol.State{}, fmt.Errorf("persist run continue control state: %w", err)
 	}
-	state.Status = "running"
+	state.Status = string(runtimerunlifecycle.StateRunning)
 	state.ControlStatus = "running"
 	state.Reason = req.Reason
 	state.ControlledBy = req.ControlledBy
@@ -231,21 +232,20 @@ func continueRunControlTx(ctx context.Context, tx *sql.Tx, state runtimeruncontr
 }
 
 func (s *PostgresStore) stopRunControlTx(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
-	switch state.Status {
-	case "running", "paused":
-	case "completed", "failed", "cancelled", "forked":
+	lifecycleState, err := runtimerunlifecycle.ParseState(state.Status)
+	if err != nil {
+		return runtimeruncontrol.State{}, err
+	}
+	if !lifecycleState.Active() {
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyTerminal, RunID: state.RunID, CurrentStatus: state.Status}
-	default:
-		return runtimeruncontrol.State{}, fmt.Errorf("unsupported run status %q", state.Status)
 	}
 	abandoned, err := s.quiesceStoppedRunWorkTx(ctx, tx, state.RunID, req.Reason, req.Now.UTC())
 	if err != nil {
 		return runtimeruncontrol.State{}, err
 	}
-	if err := supersedeDecisionCardsForRun(ctx, tx, state.RunID, "run_stopped", req.Now.UTC(), false, true); err != nil {
-		return runtimeruncontrol.State{}, err
-	}
-	if _, err := storerunlifecycle.MarkTerminal(ctx, tx, state.RunID, "cancelled", nil, req.Now.UTC(), runLifecycleOptions()); err != nil {
+	if _, _, err := runtimerunlifecycle.MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
+		RunID: state.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: req.Now.UTC(),
+	}); err != nil {
 		return runtimeruncontrol.State{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `

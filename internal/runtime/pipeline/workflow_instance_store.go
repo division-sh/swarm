@@ -21,10 +21,10 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/lib/pq"
 )
 
@@ -124,6 +124,7 @@ type WorkflowInstanceStore struct {
 	decisionCards   decisioncard.Store
 	gateEvents      workflowGateMutationPublisher
 	lifecycleOwner  workflowInstanceLifecycleOwner
+	runLifecycle    runtimerunlifecycle.OperationOwner
 }
 
 type standingGenerationRebindContextKey struct{}
@@ -184,12 +185,19 @@ func NewSQLiteWorkflowInstanceStore(db *sql.DB) *WorkflowInstanceStore {
 }
 
 func NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db *sql.DB, runner RuntimeMutationRunner) *WorkflowInstanceStore {
-	return &WorkflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner}
+	store := &WorkflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner}
+	if owner, ok := runner.(runtimerunlifecycle.OperationOwner); ok {
+		store.runLifecycle = owner
+	}
+	return store
 }
 
 func (s *WorkflowInstanceStore) ConfigureRuntimeMutationRunner(runner RuntimeMutationRunner) {
 	if s != nil {
 		s.runtimeMutation = runner
+		if owner, ok := runner.(runtimerunlifecycle.OperationOwner); ok {
+			s.runLifecycle = owner
+		}
 	}
 }
 
@@ -225,6 +233,20 @@ func (s *WorkflowInstanceStore) ConfigureWorkflowInstanceLifecycle(owner workflo
 	if s != nil {
 		s.lifecycleOwner = owner
 	}
+}
+
+func (s *WorkflowInstanceStore) ConfigureRunLifecycle(owner runtimerunlifecycle.OperationOwner) {
+	if s != nil {
+		s.runLifecycle = owner
+	}
+}
+
+func (s *WorkflowInstanceStore) requestRunCompletionCandidate(ctx context.Context, runID string) error {
+	if s == nil || s.runLifecycle == nil {
+		return nil
+	}
+	_, err := s.runLifecycle.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID))
+	return err
 }
 
 func withWorkflowCreateEntityInitialValues(ctx context.Context, fields map[string]any) context.Context {
@@ -296,11 +318,7 @@ func (s *WorkflowInstanceStore) requireActiveWorkflowRun(ctx context.Context, tx
 	if err != nil {
 		return "", err
 	}
-	dialect := storerunlifecycle.DialectPostgres
-	if s.isSQLite() {
-		dialect = storerunlifecycle.DialectSQLite
-	}
-	if err := storerunlifecycle.RequireActive(ctx, tx, runID, dialect); err != nil {
+	if err := runtimerunlifecycle.RequireActive(ctx, runID); err != nil {
 		return "", err
 	}
 	return runID, nil
@@ -922,7 +940,14 @@ func (s *WorkflowInstanceStore) selectActiveByFieldsSpec(ctx context.Context, sc
 	if len(selectors) == 0 {
 		return nil, nil
 	}
-	args := []any{runID, scopeKey, scopeKey + "/%"}
+	activeStates := runtimerunlifecycle.ActiveStates()
+	args := []any{
+		runID,
+		scopeKey,
+		scopeKey + "/%",
+		string(activeStates[0]),
+		string(activeStates[1]),
+	}
 	var where strings.Builder
 	where.WriteString(`
 		WHERE es.run_id = $1::uuid
@@ -930,7 +955,7 @@ func (s *WorkflowInstanceStore) selectActiveByFieldsSpec(ctx context.Context, sc
 			SELECT 1
 			FROM runs run
 			WHERE run.run_id = es.run_id
-			  AND run.status IN ('running', 'paused')
+			  AND run.status IN ($4, $5)
 		  )
 		  AND (es.flow_instance = $2 OR es.flow_instance LIKE $3)
 		  AND COALESCE(fi.status, 'active') NOT IN ('terminated', 'inactive')
@@ -1216,7 +1241,7 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 	}); err != nil {
 		return err
 	}
-	return nil
+	return s.requestRunCompletionCandidate(ctx, runID)
 }
 
 func (s *WorkflowInstanceStore) createSpec(ctx context.Context, rowID, storageRef string, instance WorkflowInstance) error {
@@ -1327,6 +1352,9 @@ func (s *WorkflowInstanceStore) createSpec(ctx context.Context, rowID, storageRe
 		HandlerStep: "create",
 	}); err != nil {
 		return err
+	}
+	if standingGenerationRebindAllowed(ctx) {
+		return s.requestRunCompletionCandidate(ctx, runID)
 	}
 	return nil
 }

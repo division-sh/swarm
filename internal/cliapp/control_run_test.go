@@ -635,13 +635,16 @@ func assertControlRequest(t *testing.T, req jsonRPCRequest, wantMethod string, w
 
 func controlRunHeaderResult(runID, status string) map[string]any {
 	return map[string]any{
-		"run_id":             runID,
-		"status":             status,
-		"trigger_event_type": "manual.test",
-		"trigger_event_id":   "event-" + runID,
-		"entity_count":       1,
-		"event_count":        2,
-		"started_at":         "2026-05-18T01:00:00Z",
+		"run_id": runID,
+		"status": status,
+		"origin": map[string]any{
+			"kind":       "event",
+			"event_type": "manual.test",
+			"event_id":   "event-" + runID,
+		},
+		"entity_count": 1,
+		"event_count":  2,
+		"started_at":   "2026-05-18T01:00:00Z",
 	}
 }
 

@@ -94,7 +94,7 @@ func newTemplateFlowPilotPipelineCoordinator(t *testing.T, db *sql.DB, bundle *r
 	if err != nil {
 		t.Fatalf("LoadWorkflowNodes: %v", err)
 	}
-	workflowStore := NewWorkflowInstanceStore(db)
+	workflowStore := newPostgresWorkflowInstanceStoreForTest(db)
 	deliveryStore := newPipelineTestDeliveryOwnerForDB(t, db)
 	pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{

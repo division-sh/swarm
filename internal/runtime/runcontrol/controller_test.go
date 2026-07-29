@@ -27,8 +27,10 @@ func TestControllerContinueDoesNotFailAfterCommittedTransitionWhenReleaseFails(t
 	if result.RunID != "run-1" || result.Status != StatusRunning {
 		t.Fatalf("Continue() result = %#v", result)
 	}
-	if result.ReleasedDeliveries != 0 {
-		t.Fatalf("released deliveries = %d, want 0 after release failure", result.ReleasedDeliveries)
+	if result.Recovery.Disposition != RecoveryFailed ||
+		!errors.Is(result.Recovery.Err, releaseErr) ||
+		result.Recovery.Sweep.Settled != 0 {
+		t.Fatalf("post-commit recovery = %#v, want typed failure after committed transition", result.Recovery)
 	}
 }
 
@@ -44,8 +46,10 @@ func TestControllerContinueDrainsUntilExplicitExhaustion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Continue() error = %v, want nil", err)
 	}
-	if result.ReleasedDeliveries != 1 {
-		t.Fatalf("released deliveries = %d, want 1 after explicit exhaustion", result.ReleasedDeliveries)
+	if result.Recovery.Disposition != RecoveryExhausted ||
+		result.Recovery.Sweep.Settled != 1 ||
+		result.Recovery.Err != nil {
+		t.Fatalf("post-commit recovery = %#v, want one settlement and explicit exhaustion", result.Recovery)
 	}
 	if queue.calls != 2 {
 		t.Fatalf("queue release calls = %d, want 2", queue.calls)

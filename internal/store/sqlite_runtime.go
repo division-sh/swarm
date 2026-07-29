@@ -22,10 +22,10 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/eventrecord/sqlite"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -50,15 +50,13 @@ type SQLiteRuntimeStore struct {
 	pipelineScans           map[string]*pipelineScanState
 	sessionLockTTL          time.Duration
 	nowFn                   func() time.Time
+	runLifecycleSinks       runLifecycleCandidateSinkRegistry
 }
 
 var _ SchemaBootstrapper = (*SQLiteRuntimeStore)(nil)
 var _ runtimebus.EventStore = (*SQLiteRuntimeStore)(nil)
 var _ runtimebus.ActiveFlowInstanceDescriptorLister = (*SQLiteRuntimeStore)(nil)
-var _ runtimebus.RunLifecyclePersistence = (*SQLiteRuntimeStore)(nil)
 var _ runtimebus.RunLifecycleReadPersistence = (*SQLiteRuntimeStore)(nil)
-var _ runtimebus.StandaloneRuntimePlatformRunConvergencePersistence = (*SQLiteRuntimeStore)(nil)
-var _ runtimebus.NormalRunCompletionConvergencePersistence = (*SQLiteRuntimeStore)(nil)
 var _ runtimemanager.ManagerPersistence = (*SQLiteRuntimeStore)(nil)
 var _ runtimepipeline.SchedulePersistence = (*SQLiteRuntimeStore)(nil)
 var _ runtimetools.MailboxPersistence = (*SQLiteRuntimeStore)(nil)
@@ -157,9 +155,9 @@ func (s *SQLiteRuntimeStore) appendAdmittedEventTxOutcome(ctx context.Context, t
 	var ensureErr error
 	switch admitted.RunDisposition() {
 	case events.AdmittedRunCreateAuthorized:
-		ensureErr = sqliteEnsureActiveRunRow(ctx, tx, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName, wantIdentity.CreatedAt)
+		ensureErr = s.sqliteEnsureActiveRunRow(ctx, tx, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName, wantIdentity.CreatedAt)
 	case events.AdmittedRunRequireActive:
-		ensureErr = storerunlifecycle.RequireActive(ctx, tx, wantIdentity.RunID, storerunlifecycle.DialectSQLite)
+		ensureErr = requireSQLiteRunActive(ctx, tx, wantIdentity.RunID)
 	case events.AdmittedRunRequirePresent:
 		if evt.AdmissionClass() != events.EventAdmissionDiagnosticDirect || evt.Type() != events.EventTypePlatformRuntimeLog || strings.TrimSpace(wantIdentity.RunID) == "" {
 			ensureErr = fmt.Errorf("event %s has invalid require-present run disposition", wantIdentity.EventID)
@@ -176,7 +174,7 @@ func (s *SQLiteRuntimeStore) appendAdmittedEventTxOutcome(ctx context.Context, t
 	if ensureErr != nil {
 		return runtimebus.EventAppendOutcomeUnknown, ensureErr
 	}
-	if err := requireEventOwnedReferences(ctx, tx, storerunlifecycle.DialectSQLite, wantIdentity); err != nil {
+	if err := requireEventOwnedReferences(ctx, tx, false, wantIdentity); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	inserted, err := eventrecordsqlite.Insert(ctx, tx, wantIdentity)
@@ -197,11 +195,24 @@ func (s *SQLiteRuntimeStore) appendAdmittedEventTxOutcome(ctx context.Context, t
 		}
 		return runtimebus.EventAppendExactDuplicate, nil
 	}
-	if err := sqliteSyncRunCounts(ctx, tx, wantIdentity.RunID); err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
+	if admitted.RunDisposition() != events.AdmittedRunless {
+		if err := (sqliteRunLifecycleMutation{tx: tx}).SyncCounters(ctx, wantIdentity.RunID); err != nil {
+			return runtimebus.EventAppendOutcomeUnknown, err
+		}
 	}
 	if err := recordPersistedEventAuthorActivity(ctx, s, evt, wantIdentity.ProducedBy, string(wantIdentity.ProducedByType)); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
+	}
+	if admitted.RunDisposition() == events.AdmittedRunCreateAuthorized {
+		rec, found, err := sqliteLoadStandaloneRuntimePlatformRunRecord(ctx, tx, wantIdentity.EventID)
+		if err != nil {
+			return runtimebus.EventAppendOutcomeUnknown, err
+		}
+		if found && isStandaloneRuntimePlatformRunRecord(rec) {
+			if _, err := s.requestCompletionCandidateTx(ctx, tx, wantIdentity.RunID, nil); err != nil {
+				return runtimebus.EventAppendOutcomeUnknown, err
+			}
+		}
 	}
 	return runtimebus.EventAppendInserted, nil
 }
@@ -701,14 +712,19 @@ func sqliteLoadAPIIdempotency(ctx context.Context, q execQueryer, req APIIdempot
 	return record, true, nil
 }
 
-func sqliteEnsureActiveRunRow(ctx context.Context, tx *sql.Tx, runID, triggerEventID, triggerEventType string, now time.Time) error {
+func (s *SQLiteRuntimeStore) sqliteEnsureActiveRunRow(ctx context.Context, tx *sql.Tx, runID, triggerEventID, triggerEventType string, now time.Time) error {
 	fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
 	if !ok {
 		return fmt.Errorf("ensure active sqlite run row: executable bundle source fact is required")
 	}
-	opts := runLifecycleOptions()
-	opts.BundleSourceFact = fact
-	return storerunlifecycle.EnsureActiveSQLite(ctx, tx, runID, triggerEventID, triggerEventType, now, opts)
+	origin, err := runtimerunlifecycle.EventRunOrigin(triggerEventID, triggerEventType)
+	if err != nil {
+		return fmt.Errorf("ensure active sqlite run row origin: %w", err)
+	}
+	_, err = (sqliteRunLifecycleMutation{store: s, tx: tx}).Create(ctx, runtimerunlifecycle.CreateRequest{
+		RunID: runID, Origin: origin, Source: fact, StartedAt: normalizedRunLifecycleTime(now),
+	})
+	return err
 }
 
 func sqliteRequireRunRowPresent(ctx context.Context, tx *sql.Tx, runID string) error {
@@ -716,14 +732,7 @@ func sqliteRequireRunRowPresent(ctx context.Context, tx *sql.Tx, runID string) e
 	if runID == "" {
 		return nil
 	}
-	var status string
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = ?`, runID).Scan(&status); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return &storerunlifecycle.RunNotFoundError{RunID: runID}
-		}
-		return fmt.Errorf("require sqlite run row: %w", err)
-	}
-	return nil
+	return requireSQLiteRunPresent(ctx, tx, runID)
 }
 
 func sqliteNullString(raw string) any {

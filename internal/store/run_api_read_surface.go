@@ -11,23 +11,21 @@ import (
 	"time"
 
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
 type RunHeader struct {
-	RunID            string                    `json:"run_id"`
-	Status           string                    `json:"status"`
-	TriggerEventType string                    `json:"trigger_event_type"`
-	TriggerEventID   string                    `json:"trigger_event_id"`
-	EntityCount      int                       `json:"entity_count"`
-	EventCount       int                       `json:"event_count"`
-	StartedAt        time.Time                 `json:"started_at"`
-	EndedAt          *time.Time                `json:"ended_at,omitempty"`
-	ForkedFromRunID  string                    `json:"forked_from_run_id,omitempty"`
-	ContinuedAsRunID string                    `json:"continued_as_run_id,omitempty"`
-	Failure          *runtimefailures.Envelope `json:"failure,omitempty"`
-	ControlReason    string                    `json:"control_reason,omitempty"`
+	RunID            string                        `json:"run_id"`
+	Status           string                        `json:"status"`
+	Origin           runtimerunlifecycle.RunOrigin `json:"origin"`
+	EntityCount      int                           `json:"entity_count"`
+	EventCount       int                           `json:"event_count"`
+	StartedAt        time.Time                     `json:"started_at"`
+	EndedAt          *time.Time                    `json:"ended_at,omitempty"`
+	ContinuedAsRunID string                        `json:"continued_as_run_id,omitempty"`
+	Failure          *runtimefailures.Envelope     `json:"failure,omitempty"`
+	ControlReason    string                        `json:"control_reason,omitempty"`
 }
 
 type RunHeaderListOptions struct {
@@ -85,9 +83,6 @@ WHERE r.run_id = $1::uuid
 	if err != nil {
 		return RunHeader{}, err
 	}
-	if strings.TrimSpace(header.TriggerEventID) == "" || strings.TrimSpace(header.TriggerEventType) == "" {
-		return RunHeader{}, fmt.Errorf("run %s is missing trigger event identity", runID)
-	}
 	return header, nil
 }
 
@@ -100,7 +95,7 @@ func (s *PostgresStore) ListRunHeaders(ctx context.Context, opts RunHeaderListOp
 	}
 	opts = defaultRunHeaderListOptions(opts)
 	args := make([]any, 0, 6)
-	where := []string{"(r.trigger_event_id IS NOT NULL OR root.event_id IS NOT NULL)"}
+	where := []string{"TRUE"}
 	if opts.Status != "" {
 		args = append(args, opts.Status)
 		where = append(where, fmt.Sprintf("lower(r.status) = $%d", len(args)))
@@ -141,9 +136,6 @@ LIMIT $%d
 		if err != nil {
 			return nil, "", err
 		}
-		if strings.TrimSpace(header.TriggerEventID) == "" || strings.TrimSpace(header.TriggerEventType) == "" {
-			return nil, "", fmt.Errorf("run %s is missing trigger event identity", header.RunID)
-		}
 		headers = append(headers, header)
 	}
 	if err := rows.Err(); err != nil {
@@ -162,25 +154,32 @@ func runHeaderSelectSQL() string {
 SELECT
 	r.run_id::text,
 	lower(r.status),
-	COALESCE(r.trigger_event_type, root.event_name, ''),
-	COALESCE(r.trigger_event_id::text, root.event_id::text, ''),
+	r.bundle_hash,
+	r.bundle_source,
+	r.origin_kind,
+	COALESCE(r.trigger_event_id::text, ''),
+	COALESCE(r.trigger_event_type, ''),
+	COALESCE(r.origin_service_id::text, ''),
+	COALESCE(r.origin_generation, 0),
+	COALESCE(r.forked_from_run_id::text, ''),
+	COALESCE(r.forked_from_event_id::text, ''),
+	(SELECT COUNT(*)::integer FROM standing_service_generations ssg WHERE ssg.run_id = r.run_id),
+	(
+		SELECT COUNT(*)::integer
+		FROM standing_service_generations ssg
+		WHERE ssg.run_id = r.run_id
+		  AND ssg.service_id = r.origin_service_id
+		  AND ssg.generation = r.origin_generation
+	),
 	COALESCE(entity_summary.entity_count, 0),
 	COALESCE(NULLIF(r.event_count, 0), summary.event_count, 0),
 	r.started_at,
 	r.ended_at,
-	COALESCE(r.forked_from_run_id::text, ''),
 	COALESCE(r.continued_as_run_id::text, ''),
 	r.failure,
 	COALESCE(rc.reason, '')
 FROM runs r
 	LEFT JOIN run_control_state rc ON rc.run_id = r.run_id
-LEFT JOIN LATERAL (
-	SELECT e.event_id, e.event_name
-	FROM events e
-	WHERE e.run_id = r.run_id
-	ORDER BY e.created_at ASC, e.event_id ASC
-	LIMIT 1
-) root ON TRUE
 LEFT JOIN LATERAL (
 	SELECT COUNT(*)::integer AS event_count
 	FROM events e
@@ -202,16 +201,28 @@ func scanRunHeader(row runHeaderScanner) (RunHeader, error) {
 	var header RunHeader
 	var endedAt sql.NullTime
 	var failureRaw []byte
+	var bundleHash, bundleSource string
+	var originKind, eventID, eventType, serviceID, sourceRunID, sourceEventID string
+	var generation int64
+	var standingRelationCount, matchingStandingRelationCount int
 	if err := row.Scan(
 		&header.RunID,
 		&header.Status,
-		&header.TriggerEventType,
-		&header.TriggerEventID,
+		&bundleHash,
+		&bundleSource,
+		&originKind,
+		&eventID,
+		&eventType,
+		&serviceID,
+		&generation,
+		&sourceRunID,
+		&sourceEventID,
+		&standingRelationCount,
+		&matchingStandingRelationCount,
 		&header.EntityCount,
 		&header.EventCount,
 		&header.StartedAt,
 		&endedAt,
-		&header.ForkedFromRunID,
 		&header.ContinuedAsRunID,
 		&failureRaw,
 		&header.ControlReason,
@@ -219,9 +230,18 @@ func scanRunHeader(row runHeaderScanner) (RunHeader, error) {
 		return RunHeader{}, err
 	}
 	header.Status = strings.ToLower(strings.TrimSpace(header.Status))
-	header.TriggerEventType = strings.TrimSpace(header.TriggerEventType)
-	header.TriggerEventID = strings.TrimSpace(header.TriggerEventID)
-	header.ForkedFromRunID = strings.TrimSpace(header.ForkedFromRunID)
+	var err error
+	header.Origin, err = runtimerunlifecycle.DecodeRunOrigin(
+		originKind, eventID, eventType, serviceID, generation, sourceRunID, sourceEventID,
+	)
+	if err != nil {
+		return RunHeader{}, fmt.Errorf("run %s origin: %w", header.RunID, err)
+	}
+	if err := validateRunHeaderStandingRelation(
+		header.RunID, header.Origin, standingRelationCount, matchingStandingRelationCount,
+	); err != nil {
+		return RunHeader{}, err
+	}
 	header.ContinuedAsRunID = strings.TrimSpace(header.ContinuedAsRunID)
 	header.ControlReason = strings.TrimSpace(header.ControlReason)
 	failure, err := decodeStoredFailure(failureRaw)
@@ -229,15 +249,62 @@ func scanRunHeader(row runHeaderScanner) (RunHeader, error) {
 		return RunHeader{}, err
 	}
 	header.Failure = failure
-	if err := storerunlifecycle.ValidateStatusFailure(header.Status, header.Failure); err != nil {
-		return RunHeader{}, fmt.Errorf("run %s terminal evidence: %w", header.RunID, err)
-	}
 	if endedAt.Valid {
 		value := endedAt.Time.UTC()
 		header.EndedAt = &value
 	}
 	header.StartedAt = header.StartedAt.UTC()
+	if err := validateRunHeaderLifecycle(header, bundleHash, bundleSource); err != nil {
+		return RunHeader{}, err
+	}
 	return header, nil
+}
+
+func validateRunHeaderLifecycle(header RunHeader, bundleHash, bundleSource string) error {
+	state, err := runtimerunlifecycle.ParseState(header.Status)
+	if err != nil {
+		return fmt.Errorf("run %s lifecycle: %w", header.RunID, err)
+	}
+	snapshot := runtimerunlifecycle.Snapshot{
+		RunID: header.RunID, State: state,
+		Origin:     header.Origin,
+		BundleHash: strings.TrimSpace(bundleHash), BundleSource: strings.TrimSpace(bundleSource),
+		EventCount: header.EventCount, EntityCount: header.EntityCount,
+		Failure: header.Failure, ContinuedAsRunID: header.ContinuedAsRunID,
+		StartedAt: header.StartedAt, EndedAt: header.EndedAt,
+	}
+	if err := snapshot.Validate(); err != nil {
+		return fmt.Errorf("run %s lifecycle: %w", header.RunID, err)
+	}
+	return nil
+}
+
+func validateRunHeaderStandingRelation(
+	runID string,
+	origin runtimerunlifecycle.RunOrigin,
+	relationCount int,
+	matchingRelationCount int,
+) error {
+	if origin.Kind() == runtimerunlifecycle.OriginStandingGeneration {
+		if relationCount != 1 || matchingRelationCount != 1 {
+			return fmt.Errorf(
+				"run %s standing generation origin relation is invalid: relations=%d matching=%d",
+				runID,
+				relationCount,
+				matchingRelationCount,
+			)
+		}
+		return nil
+	}
+	if relationCount != 0 || matchingRelationCount != 0 {
+		return fmt.Errorf(
+			"run %s non-standing origin has standing generation relation: relations=%d matching=%d",
+			runID,
+			relationCount,
+			matchingRelationCount,
+		)
+	}
+	return nil
 }
 
 func encodeRunHeaderCursor(header RunHeader) string {

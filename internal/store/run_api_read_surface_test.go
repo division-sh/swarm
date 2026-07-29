@@ -7,7 +7,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -30,17 +32,30 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 	olderEventOnlyB := uuid.NewString()
 	bundleA := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	bundleB := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	failedRunFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassInternalFailure, "run_failed", nil))
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (
-			run_id, status, bundle_hash, bundle_source, trigger_event_id, trigger_event_type, forked_from_run_id, entity_count, event_count, failure, started_at, ended_at
-		)
-		VALUES
-			($1::uuid, 'running', $2, 'persisted', $3::uuid, 'scan.requested', NULL, 3, 2, NULL, $4, NULL),
-			($5::uuid, 'completed', $6, 'persisted', $7::uuid, 'scan.requested', $1::uuid, 5, 1, NULL, $8, $9),
-			($10::uuid, 'failed', $2, 'persisted', $11::uuid, 'scan.failed', NULL, 1, 1, $14::jsonb, $12, $13)
-	`, newer, bundleA, newerEvent, now, middle, bundleB, middleEvent, now.Add(-time.Hour), now.Add(-30*time.Minute), older, olderEvent, now.Add(-2*time.Hour), now.Add(-90*time.Minute), failedRunFailure); err != nil {
-		t.Fatalf("seed runs: %v", err)
+	failedRunFailure := testFailureEnvelope(runtimefailures.ClassInternalFailure, "run_failed", nil)
+	for _, snapshot := range []runlifecyclefixture.CorruptSnapshot{
+		{
+			RunID: newer, State: "running", BundleHash: bundleA, BundleSource: "persisted",
+			OriginKind:     string(runtimerunlifecycle.OriginEvent),
+			TriggerEventID: newerEvent, TriggerEventType: "scan.requested",
+			EntityCount: 3, EventCount: 2, StartedAt: now,
+		},
+		{
+			RunID: middle, State: "completed", BundleHash: bundleB, BundleSource: "persisted",
+			OriginKind:      string(runtimerunlifecycle.OriginForkMaterialization),
+			ForkedFromRunID: newer, ForkedFromEventID: newerEvent,
+			EntityCount: 5, EventCount: 1,
+			StartedAt: now.Add(-time.Hour), EndedAt: now.Add(-30 * time.Minute),
+		},
+		{
+			RunID: older, State: "failed", BundleHash: bundleA, BundleSource: "persisted",
+			OriginKind:     string(runtimerunlifecycle.OriginEvent),
+			TriggerEventID: olderEvent, TriggerEventType: "scan.failed",
+			EntityCount: 1, EventCount: 1, Failure: &failedRunFailure,
+			StartedAt: now.Add(-2 * time.Hour), EndedAt: now.Add(-90 * time.Minute),
+		},
+	} {
+		runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, db, snapshot)
 	}
 	for _, fixture := range []struct {
 		id        string
@@ -67,7 +82,10 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadRunHeader: %v", err)
 	}
-	if header.RunID != middle || header.Status != "completed" || header.TriggerEventID != middleEvent || header.ForkedFromRunID != newer {
+	if header.RunID != middle || header.Status != "completed" ||
+		header.Origin.Kind() != runtimerunlifecycle.OriginForkMaterialization ||
+		header.Origin.SourceRunID() != newer ||
+		header.Origin.SourceEventID() != newerEvent {
 		t.Fatalf("header = %#v", header)
 	}
 	if header.EndedAt == nil {

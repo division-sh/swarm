@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"os"
 	"path/filepath"
 	"sort"
@@ -1296,12 +1297,7 @@ accounts:
 	at := time.Unix(1700000710, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
 	ctx := unmanagedToolTestContext()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES ($1::uuid, 'running', $2, $3, $4)
-	`, sourceRunID, authorActivityTestBundleHash, authorActivityTestBundleSource, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed source run: %v", err)
-	}
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource})
 	for _, fixture := range []struct {
 		id        string
 		eventType events.EventType
@@ -1399,12 +1395,7 @@ accounts:
 	at := time.Unix(1700000720, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
 	ctx := unmanagedToolTestContext()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES ($1::uuid, 'running', $2, $3, $4)
-	`, sourceRunID, authorActivityTestBundleHash, authorActivityTestBundleSource, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed source run: %v", err)
-	}
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource})
 	for _, fixture := range []struct {
 		id        string
 		eventType events.EventType
@@ -2800,13 +2791,7 @@ const entityToolTestRunID = "11111111-1111-1111-1111-111111111111"
 
 func ensureEntityToolTestRun(t *testing.T, db *sql.DB) {
 	t.Helper()
-	if _, err := db.ExecContext(unmanagedToolTestContext(), `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source)
-		VALUES ($1::uuid, 'running', $2, $3)
-		ON CONFLICT (run_id) DO NOTHING
-	`, entityToolTestRunID, authorActivityTestBundleHash, authorActivityTestBundleSource); err != nil {
-		t.Fatalf("seed entity tool test run: %v", err)
-	}
+	runlifecyclefixture.RequirePostgres(t, unmanagedToolTestContext(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: entityToolTestRunID, BundleHash: authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource})
 }
 
 func asString(v any) string {

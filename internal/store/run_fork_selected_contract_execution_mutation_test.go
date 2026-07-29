@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +15,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -34,7 +35,7 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 		t.Fatalf("MaterializeRunFork error = %v, want non-agent blocker", err)
 	}
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+	request := RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: RunForkContractSelection{
@@ -43,12 +44,24 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 			WorkflowName:    "selected-workflow",
 			WorkflowVersion: "v1",
 		},
-	})
+	}
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 	if materialized.ForkRunID == "" || materialized.SelectedContractBinding == nil || !materialized.DeliveryResumeBlocked {
 		t.Fatalf("materialization = %#v", materialized)
+	}
+	replayed, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
+	if err != nil {
+		t.Fatalf("MaterializeRunForkForSelectedContractExecution exact replay: %v", err)
+	}
+	replayedBindingAt := replayed.SelectedContractBinding.CreatedAt
+	materializedBindingAt := materialized.SelectedContractBinding.CreatedAt
+	replayed.SelectedContractBinding.CreatedAt = time.Time{}
+	materialized.SelectedContractBinding.CreatedAt = time.Time{}
+	if !replayedBindingAt.Equal(materializedBindingAt) || !reflect.DeepEqual(replayed, materialized) {
+		t.Fatalf("selected-contract materialization replay = %#v, want %#v", replayed, materialized)
 	}
 	var forkBundleHash, forkBundleSource string
 	if err := db.QueryRowContext(ctx, `
@@ -1907,12 +1920,7 @@ func seedSelectedContractExecutionStoreSourceWithoutDelivery(t *testing.T, db *s
 func seedSelectedContractExecutionStoreSourceRaw(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time, routes []events.DeliveryRoute) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
-		VALUES ($1::uuid, 'running', $2, $3, $4)
-	`, sourceRunID, authorActivityTestBundleHash, storerunlifecycle.BundleSourceEphemeral, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed source run: %v", err)
-	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
 	selected := &PostgresStore{DB: db}
 	selected.schemaAdmission.markCurrent()
 	event := semanticEventRecordFixture(

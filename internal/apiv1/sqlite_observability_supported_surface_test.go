@@ -170,9 +170,7 @@ func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testin
 	eventOnlyID := "00000000-0000-0000-0000-000000001401"
 	lateDeliveryID := "00000000-0000-0000-0000-000000001402"
 	secondDeliveryID := "00000000-0000-0000-0000-000000001403"
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at, bundle_hash, bundle_source) VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')`, runID, base.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed sqlite run: %v", err)
-	}
+	storetest.RequireSQLiteRun(t, ctx, sqliteStore.DB, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base.Add(-time.Minute)})
 	for _, fixture := range []struct {
 		id        string
 		eventType events.EventType
@@ -183,8 +181,8 @@ func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testin
 		{id: lateDeliveryID, eventType: "trace.late_delivery", createdAt: base, agentID: "agent-late"},
 		{id: secondDeliveryID, eventType: "trace.second_delivery", createdAt: base.Add(time.Second), agentID: "agent-second"},
 	} {
-		evt := eventtest.RunCreatingRootIngress(
-			fixture.id, fixture.eventType, "runtime", "", []byte(`{}`), 0, runID, "",
+		evt := eventtest.ExistingRunRootIngress(
+			fixture.id, fixture.eventType, "runtime", "", []byte(`{}`), 0, runID,
 			events.EventEnvelope{Scope: events.EventScopeGlobal}, fixture.createdAt,
 		)
 		if fixture.agentID == "" {
@@ -299,6 +297,11 @@ func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store obs
 	now := time.Now().UTC().Add(-2 * time.Minute)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
+	if sqlite {
+		storetest.RequireSQLiteRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now.Add(-time.Minute)})
+	} else {
+		storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now.Add(-time.Minute)})
+	}
 	event := eventtest.PersistedProjection(eventID,
 		events.EventType("trace.visible"),
 		"agent-1", "", json.RawMessage(`{"trace":true}`), 0, runID, "", events.EventEnvelope{}, now)

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/lib/pq"
 )
 
@@ -276,7 +276,7 @@ func prepareDestructiveResetBundleCatalogDelete(ctx context.Context, tx *sql.Tx,
 		WHERE bundle_source = $2
 		  AND NULLIF(bundle_hash, '') IS NOT NULL
 		  AND NOT (run_id = ANY($1::uuid[]))
-	`, pq.Array(runIDs), storerunlifecycle.BundleSourcePersisted).Scan(&outOfPlan); err != nil {
+	`, pq.Array(runIDs), runtimerunlifecycle.BundleSourcePersisted).Scan(&outOfPlan); err != nil {
 		return fmt.Errorf("validate runtime.nuke bundle catalog cleanup run snapshot: %w", err)
 	}
 	if outOfPlan > 0 {

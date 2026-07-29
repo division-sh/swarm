@@ -21,14 +21,17 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
 type workflowTimerStartupStore interface {
 	runtimebus.EventStore
+	runtimerunlifecycle.CandidateOwner
 	runtimepipeline.RuntimeMutationRunner
 	runtimepipeline.SchedulePersistence
 	runtimedelivery.Store
@@ -83,13 +86,10 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-			bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
-			insertRun := `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', ?, ?)`
 			if postgres {
-				insertRun = `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, $3)`
-			}
-			if _, err := db.ExecContext(ctx, insertRun, runID, bundleHash, bundleSource); err != nil {
-				t.Fatalf("seed active run: %v", err)
+				runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: authorActivityTestBundleSourceFact})
+			} else {
+				runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: authorActivityTestBundleSourceFact})
 			}
 
 			process := worklifetime.NewProcess()
@@ -104,13 +104,14 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 					LLM:     config.LLMConfig{Backend: "anthropic"},
 				},
 				Stores: swarmruntime.Stores{
-					SQLDB:               runtimeDB,
-					EventStore:          selected,
-					ScheduleStore:       selected,
-					PipelineStore:       workflowStore,
-					ManagerStore:        selected,
-					DeliveryStore:       selected,
-					PipelineObligations: selected.PipelineObligations(),
+					SQLDB:                  runtimeDB,
+					EventStore:             selected,
+					RunLifecycleCandidates: selected,
+					ScheduleStore:          selected,
+					PipelineStore:          workflowStore,
+					ManagerStore:           selected,
+					DeliveryStore:          selected,
+					PipelineObligations:    selected.PipelineObligations(),
 				},
 				Options: swarmruntime.RuntimeOptions{
 					SelfCheck:         false,
@@ -218,13 +219,10 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-			bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
-			insertRun := `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', ?, ?)`
 			if postgres {
-				insertRun = `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, $3)`
-			}
-			if _, err := db.ExecContext(ctx, insertRun, runID, bundleHash, bundleSource); err != nil {
-				t.Fatalf("seed active run: %v", err)
+				runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: authorActivityTestBundleSourceFact})
+			} else {
+				runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: authorActivityTestBundleSourceFact})
 			}
 
 			source := semanticview.Wrap(workflowTimerStartupRecoveryBundle())
@@ -241,12 +239,13 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 						LLM:     config.LLMConfig{Backend: "anthropic"},
 					},
 					Stores: swarmruntime.Stores{
-						SQLDB:               runtimeDB,
-						EventStore:          selected,
-						PipelineStore:       workflowStore,
-						ManagerStore:        managerStore,
-						DeliveryStore:       selected,
-						PipelineObligations: selected.PipelineObligations(),
+						SQLDB:                  runtimeDB,
+						EventStore:             selected,
+						RunLifecycleCandidates: selected,
+						PipelineStore:          workflowStore,
+						ManagerStore:           managerStore,
+						DeliveryStore:          selected,
+						PipelineObligations:    selected.PipelineObligations(),
 					},
 					Options: swarmruntime.RuntimeOptions{
 						SelfCheck:         false,
@@ -342,13 +341,10 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-			bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
-			insertRun := `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES (?, 'running', ?, ?)`
 			if postgres {
-				insertRun = `INSERT INTO runs (run_id, status, bundle_hash, bundle_source) VALUES ($1::uuid, 'running', $2, $3)`
-			}
-			if _, err := db.ExecContext(ctx, insertRun, runID, bundleHash, bundleSource); err != nil {
-				t.Fatalf("seed active run: %v", err)
+				runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: authorActivityTestBundleSourceFact})
+			} else {
+				runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: authorActivityTestBundleSourceFact})
 			}
 
 			source := semanticview.Wrap(workflowTimerStartupRecoveryBundle())
@@ -366,12 +362,13 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 						LLM:     config.LLMConfig{Backend: "anthropic"},
 					},
 					Stores: swarmruntime.Stores{
-						SQLDB:               runtimeDB,
-						EventStore:          selected,
-						PipelineStore:       workflowStore,
-						ManagerStore:        selected,
-						DeliveryStore:       selected,
-						PipelineObligations: selected.PipelineObligations(),
+						SQLDB:                  runtimeDB,
+						EventStore:             selected,
+						RunLifecycleCandidates: selected,
+						PipelineStore:          workflowStore,
+						ManagerStore:           selected,
+						DeliveryStore:          selected,
+						PipelineObligations:    selected.PipelineObligations(),
 					},
 					Options: swarmruntime.RuntimeOptions{
 						SelfCheck:         false,
