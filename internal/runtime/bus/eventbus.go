@@ -76,6 +76,7 @@ type EventBus struct {
 	recipientPlanGuard          PublishRecipientPlanGuard
 	runtimeIngressDispatchGate  RuntimeIngressDispatchGate
 	runDispatchGate             RunDispatchGate
+	standingRunWorkOwner        StandingRunWorkOwner
 	bundleSourceFact            runtimecorrelation.BundleSourceFact
 	runtimeInstanceID           string
 	testLifecycleProbe          runtimelifecycleprobe.Observer
@@ -85,6 +86,30 @@ type EventBus struct {
 	pipelineSweepMu             sync.Mutex
 	pipelineScans               map[runtimepipelineobligation.ScanRequest]*pipelineSweepScan
 	workOwner                   worklifetime.Occurrence
+}
+
+// PipelineParentTransition excludes selected-store recovery scans while a
+// parent lifecycle operation fences, drains, and terminalizes its run.
+type PipelineParentTransition struct {
+	once sync.Once
+	bus  *EventBus
+}
+
+func (eb *EventBus) BeginPipelineParentTransition() (*PipelineParentTransition, error) {
+	if eb == nil {
+		return nil, errors.New("event bus is required")
+	}
+	eb.pipelineSweepMu.Lock()
+	return &PipelineParentTransition{bus: eb}, nil
+}
+
+func (t *PipelineParentTransition) Done() {
+	if t == nil {
+		return
+	}
+	t.once.Do(func() {
+		t.bus.pipelineSweepMu.Unlock()
+	})
 }
 
 type LocalDelivery = worklifetime.EventDelivery
@@ -170,6 +195,18 @@ type RuntimeIngressDispatchGate interface {
 
 type RunDispatchGate interface {
 	QueueableRunDispatchBlocked(context.Context, string) (bool, error)
+}
+
+// RunOriginReader exposes only the typed construction authority needed to
+// select a process-local owner for persisted pipeline recovery.
+type RunOriginReader interface {
+	LoadRunOrigin(context.Context, string) (runtimerunlifecycle.RunOrigin, error)
+}
+
+// StandingRunWorkOwner admits recovery work to the exact standing generation
+// named by a persisted run origin. It must reject stale or fenced generations.
+type StandingRunWorkOwner interface {
+	BeginStandingRunRecovery(context.Context, string, runtimerunlifecycle.RunOrigin) (*worklifetime.Lease, error)
 }
 
 type EventBusOptions struct {
@@ -342,6 +379,15 @@ func (eb *EventBus) SetRunDispatchGate(gate RunDispatchGate) {
 	}
 	eb.mu.Lock()
 	eb.runDispatchGate = gate
+	eb.mu.Unlock()
+}
+
+func (eb *EventBus) SetStandingRunWorkOwner(owner StandingRunWorkOwner) {
+	if eb == nil {
+		return
+	}
+	eb.mu.Lock()
+	eb.standingRunWorkOwner = owner
 	eb.mu.Unlock()
 }
 

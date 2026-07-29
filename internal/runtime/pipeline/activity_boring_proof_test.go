@@ -850,6 +850,7 @@ func appendActivityBoringEvent(ctx context.Context, db *sql.DB, kind activityBor
 	if _, ok := PipelineSQLTxFromContext(ctx); ok {
 		if _, err := runtimerunlifecycle.Create(ctx, runtimerunlifecycle.CreateRequest{
 			RunID:     runID,
+			Origin:    runtimerunlifecycle.ScenarioSetupRunOrigin(),
 			Source:    source,
 			StartedAt: createdAt,
 		}); err != nil {

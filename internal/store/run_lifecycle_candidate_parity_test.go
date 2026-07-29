@@ -8,6 +8,7 @@ import (
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -22,6 +23,7 @@ type runLifecycleCandidateParityStore interface {
 	runtimerunlifecycle.CandidateStore
 	runtimerunlifecycle.OperationOwner
 	RunRuntimeMutationContext(context.Context, func(context.Context) error) error
+	LoadRunLifecycleSnapshot(context.Context, string) (runtimebus.RunLifecycleSnapshot, error)
 }
 
 type runLifecycleCandidateParityFixture struct {
@@ -77,6 +79,81 @@ func TestRunLifecycleTerminalAbsorbsCandidateParity(t *testing.T) {
 						t.Fatalf("terminal request disposition = %s", absorbed.Disposition)
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestRunLifecycleTimestampAdmissionParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			fixture := openRunLifecycleCandidateParityFixture(t, backend)
+			ctx := testAuthorActivityBundleSourceContext()
+			runID := uuid.NewString()
+			startedAt := time.Date(2026, 7, 29, 12, 0, 0, 987654321, time.FixedZone("offset", -4*60*60))
+			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, startedAt)
+
+			created, err := fixture.store.LoadRunLifecycleSnapshot(ctx, runID)
+			if err != nil {
+				t.Fatalf("load created lifecycle: %v", err)
+			}
+			wantStartedAt := runtimerunlifecycle.CanonicalTimestamp(startedAt)
+			if !created.StartedAt.Equal(wantStartedAt) {
+				t.Fatalf("started_at = %s, want %s", created.StartedAt, wantStartedAt)
+			}
+
+			endedAt := startedAt.Add(time.Minute + 789*time.Nanosecond)
+			terminal, _, err := terminalizeRunLifecycleCandidateParity(
+				fixture, ctx, runID, runtimerunlifecycle.StateCancelled, endedAt,
+			)
+			if err != nil {
+				t.Fatalf("terminalize lifecycle: %v", err)
+			}
+			wantEndedAt := runtimerunlifecycle.CanonicalTimestamp(endedAt)
+			if terminal.EndedAt == nil || !terminal.EndedAt.Equal(wantEndedAt) {
+				t.Fatalf("ended_at = %v, want %s", terminal.EndedAt, wantEndedAt)
+			}
+		})
+	}
+}
+
+func TestRunLifecycleCompletionRetriesBeforeRunStartParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			fixture := openRunLifecycleCandidateParityFixture(t, backend)
+			ctx := testAuthorActivityBundleSourceContext()
+			runID := uuid.NewString()
+			startedAt := time.Now().UTC().Add(time.Hour)
+			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, startedAt)
+			candidate := requestRunLifecycleCandidateParity(t, fixture, ctx, runID).Candidate
+
+			result, err := fixture.store.ExecuteCompletionCandidate(
+				ctx,
+				candidate,
+				runtimerunlifecycle.TerminalCatalog{},
+			)
+			if err != nil {
+				t.Fatalf("execute future-start completion candidate: %v", err)
+			}
+			var beforeStart *runtimerunlifecycle.SelectedStoreBeforeRunStartError
+			if result.Outcome != runtimerunlifecycle.OutcomeRetryCurrent ||
+				!errors.As(result.Retryable, &beforeStart) ||
+				beforeStart.RunID != runID ||
+				!beforeStart.StartedAt.Equal(runtimerunlifecycle.CanonicalTimestamp(startedAt)) {
+				t.Fatalf("future-start completion result = %#v", result)
+			}
+			snapshot, err := fixture.store.LoadRunLifecycleSnapshot(ctx, runID)
+			if err != nil {
+				t.Fatalf("load future-start lifecycle: %v", err)
+			}
+			if snapshot.Status != string(runtimerunlifecycle.StateRunning) || snapshot.EndedAt != nil {
+				t.Fatalf("future-start lifecycle mutated = %#v", snapshot)
+			}
+			state, duePresent, revision := loadRunLifecycleCandidateFacts(t, fixture, ctx, runID)
+			if state != string(runtimerunlifecycle.StateRunning) || !duePresent || revision != candidate.Revision {
+				t.Fatalf("future-start candidate facts = state:%s due:%v revision:%d", state, duePresent, revision)
 			}
 		})
 	}
@@ -341,6 +418,68 @@ func TestRunLifecycleEligibilityOriginParity(t *testing.T) {
 				}
 				if _, duePresent, revision := loadRunLifecycleCandidateFacts(t, fixture, ctx, runID); !duePresent || revision != 1 {
 					t.Fatalf("duplicate continue churned candidate = due:%v revision:%d", duePresent, revision)
+				}
+			})
+
+			t.Run("paused_request_is_deferred_until_resume", func(t *testing.T) {
+				runID := uuid.NewString()
+				ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, at)
+				if got, err := transitionRunLifecycleParity(
+					fixture, ctx, runID, runtimerunlifecycle.StatePaused,
+				); err != nil || got != runtimerunlifecycle.MutationApplied {
+					t.Fatalf("pause = %s/%v", got, err)
+				}
+				var disposition runtimerunlifecycle.CandidateRequestDisposition
+				if err := fixture.store.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
+					var err error
+					disposition, err = fixture.store.RequestCompletionCandidate(
+						txctx,
+						runtimerunlifecycle.ImmediateCandidate(runID),
+					)
+					return err
+				}); err != nil {
+					t.Fatalf("request paused candidate: %v", err)
+				}
+				if disposition != runtimerunlifecycle.CandidateDeferredPaused {
+					t.Fatalf("paused candidate disposition = %s", disposition)
+				}
+				if _, duePresent, revision := loadRunLifecycleCandidateFacts(t, fixture, ctx, runID); duePresent || revision != 0 {
+					t.Fatalf("paused candidate facts = due:%v revision:%d", duePresent, revision)
+				}
+				if _, found := findRunLifecycleCandidate(
+					t,
+					fixture,
+					ctx,
+					runLifecycleCandidateParityBundleHash,
+					runID,
+				); found {
+					t.Fatal("paused candidate was exposed for execution")
+				}
+
+				if got, err := transitionRunLifecycleParity(
+					fixture, ctx, runID, runtimerunlifecycle.StateRunning,
+				); err != nil || got != runtimerunlifecycle.MutationApplied {
+					t.Fatalf("resume = %s/%v", got, err)
+				}
+				if _, duePresent, revision := loadRunLifecycleCandidateFacts(t, fixture, ctx, runID); !duePresent || revision != 1 {
+					t.Fatalf("resumed candidate facts = due:%v revision:%d", duePresent, revision)
+				}
+			})
+
+			t.Run("fresh_schema_rejects_paused_candidate", func(t *testing.T) {
+				runID := uuid.NewString()
+				ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, at)
+				if got, err := transitionRunLifecycleParity(
+					fixture, ctx, runID, runtimerunlifecycle.StatePaused,
+				); err != nil || got != runtimerunlifecycle.MutationApplied {
+					t.Fatalf("pause = %s/%v", got, err)
+				}
+				query := `UPDATE runs SET completion_revision = 1, completion_due_at = ? WHERE run_id = ?`
+				if fixture.postgres {
+					query = `UPDATE runs SET completion_revision = 1, completion_due_at = $1 WHERE run_id = $2::uuid`
+				}
+				if _, err := fixture.db.ExecContext(ctx, query, at, runID); err == nil {
+					t.Fatal("fresh schema accepted a completion candidate on a paused run")
 				}
 			})
 

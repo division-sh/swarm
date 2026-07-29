@@ -54,7 +54,7 @@ func (s *PostgresStore) IssueRunForkSelectedContractRuntimeExecution(ctx context
 	if s == nil || s.DB == nil {
 		return SelectedContractRuntimeExecution{}, fmt.Errorf("postgres store is required")
 	}
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return SelectedContractRuntimeExecution{}, fmt.Errorf("begin selected-contract runtime issuance: %w", err)
 	}

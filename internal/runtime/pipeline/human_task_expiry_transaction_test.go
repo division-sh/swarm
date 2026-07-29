@@ -31,6 +31,7 @@ func (e *transactionProbeHumanTaskExpiry) ExpireHumanTaskCardsInMutation(ctx con
 	}
 	if _, err := runtimerunlifecycle.Create(ctx, runtimerunlifecycle.CreateRequest{
 		RunID:     e.runID,
+		Origin:    runtimerunlifecycle.ScenarioSetupRunOrigin(),
 		Source:    source,
 		StartedAt: time.Now().UTC(),
 	}); err != nil {

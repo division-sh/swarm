@@ -14,6 +14,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
@@ -150,9 +151,16 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 	otherEventID := uuid.NewString()
 	now := time.Unix(1700000000, 0).UTC()
 
-	for _, runID := range []string{targetRunID, otherRunID} {
-		requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now.Add(-5 * time.Minute)})
+	targetOrigin, err := storerunlifecycle.EventRunOrigin(targetEventID, "scan.requested")
+	if err != nil {
+		t.Fatal(err)
 	}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{
+		Origin: targetOrigin, RunID: targetRunID, StartedAt: now.Add(-5 * time.Minute),
+	})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{
+		Origin: semanticScenarioSetupRunOriginForTest(), RunID: otherRunID, StartedAt: now.Add(-5 * time.Minute),
+	})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, targetEventID, targetRunID, "scan.requested", events.EventProducerAgent, "test", targetEntityID, "", now.Add(-4*time.Minute))
 	targetEvent := loadPostgresDeliveryFixtureEvent(t, ctx, db, targetEventID)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, otherEventID, otherRunID, "scan.requested", events.EventProducerAgent, "test", otherEntityID, "", now.Add(-3*time.Minute))

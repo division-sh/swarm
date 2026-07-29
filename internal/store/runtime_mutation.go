@@ -128,14 +128,27 @@ func rollbackPostgresSessionTransaction(tx *sql.Tx, session *postgresSessionAuth
 }
 
 func (s *SQLiteRuntimeStore) runRuntimeMutation(ctx context.Context, label string, fn func(context.Context, *sql.Tx) error) error {
+	postCommit, err := s.runRuntimeMutationCommitted(ctx, label, fn)
+	if err != nil {
+		return err
+	}
+	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	return nil
+}
+
+func (s *SQLiteRuntimeStore) runRuntimeMutationCommitted(
+	ctx context.Context,
+	label string,
+	fn func(context.Context, *sql.Tx) error,
+) ([]runtimepipeline.OwnerAction, error) {
 	if fn == nil {
-		return nil
+		return nil, nil
 	}
 	if s == nil || s.DB == nil {
-		return fmt.Errorf("sqlite runtime store is required")
+		return nil, fmt.Errorf("sqlite runtime store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
-		return err
+		return nil, err
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -143,9 +156,9 @@ func (s *SQLiteRuntimeStore) runRuntimeMutation(ctx context.Context, label strin
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		eventCtx, attached := eventCommitterForPipelineContext(ctx, s)
 		if !attached {
-			return fmt.Errorf("%s could not attach the event commit owner", label)
+			return nil, fmt.Errorf("%s could not attach the event commit owner", label)
 		}
-		return fn(eventCtx, tx)
+		return nil, fn(eventCtx, tx)
 	}
 	retryDeadline := time.Now().Add(sqliteRuntimeMutationRetryBudget)
 	ctxDeadline, hasCtxDeadline := ctx.Deadline()
@@ -155,52 +168,52 @@ func (s *SQLiteRuntimeStore) runRuntimeMutation(ctx context.Context, label strin
 	var lastErr error
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
-			return err
+			return nil, err
 		}
 		if time.Until(retryDeadline) <= 0 {
 			if hasCtxDeadline && !time.Now().Before(ctxDeadline) {
-				return context.DeadlineExceeded
+				return nil, context.DeadlineExceeded
 			}
-			return sqliteRuntimeMutationRetryBudgetError(label, lastErr)
+			return nil, sqliteRuntimeMutationRetryBudgetError(label, lastErr)
 		}
 		attemptCtx, cancel := context.WithDeadline(ctx, retryDeadline)
-		err := s.runRuntimeMutationOnce(attemptCtx, fn)
+		postCommit, err := s.runRuntimeMutationOnceLocked(attemptCtx, fn)
 		attemptErr := attemptCtx.Err()
 		cancel()
 		if err == nil {
 			if attemptErr != nil {
 				if err := ctx.Err(); err != nil {
-					return err
+					return nil, err
 				}
 				if hasCtxDeadline && errors.Is(attemptErr, context.DeadlineExceeded) && !time.Now().Before(ctxDeadline) {
-					return context.DeadlineExceeded
+					return nil, context.DeadlineExceeded
 				}
-				return sqliteRuntimeMutationRetryBudgetError(label, lastErr)
+				return nil, sqliteRuntimeMutationRetryBudgetError(label, lastErr)
 			}
-			return nil
+			return postCommit, nil
 		}
 		if attemptErr != nil {
 			if err := ctx.Err(); err != nil {
-				return err
+				return nil, err
 			}
 			if hasCtxDeadline && errors.Is(attemptErr, context.DeadlineExceeded) && !time.Now().Before(ctxDeadline) {
-				return context.DeadlineExceeded
+				return nil, context.DeadlineExceeded
 			}
-			return sqliteRuntimeMutationRetryBudgetError(label, lastErr)
+			return nil, sqliteRuntimeMutationRetryBudgetError(label, lastErr)
 		}
 		if !sqliteRuntimeMutationBusyError(err) {
-			return err
+			return nil, err
 		}
 		lastErr = err
 		if err := ctx.Err(); err != nil {
-			return err
+			return nil, err
 		}
 		delay := sqliteRuntimeMutationRetryDelay(attempt)
 		if remaining := time.Until(retryDeadline); remaining <= 0 {
 			if hasCtxDeadline && !time.Now().Before(ctxDeadline) {
-				return context.DeadlineExceeded
+				return nil, context.DeadlineExceeded
 			}
-			return sqliteRuntimeMutationRetryBudgetError(label, lastErr)
+			return nil, sqliteRuntimeMutationRetryBudgetError(label, lastErr)
 		} else if delay > remaining {
 			delay = remaining
 		}
@@ -208,19 +221,10 @@ func (s *SQLiteRuntimeStore) runRuntimeMutation(ctx context.Context, label strin
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return ctx.Err()
+			return nil, ctx.Err()
 		case <-timer.C:
 		}
 	}
-}
-
-func (s *SQLiteRuntimeStore) runRuntimeMutationOnce(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
-	postCommit, err := s.runRuntimeMutationOnceLocked(ctx, fn)
-	if err != nil {
-		return err
-	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-	return nil
 }
 
 func (s *SQLiteRuntimeStore) runRuntimeMutationOnceLocked(ctx context.Context, fn func(context.Context, *sql.Tx) error) ([]runtimepipeline.OwnerAction, error) {

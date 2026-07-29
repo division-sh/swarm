@@ -599,7 +599,7 @@ func executeRunCompletionCandidateForEvent(
 	if request.Disposition == runtimerunlifecycle.CandidateAbsorbedTerminal {
 		return nil
 	}
-	_, err := store.ExecuteCompletionCandidate(ctx, request.Candidate, catalog)
+	_, err := executeCompletionCandidateUntilSettledForTest(ctx, store, request.Candidate, catalog)
 	return err
 }
 
@@ -619,7 +619,7 @@ func executeRunCompletionCandidateForRun(
 		}
 		for _, candidate := range page.Candidates {
 			if candidate.RunID == strings.TrimSpace(runID) {
-				return store.ExecuteCompletionCandidate(ctx, candidate, catalog)
+				return executeCompletionCandidateUntilSettledForTest(ctx, store, candidate, catalog)
 			}
 		}
 		if page.Exhausted {
@@ -629,5 +629,37 @@ func executeRunCompletionCandidateForRun(
 			)
 		}
 		cursor = page.Next
+	}
+}
+
+func executeCompletionCandidateUntilSettledForTest(
+	ctx context.Context,
+	store runtimerunlifecycle.CandidateStore,
+	candidate runtimerunlifecycle.Candidate,
+	catalog runtimerunlifecycle.TerminalCatalog,
+) (runtimerunlifecycle.CompletionResult, error) {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		result, err := store.ExecuteCompletionCandidate(ctx, candidate, catalog)
+		if err != nil {
+			return runtimerunlifecycle.CompletionResult{}, err
+		}
+		if result.Outcome != runtimerunlifecycle.OutcomeRetryCurrent {
+			return result, nil
+		}
+		var beforeStart *runtimerunlifecycle.SelectedStoreBeforeRunStartError
+		if !errors.As(result.Retryable, &beforeStart) {
+			return result, result.Retryable
+		}
+		if time.Now().After(deadline) {
+			return result, fmt.Errorf("completion candidate selected-store clock did not reach run start: %w", beforeStart)
+		}
+		timer := time.NewTimer(time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return result, context.Cause(ctx)
+		case <-timer.C:
+		}
 	}
 }

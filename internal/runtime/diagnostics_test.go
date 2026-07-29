@@ -1021,6 +1021,7 @@ func ensureRuntimeLogRunRowInStoryForTest(ctx context.Context, _ any, runID stri
 		return err
 	}
 	_, err := storerunlifecycle.Create(ctx, storerunlifecycle.CreateRequest{
+		Origin:    storerunlifecycle.ScenarioSetupRunOrigin(),
 		RunID:     runID,
 		Source:    source,
 		StartedAt: time.Now().UTC(),

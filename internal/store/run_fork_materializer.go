@@ -88,7 +88,7 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req RunForkMater
 	}
 
 	forkRunID := deterministicRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint.EventID)
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return RunForkMaterialization{}, fmt.Errorf("begin fork materialization: %w", err)
 	}

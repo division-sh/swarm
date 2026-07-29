@@ -3,15 +3,18 @@ package bus
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 const (
@@ -34,6 +37,11 @@ type OutboxSweeperConfig struct {
 type pipelineSweepScan struct {
 	cursor         runtimepipelineobligation.Scan
 	locallyBlocked bool
+}
+
+type boundedPipelineRetry struct {
+	claim         runtimepipelineobligation.Claim
+	standingLease *worklifetime.Lease
 }
 
 func DefaultOutboxSweeperConfig() OutboxSweeperConfig {
@@ -186,13 +194,16 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 		state = &pipelineSweepScan{cursor: cursor}
 		eb.pipelineScans[request] = state
 	}
-	boundedRetryClaims := make([]runtimepipelineobligation.Claim, 0, limit)
+	boundedRetries := make([]boundedPipelineRetry, 0, limit)
 	defer func() {
 		releaseCtx := context.WithoutCancel(ctx)
-		for _, claim := range boundedRetryClaims {
-			releaseErr := eb.pipelineObligations.Release(releaseCtx, claim)
+		for _, retry := range boundedRetries {
+			releaseErr := eb.pipelineObligations.Release(releaseCtx, retry.claim)
 			if !errors.Is(releaseErr, runtimepipelineobligation.ErrStaleClaim) {
 				err = errors.Join(err, releaseErr)
+			}
+			if retry.standingLease != nil {
+				err = errors.Join(err, retry.standingLease.Done())
 			}
 		}
 	}()
@@ -213,7 +224,7 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 		result.Examined += batch.Examined
 		state.locallyBlocked = state.locallyBlocked || batch.LocallyBlocked
 		for _, work := range batch.Work {
-			settled, retry, processErr := eb.processClaimedPipelineWork(ctx, work)
+			settled, retry, standingLease, processErr := eb.processClaimedPipelineWork(ctx, work)
 			if processErr != nil {
 				if errors.Is(processErr, ErrRunDispatchBlocked) {
 					state.locallyBlocked = true
@@ -229,7 +240,10 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 			}
 			if retry {
 				state.locallyBlocked = true
-				boundedRetryClaims = append(boundedRetryClaims, work.Claim)
+				boundedRetries = append(boundedRetries, boundedPipelineRetry{
+					claim:         work.Claim,
+					standingLease: standingLease,
+				})
 			}
 			if settled {
 				result.Settled++
@@ -287,21 +301,32 @@ func (eb *EventBus) closeAllPipelineScans(ctx context.Context) error {
 	return err
 }
 
-func (eb *EventBus) processClaimedPipelineWork(ctx context.Context, work runtimepipelineobligation.ClaimedWork) (settled bool, retry bool, err error) {
+func (eb *EventBus) processClaimedPipelineWork(
+	ctx context.Context,
+	work runtimepipelineobligation.ClaimedWork,
+) (settled bool, retry bool, retryLease *worklifetime.Lease, err error) {
 	claimOpen := true
+	var standingLease *worklifetime.Lease
 	defer func() {
 		if claimOpen && !retry {
 			err = errors.Join(err, eb.pipelineObligations.Release(context.WithoutCancel(ctx), work.Claim))
 		}
+		if standingLease != nil && !retry {
+			err = errors.Join(err, standingLease.Done())
+		}
 	}()
+	ctx, standingLease, err = eb.bindClaimedRunWork(ctx, work.Event)
+	if err != nil {
+		return false, false, nil, err
+	}
 	if work.Claim.Purpose() == runtimepipelineobligation.PurposeDecisionRoute && work.Acknowledged {
 		err = eb.settleClaimedDecisionRoute(ctx, work)
 		claimOpen = err != nil
-		return err == nil, false, err
+		return err == nil, false, nil, err
 	}
 	if disposition, preclassified := work.PreDispatchDisposition(); preclassified {
 		if err := eb.pipelineObligations.Settle(ctx, work.Claim, disposition); err != nil {
-			return false, false, err
+			return false, false, nil, err
 		}
 		claimOpen = false
 		eb.logStartupRecoveryPipelineAftermath(
@@ -312,7 +337,7 @@ func (eb *EventBus) processClaimedPipelineWork(ctx context.Context, work runtime
 			disposition.Failure(),
 			nil,
 		)
-		return true, false, nil
+		return true, false, nil, nil
 	}
 	recipients, dispatchErr := eb.authoritativeRecipientsForEvent(ctx, work.Event.ID())
 	var outcome runtimepipelineobligation.ExecutionOutcome
@@ -321,7 +346,7 @@ func (eb *EventBus) processClaimedPipelineWork(ctx context.Context, work runtime
 	}
 	if dispatchErr != nil {
 		if errors.Is(dispatchErr, ErrRuntimeIngressPaused) || errors.Is(dispatchErr, ErrRunDispatchBlocked) || errors.Is(dispatchErr, errAuthoritativeDeliveryIncomplete) {
-			return false, false, dispatchErr
+			return false, false, nil, dispatchErr
 		}
 		failure := eventBusFailure(dispatchErr, "recover_pipeline_obligation")
 		disposition := runtimepipelineobligation.Terminal("pipeline_recovery_failed", failure)
@@ -332,35 +357,35 @@ func (eb *EventBus) processClaimedPipelineWork(ctx context.Context, work runtime
 			)
 		}
 		if err := eb.pipelineObligations.Settle(ctx, work.Claim, disposition); err != nil {
-			return false, false, errors.Join(dispatchErr, err)
+			return false, false, nil, errors.Join(dispatchErr, err)
 		}
 		claimOpen = false
 		eb.logStartupRecoveryPipelineAftermath(ctx, work.Event, startupRecoveryPipelineReplayOutcomeDropped, startupRecoveryPipelineReplayReasonQuarantined, disposition.Failure(), recipients)
-		return true, false, nil
+		return true, false, nil, nil
 	}
 	if _, retry := outcome.RetryRelease(); retry {
-		return false, true, nil
+		return false, true, standingLease, nil
 	}
 	if disposition, ok := outcome.Disposition(); ok {
 		if err := eb.pipelineObligations.Settle(ctx, work.Claim, disposition); err != nil {
-			return false, false, err
+			return false, false, nil, err
 		}
 		claimOpen = false
 		if disposition.Terminal() {
 			eb.logStartupRecoveryPipelineAftermath(ctx, work.Event, startupRecoveryPipelineReplayOutcomeDropped, startupRecoveryPipelineReplayReasonQuarantined, disposition.Failure(), recipients)
 		}
-		return true, false, nil
+		return true, false, nil, nil
 	}
 	if work.Claim.Purpose() == runtimepipelineobligation.PurposeDecisionRoute {
 		if err := eb.pipelineObligations.MarkDecisionProcessed(ctx, work.Claim); err != nil {
-			return false, false, err
+			return false, false, nil, err
 		}
 		err = eb.settleClaimedDecisionRoute(ctx, work)
 		claimOpen = err != nil
-		return err == nil, false, err
+		return err == nil, false, nil, err
 	}
 	if err := eb.pipelineObligations.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
-		return false, false, err
+		return false, false, nil, err
 	}
 	claimOpen = false
 	if work.Scope == runtimepipelineobligation.ScopeDirect && len(recipients) == 0 {
@@ -368,7 +393,44 @@ func (eb *EventBus) processClaimedPipelineWork(ctx context.Context, work runtime
 	} else {
 		eb.logStartupRecoveryPipelineAftermath(ctx, work.Event, startupRecoveryPipelineReplayOutcomeReplayed, startupRecoveryPipelineReplayReasonReplayed, nil, recipients)
 	}
-	return true, false, nil
+	return true, false, nil, nil
+}
+
+func (eb *EventBus) bindClaimedRunWork(
+	ctx context.Context,
+	event events.Event,
+) (context.Context, *worklifetime.Lease, error) {
+	runID := strings.TrimSpace(event.RunID())
+	if runID == "" {
+		return ctx, nil, nil
+	}
+	eb.mu.RLock()
+	owner := eb.standingRunWorkOwner
+	eb.mu.RUnlock()
+	if owner == nil {
+		return ctx, nil, nil
+	}
+	reader, ok := eb.store.(RunOriginReader)
+	if !ok || reader == nil {
+		return ctx, nil, errors.New("persisted pipeline recovery requires typed run origin readback")
+	}
+	origin, err := reader.LoadRunOrigin(ctx, runID)
+	if err != nil {
+		return ctx, nil, fmt.Errorf("load pipeline recovery run origin: %w", err)
+	}
+	if origin.Kind() != runtimerunlifecycle.OriginStandingGeneration {
+		return ctx, nil, nil
+	}
+	lease, err := owner.BeginStandingRunRecovery(ctx, runID, origin)
+	if err != nil {
+		return ctx, nil, fmt.Errorf("%w: admit standing-generation pipeline recovery: %v", ErrRunDispatchBlocked, err)
+	}
+	contextOwner, ok := worklifetime.OccurrenceFromContext(lease.Context())
+	if !ok {
+		_ = lease.Done()
+		return ctx, nil, errors.New("standing-generation pipeline recovery admission omitted its exact occurrence")
+	}
+	return bindWorkContext(ctx, lease, contextOwner), lease, nil
 }
 
 func (eb *EventBus) logStartupRecoveryPipelineAftermath(

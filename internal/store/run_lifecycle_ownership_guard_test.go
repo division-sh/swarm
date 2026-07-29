@@ -141,6 +141,9 @@ func allowedSemanticRunFixtureLiteral(relative string, value string) bool {
 		return compact == "UPDATE runs"
 	case "internal/store/run_terminal_delivery_lock_order_test.go":
 		return compact == "UPDATE RUNS"
+	case "internal/store/run_lifecycle_candidate_parity_test.go":
+		return compact == "UPDATE runs SET completion_revision = 1, completion_due_at = ? WHERE run_id = ?" ||
+			compact == "UPDATE runs SET completion_revision = 1, completion_due_at = $1 WHERE run_id = $2::uuid"
 	}
 	return false
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -250,12 +251,10 @@ func exactOnceCreateEntityHandler() runtimecontracts.SystemNodeEventHandler {
 func sqliteExactOnceRunContext(t *testing.T, db *sql.DB) context.Context {
 	t.Helper()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), testPipelineRunID)
-	if _, err := db.ExecContext(ctx, `
-		INSERT OR IGNORE INTO runs (run_id, status, started_at, bundle_hash, bundle_source)
-		VALUES (?, 'running', ?, 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral')
-	`, testPipelineRunID, time.Now().UTC()); err != nil {
-		t.Fatalf("seed sqlite run: %v", err)
-	}
+	runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{
+		Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+		RunID:  testPipelineRunID,
+	})
 	return ctx
 }
 

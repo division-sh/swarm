@@ -365,6 +365,7 @@ func (m postgresRunLifecycleMutation) Create(
 	if m.tx == nil {
 		return "", errors.New("PostgreSQL run lifecycle creation requires transaction")
 	}
+	request.StartedAt = runtimerunlifecycle.CanonicalTimestamp(request.StartedAt)
 	if err := request.Validate(); err != nil {
 		return "", err
 	}
@@ -416,6 +417,7 @@ func (m sqliteRunLifecycleMutation) Create(
 	if m.tx == nil {
 		return "", errors.New("SQLite run lifecycle creation requires transaction")
 	}
+	request.StartedAt = runtimerunlifecycle.CanonicalTimestamp(request.StartedAt)
 	if err := request.Validate(); err != nil {
 		return "", err
 	}
@@ -485,6 +487,7 @@ func insertRunForkRun(
 	if err != nil {
 		return err
 	}
+	startedAt = runtimerunlifecycle.CanonicalTimestamp(startedAt)
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runs (
 			run_id, status, origin_kind, forked_from_run_id, forked_from_event_id,
@@ -535,14 +538,13 @@ func (m postgresRunLifecycleMutation) TransitionActive(
 	if current.State == runtimerunlifecycle.StatePaused && request.State != runtimerunlifecycle.StateRunning {
 		return "", fmt.Errorf("invalid PostgreSQL run lifecycle transition %s -> %s", current.State, request.State)
 	}
-	result, err := m.tx.ExecContext(ctx, `
-		UPDATE runs
-		SET status = $2,
-		    ended_at = NULL,
-		    failure = NULL
-		WHERE run_id = $1::uuid
-		  AND status = $3
-	`, request.RunID, string(request.State), string(current.State))
+	result, err := transitionPostgresActiveRunStateTx(
+		ctx,
+		m.tx,
+		request.RunID,
+		request.State,
+		current.State,
+	)
 	if err != nil {
 		return "", fmt.Errorf("transition PostgreSQL run lifecycle: %w", err)
 	}
@@ -556,8 +558,6 @@ func (m postgresRunLifecycleMutation) TransitionActive(
 		if _, err := m.store.requestCompletionCandidateTx(ctx, m.tx, request.RunID, nil); err != nil {
 			return "", err
 		}
-	} else if err := clearPostgresCompletionCandidateTx(ctx, m.tx, request.RunID); err != nil {
-		return "", err
 	}
 	return runtimerunlifecycle.MutationApplied, nil
 }
@@ -588,14 +588,13 @@ func (m sqliteRunLifecycleMutation) TransitionActive(
 	if current.State == runtimerunlifecycle.StatePaused && request.State != runtimerunlifecycle.StateRunning {
 		return "", fmt.Errorf("invalid SQLite run lifecycle transition %s -> %s", current.State, request.State)
 	}
-	result, err := m.tx.ExecContext(ctx, `
-		UPDATE runs
-		SET status = ?,
-		    ended_at = NULL,
-		    failure = NULL
-		WHERE run_id = ?
-		  AND status = ?
-	`, string(request.State), request.RunID, string(current.State))
+	result, err := transitionSQLiteActiveRunStateTx(
+		ctx,
+		m.tx,
+		request.RunID,
+		request.State,
+		current.State,
+	)
 	if err != nil {
 		return "", fmt.Errorf("transition SQLite run lifecycle: %w", err)
 	}
@@ -609,8 +608,6 @@ func (m sqliteRunLifecycleMutation) TransitionActive(
 		if _, err := m.store.requestCompletionCandidateTx(ctx, m.tx, request.RunID, nil); err != nil {
 			return "", err
 		}
-	} else if err := clearSQLiteCompletionCandidateTx(ctx, m.tx, request.RunID); err != nil {
-		return "", err
 	}
 	return runtimerunlifecycle.MutationApplied, nil
 }
@@ -879,9 +876,9 @@ func deleteMaterializedForkRunTx(ctx context.Context, tx *sql.Tx, runID string) 
 
 func normalizedRunLifecycleTime(value time.Time) time.Time {
 	if value.IsZero() {
-		return time.Now().UTC()
+		value = time.Now().UTC()
 	}
-	return value.UTC()
+	return runtimerunlifecycle.CanonicalTimestamp(value)
 }
 
 func runtimepipelineSQLTx(ctx context.Context) (*sql.Tx, bool) {

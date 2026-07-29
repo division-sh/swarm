@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -177,6 +177,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 	loadAgentFixtures(t, fixtureRoot, llmRuntime)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	pg.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 
 	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), catalogRuntimeRunID))
 	t.Cleanup(cancel)
@@ -184,21 +185,22 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID, BundleHash: authorActivityTestBundleSourceFact.BundleHash(), BundleSource: "ephemeral"})
 
 	rt, err := runtime.NewRuntime(ctx, runtime.RuntimeDeps{Config: cfg, Stores: runtime.Stores{
-		SQLDB:               db,
-		PipelineStore:       runtimepipeline.NewWorkflowInstanceStore(db),
-		PipelineObligations: pg.PipelineObligations(),
-		EventStore:          pg,
-		DeliveryStore:       pg,
-		RuntimeLogStore:     pg,
-		SessionRegistry:     pg,
-		ManagerStore:        pg,
-		ScheduleStore:       pg,
-		StartupOwnership:    pg,
-		MailboxStore:        pg,
-		ToolEntityStore:     pg,
-		HumanTaskStore:      pg,
-		RuntimeIngressStore: pg,
-		ConversationStore:   nil,
+		SQLDB:                  db,
+		PipelineStore:          workflowStore,
+		PipelineObligations:    pg.PipelineObligations(),
+		RunLifecycleCandidates: pg,
+		EventStore:             pg,
+		DeliveryStore:          pg,
+		RuntimeLogStore:        pg,
+		SessionRegistry:        pg,
+		ManagerStore:           pg,
+		ScheduleStore:          pg,
+		StartupOwnership:       pg,
+		MailboxStore:           pg,
+		ToolEntityStore:        pg,
+		HumanTaskStore:         pg,
+		RuntimeIngressStore:    pg,
+		ConversationStore:      nil,
 	}, Options: runtime.RuntimeOptions{
 		SelfCheck:         false,
 		WorkflowModule:    module,
@@ -238,7 +240,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 		db:             db,
 		pg:             pg,
 		rt:             rt,
-		workflow:       runtimepipeline.NewWorkflowInstanceStore(db),
+		workflow:       workflowStore,
 		llm:            llmRuntime,
 		bundle:         bundle,
 		initialState:   strings.TrimSpace(rootSchema.InitialState),
@@ -316,6 +318,28 @@ func (h *runtimeHarness) publishAndWait(step catalogTriggerStep, timeout time.Du
 	if eventType == "flow.created" {
 		if autoEmit := h.rootAutoEmitOnCreateEvent(); autoEmit != "" {
 			h.publishRuntimeEvent(autoEmit, "flow-instance-activator", payload, timeout, true, false)
+		}
+	}
+}
+
+func (h *runtimeHarness) waitForRunTerminal(timeout time.Duration) {
+	h.t.Helper()
+	ctx, cancel := context.WithTimeout(h.ctx, timeout)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		snapshot, err := h.pg.LoadRunLifecycleSnapshot(ctx, catalogRuntimeRunID)
+		if err != nil {
+			h.t.Fatalf("load catalog run lifecycle: %v", err)
+		}
+		if snapshot.EndedAt != nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			h.t.Fatalf("wait for catalog run terminal lifecycle: %v", ctx.Err())
+		case <-ticker.C:
 		}
 	}
 }
@@ -713,7 +737,8 @@ func (h *runtimeHarness) seedInitialState(entityID string) {
 	if initialState == "" {
 		return
 	}
-	if err := h.workflow.Upsert(h.ctx, runtimepipeline.WorkflowInstance{
+	ctx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
+	if err := h.workflow.Upsert(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      entityID,
 		WorkflowName:    h.bundle.WorkflowName(),
 		WorkflowVersion: h.bundle.WorkflowVersion(),

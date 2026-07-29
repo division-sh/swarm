@@ -43,6 +43,14 @@ WHERE r.run_id = ?
 	return header, nil
 }
 
+func (s *SQLiteRuntimeStore) LoadRunOrigin(ctx context.Context, runID string) (runtimerunlifecycle.RunOrigin, error) {
+	header, err := s.LoadRunHeader(ctx, runID)
+	if err != nil {
+		return runtimerunlifecycle.RunOrigin{}, err
+	}
+	return header.Origin, nil
+}
+
 func (s *SQLiteRuntimeStore) ListRunHeaders(ctx context.Context, opts RunHeaderListOptions) ([]RunHeader, string, error) {
 	if err := s.requireRunHeaderAccess(); err != nil {
 		return nil, "", err

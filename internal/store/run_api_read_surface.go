@@ -86,6 +86,14 @@ WHERE r.run_id = $1::uuid
 	return header, nil
 }
 
+func (s *PostgresStore) LoadRunOrigin(ctx context.Context, runID string) (runtimerunlifecycle.RunOrigin, error) {
+	header, err := s.LoadRunHeader(ctx, runID)
+	if err != nil {
+		return runtimerunlifecycle.RunOrigin{}, err
+	}
+	return header.Origin, nil
+}
+
 func (s *PostgresStore) ListRunHeaders(ctx context.Context, opts RunHeaderListOptions) ([]RunHeader, string, error) {
 	if s == nil || s.DB == nil {
 		return nil, "", fmt.Errorf("postgres store is required")

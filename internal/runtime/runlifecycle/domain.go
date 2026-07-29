@@ -376,6 +376,15 @@ const (
 	MutationExactNoop MutationDisposition = "exact_noop"
 )
 
+// CanonicalTimestamp admits lifecycle time to the precision shared by both
+// selected stores before validation, persistence, and exact replay comparison.
+func CanonicalTimestamp(value time.Time) time.Time {
+	if value.IsZero() {
+		return time.Time{}
+	}
+	return value.UTC().Round(time.Microsecond)
+}
+
 type TerminalRequest struct {
 	RunID            string
 	State            State
@@ -558,6 +567,7 @@ func RequireActiveSource(ctx context.Context, runID string) (runtimecorrelation.
 }
 
 func Create(ctx context.Context, request CreateRequest) (MutationDisposition, error) {
+	request.StartedAt = CanonicalTimestamp(request.StartedAt)
 	if err := request.Validate(); err != nil {
 		return "", err
 	}
@@ -580,6 +590,7 @@ func TransitionActive(ctx context.Context, request ActiveTransitionRequest) (Mut
 }
 
 func MarkTerminal(ctx context.Context, request TerminalRequest) (Snapshot, MutationDisposition, error) {
+	request.EndedAt = CanonicalTimestamp(request.EndedAt)
 	if err := request.Validate(); err != nil {
 		return Snapshot{}, "", err
 	}
@@ -591,6 +602,7 @@ func MarkTerminal(ctx context.Context, request TerminalRequest) (Snapshot, Mutat
 }
 
 func ForkSource(ctx context.Context, request ForkSourceRequest) (Snapshot, MutationDisposition, error) {
+	request.EndedAt = CanonicalTimestamp(request.EndedAt)
 	if err := request.Validate(); err != nil {
 		return Snapshot{}, "", err
 	}
@@ -684,7 +696,12 @@ func (s Snapshot) Validate() error {
 		return fmt.Errorf("active run lifecycle state %s forbids ended_at", s.State)
 	}
 	if s.EndedAt != nil && s.EndedAt.Before(s.StartedAt) {
-		return errors.New("run lifecycle snapshot ended_at precedes started_at")
+		return fmt.Errorf(
+			"run lifecycle snapshot run_id=%s ended_at %s precedes started_at %s",
+			s.RunID,
+			s.EndedAt.Format(time.RFC3339Nano),
+			s.StartedAt.Format(time.RFC3339Nano),
+		)
 	}
 	return nil
 }
@@ -738,6 +755,7 @@ type CandidateRequestDisposition string
 const (
 	CandidateRequested        CandidateRequestDisposition = "requested"
 	CandidateAlreadyCurrent   CandidateRequestDisposition = "already_current"
+	CandidateDeferredPaused   CandidateRequestDisposition = "deferred_paused"
 	CandidateAbsorbedTerminal CandidateRequestDisposition = "absorbed_terminal"
 )
 
@@ -762,7 +780,7 @@ func CandidateAtTime(runID string, dueAt time.Time) CandidateRequest {
 	return CandidateRequest{
 		RunID:  strings.TrimSpace(runID),
 		Timing: CandidateAt,
-		DueAt:  dueAt.UTC(),
+		DueAt:  CanonicalTimestamp(dueAt),
 	}
 }
 
@@ -794,14 +812,18 @@ func (r CandidateRequestResult) Validate() error {
 	switch r.Disposition {
 	case CandidateRequested, CandidateAlreadyCurrent:
 		return r.Candidate.Validate()
-	case CandidateAbsorbedTerminal:
+	case CandidateDeferredPaused, CandidateAbsorbedTerminal:
 		if r.Candidate.Revision != 0 || !r.Candidate.DueAt.IsZero() {
-			return errors.New("absorbed terminal candidate result must not carry candidate identity")
+			return fmt.Errorf("%s candidate result must not carry candidate identity", r.Disposition)
 		}
 		return nil
 	default:
 		return fmt.Errorf("invalid completion candidate request disposition %q", r.Disposition)
 	}
+}
+
+func (r CandidateRequestResult) RequiresRepresentation() bool {
+	return r.Disposition == CandidateRequested || r.Disposition == CandidateAlreadyCurrent
 }
 
 type CompletionOutcome string
@@ -818,6 +840,24 @@ type CompletionResult struct {
 	Outcome   CompletionOutcome
 	Candidate Candidate
 	Retryable error
+}
+
+type SelectedStoreBeforeRunStartError struct {
+	RunID      string
+	SelectedAt time.Time
+	StartedAt  time.Time
+}
+
+func (e *SelectedStoreBeforeRunStartError) Error() string {
+	if e == nil {
+		return "selected-store time precedes run start"
+	}
+	return fmt.Sprintf(
+		"selected-store time %s precedes run %s start %s",
+		e.SelectedAt.UTC().Format(time.RFC3339Nano),
+		strings.TrimSpace(e.RunID),
+		e.StartedAt.UTC().Format(time.RFC3339Nano),
+	)
 }
 
 func (r CompletionResult) Validate() error {

@@ -50,9 +50,12 @@ func TestTier9CompositionPatternCatalogFixtures_RealRuntime(t *testing.T) {
 			var expected catalogExpectedDocument
 			loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
 
-			h := newRuntimeHarness(t, fixtureRoot, false)
+			h := newRuntimeHarness(t, fixtureRoot, fixtureName == "test-compose-clear-gates-reenter")
 			h.seedEntityFields(expected)
-			for _, step := range expected.triggerSequence() {
+			for index, step := range expected.triggerSequence() {
+				if index > 0 && fixtureName == "test-compose-clear-gates-reenter" {
+					h.waitForRunTerminal(catalogRuntimePublishTimeout)
+				}
 				h.publishAndWait(step, catalogRuntimePublishTimeout)
 			}
 			assertCatalogRuntimeOutcome(t, h, expected)

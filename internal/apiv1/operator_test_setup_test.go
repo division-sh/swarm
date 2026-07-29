@@ -282,16 +282,16 @@ func validTestSetupEntity(entityID, currentState, note string, reviewReady bool)
 
 func assertTestSetupPersistence(t *testing.T, db *sql.DB, runID, entityID, currentState, note string, reviewReady bool) {
 	t.Helper()
-	var runStatus, triggerType, bundleHash, bundleSource string
+	var runStatus, originKind, bundleHash, bundleSource string
 	if err := db.QueryRow(`
-		SELECT status, trigger_event_type, bundle_hash, bundle_source
+		SELECT status, origin_kind, bundle_hash, bundle_source
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, runID).Scan(&runStatus, &triggerType, &bundleHash, &bundleSource); err != nil {
+	`, runID).Scan(&runStatus, &originKind, &bundleHash, &bundleSource); err != nil {
 		t.Fatalf("load setup run row: %v", err)
 	}
-	if runStatus != "running" || triggerType != "test.setup_entities" {
-		t.Fatalf("setup run row status=%q trigger=%q, want running/test.setup_entities", runStatus, triggerType)
+	if runStatus != "running" || originKind != string(storerunlifecycle.OriginScenarioSetup) {
+		t.Fatalf("setup run row status=%q origin=%q, want running/scenario_setup", runStatus, originKind)
 	}
 	if bundleHash != runStartTestBundleHash || bundleSource != storerunlifecycle.BundleSourceEphemeral {
 		t.Fatalf("setup run row bundle identity = hash:%q source:%q", bundleHash, bundleSource)
