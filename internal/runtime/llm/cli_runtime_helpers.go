@@ -4,14 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"slices"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/config"
-	models "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 )
@@ -157,89 +154,19 @@ func dedupeToolCalls(calls []ToolCall) []ToolCall {
 	return out
 }
 
-func claudeToolsArg(tools []ToolDefinition) string {
-	if len(tools) == 0 {
-		return ""
-	}
-	names := make([]string, 0, len(tools))
-	for _, t := range tools {
-		name := strings.TrimSpace(t.Name)
-		if name == "" {
-			continue
-		}
-		names = append(names, name)
-	}
-	if len(names) == 0 {
-		return ""
-	}
-	slices.Sort(names)
-	return strings.Join(names, ",")
-}
-
-var claudeProviderBuiltinToolNames = []string{
-	"AskUserQuestion",
-	"Bash",
-	"Edit",
-	"EnterPlanMode",
-	"EnterWorktree",
-	"Glob",
-	"Grep",
-	"MultiEdit",
-	"NotebookEdit",
-	"Read",
-	"Skill",
-	"Task",
-	"TaskOutput",
-	"TaskStop",
-	"TodoWrite",
-	"ToolSearch",
-	"WebFetch",
-	"WebSearch",
-	"Write",
-}
-
 type conversationForkSandboxTransportSurface struct {
 	CanonicalVisibleTools []string
 	RuntimeToolNames      []string
 	PromptRuntimeTools    []string
-	ProviderBuiltinTools  []string
 	ProviderMCPTools      []string
 	LocalFallbackTools    []string
 }
 
-func cliNativeCapabilityToolSet(actor models.AgentConfig) map[string]struct{} {
-	out := map[string]struct{}{}
-	if actor.NativeTools.Bash {
-		out["bash"] = struct{}{}
-	}
-	if actor.NativeTools.WebSearch {
-		out["web_search"] = struct{}{}
-	}
-	if actor.NativeTools.FileIO {
-		out["read_file"] = struct{}{}
-		out["write_file"] = struct{}{}
-	}
-	return out
-}
+func buildConversationForkSandboxTransportSurface(tools []ToolDefinition) conversationForkSandboxTransportSurface {
+	runtimeNames := appendCanonicalToolNames(nil, toolNames(tools))
 
-func conversationForkSandboxTransportSurfaceForActor(actor models.AgentConfig, tools []ToolDefinition) conversationForkSandboxTransportSurface {
-	rawRuntimeNames := toolNames(tools)
-	nativeCapabilityTools := cliNativeCapabilityToolSet(actor)
-	runtimeNames := make([]string, 0, len(rawRuntimeNames))
-	for _, name := range rawRuntimeNames {
-		canonical := toolidentity.CanonicalName(name)
-		if canonical == "" {
-			continue
-		}
-		if _, ok := nativeCapabilityTools[canonical]; ok {
-			continue
-		}
-		runtimeNames = append(runtimeNames, canonical)
-	}
-	slices.Sort(runtimeNames)
-
-	canonicalVisible := make([]string, 0, len(runtimeNames)+4)
-	visibleSet := make(map[string]struct{}, len(runtimeNames)+4)
+	canonicalVisible := make([]string, 0, len(runtimeNames))
+	visibleSet := make(map[string]struct{}, len(runtimeNames))
 	addCanonicalVisible := func(name string) {
 		name = toolidentity.CanonicalName(name)
 		if name == "" {
@@ -253,29 +180,6 @@ func conversationForkSandboxTransportSurfaceForActor(actor models.AgentConfig, t
 	}
 	for _, name := range runtimeNames {
 		addCanonicalVisible(name)
-	}
-
-	providerBuiltins := make([]string, 0, 5)
-	addNativeCapabilityTool := func(name string) {
-		name = toolidentity.CanonicalName(name)
-		if name == "" {
-			return
-		}
-		addCanonicalVisible(name)
-	}
-
-	if actor.NativeTools.Bash {
-		providerBuiltins = append(providerBuiltins, "Bash")
-		addNativeCapabilityTool("bash")
-	}
-	if actor.NativeTools.WebSearch {
-		providerBuiltins = append(providerBuiltins, "WebFetch", "WebSearch")
-		addNativeCapabilityTool("web_search")
-	}
-	if actor.NativeTools.FileIO {
-		providerBuiltins = append(providerBuiltins, "Read", "Write", "Edit")
-		addNativeCapabilityTool("read_file")
-		addNativeCapabilityTool("write_file")
 	}
 
 	promptRuntime := make([]string, 0, len(runtimeNames))
@@ -295,7 +199,6 @@ func conversationForkSandboxTransportSurfaceForActor(actor models.AgentConfig, t
 		promptRuntime = append(promptRuntime, toolidentity.RuntimeToolsMCPPrefix+canonical)
 	}
 
-	slices.Sort(providerBuiltins)
 	slices.Sort(canonicalVisible)
 	slices.Sort(promptRuntime)
 	slices.Sort(providerMCPTools)
@@ -305,7 +208,6 @@ func conversationForkSandboxTransportSurfaceForActor(actor models.AgentConfig, t
 		CanonicalVisibleTools: canonicalVisible,
 		RuntimeToolNames:      runtimeNames,
 		PromptRuntimeTools:    promptRuntime,
-		ProviderBuiltinTools:  providerBuiltins,
 		ProviderMCPTools:      providerMCPTools,
 		LocalFallbackTools:    localFallbackTools,
 	}
@@ -328,11 +230,11 @@ func isCLIControlToolName(name string) bool {
 	return false
 }
 
-func conversationForkSandboxObservedCanonicalTools(actor models.AgentConfig, tools []ToolDefinition, observed []string) []string {
+func conversationForkSandboxObservedCanonicalTools(tools []ToolDefinition, observed []string) []string {
 	if len(observed) == 0 {
 		return nil
 	}
-	surface := conversationForkSandboxTransportSurfaceForActor(actor, tools)
+	surface := buildConversationForkSandboxTransportSurface(tools)
 	if len(surface.CanonicalVisibleTools) == 0 {
 		return nil
 	}
@@ -360,9 +262,9 @@ func conversationForkSandboxObservedCanonicalTools(actor models.AgentConfig, too
 	return filtered
 }
 
-func conversationForkSandboxAllowedToolNames(actor models.AgentConfig, tools []ToolDefinition) []string {
-	surface := conversationForkSandboxTransportSurfaceForActor(actor, tools)
-	allowed := make([]string, 0, len(surface.ProviderMCPTools)+len(surface.LocalFallbackTools)+len(surface.ProviderBuiltinTools)+len(claudeControlToolNames()))
+func conversationForkSandboxAllowedToolNames(tools []ToolDefinition) []string {
+	surface := buildConversationForkSandboxTransportSurface(tools)
+	allowed := make([]string, 0, len(surface.ProviderMCPTools)+len(surface.LocalFallbackTools)+len(claudeControlToolNames()))
 	seen := make(map[string]struct{}, cap(allowed))
 	addAllowed := func(name string) {
 		name = strings.TrimSpace(name)
@@ -381,9 +283,6 @@ func conversationForkSandboxAllowedToolNames(actor models.AgentConfig, tools []T
 	for _, name := range surface.LocalFallbackTools {
 		addAllowed(name)
 	}
-	for _, name := range surface.ProviderBuiltinTools {
-		addAllowed(name)
-	}
 	for _, name := range claudeControlToolNames() {
 		addAllowed(name)
 	}
@@ -391,114 +290,34 @@ func conversationForkSandboxAllowedToolNames(actor models.AgentConfig, tools []T
 	return allowed
 }
 
-func conversationForkSandboxDisallowedBuiltinTools(actor models.AgentConfig, tools []ToolDefinition) string {
-	surface := conversationForkSandboxTransportSurfaceForActor(actor, tools)
-	allowed := make(map[string]struct{}, len(surface.ProviderBuiltinTools))
-	for _, name := range surface.ProviderBuiltinTools {
-		allowed[name] = struct{}{}
-	}
-	names := make([]string, 0, len(claudeProviderBuiltinToolNames))
-	for _, name := range claudeProviderBuiltinToolNames {
-		if _, ok := allowed[name]; ok {
-			continue
-		}
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	return strings.Join(names, ",")
-}
-
-func conversationForkSandboxAllowedTools(actor models.AgentConfig, tools []ToolDefinition) string {
-	allowed := conversationForkSandboxAllowedToolNames(actor, tools)
-	if len(allowed) == 0 {
-		return ""
-	}
-	return strings.Join(allowed, ",")
-}
-
-func claudeToolArgumentsForContext(ctx context.Context, actor models.AgentConfig, tools []ToolDefinition) (string, string, error) {
-	surface, ok := managedcapabilities.FromContext(ctx)
-	if !ok {
-		if managedAgentExecutionContext(ctx) {
-			return "", "", fmt.Errorf("managed Claude dispatch requires exact capability surface")
-		}
-		return conversationForkSandboxAllowedTools(actor, tools), conversationForkSandboxDisallowedBuiltinTools(actor, tools), nil
-	}
-	if surface.ActorID != strings.TrimSpace(actor.ID) {
-		return "", "", fmt.Errorf("managed Claude capability surface actor mismatch")
-	}
-	allowed := make([]string, 0)
-	seenAllowed := map[string]struct{}{}
-	providerBuiltins := map[string]struct{}{}
-	for _, tool := range surface.Tools {
-		if !tool.Capability.Visible || !tool.Capability.Callable {
-			continue
-		}
-		for _, binding := range tool.Bindings {
-			switch binding.Kind {
-			case managedcapabilities.BindingProviderBuiltin, managedcapabilities.BindingMCPTool:
-			default:
-				continue
-			}
-			name := strings.TrimSpace(binding.ExactName)
-			if name == "" {
-				continue
-			}
-			if binding.Kind == managedcapabilities.BindingProviderBuiltin {
-				providerBuiltins[name] = struct{}{}
-			}
-			if _, duplicate := seenAllowed[name]; duplicate {
-				continue
-			}
-			seenAllowed[name] = struct{}{}
-			allowed = append(allowed, name)
-		}
-	}
-	for _, name := range claudeControlToolNames() {
-		if _, duplicate := seenAllowed[name]; !duplicate {
-			seenAllowed[name] = struct{}{}
-			allowed = append(allowed, name)
-		}
-	}
-	disallowed := make([]string, 0, len(claudeProviderBuiltinToolNames))
-	for _, name := range claudeProviderBuiltinToolNames {
-		if _, permitted := providerBuiltins[name]; !permitted {
-			disallowed = append(disallowed, name)
-		}
-	}
-	slices.Sort(allowed)
-	slices.Sort(disallowed)
-	return strings.Join(allowed, ","), strings.Join(disallowed, ","), nil
-}
-
-func conversationForkSandboxObservedToolsForTurn(actor models.AgentConfig, tools []ToolDefinition, resp *Response) []string {
+func conversationForkSandboxObservedToolsForTurn(tools []ToolDefinition, resp *Response) []string {
 	if resp == nil {
 		return nil
 	}
 	observed := append([]string(nil), resp.VisibleTools...)
 	observed = append(observed, resp.MCPVisibleTools...)
-	return conversationForkSandboxObservedCanonicalTools(actor, tools, observed)
+	return conversationForkSandboxObservedCanonicalTools(tools, observed)
 }
 
-func conversationForkSandboxPlannedTools(actor models.AgentConfig, tools []ToolDefinition) []string {
-	surface := conversationForkSandboxTransportSurfaceForActor(actor, tools)
+func conversationForkSandboxPlannedTools(tools []ToolDefinition) []string {
+	surface := buildConversationForkSandboxTransportSurface(tools)
 	return append([]string(nil), surface.CanonicalVisibleTools...)
 }
 
-func conversationForkSandboxLocalFallbackTools(actor models.AgentConfig, tools []ToolDefinition) []string {
-	surface := conversationForkSandboxTransportSurfaceForActor(actor, tools)
+func conversationForkSandboxLocalFallbackTools(tools []ToolDefinition) []string {
+	surface := buildConversationForkSandboxTransportSurface(tools)
 	return append([]string(nil), surface.LocalFallbackTools...)
 }
 
-func conversationForkSandboxUsableToolsForTurn(actor models.AgentConfig, tools []ToolDefinition, resp *Response) []string {
-	usable := appendCanonicalToolNames(nil, conversationForkSandboxLocalFallbackTools(actor, tools))
-	if observed := conversationForkSandboxObservedToolsForTurn(actor, tools, resp); len(observed) > 0 {
+func conversationForkSandboxUsableToolsForTurn(tools []ToolDefinition, resp *Response) []string {
+	usable := appendCanonicalToolNames(nil, conversationForkSandboxLocalFallbackTools(tools))
+	if observed := conversationForkSandboxObservedToolsForTurn(tools, resp); len(observed) > 0 {
 		return appendCanonicalToolNames(usable, observed)
 	}
 	if conversationForkSandboxHasObservedSurface(resp) {
 		return usable
 	}
-	return appendCanonicalToolNames(usable, conversationForkSandboxPlannedTools(actor, tools))
+	return appendCanonicalToolNames(usable, conversationForkSandboxPlannedTools(tools))
 }
 
 func conversationForkSandboxHasObservedSurface(resp *Response) bool {
@@ -508,12 +327,12 @@ func conversationForkSandboxHasObservedSurface(resp *Response) bool {
 	return len(resp.VisibleTools) > 0 || len(resp.MCPVisibleTools) > 0 || len(resp.MCPServers) > 0
 }
 
-func conversationForkSandboxToolCallAllowed(actor models.AgentConfig, tools []ToolDefinition, resp *Response, name string) bool {
+func conversationForkSandboxToolCallAllowed(tools []ToolDefinition, resp *Response, name string) bool {
 	name = toolidentity.CanonicalName(name)
 	if name == "" {
 		return false
 	}
-	for _, visible := range conversationForkSandboxUsableToolsForTurn(actor, tools, resp) {
+	for _, visible := range conversationForkSandboxUsableToolsForTurn(tools, resp) {
 		if visible == name {
 			return true
 		}

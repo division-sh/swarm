@@ -64,11 +64,10 @@ func BuildMCPHTTPBinding(ctx context.Context, cfg *config.Config, turns MCPTurnC
 	}
 	surface, ok := managedcapabilities.FromContext(ctx)
 	if !ok {
-		authority, sandbox := runtimeeffects.AuthorityFromContext(ctx)
-		if !sandbox || authority.Kind != runtimeeffects.AuthorityConversationForkChat {
-			return MCPHTTPBinding{}, false, errors.New("mcp bridge requires exact managed capability surface")
+		if _, err := projectClaudeInvocationTools(ctx, actor, s.Tools); err != nil {
+			return MCPHTTPBinding{}, false, err
 		}
-		allowed := conversationForkSandboxTransportSurfaceForActor(actor, s.Tools).RuntimeToolNames
+		allowed := buildConversationForkSandboxTransportSurface(s.Tools).RuntimeToolNames
 		if len(allowed) == 0 {
 			return MCPHTTPBinding{}, false, nil
 		}

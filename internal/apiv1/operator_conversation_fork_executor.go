@@ -32,6 +32,9 @@ func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared stor
 	if message == "" {
 		return store.ConversationForkChatExecution{}, fmt.Errorf("conversation fork chat message is required")
 	}
+	if err := prepared.ValidateSandboxPolicy(); err != nil {
+		return store.ConversationForkChatExecution{}, fmt.Errorf("validate conversation fork chat sandbox policy: %w", err)
+	}
 	scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, prepared.SourceBundleHash)
 	if err != nil {
 		return store.ConversationForkChatExecution{}, fmt.Errorf("resolve conversation fork chat source scope: %w", err)
@@ -54,6 +57,7 @@ func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared stor
 			RequestOccurrenceID: prepared.RequestOccurrenceID, RequestHash: prepared.RequestHash,
 		},
 	})
+	ctx = runtimellm.WithConversationForkSandboxInvocationPolicy(ctx, prepared.SandboxPolicy.AvailableToolNames())
 	resp, err := conv.Step(ctx, message)
 	if err != nil {
 		return store.ConversationForkChatExecution{}, fmt.Errorf("execute conversation fork chat turn: %w", err)

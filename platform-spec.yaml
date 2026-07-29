@@ -6396,7 +6396,9 @@ engine:
         entry is required. Native tools are not part of the tools system. They are runtime-level capabilities. Provider-native
         CLI runtimes may expose native tools only when their provider/runtime can actually call them; platform fallback native
         tools may be exposed only when the selected workspace execution target supports the matching capability, and visible
-        native-tool surface must equal callable truth on the same turn.
+        native-tool surface must equal callable truth on the same turn. A provider CLI whose builtin availability can be
+        selected MUST receive the exact positively selected provider-native bindings on its first process launch; permission
+        admission, provider defaults, and a static catalog complement are not capability-availability authority.
       contract_field:
         field: native_tools
         type: object
@@ -27254,7 +27256,10 @@ api_specification:
             $ref: '#/components/schemas/Timestamp'
       ConversationForkSandboxPolicy:
         description: Sandbox policy enforced for forkchat execution. Read tools consume only the fork snapshot; side-effecting
-          tools are stub-recorded and must not mutate live state.
+          tools are stub-recorded and must not mutate live state. The policy is the sole forkchat tool authority. Claude forkchat
+          launches select no provider-builtin actor capability; they select only the closed transport-control set and admit the
+          exact policy-derived MCP/local sandbox tools separately. Source-agent native_tools and managed capability surfaces
+          cannot widen this policy.
         type: object
         additionalProperties: false
         required:
@@ -30431,7 +30436,10 @@ api_specification:
         admitted provider backend receives an explicit model selection. The
         executor classifies provider execution as operator infrastructure rather
         than a managed-agent lifecycle generation; it MUST NOT fabricate a live
-        agent lifecycle token. It does not write agent_turns, events,
+        agent lifecycle token. Provider launch projection requires this exact
+        policy plus conversation-fork-chat execution authority; missing,
+        malformed, mismatched, or coexisting managed authority fails before
+        process launch. It does not write agent_turns, events,
         runtime logs, mailbox rows, run commands, or dashboard conversation rows
         by default.
       scope:
@@ -31395,11 +31403,12 @@ managed_agent_capability_surface:
     normal_cold_start: Settle every actor probe under the exact startup authority, persist the resulting surface identities, admit execution, and only then replay recoverable agent work or start managed-agent loops. System nodes may hydrate, subscribe, and queue work before admission, but cannot authorize provider turns or execute managed-agent deliveries until admission.
     normal_replacement: Probe candidate actors under prepared handoff authority before commit; execute only after commit/admission. Probe failure rolls back without exposing candidate execution.
     selected_contract_fork: Consume the exact current selected-fork completion authority and derive the selected managed-execution admission; settle provider/MCP preflight before gateway use, agent-loop start, or fork-event publication.
+    claude_cli_selection: Every cold, recovery, prepared-replacement, and selected-contract Claude startup process receives positive --tools selection derived from the exact callable provider_builtin bindings plus the closed transport-control set. --allowedTools separately admits those builtins, exact MCP bindings, and controls. Missing or incompatible positive-selector support fails closed without static-catalog fallback, discovery/relaunch, or negative-complement retry.
     failure: Missing provider evidence, MCP tools/list or required startup tools/call failure, delivery mismatch, persistence failure, or authority loss fails closed with retained typed evidence and zero managed execution under that admission.
   provider_turn:
     rule: Every managed provider turn receives a fresh provider_turn authority under one admitted execution variant. The same surface identity is carried through API/CLI request construction or deterministic in-process execution, provider response normalization, MCP registration/list/call, response tool-call validation, direct executor and relay admission, managed effects, turn persistence, and supported readback.
     api: Exact live-request definitions are the delivery evidence. Planned names alone are not observation.
-    cli: Allowed/disallowed provider arguments, native built-ins, MCP registration, provider-visible initialization facts, and local projections are exact bindings/evidence from the surface; prompt text is a rendering only and cannot authorize a tool. A provider-owned MCP tools/call occurrence atomically confirms its exact planned mcp_provider_visible binding and consumes that occurrence before tool authorization. Unplanned tools, authority mismatch, missing occurrence coordinates, and replayed occurrences fail closed before executor admission.
+    cli: Provider-builtin availability uses positive --tools selection from the exact callable provider_builtin bindings on every first, resumed, and tool-result process launch. The closed provider transport-control set, currently ExitPlanMode, is selected separately and is excluded from actor capability evidence. --allowedTools is permission admission for the selected builtins, exact MCP bindings, permitted local tools, and transport controls; it is never builtin-availability authority, and MCP/local names never enter --tools. Provider-visible initialization facts preserve every reported non-control builtin as exact evidence; unknown/default builtins are typed mismatches rather than filtered observations. Prompt text is a rendering only and cannot authorize a tool. A provider-owned MCP tools/call occurrence atomically confirms its exact planned mcp_provider_visible binding and consumes that occurrence before tool authorization. Missing, ambiguous, or mismatched managed-versus-forkchat authority, incompatible selector support, unplanned tools, missing occurrence coordinates, and replayed occurrences fail closed with no static catalog, negative complement, compatibility fallback, or discovery/relaunch.
     in_process: Deterministic platform mock execution carries the exact local-runtime bindings and interpreter evidence in the same provider-turn surface. It is not reclassified as API or CLI transport and cannot authorize external effects.
   enforcement:
     mcp: tools/list exposes only planned surface tools whose exact delivered name, description, and schema match the canonical candidate definition identity for the same provider-turn and managed-execution authority; any difference records a typed mismatch and denies the complete surface. tools/call settles exact provider-turn MCP visibility from the provider-owned call occurrence before authorization and rejects missing, mismatched, unavailable, unplanned, differently authorized, missing-coordinate, or replayed calls before executor dispatch.
@@ -31409,7 +31418,7 @@ managed_agent_capability_surface:
     rule: agent_turns references exactly one provider-turn capability_surface_id. PostgreSQL and SQLite persist the same typed value and identity. Flat available_tools, mcp_servers, mcp_tools_listed, mcp_tools_visible, compatibility views, dual writes, tolerant readers, and reconstruction from transcripts are forbidden.
     migration: Any non-current selected-store shape fails closed before runtime access. Empty or populated legacy tables are not upgraded, migrated, adopted, or interpreted as capability evidence.
   proof:
-    required: [API adapter delivery parity, Claude CLI startup and first-turn evidence, MCP tools/list and tools/call authorization, executor and relay denial, normal startup ordering, replacement handoff ordering, selected-fork preflight ordering, selected-fork non-completion effect binding, PostgreSQL and SQLite typed persistence parity, forkchat non-interference]
+    required: [API adapter delivery parity, Claude CLI positive-selection startup and first/resumed-turn evidence, Claude CLI zero/each/all native-family selection, Claude CLI incompatible-selector denial, Claude CLI unknown-builtin mismatch, MCP tools/list and tools/call authorization, executor and relay denial, normal startup ordering, recovery and replacement handoff ordering, selected-fork preflight and first/resumed-turn ordering, selected-fork non-completion effect binding, PostgreSQL and SQLite typed persistence parity, public forkchat exact-policy selection and source-native non-interference, deterministic release-binary lifecycle, opt-in installed-Claude selector conformance, opt-in paid public-binary agentic lifecycle]
 
 managed_external_effect_authority:
   owner: runtime_external_effect_operations and runtime_external_effect_attempts in the selected store

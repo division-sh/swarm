@@ -42,8 +42,13 @@ func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, a
 	if !ok || surface.Authority.Kind != managedcapabilities.AuthorityStartupProbe {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "startup_probe_capability_surface_missing", "claude-cli-adapter", "startup_probe", nil)
 	}
+	toolProjection, err := projectClaudeInvocationTools(ctx, actor, s.Tools)
+	if err != nil {
+		return nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "startup_probe_capability_projection_invalid", "claude-cli-adapter", "startup_probe", nil, err)
+	}
 	handle, err := runtimeeffects.BeginStartupProbe(ctx, "claude_cli_startup_probe", jsonBytes(map[string]any{
 		"actor_id": actor.ID, "system_prompt": s.SystemPrompt, "tools": s.Tools, "surface_id": surface.ID,
+		"builtin_tools": toolProjection.BuiltinSelection, "permission_tools": toolProjection.PermissionAdmission,
 	}), nil)
 	if err != nil {
 		return nil, err
@@ -66,16 +71,8 @@ func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, a
 				args = append(args, "--system-prompt", sys)
 			}
 		}
-		allowed, disallowed, err := claudeToolArgumentsForContext(ctx, actor, s.Tools)
-		if err != nil {
-			return nil, "", err
-		}
-		if disallowed = strings.TrimSpace(disallowed); disallowed != "" {
-			args = append(args, "--disallowedTools", disallowed)
-		}
-		if allowed = strings.TrimSpace(allowed); allowed != "" {
-			args = append(args, "--allowedTools", allowed)
-		}
+		args = append(args, "--tools", toolProjection.builtinSelectionArg())
+		args = append(args, "--allowedTools", toolProjection.permissionAdmissionArg())
 		mcpConfig, contextToken, enabled, err := r.buildMCPConfigArg(ctx, s)
 		if err != nil {
 			return nil, "", err

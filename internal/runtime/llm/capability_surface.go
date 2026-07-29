@@ -538,13 +538,7 @@ func exactCLIProviderVisibleTools(response *Response) []string {
 		if name == "" || isCLIControlToolName(name) || strings.HasPrefix(name, toolidentity.RuntimeToolsMCPPrefix) {
 			continue
 		}
-		if slices.Contains(claudeProviderBuiltinToolNames, name) {
-			out = append(out, name)
-			continue
-		}
-		if len(response.ProviderVisibleTools) > 0 {
-			out = append(out, name)
-		}
+		out = append(out, name)
 	}
 	slices.Sort(out)
 	return slices.Compact(out)
