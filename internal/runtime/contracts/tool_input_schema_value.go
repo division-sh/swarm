@@ -60,7 +60,7 @@ type toolInputSchemaValue struct {
 	hasMaximum bool
 
 	pattern string
-	format  string
+	format  toolSchemaFormat
 	equalTo string
 
 	minLength    int
@@ -71,6 +71,39 @@ type toolInputSchemaValue struct {
 	hasMinItems  bool
 	maxItems     int
 	hasMaxItems  bool
+}
+
+type toolSchemaFormat uint8
+
+const (
+	toolSchemaFormatUUID toolSchemaFormat = iota + 1
+	toolSchemaFormatDateTime
+)
+
+func parseToolSchemaFormat(raw string) (toolSchemaFormat, error) {
+	switch strings.TrimSpace(raw) {
+	case "":
+		return 0, nil
+	case "uuid":
+		return toolSchemaFormatUUID, nil
+	case "date-time":
+		return toolSchemaFormatDateTime, nil
+	default:
+		return 0, fmt.Errorf("unsupported schema format %q", raw)
+	}
+}
+
+func (f toolSchemaFormat) String() string {
+	switch f {
+	case 0:
+		return ""
+	case toolSchemaFormatUUID:
+		return "uuid"
+	case toolSchemaFormatDateTime:
+		return "date-time"
+	default:
+		return ""
+	}
 }
 
 // ToolInputSchema is an immutable admitted schema. Its zero value carries no
@@ -209,14 +242,12 @@ func ToolSchemaPattern(pattern string) ToolInputSchemaOption {
 
 func ToolSchemaFormat(format string) ToolInputSchemaOption {
 	return toolInputSchemaOption(func(draft *toolInputSchemaDraft) error {
-		format = strings.TrimSpace(format)
-		switch format {
-		case "", "uuid", "date-time":
-			draft.value.format = format
-			return nil
-		default:
-			return fmt.Errorf("unsupported schema format %q", format)
+		admitted, err := parseToolSchemaFormat(format)
+		if err != nil {
+			return err
 		}
+		draft.value.format = admitted
+		return nil
 	})
 }
 
@@ -335,7 +366,7 @@ func validateAdmittedToolInputSchemaActive(path string, schema ToolInputSchema, 
 	if value.kind != ToolSchemaArray && (value.hasItems || value.hasMinItems || value.hasMaxItems) {
 		return fmt.Errorf("%s type %s cannot declare array constraints", path, value.kind)
 	}
-	if value.kind != ToolSchemaString && (value.pattern != "" || value.format != "" || value.hasMinLength || value.hasMaxLength) {
+	if value.kind != ToolSchemaString && (value.pattern != "" || value.format != 0 || value.hasMinLength || value.hasMaxLength) {
 		return fmt.Errorf("%s type %s cannot declare string constraints", path, value.kind)
 	}
 	if value.equalTo != "" && !allowEqualTo {
@@ -582,7 +613,7 @@ func (s ToolInputSchema) Format() string {
 	if s.value == nil {
 		return ""
 	}
-	return s.value.format
+	return s.value.format.String()
 }
 
 func (s ToolInputSchema) EqualTo() string {
@@ -863,8 +894,8 @@ func projectAdmittedToolInputSchema(schema ToolInputSchema) map[string]any {
 	if value.pattern != "" {
 		out["pattern"] = value.pattern
 	}
-	if value.format != "" {
-		out["format"] = value.format
+	if value.format != 0 {
+		out["format"] = value.format.String()
 	}
 	if value.equalTo != "" {
 		out["x-swarm-equalTo"] = value.equalTo
@@ -941,7 +972,7 @@ func (s ToolInputSchema) MarshalYAML() (any, error) {
 		Properties:  s.Properties(),
 		Required:    s.RequiredProperties(),
 		Pattern:     value.pattern,
-		Format:      value.format,
+		Format:      value.format.String(),
 		EqualTo:     value.equalTo,
 	}
 	if items, ok := s.ItemsSchema(); ok {

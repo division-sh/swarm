@@ -93,7 +93,8 @@ type ToolSchemaEntry struct {
 }
 
 type toolSchemaEntryDraft struct {
-	value toolSchemaEntryValue
+	value                toolSchemaEntryValue
+	compiledResultSyntax *CompiledResultProjection
 }
 
 type ToolSchemaEntryOption interface {
@@ -257,12 +258,8 @@ func WithToolManagedCredential(ref ManagedCredentialRef) ToolSchemaEntryOption {
 
 func WithToolCompiledResult(result CompiledResultProjection) ToolSchemaEntryOption {
 	return toolSchemaEntryOption(func(draft *toolSchemaEntryDraft) error {
-		admitted, err := compileToolResultProjection(result)
-		if err != nil {
-			return err
-		}
-		draft.value.compiledResult = ToolCompiledResultProjection{value: &admitted}
-		draft.value.hasCompiledResult = true
+		copyValue := result
+		draft.compiledResultSyntax = &copyValue
 		return nil
 	})
 }
@@ -276,6 +273,14 @@ func NewToolSchemaEntry(options ...ToolSchemaEntryOption) (ToolSchemaEntry, erro
 		if err := option.applyToolSchemaEntry(&draft); err != nil {
 			return ToolSchemaEntry{}, err
 		}
+	}
+	if draft.compiledResultSyntax != nil {
+		admitted, err := compileToolResultProjection(*draft.compiledResultSyntax, draft.value.outputSchema)
+		if err != nil {
+			return ToolSchemaEntry{}, err
+		}
+		draft.value.compiledResult = ToolCompiledResultProjection{value: &admitted}
+		draft.value.hasCompiledResult = true
 	}
 	entry := ToolSchemaEntry{value: &draft.value}
 	if err := entry.validate(); err != nil {
@@ -302,6 +307,11 @@ func (e ToolSchemaEntry) validate() error {
 	if !e.value.outputSchema.IsZero() {
 		if err := e.value.outputSchema.ValidateDefinition(); err != nil {
 			return fmt.Errorf("output_schema: %w", err)
+		}
+	}
+	if e.value.hasResponseMapping {
+		if err := e.value.responseMapping.validateOutputShape(e.value.outputSchema); err != nil {
+			return err
 		}
 	}
 	if e.value.category.String() == "" && e.value.category != ToolCategoryUnspecified {
@@ -477,6 +487,13 @@ func (e ToolSchemaEntry) WithSchemas(input, output ToolInputSchema) (ToolSchemaE
 	copyValue := *e.value
 	copyValue.inputSchema = input
 	copyValue.outputSchema = output
+	if copyValue.hasCompiledResult {
+		admitted, err := compileToolResultProjection(copyValue.compiledResult.syntax(), output)
+		if err != nil {
+			return ToolSchemaEntry{}, err
+		}
+		copyValue.compiledResult = ToolCompiledResultProjection{value: &admitted}
+	}
 	out := ToolSchemaEntry{value: &copyValue}
 	if err := out.validate(); err != nil {
 		return ToolSchemaEntry{}, err
@@ -596,7 +613,7 @@ func (e ToolSchemaEntry) WithCompiledResult(result CompiledResultProjection) (To
 	if e.value == nil {
 		return ToolSchemaEntry{}, fmt.Errorf("tool contract is missing")
 	}
-	admitted, err := compileToolResultProjection(result)
+	admitted, err := compileToolResultProjection(result, e.value.outputSchema)
 	if err != nil {
 		return ToolSchemaEntry{}, err
 	}

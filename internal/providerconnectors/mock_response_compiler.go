@@ -32,7 +32,7 @@ func CompileMockResponsePlan(source semanticview.Source) (*MockResponsePlan, err
 		return nil, nil
 	}
 
-	responses := make(map[string]map[string]any, len(toolIDs))
+	responses := make(map[string]any, len(toolIDs))
 	for _, toolID := range toolIDs {
 		tool := tools[toolID]
 		if errs := validateTool(toolID, tool); len(errs) > 0 {
@@ -42,18 +42,14 @@ func CompileMockResponsePlan(source semanticview.Source) (*MockResponsePlan, err
 			}
 			return nil, fmt.Errorf("compile mock connector response for tool %q: %s", toolID, strings.Join(parts, "; "))
 		}
-		if err := validateMockResponseSchema(tool.OutputSchema(), "output_schema", true); err != nil {
+		if err := validateMockResponseSchema(tool.OutputSchema(), "output_schema"); err != nil {
 			return nil, fmt.Errorf("compile mock connector response for tool %q: %w", toolID, err)
 		}
 		value, err := deterministicMockSchemaValue(tool.OutputSchema(), "output_schema")
 		if err != nil {
 			return nil, fmt.Errorf("compile mock connector response for tool %q: %w", toolID, err)
 		}
-		response, ok := value.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("compile mock connector response for tool %q: output_schema: provider connector mock response root must be object", toolID)
-		}
-		responses[toolID] = response
+		responses[toolID] = value
 	}
 
 	plan, err := NewMockResponsePlan(responses)
@@ -68,11 +64,8 @@ func CompileMockResponsePlan(source semanticview.Source) (*MockResponsePlan, err
 	return plan, nil
 }
 
-func validateMockResponseSchema(schema runtimecontracts.ToolInputSchema, path string, root bool) error {
+func validateMockResponseSchema(schema runtimecontracts.ToolInputSchema, path string) error {
 	kind := schema.Kind()
-	if root && kind != runtimecontracts.ToolSchemaObject {
-		return fmt.Errorf("%s: provider connector mock response root must be object, got %q", path, kind)
-	}
 	switch kind {
 	case runtimecontracts.ToolSchemaObject, runtimecontracts.ToolSchemaArray, runtimecontracts.ToolSchemaString,
 		runtimecontracts.ToolSchemaBoolean, runtimecontracts.ToolSchemaNumber, runtimecontracts.ToolSchemaInteger,
@@ -100,12 +93,12 @@ func validateMockResponseSchema(schema runtimecontracts.ToolInputSchema, path st
 		}
 		for _, name := range schema.PropertyNames() {
 			property, _ := schema.Property(name)
-			if err := validateMockResponseSchema(property, path+".properties."+name, false); err != nil {
+			if err := validateMockResponseSchema(property, path+".properties."+name); err != nil {
 				return err
 			}
 		}
 		if additional, ok := schema.AdditionalPropertiesSchema(); ok {
-			if err := validateMockResponseSchema(additional, path+".additionalProperties", false); err != nil {
+			if err := validateMockResponseSchema(additional, path+".additionalProperties"); err != nil {
 				return err
 			}
 		}
@@ -113,7 +106,7 @@ func validateMockResponseSchema(schema runtimecontracts.ToolInputSchema, path st
 	if kind == runtimecontracts.ToolSchemaArray {
 		items, ok := schema.ItemsSchema()
 		if ok {
-			if err := validateMockResponseSchema(items, path+".items", false); err != nil {
+			if err := validateMockResponseSchema(items, path+".items"); err != nil {
 				return err
 			}
 		}
@@ -174,7 +167,23 @@ func deterministicMockSchemaValue(schema runtimecontracts.ToolInputSchema, path 
 		}
 		return value, nil
 	case runtimecontracts.ToolSchemaArray:
-		return []any{}, nil
+		count := 0
+		if minimum, ok := schema.MinItems(); ok {
+			count = minimum
+		}
+		items, ok := schema.ItemsSchema()
+		if !ok {
+			return nil, fmt.Errorf("%s.items: array item schema is required", path)
+		}
+		value := make([]any, 0, count)
+		for index := 0; index < count; index++ {
+			generated, err := deterministicMockSchemaValue(items, fmt.Sprintf("%s[%d]", path, index))
+			if err != nil {
+				return nil, err
+			}
+			value = append(value, generated)
+		}
+		return value, nil
 	case runtimecontracts.ToolSchemaString:
 		return "", nil
 	case runtimecontracts.ToolSchemaBoolean:

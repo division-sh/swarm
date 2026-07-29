@@ -9,7 +9,7 @@ generation:
     profile:
         path: catalog/generator-profiles/github.yaml
         schema_version: "1"
-        sha256: sha256:04cf8aa22379d36dffb54b351ae352e38926d56c071ddebc595395b465376754
+        sha256: sha256:1992268f155b9ea2bf3d0da7f3727253b6df2bd5cd53c983c964ddba28765ced
     operations:
         - operation_id: issues/add-labels
           tool_id: github.add_labels_to_issue
@@ -69,7 +69,9 @@ tools:
                 - issue_number
                 - labels
         output_schema:
-            type: object
+            type: array
+            items:
+                type: object
         http:
             method: POST
             url: https://api.github.com/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/labels

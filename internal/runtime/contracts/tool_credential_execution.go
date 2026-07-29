@@ -46,11 +46,17 @@ type admittedManagedCredentialValue struct {
 	key                 toolCredentialKey
 	header              string
 	prefix              string
-	grantType           string
+	grantType           managedcredentialmodel.GrantTypeKind
 	scopes              []string
-	grantModel          string
-	tokenRequest        managedcredentialmodel.TokenRequestProfile
+	grantModel          managedcredentialmodel.GrantModelKind
+	tokenRequest        admittedManagedTokenRequest
 	installationIDInput string
+}
+
+type admittedManagedTokenRequest struct {
+	clientAuth    managedcredentialmodel.TokenClientAuthKind
+	body          managedcredentialmodel.TokenBodyKind
+	staticHeaders map[string]string
 }
 
 // ToolManagedCredential is the immutable managed-credential execution policy
@@ -79,30 +85,48 @@ func admitManagedCredential(ref ManagedCredentialRef) (ToolManagedCredential, er
 	if strings.ContainsAny(prefix, "\r\n") {
 		return ToolManagedCredential{}, fmt.Errorf("managed_credential.prefix must not contain a line break")
 	}
-	grantType := managedcredentialmodel.NormalizeGrantType(ref.GrantType)
-	if err := managedcredentialmodel.ValidateRequiredGrantType(grantType); err != nil {
+	grantType, err := managedcredentialmodel.ParseGrantTypeKind(ref.GrantType)
+	if err != nil {
 		return ToolManagedCredential{}, fmt.Errorf("managed_credential.%w", err)
 	}
 	scopes, err := admitManagedCredentialScopes(ref.Scopes)
 	if err != nil {
 		return ToolManagedCredential{}, err
 	}
-	grantModel := managedcredentialmodel.NormalizeGrantModel(ref.GrantModel)
-	if err := managedcredentialmodel.ValidateGrantModel(grantModel); err != nil {
+	grantModel, err := managedcredentialmodel.ParseGrantModelKind(ref.GrantModel)
+	if err != nil {
 		return ToolManagedCredential{}, fmt.Errorf("managed_credential.%w", err)
 	}
-	tokenRequest := managedcredentialmodel.NormalizeTokenRequestProfile(ref.TokenRequest)
 	if err := managedcredentialmodel.ValidateTokenRequestProfile(ref.TokenRequest); err != nil {
 		return ToolManagedCredential{}, fmt.Errorf("managed_credential.%w", err)
+	}
+	tokenRequestSyntax := managedcredentialmodel.NormalizeTokenRequestProfile(ref.TokenRequest)
+	tokenClientAuth, err := managedcredentialmodel.ParseTokenClientAuthKind(tokenRequestSyntax.ClientAuth)
+	if err != nil {
+		return ToolManagedCredential{}, fmt.Errorf("managed_credential.%w", err)
+	}
+	tokenBody, err := managedcredentialmodel.ParseTokenBodyKind(tokenRequestSyntax.Body)
+	if err != nil {
+		return ToolManagedCredential{}, fmt.Errorf("managed_credential.%w", err)
+	}
+	tokenRequest := admittedManagedTokenRequest{
+		clientAuth: tokenClientAuth,
+		body:       tokenBody,
+	}
+	if len(tokenRequestSyntax.StaticHeaders) > 0 {
+		tokenRequest.staticHeaders = make(map[string]string, len(tokenRequestSyntax.StaticHeaders))
+		for key, value := range tokenRequestSyntax.StaticHeaders {
+			tokenRequest.staticHeaders[key] = value
+		}
 	}
 	installationInput := strings.TrimSpace(ref.InstallationIDInput)
 	if installationInput != "" && !toolPathNamePattern.MatchString(installationInput) {
 		return ToolManagedCredential{}, fmt.Errorf("managed_credential.installation_id_input %q is invalid", ref.InstallationIDInput)
 	}
-	if grantType == managedcredentialmodel.GrantGitHubAppInstallation && installationInput == "" {
-		return ToolManagedCredential{}, fmt.Errorf("managed_credential.installation_id_input is required for grant_type %s", grantType)
+	if grantType == managedcredentialmodel.GrantTypeGitHubAppInstallation && installationInput == "" {
+		return ToolManagedCredential{}, fmt.Errorf("managed_credential.installation_id_input is required for grant_type %s", grantType.String())
 	}
-	if installationInput != "" && grantType != managedcredentialmodel.GrantGitHubAppInstallation {
+	if installationInput != "" && grantType != managedcredentialmodel.GrantTypeGitHubAppInstallation {
 		return ToolManagedCredential{}, fmt.Errorf("managed_credential.installation_id_input requires grant_type %s", managedcredentialmodel.GrantGitHubAppInstallation)
 	}
 	return ToolManagedCredential{value: &admittedManagedCredentialValue{
@@ -156,7 +180,7 @@ func (m ToolManagedCredential) GrantType() string {
 	if m.value == nil {
 		return ""
 	}
-	return m.value.grantType
+	return m.value.grantType.String()
 }
 
 func (m ToolManagedCredential) Scopes() []string {
@@ -170,16 +194,19 @@ func (m ToolManagedCredential) GrantModel() string {
 	if m.value == nil {
 		return ""
 	}
-	return m.value.grantModel
+	return m.value.grantModel.String()
 }
 
 func (m ToolManagedCredential) TokenRequest() managedcredentialmodel.TokenRequestProfile {
 	if m.value == nil {
 		return managedcredentialmodel.TokenRequestProfile{}
 	}
-	out := m.value.tokenRequest
-	out.StaticHeaders = make(map[string]string, len(m.value.tokenRequest.StaticHeaders))
-	for key, value := range m.value.tokenRequest.StaticHeaders {
+	out := managedcredentialmodel.TokenRequestProfile{
+		ClientAuth: m.value.tokenRequest.clientAuth.String(),
+		Body:       m.value.tokenRequest.body.String(),
+	}
+	out.StaticHeaders = make(map[string]string, len(m.value.tokenRequest.staticHeaders))
+	for key, value := range m.value.tokenRequest.staticHeaders {
 		out.StaticHeaders[key] = value
 	}
 	return out

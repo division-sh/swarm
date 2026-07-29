@@ -38,13 +38,21 @@ func TestCatalogGenerationIsSemanticAndOrderIndependent(t *testing.T) {
 	if !first.Generation().Valid() || !first.Generation().Equal(second.Generation()) {
 		t.Fatalf("generation ids = %q %q", first.Generation().Diagnostic(), second.Generation().Diagnostic())
 	}
-	b.Identity.ManifestHash = strings.Repeat("b", 64)
+	b.Identity.ManifestHash = "sha256:" + strings.Repeat("b", 64)
 	changed, err := NewCatalogSnapshot(a, b)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if changed.Generation().Equal(first.Generation()) {
 		t.Fatal("manifest identity change did not change catalog generation")
+	}
+}
+
+func TestCatalogSnapshotRejectsNonCanonicalManifestHashAtAdmission(t *testing.T) {
+	entry := admissionTestEntry(admissionTestManifest("acme", signatureTypeTokenEquality, true), "provider.acme")
+	entry.Identity.ManifestHash = strings.Repeat("a", 64)
+	if _, err := NewCatalogSnapshot(entry); err == nil || !strings.Contains(err.Error(), "canonical sha256") {
+		t.Fatalf("NewCatalogSnapshot error = %v, want canonical manifest-hash rejection", err)
 	}
 }
 
@@ -118,7 +126,7 @@ func TestPackAuthenticationTransitionRequiresNewExplicitTargetContract(t *testin
 		t.Fatal(err)
 	}
 	unsignedEntry := admissionTestEntry(admissionTestManifest("acme", "", false), "provider.acme")
-	unsignedEntry.Identity.ManifestHash = strings.Repeat("b", 64)
+	unsignedEntry.Identity.ManifestHash = "sha256:" + strings.Repeat("b", 64)
 	unsigned, err := NewCatalogSnapshot(unsignedEntry)
 	if err != nil {
 		t.Fatal(err)
@@ -317,7 +325,7 @@ func TestCompileAdmissionTeachingFailures(t *testing.T) {
 
 func admissionTestEntry(manifest Manifest, id string) CatalogEntry {
 	return CatalogEntry{
-		Identity: PackIdentity{ID: id, Version: "1.0.0", ManifestHash: strings.Repeat("a", 64), Provenance: "external"},
+		Identity: PackIdentity{ID: id, Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("a", 64), Provenance: "external"},
 		Manifest: manifest, Source: "test", SourcePath: "/tmp/" + id,
 	}
 }

@@ -159,6 +159,43 @@ func TestSemanticSourceCapabilitiesRejectIncompletePayloads(t *testing.T) {
 	if _, ok := capabilities.ConnectorImportSource("deliver"); ok {
 		t.Fatal("incomplete connector import source acquired capability")
 	}
+	if capabilities.ConnectorPackImportsApplied() {
+		t.Fatal("incomplete connector payload acquired imports-applied authority")
+	}
+
+	validGeneration := semanticCapabilityGeneration("connector-v1", nil)
+	capabilities = Capabilities{}.WithConnectorPackImports(
+		map[string]ConnectorGenerationSurface{"orphan": validGeneration},
+		map[string]ConnectorImportSource{"deliver": MustConnectorImportSource("pack://deliver")},
+	)
+	if capabilities.ConnectorPackImportsApplied() {
+		t.Fatal("generation without a matching imported tool acquired imports-applied authority")
+	}
+}
+
+func TestConnectorGenerationSurfaceRejectsNonCanonicalHashes(t *testing.T) {
+	permissions := []ConnectorGenerationPermission{MustConnectorGenerationPermission("messages.write", "owner")}
+	for _, hash := range []string{
+		strings.Repeat("a", 64),
+		"sha256:" + strings.Repeat("A", 64),
+		" sha256:" + strings.Repeat("a", 64),
+	} {
+		if _, err := NewConnectorGenerationSurface(
+			"v1",
+			"catalog/source.yaml",
+			hash,
+			"catalog/profile.yaml",
+			"sha256:"+strings.Repeat("b", 64),
+			"sha256:"+strings.Repeat("c", 64),
+			"messages.send",
+			permissions,
+			"fixture",
+			"passing",
+			"approved",
+		); err == nil {
+			t.Fatalf("non-canonical source hash %q was admitted", hash)
+		}
+	}
 }
 
 func semanticCapabilityGeneration(version string, permissions []ConnectorGenerationPermission) ConnectorGenerationSurface {

@@ -378,10 +378,6 @@ func DerivedRequires(manifest ConnectorManifest) packs.Requires {
 	for _, toolID := range manifestToolNames(manifest) {
 		tool := manifest.Tools[toolID]
 		for _, credential := range tool.Credentials() {
-			credential = strings.TrimSpace(credential)
-			if credential == "" {
-				continue
-			}
 			if _, exists := seenSecrets[credential]; exists {
 				continue
 			}

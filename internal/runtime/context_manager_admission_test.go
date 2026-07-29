@@ -131,7 +131,7 @@ func TestRuntimeContextManagerPublishesOneAdmissionGenerationAcrossAllContexts(t
 		if subject.Applicability != "effective" || subject.TriggerAdmission == nil {
 			continue
 		}
-		if subject.TriggerAdmission.Pack == nil || subject.TriggerAdmission.Pack.ManifestHash != strings.Repeat("b", 64) {
+		if subject.TriggerAdmission.Pack == nil || subject.TriggerAdmission.Pack.ManifestHash != "sha256:"+strings.Repeat("b", 64) {
 			t.Fatalf("effective subject retained stale pack identity: %#v", subject)
 		}
 	}
@@ -906,7 +906,7 @@ func runtimeAdmissionTestCatalog(t *testing.T, hashToken string) *providertrigge
 	}
 	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{
 		Identity: providertriggers.PackIdentity{
-			ID: "provider.acme", Version: "1.0.0", ManifestHash: strings.Repeat(hashToken, 64), Provenance: packs.ProvenanceExternal,
+			ID: "provider.acme", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat(hashToken, 64), Provenance: packs.ProvenanceExternal,
 		},
 		Manifest: manifest, Source: "test", SourcePath: "/packs/acme",
 	})
@@ -927,7 +927,7 @@ func runtimeAdmissionUnsignedTestCatalog(t *testing.T, hashToken string) *provid
 	}
 	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{
 		Identity: providertriggers.PackIdentity{
-			ID: "provider.acme", Version: "1.0.0", ManifestHash: strings.Repeat(hashToken, 64), Provenance: packs.ProvenanceExternal,
+			ID: "provider.acme", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat(hashToken, 64), Provenance: packs.ProvenanceExternal,
 		},
 		Manifest: manifest, Source: "test", SourcePath: "/packs/acme",
 	})

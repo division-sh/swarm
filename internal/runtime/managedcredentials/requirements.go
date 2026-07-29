@@ -61,10 +61,9 @@ func appendToolRequirements(index map[string][]Requirement, source semanticview.
 			continue
 		}
 		storeKey, mapped := semanticview.CredentialStoreKeyForFlow(source, flowID, key)
-		if mapped && strings.TrimSpace(storeKey) == "" {
+		if mapped && storeKey == "" {
 			continue
 		}
-		storeKey = strings.TrimSpace(storeKey)
 		if storeKey == "" {
 			continue
 		}

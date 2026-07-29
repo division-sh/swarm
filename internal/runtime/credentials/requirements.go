@@ -62,15 +62,10 @@ func appendToolRequirements(index map[string][]Requirement, source semanticview.
 			continue
 		}
 		for _, key := range entry.Credentials() {
-			key = strings.TrimSpace(key)
-			if key == "" {
-				continue
-			}
 			storeKey, mapped := semanticview.CredentialStoreKeyForFlow(source, flowID, key)
-			if mapped && strings.TrimSpace(storeKey) == "" {
+			if mapped && storeKey == "" {
 				continue
 			}
-			storeKey = strings.TrimSpace(storeKey)
 			if storeKey == "" {
 				continue
 			}
@@ -98,10 +93,9 @@ func appendPolicyCredentialRequirement(index map[string][]Requirement, source se
 		return
 	}
 	storeKey, mapped := semanticview.CredentialStoreKeyForFlow(source, flowID, key)
-	if mapped && strings.TrimSpace(storeKey) == "" {
+	if mapped && storeKey == "" {
 		return
 	}
-	storeKey = strings.TrimSpace(storeKey)
 	if storeKey == "" {
 		return
 	}

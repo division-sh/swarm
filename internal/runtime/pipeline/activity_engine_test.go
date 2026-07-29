@@ -475,6 +475,33 @@ func TestActivityHTTPAppliesConnectorThenChannelResultProjection(t *testing.T) {
 	}
 }
 
+func TestActivityHTTPRejectsProviderOutputOutsideAdmittedSchemaWithoutCompiledResult(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ok":"not-a-boolean"}`)
+	}))
+	defer server.Close()
+	output := runtimecontracts.MustToolInputSchema(
+		runtimecontracts.ToolSchemaObject,
+		runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+			"ok": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaBoolean),
+		}),
+		runtimecontracts.ToolSchemaRequired("ok"),
+	)
+	_, err := executePreparedActivityHTTPTool(context.Background(), preparedActivityHTTPTool{
+		toolName:     "schema_probe",
+		method:       http.MethodPost,
+		url:          server.URL,
+		timeout:      time.Second,
+		client:       server.Client(),
+		outputSchema: output,
+	})
+	failure, ok := runtimefailures.As(err)
+	if err == nil || !ok || failure.Failure.Detail.Code != "provider_response_schema_invalid" {
+		t.Fatalf("failure = %#v, want provider_response_schema_invalid", failure)
+	}
+}
+
 func admittedActivityResponseSuccess(t *testing.T, policy runtimecontracts.HTTPResponseSuccess) runtimecontracts.ToolResponseSuccessPolicy {
 	t.Helper()
 	owner := runtimecontracts.MustToolSchemaEntry(

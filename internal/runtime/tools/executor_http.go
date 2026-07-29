@@ -159,10 +159,9 @@ func (e *Executor) resolveManagedCredentialForActor(ctx context.Context, actor m
 	e.mu.RUnlock()
 	flowID := emitActorFlowID(source, actor, "")
 	storeKey, mapped := semanticview.CredentialStoreKeyForActorFlow(source, actor.ID, flowID, key)
-	if mapped && strings.TrimSpace(storeKey) == "" {
+	if mapped && storeKey == "" {
 		return nil, fmt.Errorf("managed credential %q is not declared and bound for imported package actor %s", key, strings.TrimSpace(actor.ID))
 	}
-	storeKey = strings.TrimSpace(storeKey)
 	if storeKey == "" {
 		return nil, fmt.Errorf("managed credential %q does not resolve to a deployment credential key", key)
 	}
@@ -273,20 +272,24 @@ func (e *Executor) execHTTPRequestOnce(ctx context.Context, method, url string, 
 			return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "http_tool_result_effect_outcome_unconfirmed", "tool-executor", "validate_http_response", map[string]any{"tool": toolName, "status": resp.StatusCode}, cause)
 		}
 	}
-	if !hasResponseMapping {
-		if err := attempt.Succeed(ctx, map[string]any{"status": resp.StatusCode, "response_fingerprint": runtimeeffects.Fingerprint(rawBody)}); err != nil {
-			return nil, err
+	result := parsedBody
+	if hasResponseMapping {
+		mapped, err := responseMapping.Render(responseEnv)
+		if err != nil {
+			return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "http_tool_result_effect_outcome_unconfirmed", "tool-executor", "map_response", map[string]any{"tool": toolName, "status": resp.StatusCode}, err)
 		}
-		return parsedBody, nil
+		result = mapped
 	}
-	mapped, err := responseMapping.Render(responseEnv)
-	if err != nil {
-		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "http_tool_result_effect_outcome_unconfirmed", "tool-executor", "map_response", map[string]any{"tool": toolName, "status": resp.StatusCode}, err)
+	if !tool.value.outputSchema.IsZero() {
+		if err := tool.value.outputSchema.Validate(result); err != nil {
+			cause := runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "provider_response_schema_invalid", "tool-executor", "validate_projected_response", map[string]any{"tool": toolName, "status": resp.StatusCode}, err)
+			return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "http_tool_result_effect_outcome_unconfirmed", "tool-executor", "validate_projected_response", map[string]any{"tool": toolName, "status": resp.StatusCode}, cause)
+		}
 	}
 	if err := attempt.Succeed(ctx, map[string]any{"status": resp.StatusCode, "response_fingerprint": runtimeeffects.Fingerprint(rawBody)}); err != nil {
 		return nil, err
 	}
-	return mapped, nil
+	return result, nil
 }
 
 func (e *Executor) execMCPTool(ctx context.Context, actor models.AgentConfig, tool ExecutionTool, input any) (any, error) {
@@ -306,7 +309,7 @@ func (e *Executor) execMCPTool(ctx context.Context, actor models.AgentConfig, to
 	flowID := emitActorFlowID(source, actor, "")
 	return e.mcpClient.CallWithCredentialKeyResolver(ctx, tool.Name(), input, func(key string) (string, error) {
 		storeKey, mapped := semanticview.CredentialStoreKeyForActorFlow(source, actor.ID, flowID, key)
-		if mapped && strings.TrimSpace(storeKey) == "" {
+		if mapped && storeKey == "" {
 			return "", fmt.Errorf("credential %q is not declared and bound for imported package actor %s", key, strings.TrimSpace(actor.ID))
 		}
 		return storeKey, nil
@@ -324,7 +327,7 @@ func (e *Executor) resolveToolCredentialsForActor(ctx context.Context, actor mod
 	flowID := emitActorFlowID(source, actor, "")
 	return e.resolveToolCredentialsWithMapper(ctx, keys, func(key string) (string, error) {
 		storeKey, mapped := semanticview.CredentialStoreKeyForActorFlow(source, actor.ID, flowID, key)
-		if mapped && strings.TrimSpace(storeKey) == "" {
+		if mapped && storeKey == "" {
 			return "", fmt.Errorf("credential %q is not declared and bound for imported package actor %s", key, strings.TrimSpace(actor.ID))
 		}
 		return storeKey, nil
@@ -334,15 +337,10 @@ func (e *Executor) resolveToolCredentialsForActor(ctx context.Context, actor mod
 func (e *Executor) resolveToolCredentialsWithMapper(ctx context.Context, keys []string, mapKey func(string) (string, error)) (map[string]any, error) {
 	out := make(map[string]any, len(keys))
 	for _, key := range keys {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
 		storeKey, err := mapKey(key)
 		if err != nil {
 			return nil, err
 		}
-		storeKey = strings.TrimSpace(storeKey)
 		if storeKey == "" {
 			return nil, fmt.Errorf("credential %q does not resolve to a deployment credential key", key)
 		}

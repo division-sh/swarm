@@ -1229,10 +1229,12 @@ func executePreparedActivityHTTPTool(ctx context.Context, prepared preparedActiv
 			}
 			result = mapped
 		}
-		if prepared.hasCompiledResult {
+		if !prepared.outputSchema.IsZero() {
 			if err := prepared.outputSchema.Validate(result); err != nil {
 				return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "provider_response_schema_invalid", "activity-runtime", "validate_projected_response", map[string]any{"tool": prepared.toolName, "status": resp.StatusCode}, redactActivityError(err, prepared.secrets))
 			}
+		}
+		if prepared.hasCompiledResult {
 			projected, err := prepared.compiledResult.Project(result)
 			if err != nil {
 				return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "channel_result_projection_failed", "activity-runtime", "project_channel_result", map[string]any{"tool": prepared.toolName, "status": resp.StatusCode}, err)
@@ -1328,10 +1330,9 @@ func (d pipelineActivityDispatcher) resolveActivityManagedCredential(ctx context
 	}
 	flowID := intent.FlowID.String()
 	storeKey, mapped := semanticview.CredentialStoreKeyForFlow(source, flowID, key)
-	if mapped && strings.TrimSpace(storeKey) == "" {
+	if mapped && storeKey == "" {
 		return nil, fmt.Errorf("managed credential %q is not declared and bound for imported package flow %s", key, flowID)
 	}
-	storeKey = strings.TrimSpace(storeKey)
 	if storeKey == "" {
 		return nil, fmt.Errorf("managed credential %q does not resolve to a deployment credential key", key)
 	}
@@ -1427,15 +1428,10 @@ func (d pipelineActivityDispatcher) resolveActivityToolCredentials(ctx context.C
 	}
 	flowID := intent.FlowID.String()
 	for _, key := range keys {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
 		storeKey, mapped := semanticview.CredentialStoreKeyForFlow(source, flowID, key)
-		if mapped && strings.TrimSpace(storeKey) == "" {
+		if mapped && storeKey == "" {
 			return nil, nil, fmt.Errorf("credential %q is not declared and bound for imported package flow %s", key, flowID)
 		}
-		storeKey = strings.TrimSpace(storeKey)
 		if storeKey == "" {
 			return nil, nil, fmt.Errorf("credential %q does not resolve to a deployment credential key", key)
 		}

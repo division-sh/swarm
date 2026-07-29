@@ -3,7 +3,7 @@ lookup_data:
   handler_type: http
   http:
     method: GET
-    url: /api/v2/lookup
+    url: https://example.test/api/v2/lookup
   input_schema:
     type: object
     properties:

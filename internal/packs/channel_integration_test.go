@@ -1029,7 +1029,7 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 	}
 	channel := packs.LoadedChannelPack{
 		Envelope: packs.Envelope{
-			ID: "provider.mock.hitl_channel", Type: packs.TypeChannel, Version: "0.1.0", ManifestHash: "sha256:mock-channel",
+			ID: "provider.mock.hitl_channel", Type: packs.TypeChannel, Version: "0.1.0", ManifestHash: "sha256:" + strings.Repeat("a", 64),
 			Implements: []string{"swarm.hitl-channel/v1"}, Provenance: packs.Provenance{Source: "external"},
 			Requires: packs.Requires{Packs: map[string]string{packs.TypeTrigger: "provider.mock", packs.TypeConnector: "provider.mock.connector"}},
 		},
@@ -1058,7 +1058,7 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 		return fields
 	}
 	trigger := packs.TriggerPackDescriptor{
-		Identity: packs.MustPackIdentity("provider.mock", "0.1.0", "sha256:mock-trigger", packs.TypeTrigger, packs.MustPackSource("test", "mock-trigger")), Provider: "mock",
+		Identity: packs.MustPackIdentity("provider.mock", "0.1.0", "sha256:"+strings.Repeat("b", 64), packs.TypeTrigger, packs.MustPackSource("test", "mock-trigger")), Provider: "mock",
 		Generation: triggergeneration.FromCanonicalBytes([]byte("mock-trigger-generation")),
 		Events: map[string]packs.TriggerEvent{
 			"mock.action": {Name: "mock.action", Fields: triggerFields("token", "cursor", "principal", "room", "message_ref")},
@@ -1066,7 +1066,7 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 		},
 	}
 	connector := packs.ConnectorPackDescriptor{
-		Identity: packs.MustPackIdentity("provider.mock.connector", "0.1.0", "sha256:mock-connector", packs.TypeConnector, packs.MustPackSource("test", "mock-connector")),
+		Identity: packs.MustPackIdentity("provider.mock.connector", "0.1.0", "sha256:"+strings.Repeat("c", 64), packs.TypeConnector, packs.MustPackSource("test", "mock-connector")),
 		Provider: "mock", Tools: connectorTools,
 	}
 	return channel, trigger, connector

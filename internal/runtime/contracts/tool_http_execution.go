@@ -24,7 +24,20 @@ var (
 
 type toolValuePath struct {
 	syntax   string
-	segments []string
+	segments []toolPathSegment
+}
+
+type toolPathSegmentKind uint8
+
+const (
+	toolPathProperty toolPathSegmentKind = iota + 1
+	toolPathIndex
+)
+
+type toolPathSegment struct {
+	kind  toolPathSegmentKind
+	name  string
+	index uint32
 }
 
 func compileToolValuePath(raw string, requiredRoot string) (toolValuePath, error) {
@@ -32,7 +45,7 @@ func compileToolValuePath(raw string, requiredRoot string) (toolValuePath, error
 	if raw == "" {
 		return toolValuePath{}, fmt.Errorf("path is required")
 	}
-	segments := make([]string, 0, 4)
+	segments := make([]toolPathSegment, 0, 4)
 	for cursor := 0; cursor < len(raw); {
 		switch raw[cursor] {
 		case '.':
@@ -44,11 +57,15 @@ func compileToolValuePath(raw string, requiredRoot string) (toolValuePath, error
 			}
 			end += cursor + 1
 			index := raw[cursor+1 : end]
-			if _, err := strconv.ParseUint(index, 10, 32); err != nil {
+			parsed, err := strconv.ParseUint(index, 10, 32)
+			if err != nil || strconv.FormatUint(parsed, 10) != index {
 				return toolValuePath{}, fmt.Errorf("path %q contains invalid index %q", raw, index)
 			}
-			segments = append(segments, index)
+			segments = append(segments, toolPathSegment{kind: toolPathIndex, index: uint32(parsed)})
 			cursor = end + 1
+			if cursor < len(raw) && raw[cursor] != '.' && raw[cursor] != '[' {
+				return toolValuePath{}, fmt.Errorf("path %q requires a separator after index", raw)
+			}
 		default:
 			end := cursor
 			for end < len(raw) && raw[end] != '.' && raw[end] != '[' {
@@ -58,7 +75,7 @@ func compileToolValuePath(raw string, requiredRoot string) (toolValuePath, error
 			if !toolPathNamePattern.MatchString(segment) {
 				return toolValuePath{}, fmt.Errorf("path %q contains invalid segment %q", raw, segment)
 			}
-			segments = append(segments, segment)
+			segments = append(segments, toolPathSegment{kind: toolPathProperty, name: segment})
 			cursor = end
 		}
 		if cursor < len(raw) && raw[cursor] == '.' {
@@ -68,7 +85,7 @@ func compileToolValuePath(raw string, requiredRoot string) (toolValuePath, error
 			}
 		}
 	}
-	if len(segments) == 0 || requiredRoot != "" && segments[0] != requiredRoot {
+	if len(segments) == 0 || requiredRoot != "" && (segments[0].kind != toolPathProperty || segments[0].name != requiredRoot) {
 		return toolValuePath{}, fmt.Errorf("path %q must start with %s.", raw, requiredRoot)
 	}
 	return toolValuePath{syntax: raw, segments: segments}, nil
@@ -77,21 +94,25 @@ func compileToolValuePath(raw string, requiredRoot string) (toolValuePath, error
 func (p toolValuePath) lookup(root any) (any, bool) {
 	current := root
 	for _, segment := range p.segments {
-		switch typed := current.(type) {
-		case map[string]any:
-			next, ok := typed[segment]
+		switch segment.kind {
+		case toolPathProperty:
+			typed, ok := current.(map[string]any)
+			if !ok {
+				return nil, false
+			}
+			next, ok := typed[segment.name]
 			if !ok {
 				return nil, false
 			}
 			current = next
-		case []any:
-			index, err := strconv.Atoi(segment)
-			if err != nil || index < 0 || index >= len(typed) {
+		case toolPathIndex:
+			typed, ok := current.([]any)
+			if !ok || int(segment.index) >= len(typed) {
 				return nil, false
 			}
-			current = typed[index]
+			current = typed[segment.index]
 		default:
-			return nil, false
+			panic("admitted tool path contains unsupported segment")
 		}
 	}
 	return current, true
@@ -103,10 +124,13 @@ func (p toolValuePath) set(root map[string]any, value any) error {
 	}
 	current := root
 	for _, segment := range p.segments[:len(p.segments)-1] {
-		next, exists := current[segment]
+		if segment.kind != toolPathProperty {
+			return fmt.Errorf("target path %q cannot construct an array index", p.syntax)
+		}
+		next, exists := current[segment.name]
 		if !exists {
 			object := map[string]any{}
-			current[segment] = object
+			current[segment.name] = object
 			current = object
 			continue
 		}
@@ -117,10 +141,13 @@ func (p toolValuePath) set(root map[string]any, value any) error {
 		current = object
 	}
 	leaf := p.segments[len(p.segments)-1]
-	if _, exists := current[leaf]; exists {
+	if leaf.kind != toolPathProperty {
+		return fmt.Errorf("target path %q cannot construct an array index", p.syntax)
+	}
+	if _, exists := current[leaf.name]; exists {
 		return fmt.Errorf("target path %q is assigned more than once", p.syntax)
 	}
-	current[leaf] = value
+	current[leaf.name] = value
 	return nil
 }
 
@@ -169,7 +196,7 @@ func compileToolTemplate(raw string, allowedRoots ...string) (toolTemplate, erro
 		if len(allowedRoots) > 0 {
 			allowed := false
 			for _, root := range allowedRoots {
-				if path.segments[0] == root {
+				if path.segments[0].kind == toolPathProperty && path.segments[0].name == root {
 					allowed = true
 					break
 				}
@@ -438,6 +465,15 @@ func compileHTTPToolSpec(spec HTTPToolSpec) (compiledHTTPToolSpec, error) {
 	if err != nil {
 		return compiledHTTPToolSpec{}, fmt.Errorf("http.url: %w", err)
 	}
+	if len(urlTemplate.parts) == 0 {
+		if _, err := parseToolHTTPURL(rawURL); err != nil {
+			return compiledHTTPToolSpec{}, fmt.Errorf("http.url: %w", err)
+		}
+	} else if !urlTemplate.whole {
+		if err := validateTemplatedToolHTTPURLShape(rawURL); err != nil {
+			return compiledHTTPToolSpec{}, fmt.Errorf("http.url: %w", err)
+		}
+	}
 	headers := make(map[string]toolTemplate, len(spec.Headers))
 	seenHeaders := make(map[string]struct{}, len(spec.Headers))
 	for rawName, rawValue := range spec.Headers {
@@ -459,7 +495,13 @@ func compileHTTPToolSpec(spec HTTPToolSpec) (compiledHTTPToolSpec, error) {
 	}
 	staticHost := ""
 	if parsed, parseErr := url.Parse(rawURL); parseErr == nil {
-		staticHost = strings.TrimSpace(parsed.Host)
+		switch strings.ToLower(parsed.Scheme) {
+		case "http", "https":
+			staticHost = strings.TrimSpace(parsed.Host)
+		case "":
+		default:
+			return compiledHTTPToolSpec{}, fmt.Errorf("http.url scheme %q is unsupported", parsed.Scheme)
+		}
 	}
 	compiled := compiledHTTPToolSpec{method: method, url: urlTemplate, staticHost: staticHost, headers: headers, timeoutSeconds: spec.TimeoutSeconds}
 	if spec.TimeoutSeconds < 0 {
@@ -475,6 +517,32 @@ func compileHTTPToolSpec(spec HTTPToolSpec) (compiledHTTPToolSpec, error) {
 	return compiled, nil
 }
 
+func validateTemplatedToolHTTPURLShape(raw string) error {
+	lower := strings.ToLower(raw)
+	prefixLength := 0
+	switch {
+	case strings.HasPrefix(lower, "http://"):
+		prefixLength = len("http://")
+	case strings.HasPrefix(lower, "https://"):
+		prefixLength = len("https://")
+	default:
+		if strings.HasPrefix(raw, "{{") {
+			// A leading value may supply the scheme or complete base URL. The
+			// prepared request still undergoes absolute HTTP(S) validation.
+			return nil
+		}
+		return fmt.Errorf("templated URL must use a literal http:// or https:// prefix, or start with a template-supplied scheme/base URL")
+	}
+	authority := raw[prefixLength:]
+	if end := strings.IndexAny(authority, "/?#"); end >= 0 {
+		authority = authority[:end]
+	}
+	if authority == "" {
+		return fmt.Errorf("absolute URL host is required")
+	}
+	return nil
+}
+
 func (e ToolHTTPExecution) Prepare(input, credentials map[string]any) (PreparedToolHTTPRequest, error) {
 	if e.value == nil {
 		return PreparedToolHTTPRequest{}, fmt.Errorf("HTTP execution plan is missing")
@@ -488,7 +556,7 @@ func (e ToolHTTPExecution) Prepare(input, credentials map[string]any) (PreparedT
 	if resolvedURL == "" {
 		return PreparedToolHTTPRequest{}, fmt.Errorf("http.url resolved to an empty value")
 	}
-	if _, err := url.ParseRequestURI(resolvedURL); err != nil {
+	if _, err := parseToolHTTPURL(resolvedURL); err != nil {
 		return PreparedToolHTTPRequest{}, fmt.Errorf("http.url resolved to an invalid URL: %w", err)
 	}
 	headers := make(http.Header, len(e.value.headers))
@@ -525,6 +593,22 @@ func (e ToolHTTPExecution) Prepare(input, credentials map[string]any) (PreparedT
 	return PreparedToolHTTPRequest{
 		method: e.value.method, url: resolvedURL, headers: headers, body: body, timeout: timeout,
 	}, nil
+}
+
+func parseToolHTTPURL(raw string) (*url.URL, error) {
+	parsed, err := url.ParseRequestURI(strings.TrimSpace(raw))
+	if err != nil {
+		return nil, err
+	}
+	if parsed.Host == "" {
+		return nil, fmt.Errorf("absolute URL host is required")
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https":
+		return parsed, nil
+	default:
+		return nil, fmt.Errorf("URL scheme must be http or https")
+	}
 }
 
 func (e ToolHTTPExecution) syntax() HTTPToolSpec {
@@ -567,6 +651,98 @@ func compileToolResponseMapping(mapping map[string]any) (ToolResponseMapping, er
 		return ToolResponseMapping{}, fmt.Errorf("response_mapping must be an object")
 	}
 	return ToolResponseMapping{value: &compiled}, nil
+}
+
+func (m ToolResponseMapping) validateOutputShape(schema ToolInputSchema) error {
+	if m.value == nil {
+		return fmt.Errorf("response mapping is missing")
+	}
+	if schema.IsZero() {
+		return nil
+	}
+	if err := validateCompiledToolTemplateShape("response_mapping", *m.value, schema); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateCompiledToolTemplateShape(path string, value compiledToolTemplateValue, schema ToolInputSchema) error {
+	if !value.hasDynamicTemplate() {
+		if err := schema.Validate(value.syntaxValue()); err != nil {
+			return fmt.Errorf("%s is incompatible with output_schema: %w", path, err)
+		}
+		return nil
+	}
+	if value.template != nil {
+		return nil
+	}
+	if schema.Kind() == ToolSchemaAny {
+		return nil
+	}
+	switch {
+	case value.object != nil:
+		if schema.Kind() != ToolSchemaObject {
+			return fmt.Errorf("%s produces object but output_schema requires %s", path, schema.Kind())
+		}
+		for _, name := range schema.RequiredProperties() {
+			if _, ok := value.object[name]; !ok {
+				return fmt.Errorf("%s omits required output property %q", path, name)
+			}
+		}
+		for name, member := range value.object {
+			property, ok := schema.Property(name)
+			if !ok {
+				if additional, allowed := schema.AdditionalPropertiesSchema(); allowed {
+					property = additional
+				} else if allowed, declared := schema.AdditionalPropertiesAllowed(); declared && !allowed {
+					return fmt.Errorf("%s.%s is forbidden by output_schema", path, name)
+				} else {
+					continue
+				}
+			}
+			if err := validateCompiledToolTemplateShape(path+"."+name, member, property); err != nil {
+				return err
+			}
+		}
+	case value.array != nil:
+		if schema.Kind() != ToolSchemaArray {
+			return fmt.Errorf("%s produces array but output_schema requires %s", path, schema.Kind())
+		}
+		if minimum, ok := schema.MinItems(); ok && len(value.array) < minimum {
+			return fmt.Errorf("%s produces %d items but output_schema requires at least %d", path, len(value.array), minimum)
+		}
+		if maximum, ok := schema.MaxItems(); ok && len(value.array) > maximum {
+			return fmt.Errorf("%s produces %d items but output_schema permits at most %d", path, len(value.array), maximum)
+		}
+		if items, ok := schema.ItemsSchema(); ok {
+			for index, member := range value.array {
+				if err := validateCompiledToolTemplateShape(fmt.Sprintf("%s[%d]", path, index), member, items); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (v compiledToolTemplateValue) hasDynamicTemplate() bool {
+	switch {
+	case v.template != nil:
+		return true
+	case v.object != nil:
+		for _, member := range v.object {
+			if member.hasDynamicTemplate() {
+				return true
+			}
+		}
+	case v.array != nil:
+		for _, member := range v.array {
+			if member.hasDynamicTemplate() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (m ToolResponseMapping) Render(response map[string]any) (any, error) {
@@ -732,9 +908,15 @@ type ToolCompiledResultProjection struct {
 	value *compiledResultProjectionValue
 }
 
-func compileToolResultProjection(result CompiledResultProjection) (compiledResultProjectionValue, error) {
+func compileToolResultProjection(result CompiledResultProjection, sourceSchema ToolInputSchema) (compiledResultProjectionValue, error) {
+	if err := sourceSchema.ValidateDefinition(); err != nil {
+		return compiledResultProjectionValue{}, fmt.Errorf("compiled result source schema: %w", err)
+	}
 	if err := result.OutputSchema.ValidateDefinition(); err != nil {
-		return compiledResultProjectionValue{}, err
+		return compiledResultProjectionValue{}, fmt.Errorf("compiled result output schema: %w", err)
+	}
+	if result.OutputSchema.Kind() != ToolSchemaObject {
+		return compiledResultProjectionValue{}, fmt.Errorf("compiled result output schema must be an object")
 	}
 	targets := make([]string, 0, len(result.Fields))
 	for target := range result.Fields {
@@ -747,6 +929,9 @@ func compileToolResultProjection(result CompiledResultProjection) (compiledResul
 		if err != nil {
 			return compiledResultProjectionValue{}, fmt.Errorf("compiled result target %q: %w", rawTarget, err)
 		}
+		if toolPathContainsIndex(target) {
+			return compiledResultProjectionValue{}, fmt.Errorf("compiled result target %q cannot construct an array index", target.syntax)
+		}
 		source, err := compileToolValuePath(result.Fields[rawTarget].From, "result")
 		if err != nil {
 			return compiledResultProjectionValue{}, fmt.Errorf("compiled result source for %q: %w", rawTarget, err)
@@ -758,7 +943,151 @@ func compileToolResultProjection(result CompiledResultProjection) (compiledResul
 		}
 		fields = append(fields, compiledToolResultField{target: target, source: source})
 	}
+	for _, field := range fields {
+		sourceField, ok := guaranteedToolSchemaAtValuePath(sourceSchema, field.source, 1)
+		if !ok {
+			return compiledResultProjectionValue{}, fmt.Errorf("compiled result source %q is not guaranteed by the admitted source schema", field.source.syntax)
+		}
+		targetField, ok := toolSchemaAtValuePath(result.OutputSchema, field.target, 0)
+		if !ok {
+			return compiledResultProjectionValue{}, fmt.Errorf("compiled result target %q is absent from the admitted output schema", field.target.syntax)
+		}
+		if err := sourceField.ValidateAssignableTo("compiled result "+field.source.syntax+" -> "+field.target.syntax, targetField); err != nil {
+			return compiledResultProjectionValue{}, err
+		}
+	}
+	for _, required := range requiredToolSchemaValuePaths(result.OutputSchema, nil) {
+		covered := false
+		for _, field := range fields {
+			if toolPathsOverlap(field.target, required) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return compiledResultProjectionValue{}, fmt.Errorf("compiled result required target %q is not assigned", required.syntax)
+		}
+	}
 	return compiledResultProjectionValue{fields: fields, outputSchema: result.OutputSchema}, nil
+}
+
+func toolPathContainsIndex(path toolValuePath) bool {
+	for _, segment := range path.segments {
+		if segment.kind == toolPathIndex {
+			return true
+		}
+	}
+	return false
+}
+
+func toolSchemaAtValuePath(schema ToolInputSchema, path toolValuePath, offset int) (ToolInputSchema, bool) {
+	if offset < 0 || offset > len(path.segments) {
+		return ToolInputSchema{}, false
+	}
+	current := schema
+	for _, segment := range path.segments[offset:] {
+		switch segment.kind {
+		case toolPathProperty:
+			if current.Kind() != ToolSchemaObject {
+				return ToolInputSchema{}, false
+			}
+			property, ok := current.Property(segment.name)
+			if !ok {
+				property, ok = current.AdditionalPropertiesSchema()
+			}
+			if !ok {
+				return ToolInputSchema{}, false
+			}
+			current = property
+		case toolPathIndex:
+			if current.Kind() != ToolSchemaArray {
+				return ToolInputSchema{}, false
+			}
+			items, ok := current.ItemsSchema()
+			if !ok {
+				return ToolInputSchema{}, false
+			}
+			current = items
+		default:
+			panic("admitted tool path contains unsupported segment")
+		}
+	}
+	return current, true
+}
+
+func guaranteedToolSchemaAtValuePath(schema ToolInputSchema, path toolValuePath, offset int) (ToolInputSchema, bool) {
+	if offset < 0 || offset > len(path.segments) {
+		return ToolInputSchema{}, false
+	}
+	current := schema
+	for _, segment := range path.segments[offset:] {
+		switch segment.kind {
+		case toolPathProperty:
+			if current.Kind() != ToolSchemaObject || !current.IsRequired(segment.name) {
+				return ToolInputSchema{}, false
+			}
+			property, ok := current.Property(segment.name)
+			if !ok {
+				return ToolInputSchema{}, false
+			}
+			current = property
+		case toolPathIndex:
+			if current.Kind() != ToolSchemaArray {
+				return ToolInputSchema{}, false
+			}
+			minimum, constrained := current.MinItems()
+			if !constrained || minimum <= int(segment.index) {
+				return ToolInputSchema{}, false
+			}
+			items, ok := current.ItemsSchema()
+			if !ok {
+				return ToolInputSchema{}, false
+			}
+			current = items
+		default:
+			panic("admitted tool path contains unsupported segment")
+		}
+	}
+	return current, true
+}
+
+func requiredToolSchemaValuePaths(schema ToolInputSchema, prefix []toolPathSegment) []toolValuePath {
+	if schema.Kind() != ToolSchemaObject {
+		return nil
+	}
+	var out []toolValuePath
+	for _, name := range schema.RequiredProperties() {
+		property, ok := schema.Property(name)
+		if !ok {
+			continue
+		}
+		segments := append(append([]toolPathSegment(nil), prefix...), toolPathSegment{kind: toolPathProperty, name: name})
+		children := requiredToolSchemaValuePaths(property, segments)
+		if len(children) == 0 {
+			out = append(out, toolValuePath{syntax: toolPathSyntax(segments), segments: segments})
+			continue
+		}
+		out = append(out, children...)
+	}
+	return out
+}
+
+func toolPathSyntax(segments []toolPathSegment) string {
+	var builder strings.Builder
+	for _, segment := range segments {
+		switch segment.kind {
+		case toolPathProperty:
+			if builder.Len() > 0 {
+				builder.WriteByte('.')
+			}
+			builder.WriteString(segment.name)
+		case toolPathIndex:
+			builder.WriteByte('[')
+			builder.WriteString(strconv.FormatUint(uint64(segment.index), 10))
+			builder.WriteByte(']')
+		}
+	}
+	return builder.String()
 }
 
 func toolPathsOverlap(left, right toolValuePath) bool {

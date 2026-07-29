@@ -316,7 +316,7 @@ func TestAdmittedToolExecutionContractIsOpaqueAndMutationProof(t *testing.T) {
 
 	headers := map[string]string{"X-Test": "one"}
 	body := map[string]any{"nested": []any{"one"}}
-	mapping := map[string]any{"state": map[string]any{"from": "result.state"}}
+	mapping := map[string]any{"state": "{{response.body.state}}"}
 	fields := map[string]CompiledResultField{"state": {From: "result.state"}}
 	credentials := []string{"token"}
 	entry := MustToolSchemaEntry(
@@ -330,7 +330,7 @@ func TestAdmittedToolExecutionContractIsOpaqueAndMutationProof(t *testing.T) {
 	)
 	headers["X-Test"] = "changed"
 	body["nested"].([]any)[0] = "changed"
-	mapping["state"].(map[string]any)["from"] = "changed"
+	mapping["state"] = "changed"
 	fields["state"] = CompiledResultField{From: "changed"}
 	credentials[0] = "changed"
 
@@ -340,7 +340,7 @@ func TestAdmittedToolExecutionContractIsOpaqueAndMutationProof(t *testing.T) {
 	compiled, _ := entry.CompiledResult()
 	entryCredentials := entry.Credentials()
 	httpSpec.Headers["X-Test"] = "changed-again"
-	responseMapping["state"].(map[string]any)["from"] = "changed-again"
+	responseMapping["state"] = "changed-again"
 	compiled.Fields["state"] = CompiledResultField{From: "changed-again"}
 	entryCredentials[0] = "changed-again"
 
@@ -350,7 +350,7 @@ func TestAdmittedToolExecutionContractIsOpaqueAndMutationProof(t *testing.T) {
 	compiled, _ = entry.CompiledResult()
 	if httpSpec.Headers["X-Test"] != "one" ||
 		httpSpec.Body.(map[string]any)["nested"].([]any)[0] != "one" ||
-		responseMapping["state"].(map[string]any)["from"] != "result.state" ||
+		responseMapping["state"] != "{{response.body.state}}" ||
 		responseSuccess.Equals != true ||
 		entry.Credentials()[0] != "token" ||
 		compiled.Fields["state"].From != "result.state" {

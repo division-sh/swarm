@@ -105,7 +105,8 @@ type GeneratorInjectedInput struct {
 }
 
 type GeneratorOutput struct {
-	Type string `yaml:"type"`
+	Type      string `yaml:"type"`
+	ItemsType string `yaml:"items_type,omitempty"`
 }
 
 type GeneratorFixtureRef struct {
@@ -278,8 +279,16 @@ func (o GeneratorOperation) Validate(provider string) error {
 		}
 		seenPermissions[permissionID] = struct{}{}
 	}
-	if strings.TrimSpace(o.Output.Type) != "object" {
-		return fmt.Errorf("%s output.type must be object in the first slice", context)
+	outputKind, err := generatedToolSchemaKind(o.Output.Type)
+	if err != nil {
+		return fmt.Errorf("%s output: %w", context, err)
+	}
+	if outputKind == runtimecontracts.ToolSchemaArray {
+		if _, err := generatedToolSchemaKind(o.Output.ItemsType); err != nil {
+			return fmt.Errorf("%s output array items: %w", context, err)
+		}
+	} else if strings.TrimSpace(o.Output.ItemsType) != "" {
+		return fmt.Errorf("%s non-array output forbids items_type", context)
 	}
 	if _, err := runtimecontracts.AdmitToolResponseSuccessPolicy(o.ResponseSuccess); err != nil {
 		return fmt.Errorf("%s: %w", context, err)
@@ -519,6 +528,7 @@ type openAPIDocument struct {
 	Server     string
 	Paths      map[string]json.RawMessage
 	Parameters map[string]json.RawMessage
+	Schemas    map[string]json.RawMessage
 }
 
 type openAPIDocumentWire struct {
@@ -536,6 +546,7 @@ type openAPIServer struct {
 
 type openAPIComponents struct {
 	Parameters map[string]json.RawMessage `json:"parameters"`
+	Schemas    map[string]json.RawMessage `json:"schemas"`
 }
 
 type openAPIOperation struct {
@@ -570,6 +581,11 @@ type openAPIRequestBody struct {
 type openAPIMediaType struct {
 	Schema   json.RawMessage `json:"schema"`
 	Examples json.RawMessage `json:"examples,omitempty"`
+}
+
+type openAPIResponse struct {
+	Ref     string                      `json:"$ref,omitempty"`
+	Content map[string]openAPIMediaType `json:"content,omitempty"`
 }
 
 type openAPISchema struct {
@@ -608,7 +624,10 @@ func parseOpenAPIDocument(body []byte, expected GeneratorSource) (openAPIDocumen
 	if len(wire.Paths) == 0 {
 		return openAPIDocument{}, fmt.Errorf("OpenAPI paths are required")
 	}
-	return openAPIDocument{Version: wire.OpenAPI, Server: server, Paths: wire.Paths, Parameters: wire.Components.Parameters}, nil
+	return openAPIDocument{
+		Version: wire.OpenAPI, Server: server, Paths: wire.Paths,
+		Parameters: wire.Components.Parameters, Schemas: wire.Components.Schemas,
+	}, nil
 }
 
 func generateOperationTool(document openAPIDocument, profile GeneratorProfile, selected GeneratorOperation) (runtimecontracts.ToolSchemaEntry, error) {
@@ -716,7 +735,10 @@ func generateOperationTool(document openAPIDocument, profile GeneratorProfile, s
 	if !has2xxResponse(operation.Responses) {
 		return runtimecontracts.ToolSchemaEntry{}, fmt.Errorf("operation %q has no declared 2xx response", selected.OperationID)
 	}
-	outputSchema, err := toolInputSchema(selected.Output.Type, "")
+	if err := validateSelectedOutputSchema(document, operation.Responses, selected.Output); err != nil {
+		return runtimecontracts.ToolSchemaEntry{}, fmt.Errorf("operation %q output schema: %w", selected.OperationID, err)
+	}
+	outputSchema, err := toolInputSchema(selected.Output.Type, selected.Output.ItemsType)
 	if err != nil {
 		return runtimecontracts.ToolSchemaEntry{}, fmt.Errorf("operation %q output schema: %w", selected.OperationID, err)
 	}
@@ -855,6 +877,97 @@ func toolInputSchema(fieldType, itemsType string) (runtimecontracts.ToolInputSch
 		return runtimecontracts.NewToolInputSchema(kind, runtimecontracts.ToolSchemaItems(items))
 	}
 	return runtimecontracts.NewToolInputSchema(kind)
+}
+
+func validateSelectedOutputSchema(document openAPIDocument, responses map[string]json.RawMessage, output GeneratorOutput) error {
+	statuses := make([]string, 0, len(responses))
+	for status := range responses {
+		status = strings.TrimSpace(status)
+		if len(status) == 3 && status[0] == '2' {
+			statuses = append(statuses, status)
+		}
+	}
+	sort.Strings(statuses)
+	for _, status := range statuses {
+		var response openAPIResponse
+		if err := json.Unmarshal(responses[status], &response); err != nil {
+			return fmt.Errorf("parse %s response: %w", status, err)
+		}
+		if strings.TrimSpace(response.Ref) != "" {
+			return fmt.Errorf("%s response reference %q is unsupported", status, response.Ref)
+		}
+		media, ok := response.Content["application/json"]
+		if !ok || len(media.Schema) == 0 {
+			return fmt.Errorf("%s response has no application/json schema", status)
+		}
+		var schema openAPISchema
+		if err := decodeJSONStrict(media.Schema, &schema); err != nil {
+			return fmt.Errorf("parse %s application/json response schema: %w", status, err)
+		}
+		if err := validateOpenAPIOutputKind(document, schema, output, 0); err != nil {
+			return fmt.Errorf("%s application/json response %w", status, err)
+		}
+	}
+	return nil
+}
+
+func validateOpenAPIOutputKind(document openAPIDocument, schema openAPISchema, output GeneratorOutput, depth int) error {
+	resolved, err := resolveOpenAPIOutputSchema(document, schema, depth)
+	if err != nil {
+		return err
+	}
+	want, err := generatedToolSchemaKind(output.Type)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(resolved.Type) != string(want) {
+		return fmt.Errorf("type %q does not match profile type %q", resolved.Type, want)
+	}
+	if want != runtimecontracts.ToolSchemaArray {
+		return nil
+	}
+	if len(resolved.Items) == 0 {
+		return fmt.Errorf("array items are missing")
+	}
+	var items openAPISchema
+	if err := decodeJSONStrict(resolved.Items, &items); err != nil {
+		return fmt.Errorf("parse array items: %w", err)
+	}
+	items, err = resolveOpenAPIOutputSchema(document, items, depth+1)
+	if err != nil {
+		return fmt.Errorf("array items: %w", err)
+	}
+	wantItems, err := generatedToolSchemaKind(output.ItemsType)
+	if err != nil {
+		return fmt.Errorf("array items: %w", err)
+	}
+	if strings.TrimSpace(items.Type) != string(wantItems) {
+		return fmt.Errorf("array item type %q does not match profile items_type %q", items.Type, wantItems)
+	}
+	return nil
+}
+
+func resolveOpenAPIOutputSchema(document openAPIDocument, schema openAPISchema, depth int) (openAPISchema, error) {
+	if strings.TrimSpace(schema.Ref) == "" {
+		return schema, nil
+	}
+	if depth >= 32 {
+		return openAPISchema{}, fmt.Errorf("local schema reference depth exceeds 32")
+	}
+	const prefix = "#/components/schemas/"
+	if !strings.HasPrefix(schema.Ref, prefix) {
+		return openAPISchema{}, fmt.Errorf("unsupported schema reference %q", schema.Ref)
+	}
+	name := strings.TrimPrefix(schema.Ref, prefix)
+	raw, ok := document.Schemas[name]
+	if !ok {
+		return openAPISchema{}, fmt.Errorf("schema reference %q is missing", schema.Ref)
+	}
+	var resolved openAPISchema
+	if err := json.Unmarshal(raw, &resolved); err != nil {
+		return openAPISchema{}, fmt.Errorf("parse schema reference %q: %w", schema.Ref, err)
+	}
+	return resolveOpenAPIOutputSchema(document, resolved, depth+1)
 }
 
 func generatedToolSchemaKind(value string) (runtimecontracts.ToolSchemaKind, error) {

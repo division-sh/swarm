@@ -699,9 +699,13 @@ func assertLoadedSelectedConnectorResponse(t *testing.T, loaded LoadedSelectedCo
 	if err != nil {
 		t.Fatalf("Admit telegram.send_message: %v", err)
 	}
-	response, err := admitted.Materialize()
+	materialized, err := admitted.Materialize()
 	if err != nil {
 		t.Fatalf("Materialize telegram.send_message: %v", err)
+	}
+	response, ok := materialized.(map[string]any)
+	if !ok {
+		t.Fatalf("telegram generated response = %T, want object", materialized)
 	}
 	if len(response) != 0 {
 		t.Fatalf("telegram generated response = %#v, want canonical empty object", response)

@@ -195,10 +195,9 @@ func validateWebSearchCredential(ctx context.Context, source semanticview.Source
 	}
 	flowID := emitActorFlowID(source, actor, "")
 	storeKey, mapped := semanticview.CredentialStoreKeyForActorFlow(source, actor.ID, flowID, key)
-	if mapped && strings.TrimSpace(storeKey) == "" {
+	if mapped && storeKey == "" {
 		return fmt.Errorf("credential %q is not declared and bound for imported package actor %s", key, strings.TrimSpace(actor.ID))
 	}
-	storeKey = strings.TrimSpace(storeKey)
 	if storeKey == "" {
 		return fmt.Errorf("credential %q does not resolve to a deployment credential key", key)
 	}

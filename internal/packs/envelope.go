@@ -2,17 +2,15 @@ package packs
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"path"
-	"regexp"
 	"strings"
 
-	semver "github.com/Masterminds/semver/v3"
 	"github.com/division-sh/swarm/internal/platform"
+	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
+	"github.com/division-sh/swarm/internal/runtime/core/packidentity"
 	"gopkg.in/yaml.v3"
 )
 
@@ -29,8 +27,6 @@ const (
 	ProvenancePlatform = "platform"
 	ProvenanceExternal = "external"
 )
-
-var envelopeIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
 type Envelope struct {
 	ID              string       `yaml:"id"`
@@ -127,76 +123,61 @@ func ParseEnvelope(body []byte) (Envelope, error) {
 }
 
 func (e Envelope) ValidateCommon(runningPlatformVersion string) error {
-	id := strings.TrimSpace(e.ID)
-	if id == "" {
-		return fmt.Errorf("pack id is required")
+	id, err := packidentity.ParseID(e.ID)
+	if err != nil {
+		return err
 	}
-	if !envelopeIDPattern.MatchString(id) {
-		return fmt.Errorf("pack id %q is invalid", e.ID)
-	}
-	if strings.TrimSpace(e.Version) == "" {
-		return fmt.Errorf("pack %q version is required", id)
-	}
-	if _, err := semver.NewVersion(strings.TrimSpace(e.Version)); err != nil {
-		return fmt.Errorf("pack %q version is invalid semver: %w", id, err)
+	if _, err := packidentity.ParseVersion(e.Version); err != nil {
+		return fmt.Errorf("pack %q %w", id.String(), err)
 	}
 	if err := platform.ValidateProductPlatformVersion(e.PlatformVersion, runningPlatformVersion); err != nil {
-		return fmt.Errorf("pack %q platform_version is incompatible: %w", id, err)
+		return fmt.Errorf("pack %q platform_version is incompatible: %w", id.String(), err)
 	}
-	switch strings.TrimSpace(e.Type) {
+	switch e.Type {
 	case TypeTrigger, TypeConnector, TypeChannel:
 	default:
-		return fmt.Errorf("pack %q has unsupported type %q", id, e.Type)
+		return fmt.Errorf("pack %q has unsupported type %q", id.String(), e.Type)
 	}
-	if strings.TrimSpace(e.ManifestHash) == "" {
-		return fmt.Errorf("pack %q manifest_hash is required", id)
+	if _, err := manifesthash.Parse(e.ManifestHash); err != nil {
+		return fmt.Errorf("pack %q %w", id.String(), err)
 	}
-	switch strings.TrimSpace(e.Provenance.Source) {
+	switch e.Provenance.Source {
 	case ProvenancePlatform, ProvenanceExternal:
 	default:
-		return fmt.Errorf("pack %q has unsupported provenance source %q", id, e.Provenance.Source)
+		return fmt.Errorf("pack %q has unsupported provenance source %q", id.String(), e.Provenance.Source)
 	}
-	if err := e.Capabilities.ValidateForType(id, strings.TrimSpace(e.Type)); err != nil {
+	if err := e.Capabilities.ValidateForType(id.String(), e.Type); err != nil {
 		return err
 	}
-	if err := e.Requires.Validate(id); err != nil {
+	if err := e.Requires.Validate(id.String()); err != nil {
 		return err
 	}
-	if strings.TrimSpace(e.Type) == TypeChannel {
+	if e.Type == TypeChannel {
 		if len(e.Implements) != 1 || strings.TrimSpace(e.Implements[0]) == "" {
-			return fmt.Errorf("pack %q type channel must declare exactly one implements identity", id)
+			return fmt.Errorf("pack %q type channel must declare exactly one implements identity", id.String())
 		}
 	} else if len(e.Implements) != 0 {
-		return fmt.Errorf("pack %q type %s must not declare implements", id, e.Type)
+		return fmt.Errorf("pack %q type %s must not declare implements", id.String(), e.Type)
 	}
 	if len(e.Tests) == 0 {
-		return fmt.Errorf("pack %q tests are required", id)
+		return fmt.Errorf("pack %q tests are required", id.String())
 	}
 	for _, test := range e.Tests {
 		if strings.TrimSpace(test) == "" {
-			return fmt.Errorf("pack %q tests must not contain empty entries", id)
+			return fmt.Errorf("pack %q tests must not contain empty entries", id.String())
 		}
 	}
 	return nil
 }
 
 func (e Envelope) VerifyManifestHash(manifestBody []byte) error {
-	want := strings.TrimSpace(e.ManifestHash)
-	const prefix = "sha256:"
-	if !strings.HasPrefix(want, prefix) {
-		return fmt.Errorf("pack %q manifest_hash must use sha256: prefix", e.ID)
+	want, err := manifesthash.Parse(e.ManifestHash)
+	if err != nil {
+		return fmt.Errorf("pack %q %w", e.ID, err)
 	}
-	raw := strings.TrimPrefix(want, prefix)
-	if len(raw) != sha256.Size*2 {
-		return fmt.Errorf("pack %q manifest_hash has invalid sha256 length", e.ID)
-	}
-	if _, err := hex.DecodeString(raw); err != nil {
-		return fmt.Errorf("pack %q manifest_hash has invalid sha256 hex: %w", e.ID, err)
-	}
-	sum := sha256.Sum256(manifestBody)
-	got := prefix + hex.EncodeToString(sum[:])
-	if got != want {
-		return fmt.Errorf("pack %q manifest_hash mismatch: got %s want %s", e.ID, got, want)
+	got := manifesthash.FromBytes(manifestBody)
+	if !got.Equal(want) {
+		return fmt.Errorf("pack %q manifest_hash mismatch: got %s want %s", e.ID, got.String(), want.String())
 	}
 	return nil
 }
@@ -213,8 +194,7 @@ func StampEnvelope(envelope Envelope, manifestBody []byte) (Envelope, []byte, er
 }
 
 func ManifestHash(manifestBody []byte) string {
-	sum := sha256.Sum256(manifestBody)
-	return "sha256:" + hex.EncodeToString(sum[:])
+	return manifesthash.FromBytes(manifestBody).String()
 }
 
 func (c Capabilities) Validate(packID string) error {
@@ -222,7 +202,7 @@ func (c Capabilities) Validate(packID string) error {
 }
 
 func (c Capabilities) ValidateForType(packID, packType string) error {
-	switch strings.TrimSpace(packType) {
+	switch packType {
 	case TypeTrigger:
 		return c.validateTrigger(packID)
 	case TypeConnector:

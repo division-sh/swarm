@@ -43,6 +43,9 @@ func TestRegisteredToolSemanticReconstructionIsAbsent(t *testing.T) {
 		"splitTemplatePath":            {},
 		"resolveHTTPTemplate":          {},
 		"resolveActivityTemplate":      {},
+		"validateChannelSchemaSubset":  {},
+		"validateChannelObjectSubset":  {},
+		"validateFiniteSourceEnum":     {},
 	}
 	inspectProductionGo(t, func(path string, file *ast.File) {
 		for _, declaration := range file.Decls {
@@ -95,6 +98,14 @@ func TestSchemaToolPlanPackagesRejectFreeSemanticStringsAndConsumerNormalization
 
 	inspectProductionGo(t, func(path string, file *ast.File) {
 		ast.Inspect(file, func(node ast.Node) bool {
+			rangeStatement, ok := node.(*ast.RangeStmt)
+			if ok && rangeNormalizesCredentialProjection(rangeStatement) {
+				t.Errorf("%s normalizes a credential key after admitted-owner projection", path)
+			}
+			call, ok := node.(*ast.CallExpr)
+			if ok && normalizesCredentialStoreKey(call) {
+				t.Errorf("%s normalizes a credential store key after admitted-owner mapping", path)
+			}
 			field, ok := node.(*ast.Field)
 			if !ok {
 				return true
@@ -109,12 +120,53 @@ func TestSchemaToolPlanPackagesRejectFreeSemanticStringsAndConsumerNormalization
 	})
 }
 
+func rangeNormalizesCredentialProjection(statement *ast.RangeStmt) bool {
+	call, ok := statement.X.(*ast.CallExpr)
+	if !ok || calledFunctionName(call.Fun) != "Credentials" {
+		return false
+	}
+	value, ok := statement.Value.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	normalizes := false
+	ast.Inspect(statement.Body, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok || calledFunctionName(call.Fun) != "TrimSpace" || len(call.Args) != 1 {
+			return true
+		}
+		identifier, ok := call.Args[0].(*ast.Ident)
+		if ok && identifier.Name == value.Name {
+			normalizes = true
+		}
+		return true
+	})
+	return normalizes
+}
+
+func normalizesCredentialStoreKey(call *ast.CallExpr) bool {
+	if calledFunctionName(call.Fun) != "TrimSpace" || len(call.Args) != 1 {
+		return false
+	}
+	identifier, ok := call.Args[0].(*ast.Ident)
+	return ok && identifier.Name == "storeKey"
+}
+
 func TestSemanticOwnershipProducerConsumerLedgerIsClosed(t *testing.T) {
 	expectedExecutionProjectionCalls := map[string]int{
 		"internal/runtime/tools/platform_builtin_catalog.go": 1,
 		"internal/runtime/tools/registry.go":                 3,
 	}
 	actualExecutionProjectionCalls := map[string]int{}
+	expectedCompiledResultCalls := map[string]int{
+		"internal/packs/channel.go": 1,
+	}
+	actualCompiledResultCalls := map[string]int{}
+	expectedSchemaRelationCalls := map[string]int{
+		"internal/packs/channel_relation.go":                1,
+		"internal/runtime/contracts/tool_http_execution.go": 1,
+	}
+	actualSchemaRelationCalls := map[string]int{}
 	requiredTypedFields := map[string]map[string]string{
 		"toolSchemaEntryValue": {
 			"category":          "ToolCategory",
@@ -131,6 +183,33 @@ func TestSemanticOwnershipProducerConsumerLedgerIsClosed(t *testing.T) {
 			"credentials":       "[]toolCredentialKey",
 			"managedCredential": "ToolManagedCredential",
 			"compiledResult":    "ToolCompiledResultProjection",
+		},
+		"toolInputSchemaValue": {
+			"kind":   "ToolSchemaKind",
+			"format": "toolSchemaFormat",
+		},
+		"admittedManagedCredentialValue": {
+			"key":          "toolCredentialKey",
+			"grantType":    "GrantTypeKind",
+			"grantModel":   "GrantModelKind",
+			"tokenRequest": "admittedManagedTokenRequest",
+		},
+		"admittedManagedTokenRequest": {
+			"clientAuth": "TokenClientAuthKind",
+			"body":       "TokenBodyKind",
+		},
+		"executionToolValue": {
+			"category":           "ToolCategory",
+			"handler":            "ToolHandlerKind",
+			"requiredPermission": "ToolPermission",
+			"inputSchema":        "ToolInputSchema",
+			"outputSchema":       "ToolInputSchema",
+			"http":               "ToolHTTPExecution",
+			"responseMapping":    "ToolResponseMapping",
+			"responseSuccess":    "ToolResponseSuccessPolicy",
+			"managedCredential":  "ToolManagedCredential",
+			"ratePolicy":         "ToolRatePolicy",
+			"mcp":                "ToolMCPBinding",
 		},
 		"compiledChannelOperation": {
 			"name":          "channelPlanIdentity",
@@ -156,7 +235,43 @@ func TestSemanticOwnershipProducerConsumerLedgerIsClosed(t *testing.T) {
 			"generation": "Generation",
 		},
 		"Authorization": {
-			"generation": "Generation",
+			"manifestHash": "Hash",
+			"generation":   "Generation",
+			"packID":       "ID",
+			"packVersion":  "Version",
+		},
+		"compiledHTTPToolSpec": {
+			"url":     "toolTemplate",
+			"headers": "map[string]toolTemplate",
+			"body":    "compiledToolTemplateValue",
+		},
+		"compiledToolResultField": {
+			"target": "toolValuePath",
+			"source": "toolValuePath",
+		},
+		"compiledResultProjectionValue": {
+			"fields":       "[]compiledToolResultField",
+			"outputSchema": "ToolInputSchema",
+		},
+		"toolValuePath": {
+			"segments": "[]toolPathSegment",
+		},
+		"CatalogSnapshot": {
+			"byProvider": "map[string]catalogEntryValue",
+			"byID":       "map[string]catalogEntryValue",
+		},
+		"catalogEntryValue": {
+			"identity": "PackIdentity",
+		},
+		"InboundAdmissionPlan": {
+			"packIdentity": "PackIdentity",
+		},
+		"PackIdentity": {
+			"manifestHash": "Hash",
+			"id":           "ID",
+			"version":      "Version",
+			"packType":     "packIdentityType",
+			"source":       "PackSource",
 		},
 	}
 	seenTypedFields := map[string]map[string]bool{}
@@ -170,6 +285,14 @@ func TestSemanticOwnershipProducerConsumerLedgerIsClosed(t *testing.T) {
 			identifier, ok := call.Fun.(*ast.Ident)
 			if ok && identifier.Name == "executionToolFromAdmitted" {
 				actualExecutionProjectionCalls[path]++
+			}
+			switch calledFunctionName(call.Fun) {
+			case "WithCompiledResult":
+				actualCompiledResultCalls[path]++
+			case "WithToolCompiledResult":
+				t.Errorf("%s constructs compiled-result authority outside the channel compiler", path)
+			case "ValidateAssignableTo":
+				actualSchemaRelationCalls[path]++
 			}
 			return true
 		})
@@ -223,6 +346,12 @@ func TestSemanticOwnershipProducerConsumerLedgerIsClosed(t *testing.T) {
 
 	if !reflect.DeepEqual(actualExecutionProjectionCalls, expectedExecutionProjectionCalls) {
 		t.Fatalf("execution-tool projection consumers = %#v, want finite ledger %#v", actualExecutionProjectionCalls, expectedExecutionProjectionCalls)
+	}
+	if !reflect.DeepEqual(actualCompiledResultCalls, expectedCompiledResultCalls) {
+		t.Fatalf("compiled-result producers = %#v, want finite ledger %#v", actualCompiledResultCalls, expectedCompiledResultCalls)
+	}
+	if !reflect.DeepEqual(actualSchemaRelationCalls, expectedSchemaRelationCalls) {
+		t.Fatalf("schema-relation consumers = %#v, want finite ledger %#v", actualSchemaRelationCalls, expectedSchemaRelationCalls)
 	}
 	for owner, fields := range requiredTypedFields {
 		for field := range fields {

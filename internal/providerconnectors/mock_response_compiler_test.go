@@ -32,6 +32,7 @@ func TestCompileMockResponsePlanGeneratesEveryEffectiveConnectorDeterministicall
 			"items": runtimecontracts.MustToolInputSchema(
 				runtimecontracts.ToolSchemaArray,
 				runtimecontracts.ToolSchemaItems(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString)),
+				runtimecontracts.ToolSchemaMinItems(2),
 			),
 			"metadata": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
 			"name": runtimecontracts.MustToolInputSchema(
@@ -69,19 +70,34 @@ func TestCompileMockResponsePlanGeneratesEveryEffectiveConnectorDeterministicall
 			t.Fatalf("Materialize(%s): %v", toolID, materializeErr)
 		}
 	}
+	addLabelsResponse, err := first.Admit("github.add_labels_to_issue", tools["github.add_labels_to_issue"])
+	if err != nil {
+		t.Fatalf("Admit(github.add_labels_to_issue): %v", err)
+	}
+	addLabelsValue, err := addLabelsResponse.Materialize()
+	if err != nil {
+		t.Fatalf("Materialize(github.add_labels_to_issue): %v", err)
+	}
+	if labels, ok := addLabelsValue.([]any); !ok || len(labels) != 0 {
+		t.Fatalf("generated GitHub add-labels response = %#v, want canonical empty array", addLabelsValue)
+	}
 
 	admitted, err := first.Admit("acme.create", flowLocal)
 	if err != nil {
 		t.Fatalf("Admit flow-local response: %v", err)
 	}
-	got, err := admitted.Materialize()
+	materialized, err := admitted.Materialize()
 	if err != nil {
 		t.Fatalf("Materialize flow-local response: %v", err)
+	}
+	got, ok := materialized.(map[string]any)
+	if !ok {
+		t.Fatalf("flow-local generated response = %T, want object", materialized)
 	}
 	want := map[string]any{
 		"accepted": false,
 		"count":    float64(2),
-		"items":    []any{},
+		"items":    []any{"", ""},
 		"metadata": map[string]any{},
 		"name":     "fixture",
 		"nothing":  nil,
@@ -138,9 +154,13 @@ required: [value]
 	if err != nil {
 		t.Fatalf("Admit: %v", err)
 	}
-	got, err := admitted.Materialize()
+	materialized, err := admitted.Materialize()
 	if err != nil {
 		t.Fatalf("Materialize: %v", err)
+	}
+	got, ok := materialized.(map[string]any)
+	if !ok {
+		t.Fatalf("generated structured response = %T, want object", materialized)
 	}
 	want := map[string]any{
 		"value": map[string]any{
@@ -160,9 +180,9 @@ func TestCompileMockResponsePlanFailsClosedWithExactSchemaPath(t *testing.T) {
 		want   string
 	}{
 		{
-			name:   "root must be object",
-			schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString),
-			want:   "output_schema: provider connector mock response root must be object",
+			name:   "uninhabited any schema",
+			schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaAny),
+			want:   "output_schema: unsupported schema type",
 		},
 		{
 			name: "integer interval has no inhabitant",
