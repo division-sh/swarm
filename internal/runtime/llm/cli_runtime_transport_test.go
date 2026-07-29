@@ -88,26 +88,163 @@ func TestClaudeToolArgumentsProjectExactManagedSurface(t *testing.T) {
 	actor := models.AgentConfig{ID: "analysis-agent", NativeTools: models.NativeToolConfig{FileIO: true, Bash: true, WebSearch: true}}
 	tools := []ToolDefinition{{Name: "query_metrics"}, {Name: "emit_category_assessed"}}
 	ctx, surface := testManagedCLISurfaceContext(t, actor, tools)
-	allowed, disallowed, err := claudeToolArgumentsForContext(ctx, actor, tools)
+	projection, err := projectClaudeInvocationTools(ctx, actor, tools)
 	if err != nil {
-		t.Fatalf("claudeToolArgumentsForContext: %v", err)
+		t.Fatalf("projectClaudeInvocationTools: %v", err)
 	}
-	allowedNames := strings.Split(allowed, ",")
+	allowedNames := projection.PermissionAdmission
 	for _, name := range []string{"Bash", "Edit", "Read", "WebFetch", "WebSearch", "Write", "mcp__runtime-tools__emit_category_assessed", "mcp__runtime-tools__query_metrics", "ExitPlanMode"} {
 		if !slices.Contains(allowedNames, name) {
-			t.Fatalf("planned binding %q missing from allowed tools %q", name, allowed)
+			t.Fatalf("planned binding %q missing from allowed tools %#v", name, allowedNames)
 		}
 	}
 	for _, name := range []string{"read_file", "write_file", "bash", "web_search", "query_metrics"} {
 		if slices.Contains(allowedNames, name) {
-			t.Fatalf("canonical name %q leaked as a second provider binding in %q", name, allowed)
+			t.Fatalf("canonical name %q leaked as a second provider binding in %#v", name, allowedNames)
 		}
 	}
-	if slices.Contains(strings.Split(disallowed, ","), "Read") {
-		t.Fatalf("planned provider binding was also disallowed: %q", disallowed)
+	if !slices.Equal(projection.BuiltinSelection, []string{"Bash", "Edit", "ExitPlanMode", "Read", "WebFetch", "WebSearch", "Write"}) {
+		t.Fatalf("builtin selection = %#v", projection.BuiltinSelection)
+	}
+	for _, name := range projection.BuiltinSelection {
+		if strings.HasPrefix(name, "mcp__") {
+			t.Fatalf("MCP tool %q leaked into builtin selection", name)
+		}
 	}
 	if got := surface.PlannedBindingNames(managedcapabilities.BindingMCPTool); !slices.Equal(got, []string{"mcp__runtime-tools__emit_category_assessed", "mcp__runtime-tools__query_metrics"}) {
 		t.Fatalf("planned MCP gateway bindings = %#v", got)
+	}
+}
+
+func TestClaudeInvocationToolProjectionCoversEveryNativeFamily(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		native   models.NativeToolConfig
+		expected []string
+	}{
+		{name: "zero", expected: []string{"ExitPlanMode"}},
+		{name: "bash", native: models.NativeToolConfig{Bash: true}, expected: []string{"Bash", "ExitPlanMode"}},
+		{name: "web", native: models.NativeToolConfig{WebSearch: true}, expected: []string{"ExitPlanMode", "WebFetch", "WebSearch"}},
+		{name: "file", native: models.NativeToolConfig{FileIO: true}, expected: []string{"Edit", "ExitPlanMode", "Read", "Write"}},
+		{
+			name: "all",
+			native: models.NativeToolConfig{
+				Bash:      true,
+				WebSearch: true,
+				FileIO:    true,
+			},
+			expected: []string{"Bash", "Edit", "ExitPlanMode", "Read", "WebFetch", "WebSearch", "Write"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			actor := models.AgentConfig{ID: "native-agent", NativeTools: test.native}
+			tools := []ToolDefinition{{Name: "emit_done"}}
+			ctx, _ := testManagedCLISurfaceContext(t, actor, tools)
+			projection, err := projectClaudeInvocationTools(ctx, actor, tools)
+			if err != nil {
+				t.Fatalf("projectClaudeInvocationTools: %v", err)
+			}
+			if !slices.Equal(projection.BuiltinSelection, test.expected) {
+				t.Fatalf("builtin selection = %#v, want %#v", projection.BuiltinSelection, test.expected)
+			}
+			if slices.Contains(projection.BuiltinSelection, "mcp__runtime-tools__emit_done") {
+				t.Fatalf("MCP tool leaked into builtin selection: %#v", projection.BuiltinSelection)
+			}
+			if !slices.Contains(projection.PermissionAdmission, "mcp__runtime-tools__emit_done") {
+				t.Fatalf("MCP tool missing from permission admission: %#v", projection.PermissionAdmission)
+			}
+		})
+	}
+}
+
+func TestClaudeInvocationToolProjectionRequiresOneExactOwner(t *testing.T) {
+	actor := models.AgentConfig{ID: "fork-agent"}
+	tools := []ToolDefinition{{Name: "emit_event"}}
+	managedCtx, _ := testManagedCLISurfaceContext(t, actor, tools)
+	forkCtx := testConversationForkInvocationContext(tools)
+
+	for _, test := range []struct {
+		name string
+		ctx  context.Context
+	}{
+		{name: "missing", ctx: context.Background()},
+		{name: "fork_authority_without_policy", ctx: runtimeeffects.WithAuthority(context.Background(), testConversationForkAuthority())},
+		{name: "policy_without_fork_authority", ctx: WithConversationForkSandboxInvocationPolicy(context.Background(), toolNames(tools))},
+		{name: "managed_and_fork_policy", ctx: WithConversationForkSandboxInvocationPolicy(managedCtx, toolNames(tools))},
+		{name: "fork_policy_tool_mismatch", ctx: WithConversationForkSandboxInvocationPolicy(runtimeeffects.WithAuthority(context.Background(), testConversationForkAuthority()), []string{"different_tool"})},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := projectClaudeInvocationTools(test.ctx, actor, tools); err == nil {
+				t.Fatal("invalid Claude invocation authority was accepted")
+			}
+		})
+	}
+
+	if _, err := projectClaudeInvocationTools(forkCtx, actor, tools); err != nil {
+		t.Fatalf("valid fork authority rejected: %v", err)
+	}
+}
+
+func TestClaudeInvocationToolProjectionDoesNotReconstructForkBuiltinsFromSourceActor(t *testing.T) {
+	actor := models.AgentConfig{
+		ID: "source-agent",
+		NativeTools: models.NativeToolConfig{
+			Bash:      true,
+			WebSearch: true,
+			FileIO:    true,
+		},
+	}
+	tools := []ToolDefinition{{Name: "fork_snapshot_read_entities"}, {Name: "emit_event"}}
+	projection, err := projectClaudeInvocationTools(testConversationForkInvocationContext(tools), actor, tools)
+	if err != nil {
+		t.Fatalf("projectClaudeInvocationTools: %v", err)
+	}
+	if !slices.Equal(projection.BuiltinSelection, []string{"ExitPlanMode"}) {
+		t.Fatalf("fork builtin selection = %#v, want only explicit control", projection.BuiltinSelection)
+	}
+	for _, leaked := range []string{"Bash", "Edit", "Read", "WebFetch", "WebSearch", "Write"} {
+		if slices.Contains(projection.PermissionAdmission, leaked) {
+			t.Fatalf("source actor builtin %q leaked into fork permission admission %#v", leaked, projection.PermissionAdmission)
+		}
+	}
+}
+
+func TestClaudeInvocationToolProjectionRejectsUnknownForkBuiltinEvidence(t *testing.T) {
+	actor := models.AgentConfig{ID: "source-agent"}
+	tools := []ToolDefinition{{Name: "fork_snapshot_read_entities"}}
+	projection, err := projectClaudeInvocationTools(testConversationForkInvocationContext(tools), actor, tools)
+	if err != nil {
+		t.Fatalf("projectClaudeInvocationTools: %v", err)
+	}
+	if err := validateClaudeInvocationProviderBuiltins(projection, &Response{
+		ProviderVisibleTools: []string{"ExitPlanMode", "FutureUnplannedBuiltin"},
+	}); err == nil || !strings.Contains(err.Error(), "FutureUnplannedBuiltin") {
+		t.Fatalf("unknown provider builtin validation error = %v", err)
+	}
+}
+
+func testConversationForkInvocationContext(tools []ToolDefinition) context.Context {
+	ctx := runtimeeffects.WithAuthority(context.Background(), testConversationForkAuthority())
+	return WithConversationForkSandboxInvocationPolicy(ctx, toolNames(tools))
+}
+
+func testConversationForkAuthority() runtimeeffects.Authority {
+	forkTurnID := uuid.NewString()
+	return runtimeeffects.Authority{
+		Kind:            runtimeeffects.AuthorityConversationForkChat,
+		ID:              forkTurnID,
+		ExecutionOwner:  "forkchat-test-owner",
+		LeaseExpiresAt:  time.Now().UTC().Add(time.Minute),
+		FenceGeneration: 1,
+		ExecutionMode:   runtimeeffects.ExecutionModeLive,
+		ForkChat: runtimeeffects.ConversationForkChatAuthority{
+			ForkTurnID:          forkTurnID,
+			ForkID:              uuid.NewString(),
+			BundleHash:          "bundle-v1:sha256:" + strings.Repeat("a", 64),
+			ActorTokenID:        "actor-token",
+			RequestOccurrenceID: uuid.NewString(),
+			RequestHash:         "request-hash",
+		},
 	}
 }
 
@@ -122,11 +259,11 @@ func TestManagedCapabilitySurfaceDoesNotInjectRetiredLegacyEntityTools(t *testin
 	}
 
 	ctx, surface := testManagedCLISurfaceContext(t, actor, tools)
-	allowedArg, _, err := claudeToolArgumentsForContext(ctx, actor, tools)
+	projection, err := projectClaudeInvocationTools(ctx, actor, tools)
 	if err != nil {
-		t.Fatalf("claudeToolArgumentsForContext: %v", err)
+		t.Fatalf("projectClaudeInvocationTools: %v", err)
 	}
-	allowed := strings.Split(allowedArg, ",")
+	allowed := projection.PermissionAdmission
 	legacyNames := []string{
 		"create_entity",
 		"get_entity",

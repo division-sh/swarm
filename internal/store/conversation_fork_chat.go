@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -114,6 +115,33 @@ type ConversationForkSandboxPolicy struct {
 	StubbedTools       []string `json:"stubbed_tools"`
 }
 
+func (p ConversationForkSandboxPolicy) Validate() error {
+	canonical := CanonicalConversationForkSandboxPolicy()
+	if p.Owner != canonical.Owner ||
+		p.ReadPolicy != canonical.ReadPolicy ||
+		p.WritePolicy != canonical.WritePolicy ||
+		!slices.Equal(p.SideEffectingTools, canonical.SideEffectingTools) ||
+		!slices.Equal(p.StubbedTools, canonical.StubbedTools) {
+		return fmt.Errorf("conversation fork sandbox policy is not canonical")
+	}
+	return nil
+}
+
+func (p ConversationForkSandboxPolicy) AvailableToolNames() []string {
+	return conversationForkSandboxAvailableTools(p)
+}
+
+func (p ConversationForkChatPrepared) ValidateSandboxPolicy() error {
+	if err := p.SandboxPolicy.Validate(); err != nil {
+		return err
+	}
+	expected := p.SandboxPolicy.AvailableToolNames()
+	if !slices.Equal(p.AvailableTools, expected) {
+		return fmt.Errorf("conversation fork sandbox available tools do not match policy")
+	}
+	return nil
+}
+
 type ConversationForkChatExecution struct {
 	AssistantMessage string
 	ToolCalls        []OperatorConversationToolCall
@@ -189,7 +217,7 @@ func (s conversationForkStore) prepareOperatorConversationForkChat(ctx context.C
 		if err != nil {
 			return err
 		}
-		policy := defaultConversationForkSandboxPolicy()
+		policy := CanonicalConversationForkSandboxPolicy()
 		forkTurnID, turnIndex, occurrenceID, executionOwner, leaseExpiresAt, err := preallocateConversationForkTurn(txctx, s, tx, forkID, sourceBundleHash, method, actorTokenID, idempotencyKey, requestHash, message, now)
 		if err != nil {
 			return err
@@ -393,7 +421,7 @@ func (s conversationForkStore) recordOperatorConversationForkChat(ctx context.Co
 		if err != nil {
 			return err
 		}
-		policy := defaultConversationForkSandboxPolicy()
+		policy := CanonicalConversationForkSandboxPolicy()
 		if len(execution.AvailableTools) == 0 {
 			execution.AvailableTools = conversationForkSandboxAvailableTools(policy)
 		}
@@ -859,7 +887,7 @@ func loadConversationForkTurns(ctx context.Context, owner conversationForkStore,
 	return turns, nil
 }
 
-func defaultConversationForkSandboxPolicy() ConversationForkSandboxPolicy {
+func CanonicalConversationForkSandboxPolicy() ConversationForkSandboxPolicy {
 	sideEffecting := []string{
 		"save_entity_field",
 		"create_entity",

@@ -171,6 +171,9 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 		switch record.Class {
 		case "claude_startup":
 			startupIndex, startupSession = index, record.SessionID
+			if selected := splitAllowedTools(dockerOptionValue(record.Args, "--tools")); !equalStrings(selected, releaseE2EBuiltinTools()) {
+				return fmt.Errorf("startup selected builtins = %q, want exact fixture builtin surface", selected)
+			}
 			wantTools := releaseE2EAllowedTools()
 			if allowed := splitAllowedTools(dockerOptionValue(record.Args, "--allowedTools")); !equalStrings(allowed, wantTools) {
 				return fmt.Errorf("startup accepted tools = %q, want exact fixture tool surface", allowed)
@@ -180,6 +183,9 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 			}
 		case "claude_live":
 			liveIndex, liveSession = index, record.SessionID
+			if selected := splitAllowedTools(dockerOptionValue(record.Args, "--tools")); !equalStrings(selected, releaseE2EBuiltinTools()) {
+				return fmt.Errorf("live selected builtins = %q, want exact fixture builtin surface", selected)
+			}
 			if allowed := splitAllowedTools(dockerOptionValue(record.Args, "--allowedTools")); !equalStrings(allowed, releaseE2EAllowedTools()) {
 				return fmt.Errorf("live accepted tools = %q, want exact fixture tool surface", allowed)
 			}
@@ -225,6 +231,10 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 
 func releaseE2EAllowedTools() []string {
 	return []string{"ExitPlanMode", "WebFetch", "WebSearch", "mcp__runtime-tools__emit_work_completed"}
+}
+
+func releaseE2EBuiltinTools() []string {
+	return []string{"ExitPlanMode", "WebFetch", "WebSearch"}
 }
 
 func assertReleaseExternalProcessesExited(t *testing.T, root string) {

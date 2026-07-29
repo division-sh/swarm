@@ -2444,7 +2444,7 @@
     },
     {
       "name": "conversation.fork_chat",
-      "description": "Execute one sandboxed forkchat turn against an active fork lifecycle session.\nThe method consumes conversation_forks for lifecycle validation,\nconversation_fork_snapshots for source-at-fork context, and\nconversation_fork_turns for fork-local transcript persistence. It does\nexecute the source agent through the forkchat sandbox executor, provides\nfork-snapshot read tools, and records only sandbox-observed requested\nside-effecting tools as stubbed fork-local results under\nConversationForkSandboxPolicy. The forkchat executor owns the synthetic\nactor and resolves it through the canonical regular model alias so every\nadmitted provider backend receives an explicit model selection. The\nexecutor classifies provider execution as operator infrastructure rather\nthan a managed-agent lifecycle generation; it MUST NOT fabricate a live\nagent lifecycle token. It does not write agent_turns, events,\nruntime logs, mailbox rows, run commands, or dashboard conversation rows\nby default.\n",
+      "description": "Execute one sandboxed forkchat turn against an active fork lifecycle session.\nThe method consumes conversation_forks for lifecycle validation,\nconversation_fork_snapshots for source-at-fork context, and\nconversation_fork_turns for fork-local transcript persistence. It does\nexecute the source agent through the forkchat sandbox executor, provides\nfork-snapshot read tools, and records only sandbox-observed requested\nside-effecting tools as stubbed fork-local results under\nConversationForkSandboxPolicy. The forkchat executor owns the synthetic\nactor and resolves it through the canonical regular model alias so every\nadmitted provider backend receives an explicit model selection. The\nexecutor classifies provider execution as operator infrastructure rather\nthan a managed-agent lifecycle generation; it MUST NOT fabricate a live\nagent lifecycle token. Provider launch projection requires this exact\npolicy plus conversation-fork-chat execution authority; missing,\nmalformed, mismatched, or coexisting managed authority fails before\nprocess launch. It does not write agent_turns, events,\nruntime logs, mailbox rows, run commands, or dashboard conversation rows\nby default.\n",
       "params": [
         {
           "name": "fork_id",
@@ -10452,7 +10452,7 @@
       },
       "ConversationForkSandboxPolicy": {
         "additionalProperties": false,
-        "description": "Sandbox policy enforced for forkchat execution. Read tools consume only the fork snapshot; side-effecting tools are stub-recorded and must not mutate live state.",
+        "description": "Sandbox policy enforced for forkchat execution. Read tools consume only the fork snapshot; side-effecting tools are stub-recorded and must not mutate live state. The policy is the sole forkchat tool authority. Claude forkchat launches select no provider-builtin actor capability; they select only the closed transport-control set and admit the exact policy-derived MCP/local sandbox tools separately. Source-agent native_tools and managed capability surfaces cannot widen this policy.",
         "properties": {
           "owner": {
             "const": "conversation.fork_chat.sandbox.v1",

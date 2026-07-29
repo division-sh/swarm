@@ -751,12 +751,12 @@ func validateReleaseClaudeArgs(args []string) error {
 	valueFlags := map[string]string{}
 	boolFlags := map[string]bool{}
 	valueNames := map[string]bool{
-		"--session-id":      true,
-		"--output-format":   true,
-		"--system-prompt":   true,
-		"--disallowedTools": true,
-		"--allowedTools":    true,
-		"--mcp-config":      true,
+		"--session-id":    true,
+		"--output-format": true,
+		"--system-prompt": true,
+		"--tools":         true,
+		"--allowedTools":  true,
+		"--mcp-config":    true,
 	}
 	boolNames := map[string]bool{
 		"-p":                         true,
@@ -798,8 +798,8 @@ func validateReleaseClaudeArgs(args []string) error {
 	if strings.TrimSpace(valueFlags["--system-prompt"]) == "" {
 		return fmt.Errorf("Claude invocation omitted --system-prompt")
 	}
-	if strings.TrimSpace(valueFlags["--disallowedTools"]) == "" {
-		return fmt.Errorf("Claude invocation omitted --disallowedTools")
+	if tools := splitAllowedTools(valueFlags["--tools"]); !equalStrings(tools, releaseE2EBuiltinTools()) {
+		return fmt.Errorf("Claude --tools = %q, want exact builtin surface", valueFlags["--tools"])
 	}
 	wantTools := releaseE2EAllowedTools()
 	if tools := splitAllowedTools(valueFlags["--allowedTools"]); !equalStrings(tools, wantTools) {

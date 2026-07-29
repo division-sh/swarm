@@ -1587,6 +1587,14 @@ fi
 		if want := []string{"ExitPlanMode", "WebFetch", "WebSearch", "mcp__runtime-tools__emit_task_completed"}; !slices.Equal(allowed, want) {
 			t.Fatalf("Claude invocation %s allowed tools = %v, want %v", invocation, allowed, want)
 		}
+		selected := strings.Split(capturedSelectedForkArgValue(t, args, "--tools"), ",")
+		slices.Sort(selected)
+		if want := []string{"ExitPlanMode", "WebFetch", "WebSearch"}; !slices.Equal(selected, want) {
+			t.Fatalf("Claude invocation %s selected builtins = %v, want %v", invocation, selected, want)
+		}
+		if strings.Contains(string(args), "--disallowedTools") {
+			t.Fatalf("Claude invocation %s retained negative builtin catalog: %q", invocation, args)
+		}
 	}
 	startupInput, err := os.ReadFile(filepath.Join(captureDir, "1.stdin"))
 	if err != nil {

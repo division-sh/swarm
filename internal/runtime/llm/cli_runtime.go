@@ -213,10 +213,6 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	}
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	entityID := actor.EffectiveEntityID()
-	allowedToolsArg, disallowedBuiltinTools, err := claudeToolArgumentsForContext(ctx, actor, s.Tools)
-	if err != nil {
-		return nil, err
-	}
 
 	lease, resolved, err := acquireContinuedMemory(ctx, r.sessions, s, r.lockOwner)
 	if err != nil {
@@ -243,6 +239,10 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		"memory_enabled": resolved.Enabled(), "run_id": resolved.Identity.RunID, "flow_instance": resolved.Identity.FlowInstance,
 	}, entityID); err != nil {
 		return nil, fmt.Errorf("mark inbound delivery active for reused cli session: %w", err)
+	}
+	toolProjection, err := projectClaudeInvocationTools(ctx, actor, s.Tools)
+	if err != nil {
+		return nil, err
 	}
 	target, err := r.resolveWorkspace(ctx)
 	if err != nil {
@@ -273,12 +273,12 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		defer r.mcpTurns.UnregisterTurnContext(mcpContextToken)
 	}
 	requestFingerprintInput := jsonBytes(map[string]any{
-		"allowed_tools":           allowedToolsArg,
+		"builtin_tools":           toolProjection.BuiltinSelection,
 		"confirmed_provider_head": confirmedHead,
 		"memory_enabled":          resolved.Enabled(),
-		"disallowed_tools":        disallowedBuiltinTools,
 		"mcp_enabled":             mcpEnabled,
 		"output_format":           configuredCLIOutputFormat(r.cfg),
+		"permission_tools":        toolProjection.PermissionAdmission,
 		"permission_mode_args":    permissionModeArgs(),
 		"prompt":                  prompt,
 		"run_id":                  resolved.Identity.RunID,
@@ -315,12 +315,8 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		if sys := strings.TrimSpace(s.SystemPrompt); sys != "" {
 			args = append(args, "--system-prompt", sys)
 		}
-		if strings.TrimSpace(disallowedBuiltinTools) != "" {
-			args = append(args, "--disallowedTools", disallowedBuiltinTools)
-		}
-		if strings.TrimSpace(allowedToolsArg) != "" {
-			args = append(args, "--allowedTools", allowedToolsArg)
-		}
+		args = append(args, "--tools", toolProjection.builtinSelectionArg())
+		args = append(args, "--allowedTools", toolProjection.permissionAdmissionArg())
 		if mcpEnabled {
 			args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
 		}
@@ -334,12 +330,8 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		}
 		args = appendClaudePrintModeArgs(args, r.cfg)
 		args = append(args, permissionModeArgs()...)
-		if strings.TrimSpace(disallowedBuiltinTools) != "" {
-			args = append(args, "--disallowedTools", disallowedBuiltinTools)
-		}
-		if strings.TrimSpace(allowedToolsArg) != "" {
-			args = append(args, "--allowedTools", allowedToolsArg)
-		}
+		args = append(args, "--tools", toolProjection.builtinSelectionArg())
+		args = append(args, "--allowedTools", toolProjection.permissionAdmissionArg())
 		if mcpEnabled {
 			args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
 		}
@@ -412,6 +404,15 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		resp.CapabilitySurface = &observed
 		ctx = managedcapabilities.WithContext(ctx, observed)
 		if validateErr := ValidateCLIProviderCapabilitySurface(observed, resp); validateErr != nil {
+			turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, false, latency, agentTurnFailure(validateErr, "claude_cli_capability_validation")), resp)
+			if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_capability_surface"}); settleErr != nil {
+				return nil, errors.Join(validateErr, settleErr)
+			}
+			return nil, validateErr
+		}
+	}
+	if _, ok := managedcapabilities.FromContext(ctx); !ok {
+		if validateErr := validateClaudeInvocationProviderBuiltins(toolProjection, resp); validateErr != nil {
 			turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, false, latency, agentTurnFailure(validateErr, "claude_cli_capability_validation")), resp)
 			if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_capability_surface"}); settleErr != nil {
 				return nil, errors.Join(validateErr, settleErr)
@@ -514,7 +515,7 @@ func validateCLIResponseToolCallsForTurn(ctx context.Context, actor runtimeactor
 			}
 		} else if managedAgentExecutionContext(ctx) {
 			return fmt.Errorf("managed CLI response is missing its exact capability surface")
-		} else if conversationForkSandboxToolCallAllowed(actor, tools, resp, call.Name) {
+		} else if conversationForkSandboxToolCallAllowed(tools, resp, call.Name) {
 			continue
 		}
 		return fmt.Errorf("tool %q was not provider-visible or locally allowed on this turn", strings.TrimSpace(call.Name))

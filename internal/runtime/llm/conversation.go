@@ -512,8 +512,7 @@ func runtimeReadFileFollowUpAllowedForTurn(ctx context.Context, tools []ToolDefi
 		}
 		return false
 	}
-	actor, _ := models.ActorFromContext(ctx)
-	for _, name := range conversationForkSandboxPlannedTools(actor, tools) {
+	for _, name := range conversationForkSandboxPlannedTools(tools) {
 		if name == "read_file" {
 			return true
 		}
@@ -603,8 +602,7 @@ func toolInputPath(input any) string {
 }
 
 func withConversationForkSandboxToolsForTurn(ctx context.Context, tools []ToolDefinition, resp *Response) context.Context {
-	actor, _ := models.ActorFromContext(ctx)
-	usable := conversationForkSandboxUsableToolsForTurn(actor, tools, resp)
+	usable := conversationForkSandboxUsableToolsForTurn(tools, resp)
 	return context.WithValue(ctx, conversationForkSandboxToolsContextKey{}, conversationForkSandboxToolsContextValue{tools: append([]string(nil), usable...)})
 }
 
