@@ -1056,6 +1056,7 @@ seam_families:
       - internal/serveapp/main_runtime_test.go
       - internal/runtime/manager/delivery_lifecycle_test_helpers_test.go
       - internal/runtime/manager/failure_test.go
+      - internal/runtime/runtime_managed_native_lifecycle_test.go
       - internal/runtime/pipeline/delivery_lifecycle_test_owner_test.go
       - internal/store/agent_lifecycle_read_surface_test.go
       - internal/store/author_activity_receipt_parity_test.go
