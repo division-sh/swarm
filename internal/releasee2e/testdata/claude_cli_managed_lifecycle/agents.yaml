@@ -4,5 +4,7 @@ release-worker:
   prompt_ref: release-worker
   model: regular
   memory: false
+  native_tools:
+    web_search: true
   subscriptions: [work.requested]
   emit_events: [work.completed]

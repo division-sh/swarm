@@ -801,7 +801,7 @@ func validateReleaseClaudeArgs(args []string) error {
 	if strings.TrimSpace(valueFlags["--disallowedTools"]) == "" {
 		return fmt.Errorf("Claude invocation omitted --disallowedTools")
 	}
-	wantTools := []string{"ExitPlanMode", "mcp__runtime-tools__emit_work_completed"}
+	wantTools := releaseE2EAllowedTools()
 	if tools := splitAllowedTools(valueFlags["--allowedTools"]); !equalStrings(tools, wantTools) {
 		return fmt.Errorf("Claude --allowedTools = %q, want fixture tool surface", valueFlags["--allowedTools"])
 	}
@@ -913,7 +913,7 @@ func runFakeClaudeTurn(root string, invocation fakeClaudeInvocation) int {
 		return 97
 	}
 
-	writeClaudeInit(invocation.sessionID, []string{"mcp__runtime-tools__" + toolName})
+	writeClaudeInit(invocation.sessionID, splitAllowedTools(dockerOptionValue(invocation.commandArgs, "--allowedTools")))
 	result, err := fakeMCPCall(client, invocation.hostMCPURL, invocation.headers, "tools/call", map[string]any{
 		"name":      toolName,
 		"arguments": map[string]any{"result": "release-e2e-complete"},

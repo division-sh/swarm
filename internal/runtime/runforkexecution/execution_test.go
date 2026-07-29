@@ -1459,7 +1459,20 @@ func TestExecuteSelectedContractRunForkClaudeOAuthPersistsStartupAndTurnCapabili
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
-	contractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
+	sourceContractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
+	contractsRoot := filepath.Join(t.TempDir(), "contracts")
+	if err := os.CopyFS(contractsRoot, os.DirFS(sourceContractsRoot)); err != nil {
+		t.Fatalf("copy selected contract fixture: %v", err)
+	}
+	agentsPath := filepath.Join(contractsRoot, "agents.yaml")
+	agentsYAML, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatalf("read selected contract agents: %v", err)
+	}
+	agentsYAML = append(agentsYAML, []byte("  native_tools:\n    web_search: true\n")...)
+	if err := os.WriteFile(agentsPath, agentsYAML, 0o644); err != nil {
+		t.Fatalf("author selected contract native capability: %v", err)
+	}
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{Mode: "selected_contracts", ContractsRoot: contractsRoot})
 	if err != nil {
@@ -1504,7 +1517,7 @@ for payload in (
         response.read()
 PY
 fi
-printf '%s\n' "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"$session_id\",\"mcp_servers\":[{\"name\":\"runtime-tools\",\"status\":\"connected\"}],\"tools\":[\"mcp__runtime-tools__emit_task_completed\"]}"
+printf '%s\n' "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"$session_id\",\"mcp_servers\":[{\"name\":\"runtime-tools\",\"status\":\"connected\"}],\"tools\":[\"WebFetch\",\"WebSearch\",\"mcp__runtime-tools__emit_task_completed\"]}"
 if [ "$count" -gt 1 ]; then
   printf '%s\n' "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"emit-1\",\"name\":\"mcp__runtime-tools__emit_task_completed\",\"input\":{}}},\"session_id\":\"$session_id\"}"
   printf '%s\n' "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_stop\",\"index\":0},\"session_id\":\"$session_id\"}"
@@ -1569,8 +1582,36 @@ fi
 		if !strings.Contains(string(args), "CLAUDE_CODE_OAUTH_TOKEN=selected-fork-oauth-token") || strings.Contains(string(args), "stale-host-token") {
 			t.Fatalf("Claude invocation %s credential projection = %q", invocation, args)
 		}
+		allowed := strings.Split(capturedSelectedForkArgValue(t, args, "--allowedTools"), ",")
+		slices.Sort(allowed)
+		if want := []string{"ExitPlanMode", "WebFetch", "WebSearch", "mcp__runtime-tools__emit_task_completed"}; !slices.Equal(allowed, want) {
+			t.Fatalf("Claude invocation %s allowed tools = %v, want %v", invocation, allowed, want)
+		}
+	}
+	startupInput, err := os.ReadFile(filepath.Join(captureDir, "1.stdin"))
+	if err != nil {
+		t.Fatalf("read selected-fork startup input: %v", err)
+	}
+	liveInput, err := os.ReadFile(filepath.Join(captureDir, "2.stdin"))
+	if err != nil {
+		t.Fatalf("read selected-fork live input: %v", err)
+	}
+	if !strings.Contains(string(startupInput), "Startup validation probe") || strings.Contains(string(liveInput), "Startup validation probe") {
+		t.Fatalf("selected-fork invocation order is not startup then live: startup=%q live=%q", startupInput, liveInput)
 	}
 	assertSelectedForkClaudeCapabilityEvidence(t, ctx, db, result)
+}
+
+func capturedSelectedForkArgValue(t testing.TB, raw []byte, name string) string {
+	t.Helper()
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	for index := 0; index+1 < len(lines); index++ {
+		if lines[index] == name {
+			return lines[index+1]
+		}
+	}
+	t.Fatalf("captured Claude arguments omitted %s: %q", name, raw)
+	return ""
 }
 
 type selectedForkWorkspaceLifecycle struct {
@@ -1620,6 +1661,25 @@ func assertSelectedForkClaudeCapabilityEvidence(t testing.TB, ctx context.Contex
 	if startupSurfaces != 1 || startupAttempts != 1 {
 		t.Fatalf("selected Claude startup surfaces=%d attempts=%d, want 1/1", startupSurfaces, startupAttempts)
 	}
+	var rawStartupSurface string
+	if err := db.QueryRowContext(ctx, `
+		SELECT s.surface::text
+		FROM managed_agent_capability_surfaces s
+		JOIN runtime_external_effect_attempts a ON a.capability_surface_id = s.surface_id
+		JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
+		WHERE o.selected_execution_id = $1::uuid
+		  AND a.adapter = 'claude_cli_startup_probe'
+		  AND a.state = 'settled'
+		  AND s.run_id = $2::uuid
+		  AND s.actor_id = 'test-agent'
+	`, proof.RuntimeExecutionID, result.Materialization.ForkRunID).Scan(&rawStartupSurface); err != nil {
+		t.Fatalf("load selected Claude startup surface: %v", err)
+	}
+	var startupSurface managedcapabilities.Surface
+	if err := json.Unmarshal([]byte(rawStartupSurface), &startupSurface); err != nil {
+		t.Fatalf("decode selected Claude startup surface: %v", err)
+	}
+	assertSelectedForkClaudeManagedSurface(t, startupSurface, proof.RuntimeExecutionID, result.Materialization.ForkRunID, managedcapabilities.AuthorityStartupProbe)
 
 	var attemptSurfaceID, turnSurfaceID, rawSurface string
 	if err := db.QueryRowContext(ctx, `
@@ -1660,9 +1720,48 @@ func assertSelectedForkClaudeCapabilityEvidence(t testing.TB, ctx context.Contex
 	if err := json.Unmarshal([]byte(rawSurface), &surface); err != nil {
 		t.Fatalf("decode selected Claude turn surface: %v", err)
 	}
-	if surface.Authority.ExecutionKind != managedcapabilities.ExecutionSelectedContractFork || surface.Authority.ExecutionAuthorityID != proof.RuntimeExecutionID || surface.Authority.RunID != result.Materialization.ForkRunID || !slices.Equal(surface.EffectiveNames(), []string{"emit_task_completed"}) {
-		t.Fatalf("selected Claude turn surface = %#v", surface)
+	assertSelectedForkClaudeManagedSurface(t, surface, proof.RuntimeExecutionID, result.Materialization.ForkRunID, managedcapabilities.AuthorityProviderTurn)
+}
+
+func assertSelectedForkClaudeManagedSurface(t testing.TB, surface managedcapabilities.Surface, executionID, runID string, authorityKind managedcapabilities.AuthorityKind) {
+	t.Helper()
+	if surface.Authority.Kind != authorityKind ||
+		surface.Authority.ExecutionKind != managedcapabilities.ExecutionSelectedContractFork ||
+		surface.Authority.ExecutionAuthorityID != executionID ||
+		surface.Authority.RunID != runID {
+		t.Fatalf("selected Claude %s authority = %#v", authorityKind, surface.Authority)
 	}
+	if got := surface.EffectiveNames(); !slices.Equal(got, []string{"emit_task_completed", "web_search"}) {
+		t.Fatalf("selected Claude %s effective capabilities = %v", authorityKind, got)
+	}
+	if got := surface.PlannedBindingNames(managedcapabilities.BindingProviderBuiltin); !slices.Equal(got, []string{"WebFetch", "WebSearch"}) {
+		t.Fatalf("selected Claude %s provider bindings = %v", authorityKind, got)
+	}
+	for _, kind := range []managedcapabilities.BindingKind{managedcapabilities.BindingMCPTool, managedcapabilities.BindingMCPProvider} {
+		if got := surface.PlannedBindingNames(kind); !slices.Equal(got, []string{"mcp__runtime-tools__emit_task_completed"}) {
+			t.Fatalf("selected Claude %s %s bindings = %v", authorityKind, kind, got)
+		}
+	}
+	for _, kind := range []managedcapabilities.BindingKind{managedcapabilities.BindingAPIDefinition, managedcapabilities.BindingLocalRuntime} {
+		if got := surface.BindingNames(kind); len(got) != 0 {
+			t.Fatalf("selected Claude %s acquired fallback %s bindings = %v", authorityKind, kind, got)
+		}
+	}
+	for _, tool := range surface.Tools {
+		if tool.Name != "web_search" {
+			continue
+		}
+		if len(tool.Bindings) != 2 {
+			t.Fatalf("selected Claude %s web_search bindings = %#v", authorityKind, tool.Bindings)
+		}
+		for _, binding := range tool.Bindings {
+			if binding.Kind != managedcapabilities.BindingProviderBuiltin {
+				t.Fatalf("selected Claude %s web_search acquired fallback binding %#v", authorityKind, binding)
+			}
+		}
+		return
+	}
+	t.Fatalf("selected Claude %s surface omitted web_search: %#v", authorityKind, surface)
 }
 
 func TestSelectedContractForkManagedPreflightExecutesEligibleMCPToolCall(t *testing.T) {

@@ -171,7 +171,7 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 		switch record.Class {
 		case "claude_startup":
 			startupIndex, startupSession = index, record.SessionID
-			wantTools := []string{"ExitPlanMode", "mcp__runtime-tools__emit_work_completed"}
+			wantTools := releaseE2EAllowedTools()
 			if allowed := splitAllowedTools(dockerOptionValue(record.Args, "--allowedTools")); !equalStrings(allowed, wantTools) {
 				return fmt.Errorf("startup accepted tools = %q, want exact fixture tool surface", allowed)
 			}
@@ -180,6 +180,9 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 			}
 		case "claude_live":
 			liveIndex, liveSession = index, record.SessionID
+			if allowed := splitAllowedTools(dockerOptionValue(record.Args, "--allowedTools")); !equalStrings(allowed, releaseE2EAllowedTools()) {
+				return fmt.Errorf("live accepted tools = %q, want exact fixture tool surface", allowed)
+			}
 			if record.RawMCPURL != releaseE2ERawMCPURL || record.MCPURL != releaseE2EHostMCPURL {
 				return fmt.Errorf("live MCP endpoints = %q/%q, want raw container and translated host defaults", record.RawMCPURL, record.MCPURL)
 			}
@@ -218,6 +221,10 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 		return fmt.Errorf("startup/live attempt identities = %q/%q, want distinct non-empty identities", startupSession, liveSession)
 	}
 	return nil
+}
+
+func releaseE2EAllowedTools() []string {
+	return []string{"ExitPlanMode", "WebFetch", "WebSearch", "mcp__runtime-tools__emit_work_completed"}
 }
 
 func assertReleaseExternalProcessesExited(t *testing.T, root string) {
