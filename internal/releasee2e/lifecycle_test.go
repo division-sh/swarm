@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -401,72 +400,54 @@ func requireDefaultMCPPortAvailable(t *testing.T) {
 func acquireReleaseMCPPortLock(t *testing.T) func() {
 	t.Helper()
 	path := filepath.Join(os.TempDir(), "swarm-release-e2e-mcp-8082.lock")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatalf("open release E2E MCP port lock: %v", err)
+	}
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {
-			if _, err := fmt.Fprintln(file, os.Getpid()); err != nil {
-				file.Close()
-				_ = os.Remove(path)
-				t.Fatalf("record release E2E MCP port lock owner: %v", err)
+			return func() {
+				_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+				_ = file.Close()
 			}
-			if err := file.Close(); err != nil {
-				_ = os.Remove(path)
-				t.Fatalf("close release E2E MCP port lock: %v", err)
-			}
-			return func() { _ = os.Remove(path) }
 		}
-		if !errors.Is(err, os.ErrExist) {
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
+			_ = file.Close()
 			t.Fatalf("acquire release E2E MCP port lock: %v", err)
 		}
-		if reclaimStaleReleaseMCPPortLock(path) {
-			continue
-		}
 		if time.Now().After(deadline) {
+			_ = file.Close()
 			t.Fatalf("timed out waiting for release E2E MCP port lock")
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 }
 
-func TestReleaseMCPPortLockReclaimsOnlyDeadOwners(t *testing.T) {
-	t.Run("dead owner", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "mcp.lock")
-		writeReleaseFile(t, path, strconv.Itoa(1<<30)+"\n")
-		if !reclaimStaleReleaseMCPPortLock(path) {
-			t.Fatal("dead process lock was not reclaimed")
-		}
-		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("dead process lock still exists: %v", err)
-		}
-	})
-	t.Run("live owner", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "mcp.lock")
-		writeReleaseFile(t, path, strconv.Itoa(os.Getpid())+"\n")
-		if reclaimStaleReleaseMCPPortLock(path) {
-			t.Fatal("live process lock was reclaimed")
-		}
-	})
-}
-
-func reclaimStaleReleaseMCPPortLock(path string) bool {
-	raw, err := os.ReadFile(path)
+func TestReleaseMCPPortLockIsKernelReleased(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp.lock")
+	first, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return false
+		t.Fatal(err)
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
-	if err != nil || pid <= 0 || releaseProcessAlive(pid) {
-		return false
+	defer first.Close()
+	if err := syscall.Flock(int(first.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatalf("acquire first advisory lock: %v", err)
 	}
-	removeErr := os.Remove(path)
-	return removeErr == nil || errors.Is(removeErr, os.ErrNotExist)
-}
-
-func releaseProcessAlive(pid int) bool {
-	process, err := os.FindProcess(pid)
+	second, err := os.OpenFile(path, os.O_RDWR, 0o600)
 	if err != nil {
-		return false
+		t.Fatal(err)
 	}
-	err = process.Signal(syscall.Signal(0))
-	return err == nil || errors.Is(err, syscall.EPERM)
+	defer second.Close()
+	if err := syscall.Flock(int(second.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
+		t.Fatalf("second advisory lock error = %v, want blocked", err)
+	}
+	if err := syscall.Flock(int(first.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatalf("release first advisory lock: %v", err)
+	}
+	if err := syscall.Flock(int(second.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatalf("acquire advisory lock after release: %v", err)
+	}
+	_ = syscall.Flock(int(second.Fd()), syscall.LOCK_UN)
 }
