@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -18,8 +19,8 @@ type Provider interface {
 }
 
 type graphMutableProvider interface {
-	UpsertManagedAgent(cfg models.AgentConfig)
-	RemoveManagedAgent(agentID string)
+	UpsertManagedAgent(identity, parent agentidentity.Identity) error
+	RemoveManagedAgent(identity agentidentity.Identity) error
 }
 
 type noopProvider struct{}
@@ -65,14 +66,16 @@ func ProviderOrNoop(provider Provider) Provider {
 	return provider
 }
 
-func UpsertManagedAgent(provider Provider, cfg models.AgentConfig) {
+func UpsertManagedAgent(provider Provider, identity, parent agentidentity.Identity) error {
 	if mutable, ok := ProviderOrNoop(provider).(graphMutableProvider); ok && mutable != nil {
-		mutable.UpsertManagedAgent(cfg)
+		return mutable.UpsertManagedAgent(identity, parent)
 	}
+	return nil
 }
 
-func RemoveManagedAgent(provider Provider, agentID string) {
+func RemoveManagedAgent(provider Provider, identity agentidentity.Identity) error {
 	if mutable, ok := ProviderOrNoop(provider).(graphMutableProvider); ok && mutable != nil {
-		mutable.RemoveManagedAgent(agentID)
+		return mutable.RemoveManagedAgent(identity)
 	}
+	return nil
 }

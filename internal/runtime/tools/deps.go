@@ -31,6 +31,7 @@ type WorkflowInstanceLoader interface {
 type EventPublisher interface {
 	Publish(ctx context.Context, evt events.Event) error
 	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
+	PublishDirectRoutes(ctx context.Context, evt events.Event, routes []events.DeliveryRoute) error
 }
 
 type MutationEventPublisher interface {

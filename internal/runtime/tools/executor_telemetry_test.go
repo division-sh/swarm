@@ -38,6 +38,10 @@ func (b *telemetryBusStub) Publish(_ context.Context, evt events.Event) error {
 
 func (*telemetryBusStub) PublishDirect(context.Context, events.Event, []string) error { return nil }
 
+func (*telemetryBusStub) PublishDirectRoutes(context.Context, events.Event, []events.DeliveryRoute) error {
+	return nil
+}
+
 func (b *telemetryBusStub) LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry) error {
 	lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx)
 	b.lineages = append(b.lineages, lineage)

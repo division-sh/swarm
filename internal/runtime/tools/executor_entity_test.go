@@ -49,6 +49,10 @@ func (*entityToolRuntimeLogBus) PublishDirect(context.Context, events.Event, []s
 	return nil
 }
 
+func (*entityToolRuntimeLogBus) PublishDirectRoutes(context.Context, events.Event, []events.DeliveryRoute) error {
+	return nil
+}
+
 func (b *entityToolRuntimeLogBus) LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry) error {
 	lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx)
 	b.lineages = append(b.lineages, lineage)

@@ -5,6 +5,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -152,16 +153,57 @@ func TestSourceProvider_ManagedAgentGraphUpdates(t *testing.T) {
 	controlPlane := testAgentConfig("control-plane", "control-plane", []string{"agent_hire"}, "", "review/inst-1", "")
 	reviewer := testAgentConfig("reviewer", "reviewer", []string{}, "", "review/inst-1", "control-plane")
 	worker := testAgentConfig("worker", "worker", []string{}, "", "review/inst-1", "reviewer")
+	controlPlane.Identity = agentidentitytest.Runtime(t, "control-plane", "authority-test", "review", "inst-1", "review/inst-1")
+	reviewer.Identity = agentidentitytest.Runtime(t, "reviewer", "authority-test", "review", "inst-1", "review/inst-1")
+	worker.Identity = agentidentitytest.Runtime(t, "worker", "authority-test", "review", "inst-1", "review/inst-1")
 
-	provider.UpsertManagedAgent(reviewer)
-	provider.UpsertManagedAgent(worker)
+	if err := provider.UpsertManagedAgent(reviewer.Identity, controlPlane.Identity); err != nil {
+		t.Fatalf("upsert reviewer authority: %v", err)
+	}
+	if err := provider.UpsertManagedAgent(worker.Identity, reviewer.Identity); err != nil {
+		t.Fatalf("upsert worker authority: %v", err)
+	}
 	if err := provider.AuthorizeManagement(controlPlane, worker); err != nil {
 		t.Fatalf("expected dynamic managed descendant authorization, got %v", err)
 	}
 
-	provider.RemoveManagedAgent("reviewer")
+	if err := provider.RemoveManagedAgent(reviewer.Identity); err != nil {
+		t.Fatalf("remove reviewer authority: %v", err)
+	}
 	if err := provider.AuthorizeManagement(controlPlane, worker); err == nil {
 		t.Fatal("expected descendant authorization to break after manager removal")
+	}
+}
+
+func TestSourceProvider_ManagedAgentRemovalKeepsSameSlugSiblingAuthority(t *testing.T) {
+	provider, ok := NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})).(*sourceProvider)
+	if !ok {
+		t.Fatal("expected sourceProvider")
+	}
+
+	managerA := testAgentConfig("manager", "manager", []string{"agent_fire"}, "", "review/inst-a", "")
+	managerA.Identity = agentidentitytest.Runtime(t, "manager", "authority-test", "review", "inst-a", "review/inst-a")
+	managerB := testAgentConfig("manager", "manager", []string{"agent_fire"}, "", "review/inst-b", "")
+	managerB.Identity = agentidentitytest.Runtime(t, "manager", "authority-test", "review", "inst-b", "review/inst-b")
+	workerA := testAgentConfig("worker", "worker", nil, "", "review/inst-a", "manager")
+	workerA.Identity = agentidentitytest.Runtime(t, "worker", "authority-test", "review", "inst-a", "review/inst-a")
+	workerB := testAgentConfig("worker", "worker", nil, "", "review/inst-b", "manager")
+	workerB.Identity = agentidentitytest.Runtime(t, "worker", "authority-test", "review", "inst-b", "review/inst-b")
+
+	if err := provider.UpsertManagedAgent(workerA.Identity, managerA.Identity); err != nil {
+		t.Fatalf("upsert first worker authority: %v", err)
+	}
+	if err := provider.UpsertManagedAgent(workerB.Identity, managerB.Identity); err != nil {
+		t.Fatalf("upsert sibling worker authority: %v", err)
+	}
+	if err := provider.RemoveManagedAgent(workerA.Identity); err != nil {
+		t.Fatalf("remove first worker authority: %v", err)
+	}
+	if err := provider.AuthorizeManagement(managerA, workerA); err == nil {
+		t.Fatal("expected removed concrete worker authority to be absent")
+	}
+	if err := provider.AuthorizeManagement(managerB, workerB); err != nil {
+		t.Fatalf("same-slug sibling authority was removed: %v", err)
 	}
 }
 
