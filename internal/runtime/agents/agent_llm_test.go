@@ -698,6 +698,11 @@ func (b *directiveFactoryPublishBus) PublishDirect(_ context.Context, evt events
 	return nil
 }
 
+func (b *directiveFactoryPublishBus) PublishDirectRoutes(_ context.Context, evt events.Event, _ []events.DeliveryRoute) error {
+	b.events = append(b.events, evt)
+	return nil
+}
+
 func newFactoryDirectiveAgent(t *testing.T, cfg models.AgentConfig, modelRuntime llm.Runtime, bundle *runtimecontracts.WorkflowContractBundle) (*LLMAgent, *directiveFactoryPublishBus) {
 	t.Helper()
 

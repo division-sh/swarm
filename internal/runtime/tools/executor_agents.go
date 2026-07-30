@@ -67,10 +67,15 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 	}
 	targetEntity := strings.TrimSpace(in.EntityID)
 	in.EntityID = targetEntity
+	targetRoutes := make([]events.DeliveryRoute, 0, len(targets))
 	for _, targetID := range targets {
 		targetCfg, err := manager.ResolveAgentConfig(targetID, in.FlowInstance)
 		if err != nil {
 			return nil, fmt.Errorf("resolve target agent %s: %w", targetID, err)
+		}
+		targetIdentity, err := targetCfg.ConcreteIdentity()
+		if err != nil {
+			return nil, fmt.Errorf("resolve concrete target agent %s identity: %w", targetID, err)
 		}
 		targetCfgEntityID := targetCfg.EffectiveEntityID()
 		if targetEntity == "" {
@@ -79,6 +84,11 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 		if err := authorizeAgentMessage(e.authority, actor, targetCfg, manager); err != nil {
 			return nil, fmt.Errorf("agent_message target %s: %w", targetID, err)
 		}
+		targetRoutes = append(targetRoutes, events.DeliveryRoute{
+			SubscriberType: "agent",
+			SubscriberID:   targetIdentity.AgentID(),
+			AgentIdentity:  targetIdentity,
+		})
 	}
 
 	wirePayload, err := json.Marshal(map[string]any{
@@ -121,7 +131,7 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 	if err != nil {
 		return nil, err
 	}
-	if err := e.bus.PublishDirect(ctx, evt, targets); err != nil {
+	if err := e.bus.PublishDirectRoutes(ctx, evt, targetRoutes); err != nil {
 		return nil, err
 	}
 	return map[string]any{"event_id": evt.ID(), "status": "sent", "targets": targets}, nil
@@ -289,10 +299,12 @@ func (e *Executor) execAgentHire(ctx context.Context, actor models.AgentConfig, 
 	if err := manager.SpawnAgentForEntity(in.Config.EffectiveEntityID(), in.Config); err != nil {
 		return nil, err
 	}
-	if cfg, err := manager.ResolveAgentConfig(in.Config.ID, in.Config.CanonicalFlowPath()); err == nil {
-		runtimeauthority.UpsertManagedAgent(e.authority, cfg)
-	} else {
-		runtimeauthority.UpsertManagedAgent(e.authority, in.Config)
+	cfg, err := manager.ResolveAgentConfig(in.Config.ID, in.Config.CanonicalFlowPath())
+	if err != nil {
+		return nil, fmt.Errorf("resolve hired agent %s: %w", in.Config.ID, err)
+	}
+	if err := syncManagedAgentAuthority(e.authority, manager, actor, cfg); err != nil {
+		return nil, fmt.Errorf("record hired agent authority: %w", err)
 	}
 	return map[string]any{"status": "hired", "agent_id": in.Config.ID}, nil
 }
@@ -319,10 +331,16 @@ func (e *Executor) execAgentFire(actor models.AgentConfig, input any) (any, erro
 	if err := authorizeManage(e.authority, actor, targetCfg, manager); err != nil {
 		return nil, err
 	}
+	targetIdentity, err := targetCfg.ConcreteIdentity()
+	if err != nil {
+		return nil, fmt.Errorf("resolve concrete target agent %s identity: %w", in.AgentID, err)
+	}
 	if err := manager.TeardownAgentTarget(in.AgentID, in.FlowInstance); err != nil {
 		return nil, err
 	}
-	runtimeauthority.RemoveManagedAgent(e.authority, in.AgentID)
+	if err := runtimeauthority.RemoveManagedAgent(e.authority, targetIdentity); err != nil {
+		return nil, fmt.Errorf("remove fired agent authority: %w", err)
+	}
 	return map[string]any{"status": "fired", "agent_id": in.AgentID}, nil
 }
 
@@ -361,13 +379,51 @@ func (e *Executor) execAgentReconfigure(ctx context.Context, actor models.AgentC
 	if err := manager.ReconfigureAgentTarget(in.AgentID, in.FlowInstance, in.Config); err != nil {
 		return nil, err
 	}
-	if cfg, err := manager.ResolveAgentConfig(in.AgentID, in.FlowInstance); err == nil {
-		runtimeauthority.UpsertManagedAgent(e.authority, cfg)
-	} else {
-		in.Config.ID = in.AgentID
-		runtimeauthority.UpsertManagedAgent(e.authority, in.Config)
+	cfg, err := manager.ResolveAgentConfig(in.AgentID, in.FlowInstance)
+	if err != nil {
+		return nil, fmt.Errorf("resolve reconfigured agent %s: %w", in.AgentID, err)
+	}
+	if err := syncManagedAgentAuthority(e.authority, manager, actor, cfg); err != nil {
+		return nil, fmt.Errorf("record reconfigured agent authority: %w", err)
 	}
 	return map[string]any{"status": "reconfigured", "agent_id": in.AgentID}, nil
+}
+
+func syncManagedAgentAuthority(provider runtimeauthority.Provider, manager Manager, actor, target models.AgentConfig) error {
+	targetIdentity, err := target.ConcreteIdentity()
+	if err != nil {
+		return err
+	}
+	parentRef := strings.TrimSpace(target.ParentAgent)
+	if parentRef == "" {
+		parentRef = strings.TrimSpace(target.ManagerFallback)
+	}
+	if parentRef == "" {
+		return runtimeauthority.RemoveManagedAgent(provider, targetIdentity)
+	}
+
+	parent := actor
+	if !managedParentReferenceMatches(parentRef, parent) || !sameConcreteFlowRoute(parent, target) {
+		parent, err = manager.ResolveAgentConfig(parentRef, target.CanonicalFlowPath())
+		if err != nil {
+			return fmt.Errorf("resolve managed parent %s: %w", parentRef, err)
+		}
+	}
+	parentIdentity, err := parent.ConcreteIdentity()
+	if err != nil {
+		return fmt.Errorf("resolve concrete managed parent %s identity: %w", parentRef, err)
+	}
+	return runtimeauthority.UpsertManagedAgent(provider, targetIdentity, parentIdentity)
+}
+
+func managedParentReferenceMatches(parentRef string, parent models.AgentConfig) bool {
+	return strings.TrimSpace(parentRef) != "" && strings.TrimSpace(parentRef) == strings.TrimSpace(parent.ID)
+}
+
+func sameConcreteFlowRoute(left, right models.AgentConfig) bool {
+	leftIdentity, leftErr := left.ConcreteIdentity()
+	rightIdentity, rightErr := right.ConcreteIdentity()
+	return leftErr == nil && rightErr == nil && leftIdentity.Route == rightIdentity.Route
 }
 
 type agentMutationInput struct {

@@ -1,12 +1,14 @@
 package authority
 
 import (
+	"fmt"
 	"slices"
 	"sort"
 	"strings"
 	"sync"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -16,7 +18,8 @@ type sourceProvider struct {
 	mailboxSendRoles []string
 	producerRoles    []string
 	agentEvents      map[string][]string
-	parentByAgent    map[string]string
+	declaredParents  map[string]string
+	managedParents   map[agentidentity.Identity]agentidentity.Identity
 }
 
 func NewSourceProvider(source semanticview.Source) Provider {
@@ -41,7 +44,8 @@ func buildSourceProvider(source semanticview.Source) Provider {
 		mailboxSendRoles: cloneRoles(mailboxSendRoles),
 		producerRoles:    producerRoles,
 		agentEvents:      agentEvents,
-		parentByAgent:    buildManagerFallbackGraph(source),
+		declaredParents:  buildManagerFallbackGraph(source),
+		managedParents:   make(map[agentidentity.Identity]agentidentity.Identity),
 	}
 }
 
@@ -131,38 +135,43 @@ func (p *sourceProvider) AuthorizeManagement(actor, target models.AgentConfig) e
 	return authorizationDenied("agent_manage", actor, target)
 }
 
-func (p *sourceProvider) UpsertManagedAgent(cfg models.AgentConfig) {
+func (p *sourceProvider) UpsertManagedAgent(identity, parent agentidentity.Identity) error {
 	if p == nil {
-		return
+		return nil
 	}
-	agentID := strings.TrimSpace(cfg.ID)
-	if agentID == "" {
-		return
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		return fmt.Errorf("managed agent identity: %w", err)
 	}
-	parent := strings.TrimSpace(cfg.ParentAgent)
-	if parent == "" {
-		parent = strings.TrimSpace(cfg.ManagerFallback)
+	parent = parent.Normalize()
+	if err := parent.Validate(); err != nil {
+		return fmt.Errorf("managed parent identity: %w", err)
 	}
+	if identity == parent {
+		return fmt.Errorf("managed agent identity cannot be its own parent")
+	}
+	if identity.Route != parent.Route {
+		return fmt.Errorf("managed agent and parent must have the same concrete route")
+	}
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if parent == "" || parent == agentID {
-		delete(p.parentByAgent, agentID)
-		return
-	}
-	p.parentByAgent[agentID] = parent
+	p.managedParents[identity] = parent
+	return nil
 }
 
-func (p *sourceProvider) RemoveManagedAgent(agentID string) {
+func (p *sourceProvider) RemoveManagedAgent(identity agentidentity.Identity) error {
 	if p == nil {
-		return
+		return nil
 	}
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
-		return
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		return fmt.Errorf("managed agent identity: %w", err)
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	delete(p.parentByAgent, agentID)
+	delete(p.managedParents, identity)
+	return nil
 }
 
 func (p *sourceProvider) AuthorizeMailboxSend(actor models.AgentConfig) error {
@@ -261,6 +270,9 @@ func buildManagerFallbackGraph(source semanticview.Source) map[string]string {
 }
 
 func (p *sourceProvider) isManagedDescendant(actor, target models.AgentConfig) bool {
+	if p.isConcreteManagedDescendant(actor, target) {
+		return true
+	}
 	actorIDs := uniqueGraphCandidates(strings.TrimSpace(actor.ID), canonicalRole(actor.Role))
 	targetIDs := uniqueGraphCandidates(strings.TrimSpace(target.ID), canonicalRole(target.Role))
 	if len(actorIDs) == 0 || len(targetIDs) == 0 {
@@ -282,7 +294,7 @@ func (p *sourceProvider) isManagedDescendant(actor, target models.AgentConfig) b
 		current := targetID
 		visited := map[string]struct{}{current: {}}
 		for {
-			parent := strings.TrimSpace(p.parentByAgent[current])
+			parent := strings.TrimSpace(p.declaredParents[current])
 			if parent == "" {
 				break
 			}
@@ -297,6 +309,36 @@ func (p *sourceProvider) isManagedDescendant(actor, target models.AgentConfig) b
 		}
 	}
 	return false
+}
+
+func (p *sourceProvider) isConcreteManagedDescendant(actor, target models.AgentConfig) bool {
+	actorIdentity, err := actor.ConcreteIdentity()
+	if err != nil {
+		return false
+	}
+	targetIdentity, err := target.ConcreteIdentity()
+	if err != nil {
+		return false
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	current := targetIdentity
+	visited := map[agentidentity.Identity]struct{}{current: {}}
+	for {
+		parent, ok := p.managedParents[current]
+		if !ok {
+			return false
+		}
+		if parent == actorIdentity {
+			return true
+		}
+		if _, seen := visited[parent]; seen {
+			return false
+		}
+		visited[parent] = struct{}{}
+		current = parent
+	}
 }
 
 func uniqueGraphCandidates(values ...string) []string {

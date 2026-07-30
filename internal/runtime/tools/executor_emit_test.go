@@ -48,6 +48,12 @@ func (b *publishBusCapture) PublishDirect(_ context.Context, evt events.Event, _
 	return nil
 }
 
+func (b *publishBusCapture) PublishDirectRoutes(_ context.Context, evt events.Event, _ []events.DeliveryRoute) error {
+	b.event = evt
+	b.count++
+	return nil
+}
+
 type emitWorkflowInstanceLoader struct {
 	rows map[string]runtimepipeline.WorkflowInstance
 	err  error

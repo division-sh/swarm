@@ -45,6 +45,7 @@ func (managerStub) ReconfigureAgentTarget(string, string, models.AgentConfig) er
 
 type publishDirectBusStub struct {
 	recipients []string
+	routes     []events.DeliveryRoute
 	event      events.Event
 }
 
@@ -52,6 +53,12 @@ func (b *publishDirectBusStub) Publish(context.Context, events.Event) error { re
 
 func (b *publishDirectBusStub) PublishDirect(_ context.Context, event events.Event, recipients []string) error {
 	b.recipients = append([]string{}, recipients...)
+	b.event = event
+	return nil
+}
+
+func (b *publishDirectBusStub) PublishDirectRoutes(_ context.Context, event events.Event, routes []events.DeliveryRoute) error {
+	b.routes = append([]events.DeliveryRoute(nil), routes...)
 	b.event = event
 	return nil
 }
@@ -73,10 +80,15 @@ func (m *captureManagerStub) ResolveAgentConfig(agentID, flowInstance string) (m
 	if !ok || (flowInstance != "" && cfg.CanonicalFlowPath() != flowInstance) {
 		return models.AgentConfig{}, fmt.Errorf("agent not found")
 	}
-	return cfg, nil
+	return withRuntimeToolsTestIdentity(cfg)
 }
 
 func (m *captureManagerStub) SpawnAgentForEntity(entityID string, cfg models.AgentConfig) error {
+	var err error
+	cfg, err = withRuntimeToolsTestIdentity(cfg)
+	if err != nil {
+		return err
+	}
 	m.spawnedEntityID = entityID
 	m.spawnedConfig = cfg
 	m.spawnCalled = true
@@ -110,7 +122,91 @@ func (m *captureManagerStub) ReconfigureAgentTarget(agentID, flowInstance string
 	current := m.agents[agentID]
 	current = mergeDelegablePrivilegeConfig(current, cfg)
 	current.ID = agentID
+	var err error
+	current, err = withRuntimeToolsTestIdentity(current)
+	if err != nil {
+		return err
+	}
 	m.agents[agentID] = current
+	return nil
+}
+
+func withRuntimeToolsTestIdentity(cfg models.AgentConfig) (models.AgentConfig, error) {
+	if !cfg.Identity.IsZero() {
+		return cfg, nil
+	}
+	name, err := agentidentity.RuntimeName(cfg.ID, "runtime-tools-test")
+	if err != nil {
+		return models.AgentConfig{}, err
+	}
+	flowPath := cfg.CanonicalFlowPath()
+	route := agentidentity.RootRoute()
+	if flowPath != "" {
+		parts := strings.Split(flowPath, "/")
+		route, err = agentidentity.PresentRoute(parts[0], parts[len(parts)-1], flowPath)
+		if err != nil {
+			return models.AgentConfig{}, err
+		}
+	}
+	cfg.Identity, err = agentidentity.New(name, route)
+	return cfg, err
+}
+
+type concreteManagerStub struct {
+	agents   map[agentidentity.Identity]models.AgentConfig
+	tornDown []agentidentity.Identity
+}
+
+func (m *concreteManagerStub) ResolveAgentConfig(agentID, flowInstance string) (models.AgentConfig, error) {
+	matches := make([]models.AgentConfig, 0, 2)
+	for identity, cfg := range m.agents {
+		if identity.AgentID() != strings.TrimSpace(agentID) {
+			continue
+		}
+		if flowInstance != "" && identity.FlowInstance() != strings.Trim(strings.TrimSpace(flowInstance), "/") {
+			continue
+		}
+		matches = append(matches, cfg)
+	}
+	if len(matches) != 1 {
+		return models.AgentConfig{}, fmt.Errorf("agent resolution matched %d concrete identities", len(matches))
+	}
+	return matches[0], nil
+}
+
+func (m *concreteManagerStub) SpawnAgentForEntity(_ string, cfg models.AgentConfig) error {
+	identity, err := cfg.ConcreteIdentity()
+	if err != nil {
+		return err
+	}
+	m.agents[identity] = cfg
+	return nil
+}
+
+func (m *concreteManagerStub) TeardownAgentTarget(agentID, flowInstance string) error {
+	cfg, err := m.ResolveAgentConfig(agentID, flowInstance)
+	if err != nil {
+		return err
+	}
+	identity, err := cfg.ConcreteIdentity()
+	if err != nil {
+		return err
+	}
+	delete(m.agents, identity)
+	m.tornDown = append(m.tornDown, identity)
+	return nil
+}
+
+func (m *concreteManagerStub) ReconfigureAgentTarget(agentID, flowInstance string, cfg models.AgentConfig) error {
+	current, err := m.ResolveAgentConfig(agentID, flowInstance)
+	if err != nil {
+		return err
+	}
+	identity, err := current.ConcreteIdentity()
+	if err != nil {
+		return err
+	}
+	m.agents[identity] = mergeDelegablePrivilegeConfig(current, cfg)
 	return nil
 }
 
@@ -175,7 +271,10 @@ func TestExecAgentFire_UsesAuthorizedManagerLifecyclePath(t *testing.T) {
 		},
 	})
 	manager := &captureManagerStub{agents: map[string]models.AgentConfig{
-		"worker-1": {ID: "worker-1", Role: "worker", ManagerFallback: "manager", FlowPath: "review/inst-1"},
+		"worker-1": {
+			ID: "worker-1", Identity: agentidentitytest.Runtime(t, "worker-1", "runtime-tools-test", "review", "inst-1", "review/inst-1"),
+			Role: "worker", ManagerFallback: "manager", FlowPath: "review/inst-1",
+		},
 	}}
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
 		Manager: manager, AuthorityProvider: runtimeauthority.NewSourceProvider(source), WorkflowSource: source,
@@ -193,6 +292,53 @@ func TestExecAgentFire_UsesAuthorizedManagerLifecyclePath(t *testing.T) {
 	}
 	if got := result.(map[string]any)["status"]; got != "fired" {
 		t.Fatalf("status = %v, want fired", got)
+	}
+}
+
+func TestExecAgentFire_RemovesOnlySelectedSameSlugAuthority(t *testing.T) {
+	t.Parallel()
+
+	provider := runtimeauthority.NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+	managerA := models.AgentConfig{
+		ID: "manager", Identity: agentidentitytest.Runtime(t, "manager", "runtime-tools-test", "review", "inst-a", "review/inst-a"),
+		Role: "manager", Permissions: []string{"agent_fire"}, FlowPath: "review/inst-a",
+	}
+	managerB := models.AgentConfig{
+		ID: "manager", Identity: agentidentitytest.Runtime(t, "manager", "runtime-tools-test", "review", "inst-b", "review/inst-b"),
+		Role: "manager", Permissions: []string{"agent_fire"}, FlowPath: "review/inst-b",
+	}
+	workerA := models.AgentConfig{
+		ID: "worker", Identity: agentidentitytest.Runtime(t, "worker", "runtime-tools-test", "review", "inst-a", "review/inst-a"),
+		Role: "worker", ParentAgent: "manager", FlowPath: "review/inst-a",
+	}
+	workerB := models.AgentConfig{
+		ID: "worker", Identity: agentidentitytest.Runtime(t, "worker", "runtime-tools-test", "review", "inst-b", "review/inst-b"),
+		Role: "worker", ParentAgent: "manager", FlowPath: "review/inst-b",
+	}
+	if err := runtimeauthority.UpsertManagedAgent(provider, workerA.Identity, managerA.Identity); err != nil {
+		t.Fatalf("upsert first worker authority: %v", err)
+	}
+	if err := runtimeauthority.UpsertManagedAgent(provider, workerB.Identity, managerB.Identity); err != nil {
+		t.Fatalf("upsert sibling worker authority: %v", err)
+	}
+	manager := &concreteManagerStub{agents: map[agentidentity.Identity]models.AgentConfig{
+		managerA.Identity: managerA,
+		managerB.Identity: managerB,
+		workerA.Identity:  workerA,
+		workerB.Identity:  workerB,
+	}}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
+
+	if _, err := exec.ExecAgentFireDirect(managerA, map[string]any{
+		"agent_id": "worker", "flow_instance": "review/inst-a",
+	}); err != nil {
+		t.Fatalf("fire first concrete worker: %v", err)
+	}
+	if len(manager.tornDown) != 1 || manager.tornDown[0] != workerA.Identity {
+		t.Fatalf("torn down identities = %#v, want first worker only", manager.tornDown)
+	}
+	if err := provider.AuthorizeManagement(managerB, workerB); err != nil {
+		t.Fatalf("same-slug sibling authority was removed by fire: %v", err)
 	}
 }
 
@@ -214,7 +360,8 @@ func TestExecAgentReconfigure_UsesAuthorizedManagerLifecyclePath(t *testing.T) {
 
 	result, err := exec.ExecAgentReconfigureDirect(models.AgentConfig{
 		ExecutionMode: "live",
-		ID:            "manager-1", Role: "manager", Permissions: []string{"agent_reconfigure"}, FlowPath: "review/inst-1",
+		ID:            "manager", Identity: agentidentitytest.Runtime(t, "manager", "runtime-tools-test", "review", "inst-1", "review/inst-1"),
+		Role: "manager", Permissions: []string{"agent_reconfigure"}, FlowPath: "review/inst-1",
 	}, map[string]any{"agent_id": "worker-1", "model": "fast"})
 	if err != nil {
 		t.Fatalf("ExecAgentReconfigureDirect: %v", err)
@@ -258,6 +405,7 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 		agents: map[string]models.AgentConfig{
 			"target-1": {
 				ID:              "target-1",
+				Identity:        agentidentitytest.Runtime(t, "target-1", "runtime-tools-test", "review", "inst-1", "review/inst-1"),
 				Role:            "reviewer",
 				EntityID:        "entity-b",
 				FlowPath:        "review/inst-1",
@@ -283,11 +431,77 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("expected cross-entity agent_message to be allowed, got %v", err)
 	}
-	if len(bus.recipients) != 1 || bus.recipients[0] != "target-1" {
-		t.Fatalf("recipients = %#v, want [target-1]", bus.recipients)
+	if len(bus.recipients) != 0 {
+		t.Fatalf("slug-only recipients = %#v, want none", bus.recipients)
+	}
+	if len(bus.routes) != 1 || bus.routes[0].AgentIdentity != manager.agents["target-1"].Identity {
+		t.Fatalf("exact routes = %#v, want target concrete identity", bus.routes)
 	}
 	if bus.event.ExecutionMode() != runtimeeffects.ExecutionModeMock {
 		t.Fatalf("agent_message event execution mode = %q, want mock", bus.event.ExecutionMode())
+	}
+}
+
+func TestExecAgentMessage_PublishesOnlyResolvedSameSlugRoute(t *testing.T) {
+	t.Parallel()
+
+	agents := map[string]runtimecontracts.AgentRegistryEntry{
+		"manager": {ID: "manager", Role: "manager", Tools: []string{"message_flow"}},
+		"worker":  {ID: "worker", Role: "worker"},
+	}
+	reviewFlow := &runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
+		Path:  "review", Agents: agents,
+	}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: reviewFlow,
+			ByID: map[string]*runtimecontracts.FlowContractView{"review": reviewFlow},
+		},
+	})
+	workerA := models.AgentConfig{
+		ID: "worker", Identity: agentidentitytest.Runtime(t, "worker", "runtime-tools-test", "review", "inst-a", "review/inst-a"),
+		Role: "worker", EntityID: "entity-a", FlowPath: "review/inst-a",
+	}
+	workerB := models.AgentConfig{
+		ID: "worker", Identity: agentidentitytest.Runtime(t, "worker", "runtime-tools-test", "review", "inst-b", "review/inst-b"),
+		Role: "worker", EntityID: "entity-b", FlowPath: "review/inst-b",
+	}
+	manager := &concreteManagerStub{agents: map[agentidentity.Identity]models.AgentConfig{
+		workerA.Identity: workerA,
+		workerB.Identity: workerB,
+	}}
+	bus := &publishDirectBusStub{}
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{
+		Manager: manager, AuthorityProvider: runtimeauthority.NewSourceProvider(source), WorkflowSource: source,
+	})
+	actor := models.AgentConfig{
+		ExecutionMode: "mock",
+		ID:            "manager",
+		Identity:      agentidentitytest.Runtime(t, "manager", "runtime-tools-test", "review", "inst-b", "review/inst-b"),
+		Role:          "manager",
+		Permissions:   []string{"message_flow"},
+		EntityID:      "entity-manager",
+		FlowID:        "review",
+		FlowPath:      "review/inst-b",
+	}
+	ctx := runtimeeffects.WithExecutionMode(WithActor(toolEventTestContext(actor), actor), runtimeeffects.ExecutionModeMock)
+
+	if _, err := exec.execAgentMessage(ctx, actor, map[string]any{
+		"target_agent_id": "worker",
+		"flow_instance":   "review/inst-b",
+		"message":         "exact sibling",
+	}); err != nil {
+		t.Fatalf("send exact same-slug agent message: %v", err)
+	}
+	if len(bus.recipients) != 0 {
+		t.Fatalf("slug-only recipients = %#v, want none", bus.recipients)
+	}
+	if len(bus.routes) != 1 || bus.routes[0].AgentIdentity != workerB.Identity {
+		t.Fatalf("published routes = %#v, want second concrete worker only", bus.routes)
+	}
+	if bus.routes[0].AgentIdentity == workerA.Identity {
+		t.Fatal("message route crossed to unrelated same-slug sibling")
 	}
 }
 
@@ -309,7 +523,8 @@ func TestExecAgentHire_DeniesDelegatedPermissionEscalation(t *testing.T) {
 
 	_, err := exec.ExecAgentHireDirect(models.AgentConfig{
 		ExecutionMode: "live",
-		ID:            "manager-1",
+		ID:            "manager",
+		Identity:      agentidentitytest.Runtime(t, "manager", "runtime-tools-test", "review", "inst-1", "review/inst-1"),
 		Role:          "manager",
 		Permissions:   []string{"agent_hire"},
 		FlowPath:      "review/inst-1",
@@ -348,7 +563,8 @@ func TestExecAgentHire_DeniesDelegatedToolEscalation(t *testing.T) {
 
 	_, err := exec.ExecAgentHireDirect(models.AgentConfig{
 		ExecutionMode: "live",
-		ID:            "manager-1",
+		ID:            "manager",
+		Identity:      agentidentitytest.Runtime(t, "manager", "runtime-tools-test", "review", "inst-1", "review/inst-1"),
 		Role:          "manager",
 		Permissions:   []string{"agent_hire"},
 		FlowPath:      "review/inst-1",
@@ -431,7 +647,8 @@ func TestExecAgentHire_AllowsDelegablePrivileges(t *testing.T) {
 
 	_, err := exec.ExecAgentHireDirect(models.AgentConfig{
 		ExecutionMode: "live",
-		ID:            "manager-1",
+		ID:            "manager",
+		Identity:      agentidentitytest.Runtime(t, "manager", "runtime-tools-test", "review", "inst-1", "review/inst-1"),
 		Role:          "manager",
 		Permissions:   []string{"agent_hire", "schedule"},
 		Tools:         []string{"lookup_data"},
@@ -553,7 +770,8 @@ func TestExecAgentHire_PreservesMemoryPresenceAndProvenance(t *testing.T) {
 			}
 			_, err := exec.ExecAgentHireDirect(models.AgentConfig{
 				ExecutionMode: "live",
-				ID:            "manager-1",
+				ID:            "manager",
+				Identity:      agentidentitytest.Runtime(t, "manager", "runtime-tools-test", "review", "inst-1", "review/inst-1"),
 				Role:          "manager",
 				Permissions:   []string{"agent_hire"},
 				FlowPath:      "review/inst-1",
@@ -780,7 +998,8 @@ func TestExecAgentReconfigure_PreservesMemoryPresence(t *testing.T) {
 			})
 			_, err := exec.ExecAgentReconfigureDirect(models.AgentConfig{
 				ExecutionMode: "live",
-				ID:            "manager-1", Role: "manager", Permissions: []string{"agent_reconfigure"}, FlowPath: "review/inst-1",
+				ID:            "manager", Identity: agentidentitytest.Runtime(t, "manager", "runtime-tools-test", "review", "inst-1", "review/inst-1"),
+				Role: "manager", Permissions: []string{"agent_reconfigure"}, FlowPath: "review/inst-1",
 			}, tc.input)
 			if err != nil {
 				t.Fatalf("ExecAgentReconfigureDirect: %v", err)
