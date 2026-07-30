@@ -13677,9 +13677,14 @@ platform_tables:
             memory is never durable authority.
           retirement: >
             Retirement atomically rejects new candidate admission, cancels process-local waits, and joins every
-            accepted chain before selected-store release. A rearm operation commits and represents its newer exact
-            revision before settling the current chain. A retired generation cannot mutate or block its successor;
-            successor startup reconstructs every durable candidate and future wake before readiness.
+            accepted chain before selected-store release. Its wait for already-reserved commit/rollback handoffs is
+            governed by the runtime's one shutdown-grace context, so an unsettled selected-store mutation cannot delay
+            cancellation escalation or the timeout report. A delayed reserved handoff cannot install process-local work
+            after retirement; a committed candidate remains durable for successor startup recovery. Grace expiry does
+            not release accepted work or selected-store ownership: the reachable shutdown owner still joins the runtime
+            occurrence before store release. A rearm operation commits and represents its newer exact revision before
+            settling the current chain. A retired generation cannot mutate or block its successor; successor startup
+            reconstructs every durable candidate and future wake before readiness.
           backend_contract: >
             SQLite and PostgreSQL share the typed request, execution, stale-revision, rollback, readback, startup,
             retirement, and late-settlement contract. Selected-fork source terminalization remains PostgreSQL-only and

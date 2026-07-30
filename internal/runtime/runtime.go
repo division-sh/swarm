@@ -1867,12 +1867,17 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions, releaseOwnership bool) 
 	if rt.workOccurrence != nil {
 		_ = rt.workOccurrence.Fence()
 	}
-	if rt.runLifecycleExecutor != nil {
-		rt.runLifecycleExecutor.Retire()
-	}
 	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
 	defer cancelDrain()
 	var shutdownErr error
+	if rt.runLifecycleExecutor != nil {
+		if err := rt.runLifecycleExecutor.Retire(drainCtx); err != nil {
+			shutdownErr = errors.Join(
+				shutdownErr,
+				fmt.Errorf("run lifecycle executor retirement timed out after %s: %w", grace, err),
+			)
+		}
+	}
 	if err := rt.shutdownGate.Wait(drainCtx); err != nil {
 		shutdownErr = errors.Join(shutdownErr, fmt.Errorf("runtime ingress admission drain timed out after %s: %w", grace, err))
 	}

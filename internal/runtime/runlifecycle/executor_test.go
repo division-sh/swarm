@@ -3,6 +3,7 @@ package runlifecycle
 import (
 	"context"
 	"errors"
+	goruntime "runtime"
 	"sync"
 	"testing"
 	"time"
@@ -159,12 +160,59 @@ func TestExecutorRetirementCancelsAcceptedWorkAndRejectsNewAdmission(t *testing.
 	}
 	receiveSignal(t, executing, "candidate execution")
 
-	executor.Retire()
+	if err := executor.Retire(context.Background()); err != nil {
+		t.Fatalf("retire executor: %v", err)
+	}
 	if cause := receiveValue(t, cancelled, "candidate cancellation"); !errors.Is(cause, worklifetime.ErrRetired) {
 		t.Fatalf("candidate cancellation cause = %v, want %v", cause, worklifetime.ErrRetired)
 	}
 	if _, err := executor.ReserveCompletionCandidate(context.Background()); !errors.Is(err, worklifetime.ErrRetired) {
 		t.Fatalf("post-retirement admission error = %v, want %v", err, worklifetime.ErrRetired)
+	}
+	retireRuntimeOccurrence(t, occurrence)
+}
+
+func TestExecutorRetirementIsContextBoundAndRejectsDelayedReservedSubmission(t *testing.T) {
+	store := &executorTestStore{
+		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
+			return CandidatePage{Exhausted: true}, nil
+		},
+		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+			t.Fatal("retired executor executed a delayed reserved candidate")
+			return CompletionResult{}, nil
+		},
+	}
+	executor, occurrence := newExecutorTestSubject(t, store, ExecutorOptions{})
+	if err := executor.Start(context.Background()); err != nil {
+		t.Fatalf("start executor: %v", err)
+	}
+	admission, err := executor.ReserveCompletionCandidate(context.Background())
+	if err != nil {
+		t.Fatalf("reserve candidate admission: %v", err)
+	}
+
+	retireCtx, cancelRetire := context.WithCancel(context.Background())
+	retired := make(chan error, 1)
+	go func() { retired <- executor.Retire(retireCtx) }()
+	retirementDeadline := time.NewTimer(5 * time.Second)
+	defer retirementDeadline.Stop()
+	for executor.Ready() {
+		select {
+		case <-retirementDeadline.C:
+			t.Fatal("timed out waiting for executor retirement fence")
+		default:
+			goruntime.Gosched()
+		}
+	}
+	if _, err := executor.ReserveCompletionCandidate(context.Background()); !errors.Is(err, worklifetime.ErrRetired) {
+		t.Fatalf("post-retirement admission error = %v, want %v", err, worklifetime.ErrRetired)
+	}
+	cancelRetire()
+	if err := receiveValue(t, retired, "bounded executor retirement"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("retire executor error = %v, want context cancellation", err)
+	}
+	if err := admission.Submit(executorTestCandidate(1)); !errors.Is(err, worklifetime.ErrRetired) {
+		t.Fatalf("delayed reserved submission error = %v, want %v", err, worklifetime.ErrRetired)
 	}
 	retireRuntimeOccurrence(t, occurrence)
 }
@@ -221,7 +269,9 @@ func newExecutorTestSubject(
 
 func retireExecutorTestSubject(t *testing.T, executor *Executor, occurrence *worklifetime.RuntimeOccurrence) {
 	t.Helper()
-	executor.Retire()
+	if err := executor.Retire(context.Background()); err != nil {
+		t.Fatalf("retire executor: %v", err)
+	}
 	retireRuntimeOccurrence(t, occurrence)
 }
 

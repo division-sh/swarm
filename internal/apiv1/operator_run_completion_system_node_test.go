@@ -122,7 +122,9 @@ func startAPIRunLifecycleExecutor(
 		t.Fatalf("start completion candidate executor: %v", err)
 	}
 	t.Cleanup(func() {
-		executor.Retire()
+		if err := executor.Retire(context.Background()); err != nil {
+			t.Errorf("retire completion candidate executor: %v", err)
+		}
 		registration.Release()
 	})
 	return executor
