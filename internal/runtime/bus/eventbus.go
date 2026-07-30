@@ -83,7 +83,7 @@ type EventBus struct {
 	providerOutputVerifier      ProviderOutputAuthorizationVerifier
 	outboxSweeperActive         bool
 	outboxSweeperDone           chan struct{}
-	pipelineSweepMu             sync.Mutex
+	pipelineSweepMu             pipelineSweepLock
 	pipelineScans               map[runtimepipelineobligation.ScanRequest]*pipelineSweepScan
 	workOwner                   worklifetime.Occurrence
 }
@@ -95,11 +95,42 @@ type PipelineParentTransition struct {
 	bus  *EventBus
 }
 
-func (eb *EventBus) BeginPipelineParentTransition() (*PipelineParentTransition, error) {
+type pipelineSweepLock struct {
+	once  sync.Once
+	token chan struct{}
+}
+
+func (l *pipelineSweepLock) acquire(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("pipeline sweep lock context is required")
+	}
+	l.once.Do(func() {
+		l.token = make(chan struct{}, 1)
+		l.token <- struct{}{}
+	})
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-l.token:
+		if err := ctx.Err(); err != nil {
+			l.token <- struct{}{}
+			return err
+		}
+		return nil
+	}
+}
+
+func (l *pipelineSweepLock) release() {
+	l.token <- struct{}{}
+}
+
+func (eb *EventBus) BeginPipelineParentTransition(ctx context.Context) (*PipelineParentTransition, error) {
 	if eb == nil {
 		return nil, errors.New("event bus is required")
 	}
-	eb.pipelineSweepMu.Lock()
+	if err := eb.pipelineSweepMu.acquire(ctx); err != nil {
+		return nil, fmt.Errorf("acquire pipeline parent transition: %w", err)
+	}
 	return &PipelineParentTransition{bus: eb}, nil
 }
 
@@ -108,7 +139,7 @@ func (t *PipelineParentTransition) Done() {
 		return
 	}
 	t.once.Do(func() {
-		t.bus.pipelineSweepMu.Unlock()
+		t.bus.pipelineSweepMu.release()
 	})
 }
 

@@ -1516,7 +1516,7 @@ func (c *serveStandingServiceController) closeAndDrain(ctx context.Context, serv
 	if owner.Bus == nil {
 		return nil, nil, errors.Join(errors.New("standing service pipeline recovery owner is required"), c.restoreAdmission(owner, serviceID, nil))
 	}
-	pipelineRecovery, err := owner.Bus.BeginPipelineParentTransition()
+	pipelineRecovery, err := owner.Bus.BeginPipelineParentTransition(ctx)
 	if err != nil {
 		return nil, nil, errors.Join(err, c.restoreAdmission(owner, serviceID, nil))
 	}
