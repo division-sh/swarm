@@ -141,7 +141,11 @@ func authorizeAgentMessage(provider runtimeauthority.Provider, actor, target mod
 	if strings.TrimSpace(actor.ID) == "" || strings.TrimSpace(target.ID) == "" {
 		return failures.NewDetail("invalid_tool_input", "tool-executor", "agent_message.authorize", map[string]any{"field": "agent_id"})
 	}
-	if strings.TrimSpace(actor.ID) == strings.TrimSpace(target.ID) {
+	same, err := runtimeauthority.SameAgent(actor, target)
+	if err != nil {
+		return failures.NewDetail("invalid_tool_input", "tool-executor", "agent_message.authorize", map[string]any{"field": "agent_identity", "reason": err.Error()})
+	}
+	if same {
 		return nil
 	}
 	if hasRoleMessageAuthority(provider, actor, target) {
@@ -296,6 +300,9 @@ func (e *Executor) execAgentHire(ctx context.Context, actor models.AgentConfig, 
 	if err := e.ValidateNativeToolAdmission(ctx, in.Config); err != nil {
 		return nil, err
 	}
+	if err := preflightManagedAgentParent(manager, actor, in.Config); err != nil {
+		return nil, fmt.Errorf("validate hired agent authority: %w", err)
+	}
 	if err := manager.SpawnAgentForEntity(in.Config.EffectiveEntityID(), in.Config); err != nil {
 		return nil, err
 	}
@@ -304,7 +311,11 @@ func (e *Executor) execAgentHire(ctx context.Context, actor models.AgentConfig, 
 		return nil, fmt.Errorf("resolve hired agent %s: %w", in.Config.ID, err)
 	}
 	if err := syncManagedAgentAuthority(e.authority, manager, actor, cfg); err != nil {
-		return nil, fmt.Errorf("record hired agent authority: %w", err)
+		syncErr := fmt.Errorf("record hired agent authority: %w", err)
+		if teardownErr := manager.TeardownAgentTarget(cfg.ID, cfg.CanonicalFlowPath()); teardownErr != nil {
+			return nil, errors.Join(syncErr, fmt.Errorf("rollback hired agent after authority failure: %w", teardownErr))
+		}
+		return nil, syncErr
 	}
 	return map[string]any{"status": "hired", "agent_id": in.Config.ID}, nil
 }
@@ -414,6 +425,32 @@ func syncManagedAgentAuthority(provider runtimeauthority.Provider, manager Manag
 		return fmt.Errorf("resolve concrete managed parent %s identity: %w", parentRef, err)
 	}
 	return runtimeauthority.UpsertManagedAgent(provider, targetIdentity, parentIdentity)
+}
+
+func preflightManagedAgentParent(manager Manager, actor, target models.AgentConfig) error {
+	parentRef := strings.TrimSpace(target.ParentAgent)
+	if parentRef == "" {
+		parentRef = strings.TrimSpace(target.ManagerFallback)
+	}
+	if parentRef == "" {
+		return nil
+	}
+
+	parent := actor
+	if !managedParentReferenceMatches(parentRef, parent) || parent.CanonicalFlowPath() != target.CanonicalFlowPath() {
+		var err error
+		parent, err = manager.ResolveAgentConfig(parentRef, target.CanonicalFlowPath())
+		if err != nil {
+			return fmt.Errorf("resolve managed parent %s: %w", parentRef, err)
+		}
+	}
+	if _, err := parent.ConcreteIdentity(); err != nil {
+		return fmt.Errorf("resolve concrete managed parent %s identity: %w", parentRef, err)
+	}
+	if parent.CanonicalFlowPath() != target.CanonicalFlowPath() {
+		return fmt.Errorf("managed parent %s is not in target flow route %s", parentRef, target.CanonicalFlowPath())
+	}
+	return nil
 }
 
 func managedParentReferenceMatches(parentRef string, parent models.AgentConfig) bool {

@@ -57,3 +57,39 @@ func TestIdentityKeepsNameProvenanceSeparate(t *testing.T) {
 		t.Fatal("declared and runtime-created provenance collapsed")
 	}
 }
+
+func TestEqualRequiresCompleteIdentityAndEveryAxis(t *testing.T) {
+	name, err := DeclaredName("worker", "swarm://review/worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	routeA, err := PresentRoute("review", "inst-a", "review/inst-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	routeB, err := PresentRoute("review", "inst-b", "review/inst-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	left, err := New(name, routeA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := New(name, routeA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sibling, err := New(name, routeB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if equal, err := Equal(left, replay); err != nil || !equal {
+		t.Fatalf("exact identity equality = %t, %v", equal, err)
+	}
+	if equal, err := Equal(left, sibling); err != nil || equal {
+		t.Fatalf("same-slug sibling equality = %t, %v", equal, err)
+	}
+	if _, err := Equal(left, Identity{}); err == nil {
+		t.Fatal("malformed identity participated in equality")
+	}
+}

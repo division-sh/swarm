@@ -767,7 +767,11 @@ func authorizeManage(provider runtimeauthority.Provider, actor, target models.Ag
 	if !runtimeauthority.SameFlowInstance(actor, target) {
 		return failures.New(failures.ClassAuthorizationDenied, "agent_management_cross_flow_forbidden", "tool-executor", "authorize_manage", map[string]any{"action": "agent_manage", "actor_id": actor.ID, "target_agent_id": target.ID})
 	}
-	if strings.TrimSpace(actor.ID) == strings.TrimSpace(target.ID) {
+	same, err := runtimeauthority.SameAgent(actor, target)
+	if err != nil && !target.Identity.IsZero() {
+		return failures.New(failures.ClassAuthorizationDenied, "agent_management_identity_invalid", "tool-executor", "authorize_manage", map[string]any{"action": "agent_manage", "actor_id": actor.ID, "target_agent_id": target.ID, "reason": err.Error()})
+	}
+	if err == nil && same {
 		return failures.New(failures.ClassAuthorizationDenied, "agent_self_management_forbidden", "tool-executor", "authorize_manage", map[string]any{"action": "agent_manage", "actor_id": actor.ID, "target_agent_id": target.ID})
 	}
 	return runtimeauthority.ProviderOrNoop(provider).AuthorizeManagement(actor, target)

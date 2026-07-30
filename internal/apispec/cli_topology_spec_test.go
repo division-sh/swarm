@@ -413,10 +413,10 @@ func TestCLIIdentifierResolutionPromotedToOutputContract(t *testing.T) {
 
 	agentBoundary := mustMappingValue(t, cliSpecification(t), "agent_identity_boundary")
 	agentRule := mustMappingValue(t, agentBoundary, "rule")
-	assertScalarContains(t, agentRule, "unique")
 	assertScalarContains(t, agentRule, "case-sensitive")
-	assertScalarContains(t, agentRule, "mutating agent selectors remain full-slug-only")
-	assertScalarContains(t, agentRule, "UUIDs")
+	assertScalarContains(t, agentRule, "flow_instance")
+	assertScalarContains(t, agentRule, "one concrete identity")
+	assertScalarContains(t, agentRule, "exactly one live identity")
 	assertScalarContains(t, agentRule, "aliases")
 }
 

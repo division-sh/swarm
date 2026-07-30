@@ -581,31 +581,32 @@ func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt eve
 	for _, recipient := range liveRecipients {
 		recipientIDs = append(recipientIDs, recipient.RecipientID)
 	}
-	expected := agentChannelDeliveryRecipients(recipientIDs, deliveryRoutes)
-	dispatchRecipients := uniqueStrings(append(append([]string(nil), recipientIDs...), expected...))
+	expected := authoritativeDeliveryTargetKeys(liveRecipients, deliveryRoutes)
+	dispatchRecipients := uniqueStrings(append(append([]string(nil), recipientIDs...), deliveryTargetKeySubscriberIDs(expected)...))
 	if len(dispatchRecipients) == 0 {
 		return nil
 	}
-	expectedSet := make(map[string]struct{}, len(expected))
+	expectedSet := make(map[deliveryRouteTargetKey]struct{}, len(expected))
 	for _, recipient := range expected {
 		expectedSet[recipient] = struct{}{}
 	}
 	routesByRecipient := deliveryRoutesBySubscriber(deliveryRoutes)
 	recipients := eb.snapshotRoutePlanRecipientChans(dispatchRecipients, liveRecipients)
-	delivered := make([]string, 0, len(recipients))
-	seen := make(map[string]struct{}, len(recipients))
+	delivered := make([]deliveryRouteTargetKey, 0, len(recipients))
+	seen := make(map[deliveryRouteTargetKey]struct{}, len(recipients))
 	for _, recipient := range recipients {
-		seen[recipient.subscriberID()] = struct{}{}
+		seen[recipient.deliveryRouteTargetKey()] = struct{}{}
 	}
-	missing := make([]string, 0, len(expected))
+	missing := make([]deliveryRouteTargetKey, 0, len(expected))
 	for _, recipient := range expected {
 		if _, ok := seen[recipient]; !ok {
 			missing = append(missing, recipient)
 		}
 	}
-	timedOut := make([]string, 0, len(recipients))
+	timedOut := make([]deliveryRouteTargetKey, 0, len(recipients))
 	for _, recipient := range recipients {
-		routes := routesByRecipient[recipient.deliveryRouteTargetKey()]
+		targetKey := recipient.deliveryRouteTargetKey()
+		routes := routesByRecipient[targetKey]
 		if recipient.isWorkflowRuntimeInternalCarrier() {
 			// The workflow-runtime subscription is an in-memory carrier for the
 			// concrete node delivery routes. Its placeholder route must never
@@ -625,43 +626,33 @@ func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt eve
 			sendResult := recipient.send(ctx, deliverEvent.Event(), route)
 			switch sendResult {
 			case agentRouteSendDelivered:
-				delivered = append(delivered, recipient.subscriberID())
+				delivered = append(delivered, targetKey)
 			case agentRouteSendInactive:
-				if _, required := expectedSet[recipient.subscriberID()]; required {
-					missing = append(missing, recipient.subscriberID())
+				if _, required := expectedSet[targetKey]; required {
+					missing = append(missing, targetKey)
 				}
 			case agentRouteSendContextDone:
-				remaining := make([]string, 0, len(recipients)-len(delivered))
-				for _, candidate := range recipients {
-					if _, ok := seen[candidate.subscriberID()]; ok {
-						delete(seen, candidate.subscriberID())
-					}
-				}
+				remaining := make([]deliveryRouteTargetKey, 0, len(expected))
+				deliveredSet := deliveryTargetKeySet(delivered)
 				for _, recipient := range expected {
-					found := false
-					for _, sent := range delivered {
-						if sent == recipient {
-							found = true
-							break
-						}
-					}
-					if !found {
+					if _, found := deliveredSet[recipient]; !found {
 						remaining = append(remaining, recipient)
 					}
 				}
-				return eb.logAuthoritativeDeliveryIncomplete(ctx, evt, expected, delivered, uniqueStrings(missing), remaining, ctx.Err())
+				return eb.logAuthoritativeDeliveryIncomplete(ctx, evt, expected, delivered, uniqueDeliveryTargetKeys(missing), remaining, ctx.Err())
 			case agentRouteSendTimedOut:
-				if _, required := expectedSet[recipient.subscriberID()]; required {
-					timedOut = append(timedOut, recipient.subscriberID())
+				if _, required := expectedSet[targetKey]; required {
+					timedOut = append(timedOut, targetKey)
 				}
 				eb.logRuntime(ctx, "warn", "Event delivery to a recipient timed out", "eventbus", "delivery_timeout", evt.ID(), string(evt.Type()), recipient.subscriberID(), evt.EntityID(), "", nil, map[string]any{
 					"timeout_ms": int(deliverySendTimeout / time.Millisecond),
-				}, targetDeliveryTimeoutFailure(evt, recipient.subscriberID(), deliverySendTimeout), 0)
+					"target":     targetKey.description(),
+				}, targetDeliveryTimeoutFailure(evt, targetKey, deliverySendTimeout), 0)
 			}
 		}
 	}
-	missing = uniqueStrings(missing)
-	timedOut = uniqueStrings(timedOut)
+	missing = uniqueDeliveryTargetKeys(missing)
+	timedOut = uniqueDeliveryTargetKeys(timedOut)
 	if len(missing) > 0 || len(timedOut) > 0 {
 		return eb.logAuthoritativeDeliveryIncomplete(ctx, evt, expected, delivered, missing, timedOut, nil)
 	}
@@ -689,35 +680,124 @@ func deliveryRoutesBySubscriber(deliveryRoutes []events.DeliveryRoute) map[deliv
 	return out
 }
 
-func agentChannelDeliveryRecipients(recipientIDs []string, deliveryRoutes []events.DeliveryRoute) []string {
+func authoritativeDeliveryTargetKeys(liveRecipients []RoutePlanLiveRecipient, deliveryRoutes []events.DeliveryRoute) []deliveryRouteTargetKey {
 	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
-	if len(deliveryRoutes) == 0 {
-		return uniqueStrings(recipientIDs)
+	if len(deliveryRoutes) > 0 {
+		out := make([]deliveryRouteTargetKey, 0, len(deliveryRoutes))
+		for _, route := range deliveryRoutes {
+			if route.SubscriberType != routePlanSubscriberAgent {
+				continue
+			}
+			out = append(out, deliveryRouteTargetKey{
+				subscriberType: route.SubscriberType,
+				subscriberID:   route.SubscriberID,
+				agentIdentity:  route.AgentIdentity,
+			})
+		}
+		return uniqueDeliveryTargetKeys(out)
 	}
-	return deliveryRouteRecipientIDsByType(deliveryRoutes, "agent")
+	out := make([]deliveryRouteTargetKey, 0, len(liveRecipients))
+	for _, recipient := range normalizeRoutePlanLiveRecipients(liveRecipients) {
+		out = append(out, deliveryRouteTargetKey{
+			subscriberType: recipient.SubscriberType,
+			subscriberID:   recipient.RecipientID,
+			agentIdentity:  recipient.AgentIdentity,
+		})
+	}
+	return uniqueDeliveryTargetKeys(out)
 }
 
 func deliveryRoutesCoverAgentRecipients(routes []events.DeliveryRoute, recipients []string) bool {
-	required := make(map[string]struct{}, len(recipients))
-	for _, recipient := range uniqueStrings(recipients) {
-		required[recipient] = struct{}{}
-	}
+	// Delivery routes own the exact target set. The persisted recipient list is
+	// only its slug projection and must agree without becoming identity authority.
+	exactTargets := authoritativeDeliveryTargetKeys(nil, routes)
+	projectedRecipients := make(map[string]struct{}, len(exactTargets))
+	agentRouteCount := 0
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
 		if route.SubscriberType != routePlanSubscriberAgent {
 			continue
 		}
+		agentRouteCount++
 		if err := route.AgentIdentity.Validate(); err != nil || route.AgentIdentity.AgentID() != route.SubscriberID {
-			continue
+			return false
 		}
-		delete(required, route.SubscriberID)
+		projectedRecipients[route.SubscriberID] = struct{}{}
 	}
-	return len(required) == 0
+	if len(exactTargets) != agentRouteCount {
+		return false
+	}
+	recipients = uniqueStrings(recipients)
+	if len(projectedRecipients) != len(recipients) {
+		return false
+	}
+	for _, recipient := range recipients {
+		if _, ok := projectedRecipients[recipient]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 type deliveryRouteTargetKey struct {
 	subscriberType string
 	subscriberID   string
 	agentIdentity  agentidentity.Identity
+}
+
+func (k deliveryRouteTargetKey) description() string {
+	if k.subscriberType == routePlanSubscriberAgent {
+		return "agent:" + k.agentIdentity.Description()
+	}
+	return strings.TrimSpace(k.subscriberType) + ":" + strings.TrimSpace(k.subscriberID)
+}
+
+func deliveryTargetKeySet(in []deliveryRouteTargetKey) map[deliveryRouteTargetKey]struct{} {
+	out := make(map[deliveryRouteTargetKey]struct{}, len(in))
+	for _, key := range in {
+		out[key] = struct{}{}
+	}
+	return out
+}
+
+func uniqueDeliveryTargetKeys(in []deliveryRouteTargetKey) []deliveryRouteTargetKey {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[deliveryRouteTargetKey]struct{}, len(in))
+	out := make([]deliveryRouteTargetKey, 0, len(in))
+	for _, key := range in {
+		key.subscriberType = strings.TrimSpace(key.subscriberType)
+		key.subscriberID = strings.TrimSpace(key.subscriberID)
+		key.agentIdentity = key.agentIdentity.Normalize()
+		if key.subscriberType == routePlanSubscriberInternal {
+			key.subscriberType = "node"
+		}
+		if key.subscriberType == "" || key.subscriberID == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	return out
+}
+
+func deliveryTargetKeySubscriberIDs(in []deliveryRouteTargetKey) []string {
+	out := make([]string, 0, len(in))
+	for _, key := range in {
+		out = append(out, key.subscriberID)
+	}
+	return uniqueStrings(out)
+}
+
+func deliveryTargetKeyDescriptions(in []deliveryRouteTargetKey) []string {
+	out := make([]string, 0, len(in))
+	for _, key := range uniqueDeliveryTargetKeys(in) {
+		out = append(out, key.description())
+	}
+	return out
 }
 
 func deliveryRouteTargetsBySubscriber(deliveryRoutes []events.DeliveryRoute) map[deliveryRouteTargetKey][]events.RouteIdentity {
@@ -1022,23 +1102,27 @@ func (eb *EventBus) emitContradiction(ctx context.Context, source events.Event, 
 	return nil
 }
 
-func (eb *EventBus) logAuthoritativeDeliveryIncomplete(ctx context.Context, evt events.Event, expected, delivered, missing, timedOut []string, cause error) error {
+func (eb *EventBus) logAuthoritativeDeliveryIncomplete(ctx context.Context, evt events.Event, expected, delivered, missing, timedOut []deliveryRouteTargetKey, cause error) error {
+	expectedDescriptions := deliveryTargetKeyDescriptions(expected)
+	deliveredDescriptions := deliveryTargetKeyDescriptions(delivered)
+	missingDescriptions := deliveryTargetKeyDescriptions(missing)
+	timedOutDescriptions := deliveryTargetKeyDescriptions(timedOut)
 	detail := map[string]any{
-		"expected_recipients":  expected,
-		"delivered_recipients": delivered,
+		"expected_recipients":  expectedDescriptions,
+		"delivered_recipients": deliveredDescriptions,
 	}
 	if len(missing) > 0 {
-		detail["missing_recipients"] = missing
+		detail["missing_recipients"] = missingDescriptions
 	}
 	if len(timedOut) > 0 {
-		detail["timed_out_recipients"] = timedOut
+		detail["timed_out_recipients"] = timedOutDescriptions
 	}
 	parts := make([]string, 0, 3)
 	if len(missing) > 0 {
-		parts = append(parts, "missing="+strings.Join(missing, ","))
+		parts = append(parts, "missing="+strings.Join(missingDescriptions, ","))
 	}
 	if len(timedOut) > 0 {
-		parts = append(parts, "timed_out="+strings.Join(timedOut, ","))
+		parts = append(parts, "timed_out="+strings.Join(timedOutDescriptions, ","))
 	}
 	if cause != nil {
 		parts = append(parts, cause.Error())
@@ -1053,9 +1137,9 @@ func (eb *EventBus) logAuthoritativeDeliveryIncomplete(ctx context.Context, evt 
 	return failureErr
 }
 
-func targetDeliveryTimeoutFailure(evt events.Event, recipient string, timeout time.Duration) *runtimefailures.Envelope {
+func targetDeliveryTimeoutFailure(evt events.Event, recipient deliveryRouteTargetKey, timeout time.Duration) *runtimefailures.Envelope {
 	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassTimeout, "delivery_timeout", "eventbus", "deliver_recipient", map[string]any{
-		"event_id": evt.ID(), "event_type": string(evt.Type()), "recipient": strings.TrimSpace(recipient), "timeout_ms": int(timeout / time.Millisecond),
+		"event_id": evt.ID(), "event_type": string(evt.Type()), "recipient": recipient.description(), "timeout_ms": int(timeout / time.Millisecond),
 	}), "eventbus", "deliver_recipient")
 	return &failure
 }

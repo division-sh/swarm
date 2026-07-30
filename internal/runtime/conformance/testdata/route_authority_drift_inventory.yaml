@@ -1088,9 +1088,10 @@ seam_families:
     classification: valid_consumer
     paths:
       - internal/runtime/bus/bustest/routes.go
+      - internal/runtime/bus/eventbus_exact_target_obligations_test.go
       - internal/runtime/bus/pipeline_terminal_release_test.go
       - internal/runtime/bus/test_routes_test.go
-    search_dimensions: [live_agent_subscription_route_authority]
+    search_dimensions: [live_agent_subscription_route_authority, route_plan_source_reason]
     notes: >
       Test-only subscription adapters install and retire exact lifecycle-token
       route generations. Tests consume and settle the real local carriers;

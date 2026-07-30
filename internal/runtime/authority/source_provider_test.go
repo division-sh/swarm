@@ -5,6 +5,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -137,6 +138,42 @@ func TestNewSourceProvider_AuthorityMatrix(t *testing.T) {
 	}
 	if err := provider.AuthorizeMailboxSend(reviewer); err != nil {
 		t.Fatalf("expected reviewer mailbox permission: %v", err)
+	}
+}
+
+func TestMessageAndRoutingSelfAuthorityRequiresExactConcreteIdentity(t *testing.T) {
+	provider := NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"worker": {ID: "worker", Role: "worker"},
+		},
+	}))
+	workerA := testAgentConfig("worker", "worker", nil, "", "review/inst-a", "")
+	workerA.Identity = agentidentitytest.Runtime(t, "worker", "authority-test", "review", "inst-a", "review/inst-a")
+	workerB := testAgentConfig("worker", "worker", nil, "", "review/inst-b", "")
+	workerB.Identity = agentidentitytest.Runtime(t, "worker", "authority-test", "review", "inst-b", "review/inst-b")
+
+	if !provider.HasMessageAuthority(workerA, workerA) {
+		t.Fatal("exact concrete self message was denied")
+	}
+	if provider.HasMessageAuthority(workerA, workerB) {
+		t.Fatal("same-slug sibling was authorized as self")
+	}
+	workerA.Permissions = []string{"configure_routing"}
+	if err := provider.AuthorizeRouting(workerA, workerB, "active"); err == nil {
+		t.Fatal("same-slug sibling was authorized as routing self")
+	}
+
+	noop := NoopProvider()
+	if !noop.HasMessageAuthority(workerA, workerA) {
+		t.Fatal("noop provider denied exact concrete self")
+	}
+	if noop.HasMessageAuthority(workerA, workerB) {
+		t.Fatal("noop provider authorized same-slug sibling as self")
+	}
+	malformed := workerA
+	malformed.Identity = agentidentity.Identity{}
+	if noop.HasMessageAuthority(malformed, malformed) {
+		t.Fatal("noop provider authorized malformed identity")
 	}
 }
 
