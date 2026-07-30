@@ -58,9 +58,15 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 	}
 	replayedBindingAt := replayed.SelectedContractBinding.CreatedAt
 	materializedBindingAt := materialized.SelectedContractBinding.CreatedAt
+	replayedForkAt := replayed.ForkPoint.Timestamp
+	materializedForkAt := materialized.ForkPoint.Timestamp
 	replayed.SelectedContractBinding.CreatedAt = time.Time{}
 	materialized.SelectedContractBinding.CreatedAt = time.Time{}
-	if !replayedBindingAt.Equal(materializedBindingAt) || !reflect.DeepEqual(replayed, materialized) {
+	replayed.ForkPoint.Timestamp = time.Time{}
+	materialized.ForkPoint.Timestamp = time.Time{}
+	if !replayedBindingAt.Equal(materializedBindingAt) ||
+		!replayedForkAt.Equal(materializedForkAt) ||
+		!reflect.DeepEqual(replayed, materialized) {
 		t.Fatalf("selected-contract materialization replay = %#v, want %#v", replayed, materialized)
 	}
 	var forkBundleHash, forkBundleSource string
