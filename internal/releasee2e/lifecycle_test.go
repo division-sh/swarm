@@ -281,7 +281,7 @@ func assertReleasePersistentWorkspacesPreserved(t *testing.T, root string) {
 	if err := json.Unmarshal(raw, &state); err != nil {
 		t.Fatalf("decode fake Docker state: %v", err)
 	}
-	for _, name := range []string{"swarm-scaffold", "swarm-system", "swarm-agent-release-worker"} {
+	for _, name := range []string{"swarm-scaffold", "swarm-system", releaseE2EAgentContainer} {
 		container, ok := state.Containers[name]
 		if !ok || !container.Running {
 			t.Fatalf("persistent workspace %q state = %#v, want preserved and running", name, container)
