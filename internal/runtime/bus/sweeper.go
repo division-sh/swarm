@@ -180,8 +180,10 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 	if err != nil {
 		return result, err
 	}
-	eb.pipelineSweepMu.Lock()
-	defer eb.pipelineSweepMu.Unlock()
+	if err := eb.pipelineSweepMu.acquire(ctx); err != nil {
+		return result, err
+	}
+	defer eb.pipelineSweepMu.release()
 	if eb.pipelineScans == nil {
 		eb.pipelineScans = map[runtimepipelineobligation.ScanRequest]*pipelineSweepScan{}
 	}
@@ -265,8 +267,10 @@ func (eb *EventBus) closePipelineScan(ctx context.Context, request runtimepipeli
 	if eb == nil || eb.pipelineObligations == nil {
 		return nil
 	}
-	eb.pipelineSweepMu.Lock()
-	defer eb.pipelineSweepMu.Unlock()
+	if err := eb.pipelineSweepMu.acquire(ctx); err != nil {
+		return err
+	}
+	defer eb.pipelineSweepMu.release()
 	return eb.closePipelineScanLocked(ctx, request)
 }
 
@@ -292,8 +296,10 @@ func (eb *EventBus) closeAllPipelineScans(ctx context.Context) error {
 	if eb == nil || eb.pipelineObligations == nil {
 		return nil
 	}
-	eb.pipelineSweepMu.Lock()
-	defer eb.pipelineSweepMu.Unlock()
+	if err := eb.pipelineSweepMu.acquire(ctx); err != nil {
+		return err
+	}
+	defer eb.pipelineSweepMu.release()
 	var err error
 	for request := range eb.pipelineScans {
 		err = errors.Join(err, eb.closePipelineScanLocked(ctx, request))
