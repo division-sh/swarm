@@ -14,7 +14,7 @@ func TestPlatformSpecManagedCapabilitySurfaceCandidateDefinitionOwner(t *testing
 	for key, fragments := range map[string][]string{
 		"emit_definition_owner": {"EmitRegistry.GenerateEmitToolsForActor", "GenerateEmitToolsForRole", "no emit_events"},
 		"live_catalog_owner":    {"Executor.ToolDefinitionsForActorInContext", "ToolDefinitionsForActor", "context-free fallback"},
-		"transport_rule":        {"consume the executor catalog unchanged", "MUST NOT merge", "side-channel"},
+		"transport_rule":        {"consume the executor catalog unchanged", "preserve executor order and cardinality", "duplicate canonical definition names fail closed", "MUST NOT merge", "side-channel"},
 	} {
 		value := scalarValue(mustMappingValue(t, owner, key))
 		for _, fragment := range fragments {

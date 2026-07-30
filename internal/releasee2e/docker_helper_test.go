@@ -1003,7 +1003,7 @@ func fakeMCPCall(client *http.Client, endpoint string, headers map[string]string
 
 func exactReleaseFlowEmitTool(result map[string]any) (string, error) {
 	tools, _ := result["tools"].([]any)
-	wantNames := []string{"emit_agent_completed", "read_worker_state", "read_worker_state_requests"}
+	wantNames := []string{"read_worker_state", "read_worker_state_requests", "emit_agent_completed"}
 	if names := listedToolNames(tools); !equalStrings(names, wantNames) {
 		return "", fmt.Errorf("MCP tools/list names = %#v, want exact contextual surface %#v", names, wantNames)
 	}
@@ -1048,7 +1048,6 @@ func listedToolNames(tools []any) []string {
 		name, _ := tool["name"].(string)
 		names = append(names, name)
 	}
-	sort.Strings(names)
 	return names
 }
 

@@ -433,6 +433,7 @@ func (a *LLMAgent) BoardStep(ctx context.Context, directive runtimeagentcontrol.
 	ctx = agentmemory.WithExecution(ctx, a.cfg.Memory, agentmemory.Identity{RunID: evt.RunID(), AgentID: a.cfg.ID, FlowInstance: a.cfg.CanonicalFlowPath()})
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
+	a.applyTurnToolDefinitions(ctx)
 	beforeMessages := len(a.conversation.Messages)
 	resp, err := a.conversation.Step(ctx, formatEventForAgent(a.cfg, evt, a.conversation.Tools))
 	if err != nil {

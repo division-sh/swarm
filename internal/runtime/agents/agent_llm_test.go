@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -596,6 +597,60 @@ func TestLLMAgentOnEvent_FiltersRoleScopedToolsByTurnEntityEligibility(t *testin
 	}
 	if len(rt.inputs) == 0 || strings.Contains(rt.inputs[0], "read_scan_campaign") || strings.Contains(rt.inputs[0], "save_scan_campaign_mode") {
 		t.Fatalf("event prompt advertised ineligible role-scoped tools: %#v", rt.inputs)
+	}
+}
+
+func TestLLMAgentBoardStep_UsesExactContextAwareDefinitionsForDirective(t *testing.T) {
+	rt := &boardTestRuntime{
+		steps: []*llm.Response{
+			{
+				Message: llm.Message{Role: "assistant", Content: "Completing directive."},
+				ToolCalls: []llm.ToolCall{{
+					Name:      "emit_market_research_scan_complete",
+					Arguments: map[string]any{},
+				}},
+			},
+			{Message: llm.Message{Role: "assistant", Content: "done"}},
+		},
+	}
+	factory := NewLLMAgentFactory(rt, contextAwareFactoryToolExec{}, LLMAgentOptions{})
+	created, err := factory(models.AgentConfig{
+		ID:            "market-research-agent",
+		Role:          "market_research",
+		Memory:        agentmemory.Authored(false),
+		ExecutionMode: runtimeeffects.ExecutionModeLive,
+		Config: mustAgentConfigJSON(t, map[string]any{
+			"system_prompt": "You are here.",
+		}),
+	})
+	if err != nil {
+		t.Fatalf("factory: %v", err)
+	}
+	agent := created.(*LLMAgent)
+
+	if _, err := agent.BoardStep(context.Background(), testBoardDirective("finish the scan")); err != nil {
+		t.Fatalf("BoardStep: %v", err)
+	}
+	wantTools := []string{"emit_market_research_scan_complete"}
+	if !slices.Equal(rt.startTools, wantTools) {
+		t.Fatalf("provider startup tools = %#v, want exact context-aware definitions %#v", rt.startTools, wantTools)
+	}
+	if !slices.Equal(rt.continueTools, wantTools) {
+		t.Fatalf("provider turn tools = %#v, want exact context-aware definitions %#v", rt.continueTools, wantTools)
+	}
+	if got := toolNamesForAgentTest(agent.conversation.Tools); !slices.Equal(got, wantTools) {
+		t.Fatalf("planned conversation tools = %#v, want %#v", got, wantTools)
+	}
+	if agent.conversation.Session == nil {
+		t.Fatal("directive did not create provider session")
+	}
+	if got := toolNamesForAgentTest(agent.conversation.Session.Tools); !slices.Equal(got, wantTools) {
+		t.Fatalf("provider session tools = %#v, want %#v", got, wantTools)
+	}
+	for _, ineligible := range []string{"read_scan_campaign", "save_scan_campaign_mode"} {
+		if containsString(rt.startTools, ineligible) {
+			t.Fatalf("context-ineligible tool %q reached provider definitions %#v", ineligible, rt.startTools)
+		}
 	}
 }
 
