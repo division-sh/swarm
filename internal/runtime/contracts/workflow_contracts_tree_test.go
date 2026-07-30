@@ -138,6 +138,25 @@ func TestBuildFlowTreeRootOnlyPackageIndexesAgentIdentityWithoutCopyingCatalogs(
 	}
 }
 
+func TestAgentDeclarationRejectsInstanceIDInterpolation(t *testing.T) {
+	_, err := normalizeAgentRegistryEntries(map[string]AgentRegistryEntry{
+		"account-worker": {ID: "account-worker-{instance_id}"},
+	}, "flows/account/agents.yaml")
+	if err == nil {
+		t.Fatal("agent declaration accepted retired {instance_id} interpolation")
+	}
+	for _, want := range []string{
+		"flows/account/agents.yaml",
+		`agent "account-worker"`,
+		"agent IDs are declaration identities",
+		"runtime carries flow-instance identity separately",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want teaching fragment %q", err, want)
+		}
+	}
+}
+
 func TestWorkflowContractBundleEffectiveRequiredAgentsInferWhenOmitted(t *testing.T) {
 	flowView := &FlowContractView{
 		Paths: FlowContractPaths{ID: "analysis", SchemaFile: "flows/analysis/schema.yaml", AgentsFile: "flows/analysis/agents.yaml"},
