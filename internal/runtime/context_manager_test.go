@@ -323,7 +323,7 @@ func TestRuntimeContextManagerDeactivationBoundsStuckAdmissionByConfiguredGrace(
 	select {
 	case result := <-done:
 		t.Fatalf("deactivation abandoned admitted work after timeout: %#v", result)
-	default:
+	case <-time.After(2 * grace):
 	}
 	release()
 	result := <-done
