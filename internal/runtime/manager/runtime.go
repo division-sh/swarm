@@ -1963,8 +1963,8 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 							}
 							am.clearPoisonPanicCount(route.AgentIdentity, evt.ID())
 							consecutivePanics = 0
-								if err != nil && am.bus != nil {
-									am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
+							if err != nil && am.bus != nil {
+								am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
 									Level:     "error",
 									Component: "agent-manager",
 									Action:    "agent_event_failed",
