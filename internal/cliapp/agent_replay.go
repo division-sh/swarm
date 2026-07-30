@@ -23,6 +23,7 @@ const (
 type agentReplayCommandOptions struct {
 	apiOptions     rootCommandOptions
 	eventID        string
+	flowInstance   string
 	idempotencyKey string
 }
 
@@ -64,6 +65,7 @@ func newAgentReplayCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	argcount.SetDiscoveryHint(cmd, "List agent ids with `swarm agent list`.")
 	cmd.Flags().StringVar(&replayOpts.eventID, "event-id", "", "Required event ID to replay")
+	cmd.Flags().StringVar(&replayOpts.flowInstance, "flow-instance", "", "Select the exact concrete agent flow instance")
 	cmd.Flags().StringVar(&replayOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIAPIConnectionFlagsWithClass(cmd, &replayOpts.apiOptions, cliAPICommandClassMutating, "swarm agent replay")
@@ -115,6 +117,9 @@ func (opts agentReplayCommandOptions) params(agentID, eventID string) map[string
 	params := map[string]any{
 		"agent_id": agentID,
 		"event_id": eventID,
+	}
+	if flowInstance := strings.Trim(strings.TrimSpace(opts.flowInstance), "/"); flowInstance != "" {
+		params["flow_instance"] = flowInstance
 	}
 	if key := strings.TrimSpace(opts.idempotencyKey); key != "" {
 		params["idempotency_key"] = key

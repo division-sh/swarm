@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -95,6 +96,7 @@ type CompletionAgentTurn struct {
 	TurnID              string
 	RunID               string
 	AgentID             string
+	Identity            agentmemory.Identity
 	SessionID           string
 	Memory              agentmemory.Plan
 	FlowInstance        string
@@ -122,6 +124,15 @@ func (t CompletionAgentTurn) Validate() error {
 	if strings.TrimSpace(t.AgentID) == "" || strings.TrimSpace(t.SessionID) == "" || strings.TrimSpace(t.RunID) == "" {
 		return fmt.Errorf("completion agent turn requires run, agent, and session identity")
 	}
+	identity := t.Identity.Normalize()
+	if err := identity.ValidateOwner(); err != nil {
+		return fmt.Errorf("completion agent turn concrete identity: %w", err)
+	}
+	if identity.RunID != strings.TrimSpace(t.RunID) ||
+		identity.AgentID() != strings.TrimSpace(t.AgentID) ||
+		identity.FlowInstance() != strings.Trim(strings.TrimSpace(t.FlowInstance), "/") {
+		return fmt.Errorf("completion agent turn display identity does not match concrete identity")
+	}
 	memory, err := t.Memory.Normalize()
 	if err != nil {
 		return fmt.Errorf("completion agent turn memory plan: %w", err)
@@ -145,6 +156,7 @@ type CompletionSpend struct {
 	EntityID       string
 	FlowInstance   string
 	AgentID        string
+	AgentIdentity  agentidentity.Identity
 	Model          string
 	ModelAlias     string
 	BackendProfile string
@@ -156,13 +168,25 @@ type CompletionSpend struct {
 }
 
 func (s CompletionSpend) Validate() error {
-	if strings.TrimSpace(s.FlowInstance) == "" || strings.TrimSpace(s.AgentID) == "" || strings.TrimSpace(s.Model) == "" ||
+	if strings.TrimSpace(s.AgentID) == "" || strings.TrimSpace(s.Model) == "" ||
 		strings.TrimSpace(s.BackendProfile) == "" || strings.TrimSpace(s.Provider) == "" || strings.TrimSpace(s.Transport) == "" ||
 		strings.TrimSpace(s.ResolvedModel) == "" || strings.TrimSpace(s.InvocationType) == "" {
 		return fmt.Errorf("completion spend requires complete provider and invocation identity")
 	}
 	if s.CostUSD < 0 {
 		return fmt.Errorf("completion spend cost cannot be negative")
+	}
+	if !s.AgentIdentity.IsZero() {
+		identity := s.AgentIdentity.Normalize()
+		if err := identity.Validate(); err != nil {
+			return fmt.Errorf("completion spend agent identity: %w", err)
+		}
+		if identity.AgentID() != strings.TrimSpace(s.AgentID) ||
+			identity.FlowInstance() != strings.Trim(strings.TrimSpace(s.FlowInstance), "/") {
+			return fmt.Errorf("completion spend display identity does not match concrete identity")
+		}
+	} else if strings.TrimSpace(s.FlowInstance) == "" {
+		return fmt.Errorf("completion spend without concrete agent identity requires flow_instance evidence")
 	}
 	return nil
 }
@@ -224,6 +248,9 @@ func (s CompletionSettlement) Validate(attempt Attempt) error {
 			return err
 		}
 		target := attempt.Authority.Target
+		if s.Spend.AgentIdentity.Normalize() != target.AgentIdentity.Normalize() {
+			return fmt.Errorf("completion spend agent identity does not match completion target")
+		}
 		if !nonEmpty(target.AgentID, target.SessionID, target.RunID) {
 			return fmt.Errorf("agent-turn completion target requires exact run, actor, and session coordinates")
 		}
@@ -266,7 +293,7 @@ func (s CompletionSettlement) Validate(attempt Attempt) error {
 	}
 	if s.ProviderHead != nil {
 		if attempt.Authority.Kind != AuthorityNormalAgent || s.Settlement.State != StateSettled ||
-			!nonEmpty(s.ProviderHead.Identity.RunID, s.ProviderHead.Identity.AgentID, s.ProviderHead.Identity.FlowInstance, s.ProviderHead.SessionID, s.ProviderHead.LockOwner, s.ProviderHead.NewProviderHead) {
+			!nonEmpty(s.ProviderHead.Identity.RunID, s.ProviderHead.Identity.AgentID(), s.ProviderHead.Identity.FlowInstance(), s.ProviderHead.SessionID, s.ProviderHead.LockOwner, s.ProviderHead.NewProviderHead) {
 			return fmt.Errorf("completion provider-head promotion requires a successful normal-agent settlement and complete lease identity")
 		}
 		if err := s.ProviderHead.Identity.Validate(); err != nil {

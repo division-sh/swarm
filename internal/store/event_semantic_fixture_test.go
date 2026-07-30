@@ -39,7 +39,11 @@ func commitSemanticEventFixture(ctx context.Context, store any, event events.Eve
 func commitSemanticEventFixtureWithAgents(ctx context.Context, store any, event events.Event, agentIDs []string) error {
 	routes := make([]events.DeliveryRoute, 0, len(agentIDs))
 	for _, agentID := range agentIDs {
-		routes = append(routes, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: agentID})
+		routes = append(routes, events.DeliveryRoute{
+			SubscriberType: "agent",
+			SubscriberID:   agentID,
+			AgentIdentity:  mustTestAgentIdentity(agentID, "fixture/"+agentID),
+		})
 	}
 	scope := runtimepipelineobligation.ScopeDirect
 	if len(routes) > 0 {
@@ -225,7 +229,10 @@ func commitDeliveryReplayEventFixture(
 		if err := insertCommittedPipelineScopeTx(txctx, tx, forkEventID, runtimepipelineobligation.ScopeDirect, true, time.Now().UTC()); err != nil {
 			return err
 		}
-		route := events.DeliveryRoute{SubscriberType: subscriberType, SubscriberID: subscriberID}
+			route := events.DeliveryRoute{SubscriberType: subscriberType, SubscriberID: subscriberID}
+			if route.Normalized().SubscriberType == string(runtimedelivery.SubscriberAgent) {
+				route.AgentIdentity = mustTestAgentIdentity(subscriberID, "fixture/"+subscriberID)
+			}
 		obligation, err := runtimedelivery.NewObligation(forkEventID, forkRunID, route)
 		if err != nil {
 			return err

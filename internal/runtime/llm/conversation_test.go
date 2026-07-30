@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
@@ -101,7 +102,7 @@ type managedRoundRuntime struct {
 }
 
 func (r *managedRoundRuntime) StartSession(_ context.Context, agentID, _ string, _ []ToolDefinition) (*Session, error) {
-	return &Session{ID: "22222222-2222-4222-8222-222222222222", AgentID: agentID, Memory: testMemory(), MemoryIdentity: testMemoryIdentity(agentID, "effect-test")}, nil
+	return &Session{ID: "22222222-2222-4222-8222-222222222222", AgentID: agentID, Memory: testMemory(), MemoryIdentity: testMemoryIdentity(agentID, "effect-test/instance")}, nil
 }
 
 func (r *managedRoundRuntime) ProviderContract() ProviderContract {
@@ -140,9 +141,14 @@ func (r *managedRoundRuntime) ContinueSession(ctx context.Context, session *Sess
 		Usage:      runtimeeffects.CompletionUsage{ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageExact, InputTokens: &input, OutputTokens: &output},
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
-			Memory: target.Memory, FlowInstance: target.FlowInstance, CapabilitySurfaceID: observed.ID, CapabilitySurface: surfaceJSON,
+			Identity: agentmemory.Identity{RunID: target.RunID, Agent: target.AgentIdentity},
+			Memory:   target.Memory, FlowInstance: target.FlowInstance, CapabilitySurfaceID: observed.ID, CapabilitySurface: surfaceJSON,
 		},
-		Spend: runtimeeffects.CompletionSpend{FlowInstance: "global", AgentID: target.AgentID, Model: "test-model", BackendProfile: "anthropic", Provider: "anthropic", Transport: "http", ResolvedModel: "test-model", InvocationType: "task"},
+		Spend: runtimeeffects.CompletionSpend{
+			FlowInstance: target.FlowInstance, AgentID: target.AgentID, AgentIdentity: target.AgentIdentity,
+			Model: "test-model", BackendProfile: "anthropic", Provider: "anthropic", Transport: "http",
+			ResolvedModel: "test-model", InvocationType: "task",
+		},
 	}); err != nil {
 		return nil, err
 	}

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/google/uuid"
 )
 
@@ -36,6 +37,7 @@ type OperatorConversationForkSession struct {
 	SourceSessionID string                          `json:"source_session_id"`
 	SourceRunID     string                          `json:"source_run_id,omitempty"`
 	SourceAgentID   string                          `json:"source_agent_id"`
+	SourceIdentity  runtimeagentidentity.Identity   `json:"-"`
 	ForkPoint       ConversationForkPointDescriptor `json:"fork_point"`
 	CreatedBy       string                          `json:"created_by"`
 	CreatedAt       time.Time                       `json:"created_at"`
@@ -74,6 +76,7 @@ type conversationForkSource struct {
 	SessionID string
 	AgentID   string
 	RunID     string
+	Identity  runtimeagentidentity.Identity
 }
 
 type conversationForkCursor struct {
@@ -119,11 +122,17 @@ func (s conversationForkStore) createOperatorConversationFork(ctx context.Contex
 		return OperatorConversationForkSession{}, err
 	}
 	expiresAt := now.Add(ConversationForkLifecycleTTL).UTC()
+	sourceIdentity, err := agentIdentityFields(source.Identity)
+	if err != nil {
+		return OperatorConversationForkSession{}, err
+	}
 	var created OperatorConversationForkSession
 	err = s.runMutation(ctx, false, func(txctx context.Context, tx *sql.Tx) error {
 		row := s.queryRow(txctx, tx, `
 		INSERT INTO conversation_forks (
 			source_session_id, source_run_id, source_agent_id,
+			source_agent_name_owner, source_agent_name_source, source_agent_route_presence,
+			source_flow_scope_key, source_flow_instance_id, source_flow_instance,
 			fork_point_kind, fork_point_turn_index, fork_point_turn_id,
 			fork_point_event_id, fork_point_at, fork_point_selected_at,
 			created_by, created_at, expires_at
@@ -132,14 +141,21 @@ func (s conversationForkStore) createOperatorConversationFork(ctx context.Contex
 			?, ?, ?,
 			?, ?, ?,
 			?, ?, ?,
+			?, ?, ?,
+			?, ?, ?,
 			?, ?, ?
 		)
 		RETURNING
 			CAST(fork_id AS TEXT), CAST(source_session_id AS TEXT), COALESCE(CAST(source_run_id AS TEXT), ''),
-			source_agent_id, fork_point_kind, fork_point_turn_index,
+			source_agent_id, source_agent_name_owner, source_agent_name_source, source_agent_route_presence,
+			source_flow_scope_key, source_flow_instance_id, source_flow_instance,
+			fork_point_kind, fork_point_turn_index,
 			COALESCE(CAST(fork_point_turn_id AS TEXT), ''), COALESCE(CAST(fork_point_event_id AS TEXT), ''),
 			fork_point_at, fork_point_selected_at, created_by, created_at, expires_at, deleted_at
-	`, source.SessionID, nullableConversationForkID(source.RunID), source.AgentID, descriptor.Kind, descriptor.TurnIndex, descriptor.TurnID,
+	`, source.SessionID, nullableConversationForkID(source.RunID), sourceIdentity.AgentID,
+			sourceIdentity.NameOwner, sourceIdentity.NameSource, sourceIdentity.RoutePresence,
+			sourceIdentity.FlowScopeKey, sourceIdentity.FlowInstanceID, sourceIdentity.FlowInstancePath,
+			descriptor.Kind, descriptor.TurnIndex, descriptor.TurnID,
 			nullableConversationForkID(descriptor.EventID), descriptor.At, descriptor.SelectedAt, createdBy, now, expiresAt)
 		created, err = scanConversationForkSession(row, now)
 		return err
@@ -205,7 +221,9 @@ func (s conversationForkStore) listOperatorConversationForks(ctx context.Context
 	rows, err := s.query(ctx, s.db, fmt.Sprintf(`
 		SELECT
 			CAST(fork_id AS TEXT), CAST(source_session_id AS TEXT), COALESCE(CAST(source_run_id AS TEXT), ''),
-			source_agent_id, fork_point_kind, fork_point_turn_index,
+			source_agent_id, source_agent_name_owner, source_agent_name_source, source_agent_route_presence,
+			source_flow_scope_key, source_flow_instance_id, source_flow_instance,
+			fork_point_kind, fork_point_turn_index,
 			COALESCE(CAST(fork_point_turn_id AS TEXT), ''), COALESCE(CAST(fork_point_event_id AS TEXT), ''),
 			fork_point_at, fork_point_selected_at, created_by, created_at, expires_at, deleted_at
 		FROM conversation_forks
@@ -271,7 +289,9 @@ func (s conversationForkStore) loadOperatorConversationFork(ctx context.Context,
 	row := s.queryRow(ctx, s.db, `
 		SELECT
 			CAST(fork_id AS TEXT), CAST(source_session_id AS TEXT), COALESCE(CAST(source_run_id AS TEXT), ''),
-			source_agent_id, fork_point_kind, fork_point_turn_index,
+			source_agent_id, source_agent_name_owner, source_agent_name_source, source_agent_route_presence,
+			source_flow_scope_key, source_flow_instance_id, source_flow_instance,
+			fork_point_kind, fork_point_turn_index,
 			COALESCE(CAST(fork_point_turn_id AS TEXT), ''), COALESCE(CAST(fork_point_event_id AS TEXT), ''),
 			fork_point_at, fork_point_selected_at, created_by, created_at, expires_at, deleted_at
 		FROM conversation_forks
@@ -376,7 +396,9 @@ func (s conversationForkStore) loadConversationForkSource(ctx context.Context, s
 		return conversationForkSource{}, ErrSessionNotFound
 	}
 	rows, err := s.query(ctx, s.db, fmt.Sprintf(`
-		SELECT session_id, agent_id, run_id
+		SELECT
+			session_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance, run_id
 		FROM (
 			%s
 		) conversations
@@ -390,12 +412,27 @@ func (s conversationForkStore) loadConversationForkSource(ctx context.Context, s
 	items := []conversationForkSource{}
 	for rows.Next() {
 		var item conversationForkSource
-		if err := rows.Scan(&item.SessionID, &item.AgentID, &item.RunID); err != nil {
+		var identityFields runtimeagentidentity.StorageFields
+		if err := rows.Scan(
+			&item.SessionID,
+			&identityFields.AgentID,
+			&identityFields.NameOwner,
+			&identityFields.NameSource,
+			&identityFields.RoutePresence,
+			&identityFields.FlowScopeKey,
+			&identityFields.FlowInstanceID,
+			&identityFields.FlowInstancePath,
+			&item.RunID,
+		); err != nil {
 			return conversationForkSource{}, err
 		}
 		item.SessionID = strings.TrimSpace(item.SessionID)
-		item.AgentID = strings.TrimSpace(item.AgentID)
 		item.RunID = strings.TrimSpace(item.RunID)
+		item.Identity, err = runtimeagentidentity.FromStorageFields(identityFields)
+		if err != nil {
+			return conversationForkSource{}, fmt.Errorf("load conversation fork source identity: %w", err)
+		}
+		item.AgentID = item.Identity.AgentID()
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -454,11 +491,18 @@ func scanConversationForkSession(scanner interface {
 	var createdAt conversationForkTimeValue
 	var expiresAt conversationForkTimeValue
 	var deletedAt conversationForkTimeValue
+	var identityFields runtimeagentidentity.StorageFields
 	if err := scanner.Scan(
 		&item.ForkID,
 		&item.SourceSessionID,
 		&item.SourceRunID,
-		&item.SourceAgentID,
+		&identityFields.AgentID,
+		&identityFields.NameOwner,
+		&identityFields.NameSource,
+		&identityFields.RoutePresence,
+		&identityFields.FlowScopeKey,
+		&identityFields.FlowInstanceID,
+		&identityFields.FlowInstancePath,
 		&item.ForkPoint.Kind,
 		&turnIndex,
 		&turnID,
@@ -472,6 +516,12 @@ func scanConversationForkSession(scanner interface {
 	); err != nil {
 		return OperatorConversationForkSession{}, err
 	}
+	identity, err := runtimeagentidentity.FromStorageFields(identityFields)
+	if err != nil {
+		return OperatorConversationForkSession{}, fmt.Errorf("decode conversation fork source identity: %w", err)
+	}
+	item.SourceIdentity = identity
+	item.SourceAgentID = item.SourceIdentity.AgentID()
 	if turnIndex.Valid {
 		item.ForkPoint.TurnIndex = int(turnIndex.Int64)
 	}

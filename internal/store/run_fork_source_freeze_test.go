@@ -366,16 +366,24 @@ func seedRunForkFreezeDirectiveAuthority(t *testing.T, ctx context.Context, db *
 	if live {
 		state, response, completedAt = "executing", nil, nil
 	}
+	identity := testAgentIdentity(t, "freeze-agent", "freeze/directive")
+	fields := testAgentIdentityStorageFields(t, identity)
+	seedTestAgentRow(t, ctx, db, true, identity, "active")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_directive_operations (
-			operation_id, method, actor_token_id, request_hash, agent_id, directive_text,
+			operation_id, method, actor_token_id, request_hash,
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance, directive_text,
 			resolved_run_id, run_id_resolution, source, directive_event_id, state,
 			response, completed_at, created_at, updated_at
 		) VALUES (
-			$1::uuid, 'agent.send_directive', 'operator', 'hash', 'freeze-agent', 'continue',
-			$2::uuid, 'specified', 'v1_rpc', $3::uuid, $4, $5::jsonb, $6, $7, $7
+			$1::uuid, 'agent.send_directive', 'operator', 'hash',
+			$2, $3, $4, $5, $6, $7, $8, 'continue',
+			$9::uuid, 'specified', 'v1_rpc', $10::uuid, $11, $12::jsonb, $13, $14, $14
 		)
-	`, uuid.NewString(), lineage.SourceRunID, eventID, state, response, completedAt, now); err != nil {
+	`, uuid.NewString(), fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+		lineage.SourceRunID, eventID, state, response, completedAt, now); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -383,12 +391,9 @@ func seedRunForkFreezeDirectiveAuthority(t *testing.T, ctx context.Context, db *
 func seedRunForkFreezeExternalEffectAuthority(t *testing.T, ctx context.Context, db *sql.DB, lineage runForkActivationLineage, now time.Time, live bool) {
 	t.Helper()
 	agentID := "freeze-effect-agent"
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, created_at)
-		VALUES ($1, 'freeze/effect', 'worker', 'standard', 'mock', TRUE, 'authored', 'active', $2)
-	`, agentID, now); err != nil {
-		t.Fatal(err)
-	}
+	identity := testAgentIdentity(t, agentID, "freeze/effect")
+	fields := testAgentIdentityStorageFields(t, identity)
+	seedTestAgentRow(t, ctx, db, true, identity, "active")
 	operationID := uuid.NewString()
 	operationState := "settled"
 	attemptState := "settled"
@@ -399,13 +404,14 @@ func seedRunForkFreezeExternalEffectAuthority(t *testing.T, ctx context.Context,
 	}
 	turnID, sessionID := uuid.NewString(), uuid.NewString()
 	authority := runtimeeffects.NormalAgentAuthority(
-		runtimeeffects.LifecycleToken{RuntimeEpoch: 1, AgentID: agentID, Generation: 1},
+		runtimeeffects.LifecycleToken{RuntimeEpoch: 1, Identity: identity, AgentID: agentID, Generation: 1},
 		"freeze-worker",
 		leaseExpiry,
 	)
 	authority.Target = runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: lineage.SourceRunID,
-		AgentID: agentID, SessionID: sessionID, Memory: agentmemory.PlatformDefault(), FlowInstance: "freeze/effect",
+		AgentID: agentID, AgentIdentity: identity, SessionID: sessionID,
+		Memory: agentmemory.PlatformDefault(), FlowInstance: identity.FlowInstance(),
 	}
 	capabilitySurface := managedCompletionTestSurface(t, authority, "test")
 	if err := (admitTestPostgresStore(t, db)).SaveManagedCapabilitySurface(ctx, capabilitySurface); err != nil {
@@ -418,14 +424,20 @@ func seedRunForkFreezeExternalEffectAuthority(t *testing.T, ctx context.Context,
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runtime_external_effect_operations (
 			operation_id, effect_kind, effect_class, execution_mode, bundle_hash, authority_kind, authority_id,
-			agent_id, runtime_epoch, generation, capability_plan_fingerprint, authority_evidence, lineage, request_fingerprint,
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance,
+			runtime_epoch, generation, capability_plan_fingerprint, authority_evidence, lineage, request_fingerprint,
 			state, created_at, updated_at, completed_at
 		) VALUES (
 			$1::uuid, 'tool', 'write_or_unknown', 'live', $2, 'normal_agent', $3,
-			$3, 1, 1, $4, '{}'::jsonb, jsonb_build_object('run_id', $5::text), 'fingerprint',
-			$6, $7, $7, $8
+			$4, $5, $6, $7, $8, $9, $10,
+			1, 1, $11, '{}'::jsonb, jsonb_build_object('run_id', $12::text), 'fingerprint',
+			$13, $14, $14, $15
 		)
-	`, operationID, authorActivityTestBundleHash, agentID, capabilityPlanFingerprint, lineage.SourceRunID, operationState, now, completedAt); err != nil {
+	`, operationID, authorActivityTestBundleHash, agentID,
+		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+		capabilityPlanFingerprint, lineage.SourceRunID, operationState, now, completedAt); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `

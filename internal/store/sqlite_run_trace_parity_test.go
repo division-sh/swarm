@@ -193,21 +193,31 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 	}
 	event := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, eventID)
 	seedSQLiteTraceAgent(t, ctx, sqliteStore, agentID, base)
+	fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, agentID, "flow-a"))
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
-			session_id, run_id, agent_id, entity_id, flow_instance, memory_enabled, memory_source,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			entity_id, memory_enabled, memory_source,
 			conversation, turn_count, runtime_state, status, created_at, updated_at
 		) VALUES (
-			?, ?, ?, NULL, 'flow-a', 0, 'platform_default',
+			?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 'platform_default',
 			'[]', 1, '{}', 'active', ?, ?
 		)
-	`, sessionID, runID, agentID, base.Add(time.Second), base.Add(5*time.Second)); err != nil {
+	`, sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+		base.Add(time.Second), base.Add(5*time.Second)); err != nil {
 		t.Fatalf("seed task audit: %v", err)
 	}
-	delivered := seedDeliveryStateFixture(t, ctx, sqliteStore, event, events.DeliveryRoute{
-		SubscriberType: string(runtimedelivery.SubscriberAgent),
-		SubscriberID:   agentID,
-	}, runtimedelivery.StateDelivered, nil)
+	delivered := seedDeliveryStateFixture(
+		t,
+		ctx,
+		sqliteStore,
+		event,
+		testAgentDeliveryRoute(t, agentID, "flow-a"),
+		runtimedelivery.StateDelivered,
+		nil,
+	)
 	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.DB, delivered, base.Add(time.Second), base.Add(2*time.Second))
 	insertSQLiteTraceTurnWithMemory(t, ctx, sqliteStore, turnID, runID, agentID, sessionID, eventID, "trace.task_audit", false, base.Add(2*time.Second))
 
@@ -304,7 +314,7 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 	seedDelivery := func(eventID, agentID, sessionID string, state runtimedelivery.State, createdAt, transitionAt time.Time) runtimedelivery.Snapshot {
 		t.Helper()
 		event := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, eventID)
-		route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: agentID}
+		route := testAgentDeliveryRoute(t, agentID, "flow-a")
 		if err := commitDeliveryObligationFixture(ctx, sqliteStore, event, route); err != nil {
 			t.Fatalf("commit trace delivery %s/%s: %v", eventID, agentID, err)
 		}
@@ -354,30 +364,25 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 
 func seedSQLiteTraceAgent(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, agentID string, startedAt time.Time) {
 	t.Helper()
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO agents (
-			agent_id, role, model, llm_backend, memory_enabled, memory_source,
-			config, subscriptions, emit_events, tools, permissions, runtime_descriptor, status, created_at
-		) VALUES (
-			?, 'operator', 'regular', 'anthropic', 1, 'authored',
-			'{}', '[]', '[]', '[]', '[]', '{}', 'active', ?
-		)
-	`, agentID, startedAt); err != nil {
-		t.Fatalf("seed agent %s: %v", agentID, err)
-	}
+	seedTestAgentRow(t, ctx, sqliteStore.DB, false, testAgentIdentity(t, agentID, "flow-a"), "active")
 }
 
 func insertSQLiteTraceSession(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, sessionID, runID, agentID string, updatedAt time.Time) {
 	t.Helper()
+	fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, agentID, "flow-a"))
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source,
 			conversation, turn_count, runtime_state, status, created_at, updated_at
 		) VALUES (
-			?, ?, ?, 'flow-a', 1, 'authored',
+			?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored',
 			'[]', 1, '{}', 'active', ?, ?
 		)
-	`, sessionID, runID, agentID, updatedAt.Add(-time.Second), updatedAt); err != nil {
+	`, sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+		updatedAt.Add(-time.Second), updatedAt); err != nil {
 		t.Fatalf("seed session %s: %v", agentID, err)
 	}
 }
@@ -395,20 +400,29 @@ func insertSQLiteTraceTurnWithMemory(t *testing.T, ctx context.Context, sqliteSt
 		memorySource = "authored"
 		runtimeMode = "session"
 	}
-	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, sqliteStore, runID, agentID, sessionID, turnID, runtimeMode, "global")
+	identity := testAgentIdentity(t, agentID, "flow-a")
+	fields := testAgentIdentityStorageFields(t, identity)
+	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(
+		t, sqliteStore, runID, identity, sessionID, turnID, runtimeMode, "global",
+	)
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
+			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id,
+			session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
 			emitted_events,
 			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, failure, execution_mode, created_at
 		) VALUES (
-			?, ?, ?, ?, 'flow-a', ?, ?, NULL,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL,
 			?, ?, 'task-1', ?, '[]',
 			'[]',
 			'{}', '{}', '[]', 1, 0, 0, NULL, 'live', ?
 		)
-	`, turnID, runID, agentID, sessionID, memoryEnabled, memorySource, eventID, eventName, capabilitySurfaceID, createdAt); err != nil {
+	`, turnID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, sessionID,
+		fields.FlowInstancePath, memoryEnabled, memorySource, eventID, eventName,
+		capabilitySurfaceID, createdAt); err != nil {
 		t.Fatalf("seed turn %s/%s: %v", agentID, turnID, err)
 	}
 }

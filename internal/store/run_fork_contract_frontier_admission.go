@@ -1,6 +1,10 @@
 package store
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+)
 
 const (
 	RunForkContractFrontierAdmissionOwner = "runtime.run_fork.contract_frontier_admission"
@@ -60,10 +64,11 @@ type RunForkContractFrontierEvent struct {
 }
 
 type RunForkContractFrontierRecipient struct {
-	SubscriberType string `json:"subscriber_type"`
-	SubscriberID   string `json:"subscriber_id"`
-	Path           string `json:"path,omitempty"`
-	RouteSource    string `json:"route_source,omitempty"`
+	SubscriberType string                 `json:"subscriber_type"`
+	SubscriberID   string                 `json:"subscriber_id"`
+	Path           string                 `json:"path,omitempty"`
+	RouteSource    string                 `json:"route_source,omitempty"`
+	AgentIdentity  agentidentity.Identity `json:"agent_identity,omitempty"`
 }
 
 func RunForkSelectedContractDiagnosticPlatformOutcomePolicyApplies(item RunForkPendingWork) bool {

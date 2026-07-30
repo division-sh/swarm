@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -20,7 +21,7 @@ import (
 )
 
 type activeRunDeliveryQuiescenceReader interface {
-	ActiveRunDeliveryQuiesced(ctx context.Context, eventID, subscriberType, subscriberID string) (string, bool, error)
+	ActiveRunDeliveryQuiesced(ctx context.Context, eventID string, route events.DeliveryRoute) (string, bool, error)
 }
 
 func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt events.Event) error {
@@ -42,7 +43,18 @@ func failureEnvelope(err error, component, operation string) *runtimefailures.En
 }
 
 func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, evt events.Event) eventProcessResult {
-	release, err := am.acquireClaimedAttemptLane(ctx, agent.ID())
+	route, ok := runtimedelivery.RouteFromContext(ctx)
+	if !ok || route.SubscriberType != "agent" || route.SubscriberID != agent.ID() {
+		err := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "delivery_route_identity_missing", "agent-manager", "process_event", map[string]any{
+			"agent_id": agent.ID(), "event_id": evt.ID(),
+		})
+		return eventProcessResult{record: startupManagerReplayRecord{
+			Event: evt, AgentID: agent.ID(), Outcome: startupManagerReplayOutcomeDropped,
+			ReasonCode: startupManagerReplayReasonDeliveryStartFailed,
+			Failure:    failureEnvelope(err, "agent-manager", "acquire_claimed_attempt_lane"),
+		}, err: err}
+	}
+	release, err := am.acquireClaimedAttemptLane(ctx, route.AgentIdentity)
 	if err != nil {
 		return eventProcessResult{record: startupManagerReplayRecord{
 			Event: evt, AgentID: agent.ID(), Outcome: startupManagerReplayOutcomeDropped,
@@ -106,11 +118,30 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 		record.Failure = failureEnvelope(err, "agent-manager", "process_event")
 		return eventProcessResult{record: record, err: err}
 	}
+	route, ok := runtimedelivery.RouteFromContext(ctx)
+	if !ok || route.SubscriberType != "agent" || route.SubscriberID != agent.ID() {
+		err := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "delivery_route_identity_missing", "agent-manager", "process_event", map[string]any{
+			"agent_id": agent.ID(), "delivery_id": claim.DeliveryID(),
+		})
+		record.Outcome = startupManagerReplayOutcomeDropped
+		record.ReasonCode = startupManagerReplayReasonDeliveryStartFailed
+		record.Failure = failureEnvelope(err, "agent-manager", "process_event")
+		return eventProcessResult{record: record, err: err}
+	}
+	if err := route.AgentIdentity.Validate(); err != nil {
+		err = runtimefailures.WrapDetail("delivery_route_identity_invalid", "agent-manager", "process_event", map[string]any{
+			"agent_id": agent.ID(), "delivery_id": claim.DeliveryID(),
+		}, err)
+		record.Outcome = startupManagerReplayOutcomeDropped
+		record.ReasonCode = startupManagerReplayReasonDeliveryStartFailed
+		record.Failure = failureEnvelope(err, "agent-manager", "process_event")
+		return eventProcessResult{record: record, err: err}
+	}
 	am.notifyTestDeliveryStatus(ctx, evt, agent.ID(), runtimedelivery.StatusInProgress)
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID()))
 	ctx = events.WithDeliveryContext(ctx, evt.DeliveryContext())
-	if reason, ok := am.activeRunDeliveryQuiesced(ctx, evt.ID(), agent.ID()); ok {
+	if reason, ok := am.activeRunDeliveryQuiesced(ctx, evt.ID(), route); ok {
 		record.Outcome = startupManagerReplayOutcomeSkipped
 		record.ReasonCode = reason
 		return eventProcessResult{record: record}
@@ -125,7 +156,7 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 	}
 	defer func() { _ = heartbeat.Stop() }()
 	attemptCtx := heartbeat.Context()
-	if suppress, _ := am.shouldSuppressForBudget(agent.ID(), evt); suppress {
+	if suppress, _ := am.shouldSuppressForBudget(route.AgentIdentity, evt); suppress {
 		budgetFailure := runtimefailures.FromError(runtimefailures.New(runtimefailures.ClassBudgetExhausted, "spend_budget_emergency", "agent-manager", "delivery_budget_admission", map[string]any{
 			"budget_kind": "spend", "agent_id": agent.ID(), "entity_id": evt.EntityID(),
 		}), "agent-manager", "delivery_budget_admission")
@@ -136,7 +167,7 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 				Failure: &budgetFailure.Failure,
 			})
 		}
-		if _, settleErr := am.writeReceipt(attemptCtx, evt, agent.ID(), ReceiptStatusError, &budgetFailure.Failure, heartbeat); settleErr != nil {
+		if _, settleErr := am.writeReceipt(attemptCtx, evt, ReceiptStatusError, &budgetFailure.Failure, heartbeat); settleErr != nil {
 			record.Outcome = startupManagerReplayOutcomeDropped
 			record.ReasonCode = startupManagerReplayReasonProcessFailed
 			record.Failure = failureEnvelope(settleErr, "agent-manager", "settle_budget_suppression")
@@ -147,7 +178,7 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 		return eventProcessResult{record: record}
 	}
 	if am.shouldInterceptDirective(agent.ID(), evt) {
-		if _, settleErr := am.writeReceipt(attemptCtx, evt, agent.ID(), ReceiptStatusProcessed, nil, heartbeat); settleErr != nil {
+		if _, settleErr := am.writeReceipt(attemptCtx, evt, ReceiptStatusProcessed, nil, heartbeat); settleErr != nil {
 			record.Outcome = startupManagerReplayOutcomeDropped
 			record.ReasonCode = startupManagerReplayReasonProcessFailed
 			record.Failure = failureEnvelope(settleErr, "agent-manager", "settle_directive_intercept")
@@ -158,7 +189,7 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 		return eventProcessResult{record: record}
 	}
 	out, err := agent.OnEvent(attemptCtx, evt)
-	if reason, ok := am.activeRunDeliveryQuiesced(ctx, evt.ID(), agent.ID()); ok {
+	if reason, ok := am.activeRunDeliveryQuiesced(ctx, evt.ID(), route); ok {
 		record.Outcome = startupManagerReplayOutcomeSkipped
 		record.ReasonCode = reason
 		return eventProcessResult{record: record}
@@ -166,8 +197,8 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 	if err != nil {
 		status := receiptStatusForAgentFailure(err)
 		agentFailure := runtimeengine.NormalizeFailure(err, "agent-manager", "process_event.on_event")
-		shutdownAfterSettlement := am.maybeTripAuthCircuitBreaker(ctx, agent.ID(), evt, agentFailure.Failure)
-		_, settleErr := am.writeReceipt(attemptCtx, evt, agent.ID(), status, &agentFailure.Failure, heartbeat)
+		shutdownAfterSettlement := am.maybeTripAuthCircuitBreaker(ctx, route.AgentIdentity, evt, agentFailure.Failure)
+		_, settleErr := am.writeReceipt(attemptCtx, evt, status, &agentFailure.Failure, heartbeat)
 		if shutdownAfterSettlement {
 			am.lifecycle.requestShutdownTransition()
 		}
@@ -178,14 +209,16 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 	}
 	for idx, e := range out {
 		if e.ID() == "" {
-			var identityErr error
-			e, identityErr = events.BindManagerOutputIdentity(e, deterministicOutputEventID(evt, agent.ID(), idx, e))
+			outputID, identityErr := deterministicOutputEventID(evt, route.AgentIdentity, idx, e)
+			if identityErr == nil {
+				e, identityErr = events.BindManagerOutputIdentity(e, outputID)
+			}
 			if identityErr != nil {
 				pubErr := runtimefailures.WrapDetail("event_output_identity_failed", "agent-manager", "process_event.bind_output_identity", map[string]any{
 					"event_type": e.Type(), "agent_id": agent.ID(), "output_index": idx,
 				}, identityErr)
 				failure := runtimefailures.FromError(pubErr, "agent-manager", "process_event.bind_output_identity")
-				_, settleErr := am.writeReceipt(attemptCtx, evt, agent.ID(), ReceiptStatusError, &failure.Failure, heartbeat)
+				_, settleErr := am.writeReceipt(attemptCtx, evt, ReceiptStatusError, &failure.Failure, heartbeat)
 				record.Outcome = startupManagerReplayOutcomeDropped
 				record.ReasonCode = startupManagerReplayReasonPublishFailed
 				record.Failure = runtimefailures.CloneEnvelope(&failure.Failure)
@@ -200,14 +233,14 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 				"event_id": e.ID(), "event_type": e.Type(), "agent_id": agent.ID(),
 			}, err)
 			failure := runtimefailures.FromError(pubErr, "agent-manager", "process_event.publish_output")
-			_, settleErr := am.writeReceipt(attemptCtx, evt, agent.ID(), ReceiptStatusError, &failure.Failure, heartbeat)
+			_, settleErr := am.writeReceipt(attemptCtx, evt, ReceiptStatusError, &failure.Failure, heartbeat)
 			record.Outcome = startupManagerReplayOutcomeDropped
 			record.ReasonCode = startupManagerReplayReasonPublishFailed
 			record.Failure = runtimefailures.CloneEnvelope(&failure.Failure)
 			return eventProcessResult{record: record, err: errors.Join(pubErr, settleErr)}
 		}
 	}
-	if _, settleErr := am.writeReceipt(attemptCtx, evt, agent.ID(), ReceiptStatusProcessed, nil, heartbeat); settleErr != nil {
+	if _, settleErr := am.writeReceipt(attemptCtx, evt, ReceiptStatusProcessed, nil, heartbeat); settleErr != nil {
 		record.Outcome = startupManagerReplayOutcomeDropped
 		record.ReasonCode = startupManagerReplayReasonProcessFailed
 		record.Failure = failureEnvelope(settleErr, "agent-manager", "settle_delivery")
@@ -229,7 +262,7 @@ func receiptStatusForAgentFailure(err error) ReceiptStatus {
 	}
 }
 
-func (am *AgentManager) activeRunDeliveryQuiesced(ctx context.Context, eventID, agentID string) (startupManagerReplayReasonCode, bool) {
+func (am *AgentManager) activeRunDeliveryQuiesced(ctx context.Context, eventID string, route events.DeliveryRoute) (startupManagerReplayReasonCode, bool) {
 	reader, ok := am.store.(activeRunDeliveryQuiescenceReader)
 	if !ok || reader == nil {
 		return "", false
@@ -237,7 +270,8 @@ func (am *AgentManager) activeRunDeliveryQuiesced(ctx context.Context, eventID, 
 	if _, err := uuid.Parse(strings.TrimSpace(eventID)); err != nil {
 		return "", false
 	}
-	reason, ok, err := reader.ActiveRunDeliveryQuiesced(ctx, eventID, "agent", agentID)
+	route = route.Normalized()
+	reason, ok, err := reader.ActiveRunDeliveryQuiesced(ctx, eventID, route)
 	if err != nil {
 		if am.bus != nil {
 			am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
@@ -245,7 +279,7 @@ func (am *AgentManager) activeRunDeliveryQuiesced(ctx context.Context, eventID, 
 				Component: "agent-manager",
 				Action:    "active_run_quiescence_check_failed",
 				EventID:   strings.TrimSpace(eventID),
-				AgentID:   strings.TrimSpace(agentID),
+				AgentID:   route.SubscriberID,
 				Failure:   failureEnvelope(err, "agent-manager", "check_active_run_quiescence"),
 			})
 		}
@@ -259,8 +293,8 @@ func (am *AgentManager) shouldInterceptDirective(agentID string, evt events.Even
 	return false
 }
 
-func (am *AgentManager) shouldSuppressForBudget(agentID string, evt events.Event) (bool, string) {
-	execution, ok := am.lifecycle.executionSnapshot(agentID)
+func (am *AgentManager) shouldSuppressForBudget(identity runtimeagentidentity.Identity, evt events.Event) (bool, string) {
+	execution, ok := am.lifecycle.executionSnapshotByIdentity(identity)
 	am.mu.RLock()
 	tracker := am.budget
 	am.mu.RUnlock()
@@ -290,7 +324,9 @@ func (am *AgentManager) shouldSuppressForBudget(agentID string, evt events.Event
 	return false, ""
 }
 
-func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, agentID string, evt events.Event, failure runtimefailures.Envelope) (shutdownAfterSettlement bool) {
+func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, identity runtimeagentidentity.Identity, evt events.Event, failure runtimefailures.Envelope) (shutdownAfterSettlement bool) {
+	identity = identity.Normalize()
+	agentID := identity.AgentID()
 	eventID := strings.TrimSpace(evt.ID())
 	reason := ""
 	authRequired := false
@@ -357,7 +393,7 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, agentID
 	now := time.Now().UTC()
 	entityID := ""
 	flowInstance := ""
-	if execution, ok := am.lifecycle.executionSnapshot(agentID); ok {
+	if execution, ok := am.lifecycle.executionSnapshotByIdentity(identity); ok {
 		cfg := execution.Config
 		entityID = cfg.EffectiveEntityID()
 		flowInstance = flowPathFromAgentConfig(cfg)
@@ -398,13 +434,20 @@ func (am *AgentManager) isAuthBreakerTripped() bool {
 	return am.authBreakerTripped
 }
 
-func (am *AgentManager) writeReceipt(ctx context.Context, evt events.Event, agentID string, status ReceiptStatus, failure *runtimefailures.Envelope, heartbeats ...*runtimedelivery.ClaimHeartbeat) (runtimedelivery.Snapshot, error) {
+func (am *AgentManager) writeReceipt(ctx context.Context, evt events.Event, status ReceiptStatus, failure *runtimefailures.Envelope, heartbeats ...*runtimedelivery.ClaimHeartbeat) (runtimedelivery.Snapshot, error) {
 	eventID := strings.TrimSpace(evt.ID())
-	if am.deliveryStore == nil || eventID == "" || agentID == "" {
-		return runtimedelivery.Snapshot{}, fmt.Errorf("delivery settlement requires store, event id, and agent id")
+	route, routeOK := runtimedelivery.RouteFromContext(ctx)
+	if am.deliveryStore == nil || eventID == "" || !routeOK {
+		return runtimedelivery.Snapshot{}, fmt.Errorf("delivery settlement requires store, event id, and exact route")
+	}
+	route = route.Normalized()
+	agentID := route.SubscriberID
+	routeIdentity, err := route.Identity()
+	if err != nil {
+		return runtimedelivery.Snapshot{}, fmt.Errorf("delivery settlement route: %w", err)
 	}
 	claim, ok := runtimedelivery.ClaimFromContext(ctx)
-	if !ok || claim.SubscriberClass() != runtimedelivery.SubscriberAgent || claim.SubscriberID() != strings.TrimSpace(agentID) {
+	if !ok || claim.SubscriberClass() != runtimedelivery.SubscriberAgent || claim.SubscriberID() != agentID || claim.RouteIdentity() != routeIdentity.String() {
 		if am.bus != nil {
 			_ = am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 				Level: "error", Component: "agent-manager", Action: "delivery_settlement_claim_missing",
@@ -481,7 +524,7 @@ func (am *AgentManager) writeReceipt(ctx context.Context, evt events.Event, agen
 	am.notifyTestDeliveryStatus(postCtx, evt, agentID, snapshot.Status)
 
 	if snapshot.Status == runtimedelivery.StatusDeadLetter {
-		am.maybeEscalateDeadLetter(postCtx, evt, agentID, snapshot)
+		am.maybeEscalateDeadLetter(postCtx, evt, route.AgentIdentity, snapshot)
 	}
 	return snapshot, nil
 }
@@ -543,10 +586,11 @@ func (am *AgentManager) logDeliveryLifecycle(ctx context.Context, snapshot runti
 	_ = am.bus.LogRuntime(ctx, entry)
 }
 
-func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, evt events.Event, agentID string, snapshot runtimedelivery.Snapshot) {
+func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, evt events.Event, identity runtimeagentidentity.Identity, snapshot runtimedelivery.Snapshot) {
 	eventID := strings.TrimSpace(evt.ID())
-	execution, cfgOK := am.lifecycle.executionSnapshot(agentID)
+	execution, cfgOK := am.lifecycle.executionSnapshotByIdentity(identity)
 	cfg := execution.Config
+	agentID := identity.AgentID()
 	entityID := ""
 	flowInstance := ""
 	if cfgOK {
@@ -636,8 +680,8 @@ func (am *AgentManager) recordDeadLetterEscalation(flowInstance string, sample d
 	return len(window), sampleEvents, true
 }
 
-func (am *AgentManager) resolveManagerAgentID(agentID string) string {
-	execution, ok := am.lifecycle.executionSnapshot(agentID)
+func (am *AgentManager) resolveManagerAgentID(identity runtimeagentidentity.Identity) string {
+	execution, ok := am.lifecycle.executionSnapshotByIdentity(identity)
 	cfg := execution.Config
 	if ok {
 		if p := strings.TrimSpace(cfg.ParentAgent); p != "" {

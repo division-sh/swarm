@@ -27,7 +27,7 @@ func TestAgentManagerSpawnAgentConsumesNativeToolAdmissionValidator(t *testing.T
 	if err == nil || !strings.Contains(err.Error(), "native tool admission failed: native tool denied") {
 		t.Fatalf("SpawnAgent error = %v, want native tool admission failure", err)
 	}
-	if _, ok := am.GetAgentConfig("worker-1"); ok {
+	if _, ok := testAgentConfig(t, am, "worker-1", ""); ok {
 		t.Fatal("agent was registered despite native tool admission failure")
 	}
 }
@@ -47,14 +47,14 @@ func TestAgentManagerReconfigureConsumesNativeToolAdmissionValidator(t *testing.
 		t.Fatalf("SpawnAgent setup: %v", err)
 	}
 
-	err := am.ReconfigureAgent("worker-1", models.AgentConfig{
+	err := am.ReconfigureAgentTarget("worker-1", "", models.AgentConfig{
 		ExecutionMode: "live",
 		NativeTools:   models.NativeToolConfig{FileIO: true},
 	})
 	if err == nil || !strings.Contains(err.Error(), "native tool admission failed: native tool denied") {
 		t.Fatalf("ReconfigureAgent error = %v, want native tool admission failure", err)
 	}
-	cfg, ok := am.GetAgentConfig("worker-1")
+	cfg, ok := testAgentConfig(t, am, "worker-1", "")
 	if !ok {
 		t.Fatal("setup agent missing after failed reconfigure")
 	}

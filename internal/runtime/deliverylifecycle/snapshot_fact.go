@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -22,6 +23,7 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 		RouteIdentity             string                           `json:"route_identity"`
 		SubscriberType            string                           `json:"subscriber_type"`
 		SubscriberID              string                           `json:"subscriber_id"`
+		AgentIdentity             agentidentity.Identity           `json:"agent_identity"`
 		DeliveryTargetRoute       events.RouteIdentity             `json:"delivery_target_route"`
 		DeliveryContext           events.DeliveryContext           `json:"delivery_context"`
 		DeliveryPayloadProjection events.DeliveryPayloadProjection `json:"delivery_payload_projection"`
@@ -69,7 +71,7 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 	}
 	route := events.DeliveryRoute{
 		SubscriberType: string(class), SubscriberID: fact.SubscriberID,
-		Target: fact.DeliveryTargetRoute, Context: fact.DeliveryContext,
+		AgentIdentity: fact.AgentIdentity, Target: fact.DeliveryTargetRoute, Context: fact.DeliveryContext,
 		PayloadProjection: fact.DeliveryPayloadProjection,
 	}.Normalized()
 	derived, err := route.Identity()

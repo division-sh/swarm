@@ -9,7 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/google/uuid"
 )
 
@@ -29,7 +28,9 @@ func TestRunDebugTracePageBoundsCanonicalHydrationParity(t *testing.T) {
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 
 			filteredEvent, filteredDelivery := seedRunDebugTraceBoundedDelivery(t, ctx, selected, runID, "trace.filtered", "filtered-agent", base)
-			filteredClaim, err := selected.ClaimAgentDelivery(ctx, filteredEvent, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "filtered-agent"})
+			filteredClaim, err := selected.ClaimAgentDelivery(
+				ctx, filteredEvent, testAgentDeliveryRoute(t, "filtered-agent", "fixture/filtered-agent"),
+			)
 			if err != nil {
 				t.Fatalf("claim filtered delivery: %v", err)
 			}
@@ -89,7 +90,7 @@ func seedRunDebugTraceBoundedDelivery(
 		uuid.NewString(), events.EventType(eventName), "runtime", "", json.RawMessage(fmt.Sprintf(`{"index":%d}`, createdAt.Unix())), 0,
 		runID, "", events.EventEnvelope{}, createdAt,
 	)
-	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: agentID}
+	route := testAgentDeliveryRoute(t, agentID, "fixture/"+agentID)
 	if err := commitSemanticEventFixtureWithRoutes(ctx, store, event, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("commit bounded trace event %s: %v", event.ID(), err)
 	}

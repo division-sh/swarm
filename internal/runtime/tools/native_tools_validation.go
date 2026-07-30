@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -22,6 +23,18 @@ func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Sourc
 		actor := nativeToolAgentConfig(agentID, entry)
 		if !actor.NativeTools.Any() {
 			continue
+		}
+		if owner, ok := semanticview.AgentDeclarationOwner(source, "", agentID); ok {
+			name, err := runtimeagentidentity.DeclaredName(actor.ID, owner)
+			if err != nil {
+				failures = append(failures, err.Error())
+				continue
+			}
+			actor.Identity, err = runtimeagentidentity.New(name, runtimeagentidentity.RootRoute())
+			if err != nil {
+				failures = append(failures, err.Error())
+				continue
+			}
 		}
 		if err := ValidateNativeToolAgentAdmission(ctx, actor, NativeToolAdmissionOptions{
 			Runtime:     runtime,

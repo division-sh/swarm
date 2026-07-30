@@ -166,7 +166,7 @@ search_dimensions:
     canonical_layer: invalid_old_authority
     classified_paths_required: true
   - id: direct_delivery_path
-    pattern: '\bPlanDirect\b|\bPublishDirect\(|\bCheckDirectRecipients\('
+    pattern: '\bPlanDirect\b|\bPublishDirect(?:Routes)?\(|\bCheckDirectRoutes\('
     minimum_matching_files: 7
     required_paths:
       - internal/runtime/bus/delivery_planner.go

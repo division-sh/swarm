@@ -228,6 +228,14 @@ func TestNewRunDirectiveOperationCarriesCreationAuthorityParity(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			store := fixture.store.(runtimeagentcontrol.DirectiveOperationStore)
 			req := newRunDispositionDirectiveRequest(t, runtimeagentcontrol.RunResolutionNewRunAllocated)
+			seedTestAgentRow(
+				t,
+				ctx,
+				fixture.db,
+				fixture.dialect == runtimeauthoractivity.DialectPostgres,
+				req.Operation.AgentIdentity,
+				"active",
+			)
 			before := eventMutationSurfaceCounts(t, fixture.db, ctx)
 
 			reserved, err := store.ReserveDirectiveOperation(ctx, req)
@@ -320,7 +328,7 @@ func newRunDispositionDirectiveRequest(t *testing.T, resolution string) runtimea
 	return runtimeagentcontrol.ReserveDirectiveOperationRequest{
 		Operation: runtimeagentcontrol.DirectiveOperation{
 			OperationID: operationID, Method: runtimeagentcontrol.DirectiveOperationMethod,
-			ActorTokenID: "actor-1", RequestHash: "hash-1", AgentID: req.AgentID,
+			ActorTokenID: "actor-1", RequestHash: "hash-1", AgentIdentity: testAgentIdentity(t, req.AgentID, req.FlowInstance),
 			Directive: req.Directive, RequestedRunID: req.RunID, ResolvedRunID: runID,
 			RunIDResolution: resolution, Source: req.Source, OperatorID: req.OperatorID,
 			DirectiveEventID: eventID, State: runtimeagentcontrol.DirectiveOperationPrepared,

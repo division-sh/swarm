@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 )
 
 const (
@@ -182,16 +184,16 @@ type TableRef struct {
 }
 
 type ContainerRef struct {
-	Name           string `json:"name"`
-	Kind           string `json:"kind"`
-	Action         string `json:"action"`
-	ResetEligible  bool   `json:"reset_eligible,omitempty"`
-	CreationSource string `json:"creation_source,omitempty"`
-	WorkspaceScope string `json:"workspace_scope,omitempty"`
-	RunID          string `json:"run_id,omitempty"`
-	EntityID       string `json:"entity_id,omitempty"`
-	AgentID        string `json:"agent_id,omitempty"`
-	FlowInstance   string `json:"flow_instance,omitempty"`
+	Name           string                        `json:"name"`
+	Kind           string                        `json:"kind"`
+	Action         string                        `json:"action"`
+	ResetEligible  bool                          `json:"reset_eligible,omitempty"`
+	CreationSource string                        `json:"creation_source,omitempty"`
+	WorkspaceScope string                        `json:"workspace_scope,omitempty"`
+	RunID          string                        `json:"run_id,omitempty"`
+	EntityID       string                        `json:"entity_id,omitempty"`
+	AgentIdentity  runtimeagentidentity.Identity `json:"agent_identity,omitempty"`
+	FlowInstance   string                        `json:"flow_instance,omitempty"`
 }
 
 type PreservedResources struct {
@@ -279,7 +281,7 @@ type ContainerIdentity struct {
 	WorkspaceScope string
 	RunID          string
 	EntityID       string
-	AgentID        string
+	AgentIdentity  runtimeagentidentity.Identity
 	FlowInstance   string
 }
 

@@ -257,6 +257,7 @@ func joinSchedule(entityID string, instance WorkflowInstance, activation joinrun
 	}
 	return Schedule{
 		AgentID:      runtimeWorkflowID,
+		OwnerKind:    ScheduleOwnerSystem,
 		EventType:    eventType,
 		Mode:         "once",
 		At:           activation.FireAt,

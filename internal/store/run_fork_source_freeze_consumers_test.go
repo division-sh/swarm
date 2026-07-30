@@ -106,7 +106,11 @@ func TestForkedSourceEventDeliveryAndReplayConsumersRefuseAndSelectorsExclude(t 
 				eventID, events.EventType("freeze.pending"), eventtest.Producer(events.EventProducerPlatform, "test"),
 				"", []byte(`{}`), 0, fixture.sourceRun, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, fixture.forkedAt.Add(-time.Minute),
 			)
-			route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "freeze-agent"}
+			route := events.DeliveryRoute{
+				SubscriberType: string(runtimedelivery.SubscriberAgent),
+				SubscriberID:   "freeze-agent",
+				AgentIdentity:  mustTestAgentIdentity("freeze-agent", "fixture/freeze-agent"),
+			}
 			var claim runtimedelivery.Claim
 			if fixture.postgres != nil {
 				if err := commitSemanticEventFixtureWithAgents(ctx, fixture.postgres, event, []string{"freeze-agent"}); err != nil {
@@ -204,7 +208,8 @@ func TestForkedSourceTimerConsumersRefuseWhileClaimsCanBeReleased(t *testing.T) 
 			fixture := newForkedConsumerTestBackend(t, backend)
 			ctx := testAuthorActivityBundleSourceContext()
 			schedule := runtimepipeline.Schedule{
-				RunID: fixture.sourceRun, AgentID: "freeze-agent", EventType: "freeze.timer", Mode: "once",
+				RunID: fixture.sourceRun, AgentID: "freeze-agent", OwnerKind: runtimepipeline.ScheduleOwnerAgent,
+				AgentIdentity: testAgentIdentity(t, "freeze-agent", ""), EventType: "freeze.timer", Mode: "once",
 				At: fixture.forkedAt.Add(time.Hour), TaskID: "freeze-timer", Payload: []byte(`{"timer":true}`),
 			}
 			var store interface {
@@ -271,19 +276,19 @@ func TestForkedSourceSessionTurnAndConversationConsumersRefuse(t *testing.T) {
 			fixture := newForkedConsumerTestBackend(t, backend)
 			fixture.freeze(t)
 			ctx := runtimeeffects.WithExecutionMode(testAuthorActivityBundleSourceContext(), runtimeeffects.ExecutionModeLive)
-			identity := agentmemory.Identity{RunID: fixture.sourceRun, AgentID: "freeze-agent", FlowInstance: "freeze/flow"}
+			identity := testAgentMemoryIdentity(t, fixture.sourceRun, "freeze-agent", "freeze/flow")
 			lease := &runtimesessions.Lease{SessionID: uuid.NewString(), Identity: identity, LockOwner: "worker", ExpiresAt: time.Now().Add(time.Minute)}
 			conversation := runtimellm.ConversationRecord{
-				SessionID: lease.SessionID, AgentID: identity.AgentID, Identity: identity, Memory: agentmemory.Authored(true),
+				SessionID: lease.SessionID, AgentID: identity.AgentID(), Identity: identity, Memory: agentmemory.Authored(true),
 				TurnCount: 1, Status: "active",
 			}
 			turn := runtimellm.AgentTurnRecord{
-				SessionID: uuid.NewString(), AgentID: identity.AgentID, RunID: identity.RunID, FlowInstance: identity.FlowInstance,
+				SessionID: uuid.NewString(), AgentID: identity.AgentID(), Identity: identity, RunID: identity.RunID, FlowInstance: identity.FlowInstance(),
 				Memory: agentmemory.PlatformDefault(), RequestPayload: []byte(`{"request":true}`), ResponseRaw: []byte(`{"ok":true}`), ParseOK: true,
 			}
 			turn = managedAgentTurnRecordForTest(t, turn)
 			watchdog := runtimellm.ConversationWatchdogUpdate{
-				SessionID: lease.SessionID, AgentID: identity.AgentID, Identity: identity,
+				SessionID: lease.SessionID, AgentID: identity.AgentID(), Identity: identity,
 				Watchdog: &runtimellm.ConversationWatchdog{State: "healthy_long_running", BlockingLayer: "session_execution", Action: "turn_long_running", Outcome: "observed", LastOutputAt: "2026-07-15T12:00:00Z", RecordedAt: "2026-07-15T12:00:30Z"},
 			}
 			var store interface {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
@@ -30,6 +31,7 @@ type persistedAgentRuntimeDescriptor struct {
 }
 
 type persistedAgentProjection struct {
+	Identity          runtimeagentidentity.StorageFields
 	AgentID           string
 	FlowInstance      string
 	Role              string
@@ -145,6 +147,14 @@ func sanitizeOpaqueAgentConfig(raw json.RawMessage) ([]byte, error) {
 func projectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID string) (persistedAgentProjection, error) {
 	cfg.NormalizeEntityID()
 	cfg.NormalizeRuntimeDescriptor()
+	identity, err := cfg.ConcreteIdentity()
+	if err != nil {
+		return persistedAgentProjection{}, err
+	}
+	identityFields, err := identity.StorageFields()
+	if err != nil {
+		return persistedAgentProjection{}, err
+	}
 	modelAlias, err := agentModel(cfg)
 	if err != nil {
 		return persistedAgentProjection{}, err
@@ -169,6 +179,7 @@ func projectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID st
 		return persistedAgentProjection{}, fmt.Errorf("marshal agent runtime descriptor: %w", err)
 	}
 	return persistedAgentProjection{
+		Identity:          identityFields,
 		AgentID:           strings.TrimSpace(cfg.ID),
 		FlowInstance:      agentFlowInstance(cfg),
 		Role:              strings.TrimSpace(cfg.Role),
@@ -227,6 +238,13 @@ func hydratePersistedAgentConfig(row persistedAgentProjection) (runtimeactors.Ag
 	if profile.ID != llmselection.BackendMock && desc.Mock.Configured() {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s live runtime descriptor carries a mock performance artifact", strings.TrimSpace(row.AgentID))
 	}
+	identity, err := runtimeagentidentity.FromStorageFields(row.Identity)
+	if err != nil {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid concrete identity: %w", strings.TrimSpace(row.AgentID), err)
+	}
+	if identity.AgentID() != strings.TrimSpace(row.AgentID) {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent row identity disagrees with agent_id")
+	}
 	cfg := runtimeactors.AgentConfig{
 		ID:                   strings.TrimSpace(row.AgentID),
 		Type:                 desc.Type,
@@ -252,6 +270,7 @@ func hydratePersistedAgentConfig(row persistedAgentProjection) (runtimeactors.Ag
 		EntityID:             strings.TrimSpace(row.EntityID),
 		ParentAgent:          strings.TrimSpace(row.ParentAgentID),
 		Config:               append(json.RawMessage(nil), row.ConfigJSON...),
+		Identity:             identity,
 	}
 	cfg.NormalizeEntityID()
 	cfg.NormalizeRuntimeDescriptor()

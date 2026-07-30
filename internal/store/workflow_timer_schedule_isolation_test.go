@@ -76,8 +76,8 @@ func TestGenericScheduleAPIsCannotInterpretWorkflowTimerFamilyOnBothStores(t *te
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO timers (
 						timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-						fire_at, recurring, owner_agent, task_type, status, created_at
-					) VALUES (?, ?, ?, ?, 'timer-proof', 'timer.timeout', ?, ?, false, 'runtime', 'workflow_timer', 'active', ?)
+						fire_at, recurring, owner_agent, owner_kind, task_type, status, created_at
+					) VALUES (?, ?, ?, ?, 'timer-proof', 'timer.timeout', ?, ?, false, 'runtime', 'system', 'workflow_timer', 'active', ?)
 				`, activationID, runID, ref.TaskID(), entityID, string(payload), fireAt, fireAt.Add(-time.Hour))
 				if err != nil {
 					t.Fatalf("insert SQLite workflow activation: %v", err)
@@ -86,9 +86,9 @@ func TestGenericScheduleAPIsCannotInterpretWorkflowTimerFamilyOnBothStores(t *te
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO timers (
 						timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-						fire_at, recurring, owner_agent, task_type, status, created_at
+						fire_at, recurring, owner_agent, owner_kind, task_type, status, created_at
 					) VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'timer-proof', 'timer.timeout', $5::jsonb,
-					          $6, false, 'runtime', 'workflow_timer', 'active', $7)
+					          $6, false, 'runtime', 'system', 'workflow_timer', 'active', $7)
 				`, activationID, runID, ref.TaskID(), entityID, string(payload), fireAt, fireAt.Add(-time.Hour))
 				if err != nil {
 					t.Fatalf("insert PostgreSQL workflow activation: %v", err)
@@ -98,7 +98,7 @@ func TestGenericScheduleAPIsCannotInterpretWorkflowTimerFamilyOnBothStores(t *te
 			}
 
 			generic := runtimepipeline.Schedule{
-				RunID: runID, AgentID: "runtime", EventType: "timer.timeout", Mode: "once", At: fireAt,
+				RunID: runID, AgentID: "runtime", OwnerKind: runtimepipeline.ScheduleOwnerSystem, EventType: "timer.timeout", Mode: "once", At: fireAt,
 				EntityID: entityID, FlowInstance: "timer-proof", TaskID: genericTaskID, Payload: json.RawMessage(`{"business":true}`),
 			}
 			active, err := store.LoadActiveSchedules(ctx)
@@ -114,14 +114,6 @@ func TestGenericScheduleAPIsCannotInterpretWorkflowTimerFamilyOnBothStores(t *te
 			}
 			if err := store.MarkScheduleFiredExact(ctx, generic); err != nil {
 				t.Fatalf("generic exact completion: %v", err)
-			}
-			if postgres, ok := store.(*PostgresStore); ok {
-				if err := postgres.CancelSchedule(ctx, generic.AgentID, generic.EventType); err != nil {
-					t.Fatalf("generic broad cancel: %v", err)
-				}
-				if err := postgres.MarkScheduleFired(ctx, generic); err != nil {
-					t.Fatalf("generic broad completion: %v", err)
-				}
 			}
 			assertWorkflowTimerRowStatus(t, db, store, activationID, "active")
 
@@ -175,10 +167,11 @@ func TestGenericScheduleIdentityDoesNotInferWorkflowTimerFamilyOnBothStores(t *t
 			}
 			for _, test := range tests {
 				t.Run(test.name, func(t *testing.T) {
-					if err := store.UpsertSchedule(ctx, runtimepipeline.Schedule{
+					schedule := testAgentOwnedSchedule(t, runtimepipeline.Schedule{
 						AgentID: "generic-" + test.name, EventType: test.eventType, TaskID: test.taskID,
 						Mode: "once", At: time.Now().UTC().Add(time.Hour),
-					}); err != nil {
+					})
+					if err := store.UpsertSchedule(ctx, schedule); err != nil {
 						t.Fatalf("UpsertSchedule inferred workflow ownership from an opaque identity: %v", err)
 					}
 				})
@@ -341,11 +334,11 @@ func insertWorkflowTimerDDLProofRow(
 			INSERT INTO timers (
 				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
 				fire_at, recurring, recurrence_cron, recurrence_interval, owner_node, owner_agent,
-				task_type, status, fired_at, created_at, source_timer_id, forked_from_run_id,
+				owner_kind, task_type, status, fired_at, created_at, source_timer_id, forked_from_run_id,
 				forked_from_event_id, reconstruction_owner
 			) VALUES (
 				$1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7::jsonb,
-				$8, $9, $10, $11, $12, $13, 'workflow_timer', $14, $15, $16,
+				$8, $9, $10, $11, $12, $13, 'system', 'workflow_timer', $14, $15, $16,
 				$17::uuid, $18::uuid, $19::uuid, $20
 			)
 		`, args...)
@@ -355,10 +348,10 @@ func insertWorkflowTimerDDLProofRow(
 		INSERT INTO timers (
 			timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
 			fire_at, recurring, recurrence_cron, recurrence_interval, owner_node, owner_agent,
-			task_type, status, fired_at, created_at, source_timer_id, forked_from_run_id,
+			owner_kind, task_type, status, fired_at, created_at, source_timer_id, forked_from_run_id,
 			forked_from_event_id, reconstruction_owner
 		) VALUES (
-			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'workflow_timer', ?, ?, ?, ?, ?, ?, ?
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'system', 'workflow_timer', ?, ?, ?, ?, ?, ?, ?
 		)
 	`, args...)
 	return err
@@ -373,6 +366,7 @@ func TestGenericRecurringScheduleFiresRestoresAndCancelsOnBothStores(t *testing.
 				EventType: "generic.tick", Mode: "cron", Cron: "@every 200ms",
 				TaskID: "generic-recurring-proof", Payload: json.RawMessage(`{"business":true}`),
 			}
+			schedule = testAgentOwnedSchedule(t, schedule)
 			if err := store.UpsertSchedule(ctx, schedule); err != nil {
 				t.Fatalf("persist generic recurring schedule: %v", err)
 			}

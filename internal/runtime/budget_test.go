@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -100,6 +101,7 @@ func TestBudgetTracker_RecordSpendNormalizesThroughBudgetSpendOwner(t *testing.T
 		ExecutionMode:   "live",
 		FlowInstance:    " flow/1 ",
 		AgentID:         " agent-1 ",
+		AgentIdentity:   agentidentitytest.Runtime(t, "agent-1", "budget-test", "flow", "1", "flow/1"),
 		Model:           " claude ",
 		InputTokens:     -1,
 		OutputTokens:    -2,

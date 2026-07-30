@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -10,6 +11,8 @@ import (
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
@@ -17,18 +20,28 @@ import (
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
+func toolTestRootAgentIdentity(t testing.TB, agentID string) agentidentity.Identity {
+	t.Helper()
+	return agentidentitytest.RootRuntime(t, agentID, "runtime-tools-test")
+}
+
 type managerStub struct {
 	agents map[string]models.AgentConfig
 }
 
-func (m managerStub) GetAgentConfig(agentID string) (models.AgentConfig, bool) {
+func (m managerStub) ResolveAgentConfig(agentID, flowInstance string) (models.AgentConfig, error) {
 	cfg, ok := m.agents[agentID]
-	return cfg, ok
+	if !ok || (flowInstance != "" && cfg.CanonicalFlowPath() != flowInstance) {
+		return models.AgentConfig{}, fmt.Errorf("agent not found")
+	}
+	return cfg, nil
 }
 
 func (managerStub) SpawnAgentForEntity(string, models.AgentConfig) error { return nil }
-func (managerStub) TeardownAgent(string) error                           { return nil }
-func (managerStub) ReconfigureAgent(string, models.AgentConfig) error    { return nil }
+func (managerStub) TeardownAgentTarget(string, string) error             { return nil }
+func (managerStub) ReconfigureAgentTarget(string, string, models.AgentConfig) error {
+	return nil
+}
 
 type publishDirectBusStub struct {
 	recipients []string
@@ -55,9 +68,12 @@ type captureManagerStub struct {
 	teardownCalled    bool
 }
 
-func (m *captureManagerStub) GetAgentConfig(agentID string) (models.AgentConfig, bool) {
+func (m *captureManagerStub) ResolveAgentConfig(agentID, flowInstance string) (models.AgentConfig, error) {
 	cfg, ok := m.agents[agentID]
-	return cfg, ok
+	if !ok || (flowInstance != "" && cfg.CanonicalFlowPath() != flowInstance) {
+		return models.AgentConfig{}, fmt.Errorf("agent not found")
+	}
+	return cfg, nil
 }
 
 func (m *captureManagerStub) SpawnAgentForEntity(entityID string, cfg models.AgentConfig) error {
@@ -71,14 +87,20 @@ func (m *captureManagerStub) SpawnAgentForEntity(entityID string, cfg models.Age
 	return nil
 }
 
-func (m *captureManagerStub) TeardownAgent(agentID string) error {
+func (m *captureManagerStub) TeardownAgentTarget(agentID, flowInstance string) error {
+	if _, err := m.ResolveAgentConfig(agentID, flowInstance); err != nil {
+		return err
+	}
 	m.tornDownID = agentID
 	m.teardownCalled = true
 	delete(m.agents, agentID)
 	return nil
 }
 
-func (m *captureManagerStub) ReconfigureAgent(agentID string, cfg models.AgentConfig) error {
+func (m *captureManagerStub) ReconfigureAgentTarget(agentID, flowInstance string, cfg models.AgentConfig) error {
+	if _, err := m.ResolveAgentConfig(agentID, flowInstance); err != nil {
+		return err
+	}
 	m.reconfiguredID = agentID
 	m.reconfiguredPatch = cfg
 	m.reconfigureCalled = true

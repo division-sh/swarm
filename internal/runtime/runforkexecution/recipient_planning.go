@@ -116,6 +116,7 @@ func sortedFrontierRecipients(in []store.RunForkContractFrontierRecipient) []sto
 			SubscriberID:   strings.TrimSpace(recipient.SubscriberID),
 			Path:           strings.TrimSpace(recipient.Path),
 			RouteSource:    strings.TrimSpace(recipient.RouteSource),
+			AgentIdentity:  recipient.AgentIdentity.Normalize(),
 		}
 		if recipient.SubscriberType == "" || recipient.SubscriberID == "" {
 			continue
@@ -523,6 +524,7 @@ func expectedRecipientKeys(in []store.RunForkContractFrontierRecipient) []string
 			SubscriberID:   strings.TrimSpace(recipient.SubscriberID),
 			Path:           strings.TrimSpace(recipient.Path),
 			RouteSource:    strings.TrimSpace(recipient.RouteSource),
+			AgentIdentity:  recipient.AgentIdentity.Normalize(),
 		}
 		if recipient.SubscriberType == "" || recipient.SubscriberID == "" {
 			continue

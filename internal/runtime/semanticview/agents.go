@@ -45,6 +45,78 @@ func ResolveAgentRegistryEntry(source Source, cfg models.AgentConfig) (string, r
 	return "", runtimecontracts.AgentRegistryEntry{}, false
 }
 
+func AgentDeclarationOwner(source Source, flowID, logicalID string) (string, bool) {
+	if source == nil {
+		return "", false
+	}
+	flowID = strings.TrimSpace(flowID)
+	logicalID = strings.TrimSpace(logicalID)
+	if logicalID == "" {
+		return "", false
+	}
+
+	bundle, ok := Bundle(source)
+	if !ok || bundle == nil {
+		return "", false
+	}
+	owners := map[string]struct{}{}
+	for _, ref := range bundle.URIRegistry.Agents {
+		if strings.TrimSpace(ref.LocalID) != logicalID {
+			continue
+		}
+		refFlowID := strings.TrimSpace(ref.FlowID)
+		if refFlowID != flowID {
+			if refFlowID != "" || !projectAgentRefOwnedByFlow(source, ref, flowID, logicalID) {
+				continue
+			}
+		}
+		owner := strings.TrimSpace(ref.Full)
+		if owner == "" {
+			owner = strings.TrimSpace(ref.Absolute)
+		}
+		if owner != "" {
+			owners[owner] = struct{}{}
+		}
+	}
+	if len(owners) == 1 {
+		for owner := range owners {
+			return owner, true
+		}
+	}
+	return "", false
+}
+
+func projectAgentRefOwnedByFlow(source Source, ref runtimecontracts.ContractURIRef, flowID, logicalID string) bool {
+	refPath := strings.Trim(strings.TrimSpace(ref.Path), "/")
+	matchingScopes := 0
+	for _, scope := range source.ProjectScopes() {
+		if strings.TrimSpace(scope.OwningFlowID) != strings.TrimSpace(flowID) {
+			continue
+		}
+		if _, ok := scope.Agents[strings.TrimSpace(logicalID)]; !ok {
+			continue
+		}
+		matchingScopes++
+		if strings.Trim(strings.TrimSpace(scope.Key), "/") == refPath {
+			return true
+		}
+	}
+	if matchingScopes != 1 {
+		return false
+	}
+	matchingRefs := 0
+	bundle, ok := Bundle(source)
+	if !ok || bundle == nil {
+		return false
+	}
+	for _, candidate := range bundle.URIRegistry.Agents {
+		if strings.TrimSpace(candidate.FlowID) == "" && strings.TrimSpace(candidate.LocalID) == strings.TrimSpace(logicalID) {
+			matchingRefs++
+		}
+	}
+	return matchingRefs == 1
+}
+
 func resolveAgentRegistryByID(source Source, agentID string) string {
 	agentID = strings.TrimSpace(agentID)
 	if source == nil || agentID == "" {

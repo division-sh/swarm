@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
@@ -37,6 +38,7 @@ type SpendRecord struct {
 	EntityID        string
 	FlowInstance    string
 	AgentID         string
+	AgentIdentity   agentidentity.Identity
 	Model           string
 	ModelAlias      string
 	BackendProfile  string

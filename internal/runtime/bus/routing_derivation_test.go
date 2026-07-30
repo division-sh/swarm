@@ -12,6 +12,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
@@ -178,8 +179,9 @@ func TestEventBusPublishPersistedFlowInstanceRouteDoesNotRewritePersistence(t *t
 func TestEventBusStageFlowInstanceRouteKeepsPublicationManifestInvisibleUntilReadiness(t *testing.T) {
 	store := &routePersistenceTestStore{}
 	bundle := routeMaterializationConfigVarBundle()
+	source := semanticview.Wrap(bundle)
 	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{
-		ContractBundle: semanticview.Wrap(bundle),
+		ContractBundle: source,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -201,12 +203,19 @@ func TestEventBusStageFlowInstanceRouteKeepsPublicationManifestInvisibleUntilRea
 	if eb.HasFlowInstanceRoute(identity) {
 		t.Fatal("staged route became process-visible before readiness")
 	}
-	runtimebustest.Subscribe(t, eb, "ceo-11111111-1111-4111-8111-111111111111")
-	defer runtimebustest.Unsubscribe(eb, "ceo-11111111-1111-4111-8111-111111111111")
+	agentIdentity, admission := routeMaterializationAgentRoute(t, source, identity)
+	eb.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{
+		Identity: agentIdentity, EntityID: runtimeflowidentity.EntityID(identity.InstancePath),
+	})
+	runtimebustest.SubscribeIdentity(t, eb, agentIdentity, admission)
+	defer runtimebustest.UnsubscribeIdentity(eb, agentIdentity)
+	instanceEnvelope := events.EventEnvelope{
+		EntityID: runtimeflowidentity.EntityID(identity.InstancePath), FlowInstance: identity.InstancePath,
+	}
 	before := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("event-before-runtime-readiness"),
 		events.EventType("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested"),
-		"", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{},
+		"", "", nil, 0, "", "", instanceEnvelope, time.Time{},
 	)
 	if err := eb.Publish(context.Background(), before); err != nil {
 		t.Fatalf("Publish before readiness: %v", err)
@@ -217,10 +226,14 @@ func TestEventBusStageFlowInstanceRouteKeepsPublicationManifestInvisibleUntilRea
 	if err := eb.PublishPersistedFlowInstanceRoute(req); err != nil {
 		t.Fatalf("PublishPersistedFlowInstanceRoute: %v", err)
 	}
+	resolved := eb.RouteTable().Resolve("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested")
+	if len(resolved) != 1 || resolved[0].AgentIdentity != agentIdentity {
+		t.Fatalf("published agent route = %#v, want exact identity %s", resolved, agentIdentity)
+	}
 	after := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("event-after-runtime-readiness"),
 		events.EventType("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested"),
-		"", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{},
+		"", "", nil, 0, "", "", instanceEnvelope, time.Time{},
 	)
 	if err := eb.Publish(context.Background(), after); err != nil {
 		t.Fatalf("Publish after readiness: %v", err)
@@ -549,8 +562,9 @@ func TestEventBusAddFlowInstanceRouteRollsBackPersistedRouteOnActiveInstallFailu
 func TestEventBusFlowInstanceRoutePersistsAndDeliversRenderedActivationConfigSubscriber(t *testing.T) {
 	store := &routePersistenceTestStore{}
 	bundle := routeMaterializationConfigVarBundle()
+	source := semanticview.Wrap(bundle)
 	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{
-		ContractBundle: semanticview.Wrap(bundle),
+		ContractBundle: source,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -572,10 +586,19 @@ func TestEventBusFlowInstanceRoutePersistsAndDeliversRenderedActivationConfigSub
 		t.Fatalf("persisted subscriber_id = %q, want rendered ceo id", route.SubscriberID)
 	}
 
-	runtimebustest.Subscribe(t, eb, "ceo-11111111-1111-4111-8111-111111111111")
-	defer runtimebustest.Unsubscribe(eb, "ceo-11111111-1111-4111-8111-111111111111")
+	agentIdentity, admission := routeMaterializationAgentRoute(t, source, identity)
+	eb.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{
+		Identity: agentIdentity, EntityID: runtimeflowidentity.EntityID(identity.InstancePath),
+	})
+	runtimebustest.SubscribeIdentity(t, eb, agentIdentity, admission)
+	defer runtimebustest.UnsubscribeIdentity(eb, agentIdentity)
+	resolved := eb.RouteTable().Resolve("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested")
+	if len(resolved) != 1 || resolved[0].AgentIdentity != agentIdentity {
+		t.Fatalf("active agent route = %#v, want exact identity %s", resolved, agentIdentity)
+	}
 	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("event-rendered-route-delivery"),
-		events.EventType("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+		events.EventType("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested"), "", "", nil, 0, "", "",
+		events.EventEnvelope{EntityID: runtimeflowidentity.EntityID(identity.InstancePath), FlowInstance: identity.InstancePath}, time.Time{})
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -691,6 +714,24 @@ func TestRouteTableFlowInstanceRouteRendersSubscriberWithActivationConfigVars(t 
 	if got[0].ID != "ceo-11111111-1111-4111-8111-111111111111" {
 		t.Fatalf("resolved subscriber id = %q, want rendered ceo id", got[0].ID)
 	}
+	if got[0].AgentIdentity.AgentID() != got[0].ID || got[0].AgentIdentity.FlowInstance() != identity.InstancePath {
+		t.Fatalf("resolved subscriber identity = %#v, want exact first instance", got[0].AgentIdentity)
+	}
+	siblingIdentity := runtimeflowidentity.DeriveRoute("operating", "22222222-2222-4222-8222-222222222222")
+	if err := rt.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
+		Identity: siblingIdentity,
+		ActivationVariables: map[string]string{
+			"vertical_id": "11111111-1111-4111-8111-111111111111",
+		},
+	}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute sibling: %v", err)
+	}
+	sibling := rt.Resolve("operating/22222222-2222-4222-8222-222222222222/opco.product_initialization_requested")
+	if len(sibling) != 1 || sibling[0].ID != got[0].ID ||
+		sibling[0].AgentIdentity.FlowInstance() != siblingIdentity.InstancePath ||
+		sibling[0].AgentIdentity == got[0].AgentIdentity {
+		t.Fatalf("resolved sibling subscriber = %#v, want same slug with distinct concrete identity from %#v", sibling, got[0])
+	}
 	routes := rt.MaterializedRoutes(identity)
 	if len(routes) != 1 || routes[0].SubscriberID != "ceo-11111111-1111-4111-8111-111111111111" {
 		t.Fatalf("materialized routes = %#v, want rendered ceo subscriber", routes)
@@ -725,6 +766,14 @@ func routeMaterializationConfigVarBundle() *runtimecontracts.WorkflowContractBun
 			Name:    "route-materialization",
 			Version: "1.0.0",
 		},
+		URIRegistry: runtimecontracts.ContractURIRegistry{
+			Agents: map[string]runtimecontracts.ContractURIRef{
+				"operating/ceo": {
+					Kind: "agent", FlowID: "operating", LocalID: "ceo",
+					Full: "test://route-materialization/operating/ceo",
+				},
+			},
+		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -740,6 +789,40 @@ func routeMaterializationConfigVarBundle() *runtimecontracts.WorkflowContractBun
 			},
 		},
 	}
+}
+
+func routeMaterializationAgentRoute(
+	t testing.TB,
+	source semanticview.Source,
+	route runtimeflowidentity.Route,
+) (agentidentity.Identity, semanticview.FlowOwnedAgentSubscriptionAdmission) {
+	t.Helper()
+	const agentID = "ceo-11111111-1111-4111-8111-111111111111"
+	owner, ok := semanticview.AgentDeclarationOwner(source, "operating", "ceo")
+	if !ok {
+		t.Fatal("resolve operating/ceo declaration owner")
+	}
+	name, err := agentidentity.DeclaredName(agentID, owner)
+	if err != nil {
+		t.Fatalf("build rendered agent name: %v", err)
+	}
+	identityRoute, err := route.AgentIdentityRoute()
+	if err != nil {
+		t.Fatalf("build rendered agent route: %v", err)
+	}
+	identity, err := agentidentity.New(name, identityRoute)
+	if err != nil {
+		t.Fatalf("build rendered agent identity: %v", err)
+	}
+	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
+		AgentID:  agentID,
+		FlowID:   "operating",
+		FlowPath: route.InstancePath,
+	})
+	if err != nil {
+		t.Fatalf("admit rendered agent route: %v", err)
+	}
+	return identity, admission
 }
 
 func TestRouteTableTemplateOutputPinWildcardSubscriberResolvesThroughDerivedInstance(t *testing.T) {

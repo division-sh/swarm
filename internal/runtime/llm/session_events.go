@@ -36,7 +36,7 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	payload := map[string]any{
 		"agent_id":               strings.TrimSpace(session.AgentID),
-		"flow_instance":          strings.TrimSpace(session.MemoryIdentity.FlowInstance),
+		"flow_instance":          strings.TrimSpace(session.MemoryIdentity.FlowInstance()),
 		"memory_enabled":         session.Memory.Enabled,
 		"memory_source":          strings.TrimSpace(string(session.Memory.Source)),
 		"model":                  strings.TrimSpace(actor.Model),

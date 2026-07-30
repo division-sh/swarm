@@ -432,7 +432,7 @@ func TestOperatorEventPublishResolvesFlowScopedContractEventName(t *testing.T) {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	ctx := context.Background()
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "repo-observer")
+	seedActiveAPIV1RuntimeBusAgentAt(t, ctx, pg, "repo-observer", "repo-scaffold")
 	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(source, semanticview.FlowOwnedAgentSubscriptionRequest{
 		AgentID:       "repo-observer",
 		FlowID:        "repo-scaffold",

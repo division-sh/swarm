@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -57,14 +58,14 @@ func (r servedEventPublishBlockingLLMRuntime) ContinueSession(ctx context.Contex
 func (r servedSessionCleanupProofLLMRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
 	execution, ok := agentmemory.FromContext(ctx)
 	if !ok {
-		return nil, errors.New("served session cleanup proof requires canonical memory execution")
+		return nil, r.reportFailure(errors.New("served session cleanup proof requires canonical memory execution"))
 	}
 	lease, err := r.store.Acquire(ctx, execution.Identity, "served-cleanup-start")
 	if err != nil {
-		return nil, err
+		return nil, r.reportFailure(fmt.Errorf("acquire start identity %#v: %w", execution.Identity, err))
 	}
 	if err := r.store.Release(ctx, lease); err != nil {
-		return nil, err
+		return nil, r.reportFailure(err)
 	}
 	return &runtimellm.Session{
 		ID: lease.SessionID, AgentID: agentID, SystemPrompt: systemPrompt,
@@ -74,11 +75,11 @@ func (r servedSessionCleanupProofLLMRuntime) StartSession(ctx context.Context, a
 
 func (r servedSessionCleanupProofLLMRuntime) ContinueSession(ctx context.Context, session *runtimellm.Session, _ runtimellm.Message) (*runtimellm.Response, error) {
 	if r.store == nil || session == nil {
-		return nil, errors.New("served session cleanup proof requires store and session")
+		return nil, r.reportFailure(errors.New("served session cleanup proof requires store and session"))
 	}
 	lease, err := r.store.Acquire(ctx, session.MemoryIdentity, "served-cleanup-proof")
 	if err != nil {
-		return nil, err
+		return nil, r.reportFailure(fmt.Errorf("acquire continue identity %#v: %w", session.MemoryIdentity, err))
 	}
 	defer func() { _ = r.store.Release(context.Background(), lease) }()
 	surface, ok := managedcapabilities.FromContext(ctx)
@@ -87,12 +88,17 @@ func (r servedSessionCleanupProofLLMRuntime) ContinueSession(ctx context.Context
 	}
 	runID := session.MemoryIdentity.RunID
 	err = r.store.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
-		AgentID: session.AgentID, Memory: session.Memory, SessionID: lease.SessionID,
-		FlowInstance: session.MemoryIdentity.FlowInstance, RunID: runID, CapabilitySurface: &surface,
+		AgentID: session.AgentID, Identity: session.MemoryIdentity, Memory: session.Memory, SessionID: lease.SessionID,
+		FlowInstance: session.MemoryIdentity.FlowInstance(), RunID: runID, CapabilitySurface: &surface,
 		ResponseRaw: []byte(`{"proof":"in-flight"}`), ParseOK: true,
 	})
 	if err != nil {
-		return nil, err
+		return nil, r.reportFailure(fmt.Errorf(
+			"append turn identity %#v record_run_id %q: %w",
+			session.MemoryIdentity,
+			runID,
+			err,
+		))
 	}
 	select {
 	case r.started <- lease.SessionID:
@@ -104,6 +110,17 @@ func (r servedSessionCleanupProofLLMRuntime) ContinueSession(ctx context.Context
 		return nil, ctx.Err()
 	}
 	return &runtimellm.Response{Message: runtimellm.Message{Role: "assistant", Content: "released"}, SessionID: lease.SessionID, CapabilitySurface: &surface}, nil
+}
+
+func (r servedSessionCleanupProofLLMRuntime) reportFailure(err error) error {
+	if err == nil {
+		return nil
+	}
+	select {
+	case r.started <- "error: " + err.Error():
+	default:
+	}
+	return err
 }
 
 func (f *servedDirectivePersistenceFaults) setRecordResultFault(afterCommit bool) {

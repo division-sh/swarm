@@ -12,6 +12,8 @@ import (
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -314,6 +316,10 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 			{InstanceID: "acct-a", EntityID: "ent-a", FlowInstance: "account/acct-a", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
 			{InstanceID: "acct-b", EntityID: "ent-b", FlowInstance: "account/acct-b", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-b"}},
 		},
+		activeAgents: []runtimebus.ActiveAgentDescriptor{
+			{Identity: agentidentitytest.Declared(t, "account-worker", "notify-all-children/account", "account", "acct-a", "account/acct-a"), EntityID: "ent-a"},
+			{Identity: agentidentitytest.Declared(t, "account-worker", "notify-all-children/account", "account", "acct-b", "account/acct-b"), EntityID: "ent-b"},
+		},
 	}
 	eb, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
 		ContractBundle: source,
@@ -331,6 +337,19 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		}); err != nil {
 			t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
 		}
+	}
+	agentDeliveries := make(map[string]<-chan *runtimebus.LocalDelivery, len(store.activeAgents))
+	for _, descriptor := range store.activeAgents {
+		admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(source, semanticview.FlowOwnedAgentSubscriptionRequest{
+			AgentID:       descriptor.Identity.AgentID(),
+			FlowID:        "account",
+			FlowPath:      descriptor.Identity.FlowInstance(),
+			Subscriptions: []string{"account.notify.requested"},
+		})
+		if err != nil {
+			t.Fatalf("AdmitFlowOwnedAgentSubscriptions(%s): %v", descriptor.Identity, err)
+		}
+		agentDeliveries[descriptor.Identity.FlowInstance()] = runtimebustest.SubscribeIdentity(t, eb, descriptor.Identity, admission.CarrierOnly())
 	}
 
 	want := map[string]events.RouteIdentity{
@@ -364,20 +383,36 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		if !ok {
 			t.Fatalf("unexpected account_id in fan_out payload: %#v", payload)
 		}
+		expectedAgent := agentidentitytest.Declared(
+			t,
+			"account-worker",
+			"notify-all-children/account",
+			"account",
+			accountID,
+			"account/"+accountID,
+		)
 		preflight, err := eb.CheckPublishRecipientPlan(testAuthorActivityContext(context.Background()), evt)
 		if err != nil {
 			t.Fatalf("CheckPublishRecipientPlan(%s): %v", accountID, err)
 		}
-		if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != 1 ||
-			!fanOutPinRouteDeliveryRoutesContain(preflight.DeliveryRoutes, expected) {
-			t.Fatalf("preflight for %s = failure:%q routes:%#v, want only %#v", accountID, preflight.TargetFailure, preflight.DeliveryRoutes, expected)
+		if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != 2 ||
+			!fanOutPinRouteDeliveryRoutesContain(preflight.DeliveryRoutes, expected, expectedAgent) {
+			t.Fatalf("preflight for %s = failure:%q routes:%#v, want node and exact agent at %#v", accountID, preflight.TargetFailure, preflight.DeliveryRoutes, expected)
 		}
 		if err := eb.Publish(testAuthorActivityContext(context.Background()), evt); err != nil {
 			t.Fatalf("Publish fan_out event for %s: %v", accountID, err)
 		}
-		if routes := store.deliveryRoutes[evt.ID()]; len(routes) != 1 ||
-			!fanOutPinRouteDeliveryRoutesContain(routes, expected) {
-			t.Fatalf("persisted routes for %s = %#v, want only %#v", accountID, routes, expected)
+		select {
+		case delivery := <-agentDeliveries[expectedAgent.FlowInstance()]:
+			if err := delivery.Complete(); err != nil {
+				t.Fatalf("complete exact account agent delivery for %s: %v", accountID, err)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for exact account agent delivery for %s", accountID)
+		}
+		if routes := store.deliveryRoutes[evt.ID()]; len(routes) != 2 ||
+			!fanOutPinRouteDeliveryRoutesContain(routes, expected, expectedAgent) {
+			t.Fatalf("persisted routes for %s = %#v, want node and exact agent at %#v", accountID, routes, expected)
 		}
 	}
 }
@@ -508,6 +543,7 @@ func (fanOutPinRouteDispatcher) DispatchPostCommit(context.Context, []runtimeeng
 type fanOutPinRouteMemoryStore struct {
 	runtimebus.InMemoryEventStore
 	flowInstances  []runtimebus.ActiveFlowInstanceDescriptor
+	activeAgents   []runtimebus.ActiveAgentDescriptor
 	deliveryRoutes map[string][]events.DeliveryRoute
 }
 
@@ -528,6 +564,10 @@ func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptors(context.Co
 	return descriptors, nil
 }
 
+func (s *fanOutPinRouteMemoryStore) ListActiveAgentDescriptors(context.Context) ([]runtimebus.ActiveAgentDescriptor, error) {
+	return append([]runtimebus.ActiveAgentDescriptor(nil), s.activeAgents...), nil
+}
+
 func (s *fanOutPinRouteMemoryStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
 	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, req runtimebus.CommitPublishRequest) error {
 		if s.deliveryRoutes == nil {
@@ -538,12 +578,18 @@ func (s *fanOutPinRouteMemoryStore) CommitPublish(ctx context.Context, plan runt
 	})
 }
 
-func fanOutPinRouteDeliveryRoutesContain(routes []events.DeliveryRoute, target events.RouteIdentity) bool {
+func fanOutPinRouteDeliveryRoutesContain(routes []events.DeliveryRoute, target events.RouteIdentity, agentIdentity agentidentity.Identity) bool {
 	target = target.Normalized()
+	nodeFound := false
+	agentFound := false
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
 		if route.SubscriberType == "node" && route.SubscriberID == "account-node" && route.Target == target {
-			return true
+			nodeFound = true
+		}
+		if route.SubscriberType == "agent" && route.SubscriberID == "account-worker" &&
+			route.AgentIdentity == agentIdentity && route.Target == target {
+			agentFound = true
 		}
 	}
-	return false
+	return nodeFound && agentFound
 }

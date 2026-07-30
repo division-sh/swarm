@@ -16,6 +16,7 @@ import (
 
 type AgentTurnRecord struct {
 	AgentID           string
+	Identity          agentmemory.Identity
 	Memory            agentmemory.Plan
 	SessionID         string
 	RunID             string
@@ -43,12 +44,11 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 			rec.SessionID = strings.TrimSpace(s.ID)
 		}
 		rec.Memory = s.Memory
+		rec.Identity = s.MemoryIdentity.Normalize()
 		if strings.TrimSpace(rec.RunID) == "" {
 			rec.RunID = s.MemoryIdentity.RunID
 		}
-		if strings.TrimSpace(rec.FlowInstance) == "" {
-			rec.FlowInstance = s.MemoryIdentity.FlowInstance
-		}
+		rec.FlowInstance = s.MemoryIdentity.FlowInstance()
 	}
 	if strings.TrimSpace(rec.RunID) == "" {
 		rec.RunID = strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
@@ -69,12 +69,12 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 		if strings.TrimSpace(rec.EntityID) == "" {
 			rec.EntityID = strings.TrimSpace(inbound.EntityID())
 		}
-		if strings.TrimSpace(rec.FlowInstance) == "" {
+		if rec.Identity.Agent.IsZero() && strings.TrimSpace(rec.FlowInstance) == "" {
 			rec.FlowInstance = strings.TrimSpace(inbound.FlowInstance())
 		}
 	}
 	if actor, ok := runtimeactors.ActorFromContext(ctx); ok {
-		if strings.TrimSpace(rec.FlowInstance) == "" {
+		if rec.Identity.Agent.IsZero() && strings.TrimSpace(rec.FlowInstance) == "" {
 			rec.FlowInstance = strings.TrimSpace(actor.CanonicalFlowPath())
 		}
 	}

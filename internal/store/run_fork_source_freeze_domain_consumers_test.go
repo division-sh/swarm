@@ -84,7 +84,8 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 			requireForkedSourceRefusal(t, "save entity field and mutation log", err)
 			requireForkedSourceRefusal(t, "record spend", surface.RecordSpend(ctx, budgetspend.SpendRecord{
 				ExecutionMode: runtimeeffects.ExecutionModeLive, EntityID: entityID, FlowInstance: entity.FlowInstance,
-				AgentID: "freeze-agent", Model: "test", ModelAlias: "regular", BackendProfile: "test",
+				AgentID: "freeze-agent", AgentIdentity: testAgentIdentity(t, "freeze-agent", entity.FlowInstance),
+				Model: "test", ModelAlias: "regular", BackendProfile: "test",
 				Provider: "test", Transport: "test", ResolvedModel: "test", InputTokens: 1, OutputTokens: 1,
 				CostUSD: 0.01, InvocationType: "test", UsageAccounting: "exact", RecordedAt: fixture.forkedAt,
 			}))
@@ -183,6 +184,10 @@ func TestForkedSourceDirectiveReservationTransitionsAndRecoveryRefuse(t *testing
 			}
 			ctx := testAuthorActivityBundleSourceContext()
 			now := fixture.forkedAt.Add(time.Minute)
+			seedTestAgentRow(
+				t, ctx, fixture.db, fixture.postgres != nil,
+				testAgentIdentity(t, "freeze-agent", "freeze/directive"), "active",
+			)
 			request := forkedDirectiveReservation(t, fixture.sourceRun, now)
 			_, err := surface.ReserveDirectiveOperation(ctx, request)
 			requireForkedSourceRefusal(t, "reserve directive", err)
@@ -221,7 +226,7 @@ func forkedDirectiveReservation(t *testing.T, runID string, now time.Time) agent
 	t.Helper()
 	operationID, eventID := uuid.NewString(), uuid.NewString()
 	request := agentcontrol.SendDirectiveRequest{
-		AgentID: "freeze-agent", Directive: "continue", RunID: runID, Source: agentcontrol.DirectiveSourceV1RPC, OperatorID: "operator",
+		AgentID: "freeze-agent", FlowInstance: "freeze/directive", Directive: "continue", RunID: runID, Source: agentcontrol.DirectiveSourceV1RPC, OperatorID: "operator",
 	}
 	event, err := agentcontrol.NewDirectiveEvent(request, agentcontrol.RunTargetResolution{RunID: runID, Mode: agentcontrol.RunResolutionSpecified}, operationID, eventID, now)
 	if err != nil {
@@ -234,7 +239,7 @@ func forkedDirectiveReservation(t *testing.T, runID string, now time.Time) agent
 	return agentcontrol.ReserveDirectiveOperationRequest{
 		Operation: agentcontrol.DirectiveOperation{
 			OperationID: operationID, Method: agentcontrol.DirectiveOperationMethod, ActorTokenID: "operator",
-			RequestHash: "frozen-request", AgentID: request.AgentID, Directive: request.Directive,
+			RequestHash: "frozen-request", AgentIdentity: testAgentIdentity(t, request.AgentID, request.FlowInstance), Directive: request.Directive,
 			RequestedRunID: runID, ResolvedRunID: runID, RunIDResolution: agentcontrol.RunResolutionSpecified,
 			Source: request.Source, OperatorID: request.OperatorID, DirectiveEventID: eventID, State: agentcontrol.DirectiveOperationPrepared,
 		},
@@ -246,23 +251,35 @@ func seedForkedDirectiveOperation(t *testing.T, fixture *forkedConsumerTestBacke
 	t.Helper()
 	eventID := uuid.NewString()
 	insertForkedConsumerEvent(t, fixture, eventID, "agent.directive", now)
+	fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "freeze-agent", "freeze/directive"))
 	query := `INSERT INTO agent_directive_operations (
-		operation_id, method, actor_token_id, request_hash, agent_id, directive_text, resolved_run_id,
+		operation_id, method, actor_token_id, request_hash,
+		agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+		flow_scope_key, flow_instance_id, flow_instance,
+		directive_text, resolved_run_id,
 		run_id_resolution, source, directive_event_id, state, execution_owner_id, execution_admitted_at,
 		execution_lease_expires_at, created_at, updated_at
-	) VALUES (?, 'agent.send_directive', 'operator', 'frozen-request', 'freeze-agent', 'continue', ?,
+	) VALUES (?, 'agent.send_directive', 'operator', 'frozen-request', ?, ?, ?, ?, ?, ?, ?, 'continue', ?,
 		'specified', 'v1_rpc', ?, 'executing', ?, ?, ?, ?, ?)`
 	if fixture.postgres != nil {
 		query = `INSERT INTO agent_directive_operations (
-			operation_id, method, actor_token_id, request_hash, agent_id, directive_text, resolved_run_id,
+			operation_id, method, actor_token_id, request_hash,
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance,
+			directive_text, resolved_run_id,
 			run_id_resolution, source, directive_event_id, state, execution_owner_id, execution_admitted_at,
 			execution_lease_expires_at, created_at, updated_at
-		) VALUES ($1::uuid, 'agent.send_directive', 'operator', 'frozen-request', 'freeze-agent', 'continue', $2::uuid,
-			'specified', 'v1_rpc', $3::uuid, 'executing', $4, $5, $6, $5, $5)`
+		) VALUES ($1::uuid, 'agent.send_directive', 'operator', 'frozen-request',
+			$2, $3, $4, $5, $6, $7, $8, 'continue', $9::uuid,
+			'specified', 'v1_rpc', $10::uuid, 'executing', $11, $12, $13, $12, $12)`
 	}
-	args := []any{operationID, fixture.sourceRun, eventID, ownerID, now, now.Add(-time.Second), now, now}
+	args := []any{
+		operationID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+		fixture.sourceRun, eventID, ownerID, now, now.Add(-time.Second), now, now,
+	}
 	if fixture.postgres != nil {
-		args = args[:6]
+		args = args[:13]
 	}
 	if _, err := fixture.db.ExecContext(context.Background(), query, args...); err != nil {
 		t.Fatal(err)
@@ -291,11 +308,15 @@ func TestForkedSourceManagedExternalEffectAdmissionTransitionsAndRecoveryRefuse(
 				surface = fixture.sqlite
 			}
 			now := fixture.forkedAt.Add(time.Minute)
-			token := runtimeeffects.LifecycleToken{RuntimeEpoch: 1, AgentID: "freeze-effect-agent", Generation: 1}
+			identity := testAgentIdentity(t, "freeze-effect-agent", "freeze/effect")
+			token := runtimeeffects.LifecycleToken{
+				RuntimeEpoch: 1, Identity: identity, AgentID: identity.AgentID(), Generation: 1,
+			}
 			authority := runtimeeffects.NormalAgentAuthority(token, "freeze-worker", now.Add(time.Minute))
 			authority.Target = runtimeeffects.UsageTarget{
 				Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: fixture.sourceRun,
-				AgentID: token.AgentID, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "freeze/effect",
+				AgentID: token.AgentID, AgentIdentity: identity, SessionID: uuid.NewString(),
+				Memory: agentmemory.PlatformDefault(), FlowInstance: identity.FlowInstance(),
 			}
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityBundleSourceContext(), fixture.sourceRun)
 			if current, err := surface.IsExternalEffectAuthorityCurrent(ctx, authority); err != nil || current {
@@ -341,14 +362,16 @@ func seedForkedExternalEffectAttempt(t *testing.T, fixture *forkedConsumerTestBa
 	t.Helper()
 	agentID, operationID, attemptID := "frozen-recovery-agent-"+uuid.NewString(), uuid.NewString(), uuid.NewString()
 	turnID, sessionID := uuid.NewString(), uuid.NewString()
+	identity := testAgentIdentity(t, agentID, "freeze/effect")
 	authority := runtimeeffects.NormalAgentAuthority(
-		runtimeeffects.LifecycleToken{RuntimeEpoch: 1, AgentID: agentID, Generation: 1},
+		runtimeeffects.LifecycleToken{RuntimeEpoch: 1, Identity: identity, AgentID: agentID, Generation: 1},
 		"freeze-worker",
 		now.Add(-time.Minute),
 	)
 	authority.Target = runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: fixture.sourceRun,
-		AgentID: agentID, SessionID: sessionID, Memory: agentmemory.PlatformDefault(), FlowInstance: "freeze/effect",
+		AgentID: agentID, AgentIdentity: identity, SessionID: sessionID,
+		Memory: agentmemory.PlatformDefault(), FlowInstance: identity.FlowInstance(),
 	}
 	capabilitySurface := managedCompletionTestSurface(t, authority, "native_command")
 	capabilityStore := managedCapabilityTestStore(fixture.sqlite)
@@ -362,11 +385,14 @@ func seedForkedExternalEffectAttempt(t *testing.T, fixture *forkedConsumerTestBa
 	if err != nil {
 		t.Fatalf("fingerprint frozen external-effect capability plan: %v", err)
 	}
-	agentQuery := `INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, created_at) VALUES (?, 'freeze/effect', 'worker', 'standard', 'mock', TRUE, 'authored', 'active', ?)`
+	fields := testAgentIdentityStorageFields(t, identity)
 	operationQuery := `INSERT INTO runtime_external_effect_operations (
-		operation_id, effect_kind, effect_class, execution_mode, bundle_hash, authority_kind, authority_id, agent_id,
+		operation_id, effect_kind, effect_class, execution_mode, bundle_hash, authority_kind, authority_id,
+		agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+		flow_scope_key, flow_instance_id, flow_instance,
 		runtime_epoch, generation, capability_plan_fingerprint, authority_evidence, lineage, request_fingerprint, state, created_at, updated_at
-	) VALUES (?, 'native_command', 'write_or_unknown', 'live', ?, 'normal_agent', ?, ?, 1, 1, ?, '{}', ?, 'frozen-fingerprint', 'launched', ?, ?)`
+	) VALUES (?, 'native_command', 'write_or_unknown', 'live', ?, 'normal_agent', ?,
+		?, ?, ?, ?, ?, ?, ?, 1, 1, ?, '{}', ?, 'frozen-fingerprint', 'launched', ?, ?)`
 	attemptQuery := `INSERT INTO runtime_external_effect_attempts (
 		attempt_id, operation_id, attempt_ordinal, adapter, transport, execution_mode, runtime_epoch, generation,
 		execution_owner, lease_expires_at, fence_generation, usage_target_kind, usage_target_id, capability_surface_id,
@@ -374,23 +400,29 @@ func seedForkedExternalEffectAttempt(t *testing.T, fixture *forkedConsumerTestBa
 	) VALUES (?, ?, 1, 'native_command', 'process', 'live', 1, 1, 'freeze-worker', ?, 1, 'agent_turn', ?, ?, 'launched', '{}', ?, ?, ?)`
 	lineage := `{"run_id":"` + fixture.sourceRun + `"}`
 	if fixture.postgres != nil {
-		agentQuery = `INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, created_at) VALUES ($1, 'freeze/effect', 'worker', 'standard', 'mock', TRUE, 'authored', 'active', $2)`
 		operationQuery = `INSERT INTO runtime_external_effect_operations (
-			operation_id, effect_kind, effect_class, execution_mode, bundle_hash, authority_kind, authority_id, agent_id,
+			operation_id, effect_kind, effect_class, execution_mode, bundle_hash, authority_kind, authority_id,
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance,
 			runtime_epoch, generation, capability_plan_fingerprint, authority_evidence, lineage, request_fingerprint, state, created_at, updated_at
-		) VALUES ($1::uuid, 'native_command', 'write_or_unknown', 'live', $2, 'normal_agent', $3, $4, 1, 1, $5, '{}'::jsonb, $6::jsonb, 'frozen-fingerprint', 'launched', $7, $7)`
+		) VALUES ($1::uuid, 'native_command', 'write_or_unknown', 'live', $2, 'normal_agent', $3,
+			$4, $5, $6, $7, $8, $9, $10, 1, 1, $11, '{}'::jsonb, $12::jsonb,
+			'frozen-fingerprint', 'launched', $13, $13)`
 		attemptQuery = `INSERT INTO runtime_external_effect_attempts (
 			attempt_id, operation_id, attempt_ordinal, adapter, transport, execution_mode, runtime_epoch, generation,
 			execution_owner, lease_expires_at, fence_generation, usage_target_kind, usage_target_id, capability_surface_id,
 			state, evidence, authorized_at, launched_at, updated_at
 		) VALUES ($1::uuid, $2::uuid, 1, 'native_command', 'process', 'live', 1, 1, 'freeze-worker', $3, 1, 'agent_turn', $4::uuid, $5::uuid, 'launched', '{}'::jsonb, $6, $6, $6)`
 	}
-	if _, err := fixture.db.ExecContext(context.Background(), agentQuery, agentID, now); err != nil {
-		t.Fatal(err)
+	seedTestAgentRow(t, context.Background(), fixture.db, fixture.postgres != nil, identity, "active")
+	operationArgs := []any{
+		operationID, authorActivityTestBundleHash, agentID,
+		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+		capabilityPlanFingerprint, lineage, now, now,
 	}
-	operationArgs := []any{operationID, authorActivityTestBundleHash, agentID, agentID, capabilityPlanFingerprint, lineage, now, now}
 	if fixture.postgres != nil {
-		operationArgs = operationArgs[:7]
+		operationArgs = operationArgs[:13]
 	}
 	if _, err := fixture.db.ExecContext(context.Background(), operationQuery, operationArgs...); err != nil {
 		t.Fatal(err)

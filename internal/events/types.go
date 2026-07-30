@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
@@ -415,6 +416,7 @@ func (p *DeliveryPayloadProjection) UnmarshalJSON(raw []byte) error {
 type DeliveryRoute struct {
 	SubscriberType    string                    `json:"subscriber_type"`
 	SubscriberID      string                    `json:"subscriber_id"`
+	AgentIdentity     agentidentity.Identity    `json:"agent_identity,omitempty"`
 	Target            RouteIdentity             `json:"delivery_target_route,omitempty"`
 	Context           DeliveryContext           `json:"delivery_context,omitempty"`
 	PayloadProjection DeliveryPayloadProjection `json:"delivery_payload_projection,omitempty"`
@@ -427,7 +429,7 @@ type DeliveryRouteIdentity struct {
 	value string
 }
 
-const deliveryRouteIdentityPrefix = "delivery-route-v1:sha256:"
+const deliveryRouteIdentityPrefix = "delivery-route-v2:sha256:"
 
 func (i DeliveryRouteIdentity) String() string { return i.value }
 
@@ -461,19 +463,36 @@ func (r DeliveryRoute) Identity() (DeliveryRouteIdentity, error) {
 	if r.SubscriberType == "" || r.SubscriberID == "" {
 		return DeliveryRouteIdentity{}, fmt.Errorf("delivery route subscriber type and id are required")
 	}
+	switch r.SubscriberType {
+	case "agent":
+		if err := r.AgentIdentity.Validate(); err != nil {
+			return DeliveryRouteIdentity{}, fmt.Errorf("delivery route agent identity: %w", err)
+		}
+		if r.AgentIdentity.AgentID() != r.SubscriberID {
+			return DeliveryRouteIdentity{}, fmt.Errorf("delivery route subscriber id does not match agent identity")
+		}
+	case "node":
+		if !r.AgentIdentity.IsZero() {
+			return DeliveryRouteIdentity{}, fmt.Errorf("node delivery route cannot carry agent identity")
+		}
+	default:
+		return DeliveryRouteIdentity{}, fmt.Errorf("delivery route subscriber type %q is unsupported", r.SubscriberType)
+	}
 	projection, err := r.PayloadProjection.Canonical()
 	if err != nil {
 		return DeliveryRouteIdentity{}, fmt.Errorf("delivery route payload projection: %w", err)
 	}
 	canonical, err := json.Marshal(struct {
-		SubscriberType string            `json:"subscriber_type"`
-		SubscriberID   string            `json:"subscriber_id"`
-		Target         RouteIdentity     `json:"target"`
-		Context        DeliveryContext   `json:"context"`
-		Projection     map[string]string `json:"projection"`
+		SubscriberType string                 `json:"subscriber_type"`
+		SubscriberID   string                 `json:"subscriber_id"`
+		AgentIdentity  agentidentity.Identity `json:"agent_identity,omitempty"`
+		Target         RouteIdentity          `json:"target"`
+		Context        DeliveryContext        `json:"context"`
+		Projection     map[string]string      `json:"projection"`
 	}{
 		SubscriberType: r.SubscriberType,
 		SubscriberID:   r.SubscriberID,
+		AgentIdentity:  r.AgentIdentity,
 		Target:         r.Target,
 		Context:        r.Context,
 		Projection:     projection.Fields(),
@@ -1322,6 +1341,7 @@ func (r DeliveryRoute) Normalized() DeliveryRoute {
 	return DeliveryRoute{
 		SubscriberType:    strings.TrimSpace(r.SubscriberType),
 		SubscriberID:      strings.TrimSpace(r.SubscriberID),
+		AgentIdentity:     r.AgentIdentity.Normalize(),
 		Target:            r.Target.Normalized(),
 		Context:           r.Context.Normalized(),
 		PayloadProjection: r.PayloadProjection.Normalized(),

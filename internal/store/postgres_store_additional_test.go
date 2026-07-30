@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -81,7 +82,7 @@ func acquireLiveTestSession(t *testing.T, ctx context.Context, db *sql.DB, agent
 	registry := newTestPostgresStore(t, db)
 	registry.SetSessionLockTTL(30 * time.Second)
 	ctx = runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
-	identity := agentmemory.Identity{RunID: specEntityStateRunID, AgentID: agentID, FlowInstance: flowInstance}
+	identity := testAgentMemoryIdentity(t, specEntityStateRunID, agentID, flowInstance)
 	lease, err := registry.Acquire(ctx, identity, "test-owner")
 	if err != nil {
 		t.Fatalf("Acquire(%+v): %v", identity, err)
@@ -103,11 +104,15 @@ func seedManagerRun(t *testing.T, ctx context.Context, db *sql.DB, runID string)
 }
 
 func specMemoryIdentity(agentID, flowInstance string) agentmemory.Identity {
-	return agentmemory.Identity{RunID: specEntityStateRunID, AgentID: agentID, FlowInstance: flowInstance}
+	return mustTestAgentMemoryIdentity(specEntityStateRunID, agentID, flowInstance)
 }
 
-func terminateSpecAgentViaLifecycle(t *testing.T, ctx context.Context, pg *PostgresStore, agentID string) runtimemanager.AgentLifecycleTransitionResult {
+func terminateSpecAgentViaLifecycle(t *testing.T, ctx context.Context, pg *PostgresStore, identity runtimeagentidentity.Identity) runtimemanager.AgentLifecycleTransitionResult {
 	t.Helper()
+	fields, err := agentIdentityFields(identity)
+	if err != nil {
+		t.Fatalf("agent identity fields: %v", err)
+	}
 	var epoch int64
 	var generation uint64
 	var phase runtimemanager.AgentLifecyclePhase
@@ -115,16 +120,23 @@ func terminateSpecAgentViaLifecycle(t *testing.T, ctx context.Context, pg *Postg
 		SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase
 		FROM agents
 		WHERE agent_id = $1
-	`, agentID).Scan(&epoch, &generation, &phase); err != nil {
-		t.Fatalf("load lifecycle cell for %s: %v", agentID, err)
+		  AND agent_name_owner = $2
+		  AND agent_name_source = $3
+		  AND agent_route_presence = $4
+		  AND flow_scope_key = $5
+		  AND flow_instance_id = $6
+		  AND flow_instance = $7
+	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&epoch, &generation, &phase); err != nil {
+		t.Fatalf("load lifecycle cell for %s: %v", identity.Description(), err)
 	}
 	targetEpoch := epoch
 	if targetEpoch == 0 {
 		targetEpoch = 1
 	}
 	result, err := pg.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
-		OperationID: uuid.NewString(), OperationKind: "teardown", RequestHash: "test-terminate-" + agentID,
-		AgentID: agentID, Trigger: "test", ExpectedEpoch: epoch, ExpectedGeneration: generation, ExpectedPhase: phase,
+		OperationID: uuid.NewString(), OperationKind: "teardown", RequestHash: "test-terminate-" + identity.AgentID(),
+		Identity: identity, AgentID: identity.AgentID(), Trigger: "test", ExpectedEpoch: epoch, ExpectedGeneration: generation, ExpectedPhase: phase,
 		TargetEpoch: targetEpoch, TargetGeneration: generation + 1, TargetPhase: runtimemanager.AgentLifecycleTerminated,
 		ConfigRevision: "test", RunMode: runtimemanager.AgentRunModeStopped,
 		Subordinate: runtimesessions.LifecycleMutationPlan{
@@ -133,7 +145,7 @@ func terminateSpecAgentViaLifecycle(t *testing.T, ctx context.Context, pg *Postg
 		Now: time.Now().UTC(),
 	})
 	if err != nil {
-		t.Fatalf("terminate %s through lifecycle authority: %v", agentID, err)
+		t.Fatalf("terminate %s through lifecycle authority: %v", identity.Description(), err)
 	}
 	return result
 }
@@ -149,7 +161,8 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	seedPostgresStoreEvent(t, ctx, pg, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", time.Now().UTC())
 	seedPostgresEntityStateRows(t, db, ctx, runID, entityID)
-	event := commitPostgresDeliveryFixture(t, ctx, db, eventID, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"})
+	route := testAgentDeliveryRoute(t, "agent-1", "fixture/agent-1")
+	event := commitPostgresDeliveryFixture(t, ctx, db, eventID, route)
 	if err := acknowledgePipelineEventFixture(ctx, pg, eventID); err != nil {
 		t.Fatalf("seed pipeline receipt: %v", err)
 	}
@@ -165,7 +178,7 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 		t.Fatalf("active-delivery run status = %q, %v, want running", activeStatus, err)
 	}
 
-	claimed, err := pg.ClaimAgentDelivery(ctx, event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"})
+	claimed, err := pg.ClaimAgentDelivery(ctx, event, route)
 	if err != nil {
 		t.Fatalf("claim delivery: %v", err)
 	}
@@ -410,36 +423,48 @@ func TestPostgresStore_AgentSessionsPartialUniquenessAllowsTerminatedHistoryButR
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	seedSpecMemoryRun(t, ctx, db)
+	fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "a1", "global"))
 
 	sessionA := uuid.NewString()
 	sessionB := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source, status,
 			termination_reason, terminated_at, created_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'a1', 'global', TRUE, 'authored', 'terminated',
-			'failed', now(), now(), now()
+			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9,
+			TRUE, 'authored', 'terminated', 'failed', now(), now(), now()
 		)
-	`, sessionA, specEntityStateRunID); err != nil {
+	`, sessionA, specEntityStateRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
 		t.Fatalf("insert terminated row: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status, created_at, updated_at
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source, status, created_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'a1', 'global', TRUE, 'authored', 'active', now(), now()
+			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9,
+			TRUE, 'authored', 'active', now(), now()
 		)
-	`, sessionB, specEntityStateRunID); err != nil {
+	`, sessionB, specEntityStateRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
 		t.Fatalf("insert active row after terminated history: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status, created_at, updated_at
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source, status, created_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'a1', 'global', TRUE, 'authored', 'suspended', now(), now()
+			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9,
+			TRUE, 'authored', 'suspended', now(), now()
 		)
-	`, uuid.NewString(), specEntityStateRunID); err == nil {
+	`, uuid.NewString(), specEntityStateRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err == nil {
 		t.Fatal("expected second non-terminated owner insert to fail")
 	}
 }
@@ -451,19 +476,24 @@ func TestPostgresRegistry_AcquireFailsClosedOnSuspendedResumableOwner(t *testing
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	seedSpecMemoryRun(t, ctx, db)
+	fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "a1", "global"))
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status, created_at, updated_at
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source, status, created_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'a1', 'global', TRUE, 'authored', 'suspended', now(), now()
+			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9,
+			TRUE, 'authored', 'suspended', now(), now()
 		)
-	`, uuid.NewString(), specEntityStateRunID); err != nil {
+	`, uuid.NewString(), specEntityStateRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
 		t.Fatalf("insert suspended session: %v", err)
 	}
 
 	ctx = runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
-	identity := agentmemory.Identity{RunID: specEntityStateRunID, AgentID: "a1", FlowInstance: "global"}
+	identity := testAgentMemoryIdentity(t, specEntityStateRunID, "a1", "global")
 	if _, err := pg.Acquire(ctx, identity, "worker-1"); err != runtimesessions.ErrSessionSuspended {
 		t.Fatalf("Acquire error = %v, want ErrSessionSuspended", err)
 	}
@@ -522,27 +552,35 @@ func TestPostgresStore_AgentSessionSuccessorInvariantsRejectInvalidCanonicalWrit
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	seedSpecMemoryRun(t, ctx, db)
+	fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "a1", "global"))
 
 	oldID := uuid.NewString()
 	goodSuccessorID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source, status,
 			termination_reason, terminated_at, created_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'a1', 'global', TRUE, 'authored', 'terminated',
-			'failed', now(), now(), now()
+			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9,
+			TRUE, 'authored', 'terminated', 'failed', now(), now(), now()
 		)
-	`, oldID, specEntityStateRunID); err != nil {
+	`, oldID, specEntityStateRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
 		t.Fatalf("insert terminated session: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status, created_at, updated_at
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source, status, created_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'a1', 'global', TRUE, 'authored', 'active', now(), now()
+			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9,
+			TRUE, 'authored', 'active', now(), now()
 		)
-	`, goodSuccessorID, specEntityStateRunID); err != nil {
+	`, goodSuccessorID, specEntityStateRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
 		t.Fatalf("insert active successor candidate: %v", err)
 	}
 
@@ -613,12 +651,14 @@ func seedSpecAgent(t *testing.T, ctx context.Context, pg *PostgresStore, agentID
 		ID:            agentID,
 		Role:          agentID,
 		FlowID:        "global",
+		FlowPath:      "global",
 		Type:          "stub",
 		Model:         "regular",
 		ExecutionMode: "live",
 		EntityID:      strings.TrimSpace(entityID),
 		Subscriptions: subscriptions,
 		Config:        []byte(`{"system_prompt":"x"}`),
+		Identity:      specMemoryIdentity(agentID, "global").Agent,
 	}
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config:    cfg,
@@ -1209,6 +1249,7 @@ func TestSchedules_UpsertLoadCancelAndMarkFired(t *testing.T) {
 		At:        time.Now().Add(1 * time.Hour).UTC(),
 		Payload:   []byte(`{"x":1}`),
 	}
+	once = testAgentOwnedSchedule(t, once)
 	if err := pg.UpsertSchedule(ctx, once); err != nil {
 		t.Fatalf("upsert once: %v", err)
 	}
@@ -1220,7 +1261,7 @@ func TestSchedules_UpsertLoadCancelAndMarkFired(t *testing.T) {
 		t.Fatalf("expected active schedule")
 	}
 
-	if err := pg.MarkScheduleFired(ctx, once); err != nil {
+	if err := pg.MarkScheduleFiredExact(ctx, once); err != nil {
 		t.Fatalf("mark fired: %v", err)
 	}
 	active, err = pg.LoadActiveSchedules(ctx)
@@ -1240,14 +1281,15 @@ func TestSchedules_UpsertLoadCancelAndMarkFired(t *testing.T) {
 		Cron:      "0 9 * * *",
 		Payload:   nil,
 	}
+	recurring = testAgentOwnedSchedule(t, recurring)
 	if err := pg.UpsertSchedule(ctx, recurring); err != nil {
 		t.Fatalf("upsert recurring: %v", err)
 	}
-	if err := pg.MarkScheduleFired(ctx, recurring); err != nil {
+	if err := pg.MarkScheduleFiredExact(ctx, recurring); err != nil {
 		t.Fatalf("mark recurring fired: %v", err)
 	}
 
-	if err := pg.CancelSchedule(ctx, "a1", "system.started"); err != nil {
+	if err := pg.CancelScheduleExact(ctx, recurring); err != nil {
 		t.Fatalf("cancel schedule: %v", err)
 	}
 }
@@ -1269,6 +1311,7 @@ func TestSchedules_RunScopedWritesUsePipelineTransaction(t *testing.T) {
 		RunID: runID, AgentID: "scheduler", EventType: "timer.pipeline", TaskID: "pipeline-timer",
 		Mode: "once", At: time.Now().UTC().Add(time.Hour), Payload: []byte(`{}`),
 	}
+	schedule = testAgentOwnedSchedule(t, schedule)
 	if err := pg.UpsertSchedule(txctx, schedule); err != nil {
 		t.Fatalf("UpsertSchedule in pipeline transaction: %v", err)
 	}
@@ -1318,6 +1361,8 @@ func TestSchedules_ExactIdentityUsesTaskID(t *testing.T) {
 		TaskID:    "timer-b",
 		Payload:   []byte(`{"timer_id":"timer-b"}`),
 	}
+	first = testAgentOwnedSchedule(t, first)
+	second = testAgentOwnedSchedule(t, second)
 	if err := pg.UpsertSchedule(ctx, first); err != nil {
 		t.Fatalf("upsert first exact schedule: %v", err)
 	}
@@ -1393,6 +1438,8 @@ func TestSchedules_ExactIdentityUsesFlowInstance(t *testing.T) {
 		TaskID:       "timer-a",
 		Payload:      []byte(`{"timer_id":"timer-a"}`),
 	}
+	first = testAgentOwnedSchedule(t, first)
+	second = testAgentOwnedSchedule(t, second)
 	if err := pg.UpsertSchedule(ctx, first); err != nil {
 		t.Fatalf("upsert first exact schedule: %v", err)
 	}
@@ -1485,6 +1532,8 @@ func TestSchedules_ExactIdentityUsesRunID(t *testing.T) {
 	second := base
 	second.RunID = runB
 	second.At = time.Now().Add(60 * time.Minute).UTC()
+	first = testAgentOwnedSchedule(t, first)
+	second = testAgentOwnedSchedule(t, second)
 
 	if err := pg.UpsertSchedule(ctx, first); err != nil {
 		t.Fatalf("UpsertSchedule(first): %v", err)
@@ -1559,6 +1608,7 @@ func TestSchedules_LoadActiveSchedulesPreservesFlowInstance(t *testing.T) {
 		TaskID:       "timer-a",
 		Payload:      []byte(`{"timer_id":"timer-a"}`),
 	}
+	sc = testAgentOwnedSchedule(t, sc)
 	if err := pg.UpsertSchedule(ctx, sc); err != nil {
 		t.Fatalf("upsert schedule: %v", err)
 	}
@@ -1586,12 +1636,12 @@ func TestSchedules_LoadActiveSchedulesIgnoresWorkflowSidecarRows(t *testing.T) {
 		INSERT INTO timers (
 			run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
 			fire_at, recurring, recurrence_cron, recurrence_interval,
-			owner_node, owner_agent, task_type, status
+			owner_node, owner_agent, owner_kind, task_type, status
 		)
 		VALUES (
 			$1::uuid, 'workflow-sidecar', $2::uuid, 'review/inst-1', 'timer.workflow', '{}'::jsonb,
 			$3, false, NULL, NULL,
-			'workflow_instance_store', NULL, 'timer', 'active'
+			'workflow_instance_store', NULL, 'system', 'timer', 'active'
 		)
 	`, runID, entityID, time.Now().Add(30*time.Minute).UTC()); err != nil {
 		t.Fatalf("seed workflow sidecar timer: %v", err)
@@ -1616,12 +1666,12 @@ func TestSchedules_LoadActiveSchedulesDoesNotReconstructTaskIDFromTimerName(t *t
 		INSERT INTO timers (
 			timer_name, entity_id, flow_instance, fire_event, fire_payload,
 			fire_at, recurring, recurrence_cron, recurrence_interval,
-			owner_node, owner_agent, task_type, status
+			owner_node, owner_agent, owner_kind, task_type, status
 		)
 		VALUES (
 			$1, $2::uuid, $3, $4, $5::jsonb,
 			$6, false, NULL, NULL,
-			NULL, $7, 'timer', 'active'
+			NULL, $7, 'system', 'timer', 'active'
 		)
 	`, "timer-a", entityID, "review/inst-1", "timer.validation_timeout", `{"timer_id":"timer-a"}`, time.Now().Add(30*time.Minute).UTC(), "validation-orchestrator"); err != nil {
 		t.Fatalf("seed exact timer row: %v", err)
@@ -1669,6 +1719,8 @@ func TestSchedules_MarkScheduleFiredExact_PreservesRecurringReplayAndFiresOnceSc
 		TaskID:       "timer-once",
 		Payload:      []byte(`{"timer_id":"timer-once"}`),
 	}
+	recurring = testAgentOwnedSchedule(t, recurring)
+	once = testAgentOwnedSchedule(t, once)
 	if err := pg.UpsertSchedule(ctx, recurring); err != nil {
 		t.Fatalf("upsert recurring schedule: %v", err)
 	}
@@ -1747,6 +1799,7 @@ func TestSchedules_ClaimSchedule_IsExclusiveAcrossStores(t *testing.T) {
 		TaskID:       "timer-recurring",
 		Payload:      []byte(`{"timer_id":"timer-recurring"}`),
 	}
+	sc = testAgentOwnedSchedule(t, sc)
 	if err := pg1.UpsertSchedule(ctx, sc); err != nil {
 		t.Fatalf("UpsertSchedule: %v", err)
 	}
@@ -1795,6 +1848,7 @@ func TestSchedules_ClaimedOwnerIsOnlyRestoredTimerThatFires(t *testing.T) {
 		TaskID:       "timer-once",
 		Payload:      []byte(`{"timer_id":"timer-once"}`),
 	}
+	sc = testAgentOwnedSchedule(t, sc)
 	if err := pg1.UpsertSchedule(ctx, sc); err != nil {
 		t.Fatalf("UpsertSchedule: %v", err)
 	}
@@ -1877,6 +1931,7 @@ func TestSchedules_CancelExactTerminalAllowsSubsequentReclaim(t *testing.T) {
 		TaskID:       "timer-cancel-reclaim",
 		Payload:      []byte(`{"timer_id":"timer-cancel-reclaim"}`),
 	}
+	sc = testAgentOwnedSchedule(t, sc)
 	if err := pgOwner.UpsertSchedule(ctx, sc); err != nil {
 		t.Fatalf("UpsertSchedule: %v", err)
 	}
@@ -1928,6 +1983,7 @@ func TestSchedules_CompleteScheduleFireExactReleasesClaimForRecreatedOnceTimer(t
 		TaskID:       "timer-fire-reclaim",
 		Payload:      []byte(`{"timer_id":"timer-fire-reclaim"}`),
 	}
+	sc = testAgentOwnedSchedule(t, sc)
 	if err := pgOwner.UpsertSchedule(ctx, sc); err != nil {
 		t.Fatalf("UpsertSchedule: %v", err)
 	}
@@ -2006,7 +2062,14 @@ func TestManagerStore_LoadRoutingRules_AndDeactivateValidation(t *testing.T) {
 		t.Fatalf("expected lifecycle transition fields required")
 	}
 
-	if err := pg.CancelSchedule(ctx, "sub", "timer.recurring_digest"); err != nil {
+	if err := pg.CancelScheduleExact(ctx, runtimepipeline.Schedule{
+		AgentID:       "sub",
+		OwnerKind:     runtimepipeline.ScheduleOwnerAgent,
+		AgentIdentity: testAgentIdentity(t, "sub", ""),
+		EventType:     "timer.recurring_digest",
+		Mode:          "cron",
+		Cron:          "0 9 * * *",
+	}); err != nil {
 		t.Fatalf("CancelSchedule: %v", err)
 	}
 	_ = time.Second
@@ -2130,7 +2193,7 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 	}
 
 	if err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
-		AgentID: "a1", RunID: identity.RunID, FlowInstance: identity.FlowInstance,
+		AgentID: "a1", Identity: identity, RunID: identity.RunID, FlowInstance: identity.FlowInstance(),
 		Memory: agentmemory.Authored(true), SessionID: uuid.NewString(),
 	}); err == nil {
 		t.Fatal("expected missing session row error")
@@ -2138,7 +2201,8 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
 		RunID:          identity.RunID,
-		FlowInstance:   identity.FlowInstance,
+		FlowInstance:   identity.FlowInstance(),
+		Identity:       identity,
 		Memory:         agentmemory.Authored(true),
 		SessionID:      sessionID,
 		TaskID:         uuid.NewString(),
@@ -2173,14 +2237,15 @@ func TestManagerStore_ConversationPersistenceUsesExactFlowInstanceIdentity(t *te
 	baseCtx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
 	resetAgentSessionsSpecTable(t, baseCtx, pg)
 	entityID := uuid.NewString()
-	seedSpecAgent(t, baseCtx, pg, "entity-agent", entityID, "")
+	identity := specMemoryIdentity("entity-agent", "review/inst-1")
+	seedTestAgentRow(t, baseCtx, db, true, identity.Agent, "active")
 
 	ctx := runtimeactors.WithActor(baseCtx, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "entity-agent",
+		Identity: identity.Agent,
 		FlowPath: "review/inst-1",
 		EntityID: entityID,
 	})
-	identity := specMemoryIdentity("entity-agent", "review/inst-1")
-	sessionID := acquireLiveTestSession(t, ctx, db, identity.AgentID, identity.FlowInstance)
+	sessionID := acquireLiveTestSession(t, ctx, db, identity.AgentID(), identity.FlowInstance())
 
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
 		SessionID: sessionID,
@@ -2207,7 +2272,7 @@ func TestManagerStore_ConversationPersistenceUsesExactFlowInstanceIdentity(t *te
 		SELECT COALESCE(flow_instance, '')
 		FROM agent_sessions
 		WHERE run_id = $1::uuid AND agent_id = 'entity-agent' AND flow_instance = $2
-	`, identity.RunID, identity.FlowInstance).Scan(&flowInstance); err != nil {
+	`, identity.RunID, identity.FlowInstance()).Scan(&flowInstance); err != nil {
 		t.Fatalf("load exact memory session row: %v", err)
 	}
 	if flowInstance != "review/inst-1" {
@@ -2225,7 +2290,7 @@ func TestManagerStore_AppendAgentTurn_PersistsObservedToolCalls(t *testing.T) {
 	identity := specMemoryIdentity("a1", "global")
 
 	if err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
-		AgentID: "a1", RunID: identity.RunID, FlowInstance: identity.FlowInstance,
+		AgentID: "a1", Identity: identity, RunID: identity.RunID, FlowInstance: identity.FlowInstance(),
 		Memory: agentmemory.Authored(true), SessionID: sessionID,
 		ToolCalls: []runtimellm.ToolCall{
 			{Name: "query_entities", Arguments: map[string]any{"entity_type": "company"}},
@@ -2674,7 +2739,8 @@ func TestManagerStore_AppendAgentTurn_LeavesLiveSessionRuntimeStateForLiveOwners
 	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
 		RunID:          identity.RunID,
-		FlowInstance:   identity.FlowInstance,
+		FlowInstance:   identity.FlowInstance(),
+		Identity:       identity,
 		Memory:         agentmemory.Authored(true),
 		SessionID:      sessionID,
 		RequestPayload: []byte(`{"kind":"session"}`),
@@ -2734,7 +2800,8 @@ func TestManagerStore_AppendAgentTurn_PreservesLiveSessionRetryLineageRuntimeSta
 	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
 		RunID:          identity.RunID,
-		FlowInstance:   identity.FlowInstance,
+		FlowInstance:   identity.FlowInstance(),
+		Identity:       identity,
 		Memory:         agentmemory.Authored(true),
 		SessionID:      sessionID,
 		RequestPayload: []byte(`{"kind":"session"}`),
@@ -2879,7 +2946,8 @@ func TestManagerStore_MemoryConversationDoesNotPersistStatelessAuditRow(t *testi
 	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
 		RunID:          identity.RunID,
-		FlowInstance:   identity.FlowInstance,
+		FlowInstance:   identity.FlowInstance(),
+		Identity:       identity,
 		Memory:         agentmemory.Authored(true),
 		SessionID:      sessionID,
 		RequestPayload: []byte(`{"kind":"session"}`),
@@ -3151,6 +3219,7 @@ func TestManagerStore_UpsertAgent_MergesSubscriptions(t *testing.T) {
 
 	rec := runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "a1",
+			Identity:      testAgentIdentity(t, "a1", ""),
 			Type:          "sonnet",
 			Role:          "a1",
 			FlowID:        "global",
@@ -3194,6 +3263,7 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 	entityID := uuid.NewString()
 	rec := runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-canonical-1",
+			Identity:        testAgentIdentity(t, "agent-canonical-1", "review/inst-1"),
 			Type:            "review-worker",
 			Role:            "reviewer",
 			FlowID:          "review",
@@ -3307,6 +3377,7 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.T) {
 	projection, err := projectPersistedAgentConfig(runtimeactors.AgentConfig{
 		ID:            "agent-default-backend",
+		Identity:      testAgentIdentity(t, "agent-default-backend", ""),
 		Role:          "reviewer",
 		Model:         "regular",
 		ExecutionMode: runtimeeffects.ExecutionModeLive,
@@ -3321,6 +3392,7 @@ func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.
 
 	projection, err = projectPersistedAgentConfig(runtimeactors.AgentConfig{
 		ID:            "agent-openai-compatible-backend",
+		Identity:      testAgentIdentity(t, "agent-openai-compatible-backend", ""),
 		Role:          "reviewer",
 		Model:         "regular",
 		LLMBackend:    "openai_compatible",
@@ -3336,6 +3408,7 @@ func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.
 
 	projection, err = projectPersistedAgentConfig(runtimeactors.AgentConfig{
 		ID:            "agent-openai-responses-backend",
+		Identity:      testAgentIdentity(t, "agent-openai-responses-backend", ""),
 		Role:          "reviewer",
 		Model:         "regular",
 		LLMBackend:    "openai_responses",
@@ -3351,6 +3424,7 @@ func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.
 
 	_, err = projectPersistedAgentConfig(runtimeactors.AgentConfig{
 		ID:            "agent-bad-backend",
+		Identity:      testAgentIdentity(t, "agent-bad-backend", ""),
 		Role:          "reviewer",
 		Model:         "regular",
 		LLMBackend:    "openai",
@@ -3366,22 +3440,31 @@ func TestManagerStore_LoadAgentsSpec_FailsClosedWhenOpaqueConfigContainsRuntimeK
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	identityFields, err := agentIdentityFields(testAgentIdentity(t, "agent-invalid-config", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (
-			agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source,
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance,
+			role, model, llm_backend, memory_enabled, memory_source,
 			parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
 			runtime_descriptor, status
 		) VALUES (
-			$1, NULL, 'reviewer', 'regular', 'anthropic', FALSE, 'platform_default',
-			NULL, NULL, $2::jsonb, '["review.ready"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
-			$3::jsonb, 'active'
+			$1, $2, $3, $4, $5, $6, $7,
+			'reviewer', 'regular', 'anthropic', FALSE, 'platform_default',
+			NULL, NULL, $8::jsonb, '["review.ready"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
+			$9::jsonb, 'active'
 		)
-	`, "agent-invalid-config", `{"system_prompt":"x","subscriptions":["wrong"]}`, `{"type":"review-worker"}`); err != nil {
+	`, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence,
+		identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath,
+		`{"system_prompt":"x","subscriptions":["wrong"]}`, `{"type":"review-worker"}`); err != nil {
 		t.Fatalf("seed agent row: %v", err)
 	}
 
-	_, err := pg.loadAgentsSpec(ctx)
+	_, err = pg.loadAgentsSpec(ctx)
 	if err == nil || !strings.Contains(err.Error(), "config contains runtime-owned keys: subscriptions") {
 		t.Fatalf("loadAgentsSpec error = %v, want runtime-owned config key failure", err)
 	}
@@ -3391,22 +3474,31 @@ func TestManagerStore_LoadAgents_FailsClosedWhenCanonicalModelMissing(t *testing
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	identityFields, err := agentIdentityFields(testAgentIdentity(t, "agent-missing-type", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (
-			agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source,
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance,
+			role, model, llm_backend, memory_enabled, memory_source,
 			parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
 			runtime_descriptor, status
 		) VALUES (
-			$1, NULL, 'reviewer', '', 'anthropic', FALSE, 'platform_default',
+			$1, $2, $3, $4, $5, $6, $7,
+			'reviewer', '', 'anthropic', FALSE, 'platform_default',
 			NULL, NULL, '{}'::jsonb, '["review.ready"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
-			$2::jsonb, 'active'
+			$8::jsonb, 'active'
 		)
-	`, "agent-missing-type", `{"type":"review-worker"}`); err != nil {
+	`, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence,
+		identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath,
+		`{"type":"review-worker"}`); err != nil {
 		t.Fatalf("seed agent row: %v", err)
 	}
 
-	_, err := pg.LoadAgents(ctx)
+	_, err = pg.LoadAgents(ctx)
 	if err == nil || !strings.Contains(err.Error(), "missing model") {
 		t.Fatalf("LoadAgents error = %v, want missing model failure", err)
 	}
@@ -3421,8 +3513,10 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 
 	entityID := uuid.NewString()
 	seedSpecEntityState(t, ctx, db, entityID, "testco", "testco", "TestCo", "operating")
+	a1Identity := testAgentIdentity(t, "a1", "")
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "a1",
+			Identity: a1Identity,
 			Role:     "role",
 			FlowID:   "global",
 			Type:     "sonnet",
@@ -3438,9 +3532,11 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
-	terminateSpecAgentViaLifecycle(t, ctx, pg, "a1")
+	terminateSpecAgentViaLifecycle(t, ctx, pg, a1Identity)
+	ephemeralIdentity := testAgentIdentity(t, "ephemeral-shard-1", "")
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "ephemeral-shard-1",
+			Identity: ephemeralIdentity,
 			Role:     "worker",
 			FlowID:   "worker",
 			Type:     "sonnet",
@@ -3470,8 +3566,10 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	}
 
 	ceoID := "operator-" + entityID
+	ceoIdentity := testAgentIdentity(t, ceoID, "operating/global")
 	_ = pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: ceoID,
+			Identity: ceoIdentity,
 			Role:     "operator",
 			FlowID:   "operating",
 			Type:     "sonnet",
@@ -3517,11 +3615,20 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	if err := commitSemanticEventFixtureWithAgents(ctx, pg, evt, []string{ceoID}); err != nil {
 		t.Fatalf("AppendEvent with exact delivery: %v", err)
 	}
-	pending, err := pg.ListPendingAgentDeliveryDetails(ctx, PendingAgentDeliveryListOptions{AgentID: ceoID, Since: time.Now().Add(-24 * time.Hour), Limit: 10})
+	deliveryIdentity := testAgentIdentity(t, ceoID, "fixture/"+ceoID)
+	pending, err := pg.ListPendingAgentDeliveryDetails(ctx, PendingAgentDeliveryListOptions{
+		AgentIdentity: deliveryIdentity,
+		Since:         time.Now().Add(-24 * time.Hour),
+		Limit:         10,
+	})
 	if err != nil || len(pending.PendingDeliveries) != 1 || pending.PendingDeliveries[0].EventID != evt.ID() {
 		t.Fatalf("ListPendingAgentDeliveryDetails err=%v page=%#v", err, pending)
 	}
-	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: ceoID}
+	route := events.DeliveryRoute{
+		SubscriberType: string(runtimedelivery.SubscriberAgent),
+		SubscriberID:   ceoID,
+		AgentIdentity:  deliveryIdentity,
+	}
 	claimed, err := pg.ClaimAgentDelivery(ctx, evt, route)
 	if err != nil {
 		t.Fatalf("ClaimAgentDelivery: %v", err)
@@ -3536,13 +3643,14 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	}
 
 	identity := specMemoryIdentity(ceoID, "operating/global")
-	sessionID := acquireLiveTestSession(t, ctx, db, identity.AgentID, identity.FlowInstance)
+	sessionID := acquireLiveTestSession(t, ctx, db, identity.AgentID(), identity.FlowInstance())
 	if err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
-		AgentID:        identity.AgentID,
+		AgentID:        identity.AgentID(),
+		Identity:       identity,
 		Memory:         agentmemory.Authored(true),
 		SessionID:      sessionID,
 		RunID:          identity.RunID,
-		FlowInstance:   identity.FlowInstance,
+		FlowInstance:   identity.FlowInstance(),
 		TaskID:         "",
 		RequestPayload: []byte(`{"in":1}`),
 		ResponseRaw:    []byte(`{"out":1}`),
@@ -3555,7 +3663,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
 		SessionID: sessionID,
-		AgentID:   identity.AgentID,
+		AgentID:   identity.AgentID(),
 		Identity:  identity,
 		Memory:    agentmemory.Authored(true),
 		TaskID:    "",
@@ -3571,11 +3679,14 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	}
 
 	sc := runtimepipeline.Schedule{
-		AgentID:   ceoID,
-		EventType: "timer.test",
-		Mode:      "cron",
-		Cron:      "0 9 * * *",
-		Payload:   []byte(`{"x":1}`),
+		AgentID:       ceoID,
+		OwnerKind:     runtimepipeline.ScheduleOwnerAgent,
+		AgentIdentity: identity.Agent,
+		FlowInstance:  identity.FlowInstance(),
+		EventType:     "timer.test",
+		Mode:          "cron",
+		Cron:          "0 9 * * *",
+		Payload:       []byte(`{"x":1}`),
 	}
 	if err := pg.UpsertSchedule(ctx, sc); err != nil {
 		t.Fatalf("UpsertSchedule: %v", err)
@@ -3583,10 +3694,10 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	if got, err := pg.LoadActiveSchedules(ctx); err != nil || len(got) == 0 {
 		t.Fatalf("LoadActiveSchedules err=%v len=%d", err, len(got))
 	}
-	if err := pg.MarkScheduleFired(ctx, sc); err != nil {
+	if err := pg.MarkScheduleFiredExact(ctx, sc); err != nil {
 		t.Fatalf("MarkScheduleFired: %v", err)
 	}
-	if err := pg.CancelSchedule(ctx, ceoID, "timer.test"); err != nil {
+	if err := pg.CancelScheduleExact(ctx, sc); err != nil {
 		t.Fatalf("CancelSchedule: %v", err)
 	}
 }
@@ -3595,22 +3706,30 @@ func TestPostgresStore_LoadAgents_FailsClosedOnLegacyRuntimeMetadataInConfig(t *
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	identityFields, err := agentIdentityFields(testAgentIdentity(t, "legacy-session-agent", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (
-			agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source,
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance,
+			role, model, llm_backend, memory_enabled, memory_source,
 			config, runtime_descriptor, status, created_at
 		) VALUES (
-			'legacy-session-agent', NULL, 'worker', 'regular', 'anthropic', FALSE, 'platform_default',
+			$1, $2, $3, $4, $5, $6, $7,
+			'worker', 'regular', 'anthropic', FALSE, 'platform_default',
 			'{"type":"sonnet","mode":"worker","session_scope":"global","system_prompt":"x"}'::jsonb,
 			'{"type":"review-worker"}'::jsonb,
 			'active',
 			now()
 		)
-	`); err != nil {
+	`, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence,
+		identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed legacy agent row: %v", err)
 	}
-	_, err := pg.LoadAgents(ctx)
+	_, err = pg.LoadAgents(ctx)
 	if err == nil || !strings.Contains(err.Error(), "invalid opaque config: config contains runtime-owned keys: mode, session_scope, type") {
 		t.Fatalf("LoadAgents error = %v, want fail-closed legacy runtime config error", err)
 	}
@@ -3636,6 +3755,7 @@ func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.
 
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-cleanup-1",
+			Identity: testAgentIdentity(t, "agent-cleanup-1", "global"),
 			Role:     "worker",
 			FlowID:   "worker",
 			Type:     "sonnet",
@@ -3656,8 +3776,8 @@ func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.
 
 	identity := specMemoryIdentity("agent-cleanup-1", "global")
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
-		SessionID: acquireLiveTestSession(t, ctx, db, identity.AgentID, identity.FlowInstance),
-		AgentID:   identity.AgentID,
+		SessionID: acquireLiveTestSession(t, ctx, db, identity.AgentID(), identity.FlowInstance()),
+		AgentID:   identity.AgentID(),
 		Identity:  identity,
 		Memory:    agentmemory.Authored(true),
 		Messages:  []llm.Message{{Role: "user", Content: "hello"}},
@@ -3669,9 +3789,10 @@ func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.
 	}
 	if err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
 		SessionID:      uuid.NewString(),
-		AgentID:        identity.AgentID,
+		AgentID:        identity.AgentID(),
+		Identity:       identity,
 		RunID:          identity.RunID,
-		FlowInstance:   identity.FlowInstance,
+		FlowInstance:   identity.FlowInstance(),
 		Memory:         agentmemory.PlatformDefault(),
 		ResponseRaw:    []byte(`{"ok":true}`),
 		RequestPayload: []byte(`{"kind":"stateless"}`),
@@ -3679,7 +3800,7 @@ func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.
 	}); err != nil {
 		t.Fatalf("seed stateless audit: %v", err)
 	}
-	terminateSpecAgentViaLifecycle(t, ctx, pg, "agent-cleanup-1")
+	terminateSpecAgentViaLifecycle(t, ctx, pg, testAgentIdentity(t, "agent-cleanup-1", "global"))
 
 	var (
 		agentStatus      string

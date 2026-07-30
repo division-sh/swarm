@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -20,6 +21,7 @@ type Subscriber struct {
 	MatchPattern   string
 	RouteSource    string
 	LocalizedEvent string
+	AgentIdentity  agentidentity.Identity
 }
 
 type RouteTable struct {
@@ -60,9 +62,10 @@ type routeFlowTemplate struct {
 }
 
 type routeSubscriberTemplate struct {
-	IDTemplate  string
-	Type        string
-	RawPatterns []string
+	IDTemplate     string
+	Type           string
+	RawPatterns    []string
+	AgentNameOwner string
 }
 
 type routeResolvedPattern struct {
@@ -112,24 +115,29 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 
 	for _, scope := range semanticview.ProjectScopes(source) {
 		localEvents := routeProjectLocalEventSet(scope)
+		agentFlowID := strings.TrimSpace(scope.OwningFlowID)
+		agentPath := ""
+		if agentFlowID != "" {
+			agentPath = routeFlowPath(source, agentFlowID)
+		}
 		owningFlowID := ""
 		basePath := ""
 		var inputEvents []string
 		if routeProjectScopeRequiresPinAliases(scope) {
-			owningFlowID = strings.TrimSpace(scope.OwningFlowID)
+			owningFlowID = agentFlowID
+			basePath = agentPath
+			inputEvents = source.FlowInputEvents(owningFlowID)
 		}
 		if importedFlowID := routeProjectScopeImportedFlowID(source, scope); importedFlowID != "" && routeProjectScopeOwnedByTemplateFlow(source, importedFlowID) {
 			continue
-		}
-		if owningFlowID != "" {
-			inputEvents = source.FlowInputEvents(owningFlowID)
-			basePath = routeFlowPath(source, owningFlowID)
 		}
 		if routeProjectScopeOwnedByTemplateFlow(source, owningFlowID) {
 			continue
 		}
 		rt.addAuthoredEventPathsLocked(basePath, localEvents)
-		rt.addAgentPatternsLocked(source, scope.Key, owningFlowID, inputEvents, basePath, localEvents, scope.Agents)
+		if err := rt.addAgentPatternsLocked(source, scope.Key, owningFlowID, agentFlowID, inputEvents, basePath, agentPath, localEvents, scope.Agents); err != nil {
+			return nil, err
+		}
 		rt.addNodePatternsLocked(source, scope.Key, owningFlowID, inputEvents, basePath, localEvents, scope.Nodes)
 	}
 
@@ -137,12 +145,16 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 		flowPath := routeFlowPath(source, scope.ID)
 		localEvents := routeFlowLocalEventSet(source, scope)
 		if strings.EqualFold(scope.Mode, "template") || routeFlowStanding(source, scope.ID) {
+			subscribers, err := routeSubscriberTemplates(source, scope)
+			if err != nil {
+				return nil, err
+			}
 			rt.templates[flowPath] = routeFlowTemplate{
 				PackageKey:  scope.PackageKey,
 				FlowID:      scope.ID,
 				InputEvents: append([]string{}, scope.InputEvents...),
 				LocalEvents: cloneStringSet(localEvents),
-				Subscribers: routeSubscriberTemplates(source, scope),
+				Subscribers: subscribers,
 			}
 			continue
 		}
@@ -150,7 +162,9 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 			rt.authoredScopes[flowPath] = struct{}{}
 		}
 		rt.addAuthoredEventPathsLocked(flowPath, localEvents)
-		rt.addAgentPatternsLocked(source, scope.PackageKey, scope.ID, scope.InputEvents, flowPath, localEvents, scope.Agents)
+		if err := rt.addAgentPatternsLocked(source, scope.PackageKey, scope.ID, scope.ID, scope.InputEvents, flowPath, flowPath, localEvents, scope.Agents); err != nil {
+			return nil, err
+		}
 		rt.addNodePatternsLocked(source, scope.PackageKey, scope.ID, scope.InputEvents, flowPath, localEvents, scope.Nodes)
 	}
 
@@ -269,6 +283,20 @@ func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 				ID:   routeRenderTemplate(subscriberTemplate.IDTemplate, vars),
 				Type: subscriberTemplate.Type,
 				Path: instancePath,
+			}
+			if subscriber.Type == "agent" {
+				name, err := agentidentity.DeclaredName(subscriber.ID, subscriberTemplate.AgentNameOwner)
+				if err != nil {
+					return fmt.Errorf("materialize route subscriber agent identity: %w", err)
+				}
+				agentRoute, err := identity.AgentIdentityRoute()
+				if err != nil {
+					return fmt.Errorf("materialize route subscriber flow identity: %w", err)
+				}
+				subscriber.AgentIdentity, err = agentidentity.New(name, agentRoute)
+				if err != nil {
+					return fmt.Errorf("materialize route subscriber concrete identity: %w", err)
+				}
 			}
 			for _, rawPattern := range subscriberTemplate.RawPatterns {
 				for _, resolved := range routeResolveSubscriberPatterns(rt.source, templateDef.PackageKey, templateDef.FlowID, templateDef.InputEvents, instancePath, templateDef.LocalEvents, rawPattern) {
@@ -699,19 +727,45 @@ func routeCanonicalPathsOverlap(left, right string) bool {
 	return left == right || strings.HasPrefix(left, right+"/") || strings.HasPrefix(right, left+"/")
 }
 
-func (rt *RouteTable) addAgentPatternsLocked(source semanticview.Source, packageKey, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, agents map[string]runtimecontracts.AgentRegistryEntry) {
+func (rt *RouteTable) addAgentPatternsLocked(
+	source semanticview.Source,
+	packageKey, routingFlowID, agentFlowID string,
+	inputEvents []string,
+	basePath, agentPath string,
+	localEvents map[string]struct{},
+	agents map[string]runtimecontracts.AgentRegistryEntry,
+) error {
 	for _, key := range sortedStringKeys(agents) {
 		entry := agents[key]
 		subscriber := Subscriber{
 			ID:   strings.TrimSpace(entry.ID),
 			Type: "agent",
-			Path: strings.Trim(strings.TrimSpace(basePath), "/"),
+			Path: strings.Trim(strings.TrimSpace(agentPath), "/"),
+		}
+		owner, ok := semanticview.AgentDeclarationOwner(source, agentFlowID, key)
+		if !ok {
+			return fmt.Errorf("route subscriber agent %s missing scoped declaration owner", key)
+		}
+		name, err := agentidentity.DeclaredName(subscriber.ID, owner)
+		if err != nil {
+			return fmt.Errorf("route subscriber agent %s declaration identity: %w", key, err)
+		}
+		route := agentidentity.RootRoute()
+		if subscriber.Path != "" {
+			route, err = runtimeflowidentity.StoredRoute("", "", subscriber.Path).AgentIdentityRoute()
+			if err != nil {
+				return fmt.Errorf("route subscriber agent %s flow identity: %w", key, err)
+			}
+		}
+		subscriber.AgentIdentity, err = agentidentity.New(name, route)
+		if err != nil {
+			return fmt.Errorf("route subscriber agent %s concrete identity: %w", key, err)
 		}
 		for _, rawPattern := range normalizeStringList(entry.Subscriptions) {
-			if routeFlowInputHasLoweredConnectReceiver(source, flowID, rawPattern) {
+			if routeFlowInputHasLoweredConnectReceiver(source, routingFlowID, rawPattern) {
 				rt.addReceiverCarrierPatternsLocked(inputEvents, basePath, subscriber, rawPattern)
 			}
-			for _, resolved := range routeResolveSubscriberPatterns(source, packageKey, flowID, inputEvents, basePath, localEvents, rawPattern) {
+			for _, resolved := range routeResolveSubscriberPatterns(source, packageKey, routingFlowID, inputEvents, basePath, localEvents, rawPattern) {
 				if strings.TrimSpace(resolved.EventPattern) == "" {
 					continue
 				}
@@ -719,6 +773,7 @@ func (rt *RouteTable) addAgentPatternsLocked(source semanticview.Source, package
 			}
 		}
 	}
+	return nil
 }
 
 func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageKey, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, nodes map[string]runtimecontracts.SystemNodeContract) {
@@ -1047,7 +1102,7 @@ func routeEventKeys(events map[string]runtimecontracts.EventCatalogEntry) map[st
 	return out
 }
 
-func routeSubscriberTemplates(source semanticview.Source, scope semanticview.FlowScope) []routeSubscriberTemplate {
+func routeSubscriberTemplates(source semanticview.Source, scope semanticview.FlowScope) ([]routeSubscriberTemplate, error) {
 	out := make([]routeSubscriberTemplate, 0, len(scope.Agents)+len(scope.Nodes))
 	for _, key := range sortedStringKeys(scope.Agents) {
 		entry := scope.Agents[key]
@@ -1055,10 +1110,15 @@ func routeSubscriberTemplates(source semanticview.Source, scope semanticview.Flo
 		if len(patterns) == 0 {
 			continue
 		}
+		owner, ok := semanticview.AgentDeclarationOwner(source, scope.ID, key)
+		if !ok {
+			return nil, fmt.Errorf("route subscriber template agent %s missing scoped declaration owner", key)
+		}
 		out = append(out, routeSubscriberTemplate{
-			IDTemplate:  strings.TrimSpace(entry.ID),
-			Type:        "agent",
-			RawPatterns: append([]string{}, patterns...),
+			IDTemplate:     strings.TrimSpace(entry.ID),
+			Type:           "agent",
+			RawPatterns:    append([]string{}, patterns...),
+			AgentNameOwner: owner,
 		})
 	}
 	for _, key := range sortedStringKeys(scope.Nodes) {
@@ -1081,7 +1141,7 @@ func routeSubscriberTemplates(source semanticview.Source, scope semanticview.Flo
 			RawPatterns: append([]string{}, patterns...),
 		})
 	}
-	return out
+	return out, nil
 }
 
 func routeFlowPath(source semanticview.Source, flowID string) string {
@@ -1328,7 +1388,8 @@ func normalizedStringListContains(values []string, needle string) bool {
 
 func appendUniqueSubscriber(in []Subscriber, subscriber Subscriber) []Subscriber {
 	for _, existing := range in {
-		if existing.ID == subscriber.ID && existing.Type == subscriber.Type && existing.Path == subscriber.Path {
+		if existing.ID == subscriber.ID && existing.Type == subscriber.Type && existing.Path == subscriber.Path &&
+			existing.AgentIdentity == subscriber.AgentIdentity {
 			return in
 		}
 	}
@@ -1337,7 +1398,8 @@ func appendUniqueSubscriber(in []Subscriber, subscriber Subscriber) []Subscriber
 
 func appendUniqueRootInputSubscriber(in []Subscriber, subscriber Subscriber) []Subscriber {
 	for idx, existing := range in {
-		if existing.ID == subscriber.ID && existing.Type == subscriber.Type && existing.Path == subscriber.Path {
+		if existing.ID == subscriber.ID && existing.Type == subscriber.Type && existing.Path == subscriber.Path &&
+			existing.AgentIdentity == subscriber.AgentIdentity {
 			if strings.TrimSpace(subscriber.RouteSource) == "root_input_flow" {
 				in[idx].MatchPattern = subscriber.MatchPattern
 				in[idx].RouteSource = subscriber.RouteSource

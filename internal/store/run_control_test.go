@@ -24,7 +24,7 @@ func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testin
 		events.EventProducerPlatform, "test", "", "", time.Now().UTC(),
 	)
 	for _, route := range []events.DeliveryRoute{
-		{SubscriberType: "agent", SubscriberID: "agent-pending"},
+		testAgentDeliveryRoute(t, "agent-pending", "fixture/agent-pending"),
 		{SubscriberType: "node", SubscriberID: "node-pending"},
 	} {
 		if err := commitDeliveryObligationFixture(ctx, pg, event, route); err != nil {

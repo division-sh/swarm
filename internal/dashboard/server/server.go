@@ -11,25 +11,13 @@ import (
 	"strings"
 	"time"
 
-	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
-	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store"
 )
 
 type HealthChecker func(ctx context.Context) (map[string]any, error)
-
-type AgentReader interface {
-	LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error)
-}
-
-type canonicalAgentReader interface {
-	ListOperatorAgents(ctx context.Context, opts store.OperatorAgentListOptions) (store.OperatorAgentListResult, error)
-	LoadOperatorAgent(ctx context.Context, agentID string) (store.OperatorAgentDetail, error)
-}
 
 type MailboxReader interface {
 	ListMailboxItems(ctx context.Context, status string, limit int) ([]runtimetools.MailboxItem, error)
@@ -134,10 +122,6 @@ type RunTraceReader interface {
 	LoadRunDebugTrace(ctx context.Context, runID string, opts store.RunDebugTraceQueryOptions) ([]store.RunDebugTraceRow, error)
 }
 
-type AgentController interface {
-	runtimeagentcontrol.Controller
-}
-
 type RuntimeController interface {
 	PauseIngress() error
 	ResumeIngress() error
@@ -145,8 +129,6 @@ type RuntimeController interface {
 
 type Options struct {
 	Health        HealthChecker
-	Agents        AgentReader
-	AgentControl  AgentController
 	Mailbox       MailboxReader
 	Entities      EntityReader
 	Conversations ConversationReader
@@ -160,8 +142,6 @@ type Options struct {
 
 type Handler struct {
 	health        HealthChecker
-	agents        AgentReader
-	agentControl  AgentController
 	mailbox       MailboxReader
 	entities      EntityReader
 	conversations ConversationReader
@@ -177,8 +157,6 @@ type Handler struct {
 func NewHandler(opts Options) http.Handler {
 	h := &Handler{
 		health:        opts.Health,
-		agents:        opts.Agents,
-		agentControl:  opts.AgentControl,
 		mailbox:       opts.Mailbox,
 		entities:      opts.Entities,
 		conversations: opts.Conversations,
@@ -246,40 +224,6 @@ func (h *Handler) writeAuthError(w http.ResponseWriter, err error) {
 	writeJSONError(w, http.StatusUnauthorized, err)
 }
 
-type genericAgent struct {
-	ID                  string            `json:"id"`
-	FlowInstance        string            `json:"flow_instance,omitempty"`
-	Type                string            `json:"type,omitempty"`
-	Role                string            `json:"role,omitempty"`
-	Memory              bool              `json:"memory"`
-	MemorySource        string            `json:"memory_source"`
-	Status              string            `json:"status,omitempty"`
-	State               string            `json:"state,omitempty"`
-	BlockingLayer       string            `json:"blocking_layer,omitempty"`
-	EntityID            string            `json:"entity_id,omitempty"`
-	ParentAgentID       string            `json:"parent_agent_id,omitempty"`
-	CoordinatorID       string            `json:"coordinator_id,omitempty"`
-	HiredBy             string            `json:"hired_by,omitempty"`
-	TemplateVersion     string            `json:"template_version,omitempty"`
-	BudgetEnvelope      float64           `json:"budget_envelope,omitempty"`
-	Subscriptions       []string          `json:"subscriptions,omitempty"`
-	Permissions         []string          `json:"permissions,omitempty"`
-	PendingEvents       int               `json:"pending_events,omitempty"`
-	OldestPendingAgeSec int               `json:"oldest_pending_age_sec,omitempty"`
-	LockOwner           string            `json:"lock_owner,omitempty"`
-	LockExpiresAt       string            `json:"lock_expires_at,omitempty"`
-	TurnCount           int               `json:"turn_count,omitempty"`
-	TurnLimit           int               `json:"turn_limit,omitempty"`
-	TotalTokens24h      int               `json:"total_tokens_24h,omitempty"`
-	NearBreaker         bool              `json:"near_breaker,omitempty"`
-	SessionID           string            `json:"session_id,omitempty"`
-	ProviderSessionID   string            `json:"provider_session_id,omitempty"`
-	CurrentTaskID       string            `json:"current_task_id,omitempty"`
-	LastTool            *AgentLastTool    `json:"last_tool,omitempty"`
-	LiveTurn            *OperatorLiveTurn `json:"live_turn,omitempty"`
-	StartedAt           string            `json:"started_at,omitempty"`
-}
-
 type AgentLastTool struct {
 	Name      string `json:"name"`
 	ToolUseID string `json:"tool_use_id,omitempty"`
@@ -295,10 +239,6 @@ type controlResult struct {
 	OK      bool   `json:"ok,omitempty"`
 	Message string `json:"message,omitempty"`
 	Error   string `json:"error,omitempty"`
-}
-
-type directiveRequest struct {
-	Message string `json:"message"`
 }
 
 type runtimeActionRequest struct {
@@ -319,118 +259,6 @@ func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
 		resp["checks"] = checks
 	}
 	writeJSON(w, http.StatusOK, resp)
-}
-
-func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
-	reader, ok := h.agents.(canonicalAgentReader)
-	if h.agents == nil || !ok {
-		writeJSONError(w, http.StatusNotImplemented, errors.New("agents reader is not configured"))
-		return
-	}
-	result, err := reader.ListOperatorAgents(r.Context(), store.OperatorAgentListOptions{
-		Flow: strings.TrimSpace(r.URL.Query().Get("flow")),
-		Role: strings.TrimSpace(r.URL.Query().Get("role")),
-	})
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err)
-		return
-	}
-	out := make([]genericAgent, 0, len(result.Agents))
-	for _, row := range result.Agents {
-		out = append(out, genericAgentFromOperatorSummary(row))
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"agents": out})
-}
-
-func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
-	reader, ok := h.agents.(canonicalAgentReader)
-	if h.agents == nil || !ok {
-		writeJSONError(w, http.StatusNotImplemented, errors.New("agents reader is not configured"))
-		return
-	}
-	id := strings.TrimSpace(r.PathValue("id"))
-	if id == "" {
-		writeJSONError(w, http.StatusBadRequest, errors.New("agent id is required"))
-		return
-	}
-	row, err := reader.LoadOperatorAgent(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, store.ErrAgentNotFound) {
-			writeJSONError(w, http.StatusNotFound, errors.New("agent not found"))
-			return
-		}
-		writeJSONError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, genericAgentFromOperatorSummary(row.Agent))
-}
-
-func (h *Handler) handleAgentDirective(w http.ResponseWriter, r *http.Request) {
-	if h.agentControl == nil {
-		writeJSONError(w, http.StatusNotImplemented, errors.New("agent control is not configured"))
-		return
-	}
-	id := strings.TrimSpace(r.PathValue("id"))
-	if id == "" {
-		writeJSONError(w, http.StatusBadRequest, errors.New("agent id is required"))
-		return
-	}
-	var req directiveRequest
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, err)
-		return
-	}
-	req.Message = strings.TrimSpace(req.Message)
-	if req.Message == "" {
-		writeJSONError(w, http.StatusBadRequest, errors.New("message is required"))
-		return
-	}
-	resp, err := h.agentControl.SendDirective(r.Context(), runtimeagentcontrol.SendDirectiveRequest{
-		AgentID:   id,
-		Directive: req.Message,
-		Source:    runtimeagentcontrol.DirectiveSourceDashboardLegacy,
-	})
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, controlResult{OK: true, Message: strings.TrimSpace(resp.Response)})
-}
-
-func (h *Handler) handleAgentRestart(w http.ResponseWriter, r *http.Request) {
-	if h.agentControl == nil {
-		writeJSONError(w, http.StatusNotImplemented, errors.New("agent control is not configured"))
-		return
-	}
-	id := strings.TrimSpace(r.PathValue("id"))
-	if id == "" {
-		writeJSONError(w, http.StatusBadRequest, errors.New("agent id is required"))
-		return
-	}
-	if _, err := h.agentControl.Restart(r.Context(), runtimeagentcontrol.RestartRequest{AgentID: id}); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, controlResult{OK: true, Message: "agent restarted"})
-}
-
-func (h *Handler) handleAgentReplay(w http.ResponseWriter, r *http.Request) {
-	if h.agentControl == nil {
-		writeJSONError(w, http.StatusNotImplemented, errors.New("agent control is not configured"))
-		return
-	}
-	id := strings.TrimSpace(r.PathValue("id"))
-	if id == "" {
-		writeJSONError(w, http.StatusBadRequest, errors.New("agent id is required"))
-		return
-	}
-	if _, err := h.agentControl.ReplayBacklog(r.Context(), runtimeagentcontrol.ReplayBacklogRequest{AgentID: id}); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, controlResult{OK: true, Message: "agent backlog replayed"})
 }
 
 func (h *Handler) handleConversations(w http.ResponseWriter, r *http.Request) {
@@ -964,65 +792,6 @@ func formatTime(ts time.Time) string {
 	return ts.UTC().Format(time.RFC3339)
 }
 
-func toGenericAgent(row runtimemanager.PersistedAgent) genericAgent {
-	memory, err := row.Config.Memory.Normalize()
-	if err != nil {
-		memory = agentmemory.PlatformDefault()
-	}
-	return genericAgent{
-		ID:              strings.TrimSpace(row.Config.ID),
-		Type:            strings.TrimSpace(row.Config.Type),
-		Role:            strings.TrimSpace(row.Config.Role),
-		Memory:          memory.Enabled,
-		MemorySource:    string(memory.Source),
-		Status:          strings.TrimSpace(row.Status),
-		EntityID:        strings.TrimSpace(row.Config.EffectiveEntityID()),
-		ParentAgentID:   strings.TrimSpace(row.ParentAgentID),
-		CoordinatorID:   strings.TrimSpace(row.CoordinatorID),
-		HiredBy:         strings.TrimSpace(row.HiredBy),
-		TemplateVersion: strings.TrimSpace(row.TemplateVersion),
-		BudgetEnvelope:  row.Config.BudgetEnvelope,
-		Subscriptions:   append([]string(nil), row.Config.Subscriptions...),
-		Permissions:     append([]string(nil), row.Config.Permissions...),
-		StartedAt:       formatTime(row.StartedAt),
-	}
-}
-
-func genericAgentFromOperatorSummary(row store.OperatorAgentSummary) genericAgent {
-	return genericAgent{
-		ID:                  strings.TrimSpace(row.AgentID),
-		FlowInstance:        strings.TrimSpace(row.FlowInstance),
-		Type:                strings.TrimSpace(row.Type),
-		Role:                strings.TrimSpace(row.Role),
-		Memory:              row.Memory,
-		MemorySource:        strings.TrimSpace(row.MemorySource),
-		Status:              firstString(strings.TrimSpace(row.DashboardStatus), strings.TrimSpace(row.Status)),
-		State:               strings.TrimSpace(row.DashboardState),
-		BlockingLayer:       strings.TrimSpace(row.BlockingLayer),
-		EntityID:            strings.TrimSpace(row.EntityID),
-		ParentAgentID:       strings.TrimSpace(row.ParentAgentID),
-		CoordinatorID:       strings.TrimSpace(row.CoordinatorID),
-		HiredBy:             strings.TrimSpace(row.HiredBy),
-		TemplateVersion:     strings.TrimSpace(row.TemplateVersion),
-		BudgetEnvelope:      row.BudgetEnvelope,
-		Subscriptions:       append([]string(nil), row.Subscriptions...),
-		Permissions:         append([]string(nil), row.Permissions...),
-		PendingEvents:       row.PendingEvents,
-		OldestPendingAgeSec: row.OldestPendingAgeSec,
-		LockOwner:           strings.TrimSpace(row.LockOwner),
-		LockExpiresAt:       formatTime(row.LockExpiresAt),
-		TurnCount:           row.TurnCount,
-		TurnLimit:           row.TurnLimit,
-		NearBreaker:         row.NearBreaker,
-		SessionID:           strings.TrimSpace(row.SessionID),
-		ProviderSessionID:   strings.TrimSpace(row.ProviderSessionID),
-		CurrentTaskID:       strings.TrimSpace(row.CurrentTaskID),
-		LastTool:            dashboardAgentLastTool(row.LastTool),
-		LiveTurn:            dashboardLiveTurn(row.LiveTurn),
-		StartedAt:           formatTime(row.StartedAt),
-	}
-}
-
 func dashboardAgentLastTool(item *store.OperatorAgentTool) *AgentLastTool {
 	if item == nil {
 		return nil
@@ -1046,11 +815,6 @@ func dashboardLiveTurn(item *store.OperatorLiveTurn) *OperatorLiveTurn {
 		Outcome:                strings.TrimSpace(item.Outcome),
 		LastTool:               dashboardAgentLastTool(item.LastTool),
 	}
-}
-
-type genericAgentProvider interface {
-	ListGenericAgents(ctx context.Context) ([]genericAgent, error)
-	GetGenericAgent(ctx context.Context, id string) (genericAgent, bool, error)
 }
 
 func writeJSONError(w http.ResponseWriter, status int, err error) {

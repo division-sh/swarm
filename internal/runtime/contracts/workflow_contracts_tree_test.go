@@ -102,6 +102,42 @@ func TestLoadWorkflowContractBundleBuildsRecursiveFlowTree(t *testing.T) {
 	}
 }
 
+func TestBuildFlowTreeRootOnlyPackageIndexesAgentIdentityWithoutCopyingCatalogs(t *testing.T) {
+	paths := ProjectPackagePaths{Key: ".", Dir: "."}
+	bundle := &WorkflowContractBundle{
+		Package: ProjectPackageDocument{Name: "root-platform"},
+		PackageTree: []LoadedProjectPackage{{
+			Key:   ".",
+			Paths: paths,
+		}},
+		projectContracts: map[string]ProjectContractView{
+			".": {
+				Paths:  paths,
+				Nodes:  map[string]SystemNodeContract{"root-node": {}},
+				Events: map[string]EventCatalogEntry{"root.event": {}},
+				Agents: map[string]AgentRegistryEntry{"root-agent": {}},
+			},
+		},
+	}
+
+	if err := buildFlowTree(bundle, nil); err != nil {
+		t.Fatalf("buildFlowTree: %v", err)
+	}
+	if bundle.FlowTree.Root != nil || len(bundle.FlowTree.ByPath) != 0 || len(bundle.FlowTree.ByID) != 0 {
+		t.Fatalf("root-only package unexpectedly materialized a flow tree: %#v", bundle.FlowTree)
+	}
+	if _, ok := bundle.URIRegistry.Agents["root-agent"]; !ok {
+		t.Fatalf("root agent identity was not indexed: %#v", bundle.URIRegistry.Agents)
+	}
+	if len(bundle.URIRegistry.Nodes) != 0 || len(bundle.URIRegistry.Events) != 0 {
+		t.Fatalf(
+			"root-only package copied project catalogs into the identity registry: nodes=%#v events=%#v",
+			bundle.URIRegistry.Nodes,
+			bundle.URIRegistry.Events,
+		)
+	}
+}
+
 func TestWorkflowContractBundleEffectiveRequiredAgentsInferWhenOmitted(t *testing.T) {
 	flowView := &FlowContractView{
 		Paths: FlowContractPaths{ID: "analysis", SchemaFile: "flows/analysis/schema.yaml", AgentsFile: "flows/analysis/agents.yaml"},

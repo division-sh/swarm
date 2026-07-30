@@ -83,7 +83,7 @@ func newBlockedManagerLifecycleFixture(t *testing.T, managerBus Bus, eventBus *r
 		return agent, nil
 	})
 	if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Subscriptions: []string{"test.transition"}},
+		Config: managerRootAgentConfig(agent.id, "test.transition"),
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
@@ -252,7 +252,8 @@ func TestManagerAuthBreakerAndExplicitShutdownJoinOneTransition(t *testing.T) {
 	eventBus := newLifecycleTransitionEventBus(t)
 	fixture := newBlockedManagerLifecycleFixture(t, eventBus, eventBus)
 
-	if !fixture.manager.maybeTripAuthCircuitBreaker(testAuthorActivityContext(context.Background()), "agent-transition", fixture.inbound, testAuthFailure()) {
+	identity := testAgentIdentity(t, fixture.manager, "agent-transition", "")
+	if !fixture.manager.maybeTripAuthCircuitBreaker(testAuthorActivityContext(context.Background()), identity, fixture.inbound, testAuthFailure()) {
 		t.Fatal("auth breaker did not require shared shutdown")
 	}
 	fixture.manager.lifecycle.requestShutdownTransition()

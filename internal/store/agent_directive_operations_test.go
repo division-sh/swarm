@@ -20,11 +20,13 @@ const directiveOperationTestRunID = "00000000-0000-0000-0000-000000001000"
 
 func seedDirectiveOperationRun(t *testing.T, db *sql.DB, postgres bool) {
 	t.Helper()
+	ctx := testAuthorActivityContext()
 	if postgres {
-		requireRunningPostgresRunForTest(t, testAuthorActivityContext(), db, directiveOperationTestRunID, time.Now().UTC())
+		requireRunningPostgresRunForTest(t, ctx, db, directiveOperationTestRunID, time.Now().UTC())
 	} else {
-		requireRunningSQLiteRunForTest(t, testAuthorActivityContext(), db, directiveOperationTestRunID, time.Now().UTC())
+		requireRunningSQLiteRunForTest(t, ctx, db, directiveOperationTestRunID, time.Now().UTC())
 	}
+	seedTestAgentRow(t, ctx, db, postgres, testAgentIdentity(t, "agent-1", "directive/instance-1"), "active")
 }
 
 func TestSQLiteDirectiveOperationOwnsReservationExecutionAndCompletion(t *testing.T) {
@@ -569,8 +571,17 @@ func TestPostgresDirectiveOperationReservationFailureRollsBackEveryFact(t *testi
 
 func directiveOperationReservationForTest(t *testing.T, operationID, eventID, key, hash string, now time.Time) runtimeagentcontrol.ReserveDirectiveOperationRequest {
 	t.Helper()
+	return directiveOperationReservationForIdentityTest(t, "agent-1", "directive/instance-1", operationID, eventID, key, hash, now)
+}
+
+func directiveOperationReservationForIdentityTest(t *testing.T, agentID, flowInstance, operationID, eventID, key, hash string, now time.Time) runtimeagentcontrol.ReserveDirectiveOperationRequest {
+	t.Helper()
 	runID := directiveOperationTestRunID
-	req := runtimeagentcontrol.SendDirectiveRequest{AgentID: "agent-1", Directive: "continue", RunID: runID, Source: runtimeagentcontrol.DirectiveSourceV1RPC, OperatorID: "actor-1"}
+	identity := testAgentIdentity(t, agentID, flowInstance)
+	req := runtimeagentcontrol.SendDirectiveRequest{
+		AgentID: identity.AgentID(), FlowInstance: identity.FlowInstance(),
+		Directive: "continue", RunID: runID, Source: runtimeagentcontrol.DirectiveSourceV1RPC, OperatorID: "actor-1",
+	}
 	event, err := runtimeagentcontrol.NewDirectiveEvent(req, runtimeagentcontrol.RunTargetResolution{RunID: runID, Mode: runtimeagentcontrol.RunResolutionSpecified}, operationID, eventID, now)
 	if err != nil {
 		t.Fatalf("NewDirectiveEvent: %v", err)
@@ -586,7 +597,7 @@ func directiveOperationReservationForTest(t *testing.T, operationID, eventID, ke
 			ActorTokenID:     "actor-1",
 			IdempotencyKey:   key,
 			RequestHash:      hash,
-			AgentID:          req.AgentID,
+			AgentIdentity:    identity,
 			Directive:        req.Directive,
 			RequestedRunID:   runID,
 			ResolvedRunID:    runID,

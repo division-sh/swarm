@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -213,7 +214,7 @@ type SnapshotPage struct {
 }
 
 type AgentLifecyclePageQuery struct {
-	AgentID          string
+	AgentIdentity    agentidentity.Identity
 	RunID            string
 	Statuses         []Status
 	BeforeCreatedAt  time.Time
@@ -222,7 +223,7 @@ type AgentLifecyclePageQuery struct {
 }
 
 type AgentDiagnosticPageQuery struct {
-	AgentID          string
+	AgentIdentity    agentidentity.Identity
 	Status           Status
 	BeforeOccurredAt time.Time
 	BeforeDeliveryID string
@@ -237,16 +238,16 @@ type PendingRunEventQuery struct {
 }
 
 type AgentPendingAggregate struct {
-	AgentID       string
+	AgentIdentity agentidentity.Identity
 	Count         int
 	OldestEventAt time.Time
 }
 
 type AgentPendingPageQuery struct {
-	AgentID string
-	Since   time.Time
-	Limit   int
-	After   *AgentPendingPosition
+	AgentIdentity agentidentity.Identity
+	Since         time.Time
+	Limit         int
+	After         *AgentPendingPosition
 }
 
 type AgentPendingPosition struct {
@@ -328,6 +329,7 @@ type Claim struct {
 
 func (c Claim) DeliveryID() string               { return c.deliveryID }
 func (c Claim) RunID() string                    { return c.runID }
+func (c Claim) RouteIdentity() string            { return c.routeIdentity }
 func (c Claim) Version() int64                   { return c.version }
 func (c Claim) SubscriberClass() SubscriberClass { return c.class }
 func (c Claim) SubscriberID() string             { return c.subscriberID }
@@ -492,7 +494,7 @@ type NodeExecution = AgentExecution
 // do not cross this boundary.
 type Store interface {
 	ClaimAgentDelivery(context.Context, events.Event, events.DeliveryRoute) (ClaimedObligation, error)
-	ClaimAgentBacklog(context.Context, string, int) ([]AgentExecution, error)
+	ClaimAgentBacklog(context.Context, agentidentity.Identity, int) ([]AgentExecution, error)
 	ClaimNodeDelivery(context.Context, events.Event, events.DeliveryRoute) (ClaimedObligation, error)
 	ClaimNodeBacklog(context.Context, string, int) ([]NodeExecution, error)
 	RenewClaim(context.Context, Claim) (Snapshot, error)

@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
@@ -357,8 +358,38 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 				BundleSource:    bundleSource,
 				WorkflowVersion: "1.0.0",
 				Agents: []DynamicFlowRuntimeAgentExpectation{
-					{AgentID: "reviewer-inst-1", ConfigRevision: strings.Repeat("a", 64)},
-					{AgentID: "writer-inst-1", ConfigRevision: strings.Repeat("b", 64)},
+					{
+						Identity: runtimeagentidentity.Identity{
+							Name: runtimeagentidentity.Name{
+								AgentID: "reviewer-inst-1",
+								Owner:   "agent://review/reviewer",
+								Source:  runtimeagentidentity.NameSourceDeclared,
+							},
+							Route: runtimeagentidentity.Route{
+								Presence:     runtimeagentidentity.RoutePresent,
+								ScopeKey:     "review",
+								InstanceID:   "inst-1",
+								InstancePath: "review/inst-1",
+							},
+						},
+						ConfigRevision: strings.Repeat("a", 64),
+					},
+					{
+						Identity: runtimeagentidentity.Identity{
+							Name: runtimeagentidentity.Name{
+								AgentID: "writer-inst-1",
+								Owner:   "agent://review/writer",
+								Source:  runtimeagentidentity.NameSourceDeclared,
+							},
+							Route: runtimeagentidentity.Route{
+								Presence:     runtimeagentidentity.RoutePresent,
+								ScopeKey:     "review",
+								InstanceID:   "inst-1",
+								InstancePath: "review/inst-1",
+							},
+						},
+						ConfigRevision: strings.Repeat("b", 64),
+					},
 				},
 				CreationEvent: &DynamicFlowRuntimeCreationEventPlan{
 					EventID: uuid.NewString(), EventType: "review/inst-1/review.created",

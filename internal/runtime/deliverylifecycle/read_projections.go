@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
@@ -120,87 +121,100 @@ func (a *Adapter) PendingRunEventIDs(ctx context.Context, q queryer, page Pendin
 
 // AgentPendingAggregates computes pending-obligation count and oldest event
 // time for all requested agents without hydrating lifecycle or event records.
-func (a *Adapter) AgentPendingAggregates(ctx context.Context, q queryer, agentIDs []string, since time.Time) ([]AgentPendingAggregate, error) {
-	agentIDs = normalizedNonEmptyStrings(agentIDs)
-	if len(agentIDs) == 0 {
+func (a *Adapter) AgentPendingAggregates(ctx context.Context, q queryer, identities []agentidentity.Identity, since time.Time) ([]AgentPendingAggregate, error) {
+	identities, err := normalizeAgentIdentities(identities)
+	if err != nil {
+		return nil, err
+	}
+	if len(identities) == 0 {
 		return []AgentPendingAggregate{}, nil
 	}
 	if since.IsZero() {
 		since = time.Unix(0, 0).UTC()
 	}
-	var (
-		query string
-		args  []any
-	)
+	predicate, args, err := agentIdentityPredicate(a.dialect, "d", identities, 1)
+	if err != nil {
+		return nil, err
+	}
+	var query string
 	activeStates := runtimerunlifecycle.ActiveStates()
 	if a.dialect == DialectPostgres {
-		placeholders := make([]string, 0, len(agentIDs))
-		for _, agentID := range agentIDs {
-			args = append(args, agentID)
-			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
-		}
 		args = append(args, since.UTC())
 		sinceIndex := len(args)
 		args = append(args, string(activeStates[0]), string(activeStates[1]))
 		query = fmt.Sprintf(`
-			SELECT d.subscriber_id, COUNT(*), MIN(e.created_at)
+			SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source,
+			       d.agent_route_presence, d.agent_flow_scope_key,
+			       d.agent_flow_instance_id, d.agent_flow_instance_path,
+			       COUNT(*), MIN(e.created_at)
 			FROM event_deliveries d
 			JOIN events e ON e.event_id = d.event_id
 			LEFT JOIN runs r ON r.run_id = e.run_id
 			WHERE d.subscriber_type = 'agent'
-			  AND d.subscriber_id IN (%s)
+			  AND (%s)
 			  AND e.created_at >= $%d::timestamptz
 			  AND (e.run_id IS NULL OR r.status IN ($%d, $%d))
 			  AND %s
-			GROUP BY d.subscriber_id
-			ORDER BY d.subscriber_id`,
-			strings.Join(placeholders, ","),
-			sinceIndex,
-			sinceIndex+1,
-			sinceIndex+2,
-			postgresAgentPendingEligibility,
-		)
+			GROUP BY d.subscriber_id, d.agent_name_owner, d.agent_name_source,
+			         d.agent_route_presence, d.agent_flow_scope_key,
+			         d.agent_flow_instance_id, d.agent_flow_instance_path
+			ORDER BY d.subscriber_id, d.agent_flow_instance_path`,
+			predicate, sinceIndex, sinceIndex+1, sinceIndex+2, postgresAgentPendingEligibility)
 	} else {
-		placeholders := make([]string, 0, len(agentIDs))
-		for _, agentID := range agentIDs {
-			args = append(args, agentID)
-			placeholders = append(placeholders, "?")
-		}
 		args = append(args, since.UTC())
 		args = append(args, string(activeStates[0]), string(activeStates[1]))
 		query = fmt.Sprintf(`
-			SELECT d.subscriber_id, COUNT(*), MIN(e.created_at)
+			SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source,
+			       d.agent_route_presence, d.agent_flow_scope_key,
+			       d.agent_flow_instance_id, d.agent_flow_instance_path,
+			       COUNT(*), MIN(e.created_at)
 			FROM event_deliveries d
 			JOIN events e ON e.event_id = d.event_id
 			LEFT JOIN runs r ON r.run_id = e.run_id
 			WHERE d.subscriber_type = 'agent'
-			  AND d.subscriber_id IN (%s)
+			  AND (%s)
 			  AND e.created_at >= ?
 			  AND (e.run_id IS NULL OR r.status IN (?, ?))
 			  AND %s
-			GROUP BY d.subscriber_id
-			ORDER BY d.subscriber_id`, strings.Join(placeholders, ","), sqliteAgentPendingEligibility)
+			GROUP BY d.subscriber_id, d.agent_name_owner, d.agent_name_source,
+			         d.agent_route_presence, d.agent_flow_scope_key,
+			         d.agent_flow_instance_id, d.agent_flow_instance_path
+			ORDER BY d.subscriber_id, d.agent_flow_instance_path`,
+			predicate, sqliteAgentPendingEligibility)
 	}
 	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("select agent pending aggregates: %w", err)
 	}
 	defer rows.Close()
-	out := make([]AgentPendingAggregate, 0, len(agentIDs))
+	out := make([]AgentPendingAggregate, 0, len(identities))
 	for rows.Next() {
 		var (
-			item      AgentPendingAggregate
-			oldestRaw any
+			item                                           AgentPendingAggregate
+			agentID, nameOwner, nameSource, routePresence  string
+			flowScopeKey, flowInstanceID, flowInstancePath string
+			oldestRaw                                      any
 		)
-		if err := rows.Scan(&item.AgentID, &item.Count, &oldestRaw); err != nil {
+		if err := rows.Scan(
+			&agentID, &nameOwner, &nameSource, &routePresence,
+			&flowScopeKey, &flowInstanceID, &flowInstancePath,
+			&item.Count, &oldestRaw,
+		); err != nil {
 			return nil, fmt.Errorf("scan agent pending aggregate: %w", err)
 		}
-		item.AgentID = strings.TrimSpace(item.AgentID)
+		item.AgentIdentity, err = agentidentity.FromStorageFields(agentidentity.StorageFields{
+			AgentID: agentID, NameOwner: nameOwner, NameSource: nameSource,
+			RoutePresence: routePresence, FlowScopeKey: flowScopeKey,
+			FlowInstanceID: flowInstanceID, FlowInstancePath: flowInstancePath,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("%w: agent pending aggregate identity: %v", ErrConflict, err)
+		}
 		oldest, ok, err := parseNullableTime(oldestRaw)
 		if err != nil {
 			return nil, err
 		}
-		if item.AgentID == "" || item.Count <= 0 || !ok {
+		if item.Count <= 0 || !ok {
 			return nil, fmt.Errorf("%w: agent pending aggregate violates structural policy", ErrConflict)
 		}
 		item.OldestEventAt = oldest
@@ -215,9 +229,9 @@ func (a *Adapter) AgentPendingAggregates(ctx context.Context, q queryer, agentID
 // AgentPendingReferencePage selects limit+1 exact obligation identities, trims
 // the lookahead row, and only then hydrates canonical lifecycle snapshots.
 func (a *Adapter) AgentPendingReferencePage(ctx context.Context, q queryer, page AgentPendingPageQuery) (AgentPendingReferencePage, error) {
-	page.AgentID = strings.TrimSpace(page.AgentID)
-	if page.AgentID == "" {
-		return AgentPendingReferencePage{}, fmt.Errorf("agent pending page agent id is required")
+	page.AgentIdentity = page.AgentIdentity.Normalize()
+	if err := page.AgentIdentity.Validate(); err != nil {
+		return AgentPendingReferencePage{}, fmt.Errorf("agent pending page identity: %w", err)
 	}
 	if page.Limit <= 0 {
 		return AgentPendingReferencePage{}, fmt.Errorf("agent pending page limit must be positive")
@@ -238,18 +252,21 @@ func (a *Adapter) AgentPendingReferencePage(ctx context.Context, q queryer, page
 			return AgentPendingReferencePage{}, fmt.Errorf("agent pending page cursor delivery id: %w", err)
 		}
 	}
-	var (
-		query string
-		args  []any
-	)
+	predicate, args, err := agentIdentityPredicate(a.dialect, "d", []agentidentity.Identity{page.AgentIdentity}, 1)
+	if err != nil {
+		return AgentPendingReferencePage{}, err
+	}
+	var query string
 	activeStates := runtimerunlifecycle.ActiveStates()
 	if a.dialect == DialectPostgres {
-		args = []any{page.AgentID, page.Since.UTC(), string(activeStates[0]), string(activeStates[1])}
+		args = append(args, page.Since.UTC())
+		sinceIndex := len(args)
+		args = append(args, string(activeStates[0]), string(activeStates[1]))
 		where := []string{
 			"d.subscriber_type = 'agent'",
-			"d.subscriber_id = $1",
-			"e.created_at >= $2::timestamptz",
-			"(e.run_id IS NULL OR r.status IN ($3, $4))",
+			"(" + predicate + ")",
+			fmt.Sprintf("e.created_at >= $%d::timestamptz", sinceIndex),
+			fmt.Sprintf("(e.run_id IS NULL OR r.status IN ($%d, $%d))", sinceIndex+1, sinceIndex+2),
 			postgresAgentPendingEligibility,
 		}
 		if page.After != nil {
@@ -269,10 +286,11 @@ func (a *Adapter) AgentPendingReferencePage(ctx context.Context, q queryer, page
 			ORDER BY e.created_at, e.event_id, d.delivery_id
 			LIMIT $%d`, strings.Join(where, " AND "), len(args))
 	} else {
-		args = []any{page.AgentID, page.Since.UTC(), string(activeStates[0]), string(activeStates[1])}
+		args = append(args, page.Since.UTC())
+		args = append(args, string(activeStates[0]), string(activeStates[1]))
 		where := []string{
 			"d.subscriber_type = 'agent'",
-			"d.subscriber_id = ?",
+			"(" + predicate + ")",
 			"e.created_at >= ?",
 			"(e.run_id IS NULL OR r.status IN (?, ?))",
 			sqliteAgentPendingEligibility,
@@ -352,7 +370,7 @@ func (a *Adapter) AgentPendingReferencePage(ctx context.Context, q queryer, page
 		}
 		snapshot := snapshotAt(record, now)
 		if snapshot.DeliveryID != reference.deliveryID || snapshot.EventID != reference.eventID ||
-			snapshot.SubscriberClass != SubscriberAgent || snapshot.SubscriberID != page.AgentID ||
+			snapshot.SubscriberClass != SubscriberAgent || snapshot.Route.AgentIdentity != page.AgentIdentity ||
 			!agentPendingSnapshotEligible(snapshot, now) {
 			return AgentPendingReferencePage{}, fmt.Errorf("%w: agent pending page reference changed during hydration", ErrConflict)
 		}
@@ -366,26 +384,27 @@ func (a *Adapter) AgentPendingReferencePage(ctx context.Context, q queryer, page
 
 // CurrentAgentSnapshots selects at most one row-ranked current lifecycle
 // candidate for each requested agent before canonical hydration.
-func (a *Adapter) CurrentAgentSnapshots(ctx context.Context, q queryer, agentIDs []string) ([]Snapshot, error) {
-	agentIDs = normalizedNonEmptyStrings(agentIDs)
-	if len(agentIDs) == 0 {
+func (a *Adapter) CurrentAgentSnapshots(ctx context.Context, q queryer, identities []agentidentity.Identity) ([]Snapshot, error) {
+	identities, err := normalizeAgentIdentities(identities)
+	if err != nil {
+		return nil, err
+	}
+	if len(identities) == 0 {
 		return []Snapshot{}, nil
 	}
-	var (
-		query        string
-		args         []any
-		placeholders = make([]string, 0, len(agentIDs))
-	)
+	predicate, args, err := agentIdentityPredicate(a.dialect, "d", identities, 1)
+	if err != nil {
+		return nil, err
+	}
+	var query string
 	if a.dialect == DialectPostgres {
-		for _, agentID := range agentIDs {
-			args = append(args, agentID)
-			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
-		}
 		query = fmt.Sprintf(`
 			WITH ranked AS (
 				SELECT d.delivery_id,
 					ROW_NUMBER() OVER (
-						PARTITION BY d.subscriber_id
+						PARTITION BY d.subscriber_id, d.agent_name_owner, d.agent_name_source,
+						             d.agent_route_presence, d.agent_flow_scope_key,
+						             d.agent_flow_instance_id, d.agent_flow_instance_path
 						ORDER BY
 							CASE WHEN d.status IN ('pending', 'in_progress', 'failed') THEN 1 ELSE 0 END DESC,
 							CASE
@@ -404,23 +423,21 @@ func (a *Adapter) CurrentAgentSnapshots(ctx context.Context, q queryer, agentIDs
 				   AND a.claim_version = d.current_attempt_version
 				   AND a.open_marker = TRUE
 				WHERE d.subscriber_type = 'agent'
-				  AND d.subscriber_id IN (%s)
+				  AND (%s)
 				  AND d.status IN ('pending', 'in_progress', 'failed', 'dead_letter')
 			)
 			SELECT delivery_id::text
 			FROM ranked
 			WHERE row_number = 1
-			ORDER BY delivery_id`, strings.Join(placeholders, ","))
+			ORDER BY delivery_id`, predicate)
 	} else {
-		for _, agentID := range agentIDs {
-			args = append(args, agentID)
-			placeholders = append(placeholders, "?")
-		}
 		query = fmt.Sprintf(`
 			WITH ranked AS (
 				SELECT d.delivery_id,
 					ROW_NUMBER() OVER (
-						PARTITION BY d.subscriber_id
+						PARTITION BY d.subscriber_id, d.agent_name_owner, d.agent_name_source,
+						             d.agent_route_presence, d.agent_flow_scope_key,
+						             d.agent_flow_instance_id, d.agent_flow_instance_path
 						ORDER BY
 							CASE WHEN d.status IN ('pending', 'in_progress', 'failed') THEN 1 ELSE 0 END DESC,
 							CASE
@@ -439,29 +456,83 @@ func (a *Adapter) CurrentAgentSnapshots(ctx context.Context, q queryer, agentIDs
 				   AND a.claim_version = d.current_attempt_version
 				   AND a.open_marker = 1
 				WHERE d.subscriber_type = 'agent'
-				  AND d.subscriber_id IN (%s)
+				  AND (%s)
 				  AND d.status IN ('pending', 'in_progress', 'failed', 'dead_letter')
 			)
 			SELECT delivery_id
 			FROM ranked
 			WHERE row_number = 1
-			ORDER BY delivery_id`, strings.Join(placeholders, ","))
+			ORDER BY delivery_id`, predicate)
 	}
 	snapshots, err := a.snapshotsByIDQuery(ctx, q, query, args...)
 	if err != nil {
 		return nil, err
 	}
-	agents := make(map[string]struct{}, len(agentIDs))
-	for _, agentID := range agentIDs {
-		agents[agentID] = struct{}{}
+	agents := make(map[agentidentity.Identity]struct{}, len(identities))
+	for _, identity := range identities {
+		agents[identity] = struct{}{}
 	}
 	for _, snapshot := range snapshots {
-		_, requested := agents[snapshot.SubscriberID]
+		_, requested := agents[snapshot.Route.AgentIdentity]
 		if !requested || snapshot.SubscriberClass != SubscriberAgent || snapshot.Status == StatusDelivered {
 			return nil, fmt.Errorf("%w: current agent lifecycle reference changed during hydration", ErrConflict)
 		}
 	}
 	return snapshots, nil
+}
+
+func normalizeAgentIdentities(values []agentidentity.Identity) ([]agentidentity.Identity, error) {
+	seen := make(map[agentidentity.Identity]struct{}, len(values))
+	out := make([]agentidentity.Identity, 0, len(values))
+	for _, value := range values {
+		value = value.Normalize()
+		if err := value.Validate(); err != nil {
+			return nil, fmt.Errorf("agent delivery identity: %w", err)
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out, nil
+}
+
+func agentIdentityPredicate(dialect Dialect, alias string, identities []agentidentity.Identity, firstArg int) (string, []any, error) {
+	identities, err := normalizeAgentIdentities(identities)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(identities) == 0 {
+		return "", nil, fmt.Errorf("agent identity predicate requires at least one identity")
+	}
+	columns := []string{
+		"subscriber_id", "agent_name_owner", "agent_name_source", "agent_route_presence",
+		"agent_flow_scope_key", "agent_flow_instance_id", "agent_flow_instance_path",
+	}
+	args := make([]any, 0, len(identities)*len(columns))
+	groups := make([]string, 0, len(identities))
+	for _, identity := range identities {
+		fields, err := identity.StorageFields()
+		if err != nil {
+			return "", nil, err
+		}
+		values := []any{
+			fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+		}
+		terms := make([]string, 0, len(columns))
+		for idx, column := range columns {
+			placeholder := "?"
+			if dialect == DialectPostgres {
+				placeholder = fmt.Sprintf("$%d", firstArg+len(args))
+			}
+			terms = append(terms, alias+"."+column+" = "+placeholder)
+			args = append(args, values[idx])
+		}
+		groups = append(groups, "("+strings.Join(terms, " AND ")+")")
+	}
+	return strings.Join(groups, " OR "), args, nil
 }
 
 func (a *Adapter) NonterminalSnapshotsForRun(ctx context.Context, q queryer, runID string) ([]Snapshot, error) {

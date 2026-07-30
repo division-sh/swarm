@@ -417,6 +417,7 @@ func contractFrontierRecipients(in []runtimebus.Subscriber) []store.RunForkContr
 			SubscriberID:   strings.TrimSpace(subscriber.ID),
 			Path:           strings.TrimSpace(subscriber.Path),
 			RouteSource:    strings.TrimSpace(subscriber.RouteSource),
+			AgentIdentity:  subscriber.AgentIdentity.Normalize(),
 		}
 		if recipient.SubscriberID == "" || recipient.SubscriberType == "" {
 			continue

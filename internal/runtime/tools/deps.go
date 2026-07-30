@@ -19,6 +19,8 @@ import (
 
 type Schedule = runtimepipeline.Schedule
 
+const ScheduleOwnerAgent = runtimepipeline.ScheduleOwnerAgent
+
 type SchedulePersistence = runtimepipeline.SchedulePersistence
 
 type WorkflowInstanceLoader interface {
@@ -41,10 +43,10 @@ type Scheduler interface {
 }
 
 type Manager interface {
-	GetAgentConfig(agentID string) (models.AgentConfig, bool)
+	ResolveAgentConfig(agentID, flowInstance string) (models.AgentConfig, error)
 	SpawnAgentForEntity(entityID string, cfg models.AgentConfig) error
-	TeardownAgent(agentID string) error
-	ReconfigureAgent(agentID string, cfg models.AgentConfig) error
+	TeardownAgentTarget(agentID, flowInstance string) error
+	ReconfigureAgentTarget(agentID, flowInstance string, cfg models.AgentConfig) error
 }
 
 type ManagerProvider func() Manager

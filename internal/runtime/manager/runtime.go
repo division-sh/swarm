@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -32,7 +33,7 @@ import (
 )
 
 type agentDirectiveRunTargetResolver interface {
-	ResolveAgentDirectiveRunTarget(ctx context.Context, agentID, explicitRunID string) (runtimeagentcontrol.RunTargetResolution, error)
+	ResolveAgentDirectiveRunTarget(ctx context.Context, identity runtimeagentidentity.Identity, explicitRunID string) (runtimeagentcontrol.RunTargetResolution, error)
 }
 
 const DefaultShutdownGrace = 30 * time.Second
@@ -95,27 +96,26 @@ func ResolveShutdownGrace(grace time.Duration) (time.Duration, error) {
 	}
 }
 
-func (am *AgentManager) RestartAgent(agentID string) error {
-	_, err := am.Restart(context.Background(), runtimeagentcontrol.RestartRequest{AgentID: agentID})
-	return legacyAgentControlError(err)
-}
-
 func (am *AgentManager) Restart(ctx context.Context, req runtimeagentcontrol.RestartRequest) (runtimeagentcontrol.RestartResult, error) {
 	if am.shutdownAdmissionClosed() {
-		return runtimeagentcontrol.RestartResult{}, agentControlNotRunning(req.AgentID, runtimeagentcontrol.StatusTerminated)
+		return runtimeagentcontrol.RestartResult{}, errRuntimeShuttingDown
 	}
 	agentID := strings.TrimSpace(req.AgentID)
 	if agentID == "" {
 		return runtimeagentcontrol.RestartResult{}, errors.New("agent id is required")
 	}
-	if _, ok := am.lifecycle.executionSnapshot(agentID); !ok {
-		return runtimeagentcontrol.RestartResult{}, agentControlNotFound(agentID)
+	identity, err := am.lifecycle.resolveAgentTarget(agentID, req.FlowInstance, false)
+	if err != nil {
+		return runtimeagentcontrol.RestartResult{}, err
+	}
+	if _, ok := am.lifecycle.executionSnapshotByIdentity(identity); !ok {
+		return runtimeagentcontrol.RestartResult{}, agentControlNotFound(identity.Description())
 	}
 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ctx, err := am.bindRuntimeOperationContext(ctx)
+	ctx, err = am.bindRuntimeOperationContext(ctx)
 	if err != nil {
 		return runtimeagentcontrol.RestartResult{}, err
 	}
@@ -123,11 +123,13 @@ func (am *AgentManager) Restart(ctx context.Context, req runtimeagentcontrol.Res
 	if operationID == "" {
 		operationID = uuid.NewString()
 	}
-	if _, err := am.replaceExecution(ctx, agentID, "restart", operationID, nil); err != nil {
+	if _, err := am.replaceExecutionIdentityConfigWithTopology(ctx, identity, "restart", operationID, nil, am.semanticSource, false, nil); err != nil {
 		return runtimeagentcontrol.RestartResult{}, err
 	}
-	token, _ := am.lifecycle.token(agentID)
-	return runtimeagentcontrol.RestartResult{AgentID: agentID, OperationID: operationID, Generation: token.Generation}, nil
+	token, _ := am.lifecycle.tokenIdentity(identity)
+	return runtimeagentcontrol.RestartResult{
+		AgentID: agentID, FlowInstance: identity.FlowInstance(), OperationID: operationID, Generation: token.Generation,
+	}, nil
 }
 
 func (am *AgentManager) Shutdown() error {
@@ -174,7 +176,7 @@ func waitForRuntimeLifecycleTransition(transition *runtimeLifecycleTransition, g
 }
 
 func (am *AgentManager) Count() int {
-	return len(am.lifecycle.executionIDs())
+	return len(am.lifecycle.executionIdentities())
 }
 
 func (am *AgentManager) IsRunning() bool {
@@ -211,8 +213,20 @@ func (am *AgentManager) shutdownAdmissionClosedLocked() bool {
 	return false
 }
 
-func (am *AgentManager) GetAgentConfig(agentID string) (runtimeactors.AgentConfig, bool) {
-	execution, ok := am.lifecycle.executionSnapshot(agentID)
+func (am *AgentManager) ResolveAgentConfig(agentID, flowInstance string) (runtimeactors.AgentConfig, error) {
+	identity, err := am.lifecycle.resolveAgentTarget(agentID, flowInstance, false)
+	if err != nil {
+		return runtimeactors.AgentConfig{}, err
+	}
+	execution, ok := am.lifecycle.executionSnapshotByIdentity(identity)
+	if !ok {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("%w: %s", ErrAgentNotFound, identity.Description())
+	}
+	return execution.Config, nil
+}
+
+func (am *AgentManager) getAgentConfigIdentity(identity runtimeagentidentity.Identity) (runtimeactors.AgentConfig, bool) {
+	execution, ok := am.lifecycle.executionSnapshotByIdentity(identity)
 	return execution.Config, ok
 }
 
@@ -220,20 +234,39 @@ func (am *AgentManager) ListAgentConfigs() []runtimeactors.AgentConfig {
 	return am.lifecycle.executionConfigs()
 }
 
-func (am *AgentManager) poisonKey(agentID, eventID string) string {
-	return strings.TrimSpace(agentID) + "|" + strings.TrimSpace(eventID)
+type poisonPanicKey struct {
+	Agent   runtimeagentidentity.Identity
+	EventID string
 }
 
-func (am *AgentManager) incrementPoisonPanicCount(agentID, eventID string) int {
-	key := am.poisonKey(agentID, eventID)
+func (am *AgentManager) poisonKey(identity runtimeagentidentity.Identity, eventID string) (poisonPanicKey, error) {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		return poisonPanicKey{}, err
+	}
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return poisonPanicKey{}, fmt.Errorf("poison event id is required")
+	}
+	return poisonPanicKey{Agent: identity, EventID: eventID}, nil
+}
+
+func (am *AgentManager) incrementPoisonPanicCount(identity runtimeagentidentity.Identity, eventID string) (int, error) {
+	key, err := am.poisonKey(identity, eventID)
+	if err != nil {
+		return 0, err
+	}
 	am.poisonMu.Lock()
 	defer am.poisonMu.Unlock()
 	am.poisonPanicCounts[key]++
-	return am.poisonPanicCounts[key]
+	return am.poisonPanicCounts[key], nil
 }
 
-func (am *AgentManager) clearPoisonPanicCount(agentID, eventID string) {
-	key := am.poisonKey(agentID, eventID)
+func (am *AgentManager) clearPoisonPanicCount(identity runtimeagentidentity.Identity, eventID string) {
+	key, err := am.poisonKey(identity, eventID)
+	if err != nil {
+		return
+	}
 	am.poisonMu.Lock()
 	defer am.poisonMu.Unlock()
 	delete(am.poisonPanicCounts, key)
@@ -299,8 +332,8 @@ func (am *AgentManager) recordPoisonQuarantine(eventName, entityID string) (int,
 	return affectedCount, true
 }
 
-func deterministicOutputEventID(inbound events.Event, agentID string, index int, out events.Event) string {
-	return DeterministicOutputEventID(inbound, agentID, index, out)
+func deterministicOutputEventID(inbound events.Event, identity runtimeagentidentity.Identity, index int, out events.Event) (string, error) {
+	return DeterministicOutputEventID(inbound, identity, index, out)
 }
 
 func (am *AgentManager) defaultManagerAgentID(cfg runtimeactors.AgentConfig) string {
@@ -393,6 +426,7 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 	}
 	agentID := strings.TrimSpace(req.AgentID)
 	req.AgentID = agentID
+	req.FlowInstance = strings.Trim(strings.TrimSpace(req.FlowInstance), "/")
 	req.Directive = strings.TrimSpace(req.Directive)
 	req.RunID = strings.TrimSpace(req.RunID)
 	req.Source = strings.TrimSpace(req.Source)
@@ -421,6 +455,11 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 	if req.Directive == "" {
 		return runtimeagentcontrol.SendDirectiveResult{}, errors.New("directive is required")
 	}
+	identity, err := am.lifecycle.resolveAgentTarget(agentID, req.FlowInstance, false)
+	if err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, err
+	}
+	req.FlowInstance = identity.FlowInstance()
 	operationStore, err := am.directiveOperationStore()
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
@@ -455,10 +494,10 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 			}
 		}
 	}
-	if _, err := am.directiveBoardAgent(agentID); err != nil {
+	if _, err := am.directiveBoardAgentIdentity(identity); err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
-	target, err := am.resolveAgentDirectiveRunTarget(ctx, agentID, req.RunID)
+	target, err := am.resolveAgentDirectiveRunTarget(ctx, identity, req.RunID)
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
@@ -481,7 +520,7 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 			ActorTokenID:     req.ActorTokenID,
 			IdempotencyKey:   req.IdempotencyKey,
 			RequestHash:      req.RequestHash,
-			AgentID:          agentID,
+			AgentIdentity:    identity,
 			Directive:        req.Directive,
 			RequestedRunID:   req.RunID,
 			ResolvedRunID:    target.RunID,
@@ -511,14 +550,14 @@ func (am *AgentManager) directiveOperationStore() (runtimeagentcontrol.Directive
 	return store, nil
 }
 
-func (am *AgentManager) directiveBoardAgent(agentID string) (BoardInteractiveAgent, error) {
-	execution, ok := am.lifecycle.executionSnapshot(agentID)
+func (am *AgentManager) directiveBoardAgentIdentity(identity runtimeagentidentity.Identity) (BoardInteractiveAgent, error) {
+	execution, ok := am.lifecycle.executionSnapshotByIdentity(identity)
 	if !ok {
-		return nil, agentControlNotFound(agentID)
+		return nil, agentControlNotFound(identity.Description())
 	}
 	chatAgent, ok := execution.Agent.(BoardInteractiveAgent)
 	if !ok {
-		return nil, agentControlNotRunning(agentID, runtimeagentcontrol.StatusIdle)
+		return nil, agentControlNotRunning(identity.Description(), runtimeagentcontrol.StatusIdle)
 	}
 	return chatAgent, nil
 }
@@ -544,14 +583,14 @@ func (am *AgentManager) continueDirectiveOperation(ctx context.Context, store ru
 }
 
 func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, store runtimeagentcontrol.DirectiveOperationStore, op runtimeagentcontrol.DirectiveOperation) (runtimeagentcontrol.SendDirectiveResult, error) {
-	lease, err := am.lifecycle.acquireExecution(ctx, op.AgentID, "execute_directive", false)
+	lease, err := am.lifecycle.acquireExecutionIdentity(ctx, op.AgentIdentity, "execute_directive", false)
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
 	defer lease.Release()
 	chatAgent, ok := lease.Agent.(BoardInteractiveAgent)
 	if !ok {
-		return runtimeagentcontrol.SendDirectiveResult{}, agentControlNotRunning(op.AgentID, runtimeagentcontrol.StatusIdle)
+		return runtimeagentcontrol.SendDirectiveResult{}, agentControlNotRunning(op.AgentIdentity.Description(), runtimeagentcontrol.StatusIdle)
 	}
 	ownerID := uuid.NewString()
 	admitted, err := store.AdmitDirectiveExecution(ctx, op.OperationID, ownerID, time.Now().UTC(), directiveExecutionLease)
@@ -614,7 +653,8 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 	}
 	result := runtimeagentcontrol.SendDirectiveResult{
 		OK:                 true,
-		AgentID:            admitted.AgentID,
+		AgentID:            admitted.AgentID(),
+		FlowInstance:       admitted.FlowInstance(),
 		OperationID:        admitted.OperationID,
 		Response:           response,
 		RunID:              admitted.ResolvedRunID,
@@ -659,11 +699,12 @@ func runDirectiveExecutionHeartbeat(ctx context.Context, done chan<- struct{}, s
 
 func directiveEventFromOperation(op runtimeagentcontrol.DirectiveOperation) (events.Event, error) {
 	return runtimeagentcontrol.NewDirectiveEvent(runtimeagentcontrol.SendDirectiveRequest{
-		AgentID:    op.AgentID,
-		Directive:  op.Directive,
-		RunID:      op.RequestedRunID,
-		Source:     op.Source,
-		OperatorID: op.OperatorID,
+		AgentID:      op.AgentID(),
+		FlowInstance: op.FlowInstance(),
+		Directive:    op.Directive,
+		RunID:        op.RequestedRunID,
+		Source:       op.Source,
+		OperatorID:   op.OperatorID,
 	}, runtimeagentcontrol.RunTargetResolution{RunID: op.ResolvedRunID, Mode: op.RunIDResolution}, op.OperationID, op.DirectiveEventID, op.CreatedAt)
 }
 
@@ -678,16 +719,20 @@ func directiveResultFromOperation(op runtimeagentcontrol.DirectiveOperation) (ru
 	if !result.OK || strings.TrimSpace(result.OperationID) != op.OperationID {
 		return runtimeagentcontrol.SendDirectiveResult{}, fmt.Errorf("directive operation response identity mismatch")
 	}
-	result.AgentID = op.AgentID
+	result.AgentID = op.AgentID()
+	result.FlowInstance = op.FlowInstance()
 	return result, nil
 }
 
 func directiveRequestHash(req runtimeagentcontrol.SendDirectiveRequest) (string, error) {
 	raw, err := json.Marshal(struct {
-		AgentID   string `json:"agent_id"`
-		Directive string `json:"directive"`
-		RunID     string `json:"run_id,omitempty"`
-	}{AgentID: req.AgentID, Directive: req.Directive, RunID: req.RunID})
+		AgentID      string `json:"agent_id"`
+		FlowInstance string `json:"flow_instance,omitempty"`
+		Directive    string `json:"directive"`
+		RunID        string `json:"run_id,omitempty"`
+	}{
+		AgentID: req.AgentID, FlowInstance: req.FlowInstance, Directive: req.Directive, RunID: req.RunID,
+	})
 	if err != nil {
 		return "", err
 	}
@@ -695,11 +740,14 @@ func directiveRequestHash(req runtimeagentcontrol.SendDirectiveRequest) (string,
 	return fmt.Sprintf("%x", sum[:]), nil
 }
 
-func (am *AgentManager) resolveAgentDirectiveRunTarget(ctx context.Context, agentID, explicitRunID string) (runtimeagentcontrol.RunTargetResolution, error) {
-	agentID = strings.TrimSpace(agentID)
+func (am *AgentManager) resolveAgentDirectiveRunTarget(ctx context.Context, identity runtimeagentidentity.Identity, explicitRunID string) (runtimeagentcontrol.RunTargetResolution, error) {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		return runtimeagentcontrol.RunTargetResolution{}, err
+	}
 	explicitRunID = strings.TrimSpace(explicitRunID)
 	if resolver, ok := am.store.(agentDirectiveRunTargetResolver); ok && resolver != nil {
-		target, err := resolver.ResolveAgentDirectiveRunTarget(ctx, agentID, explicitRunID)
+		target, err := resolver.ResolveAgentDirectiveRunTarget(ctx, identity, explicitRunID)
 		if err != nil {
 			return runtimeagentcontrol.RunTargetResolution{}, err
 		}
@@ -707,9 +755,10 @@ func (am *AgentManager) resolveAgentDirectiveRunTarget(ctx context.Context, agen
 	}
 	if explicitRunID != "" {
 		return runtimeagentcontrol.RunTargetResolution{}, &runtimeagentcontrol.StateError{
-			Err:     runtimeagentcontrol.ErrRunNotFound,
-			AgentID: agentID,
-			RunID:   explicitRunID,
+			Err:          runtimeagentcontrol.ErrRunNotFound,
+			AgentID:      identity.AgentID(),
+			FlowInstance: identity.FlowInstance(),
+			RunID:        explicitRunID,
 		}
 	}
 	return runtimeagentcontrol.RunTargetResolution{
@@ -742,8 +791,8 @@ func (am *AgentManager) Run(ctx context.Context) error {
 		return errors.Join(err, am.lifecycle.abortRunStart(err))
 	}
 
-	for _, agentID := range am.lifecycle.executionIDs() {
-		if _, err := am.replaceExecution(runCtx, agentID, "start", "", nil); err != nil {
+	for _, identity := range am.lifecycle.executionIdentities() {
+		if _, err := am.replaceExecutionIdentityConfigWithTopology(runCtx, identity, "start", "", nil, am.semanticSource, false, nil); err != nil {
 			transition := am.lifecycle.requestShutdownTransition()
 			grace, _ := ResolveShutdownGrace(DefaultShutdownOptions().Grace)
 			return errors.Join(err, waitForRuntimeLifecycleTransition(transition, grace, "failed agent start shutdown drain"))
@@ -801,8 +850,8 @@ func (am *AgentManager) RunAuthoritativeDeliveryOnly(ctx context.Context) error 
 		return errors.Join(err, am.lifecycle.abortRunStart(err))
 	}
 
-	for _, agentID := range am.lifecycle.executionIDs() {
-		if _, err := am.replaceExecution(runCtx, agentID, "start", "", nil); err != nil {
+	for _, identity := range am.lifecycle.executionIdentities() {
+		if _, err := am.replaceExecutionIdentityConfigWithTopology(runCtx, identity, "start", "", nil, am.semanticSource, false, nil); err != nil {
 			transition := am.lifecycle.requestShutdownTransition()
 			grace, _ := ResolveShutdownGrace(DefaultShutdownOptions().Grace)
 			return errors.Join(err, waitForRuntimeLifecycleTransition(transition, grace, "failed authoritative agent start shutdown drain"))
@@ -1189,16 +1238,14 @@ func (am *AgentManager) replayPendingEventsDetailed(ctx context.Context) (Startu
 		return summary, nil
 	}
 
-	ids := am.lifecycle.executionIDs()
-
-	for _, id := range ids {
+	for _, identity := range am.lifecycle.executionIdentities() {
 		if am.shutdownAdmissionClosed() {
 			return summary, nil
 		}
 		if am.isAuthBreakerTripped() {
 			return summary, nil
 		}
-		backlogSummary, err := am.replayAgentBacklogDetailed(ctx, id)
+		backlogSummary, err := am.replayAgentBacklogIdentityDetailed(ctx, identity)
 		summary.merge(backlogSummary)
 		if err != nil {
 			if errors.Is(err, errRuntimeShuttingDown) {
@@ -1209,7 +1256,7 @@ func (am *AgentManager) replayPendingEventsDetailed(ctx context.Context) (Startu
 					Level:     "error",
 					Component: "agent-manager",
 					Action:    "pending_replay_failed",
-					AgentID:   id,
+					AgentID:   identity.AgentID(),
 					Failure:   failureEnvelope(err, "agent-manager", "replay_pending"),
 				})
 			}
@@ -1218,29 +1265,33 @@ func (am *AgentManager) replayPendingEventsDetailed(ctx context.Context) (Startu
 	return summary, nil
 }
 
-func (am *AgentManager) ReplayAgentBacklog(ctx context.Context, agentID string) error {
-	_, err := am.ReplayBacklog(ctx, runtimeagentcontrol.ReplayBacklogRequest{AgentID: agentID})
-	return legacyAgentControlError(err)
-}
-
 func (am *AgentManager) ReplayBacklog(ctx context.Context, req runtimeagentcontrol.ReplayBacklogRequest) (runtimeagentcontrol.ReplayBacklogResult, error) {
+	if am.shutdownAdmissionClosed() {
+		return runtimeagentcontrol.ReplayBacklogResult{}, errRuntimeShuttingDown
+	}
 	var err error
 	ctx, err = am.bindRuntimeOperationContext(ctx)
 	if err != nil {
 		return runtimeagentcontrol.ReplayBacklogResult{}, err
 	}
-	summary, err := am.replayAgentBacklogDetailed(ctx, req.AgentID)
+	identity, err := am.lifecycle.resolveAgentTarget(req.AgentID, req.FlowInstance, false)
+	if err != nil {
+		return runtimeagentcontrol.ReplayBacklogResult{}, err
+	}
+	summary, err := am.replayAgentBacklogIdentityDetailed(ctx, identity)
 	if err != nil {
 		return runtimeagentcontrol.ReplayBacklogResult{}, err
 	}
 	return runtimeagentcontrol.ReplayBacklogResult{
 		AgentID:       strings.TrimSpace(req.AgentID),
+		FlowInstance:  identity.FlowInstance(),
 		ReplayedCount: summary.ReplayedCount,
 	}, nil
 }
 
-func (am *AgentManager) replayAgentBacklogDetailed(ctx context.Context, agentID string) (StartupReplaySummary, error) {
+func (am *AgentManager) replayAgentBacklogIdentityDetailed(ctx context.Context, identity runtimeagentidentity.Identity) (StartupReplaySummary, error) {
 	summary := StartupReplaySummary{}
+	agentID := identity.AgentID()
 	if am.shutdownAdmissionClosed() {
 		return summary, agentControlNotRunning(agentID, runtimeagentcontrol.StatusTerminated)
 	}
@@ -1250,22 +1301,18 @@ func (am *AgentManager) replayAgentBacklogDetailed(ctx context.Context, agentID 
 	if am.isAuthBreakerTripped() {
 		return summary, nil
 	}
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
-		return summary, errors.New("agent id is required")
-	}
-	lease, err := am.lifecycle.acquireExecution(ctx, agentID, "replay_backlog", false)
+	lease, err := am.lifecycle.acquireExecutionIdentity(ctx, identity, "replay_backlog", false)
 	if err != nil {
 		return summary, err
 	}
 	defer lease.Release()
 	agent := lease.Agent
 	for {
-		releaseLane, laneErr := am.acquireClaimedAttemptLane(lease.Context, agentID)
+		releaseLane, laneErr := am.acquireClaimedAttemptLane(lease.Context, identity)
 		if laneErr != nil {
 			return summary, laneErr
 		}
-		pending, err := am.pendingDeliveriesForAgent(lease.Context, agentID, 1)
+		pending, err := am.pendingDeliveriesForAgent(lease.Context, lease.Token.Identity, 1)
 		if err != nil {
 			releaseLane()
 			if startupManagerReplayDiagnosticsEnabled(ctx) {
@@ -1367,13 +1414,13 @@ func legacyAgentControlError(err error) error {
 	return err
 }
 
-func (am *AgentManager) pendingDeliveriesForAgent(ctx context.Context, agentID string, limit int) ([]runtimedelivery.AgentExecution, error) {
+func (am *AgentManager) pendingDeliveriesForAgent(ctx context.Context, identity runtimeagentidentity.Identity, limit int) ([]runtimedelivery.AgentExecution, error) {
 	if am.deliveryStore == nil {
 		return nil, fmt.Errorf("delivery lifecycle owner unavailable")
 	}
-	deliveries, err := am.deliveryStore.ClaimAgentBacklog(ctx, agentID, limit)
+	deliveries, err := am.deliveryStore.ClaimAgentBacklog(ctx, identity, limit)
 	if err != nil {
-		return nil, fmt.Errorf("claim pending deliveries for %s: %w", agentID, err)
+		return nil, fmt.Errorf("claim pending deliveries for %s: %w", identity.Description(), err)
 	}
 	return deliveries, nil
 }
@@ -1486,7 +1533,7 @@ func (am *AgentManager) executeResetRuntimeState(source string) (bool, error) {
 		}
 	}
 	am.poisonMu.Lock()
-	am.poisonPanicCounts = make(map[string]int)
+	am.poisonPanicCounts = make(map[poisonPanicKey]int)
 	am.poisonMu.Unlock()
 	stateCleared := true
 	if am.resetRuntimeOwnedState != nil {
@@ -1538,25 +1585,26 @@ type replaceExecutionResult struct {
 	transitioned bool
 }
 
-func (am *AgentManager) replaceExecution(parent context.Context, agentID, trigger, operationID string, patch *runtimeactors.AgentConfig) (replaceExecutionResult, error) {
-	return am.replaceExecutionConfig(parent, agentID, trigger, operationID, patch, am.semanticSource, false)
-}
-
-func (am *AgentManager) replaceExecutionConfig(
+func (am *AgentManager) replaceExecutionIdentityConfigWithTopology(
 	parent context.Context,
-	agentID string,
+	identity runtimeagentidentity.Identity,
 	trigger string,
 	operationID string,
 	patch *runtimeactors.AgentConfig,
 	source semanticview.Source,
 	exact bool,
+	topology *DynamicAgentTopologyMutation,
 ) (replaceExecutionResult, error) {
-	return am.replaceExecutionConfigWithTopology(parent, agentID, trigger, operationID, patch, source, exact, nil)
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		return replaceExecutionResult{}, err
+	}
+	return am.replaceExecutionTargetConfigWithTopology(parent, identity, trigger, operationID, patch, source, exact, topology)
 }
 
-func (am *AgentManager) replaceExecutionConfigWithTopology(
+func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 	parent context.Context,
-	agentID string,
+	identity runtimeagentidentity.Identity,
 	trigger string,
 	operationID string,
 	patch *runtimeactors.AgentConfig,
@@ -1566,11 +1614,13 @@ func (am *AgentManager) replaceExecutionConfigWithTopology(
 ) (replaceExecutionResult, error) {
 	am.lifecycle.executionPublishMu.Lock()
 	defer am.lifecycle.executionPublishMu.Unlock()
-	cell, err := am.lifecycle.lockAgentOperation(agentID)
+	cell, err := am.lifecycle.lockIdentityOperation(identity)
 	if err != nil {
 		return replaceExecutionResult{}, err
 	}
 	defer cell.opMu.Unlock()
+	identity = cell.identity
+	agentID := identity.AgentID()
 
 	am.lifecycle.mu.Lock()
 	execution := cell.execution
@@ -1601,6 +1651,17 @@ func (am *AgentManager) replaceExecutionConfigWithTopology(
 		}
 		if updated.ID != strings.TrimSpace(agentID) {
 			return replaceExecutionResult{}, fmt.Errorf("agent id mismatch: target=%s config.id=%s", strings.TrimSpace(agentID), updated.ID)
+		}
+		updatedIdentity, err := updated.ConcreteIdentity()
+		if err != nil {
+			return replaceExecutionResult{}, err
+		}
+		if updatedIdentity != identity {
+			return replaceExecutionResult{}, fmt.Errorf(
+				"agent identity mismatch: target=%s config=%s",
+				identity.Description(),
+				updatedIdentity.Description(),
+			)
 		}
 		if err := am.resolveAgentModel(&updated); err != nil {
 			return replaceExecutionResult{}, err
@@ -1653,7 +1714,7 @@ func (am *AgentManager) replaceExecutionConfigWithTopology(
 		if err != nil {
 			return replaceExecutionResult{}, err
 		}
-		proposedToken, err = am.lifecycle.prepareLoopTokenLocked(agentID, cell)
+		proposedToken, err = am.lifecycle.prepareLoopTokenLocked(identity, cell)
 		if err != nil {
 			_ = loopWorkLease.Done()
 			return replaceExecutionResult{}, err
@@ -1689,7 +1750,7 @@ func (am *AgentManager) replaceExecutionConfigWithTopology(
 	}
 	if loopCtx != nil && token != proposedToken {
 		transitionErr := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "prepared_execution_token_mismatch", "agent-lifecycle", trigger, map[string]any{"agent_id": strings.TrimSpace(agentID)})
-		abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, strings.TrimSpace(agentID), token, done, cell)
+		abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, identity, token, done, cell)
 		return replaceExecutionResult{}, errors.Join(transitionErr, abortErr, cleanupPrepared())
 	}
 
@@ -1698,7 +1759,7 @@ func (am *AgentManager) replaceExecutionConfigWithTopology(
 	if successor == nil || successor.token != token {
 		am.lifecycle.mu.Unlock()
 		transitionErr := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", trigger, map[string]any{"agent_id": strings.TrimSpace(agentID)})
-		abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, strings.TrimSpace(agentID), token, done, cell)
+		abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, identity, token, done, cell)
 		return replaceExecutionResult{}, errors.Join(transitionErr, abortErr, cleanupPrepared())
 	}
 	successor.agent = candidate.Agent
@@ -1711,21 +1772,21 @@ func (am *AgentManager) replaceExecutionConfigWithTopology(
 	if loopCtx != nil {
 		if loopWorkLease == nil || preparedRoute == nil {
 			transitionErr := errors.New("running agent transition has no pre-admitted work and route authority")
-			abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, strings.TrimSpace(agentID), token, done, cell)
+			abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, identity, token, done, cell)
 			return replaceExecutionResult{}, errors.Join(transitionErr, abortErr, cleanupPrepared())
 		}
 		if loopWorkLease.Context().Err() != nil {
 			transitionErr := fmt.Errorf("agent execution owner retired before publication: %w", loopWorkLease.Context().Err())
-			abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, strings.TrimSpace(agentID), token, done, cell)
+			abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, identity, token, done, cell)
 			return replaceExecutionResult{}, errors.Join(transitionErr, abortErr, cleanupPrepared())
 		}
 		if err := preparedRoute.Publish(); err != nil {
-			abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, strings.TrimSpace(agentID), token, done, cell)
+			abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, identity, token, done, cell)
 			return replaceExecutionResult{}, errors.Join(fmt.Errorf("publish generation-owned agent route: %w", err), abortErr, cleanupPrepared())
 		}
 		if loopWorkLease.Context().Err() != nil {
 			transitionErr := fmt.Errorf("agent execution owner retired during route publication: %w", loopWorkLease.Context().Err())
-			abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, strings.TrimSpace(agentID), token, done, cell)
+			abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, identity, token, done, cell)
 			return replaceExecutionResult{}, errors.Join(transitionErr, abortErr, cleanupPrepared())
 		}
 		ch := preparedRoute.Deliveries()
@@ -1836,7 +1897,7 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 								}
 								return true
 							}
-							releaseLane, laneErr := am.acquireClaimedAttemptLane(evtCtx, agent.ID())
+							releaseLane, laneErr := am.acquireClaimedAttemptLane(evtCtx, route.AgentIdentity)
 							if laneErr != nil {
 								if am.bus != nil {
 									am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
@@ -1862,11 +1923,14 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 							evtCtx = runtimedelivery.WithClaim(evtCtx, claimed.Claim)
 							err, evtPanicked, evtPanicText, evtStackTrace := am.safeProcessEventOwned(evtCtx, agent, evt)
 							if evtPanicked {
-								panicCount := am.incrementPoisonPanicCount(agent.ID(), evt.ID())
+								panicCount, panicCountErr := am.incrementPoisonPanicCount(route.AgentIdentity, evt.ID())
+								if panicCountErr != nil {
+									panicCount = poisonPanicQuarantineAt
+								}
 								panicFailure := runtimefailures.FromError(runtimefailures.New(runtimefailures.ClassInternalFailure, "agent_event_panic", "agent-manager", "process_event", map[string]any{
 									"agent_id": agent.ID(), "event_id": evt.ID(), "event_type": evt.Type(),
 								}), "agent-manager", "process_event")
-								_, settlementErr := am.writeReceipt(evtCtx, evt, agent.ID(), ReceiptStatusError, &panicFailure.Failure)
+								_, settlementErr := am.writeReceipt(evtCtx, evt, ReceiptStatusError, &panicFailure.Failure)
 								if am.bus != nil {
 									detail := map[string]any{"stack_trace": evtStackTrace}
 									if settlementErr != nil {
@@ -1886,7 +1950,7 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 								}
 								if panicCount >= poisonPanicQuarantineAt {
 									am.quarantinePoisonEvent(evtCtx, agent.ID(), evt, panicCount, panicFailure.Failure)
-									am.clearPoisonPanicCount(agent.ID(), evt.ID())
+									am.clearPoisonPanicCount(route.AgentIdentity, evt.ID())
 									consecutivePanics = 0
 									return false
 								}
@@ -1897,10 +1961,10 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 								lastEventType = strings.TrimSpace(string(evt.Type()))
 								return true
 							}
-							am.clearPoisonPanicCount(agent.ID(), evt.ID())
+							am.clearPoisonPanicCount(route.AgentIdentity, evt.ID())
 							consecutivePanics = 0
-							if err != nil && am.bus != nil {
-								am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
+								if err != nil && am.bus != nil {
+									am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
 									Level:     "error",
 									Component: "agent-manager",
 									Action:    "agent_event_failed",
@@ -1923,7 +1987,7 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 				return
 			}
 			consecutivePanics++
-			am.handleAgentLoopPanic(panicCtx, agent, consecutivePanics, lastEventType, panicText, stackTrace)
+			am.handleAgentLoopPanic(panicCtx, token.Identity, agent, consecutivePanics, lastEventType, panicText, stackTrace)
 			if consecutivePanics >= 5 {
 				return
 			}
@@ -1992,7 +2056,7 @@ func panicBackoff(consecutivePanics int) time.Duration {
 	}
 }
 
-func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, consecutivePanics int, lastEventType, panicText, stackTrace string) {
+func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, identity runtimeagentidentity.Identity, agent Agent, consecutivePanics int, lastEventType, panicText, stackTrace string) {
 	panicText = strings.TrimSpace(panicText)
 	if panicText == "" {
 		panicText = "unknown panic"
@@ -2000,7 +2064,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 
 	entityID := ""
 	flowInstance := ""
-	execution, ok := am.lifecycle.executionSnapshot(agent.ID())
+	execution, ok := am.lifecycle.executionSnapshotByIdentity(identity)
 	cfg := runtimeactors.AgentConfig{}
 	if ok {
 		cfg = execution.Config
@@ -2063,7 +2127,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 		_ = am.store.UpsertAgent(ctx, PersistedAgent{
 			Config:          cfg,
 			ParentAgentID:   cfg.ParentAgent,
-			CoordinatorID:   am.resolveManagerAgentID(agent.ID()),
+			CoordinatorID:   am.resolveManagerAgentID(identity),
 			Status:          "failed",
 			HiredBy:         "runtime",
 			TemplateVersion: "",

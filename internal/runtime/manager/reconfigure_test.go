@@ -21,14 +21,18 @@ func (reconfigureTestAgent) OnEvent(context.Context, events.Event) ([]events.Eve
 	return nil, nil
 }
 
-func reconfigureMemoryIdentity(agentID, flowInstance string) agentmemory.Identity {
-	return agentmemory.Identity{RunID: "run-reconfigure", AgentID: agentID, FlowInstance: flowInstance}
+func reconfigureMemoryIdentity(t testing.TB, am *AgentManager, agentID, flowInstance string) agentmemory.Identity {
+	t.Helper()
+	return agentmemory.Identity{
+		RunID: "run-reconfigure",
+		Agent: testAgentIdentity(t, am, agentID, flowInstance),
+	}
 }
 
-func acquireReconfigureMemory(t *testing.T, registry *sessions.InMemoryRegistry, cfg models.AgentConfig) *sessions.Lease {
+func acquireReconfigureMemory(t *testing.T, am *AgentManager, registry *sessions.InMemoryRegistry, cfg models.AgentConfig) *sessions.Lease {
 	t.Helper()
 	ctx := effects.WithDifferentOwner(models.WithActor(testAuthorActivityContext(context.Background()), cfg), effects.OwnerBuildTestInfrastructure)
-	lease, err := registry.Acquire(ctx, reconfigureMemoryIdentity(cfg.ID, cfg.CanonicalFlowPath()), "reconfigure-test")
+	lease, err := registry.Acquire(ctx, reconfigureMemoryIdentity(t, am, cfg.ID, cfg.CanonicalFlowPath()), "reconfigure-test")
 	if err != nil {
 		t.Fatalf("Acquire memory: %v", err)
 	}
@@ -53,32 +57,32 @@ func TestReconfigureAgent_SameCurrentPreservesExecutionIdentityWithoutFactoryInv
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	defer cancelRun()
 	am.Run(managedExecutionTestContext(t, runCtx))
-	lease := acquireReconfigureMemory(t, registry, cfg)
-	beforeExecution, ok := am.lifecycle.executionSnapshot(cfg.ID)
+	lease := acquireReconfigureMemory(t, am, registry, cfg)
+	beforeExecution, ok := testExecutionSnapshot(t, am, cfg.ID, cfg.FlowPath)
 	if !ok {
 		t.Fatal("spawned execution is absent")
 	}
-	beforeSession, ok := registry.Snapshot(cfg.ID)
+	beforeSession, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath))
 	if !ok {
 		t.Fatal("memory session is absent before reconfigure")
 	}
 	beforeGeneration := lifecycleGenerationForTest(t, am, cfg.ID)
 
-	if err := am.ReconfigureAgent(cfg.ID, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-a"}}); err != nil {
+	if err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-a"}}); err != nil {
 		t.Fatalf("ReconfigureAgent(same current): %v", err)
 	}
 
 	if builds != 1 {
 		t.Fatalf("factory builds = %d, want 1", builds)
 	}
-	afterExecution, ok := am.lifecycle.executionSnapshot(cfg.ID)
+	afterExecution, ok := testExecutionSnapshot(t, am, cfg.ID, cfg.FlowPath)
 	if !ok || afterExecution.Agent != beforeExecution.Agent || !reflect.DeepEqual(afterExecution.Config, beforeExecution.Config) {
 		t.Fatalf("same-current execution changed: before=%#v after=%#v ok=%v", beforeExecution, afterExecution, ok)
 	}
 	if got := lifecycleGenerationForTest(t, am, cfg.ID); got != beforeGeneration {
 		t.Fatalf("generation = %d, want unchanged %d", got, beforeGeneration)
 	}
-	afterSession, ok := registry.Snapshot(cfg.ID)
+	afterSession, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath))
 	if !ok || !reflect.DeepEqual(afterSession, beforeSession) || afterSession.SessionID != lease.SessionID {
 		t.Fatalf("same-current memory changed: before=%#v after=%#v ok=%v", beforeSession, afterSession, ok)
 	}
@@ -93,16 +97,16 @@ func TestReconfigureAgent_MemoryEnabledConfigChangeRotatesExactIdentity(t *testi
 	if err := am.SpawnAgent(cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	lease := acquireReconfigureMemory(t, registry, cfg)
+	lease := acquireReconfigureMemory(t, am, registry, cfg)
 
-	if err := am.ReconfigureAgent(cfg.ID, models.AgentConfig{ExecutionMode: "live", Tools: []string{"agent_message"}}); err != nil {
+	if err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"agent_message"}}); err != nil {
 		t.Fatalf("ReconfigureAgent: %v", err)
 	}
-	rec, ok := registry.Snapshot(cfg.ID)
+	rec, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath))
 	if !ok || rec.SessionID == lease.SessionID {
 		t.Fatalf("memory session = %#v ok=%v, want rotated successor", rec, ok)
 	}
-	if rec.Identity != reconfigureMemoryIdentity(cfg.ID, cfg.FlowPath) {
+	if rec.Identity != reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath) {
 		t.Fatalf("memory identity = %+v, want exact run/agent/flow identity", rec.Identity)
 	}
 }
@@ -116,19 +120,19 @@ func TestReconfigureAgent_ExplicitFalseTerminatesReusableMemory(t *testing.T) {
 	if err := am.SpawnAgent(cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	lease := acquireReconfigureMemory(t, registry, cfg)
+	lease := acquireReconfigureMemory(t, am, registry, cfg)
 
-	if err := am.ReconfigureAgent(cfg.ID, models.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(false)}); err != nil {
+	if err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(false)}); err != nil {
 		t.Fatalf("ReconfigureAgent(memory false): %v", err)
 	}
-	if _, ok := registry.Snapshot(cfg.ID); ok {
+	if _, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath)); ok {
 		t.Fatal("reusable memory survived explicit false")
 	}
-	history := registry.History(cfg.ID)
+	history := registry.History(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath))
 	if len(history) != 1 || history[0].SessionID != lease.SessionID || history[0].Status != "terminated" || history[0].SuccessorSessionID != "" {
 		t.Fatalf("memory history = %#v, want exact terminated predecessor", history)
 	}
-	got, _ := am.GetAgentConfig(cfg.ID)
+	got, _ := testAgentConfig(t, am, cfg.ID, cfg.FlowPath)
 	if got.Memory != agentmemory.Authored(false) {
 		t.Fatalf("memory plan = %+v, want authored false", got.Memory)
 	}
@@ -143,21 +147,21 @@ func TestReconfigureAgent_ExplicitTrueStartsFreshAndOmissionRetains(t *testing.T
 	if err := am.SpawnAgent(cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	if err := am.ReconfigureAgent(cfg.ID, models.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(true)}); err != nil {
+	if err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(true)}); err != nil {
 		t.Fatalf("ReconfigureAgent(memory true): %v", err)
 	}
-	if _, ok := registry.Snapshot(cfg.ID); ok || len(registry.History(cfg.ID)) != 0 {
+	if _, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath)); ok || len(registry.History(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath))) != 0 {
 		t.Fatal("enabling memory revived or synthesized prior state")
 	}
-	lease := acquireReconfigureMemory(t, registry, models.AgentConfig{ExecutionMode: "live", ID: cfg.ID, FlowPath: cfg.FlowPath})
-	if err := am.ReconfigureAgent(cfg.ID, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-a"}}); err != nil {
+	lease := acquireReconfigureMemory(t, am, registry, models.AgentConfig{ExecutionMode: "live", ID: cfg.ID, FlowPath: cfg.FlowPath})
+	if err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-a"}}); err != nil {
 		t.Fatalf("ReconfigureAgent(omitted memory): %v", err)
 	}
-	got, _ := am.GetAgentConfig(cfg.ID)
+	got, _ := testAgentConfig(t, am, cfg.ID, cfg.FlowPath)
 	if got.Memory != agentmemory.Authored(true) {
 		t.Fatalf("omitted memory changed plan to %+v", got.Memory)
 	}
-	current, ok := registry.Snapshot(cfg.ID)
+	current, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath))
 	if !ok || current.SessionID == lease.SessionID {
 		t.Fatalf("retained enabled memory did not rotate on config change: %#v ok=%v", current, ok)
 	}
@@ -165,9 +169,7 @@ func TestReconfigureAgent_ExplicitTrueStartsFreshAndOmissionRetains(t *testing.T
 
 func lifecycleGenerationForTest(t *testing.T, am *AgentManager, agentID string) uint64 {
 	t.Helper()
-	am.lifecycle.mu.Lock()
-	defer am.lifecycle.mu.Unlock()
-	cell := am.lifecycle.cells[agentID]
+	cell, _ := testLifecycleCell(t, am.lifecycle, agentID, "")
 	if cell == nil {
 		t.Fatalf("lifecycle cell %q is absent", agentID)
 	}

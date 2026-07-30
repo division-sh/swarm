@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
@@ -587,48 +588,54 @@ func sqliteUpsertActiveRunQuiescenceRunControlTx(ctx context.Context, tx *sql.Tx
 	return nil
 }
 
-func (s *PostgresStore) ActiveRunDeliveryQuiesced(ctx context.Context, eventID, subscriberType, subscriberID string) (string, bool, error) {
+func (s *PostgresStore) ActiveRunDeliveryQuiesced(ctx context.Context, eventID string, route events.DeliveryRoute) (string, bool, error) {
 	if s == nil || s.DB == nil {
 		return "", false, fmt.Errorf("postgres store is required")
 	}
 	eventID = strings.TrimSpace(eventID)
-	subscriberType = strings.TrimSpace(subscriberType)
-	subscriberID = strings.TrimSpace(subscriberID)
-	if eventID == "" || subscriberType == "" || subscriberID == "" {
+	route = route.Normalized()
+	routeIdentity, routeErr := route.Identity()
+	if routeErr != nil {
+		return "", false, fmt.Errorf("check postgres active run delivery quiescence route: %w", routeErr)
+	}
+	if eventID == "" {
 		return "", false, nil
 	}
 	snapshots, err := s.deliverySnapshotsForEvent(ctx, eventID)
 	if err != nil {
 		return "", false, fmt.Errorf("check postgres active run delivery quiescence: %w", err)
 	}
-	return activeRunDeliveryQuiescenceReason(snapshots, subscriberType, subscriberID)
+	return activeRunDeliveryQuiescenceReason(snapshots, routeIdentity)
 }
 
-func (s *SQLiteRuntimeStore) ActiveRunDeliveryQuiesced(ctx context.Context, eventID, subscriberType, subscriberID string) (string, bool, error) {
+func (s *SQLiteRuntimeStore) ActiveRunDeliveryQuiesced(ctx context.Context, eventID string, route events.DeliveryRoute) (string, bool, error) {
 	if s == nil || s.DB == nil {
 		return "", false, fmt.Errorf("sqlite runtime store is required")
 	}
 	eventID = strings.TrimSpace(eventID)
-	subscriberType = strings.TrimSpace(subscriberType)
-	subscriberID = strings.TrimSpace(subscriberID)
-	if eventID == "" || subscriberType == "" || subscriberID == "" {
+	route = route.Normalized()
+	routeIdentity, routeErr := route.Identity()
+	if routeErr != nil {
+		return "", false, fmt.Errorf("check sqlite active run delivery quiescence route: %w", routeErr)
+	}
+	if eventID == "" {
 		return "", false, nil
 	}
 	snapshots, err := s.deliverySnapshotsForEvent(ctx, eventID)
 	if err != nil {
 		return "", false, fmt.Errorf("check sqlite active run delivery quiescence: %w", err)
 	}
-	return activeRunDeliveryQuiescenceReason(snapshots, subscriberType, subscriberID)
+	return activeRunDeliveryQuiescenceReason(snapshots, routeIdentity)
 }
 
-func activeRunDeliveryQuiescenceReason(snapshots []runtimedelivery.Snapshot, subscriberType, subscriberID string) (string, bool, error) {
+func activeRunDeliveryQuiescenceReason(snapshots []runtimedelivery.Snapshot, routeIdentity events.DeliveryRouteIdentity) (string, bool, error) {
 	reasons := map[string]struct{}{}
 	for _, reason := range activeRunQuiescenceTerminalReasonCodes() {
 		reasons[reason] = struct{}{}
 	}
 	matches := []string{}
 	for _, snapshot := range snapshots {
-		if string(snapshot.SubscriberClass) != subscriberType || snapshot.SubscriberID != subscriberID || !snapshot.Terminal() {
+		if snapshot.RouteIdentity != routeIdentity || !snapshot.Terminal() {
 			continue
 		}
 		if _, ok := reasons[snapshot.ReasonCode]; ok {

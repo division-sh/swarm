@@ -44,9 +44,11 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	}
 
 	// Upsert agent + load agents.
+	controlPlaneIdentity := testAgentIdentity(t, "control-plane", "")
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:            "control-plane",
+			Identity:      controlPlaneIdentity,
 			Role:          "control-plane",
 			FlowID:        "global",
 			Model:         "regular",
@@ -68,9 +70,11 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 
 	// Seed an operating agent id so routing_rules FK constraints are satisfied.
 	ceoID := "operator-" + entityID
+	ceoIdentity := testAgentIdentity(t, ceoID, "")
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:            ceoID,
+			Identity:      ceoIdentity,
 			Role:          "operator",
 			FlowID:        "operating",
 			Model:         "regular",
@@ -117,19 +121,30 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 		time.Now(),
 	)
 
-	if err := commitSemanticEventFixtureWithAgents(ctx, pg, evt, []string{"control-plane"}); err != nil {
+	route := events.DeliveryRoute{
+		SubscriberType: string(runtimedelivery.SubscriberAgent),
+		SubscriberID:   controlPlaneIdentity.AgentID(),
+		AgentIdentity:  controlPlaneIdentity,
+	}
+	if err := commitSemanticEventFixtureWithRoutes(ctx, pg, evt, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("append event with exact delivery: %v", err)
 	}
-	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "control-plane"}
 	claimed, err := pg.ClaimAgentDelivery(ctx, evt, route)
 	if err != nil {
 		t.Fatalf("claim delivery: %v", err)
 	}
 	activeSessionID := uuid.NewString()
+	controlPlaneFields := testAgentIdentityStorageFields(t, controlPlaneIdentity)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status)
-		VALUES ($1::uuid, $2::uuid, 'control-plane', 'global', TRUE, 'authored', 'active')
-	`, activeSessionID, evt.RunID()); err != nil {
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source, status
+		)
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', 'active')
+	`, activeSessionID, evt.RunID(), controlPlaneFields.AgentID, controlPlaneFields.NameOwner,
+		controlPlaneFields.NameSource, controlPlaneFields.RoutePresence, controlPlaneFields.FlowScopeKey,
+		controlPlaneFields.FlowInstanceID, controlPlaneFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed delivery session: %v", err)
 	}
 	if _, err := pg.BindAgentSession(ctx, claimed.Claim, activeSessionID); err != nil {

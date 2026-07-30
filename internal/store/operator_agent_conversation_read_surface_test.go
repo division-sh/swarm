@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"sort"
@@ -15,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -72,10 +74,10 @@ func (s fakeAgentConversationReadSource) LoadAgents(context.Context) ([]runtimem
 	return s.agents, s.err
 }
 
-func (s fakeAgentConversationReadSource) ListPendingAgentDeliveryFacts(_ context.Context, agentIDs []string, _ time.Time) (map[string]PendingAgentDeliveryFacts, error) {
-	out := make(map[string]PendingAgentDeliveryFacts, len(agentIDs))
-	for _, agentID := range agentIDs {
-		out[agentID] = s.pending[agentID]
+func (s fakeAgentConversationReadSource) ListPendingAgentDeliveryFacts(_ context.Context, identities []agentidentity.Identity, _ time.Time) (map[agentidentity.Identity]PendingAgentDeliveryFacts, error) {
+	out := make(map[agentidentity.Identity]PendingAgentDeliveryFacts, len(identities))
+	for _, identity := range identities {
+		out[identity] = s.pending[identity.AgentID()]
 	}
 	return out, s.err
 }
@@ -84,7 +86,7 @@ func (s fakeAgentConversationReadSource) ListPendingAgentDeliveryDetails(_ conte
 	if s.detailErr != nil {
 		return PendingAgentDeliveryPage{}, s.detailErr
 	}
-	page, ok := s.details[strings.TrimSpace(opts.AgentID)]
+	page, ok := s.details[opts.AgentIdentity.AgentID()]
 	if !ok {
 		return PendingAgentDeliveryPage{PendingDeliveries: []PendingAgentDeliveryDetail{}}, s.err
 	}
@@ -94,10 +96,10 @@ func (s fakeAgentConversationReadSource) ListPendingAgentDeliveryDetails(_ conte
 	return page, s.err
 }
 
-func (s fakeAgentConversationReadSource) ListAgentDeliveryLifecycleFacts(_ context.Context, agentIDs []string) (map[string]AgentDeliveryLifecycleFacts, error) {
-	out := make(map[string]AgentDeliveryLifecycleFacts, len(agentIDs))
-	for _, agentID := range agentIDs {
-		out[agentID] = s.lifecycle[agentID]
+func (s fakeAgentConversationReadSource) ListAgentDeliveryLifecycleFacts(_ context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]AgentDeliveryLifecycleFacts, error) {
+	out := make(map[agentidentity.Identity]AgentDeliveryLifecycleFacts, len(identities))
+	for _, identity := range identities {
+		out[identity] = s.lifecycle[identity.AgentID()]
 	}
 	return out, s.err
 }
@@ -110,7 +112,7 @@ func (s fakeAgentConversationReadSource) deliveryDiagnosticSnapshotPageForAgent(
 	return runtimedelivery.SnapshotPage{Snapshots: []runtimedelivery.Snapshot{}}, nil
 }
 
-func (s fakeAgentConversationReadSource) deliveryDiagnosticCountsForAgentSince(context.Context, string, time.Time) (runtimedelivery.AgentDiagnosticCounts, error) {
+func (s fakeAgentConversationReadSource) deliveryDiagnosticCountsForAgentSince(context.Context, agentidentity.Identity, time.Time) (runtimedelivery.AgentDiagnosticCounts, error) {
 	return runtimedelivery.AgentDiagnosticCounts{}, nil
 }
 
@@ -141,6 +143,7 @@ func (s fakeAgentConversationReadSource) LoadOperatorPublicConversationTurn(_ co
 func TestOperatorAgentSummaryPublishesCanonicalMemoryFacts(t *testing.T) {
 	memorySummary := operatorAgentSummaryFromPersisted(runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "memory-agent",
+			Identity: testAgentIdentity(t, "memory-agent", "support/chat-1"),
 			Role:     "worker",
 			Type:     "managed",
 			Model:    "cheap",
@@ -170,10 +173,11 @@ func TestOperatorAgentSummaryPublishesCanonicalMemoryFacts(t *testing.T) {
 
 	defaultSummary := operatorAgentSummaryFromPersisted(runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "stateless-agent",
-			Role:   "worker",
-			Type:   "managed",
-			Model:  "cheap",
-			Memory: agentmemory.PlatformDefault(),
+			Identity: testAgentIdentity(t, "stateless-agent", ""),
+			Role:     "worker",
+			Type:     "managed",
+			Model:    "cheap",
+			Memory:   agentmemory.PlatformDefault(),
 		},
 	}, operatorAgentProjection{}, 0)
 	if defaultSummary.Memory || defaultSummary.MemorySource != string(agentmemory.SourcePlatformDefault) {
@@ -196,8 +200,27 @@ func TestOperatorAgentSummaryPublishesCanonicalMemoryFacts(t *testing.T) {
 
 func operatorAgentProjectionColumns() []string {
 	return []string{
-		"agent_id", "status", "session_id", "session_started_at", "turn_count", "lease_holder", "lease_expires_at", "runtime_state", "pending_count", "oldest_pending_age_sec",
+		"agent_id", "agent_name_owner", "agent_name_source", "agent_route_presence",
+		"flow_scope_key", "flow_instance_id", "flow_instance",
+		"status", "session_id", "session_started_at", "turn_count", "lease_holder",
+		"lease_expires_at", "runtime_state", "pending_count", "oldest_pending_age_sec",
 	}
+}
+
+func operatorAgentProjectionRow(agentID string, values ...driver.Value) []driver.Value {
+	fields, err := testOperatorAgentIdentity(agentID).StorageFields()
+	if err != nil {
+		panic(err)
+	}
+	return append([]driver.Value{
+		fields.AgentID,
+		fields.NameOwner,
+		fields.NameSource,
+		fields.RoutePresence,
+		fields.FlowScopeKey,
+		fields.FlowInstanceID,
+		fields.FlowInstancePath,
+	}, values...)
 }
 
 func TestCanonicalStatelessConversationVisibilitySourceProjectsRunID(t *testing.T) {
@@ -222,6 +245,7 @@ func TestOperatorConversationQuerySourcesAlwaysProjectRunID(t *testing.T) {
 func testOperatorAgent(agentID string) runtimemanager.PersistedAgent {
 	return runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
+			Identity:      testOperatorAgentIdentity(agentID),
 			ID:            agentID,
 			Role:          "researcher",
 			Type:          "managed",
@@ -232,6 +256,10 @@ func testOperatorAgent(agentID string) runtimemanager.PersistedAgent {
 		Status:    "active",
 		StartedAt: time.Date(2026, 5, 12, 8, 0, 0, 0, time.UTC),
 	}
+}
+
+func testOperatorAgentIdentity(agentID string) agentidentity.Identity {
+	return mustTestAgentIdentity(agentID, "global")
 }
 
 func TestOperatorConversationReadSurfaceListUsesCanonicalProjection(t *testing.T) {
@@ -300,9 +328,9 @@ func TestOperatorAgentReadSurfaceLoadAgentProjectsSessionAndTurnRefs(t *testing.
 	}, 0)
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{"provider_session_id":"provider-sess-1"}`), 0, 0))
+			AddRow(operatorAgentProjectionRow("agent-1", "active", sessionID, sessionStartedAt, 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{"provider_session_id":"provider-sess-1"}`), 0, 0)...))
 
-	detail, err := reader.LoadOperatorAgent(testAuthorActivityContext(), "agent-1")
+	detail, err := reader.LoadOperatorAgent(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"))
 	if err != nil {
 		t.Fatalf("LoadOperatorAgent: %v", err)
 	}
@@ -348,7 +376,7 @@ func TestOperatorAgentReadSurfaceListAgentsDoesNotDeriveStatusFromActiveLease(t 
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0))
+			AddRow(operatorAgentProjectionRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0)...))
 
 	result, err := reader.ListOperatorAgents(testAuthorActivityContext(), OperatorAgentListOptions{})
 	if err != nil {
@@ -427,9 +455,9 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "", nil, runtimeState, 0, 0))
+			AddRow(operatorAgentProjectionRow("agent-1", "active", sessionID, sessionStartedAt, 2, "", nil, runtimeState, 0, 0)...))
 
-	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), "agent-1", OperatorAgentDiagnosisOptions{QueueLimit: 1, QueueCursor: "cursor-1"})
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), OperatorAgentDiagnosisOptions{QueueLimit: 1, QueueCursor: "cursor-1"})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
 	}
@@ -490,12 +518,14 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 	ctx := testAuthorActivityContext()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
+			Identity:      testOperatorAgentIdentity("agent-1"),
 			ID:            "agent-1",
 			Role:          "researcher",
 			Type:          "managed",
 			Model:         "cheap",
 			ExecutionMode: "live",
 			Memory:        agentmemory.PlatformDefault(),
+			FlowPath:      "global",
 			Config:        json.RawMessage(`{"system_prompt":"diagnose"}`),
 		},
 		Status:    "active",
@@ -524,8 +554,8 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 	} {
 		eventsByID[event.id] = seedOperatorAgentEvent(t, ctx, pg, event.id, runID, event.name, entityID, now.Add(-10*time.Minute))
 	}
-	agentOneRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"}
-	agentTwoRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-2"}
+	agentOneRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1", AgentIdentity: testOperatorAgentIdentity("agent-1")}
+	agentTwoRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-2", AgentIdentity: testOperatorAgentIdentity("agent-2")}
 	oldFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "old_failure", nil)
 	oldSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[failedOldEventID], agentOneRoute, runtimedelivery.StateRetrying, &oldFailure)
 	terminalFailureEnvelope := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "terminal_failure", nil)
@@ -545,7 +575,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 		t.Fatalf("load canonical dead letter: %v", err)
 	}
 
-	first, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, "agent-1", OperatorAgentDeliveryDiagnosticsOptions{
+	first, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentDeliveryDiagnosticsOptions{
 		FailureLimit:    1,
 		DeadLetterLimit: 10,
 	})
@@ -574,7 +604,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 		t.Fatalf("dead letter records = %#v", first.DeadLetters[0].DeadLetterRecords)
 	}
 
-	second, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, "agent-1", OperatorAgentDeliveryDiagnosticsOptions{
+	second, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentDeliveryDiagnosticsOptions{
 		FailureLimit:  1,
 		FailureCursor: first.FailuresNextCursor,
 	})
@@ -597,12 +627,14 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 	ctx := testAuthorActivityContext()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
+			Identity:      testOperatorAgentIdentity("agent-1"),
 			ID:            "agent-1",
 			Role:          "researcher",
 			Type:          "managed",
 			Model:         "cheap",
 			ExecutionMode: "live",
 			Memory:        agentmemory.PlatformDefault(),
+			FlowPath:      "global",
 			Config:        json.RawMessage(`{"system_prompt":"usage"}`),
 		},
 		Status:    "active",
@@ -612,12 +644,14 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 	}
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
+			Identity:      testOperatorAgentIdentity("agent-2"),
 			ID:            "agent-2",
 			Role:          "other",
 			Type:          "managed",
 			Model:         "cheap",
 			ExecutionMode: "live",
 			Memory:        agentmemory.PlatformDefault(),
+			FlowPath:      "global",
 			Config:        json.RawMessage(`{"system_prompt":"usage"}`),
 		},
 		Status:    "active",
@@ -649,19 +683,29 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 		{"agent-2", "claude-3-5-sonnet", "regular", "anthropic", "anthropic", "api", "claude-3-5-sonnet", 999, 999, "1.000000", "anthropic", AgentUsageAccountingExact, since.Add(time.Minute)},
 	}
 	for _, row := range rows {
+		fields, err := testOperatorAgentIdentity(row.agentID).StorageFields()
+		if err != nil {
+			t.Fatalf("seed spend identity: %v", err)
+		}
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO spend_ledger (
-				flow_instance, agent_id, model, model_alias, backend_profile, provider, transport, resolved_model, input_tokens, output_tokens,
-				cost_usd, invocation_type, usage_accounting, execution_mode, created_at
+				flow_instance, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				agent_flow_scope_key, agent_flow_instance_id,
+				model, model_alias, backend_profile, provider, transport, resolved_model,
+				input_tokens, output_tokens, cost_usd, invocation_type, usage_accounting, execution_mode, created_at
 			) VALUES (
-				'flow/a', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::numeric, $11, $12, 'live', $13
+				$1, $2, $3, $4, $5, $6, $7,
+				$8, $9, $10, $11, $12, $13, $14, $15, $16::numeric, $17, $18, 'live', $19
 			)
-		`, row.agentID, row.model, row.modelAlias, row.backendProfile, row.provider, row.transport, row.resolvedModel, row.inputTokens, row.outputTokens, row.costUSD, row.invocationType, row.usageAccounting, row.createdAt); err != nil {
+		`, fields.FlowInstancePath, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+			fields.FlowScopeKey, fields.FlowInstanceID,
+			row.model, row.modelAlias, row.backendProfile, row.provider, row.transport, row.resolvedModel,
+			row.inputTokens, row.outputTokens, row.costUSD, row.invocationType, row.usageAccounting, row.createdAt); err != nil {
 			t.Fatalf("seed spend row %+v: %v", row, err)
 		}
 	}
 
-	result, err := pg.LoadOperatorAgentUsage(ctx, "agent-1", OperatorAgentUsageOptions{Since: &since, Until: &until})
+	result, err := pg.LoadOperatorAgentUsage(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentUsageOptions{Since: &since, Until: &until})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentUsage: %v", err)
 	}
@@ -696,11 +740,13 @@ func TestSQLiteRuntimeStoreLoadAgentUsageSplitsExactAndEstimated(t *testing.T) {
 
 	since := time.Date(2026, 5, 21, 9, 0, 0, 0, time.UTC)
 	until := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
+	agent1 := testOperatorAgentIdentity("agent-1")
+	agent2 := testOperatorAgentIdentity("agent-2")
 	records := []budgetspend.SpendRecord{
-		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 100, OutputTokens: 25, CostUSD: 0.000675, InvocationType: "anthropic", UsageAccounting: AgentUsageAccountingExact, RecordedAt: since},
-		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", Model: "sonnet", ModelAlias: "regular", BackendProfile: "claude_cli", Provider: "claude", Transport: "cli", ResolvedModel: "sonnet", InputTokens: 50, OutputTokens: 10, CostUSD: 0.000300, InvocationType: "claude_cli", UsageAccounting: AgentUsageAccountingEstimated, RecordedAt: since.Add(time.Minute)},
-		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 7, OutputTokens: 3, CostUSD: 0.000010, InvocationType: "anthropic", UsageAccounting: AgentUsageAccountingExact, RecordedAt: until},
-		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-2", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 999, OutputTokens: 999, CostUSD: 1.000000, InvocationType: "anthropic", UsageAccounting: AgentUsageAccountingExact, RecordedAt: since.Add(time.Minute)},
+		{ExecutionMode: "live", FlowInstance: "global", AgentID: "agent-1", AgentIdentity: agent1, Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 100, OutputTokens: 25, CostUSD: 0.000675, InvocationType: "anthropic", UsageAccounting: AgentUsageAccountingExact, RecordedAt: since},
+		{ExecutionMode: "live", FlowInstance: "global", AgentID: "agent-1", AgentIdentity: agent1, Model: "sonnet", ModelAlias: "regular", BackendProfile: "claude_cli", Provider: "claude", Transport: "cli", ResolvedModel: "sonnet", InputTokens: 50, OutputTokens: 10, CostUSD: 0.000300, InvocationType: "claude_cli", UsageAccounting: AgentUsageAccountingEstimated, RecordedAt: since.Add(time.Minute)},
+		{ExecutionMode: "live", FlowInstance: "global", AgentID: "agent-1", AgentIdentity: agent1, Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 7, OutputTokens: 3, CostUSD: 0.000010, InvocationType: "anthropic", UsageAccounting: AgentUsageAccountingExact, RecordedAt: until},
+		{ExecutionMode: "live", FlowInstance: "global", AgentID: "agent-2", AgentIdentity: agent2, Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 999, OutputTokens: 999, CostUSD: 1.000000, InvocationType: "anthropic", UsageAccounting: AgentUsageAccountingExact, RecordedAt: since.Add(time.Minute)},
 	}
 	for _, rec := range records {
 		if err := sqliteStore.RecordSpend(ctx, rec); err != nil {
@@ -708,7 +754,7 @@ func TestSQLiteRuntimeStoreLoadAgentUsageSplitsExactAndEstimated(t *testing.T) {
 		}
 	}
 
-	result, err := sqliteStore.LoadOperatorAgentUsage(ctx, "agent-1", OperatorAgentUsageOptions{Since: &since, Until: &until})
+	result, err := sqliteStore.LoadOperatorAgentUsage(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentUsageOptions{Since: &since, Until: &until})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentUsage: %v", err)
 	}
@@ -742,7 +788,7 @@ func TestSQLiteRuntimeStoreLoadAgentUsageEmptyAndAgentExistence(t *testing.T) {
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-terminated", "terminated")
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-ephemeral", "ephemeral")
 
-	result, err := sqliteStore.LoadOperatorAgentUsage(ctx, "agent-empty", OperatorAgentUsageOptions{})
+	result, err := sqliteStore.LoadOperatorAgentUsage(ctx, testOperatorAgentIdentity("agent-empty"), OperatorAgentUsageOptions{})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentUsage empty: %v", err)
 	}
@@ -753,7 +799,7 @@ func TestSQLiteRuntimeStoreLoadAgentUsageEmptyAndAgentExistence(t *testing.T) {
 		t.Fatalf("empty usage totals = %#v", result.Usage)
 	}
 	for _, agentID := range []string{"missing", "agent-terminated", "agent-ephemeral"} {
-		_, err := sqliteStore.LoadOperatorAgentUsage(ctx, agentID, OperatorAgentUsageOptions{})
+		_, err := sqliteStore.LoadOperatorAgentUsage(ctx, testOperatorAgentIdentity(agentID), OperatorAgentUsageOptions{})
 		if !errors.Is(err, ErrAgentNotFound) {
 			t.Fatalf("LoadOperatorAgentUsage(%s) error = %v, want ErrAgentNotFound", agentID, err)
 		}
@@ -764,16 +810,24 @@ func TestSQLiteRuntimeStoreLoadAgentUsageFailsClosedOnMalformedRows(t *testing.T
 	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-1", "active")
+	fields, err := testOperatorAgentIdentity("agent-1").StorageFields()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO spend_ledger (
-			flow_instance, agent_id, model, invocation_type, usage_accounting, execution_mode, created_at
+			flow_instance, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			agent_flow_scope_key, agent_flow_instance_id,
+			model, invocation_type, usage_accounting, execution_mode, created_at
 		) VALUES (
-			'flow/a', 'agent-1', '', 'anthropic', 'exact', 'live', ?
+			?, ?, ?, ?, ?, ?, ?, '', 'anthropic', 'exact', 'live', ?
 		)
-	`, time.Date(2026, 5, 21, 9, 0, 0, 0, time.UTC)); err != nil {
+	`, fields.FlowInstancePath, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID,
+		time.Date(2026, 5, 21, 9, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("seed malformed spend row: %v", err)
 	}
-	_, err := sqliteStore.LoadOperatorAgentUsage(ctx, "agent-1", OperatorAgentUsageOptions{})
+	_, err = sqliteStore.LoadOperatorAgentUsage(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentUsageOptions{})
 	if err == nil || !strings.Contains(err.Error(), "empty model") {
 		t.Fatalf("LoadOperatorAgentUsage malformed error = %v, want empty model", err)
 	}
@@ -783,12 +837,14 @@ func seedOperatorAgentUsageAgent(t *testing.T, ctx context.Context, store *SQLit
 	t.Helper()
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
+			Identity:      testOperatorAgentIdentity(agentID),
 			ID:            agentID,
 			Role:          "researcher",
 			Type:          "managed",
 			Model:         "cheap",
 			ExecutionMode: "live",
 			Memory:        agentmemory.PlatformDefault(),
+			FlowPath:      "global",
 			Config:        json.RawMessage(`{"system_prompt":"usage"}`),
 		},
 		Status:    status,
@@ -806,12 +862,14 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsDoesNotRequireConve
 	ctx := testAuthorActivityContext()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
+			Identity:      testOperatorAgentIdentity("agent-1"),
 			ID:            "agent-1",
 			Role:          "researcher",
 			Type:          "managed",
 			Model:         "cheap",
 			ExecutionMode: "live",
 			Memory:        agentmemory.PlatformDefault(),
+			FlowPath:      "global",
 			Config:        json.RawMessage(`{"system_prompt":"diagnose"}`),
 		},
 		Status:    "active",
@@ -822,7 +880,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsDoesNotRequireConve
 
 	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{}, 0)
 
-	result, err := reader.LoadOperatorAgentDeliveryDiagnostics(ctx, "agent-1", OperatorAgentDeliveryDiagnosticsOptions{})
+	result, err := reader.LoadOperatorAgentDeliveryDiagnostics(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentDeliveryDiagnosticsOptions{})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDeliveryDiagnostics: %v", err)
 	}
@@ -852,12 +910,14 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 	} {
 		if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 			Config: runtimeactors.AgentConfig{
+				Identity:      testOperatorAgentIdentity(agent.id),
 				ID:            agent.id,
 				Role:          agent.role,
 				Type:          "managed",
 				Model:         "cheap",
 				ExecutionMode: "live",
 				Memory:        agentmemory.PlatformDefault(),
+				FlowPath:      "global",
 				Config:        json.RawMessage(`{"system_prompt":"lifecycle"}`),
 			},
 			Status:    "active",
@@ -896,8 +956,8 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 	} {
 		eventsByID[event.id] = seedOperatorAgentEvent(t, ctx, pg, event.id, event.runID, event.name, entityID, base.Add(-10*time.Minute))
 	}
-	agentOneRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"}
-	agentTwoRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-2"}
+	agentOneRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1", AgentIdentity: testOperatorAgentIdentity("agent-1")}
+	agentTwoRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-2", AgentIdentity: testOperatorAgentIdentity("agent-2")}
 	pendingSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[pendingEventID], agentOneRoute, runtimedelivery.StateQueued, nil)
 	inProgressSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[inProgressEventID], agentOneRoute, runtimedelivery.StateLaunching, nil)
 	deliveredSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[deliveredEventID], agentOneRoute, runtimedelivery.StateDelivered, nil)
@@ -914,7 +974,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 	failedDeliveryID := failedSnapshot.DeliveryID
 	deadLetterDeliveryID := deadLetterSnapshot.DeliveryID
 
-	first, err := pg.LoadOperatorAgentDeliveryLifecycle(ctx, "agent-1", OperatorAgentDeliveryLifecycleOptions{
+	first, err := pg.LoadOperatorAgentDeliveryLifecycle(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentDeliveryLifecycleOptions{
 		RunID:    runID,
 		Statuses: []string{"pending", "in_progress", "delivered", "failed", "dead_letter"},
 		Limit:    3,
@@ -929,7 +989,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 		t.Fatal("next_cursor empty, want second page")
 	}
 
-	second, err := pg.LoadOperatorAgentDeliveryLifecycle(ctx, "agent-1", OperatorAgentDeliveryLifecycleOptions{
+	second, err := pg.LoadOperatorAgentDeliveryLifecycle(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentDeliveryLifecycleOptions{
 		RunID:    runID,
 		Statuses: []string{"pending", "in_progress", "delivered", "failed", "dead_letter"},
 		Limit:    3,
@@ -1012,12 +1072,14 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
+			Identity:      testOperatorAgentIdentity("agent-1"),
 			ID:            "agent-1",
 			Role:          "researcher",
 			Type:          "managed",
 			Model:         "cheap",
 			ExecutionMode: "live",
 			Memory:        agentmemory.PlatformDefault(),
+			FlowPath:      "global",
 			Config:        json.RawMessage(`{"system_prompt":"lifecycle"}`),
 		},
 		Status:    "active",
@@ -1027,12 +1089,14 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 	}
 	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
+			Identity:      testOperatorAgentIdentity("agent-2"),
 			ID:            "agent-2",
 			Role:          "reviewer",
 			Type:          "managed",
 			Model:         "cheap",
 			ExecutionMode: "live",
 			Memory:        agentmemory.PlatformDefault(),
+			FlowPath:      "global",
 			Config:        json.RawMessage(`{"system_prompt":"lifecycle"}`),
 		},
 		Status:    "active",
@@ -1077,8 +1141,8 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 		}
 		eventsByID[event.id] = fixture
 	}
-	agentOneRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"}
-	agentTwoRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-2"}
+	agentOneRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1", AgentIdentity: testOperatorAgentIdentity("agent-1")}
+	agentTwoRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-2", AgentIdentity: testOperatorAgentIdentity("agent-2")}
 	pendingSnapshot := seedAgentDeliveryStateFixture(t, ctx, sqliteStore, eventsByID[pendingEventID], agentOneRoute, runtimedelivery.StateQueued, nil)
 	inProgressSnapshot := seedAgentDeliveryStateFixture(t, ctx, sqliteStore, eventsByID[inProgressEventID], agentOneRoute, runtimedelivery.StateLaunching, nil)
 	deliveredSnapshot := seedAgentDeliveryStateFixture(t, ctx, sqliteStore, eventsByID[deliveredEventID], agentOneRoute, runtimedelivery.StateDelivered, nil)
@@ -1095,7 +1159,7 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 	failedDeliveryID := failedSnapshot.DeliveryID
 	deadLetterDeliveryID := deadLetterSnapshot.DeliveryID
 
-	first, err := sqliteStore.LoadOperatorAgentDeliveryLifecycle(ctx, "agent-1", OperatorAgentDeliveryLifecycleOptions{
+	first, err := sqliteStore.LoadOperatorAgentDeliveryLifecycle(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentDeliveryLifecycleOptions{
 		RunID:    runID,
 		Statuses: []string{"pending", "in_progress", "delivered", "failed", "dead_letter"},
 		Limit:    3,
@@ -1110,7 +1174,7 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 		t.Fatal("next_cursor empty, want second page")
 	}
 
-	second, err := sqliteStore.LoadOperatorAgentDeliveryLifecycle(ctx, "agent-1", OperatorAgentDeliveryLifecycleOptions{
+	second, err := sqliteStore.LoadOperatorAgentDeliveryLifecycle(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentDeliveryLifecycleOptions{
 		RunID:    runID,
 		Statuses: []string{"pending", "in_progress", "delivered", "failed", "dead_letter"},
 		Limit:    3,
@@ -1252,12 +1316,14 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsUsesCanonicalLifecy
 	ctx := testAuthorActivityContext()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
+			Identity:      testOperatorAgentIdentity("agent-1"),
 			ID:            "agent-1",
 			Role:          "researcher",
 			Type:          "managed",
 			Model:         "cheap",
 			ExecutionMode: "live",
 			Memory:        agentmemory.PlatformDefault(),
+			FlowPath:      "global",
 			Config:        json.RawMessage(`{"system_prompt":"diagnose"}`),
 		},
 		Status:    "active",
@@ -1270,9 +1336,13 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsUsesCanonicalLifecy
 	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	event := seedOperatorAgentEvent(t, ctx, pg, eventID, runID, "task.dead", "", time.Now().UTC())
 	failure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "missing_dead_letter_record", nil)
-	seedAgentDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"}, runtimedelivery.StateExhausted, &failure)
+	seedAgentDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{
+		SubscriberType: "agent",
+		SubscriberID:   "agent-1",
+		AgentIdentity:  testOperatorAgentIdentity("agent-1"),
+	}, runtimedelivery.StateExhausted, &failure)
 
-	got, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, "agent-1", OperatorAgentDeliveryDiagnosticsOptions{})
+	got, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentDeliveryDiagnosticsOptions{})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDeliveryDiagnostics: %v", err)
 	}
@@ -1314,9 +1384,9 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsAbsentLifecycle(t *testi
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0))
+			AddRow(operatorAgentProjectionRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0)...))
 
-	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), "agent-1", OperatorAgentDiagnosisOptions{})
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), OperatorAgentDiagnosisOptions{})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
 	}
@@ -1460,9 +1530,9 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisDoesNotDeriveStatusFromActive
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0))
+			AddRow(operatorAgentProjectionRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0)...))
 
-	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), "agent-1", OperatorAgentDiagnosisOptions{})
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), OperatorAgentDiagnosisOptions{})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
 	}
@@ -1490,9 +1560,9 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsActiveWithoutLatestTurn(
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{}`), 0, 0))
+			AddRow(operatorAgentProjectionRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{}`), 0, 0)...))
 
-	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), "agent-1", OperatorAgentDiagnosisOptions{})
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), OperatorAgentDiagnosisOptions{})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
 	}
@@ -1524,9 +1594,9 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsEmptyActiveOptionalRefs(
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{}`), 0, 0))
+			AddRow(operatorAgentProjectionRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{}`), 0, 0)...))
 
-	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), "agent-1", OperatorAgentDiagnosisOptions{})
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), OperatorAgentDiagnosisOptions{})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
 	}
@@ -1554,9 +1624,9 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedRuntime
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{"watchdog":{"state":"stale","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","recorded_at":"2026-05-12T09:05:00Z"}}`), 0, 0))
+			AddRow(operatorAgentProjectionRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{"watchdog":{"state":"stale","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","recorded_at":"2026-05-12T09:05:00Z"}}`), 0, 0)...))
 
-	_, err = reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), "agent-1", OperatorAgentDiagnosisOptions{})
+	_, err = reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), OperatorAgentDiagnosisOptions{})
 	if err == nil || !strings.Contains(err.Error(), "decode latest agent session runtime_state") || !strings.Contains(err.Error(), "watchdog.state") {
 		t.Fatalf("LoadOperatorAgentDiagnosis err = %v, want runtime_state watchdog validation failure", err)
 	}
@@ -1581,9 +1651,9 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedLifecyc
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0))
+			AddRow(operatorAgentProjectionRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0)...))
 
-	_, err = reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), "agent-1", OperatorAgentDiagnosisOptions{})
+	_, err = reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), OperatorAgentDiagnosisOptions{})
 	if err == nil || !strings.Contains(err.Error(), "delivery_lifecycle.state") {
 		t.Fatalf("LoadOperatorAgentDiagnosis err = %v, want delivery_lifecycle.state failure", err)
 	}
@@ -1627,9 +1697,9 @@ func loadAgentDiagnosisWithLatestTurn(t *testing.T, turnID, taskID, entityID str
 	reader := NewOperatorAgentConversationReadSurface(db, source, 0)
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "11111111-1111-1111-1111-111111111111", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 1, "", nil, []byte(`{}`), 0, 0))
+			AddRow(operatorAgentProjectionRow("agent-1", "active", "11111111-1111-1111-1111-111111111111", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 1, "", nil, []byte(`{}`), 0, 0)...))
 
-	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), "agent-1", OperatorAgentDiagnosisOptions{})
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), OperatorAgentDiagnosisOptions{})
 	if expectationsErr := mock.ExpectationsWereMet(); expectationsErr != nil {
 		t.Fatalf("expectations: %v", expectationsErr)
 	}

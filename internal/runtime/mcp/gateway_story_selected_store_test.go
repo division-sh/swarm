@@ -21,6 +21,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
@@ -89,13 +90,14 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 			actor := models.AgentConfig{
 				ExecutionMode: "live",
 				ID:            "story-writer",
+				Identity:      agentidentitytest.Declared(t, "story-writer", "mcp-gateway-story://story/story-writer", "story", "instance-1", "story/instance-1"),
 				Type:          "internal",
 				Role:          "story-writer",
 				FlowID:        "story",
 				FlowPath:      "story/instance-1",
 				Tools:         []string{"send_story"},
 			}
-			seedGatewayStoryRuntime(t, selected, runID, actor.ID, sourceFact)
+			seedGatewayStoryRuntime(t, selected, runID, actor, sourceFact)
 			source := loadGatewayStorySource(t, server.URL)
 			executor := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{WorkflowSource: source})
 			if !gatewayStoryToolOffered(executor, actor, "send_story") {
@@ -151,7 +153,7 @@ func gatewayStoryManagedTurnContext(ctx context.Context, selected gatewayStorySe
 		ctx = runtimeauthoractivity.WithScope(ctx, scope)
 	}
 	ctx = runtimebus.WithInboundEvent(ctx, gatewayStoryInboundEvent(runID, actor))
-	ctx = runtimeeffects.WithLifecycleToken(ctx, runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: actor.ID, Generation: 3})
+	ctx = runtimeeffects.WithLifecycleToken(ctx, runtimeeffects.LifecycleToken{Identity: actor.Identity, RuntimeEpoch: 7, AgentID: actor.ID, Generation: 3})
 	ctx = runtimeeffects.WithAuthority(ctx, authority)
 	ctx = managedexecution.WithAdmission(ctx, admission)
 	ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewController(selected.backend))
@@ -173,11 +175,12 @@ func gatewayStoryCapabilitySurface(t *testing.T, gateway *runtimemcp.Gateway, ac
 	}
 	turnID := uuid.NewString()
 	sessionID := uuid.NewString()
-	token := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: actor.ID, Generation: 3}
+	token := runtimeeffects.LifecycleToken{Identity: actor.Identity, RuntimeEpoch: 7, AgentID: actor.ID, Generation: 3}
 	authority := runtimeeffects.NormalAgentAuthority(token, "gateway-story-owner", time.Now().UTC().Add(time.Hour))
 	authority.Target = runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: runID, AgentID: actor.ID,
-		SessionID: sessionID, Memory: agentmemory.PlatformDefault(), FlowInstance: actor.CanonicalFlowPath(),
+		AgentIdentity: actor.Identity, SessionID: sessionID, Memory: agentmemory.PlatformDefault(),
+		FlowInstance: actor.CanonicalFlowPath(),
 	}
 	binding := managedcapabilities.DeliveryBinding{
 		Kind: managedcapabilities.BindingMCPTool, ExactName: "mcp__runtime-tools__send_story", RequiredEvidenceKind: "mcp_listed",
@@ -290,25 +293,41 @@ func writeGatewayStoryFixture(t *testing.T, path, contents string) {
 	}
 }
 
-func seedGatewayStoryRuntime(t *testing.T, selected gatewayStorySelectedStore, runID, agentID string, source runtimecorrelation.BundleSourceFact) {
+func seedGatewayStoryRuntime(t *testing.T, selected gatewayStorySelectedStore, runID string, actor models.AgentConfig, source runtimecorrelation.BundleSourceFact) {
 	t.Helper()
 	now := time.Now().UTC()
 	bundleHash, bundleSource := source.StorageValues()
+	fields, err := actor.Identity.StorageFields()
+	if err != nil {
+		t.Fatalf("seed selected-store agent identity: %v", err)
+	}
 	if selected.postgres {
 		runlifecyclefixture.RequirePostgres(t, context.Background(), selected.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash, BundleSource: bundleSource})
 		if _, err := selected.db.ExecContext(context.Background(), `
-			INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, created_at)
-			VALUES ($1, 'story/instance-1', 'story-writer', 'regular', 'mock', FALSE, 'platform_default', 'active', 7, 3, 'running', $2)
-		`, agentID, now); err != nil {
+			INSERT INTO agents (
+				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, flow_instance,
+				role, model, llm_backend, memory_enabled, memory_source, status,
+				lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, created_at
+			)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, 'story-writer', 'regular', 'mock', FALSE, 'platform_default', 'active', 7, 3, 'running', $8)
+		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, now); err != nil {
 			t.Fatalf("seed selected-store agent: %v", err)
 		}
 		return
 	}
 	runlifecyclefixture.RequireSQLite(t, context.Background(), selected.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash, BundleSource: bundleSource})
 	if _, err := selected.db.ExecContext(context.Background(), `
-			INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, created_at)
-			VALUES (?, 'story/instance-1', 'story-writer', 'regular', 'mock', 0, 'platform_default', 'active', 7, 3, 'running', ?)
-		`, agentID, now); err != nil {
+			INSERT INTO agents (
+				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, flow_instance,
+				role, model, llm_backend, memory_enabled, memory_source, status,
+				lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, created_at
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, 'story-writer', 'regular', 'mock', 0, 'platform_default', 'active', 7, 3, 'running', ?)
+		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, now); err != nil {
 		t.Fatalf("seed selected-store agent: %v", err)
 	}
 }

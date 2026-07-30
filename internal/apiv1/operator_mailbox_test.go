@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -263,10 +264,16 @@ type activeAPIV1RuntimeBusAgentStore interface {
 }
 
 func seedActiveAPIV1RuntimeBusAgent(t *testing.T, ctx context.Context, owner activeAPIV1RuntimeBusAgentStore, agentID string) {
+	seedActiveAPIV1RuntimeBusAgentAt(t, ctx, owner, agentID, "")
+}
+
+func seedActiveAPIV1RuntimeBusAgentAt(t *testing.T, ctx context.Context, owner activeAPIV1RuntimeBusAgentStore, agentID, flowPath string) {
 	t.Helper()
+	identity := runtimebustest.Identity(t, agentID, flowPath)
 	if err := owner.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID: agentID, Role: "observer", FlowID: "global", Type: "stub", Model: "regular", ExecutionMode: "live", Config: []byte(`{}`),
+			Identity: identity, ID: agentID, Role: "observer", FlowID: "global", FlowPath: identity.FlowInstance(),
+			Type: "stub", Model: "regular", ExecutionMode: "live", Config: []byte(`{}`),
 		},
 		Status:    "active",
 		HiredBy:   "test",

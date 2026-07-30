@@ -182,15 +182,10 @@ func prepareCompletionContext(ctx context.Context, controller *runtimeeffects.Co
 	} else {
 		actor, _ := runtimeactors.ActorFromContext(ctx)
 		effectiveEntityID := strings.TrimSpace(actor.EffectiveEntityID())
-		effectiveFlowInstance := strings.TrimSpace(actor.CanonicalFlowPath())
+		effectiveFlowInstance := session.MemoryIdentity.FlowInstance()
 		if effectiveEntityID == "" {
 			if inbound, ok := runtimebus.InboundEventFromContext(ctx); ok {
 				effectiveEntityID = strings.TrimSpace(inbound.EntityID())
-			}
-		}
-		if effectiveFlowInstance == "" {
-			if inbound, ok := runtimebus.InboundEventFromContext(ctx); ok {
-				effectiveFlowInstance = strings.TrimSpace(inbound.FlowInstance())
 			}
 		}
 		if effectiveEntityID == "" {
@@ -203,12 +198,12 @@ func prepareCompletionContext(ctx context.Context, controller *runtimeeffects.Co
 		target = runtimeeffects.UsageTarget{
 			Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID,
 			RunID: strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)), AgentID: strings.TrimSpace(session.AgentID),
-			SessionID: strings.TrimSpace(session.ID), Memory: session.Memory,
+			AgentIdentity: session.MemoryIdentity.Agent, SessionID: strings.TrimSpace(session.ID), Memory: session.Memory,
 			FlowInstance: effectiveFlowInstance, EntityID: effectiveEntityID,
 		}
 		if session.Memory.Enabled {
 			target.RunID = session.MemoryIdentity.RunID
-			target.FlowInstance = session.MemoryIdentity.FlowInstance
+			target.FlowInstance = session.MemoryIdentity.FlowInstance()
 		}
 		entityID = effectiveEntityID
 	}
@@ -305,6 +300,7 @@ func completionAgentTurn(targetID string, turn AgentTurnRecord) *runtimeeffects.
 		TurnID:              targetID,
 		RunID:               strings.TrimSpace(turn.RunID),
 		AgentID:             strings.TrimSpace(turn.AgentID),
+		Identity:            turn.Identity.Normalize(),
 		SessionID:           strings.TrimSpace(turn.SessionID),
 		Memory:              turn.Memory,
 		FlowInstance:        strings.TrimSpace(turn.FlowInstance),
@@ -330,10 +326,13 @@ func completionSpendForContext(ctx context.Context, profile llmselection.Profile
 	meta := usageMetadataForContext(ctx, profile, usage.ResolvedModel)
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	flowInstance := strings.TrimSpace(turn.FlowInstance)
+	if !turn.Identity.Agent.IsZero() {
+		flowInstance = turn.Identity.Agent.FlowInstance()
+	}
 	if flowInstance == "" {
 		flowInstance = strings.TrimSpace(actor.CanonicalFlowPath())
 	}
-	if flowInstance == "" {
+	if flowInstance == "" && turn.Identity.Agent.IsZero() {
 		flowInstance = "global"
 	}
 	input, output := int64(0), int64(0)
@@ -351,6 +350,7 @@ func completionSpendForContext(ctx context.Context, profile llmselection.Profile
 		EntityID:       strings.TrimSpace(turn.EntityID),
 		FlowInstance:   flowInstance,
 		AgentID:        strings.TrimSpace(turn.AgentID),
+		AgentIdentity:  turn.Identity.Agent,
 		Model:          usage.ResolvedModel,
 		ModelAlias:     mapString(meta, "model_alias"),
 		BackendProfile: coalesce(mapString(meta, "backend_profile"), profile.ID),
@@ -478,10 +478,9 @@ func estimateCompletionCostUSD(model string, input, output int64) float64 {
 func completionTurnBase(ctx context.Context, session *Session, request, response []byte, parseOK bool, latency time.Duration, failure *runtimefailures.Envelope) AgentTurnRecord {
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-	flowInstance := actor.CanonicalFlowPath()
+	flowInstance := session.MemoryIdentity.FlowInstance()
 	if session.Memory.Enabled {
 		runID = session.MemoryIdentity.RunID
-		flowInstance = session.MemoryIdentity.FlowInstance
 	}
 	return AgentTurnRecord{
 		AgentID:        session.AgentID,

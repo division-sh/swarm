@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
@@ -17,7 +18,7 @@ const (
 // OperatorAgentUsageReadStore is the backend-neutral owner for the public
 // per-agent usage read surface over canonical spend_ledger facts.
 type OperatorAgentUsageReadStore interface {
-	LoadOperatorAgentUsage(context.Context, string, OperatorAgentUsageOptions) (OperatorAgentUsage, error)
+	LoadOperatorAgentUsage(context.Context, agentidentity.Identity, OperatorAgentUsageOptions) (OperatorAgentUsage, error)
 }
 
 var _ OperatorAgentUsageReadStore = (*PostgresStore)(nil)
@@ -66,9 +67,9 @@ type OperatorAgentUsageBreakdown struct {
 	Totals          OperatorAgentUsageTotals `json:"totals"`
 }
 
-func (s *PostgresStore) LoadOperatorAgentUsage(ctx context.Context, agentID string, opts OperatorAgentUsageOptions) (OperatorAgentUsage, error) {
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
+func (s *PostgresStore) LoadOperatorAgentUsage(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentUsageOptions) (OperatorAgentUsage, error) {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
 		return OperatorAgentUsage{}, ErrAgentNotFound
 	}
 	if err := validateOperatorAgentUsageWindow(opts); err != nil {
@@ -77,19 +78,19 @@ func (s *PostgresStore) LoadOperatorAgentUsage(ctx context.Context, agentID stri
 	if err := s.requireAgentUsageAccess(); err != nil {
 		return OperatorAgentUsage{}, err
 	}
-	if err := s.ensureAgentUsageAgentExists(ctx, agentID); err != nil {
+	if err := s.ensureAgentUsageAgentExists(ctx, identity); err != nil {
 		return OperatorAgentUsage{}, err
 	}
-	breakdown, err := s.loadAgentUsageBreakdown(ctx, agentID, opts)
+	breakdown, err := s.loadAgentUsageBreakdown(ctx, identity, opts)
 	if err != nil {
 		return OperatorAgentUsage{}, err
 	}
-	return buildOperatorAgentUsage(agentID, opts, breakdown)
+	return buildOperatorAgentUsage(identity.AgentID(), opts, breakdown)
 }
 
-func (s *SQLiteRuntimeStore) LoadOperatorAgentUsage(ctx context.Context, agentID string, opts OperatorAgentUsageOptions) (OperatorAgentUsage, error) {
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
+func (s *SQLiteRuntimeStore) LoadOperatorAgentUsage(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentUsageOptions) (OperatorAgentUsage, error) {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
 		return OperatorAgentUsage{}, ErrAgentNotFound
 	}
 	if err := validateOperatorAgentUsageWindow(opts); err != nil {
@@ -98,14 +99,14 @@ func (s *SQLiteRuntimeStore) LoadOperatorAgentUsage(ctx context.Context, agentID
 	if err := s.requireAgentUsageAccess(); err != nil {
 		return OperatorAgentUsage{}, err
 	}
-	if err := s.ensureAgentUsageAgentExists(ctx, agentID); err != nil {
+	if err := s.ensureAgentUsageAgentExists(ctx, identity); err != nil {
 		return OperatorAgentUsage{}, err
 	}
-	breakdown, err := s.loadAgentUsageBreakdown(ctx, agentID, opts)
+	breakdown, err := s.loadAgentUsageBreakdown(ctx, identity, opts)
 	if err != nil {
 		return OperatorAgentUsage{}, err
 	}
-	return buildOperatorAgentUsage(agentID, opts, breakdown)
+	return buildOperatorAgentUsage(identity.AgentID(), opts, breakdown)
 }
 
 func buildOperatorAgentUsage(agentID string, opts OperatorAgentUsageOptions, breakdown []OperatorAgentUsageBreakdown) (OperatorAgentUsage, error) {
@@ -162,16 +163,27 @@ func (s *SQLiteRuntimeStore) requireAgentUsageAccess() error {
 	return s.requireCurrentSchema()
 }
 
-func (s *PostgresStore) ensureAgentUsageAgentExists(ctx context.Context, agentID string) error {
+func (s *PostgresStore) ensureAgentUsageAgentExists(ctx context.Context, identity agentidentity.Identity) error {
+	fields, err := agentIdentityFields(identity)
+	if err != nil {
+		return ErrAgentNotFound
+	}
 	var exists bool
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM agents
 			WHERE agent_id = $1
+			  AND agent_name_owner = $2
+			  AND agent_name_source = $3
+			  AND agent_route_presence = $4
+			  AND flow_scope_key = $5
+			  AND flow_instance_id = $6
+			  AND flow_instance = $7
 			  AND status NOT IN ('terminated', 'ephemeral')
 		)
-	`, agentID).Scan(&exists); err != nil {
+	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&exists); err != nil {
 		return fmt.Errorf("load agent usage agent: %w", err)
 	}
 	if !exists {
@@ -180,14 +192,25 @@ func (s *PostgresStore) ensureAgentUsageAgentExists(ctx context.Context, agentID
 	return nil
 }
 
-func (s *SQLiteRuntimeStore) ensureAgentUsageAgentExists(ctx context.Context, agentID string) error {
+func (s *SQLiteRuntimeStore) ensureAgentUsageAgentExists(ctx context.Context, identity agentidentity.Identity) error {
+	fields, err := agentIdentityFields(identity)
+	if err != nil {
+		return ErrAgentNotFound
+	}
 	var count int
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT COUNT(1)
 		FROM agents
 		WHERE agent_id = ?
+		  AND agent_name_owner = ?
+		  AND agent_name_source = ?
+		  AND agent_route_presence = ?
+		  AND flow_scope_key = ?
+		  AND flow_instance_id = ?
+		  AND flow_instance = ?
 		  AND status NOT IN ('terminated', 'ephemeral')
-	`, agentID).Scan(&count); err != nil {
+	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&count); err != nil {
 		return fmt.Errorf("load agent usage agent: %w", err)
 	}
 	if count == 0 {
@@ -196,8 +219,12 @@ func (s *SQLiteRuntimeStore) ensureAgentUsageAgentExists(ctx context.Context, ag
 	return nil
 }
 
-func (s *PostgresStore) loadAgentUsageBreakdown(ctx context.Context, agentID string, opts OperatorAgentUsageOptions) ([]OperatorAgentUsageBreakdown, error) {
-	args := []any{agentID}
+func (s *PostgresStore) loadAgentUsageBreakdown(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentUsageOptions) ([]OperatorAgentUsageBreakdown, error) {
+	fields, err := identity.StorageFields()
+	if err != nil {
+		return nil, err
+	}
+	args := []any{fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath}
 	windowClause := strings.Builder{}
 	if opts.Since != nil {
 		args = append(args, opts.Since.UTC())
@@ -224,6 +251,12 @@ func (s *PostgresStore) loadAgentUsageBreakdown(ctx context.Context, agentID str
 				cost_usd
 			FROM spend_ledger
 			WHERE agent_id = $1
+			  AND agent_name_owner = $2
+			  AND agent_name_source = $3
+			  AND agent_route_presence = $4
+			  AND agent_flow_scope_key = $5
+			  AND agent_flow_instance_id = $6
+			  AND flow_instance = $7
 			  %s
 		)
 		SELECT
@@ -290,8 +323,12 @@ func (s *PostgresStore) loadAgentUsageBreakdown(ctx context.Context, agentID str
 	return out, nil
 }
 
-func (s *SQLiteRuntimeStore) loadAgentUsageBreakdown(ctx context.Context, agentID string, opts OperatorAgentUsageOptions) ([]OperatorAgentUsageBreakdown, error) {
-	args := []any{agentID}
+func (s *SQLiteRuntimeStore) loadAgentUsageBreakdown(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentUsageOptions) ([]OperatorAgentUsageBreakdown, error) {
+	fields, err := identity.StorageFields()
+	if err != nil {
+		return nil, err
+	}
+	args := []any{fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath}
 	windowClause := strings.Builder{}
 	if opts.Since != nil {
 		args = append(args, opts.Since.UTC())
@@ -318,6 +355,12 @@ func (s *SQLiteRuntimeStore) loadAgentUsageBreakdown(ctx context.Context, agentI
 				cost_usd
 			FROM spend_ledger
 			WHERE agent_id = ?
+			  AND agent_name_owner = ?
+			  AND agent_name_source = ?
+			  AND agent_route_presence = ?
+			  AND agent_flow_scope_key = ?
+			  AND agent_flow_instance_id = ?
+			  AND flow_instance = ?
 			  %s
 		)
 		SELECT

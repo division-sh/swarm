@@ -344,10 +344,12 @@ func budgetAccountingSettlement(target runtimeeffects.UsageTarget, exactness run
 		Usage:      usage,
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
-			Memory: target.Memory, FlowInstance: target.FlowInstance, ParseOK: state == runtimeeffects.StateSettled,
+			Identity: agentmemory.Identity{RunID: target.RunID, Agent: target.AgentIdentity},
+			Memory:   target.Memory, FlowInstance: target.FlowInstance, ParseOK: state == runtimeeffects.StateSettled,
 		},
 		Spend: runtimeeffects.CompletionSpend{
-			FlowInstance: target.FlowInstance, AgentID: target.AgentID, Model: "regular", ModelAlias: "regular",
+			FlowInstance: target.FlowInstance, AgentID: target.AgentID, AgentIdentity: target.AgentIdentity,
+			Model: "regular", ModelAlias: "regular",
 			BackendProfile: "test", Provider: "openai", Transport: "http", ResolvedModel: "budget-test",
 			CostUSD: cost, InvocationType: "agent_turn",
 		},

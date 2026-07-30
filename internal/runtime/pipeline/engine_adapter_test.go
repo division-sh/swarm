@@ -3166,6 +3166,7 @@ func TestPipelineEngineLifecycleEffectApplierPersistsTimersAndDefersSchedulerToP
 	ctx = withPipelineRollbackActions(ctx, &rollbackActions)
 	sc := Schedule{
 		AgentID:   "owner",
+		OwnerKind: ScheduleOwnerSystem,
 		EventType: "timer.review",
 		Mode:      "once",
 		At:        time.Now().Add(time.Hour),

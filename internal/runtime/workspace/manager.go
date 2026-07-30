@@ -712,11 +712,15 @@ func workspaceScopeForActor(source semanticview.Source, actor models.AgentConfig
 	}
 	switch scope {
 	case "per-agent":
-		agentID := strings.TrimSpace(actor.ID)
-		if agentID == "" {
-			return "", "", fmt.Errorf("workspace resolution failed: per-agent workspace requires agent id")
+		identity, err := actor.ConcreteIdentity()
+		if err != nil {
+			return "", "", fmt.Errorf("workspace resolution failed: per-agent workspace requires concrete agent identity: %w", err)
 		}
-		return scope, agentID, nil
+		fingerprint, err := identity.Fingerprint()
+		if err != nil {
+			return "", "", fmt.Errorf("workspace resolution failed: fingerprint concrete agent identity: %w", err)
+		}
+		return scope, fingerprint, nil
 	case "per-flow-instance":
 		flowPath := actor.CanonicalFlowPath()
 		if flowPath == "" {
@@ -786,7 +790,11 @@ func (m *DockerManager) workspaceContainerIdentity(ctx context.Context, containe
 		identity.FlowInstance = strings.Trim(strings.TrimSpace(scopeKey), "/")
 	default:
 		identity.Kind = runtimecontaineridentity.KindAgent
-		identity.AgentID = strings.TrimSpace(actor.ID)
+		agentIdentity, err := actor.ConcreteIdentity()
+		if err != nil {
+			return runtimecontaineridentity.Identity{}, fmt.Errorf("workspace container identity: %w", err)
+		}
+		identity.AgentIdentity = agentIdentity
 	}
 	return identity, nil
 }
@@ -1180,7 +1188,7 @@ func resetContainerIdentity(identity runtimecontaineridentity.Identity) runtimed
 		WorkspaceScope: identity.WorkspaceScope,
 		RunID:          identity.RunID,
 		EntityID:       identity.EntityID,
-		AgentID:        identity.AgentID,
+		AgentIdentity:  identity.AgentIdentity,
 		FlowInstance:   identity.FlowInstance,
 	}
 }
@@ -1196,7 +1204,7 @@ func containerIdentityFromResetInspection(inspection runtimedestructivereset.Man
 		WorkspaceScope: identity.WorkspaceScope,
 		RunID:          identity.RunID,
 		EntityID:       identity.EntityID,
-		AgentID:        identity.AgentID,
+		AgentIdentity:  identity.AgentIdentity,
 		FlowInstance:   identity.FlowInstance,
 	}.Normalized()
 }
@@ -1212,7 +1220,7 @@ func managedContainerRef(identity runtimecontaineridentity.Identity, action stri
 		WorkspaceScope: identity.WorkspaceScope,
 		RunID:          identity.RunID,
 		EntityID:       identity.EntityID,
-		AgentID:        identity.AgentID,
+		AgentIdentity:  identity.AgentIdentity,
 		FlowInstance:   identity.FlowInstance,
 	}
 }

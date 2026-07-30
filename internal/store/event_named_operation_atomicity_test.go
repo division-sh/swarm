@@ -37,9 +37,10 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 					mutate: func(req *CommitSelectedForkEventRequest) {
 						first, _ := events.NewDeliveryPayloadProjection(map[string]string{"summary": "one"})
 						second, _ := events.NewDeliveryPayloadProjection(map[string]string{"summary": "two"})
+						worker := testAgentDeliveryRoute(t, "worker", "fixture/worker")
 						req.Commit.DeliveryRoutes = []events.DeliveryRoute{
-							{SubscriberType: "agent", SubscriberID: "worker", PayloadProjection: first},
-							{SubscriberType: "agent", SubscriberID: "worker", PayloadProjection: second},
+							{SubscriberType: worker.SubscriberType, SubscriberID: worker.SubscriberID, AgentIdentity: worker.AgentIdentity, PayloadProjection: first},
+							{SubscriberType: worker.SubscriberType, SubscriberID: worker.SubscriberID, AgentIdentity: worker.AgentIdentity, PayloadProjection: second},
 						}
 					},
 				},
@@ -81,7 +82,7 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				store := fixture.store.(eventRecordContractStore)
 				req := newSelectedForkAtomicityRequest(t, ctx, store, true)
-				req.Commit.DeliveryRoutes = []events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "worker"}}
+				req.Commit.DeliveryRoutes = []events.DeliveryRoute{testAgentDeliveryRoute(t, "worker", "fixture/worker")}
 				outcome, err := store.CommitSelectedForkEvent(ctx, req)
 				if err != nil || outcome != runtimebus.EventAppendInserted {
 					t.Fatalf("initial outcome=%v err=%v", outcome, err)
@@ -90,7 +91,7 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 				assertSelectedForkOperationCounts(t, ctx, fixture, req.Commit.Event.ID(), want)
 
 				duplicate := req
-				duplicate.Commit.DeliveryRoutes = []events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "must-not-appear"}}
+				duplicate.Commit.DeliveryRoutes = []events.DeliveryRoute{testAgentDeliveryRoute(t, "must-not-appear", "fixture/must-not-appear")}
 				disposition := runtimepipelineobligation.Terminal("fixture_error", &runtimefailures.Envelope{})
 				duplicate.Commit.Disposition = &disposition
 				duplicate.Commit.DeadLetter = &runtimedeadletters.Record{OriginalEventID: uuid.NewString()}
@@ -121,7 +122,7 @@ func TestCommitSelectedForkEventHostileRepeatPostgres(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := fixture.store.(eventRecordContractStore)
 	req := newSelectedForkAtomicityRequest(t, ctx, store, true)
-	req.Commit.DeliveryRoutes = []events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "worker"}}
+	req.Commit.DeliveryRoutes = []events.DeliveryRoute{testAgentDeliveryRoute(t, "worker", "fixture/worker")}
 
 	const attempts = 12
 	start := make(chan struct{})

@@ -516,7 +516,7 @@ func TestPostgresStore_DestructiveResetPlanCapturesManagedContainersBeforeCleanu
 		Action:        destructivereset.ContainerActionStop,
 		ResetEligible: true,
 		RunID:         "11111111-1111-1111-1111-111111111111",
-		AgentID:       "agent-a",
+		AgentIdentity: testAgentIdentity(t, "agent-a", "reset/agent-a"),
 	}}
 	plan, err := (destructivereset.InventoryPlanner{Reader: destructivereset.CompositeInventoryReader{
 		Reader:     pg,
@@ -574,14 +574,17 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	replyContextID := "reply-v1:cleanup-" + uuid.NewString()
 	mailboxID := uuid.NewString()
 	entityID := uuid.NewString()
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source) VALUES ('agent-a', 'cleanup', 'operator', 'regular', TRUE, 'authored')`); err != nil {
-		t.Fatalf("seed agent: %v", err)
+	agentIdentity := testAgentIdentity(t, "agent-a", "cleanup")
+	agentFields, err := agentIdentityFields(agentIdentity)
+	if err != nil {
+		t.Fatalf("agent identity fields: %v", err)
 	}
 	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: pg.DB}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: preservedRunID, State: storerunlifecycle.StateCompleted,
 	})
 	registerTestAuthorActivityCatalog(t, pg)
+	seedTestAgentRow(t, ctx, pg.DB, true, agentIdentity, "active")
 	cleanupSemanticEvent := eventtest.PersistedProjectionForProducer(
 		eventID, events.EventType("batch.contract"), eventtest.Producer(events.EventProducerExternal, "cleanup-reference-ingress"), "",
 		[]byte(`{}`), 0, runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
@@ -590,18 +593,27 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		t.Fatalf("seed cleanup event: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', 'cleanup', TRUE, 'authored', 'active')
-	`, activeSessionID, runID); err != nil {
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source, status
+		)
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', 'active')
+	`, activeSessionID, runID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
+		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed active session: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status, termination_reason, terminated_at, successor_session_id
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source, status, termination_reason, terminated_at, successor_session_id
 		) VALUES (
-			$1::uuid, $3::uuid, 'agent-a', 'cleanup', TRUE, 'authored', 'terminated', 'cancelled', now(), $2::uuid
+			$1::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10,
+			TRUE, 'authored', 'terminated', 'cancelled', now(), $2::uuid
 		)
-	`, predecessorSessionID, activeSessionID, preservedRunID); err != nil {
+	`, predecessorSessionID, activeSessionID, preservedRunID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
+		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed preserved predecessor session: %v", err)
 	}
 	captureRunForkTestRevision(t, pg.DB, runID)
@@ -622,14 +634,14 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		t.Fatalf("seed preserved late mutation: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO timers (timer_id, timer_name, run_id, entity_id, flow_instance, fire_event, fire_at)
-		VALUES ($1::uuid, 'cleanup timer', $2::uuid, $3::uuid, 'flow/a', 'timer.fire', now())
+		INSERT INTO timers (timer_id, timer_name, run_id, entity_id, flow_instance, fire_event, fire_at, owner_kind)
+		VALUES ($1::uuid, 'cleanup timer', $2::uuid, $3::uuid, 'flow/a', 'timer.fire', now(), 'system')
 	`, cleanupTimerID, runID, entityID); err != nil {
 		t.Fatalf("seed cleanup timer: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO timers (timer_id, timer_name, source_timer_id, fire_event, fire_at, task_type)
-		VALUES ($1::uuid, 'preserved source timer', $2::uuid, 'timer.global', now(), 'global_recurring')
+		INSERT INTO timers (timer_id, timer_name, source_timer_id, fire_event, fire_at, owner_kind, task_type)
+		VALUES ($1::uuid, 'preserved source timer', $2::uuid, 'timer.global', now(), 'system', 'global_recurring')
 	`, preservedTimerID, cleanupTimerID); err != nil {
 		t.Fatalf("seed preserved source timer: %v", err)
 	}
@@ -1068,6 +1080,7 @@ func destructiveResetDirectiveReservation(t *testing.T, runID, key, requestHash 
 	eventID := uuid.NewString()
 	request := runtimeagentcontrol.SendDirectiveRequest{
 		AgentID:      "agent-a",
+		FlowInstance: "cleanup",
 		Directive:    "continue",
 		RunID:        runID,
 		Source:       runtimeagentcontrol.DirectiveSourceV1RPC,
@@ -1092,7 +1105,7 @@ func destructiveResetDirectiveReservation(t *testing.T, runID, key, requestHash 
 			ActorTokenID:     request.ActorTokenID,
 			IdempotencyKey:   key,
 			RequestHash:      requestHash,
-			AgentID:          request.AgentID,
+			AgentIdentity:    testAgentIdentity(t, request.AgentID, request.FlowInstance),
 			Directive:        request.Directive,
 			RequestedRunID:   runID,
 			ResolvedRunID:    runID,
@@ -1121,6 +1134,11 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	timerForkEvent := uuid.NewString()
 	humanTaskCardID := uuid.NewString()
 	seededAt := time.Date(2026, 5, 16, 18, 0, 0, 0, time.UTC)
+	agentIdentity := testAgentIdentity(t, "agent-a", "cleanup")
+	agentFields, err := agentIdentityFields(agentIdentity)
+	if err != nil {
+		t.Fatalf("agent identity fields: %v", err)
+	}
 	if _, err := pg.DB.ExecContext(ctx, `CREATE TABLE generated_entity_fixture (entity_id UUID PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`); err != nil {
 		t.Fatalf("create generated entity fixture: %v", err)
 	}
@@ -1259,37 +1277,56 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	`, runB, runA, forkEvent); err != nil {
 		t.Fatalf("seed selected route recovery: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source) VALUES ('agent-a', 'cleanup', 'operator', 'regular', TRUE, 'authored')`); err != nil {
-		t.Fatalf("seed agent: %v", err)
-	}
+	seedTestAgentRow(t, ctx, pg.DB, true, agentIdentity, "active")
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', 'cleanup', TRUE, 'authored', 'active')
-	`, sessionID, runA); err != nil {
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source, status
+		)
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', 'active')
+	`, sessionID, runA, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
+		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed agent session: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO conversation_forks (
-			fork_id, source_session_id, source_run_id, source_agent_id, fork_point_kind, fork_point_turn_index,
+			fork_id, source_session_id, source_run_id,
+			source_agent_id, source_agent_name_owner, source_agent_name_source, source_agent_route_presence,
+			source_flow_scope_key, source_flow_instance_id, source_flow_instance,
+			fork_point_kind, fork_point_turn_index,
 			fork_point_turn_id, fork_point_selected_at, created_by, expires_at
 		) VALUES
-			($1::uuid, $3::uuid, $5::uuid, 'agent-a', 'turn', 0, $6::uuid, now(), 'operator-token', now() + interval '1 hour'),
-			($2::uuid, $4::uuid, NULL, 'agent-a', 'turn', 0, $7::uuid, now(), 'operator-token', now() + interval '1 hour')
-	`, uuid.NewString(), uuid.NewString(), sessionID, uuid.NewString(), runA, uuid.NewString(), uuid.NewString()); err != nil {
+			($1::uuid, $3::uuid, $5::uuid, $8, $9, $10, $11, $12, $13, $14, 'turn', 0, $6::uuid, now(), 'operator-token', now() + interval '1 hour'),
+			($2::uuid, $4::uuid, NULL, $8, $9, $10, $11, $12, $13, $14, 'turn', 0, $7::uuid, now(), 'operator-token', now() + interval '1 hour')
+	`, uuid.NewString(), uuid.NewString(), sessionID, uuid.NewString(), runA, uuid.NewString(), uuid.NewString(),
+		agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource, agentFields.RoutePresence,
+		agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed conversation forks: %v", err)
 	}
 	turnID := uuid.NewString()
-	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, pg, runA, "agent-a", sessionID, turnID, "session", "agent-a:global")
+	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(
+		t, pg, runA, agentIdentity, sessionID, turnID, "session", "agent-a:global",
+	)
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, capability_surface_id, execution_mode)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'cleanup', TRUE, 'authored', $4::uuid, 'live')
-	`, turnID, runA, sessionID, capabilitySurfaceID); err != nil {
+		INSERT INTO agent_turns (
+			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id,
+			session_id, flow_instance, memory_enabled, memory_source, capability_surface_id, execution_mode
+		)
+		VALUES ($1::uuid, $2::uuid, $5, $6, $7, $8, $9, $10, $3::uuid, $11, TRUE, 'authored', $4::uuid, 'live')
+	`, turnID, runA, sessionID, capabilitySurfaceID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
+		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed agent turn: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO agent_conversation_audits (run_id, agent_id, flow_instance, memory_enabled, memory_source, status)
-		VALUES ($1::uuid, 'agent-a', 'cleanup', FALSE, 'authored', 'active')
-	`, runA); err != nil {
+		INSERT INTO agent_conversation_audits (
+			run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source, status
+		)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, FALSE, 'authored', 'active')
+	`, runA, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource, agentFields.RoutePresence,
+		agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed agent audit: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state) VALUES ($1::uuid, $2::uuid, 'flow/a', 'active')`, runA, entityID); err != nil {
@@ -1299,11 +1336,11 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		t.Fatalf("seed entity mutation: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO timers (timer_id, timer_name, run_id, entity_id, flow_instance, fire_event, fire_at) VALUES
-			($1::uuid, 'run timer', $4::uuid, $5::uuid, 'flow/a', 'timer.fire', now()),
-			($2::uuid, 'fork run timer', NULL, $5::uuid, 'flow/a', 'timer.fire', now()),
-			($3::uuid, 'fork event timer', NULL, $5::uuid, 'flow/a', 'timer.fire', now()),
-			($6::uuid, 'global timer', NULL, NULL, NULL, 'timer.global', now())
+		INSERT INTO timers (timer_id, timer_name, run_id, entity_id, flow_instance, fire_event, fire_at, owner_kind) VALUES
+			($1::uuid, 'run timer', $4::uuid, $5::uuid, 'flow/a', 'timer.fire', now(), 'system'),
+			($2::uuid, 'fork run timer', NULL, $5::uuid, 'flow/a', 'timer.fire', now(), 'system'),
+			($3::uuid, 'fork event timer', NULL, $5::uuid, 'flow/a', 'timer.fire', now(), 'system'),
+			($6::uuid, 'global timer', NULL, NULL, NULL, 'timer.global', now(), 'system')
 	`, timerRun, timerForkRun, timerForkEvent, runA, entityID, uuid.NewString()); err != nil {
 		t.Fatalf("seed timers: %v", err)
 	}

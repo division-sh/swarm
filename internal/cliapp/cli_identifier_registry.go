@@ -228,13 +228,21 @@ var cliIdentifierFamilyRegistry = map[cliIdentifierFamily]cliIdentifierFamilyPol
 // whether the command happens to validate the value locally today.
 var cliIdentifierInputRegistry = []cliIdentifierInputRegistration{
 	{Command: "swarm agent view", Selector: "arg:agent-id", Family: cliIdentifierFamilyAgent, Mode: cliIdentifierModeResolverBounded},
+	{Command: "swarm agent view", Selector: "flag:flow-instance", Family: cliIdentifierFamilyFlowInstance, Mode: cliIdentifierModeFullOnly},
 	{Command: "swarm agent diagnose", Selector: "arg:agent-id", Family: cliIdentifierFamilyAgent, Mode: cliIdentifierModeResolverBounded},
+	{Command: "swarm agent diagnose", Selector: "flag:flow-instance", Family: cliIdentifierFamilyFlowInstance, Mode: cliIdentifierModeFullOnly},
 	{Command: "swarm agent deliveries", Selector: "arg:agent-id", Family: cliIdentifierFamilyAgent, Mode: cliIdentifierModeResolverBounded},
+	{Command: "swarm agent deliveries", Selector: "flag:flow-instance", Family: cliIdentifierFamilyFlowInstance, Mode: cliIdentifierModeFullOnly},
 	{Command: "swarm agent restart", Selector: "arg:agent-id", Family: cliIdentifierFamilyAgent, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
+	{Command: "swarm agent restart", Selector: "flag:flow-instance", Family: cliIdentifierFamilyFlowInstance, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 	{Command: "swarm agent replay", Selector: "arg:agent-id", Family: cliIdentifierFamilyAgent, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
+	{Command: "swarm agent replay", Selector: "flag:flow-instance", Family: cliIdentifierFamilyFlowInstance, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 	{Command: "swarm agent replay-backlog", Selector: "arg:agent-id", Family: cliIdentifierFamilyAgent, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
+	{Command: "swarm agent replay-backlog", Selector: "flag:flow-instance", Family: cliIdentifierFamilyFlowInstance, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 	{Command: "swarm agent directive", Selector: "arg:agent-id", Family: cliIdentifierFamilyAgent, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
+	{Command: "swarm agent directive", Selector: "flag:flow-instance", Family: cliIdentifierFamilyFlowInstance, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 	{Command: "swarm conversation list", Selector: "flag:agent-id", Family: cliIdentifierFamilyAgent, Mode: cliIdentifierModeFullOnly},
+	{Command: "swarm conversation list", Selector: "flag:flow-instance", Family: cliIdentifierFamilyFlowInstance, Mode: cliIdentifierModeFullOnly},
 	{Command: "swarm event replay", Selector: "flag:subscriber", Family: cliIdentifierFamilyAgent, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 
 	{Command: "swarm bundle show", Selector: "arg:bundle-hash", Family: cliIdentifierFamilyBundle, Mode: cliIdentifierModeResolverBounded},

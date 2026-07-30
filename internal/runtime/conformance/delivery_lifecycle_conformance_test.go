@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -30,6 +31,15 @@ type deliveryLifecycleConformanceBackend struct {
 	postgres bool
 }
 
+func deliveryLifecycleConformanceRoute(t testing.TB, subscriberType, subscriberID string) events.DeliveryRoute {
+	t.Helper()
+	route := events.DeliveryRoute{SubscriberType: subscriberType, SubscriberID: subscriberID}
+	if subscriberType == string(runtimedelivery.SubscriberAgent) {
+		route.AgentIdentity = agentidentitytest.RootRuntime(t, subscriberID, "delivery-lifecycle-conformance")
+	}
+	return route
+}
+
 func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 	for _, backend := range deliveryLifecycleConformanceBackends(t) {
 		backend := backend
@@ -37,12 +47,9 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
 			t.Run("exact_route_claim_settlement_and_outcome", func(t *testing.T) {
 				event := deliveryLifecycleEvent("exact-" + backend.name)
-				agent := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
-				sibling := events.DeliveryRoute{
-					SubscriberType: "agent",
-					SubscriberID:   "agent-a",
-					Target:         events.RouteIdentity{FlowID: "flow-a"},
-				}
+				agent := deliveryLifecycleConformanceRoute(t, "agent", "agent-a")
+				sibling := agent
+				sibling.Target = events.RouteIdentity{FlowID: "flow-a"}
 				node := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-a"}
 				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{agent, sibling, node}, runtimepipelineobligation.ScopeSubscribed)
 
@@ -113,7 +120,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 
 			t.Run("claim_renewal_fences_reclaim_and_preserves_settlement", func(t *testing.T) {
 				event := deliveryLifecycleEvent("claim-renewal-" + backend.name)
-				route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "renewal-agent"}
+				route := deliveryLifecycleConformanceRoute(t, "agent", "renewal-agent")
 				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 				claimed, err := backend.store.ClaimAgentDelivery(ctx, event, route)
 				if err != nil {
@@ -158,7 +165,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 
 			t.Run("parent_terminalization_fences_late_writer", func(t *testing.T) {
 				event := deliveryLifecycleEvent("terminalize-" + backend.name)
-				route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "terminal-agent"}
+				route := deliveryLifecycleConformanceRoute(t, "agent", "terminal-agent")
 				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 				claimed, err := backend.store.ClaimAgentDelivery(ctx, event, route)
 				if err != nil {
@@ -193,7 +200,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 
 			t.Run("concurrent_claim_and_restart_reclaim_are_fenced", func(t *testing.T) {
 				event := deliveryLifecycleEvent("claim-race-" + backend.name)
-				route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "race-agent"}
+				route := deliveryLifecycleConformanceRoute(t, "agent", "race-agent")
 				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 
 				type claimResult struct {
@@ -263,8 +270,13 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 
 			t.Run("expired_claim_precedes_continuous_pending_backlog", func(t *testing.T) {
 				agentID := "selector-agent-" + backend.name
+				identity := agentidentitytest.RootRuntime(t, agentID, "delivery-lifecycle-conformance")
 				expiredEvent := deliveryLifecycleEvent("selector-expired-" + backend.name)
-				route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: agentID}
+				route := events.DeliveryRoute{
+					SubscriberType: "agent",
+					SubscriberID:   agentID,
+					AgentIdentity:  identity,
+				}
 				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, expiredEvent, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 				claimed, err := backend.store.ClaimAgentDelivery(ctx, expiredEvent, route)
 				if err != nil {
@@ -275,7 +287,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					pending := deliveryLifecycleEvent(fmt.Sprintf("selector-pending-%s-%02d", backend.name, index))
 					storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, pending, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 				}
-				backlog, err := backend.restart.ClaimAgentBacklog(ctx, agentID, 1)
+				backlog, err := backend.restart.ClaimAgentBacklog(ctx, identity, 1)
 				if err != nil {
 					t.Fatalf("claim saturated backlog: %v", err)
 				}
@@ -289,7 +301,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					class := class
 					t.Run(string(class), func(t *testing.T) {
 						event := deliveryLifecycleEvent(fmt.Sprintf("atomic-diagnostic-%s-%s", backend.name, class))
-						route := events.DeliveryRoute{SubscriberType: string(class), SubscriberID: "diagnostic-" + string(class)}
+						route := deliveryLifecycleConformanceRoute(t, string(class), "diagnostic-"+string(class))
 						storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 						var claimed runtimedelivery.ClaimedObligation
 						var err error
@@ -439,7 +451,7 @@ func assertExactDeliveryDeadLetter(t *testing.T, ctx context.Context, backend de
 
 func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend) {
 	t.Helper()
-	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "schema-agent-" + backend.name}
+	route := deliveryLifecycleConformanceRoute(t, "agent", "schema-agent-"+backend.name)
 	event := deliveryLifecycleEvent("schema-event-" + backend.name)
 	other := deliveryLifecycleEvent("schema-other-run-" + backend.name)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
@@ -494,7 +506,7 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker) VALUES (?1, ?2, ?3, ?4, ?5, ?1, TRUE)`,
 		[]any{claimed.Snapshot.DeliveryID, claimed.Claim.Version() + 1, uuid.NewString(), now, now.Add(time.Minute)})
 
-	terminatedRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "terminated-session-agent-" + backend.name}
+	terminatedRoute := deliveryLifecycleConformanceRoute(t, "agent", "terminated-session-agent-"+backend.name)
 	terminatedEvent := deliveryLifecycleEvent("schema-terminated-session-" + backend.name)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, terminatedEvent, []events.DeliveryRoute{terminatedRoute}, runtimepipelineobligation.ScopeSubscribed)
 	terminatedClaim, err := backend.store.ClaimAgentDelivery(ctx, terminatedEvent, terminatedRoute)
@@ -560,7 +572,7 @@ func assertDeliverySQLRejected(t *testing.T, backend deliveryLifecycleConformanc
 func assertDeliveryRetryBudget(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, class runtimedelivery.SubscriberClass, subscriberID string, maxRetries int) {
 	t.Helper()
 	event := deliveryLifecycleEvent(fmt.Sprintf("retry-%s-%s", backend.name, class))
-	route := events.DeliveryRoute{SubscriberType: string(class), SubscriberID: subscriberID}
+	route := deliveryLifecycleConformanceRoute(t, string(class), subscriberID)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 	proof, err := backend.store.ProveHandoff(ctx, event.ID(), route)
 	if err != nil {
@@ -806,16 +818,46 @@ func deliveryLifecycleEvent(label string) events.Event {
 
 func seedDeliveryAgentSession(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, sessionID, runID, agentID string) {
 	t.Helper()
-	agentQuery := `INSERT INTO agents (agent_id, role, model) VALUES ($1, 'delivery-test', 'test') ON CONFLICT (agent_id) DO NOTHING`
-	sessionQuery := `INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance) VALUES ($1::uuid, $2::uuid, $3, $4)`
-	if !backend.postgres {
-		agentQuery = `INSERT OR IGNORE INTO agents (agent_id, role, model) VALUES (?, 'delivery-test', 'test')`
-		sessionQuery = `INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance) VALUES (?, ?, ?, ?)`
+	identity := agentidentitytest.RootRuntime(t, agentID, "delivery-lifecycle-conformance")
+	fields, err := identity.StorageFields()
+	if err != nil {
+		t.Fatalf("seed delivery agent identity: %v", err)
 	}
-	if _, err := backend.db.ExecContext(ctx, agentQuery, agentID); err != nil {
+	agentQuery := `
+		INSERT INTO agents (
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance, role, model
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'delivery-test', 'test')
+		ON CONFLICT (
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance
+		) DO NOTHING`
+	sessionQuery := `
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance
+		) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9)`
+	if !backend.postgres {
+		agentQuery = `
+			INSERT OR IGNORE INTO agents (
+				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, flow_instance, role, model
+			) VALUES (?, ?, ?, ?, ?, ?, ?, 'delivery-test', 'test')`
+		sessionQuery = `
+			INSERT INTO agent_sessions (
+				session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+				agent_route_presence, flow_scope_key, flow_instance_id, flow_instance
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	}
+	identityArgs := []any{
+		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+	}
+	if _, err := backend.db.ExecContext(ctx, agentQuery, identityArgs...); err != nil {
 		t.Fatalf("seed delivery agent: %v", err)
 	}
-	if _, err := backend.db.ExecContext(ctx, sessionQuery, sessionID, runID, agentID, "delivery-conformance"); err != nil {
+	sessionArgs := append([]any{sessionID, runID}, identityArgs...)
+	if _, err := backend.db.ExecContext(ctx, sessionQuery, sessionArgs...); err != nil {
 		t.Fatalf("seed delivery agent session: %v", err)
 	}
 }

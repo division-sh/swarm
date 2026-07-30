@@ -49,15 +49,18 @@ func resolveMemoryExecution(ctx context.Context, agentID string) (resolvedMemory
 	if err != nil {
 		return resolvedMemoryExecution{}, err
 	}
-	if !plan.Enabled {
-		return resolvedMemoryExecution{Plan: plan}, nil
-	}
 	identity := execution.Identity.Normalize()
-	if err := identity.Validate(); err != nil {
+	if err := identity.ValidateOwner(); err != nil {
 		return resolvedMemoryExecution{}, err
 	}
-	if strings.TrimSpace(agentID) != identity.AgentID {
-		return resolvedMemoryExecution{}, fmt.Errorf("agent memory identity agent_id %q does not match executing agent %q", identity.AgentID, strings.TrimSpace(agentID))
+	if strings.TrimSpace(agentID) != identity.AgentID() {
+		return resolvedMemoryExecution{}, fmt.Errorf("agent memory identity agent_id %q does not match executing agent %q", identity.AgentID(), strings.TrimSpace(agentID))
+	}
+	if !plan.Enabled {
+		return resolvedMemoryExecution{Plan: plan, Identity: identity}, nil
+	}
+	if err := identity.Validate(); err != nil {
+		return resolvedMemoryExecution{}, err
 	}
 	return resolvedMemoryExecution{Plan: plan, Identity: identity}, nil
 }

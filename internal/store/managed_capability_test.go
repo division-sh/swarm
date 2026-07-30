@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -76,7 +77,8 @@ func managedNormalEffectStoreTestContext(t testing.TB, ctx context.Context, auth
 	runID := managedNormalEffectStoreTestRunID(authority.Normal.AgentID)
 	target := runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: runID, AgentID: authority.Normal.AgentID,
-		SessionID: sessionID, Memory: agentmemory.PlatformDefault(), FlowInstance: "store-test",
+		AgentIdentity: authority.Normal.Identity, SessionID: sessionID, Memory: agentmemory.PlatformDefault(),
+		FlowInstance: authority.Normal.Identity.FlowInstance(),
 	}
 	ctx = runtimeeffects.WithUsageTarget(ctx, target)
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
@@ -118,14 +120,18 @@ func managedSelectedExecutionStoreTestContext(t testing.TB, ctx context.Context,
 
 func managedAgentTurnRecordForTest(t testing.TB, rec runtimellm.AgentTurnRecord) runtimellm.AgentTurnRecord {
 	t.Helper()
+	if rec.Identity == (agentmemory.Identity{}) {
+		rec.Identity = testAgentMemoryIdentity(t, rec.RunID, rec.AgentID, rec.FlowInstance)
+	}
 	authority := runtimeeffects.NormalAgentAuthority(
-		runtimeeffects.LifecycleToken{RuntimeEpoch: 1, AgentID: rec.AgentID, Generation: 1},
+		runtimeeffects.LifecycleToken{Identity: rec.Identity.Agent, RuntimeEpoch: 1, AgentID: rec.AgentID, Generation: 1},
 		"store-test-owner",
 		time.Unix(1, 0).UTC().Add(time.Hour),
 	)
 	authority.Target = runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: rec.RunID,
-		AgentID: rec.AgentID, SessionID: rec.SessionID, Memory: rec.Memory, FlowInstance: rec.FlowInstance, EntityID: rec.EntityID,
+		AgentID: rec.AgentID, AgentIdentity: rec.Identity.Agent, SessionID: rec.SessionID,
+		Memory: rec.Memory, FlowInstance: rec.FlowInstance, EntityID: rec.EntityID,
 	}
 	surface := managedCompletionTestSurface(t, authority, "anthropic_api")
 	rec.CapabilitySurface = &surface
@@ -208,18 +214,27 @@ type managedCapabilityTestStore interface {
 func seedManagedAgentTurnCapabilitySurface(
 	t testing.TB,
 	store managedCapabilityTestStore,
-	runID, agentID, sessionID, turnID, runtimeMode, scopeKey string,
+	runID string,
+	identity agentidentity.Identity,
+	sessionID, turnID, runtimeMode, scopeKey string,
 ) string {
 	t.Helper()
 	now := time.Unix(1, 0).UTC()
 	authority := runtimeeffects.NormalAgentAuthority(
-		runtimeeffects.LifecycleToken{RuntimeEpoch: 1, AgentID: agentID, Generation: 1},
+		runtimeeffects.LifecycleToken{
+			RuntimeEpoch: 1,
+			Identity:     identity,
+			AgentID:      identity.AgentID(),
+			Generation:   1,
+		},
 		"store-test-owner",
 		now.Add(time.Hour),
 	)
 	authority.Target = runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: runID,
-		AgentID: agentID, SessionID: sessionID, Memory: agentmemory.PlatformDefault(), FlowInstance: scopeKey,
+		AgentID: identity.AgentID(), AgentIdentity: identity, SessionID: sessionID,
+		Memory: agentmemory.PlatformDefault(), FlowInstance: identity.FlowInstance(),
+		EntityID: scopeKey,
 	}
 	if runtimeMode != "task" {
 		authority.Target.Memory = agentmemory.Authored(true)

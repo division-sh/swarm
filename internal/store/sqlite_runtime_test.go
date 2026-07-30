@@ -63,6 +63,7 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:            "agent-1",
+			Identity:      testAgentIdentity(t, "agent-1", ""),
 			Role:          "operator",
 			FlowID:        "global",
 			Model:         "regular",
@@ -133,6 +134,7 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 		TaskID:       "task-1",
 		Payload:      json.RawMessage(`{"__schedule_task_id":"task-1"}`),
 	}
+	schedule = testAgentOwnedSchedule(t, schedule)
 	if err := store.UpsertSchedule(ctx, schedule); err != nil {
 		t.Fatalf("UpsertSchedule: %v", err)
 	}
@@ -244,7 +246,7 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 		runID, "", events.EventEnvelope{}, now,
 	)
 	routes := []events.DeliveryRoute{
-		{SubscriberType: "agent", SubscriberID: "agent-pending"},
+		testAgentDeliveryRoute(t, "agent-pending", "fixture/agent-pending"),
 		{SubscriberType: "node", SubscriberID: "node-pending"},
 	}
 	if err := commitSemanticEventFixtureWithRoutes(ctx, store, event, routes); err != nil {
@@ -373,6 +375,7 @@ func TestSQLiteRuntimeStoreUpsertAgentConsumesActivePipelineTransaction(t *testi
 	if err := store.UpsertAgent(txctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:            "agent-in-pipeline-tx",
+			Identity:      testAgentIdentity(t, "agent-in-pipeline-tx", ""),
 			Role:          "worker",
 			FlowID:        "global",
 			Model:         "regular",
@@ -419,6 +422,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 		WorkflowInstances: workflowStore,
 		LLMBackend:        "anthropic",
 		LifecycleStore:    sqliteStore,
+		DeliveryStore:     sqliteStore,
 		WorkOwner:         storeTestWorkOwner(t),
 	}, sqliteStore))
 	req := sqliteFlowActivationRequest(bundle, "review", "inst-1", "parent-ent", "review/inst-1")
@@ -439,7 +443,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 	if err != nil {
 		t.Fatalf("LoadAgents: %v", err)
 	}
-	assertSQLiteActivatedAgentIDs(t, agents, "reviewer-inst-1")
+	assertSQLiteActivatedAgentRoutes(t, agents, "reviewer\x00review/inst-1")
 	assertSQLiteAddedRoutes(t, bus, "review/inst-1")
 	assertSQLiteRouteMaterializationVars(t, bus, "review/inst-1", map[string]string{
 		"flow_instance_path": "review/inst-1",
@@ -465,6 +469,7 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 		WorkflowInstances: workflowStore,
 		LLMBackend:        "anthropic",
 		LifecycleStore:    sqliteStore,
+		DeliveryStore:     sqliteStore,
 		WorkOwner:         storeTestWorkOwner(t),
 	}, sqliteStore))
 	start := make(chan struct{})
@@ -504,7 +509,12 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 	if err != nil {
 		t.Fatalf("LoadAgents: %v", err)
 	}
-	assertSQLiteActivatedAgentIDs(t, agents, "reviewer-component-a", "reviewer-component-b")
+	assertSQLiteActivatedAgentRoutes(
+		t,
+		agents,
+		"reviewer\x00review/component-a",
+		"reviewer\x00review/component-b",
+	)
 	assertSQLiteAddedRoutes(t, bus, "review/component-a", "review/component-b")
 	assertSQLiteRouteMaterializationVars(t, bus, "review/component-a", map[string]string{
 		"flow_instance_path": "review/component-a",
@@ -716,7 +726,7 @@ func sqliteFlowActivationBundle() *runtimecontracts.WorkflowContractBundle {
 		Paths: runtimecontracts.FlowContractPaths{ID: "review"},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"reviewer": {
-				ID:            "reviewer-{instance_id}",
+				ID:            "reviewer",
 				Type:          "generic",
 				Role:          "reviewer",
 				Model:         "regular",
@@ -725,6 +735,14 @@ func sqliteFlowActivationBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 	}
 	return &runtimecontracts.WorkflowContractBundle{
+		URIRegistry: runtimecontracts.ContractURIRegistry{
+			Agents: map[string]runtimecontracts.ContractURIRef{
+				"review/reviewer": {
+					Kind: "agent", FlowID: "review", LocalID: "reviewer",
+					Full: "test://review/reviewer",
+				},
+			},
+		},
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &runtimecontracts.FlowContractView{
 				Children: []runtimecontracts.FlowContractView{*reviewFlow},
@@ -761,15 +779,15 @@ func sqliteFlowActivationRequest(bundle *runtimecontracts.WorkflowContractBundle
 	}
 }
 
-func assertSQLiteActivatedAgentIDs(t *testing.T, agents []runtimemanager.PersistedAgent, wantIDs ...string) {
+func assertSQLiteActivatedAgentRoutes(t *testing.T, agents []runtimemanager.PersistedAgent, wantRoutes ...string) {
 	t.Helper()
 	got := map[string]struct{}{}
 	for _, rec := range agents {
-		got[strings.TrimSpace(rec.Config.ID)] = struct{}{}
+		got[strings.TrimSpace(rec.Config.ID)+"\x00"+rec.Config.Identity.FlowInstance()] = struct{}{}
 	}
-	for _, want := range wantIDs {
+	for _, want := range wantRoutes {
 		if _, ok := got[want]; !ok {
-			t.Fatalf("activated agent ids = %#v, missing %q", got, want)
+			t.Fatalf("activated agent routes = %#v, missing %q", got, want)
 		}
 	}
 }
@@ -1157,6 +1175,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:            "agent-1",
+			Identity:      testAgentIdentity(t, "agent-1", "global"),
 			Role:          "operator",
 			FlowID:        "global",
 			Model:         "regular",
@@ -1190,7 +1209,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 		t.Fatalf("release successor startup lease: %v", err)
 	}
 
-	identity := agentmemory.Identity{RunID: runID, AgentID: "agent-1", FlowInstance: "global"}
+	identity := testAgentMemoryIdentity(t, runID, "agent-1", "global")
 	lease, err := store.Acquire(ctx, identity, "owner-1")
 	if err != nil {
 		t.Fatalf("Acquire session: %v", err)
@@ -1209,7 +1228,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	}
 	if err := store.UpsertConversation(ctx, runtimellm.ConversationRecord{
 		SessionID: lease.SessionID,
-		AgentID:   identity.AgentID,
+		AgentID:   identity.AgentID(),
 		Identity:  identity,
 		Memory:    agentmemory.Authored(true),
 		Messages:  []runtimellm.Message{{Role: "user", Content: "hello"}},
@@ -1233,10 +1252,14 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 		events.EventType("trace.visible"),
 		"agent-1", "", json.RawMessage(`{"trace":true}`), 0, runID, "", events.EventEnvelope{}, now)
 
-	if err := commitSemanticEventFixtureWithAgents(ctx, store, event, []string{"agent-1"}); err != nil {
+	route := events.DeliveryRoute{
+		SubscriberType: string(runtimedelivery.SubscriberAgent),
+		SubscriberID:   identity.AgentID(),
+		AgentIdentity:  identity.Agent,
+	}
+	if err := commitSemanticEventFixtureWithRoutes(ctx, store, event, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("PersistEventWithDeliveries trace event: %v", err)
 	}
-	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "agent-1"}
 	claimed, err := store.ClaimAgentDelivery(ctx, event, route)
 	if err != nil {
 		t.Fatalf("ClaimAgentDelivery trace event: %v", err)
@@ -1249,7 +1272,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 		Memory:           agentmemory.Authored(true),
 		SessionID:        lease.SessionID,
 		RunID:            runID,
-		FlowInstance:     identity.FlowInstance,
+		FlowInstance:     identity.FlowInstance(),
 		TriggerEventID:   eventID,
 		TriggerEventType: "trace.visible",
 		RequestPayload:   []byte(`{"prompt":"hello"}`),
@@ -1473,6 +1496,7 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:            "agent-cleanup-1",
+			Identity:      testAgentIdentity(t, "agent-cleanup-1", "global"),
 			Role:          "operator",
 			FlowID:        "global",
 			Model:         "regular",
@@ -1487,14 +1511,14 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 	}); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
-	identity := agentmemory.Identity{RunID: runID, AgentID: "agent-cleanup-1", FlowInstance: "global"}
+	identity := testAgentMemoryIdentity(t, runID, "agent-cleanup-1", "global")
 	lease, err := store.Acquire(ctx, identity, "owner-1")
 	if err != nil {
 		t.Fatalf("Acquire session: %v", err)
 	}
 	if err := store.UpsertConversation(ctx, runtimellm.ConversationRecord{
 		SessionID: lease.SessionID,
-		AgentID:   identity.AgentID,
+		AgentID:   identity.AgentID(),
 		Identity:  identity,
 		Memory:    agentmemory.Authored(true),
 		Messages:  []runtimellm.Message{{Role: "user", Content: "hello"}},
@@ -1506,9 +1530,10 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 	}
 	if err := appendManagedAgentTurnForTest(t, runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), store, runtimellm.AgentTurnRecord{
 		SessionID:      uuid.NewString(),
-		AgentID:        identity.AgentID,
+		AgentID:        identity.AgentID(),
+		Identity:       identity,
 		RunID:          identity.RunID,
-		FlowInstance:   identity.FlowInstance,
+		FlowInstance:   identity.FlowInstance(),
 		Memory:         agentmemory.PlatformDefault(),
 		RequestPayload: []byte(`{"kind":"stateless"}`),
 		ResponseRaw:    []byte(`{"ok":true}`),
@@ -1519,7 +1544,7 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 
 	if _, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "teardown", RequestHash: "sqlite-test-terminate-agent-cleanup-1",
-		AgentID: "agent-cleanup-1", Trigger: "test", ExpectedPhase: runtimemanager.AgentLifecycleRegistered,
+		Identity: identity.Agent, AgentID: "agent-cleanup-1", Trigger: "test", ExpectedPhase: runtimemanager.AgentLifecycleRegistered,
 		TargetEpoch: 1, TargetGeneration: 1, TargetPhase: runtimemanager.AgentLifecycleTerminated,
 		ConfigRevision: "test", RunMode: runtimemanager.AgentRunModeStopped,
 		Subordinate: runtimesessions.LifecycleMutationPlan{
@@ -1609,6 +1634,7 @@ func TestSQLiteRuntimeStoreClaimScheduleRequiresActiveRow(t *testing.T) {
 		TaskID:    "task-claim",
 		Payload:   json.RawMessage(`{"__schedule_task_id":"task-claim"}`),
 	}
+	schedule = testAgentOwnedSchedule(t, schedule)
 
 	if err := store.UpsertSchedule(ctx, schedule); err != nil {
 		t.Fatalf("UpsertSchedule: %v", err)
@@ -1650,7 +1676,7 @@ func TestSQLiteRuntimeStoreScheduleUsesPipelineTransactionForCommitVisibility(t 
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	seedSQLiteScheduleRun(t, store, ctx, runID)
-	schedule := sqliteScheduleTransactionTestSchedule(runID, "task-commit")
+	schedule := sqliteScheduleTransactionTestSchedule(t, runID, "task-commit")
 
 	tx, err := store.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -1707,7 +1733,7 @@ func TestSQLiteRuntimeStoreScheduleUsesPipelineTransactionForRollbackVisibility(
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	seedSQLiteScheduleRun(t, store, ctx, runID)
-	schedule := sqliteScheduleTransactionTestSchedule(runID, "task-rollback")
+	schedule := sqliteScheduleTransactionTestSchedule(t, runID, "task-rollback")
 
 	tx, err := store.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -1747,8 +1773,9 @@ func seedSQLiteScheduleRun(t *testing.T, store *SQLiteRuntimeStore, ctx context.
 	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC()})
 }
 
-func sqliteScheduleTransactionTestSchedule(runID, taskID string) runtimepipeline.Schedule {
-	return runtimepipeline.Schedule{
+func sqliteScheduleTransactionTestSchedule(t *testing.T, runID, taskID string) runtimepipeline.Schedule {
+	t.Helper()
+	return testAgentOwnedSchedule(t, runtimepipeline.Schedule{
 		RunID:     runID,
 		AgentID:   "agent-1",
 		EventType: "timer.fired",
@@ -1756,7 +1783,7 @@ func sqliteScheduleTransactionTestSchedule(runID, taskID string) runtimepipeline
 		At:        time.Now().UTC().Add(time.Hour),
 		TaskID:    taskID,
 		Payload:   json.RawMessage(`{"__schedule_task_id":"` + taskID + `"}`),
-	}
+	})
 }
 
 func assertSQLiteScheduleClaimed(t *testing.T, store *SQLiteRuntimeStore, ctx context.Context, schedule runtimepipeline.Schedule, want bool) {

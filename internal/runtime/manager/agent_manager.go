@@ -13,6 +13,8 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -61,7 +63,7 @@ type AgentManager struct {
 	authBreakerTripped bool
 
 	poisonMu            sync.Mutex
-	poisonPanicCounts   map[string]int
+	poisonPanicCounts   map[poisonPanicKey]int
 	poisonEventEntities map[string]map[string]struct{}
 	poisonEventEmitted  map[string]bool
 
@@ -70,7 +72,7 @@ type AgentManager struct {
 	deadLetterLastRaised map[string]time.Time
 
 	deliveryLaneMu sync.Mutex
-	deliveryLanes  map[string]*claimedAttemptLane
+	deliveryLanes  map[runtimeagentidentity.Identity]*claimedAttemptLane
 
 	dynamicFlowReadinessMu       sync.Mutex
 	dynamicFlowReadinessAttempts map[dynamicFlowRuntimeReadinessKey]*dynamicFlowRuntimeReadinessAttempt
@@ -161,12 +163,12 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		requireModelResolution:          opts.RequireModelResolution,
 		lifecycle:                       lifecycle,
 		baseContext:                     opts.BaseContext,
-		poisonPanicCounts:               make(map[string]int),
+		poisonPanicCounts:               make(map[poisonPanicKey]int),
 		poisonEventEntities:             make(map[string]map[string]struct{}),
 		poisonEventEmitted:              make(map[string]bool),
 		deadLetterWindows:               make(map[string][]deadLetterEscalationSample),
 		deadLetterLastRaised:            make(map[string]time.Time),
-		deliveryLanes:                   make(map[string]*claimedAttemptLane),
+		deliveryLanes:                   make(map[runtimeagentidentity.Identity]*claimedAttemptLane),
 		dynamicFlowReadinessAttempts:    make(map[dynamicFlowRuntimeReadinessKey]*dynamicFlowRuntimeReadinessAttempt),
 		dynamicFlowReadinessSignal:      make(chan struct{}, 1),
 	}
@@ -250,6 +252,11 @@ func (am *AgentManager) PublishEvent(ctx context.Context, evt events.Event) erro
 }
 
 func (am *AgentManager) SpawnAgent(cfg models.AgentConfig) error {
+	var err error
+	cfg, err = bindRuntimeCreatedIdentity(cfg, "manager.spawn_agent")
+	if err != nil {
+		return err
+	}
 	cfg.NormalizeEntityID()
 	rec := PersistedAgent{
 		Config:  cfg,
@@ -273,34 +280,45 @@ func (am *AgentManager) RegisterEphemeralAgentForExecution(ctx context.Context, 
 	if am == nil {
 		return errors.New("agent manager is required")
 	}
+	var err error
+	rec.Config, err = bindRuntimeCreatedIdentity(rec.Config, "manager.ephemeral_execution")
+	if err != nil {
+		return err
+	}
 	return am.spawnAgentInternal(ctx, rec, false)
 }
 
 // SpawnEphemeralClone creates a task-scoped clone of a base agent. Ephemeral
 // clones are persisted with status=ephemeral so crash recovery does not hydrate
 // them as permanent agents.
-func (am *AgentManager) SpawnEphemeralClone(baseAgentID, cloneAgentID string) error {
-	baseAgentID = strings.TrimSpace(baseAgentID)
+func (am *AgentManager) SpawnEphemeralClone(baseIdentity runtimeagentidentity.Identity, cloneAgentID string) error {
+	baseIdentity = baseIdentity.Normalize()
 	cloneAgentID = strings.TrimSpace(cloneAgentID)
-	if baseAgentID == "" {
-		return errors.New("baseAgentID is required")
+	if err := baseIdentity.Validate(); err != nil {
+		return fmt.Errorf("base agent identity: %w", err)
 	}
 	if cloneAgentID == "" {
 		return errors.New("cloneAgentID is required")
 	}
-	baseExecution, ok := am.lifecycle.executionSnapshot(baseAgentID)
+	baseExecution, ok := am.lifecycle.executionSnapshotByIdentity(baseIdentity)
 	if !ok {
-		return fmt.Errorf("%w: %s", ErrAgentNotFound, baseAgentID)
+		return fmt.Errorf("%w: %s", ErrAgentNotFound, baseIdentity.Description())
 	}
 	baseCfg := baseExecution.Config
 	cloneCfg := baseCfg
 	cloneCfg.ID = cloneAgentID
+	cloneCfg.Identity = runtimeagentidentity.Identity{}
+	var err error
+	cloneCfg, err = bindRuntimeCreatedIdentity(cloneCfg, "manager.ephemeral_clone")
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(cloneCfg.ParentAgent) == "" {
-		cloneCfg.ParentAgent = baseAgentID
+		cloneCfg.ParentAgent = baseIdentity.AgentID()
 	}
 	rec := PersistedAgent{
 		Config:        cloneCfg,
-		ParentAgentID: baseAgentID,
+		ParentAgentID: baseIdentity.AgentID(),
 		Status:        "ephemeral",
 		HiredBy:       "shard-dispatcher",
 		StartedAt:     time.Now().UTC(),
@@ -334,6 +352,10 @@ func (am *AgentManager) spawnAgentInternalForSourceWithTopology(
 	source semanticview.Source,
 	topology *DynamicAgentTopologyMutation,
 ) error {
+	identity, err := rec.Config.ConcreteIdentity()
+	if err != nil {
+		return fmt.Errorf("agent %q requires a concrete identity: %w", strings.TrimSpace(rec.Config.ID), err)
+	}
 	if strings.TrimSpace(rec.Config.LLMBackend) == "" {
 		rec.Config.LLMBackend = am.llmBackend
 	}
@@ -355,7 +377,7 @@ func (am *AgentManager) spawnAgentInternalForSourceWithTopology(
 		return err
 	}
 
-	if _, exists := am.lifecycle.executionSnapshot(a.ID()); exists {
+	if _, exists := am.lifecycle.executionSnapshotByIdentity(identity); exists {
 		return fmt.Errorf("%w: %s", ErrAgentAlreadyExists, a.ID())
 	}
 	if persist {
@@ -387,7 +409,7 @@ func (am *AgentManager) spawnAgentInternalForSourceWithTopology(
 	}
 	if persist && am.lifecycle.store == nil && am.store != nil {
 		if err := am.store.UpsertAgent(ctx, rec); err != nil {
-			am.lifecycle.unregisterLocal(a.ID())
+			am.lifecycle.unregisterIdentity(identity)
 			return fmt.Errorf("persist agent %s: %w", rec.Config.ID, err)
 		}
 	}
@@ -397,11 +419,37 @@ func (am *AgentManager) spawnAgentInternalForSourceWithTopology(
 	runCtx, _, isRunning := am.lifecycle.runSnapshot()
 	_ = persist
 	if isRunning {
-		if _, err := am.replaceExecution(runCtx, a.ID(), "start", "", nil); err != nil {
+		if _, err := am.replaceExecutionIdentityConfigWithTopology(runCtx, identity, "start", "", nil, am.semanticSource, false, nil); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func bindRuntimeCreatedIdentity(cfg models.AgentConfig, owner string) (models.AgentConfig, error) {
+	cfg.NormalizeRuntimeDescriptor()
+	if !cfg.Identity.IsZero() {
+		if _, err := cfg.ConcreteIdentity(); err != nil {
+			return models.AgentConfig{}, err
+		}
+		return cfg, nil
+	}
+	name, err := runtimeagentidentity.RuntimeName(cfg.ID, owner)
+	if err != nil {
+		return models.AgentConfig{}, err
+	}
+	route := runtimeagentidentity.RootRoute()
+	if flowPath := cfg.CanonicalFlowPath(); flowPath != "" {
+		route, err = runtimeflowidentity.StoredRoute("", "", flowPath).AgentIdentityRoute()
+		if err != nil {
+			return models.AgentConfig{}, err
+		}
+	}
+	cfg.Identity, err = runtimeagentidentity.New(name, route)
+	if err != nil {
+		return models.AgentConfig{}, err
+	}
+	return cfg, nil
 }
 
 func (am *AgentManager) publishCommittedAgent(ctx context.Context, rec PersistedAgent, a Agent, subscriptionAdmission semanticview.FlowOwnedAgentSubscriptionAdmission, result AgentLifecycleTransitionResult) error {
@@ -415,7 +463,11 @@ func (am *AgentManager) publishCommittedAgent(ctx context.Context, rec Persisted
 	_ = am.projectLifecycleDiagnostics(ctx)
 	runCtx, _, isRunning := am.lifecycle.runSnapshot()
 	if isRunning {
-		if _, err := am.replaceExecution(runCtx, a.ID(), "start", "", nil); err != nil {
+		identity, err := rec.Config.ConcreteIdentity()
+		if err != nil {
+			return err
+		}
+		if _, err := am.replaceExecutionIdentityConfigWithTopology(runCtx, identity, "start", "", nil, am.semanticSource, false, nil); err != nil {
 			return err
 		}
 	}
@@ -533,79 +585,98 @@ func (am *AgentManager) applyContractPrompt(cfg models.AgentConfig) (models.Agen
 	return cfg, nil
 }
 
-func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig) error {
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
-		return errors.New("agentID is required")
+func (am *AgentManager) ReconfigureAgentTarget(agentID, flowInstance string, cfg models.AgentConfig) error {
+	identity, err := am.lifecycle.resolveAgentTarget(agentID, flowInstance, false)
+	if err != nil {
+		return err
 	}
-	result, err := am.replaceExecution(am.runtimeContext(), agentID, "reconfigure", "", &cfg)
+	result, err := am.replaceExecutionIdentityConfigWithTopology(
+		am.runtimeContext(),
+		identity,
+		"reconfigure",
+		"",
+		&cfg,
+		am.semanticSource,
+		false,
+		nil,
+	)
 	if err != nil {
 		return err
 	}
 	if result.transitioned && am.lifecycle.store == nil && am.store != nil {
 		rec := PersistedAgent{Config: result.config, Status: "active", HiredBy: "reconfigure"}
 		if err := am.store.UpsertAgent(am.runtimeContext(), rec); err != nil {
-			return fmt.Errorf("persist reconfigured agent %s: %w", agentID, err)
+			return fmt.Errorf("persist reconfigured agent %s: %w", identity.Description(), err)
 		}
 	}
 	return nil
 }
 
-func (am *AgentManager) reconfigureAgentExact(
+func (am *AgentManager) reconfigureAgentIdentityExactWithTopology(
 	ctx context.Context,
 	source semanticview.Source,
-	agentID string,
-	cfg models.AgentConfig,
-) error {
-	return am.reconfigureAgentExactWithTopology(ctx, source, agentID, cfg, nil)
-}
-
-func (am *AgentManager) reconfigureAgentExactWithTopology(
-	ctx context.Context,
-	source semanticview.Source,
-	agentID string,
+	identity runtimeagentidentity.Identity,
 	cfg models.AgentConfig,
 	topology *DynamicAgentTopologyMutation,
 ) error {
-	result, err := am.replaceExecutionConfigWithTopology(ctx, agentID, "reconfigure", "", &cfg, source, true, topology)
+	result, err := am.replaceExecutionIdentityConfigWithTopology(
+		ctx,
+		identity,
+		"reconfigure",
+		"",
+		&cfg,
+		source,
+		true,
+		topology,
+	)
 	if err != nil {
 		return err
 	}
 	if result.transitioned && am.lifecycle.store == nil && am.store != nil {
 		rec := PersistedAgent{Config: result.config, Status: "active", HiredBy: "reconfigure"}
 		if err := am.store.UpsertAgent(ctx, rec); err != nil {
-			return fmt.Errorf("persist reconfigured agent %s: %w", agentID, err)
+			return fmt.Errorf("persist reconfigured agent %s: %w", identity.Description(), err)
 		}
 	}
 	return nil
 }
 
-func (am *AgentManager) teardownAgent(ctx context.Context, agentID, trigger string) error {
-	return am.teardownAgentWithTopology(ctx, agentID, trigger, nil)
+func (am *AgentManager) teardownIdentity(
+	ctx context.Context,
+	identity runtimeagentidentity.Identity,
+	trigger string,
+) error {
+	return am.teardownIdentityWithTopology(ctx, identity, trigger, nil)
 }
 
-func (am *AgentManager) teardownAgentWithTopology(
+func (am *AgentManager) teardownIdentityWithTopology(
 	ctx context.Context,
-	agentID string,
+	identity runtimeagentidentity.Identity,
 	trigger string,
 	topology *DynamicAgentTopologyMutation,
 ) error {
-	if strings.TrimSpace(agentID) == "" {
-		return errors.New("agentID is required")
+	if err := identity.Validate(); err != nil {
+		return err
 	}
-	if err := am.lifecycle.terminateWithTopology(ctx, agentID, trigger, AgentLifecycleTerminated, topology); err != nil {
+	if err := am.lifecycle.terminateIdentityWithTopology(
+		ctx,
+		identity,
+		trigger,
+		AgentLifecycleTerminated,
+		topology,
+	); err != nil {
 		return err
 	}
 	_ = am.projectLifecycleDiagnostics(context.WithoutCancel(ctx))
 	return nil
 }
 
-func (am *AgentManager) TeardownAgent(agentID string) error {
-	_, exists := am.lifecycle.executionSnapshot(agentID)
-	if !exists {
-		return fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
+func (am *AgentManager) TeardownAgentTarget(agentID, flowInstance string) error {
+	identity, err := am.lifecycle.resolveAgentTarget(agentID, flowInstance, false)
+	if err != nil {
+		return err
 	}
-	return am.teardownAgent(am.runtimeContext(), agentID, "teardown")
+	return am.teardownIdentity(am.runtimeContext(), identity, "teardown")
 }
 
 func reconfigureSessionMutationPlan(current, updated models.AgentConfig) sessions.LifecycleMutationPlan {

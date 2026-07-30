@@ -87,7 +87,7 @@ func (s *fileMonitorSink) OpenTurn(_ context.Context, meta MonitorTurnMeta) (Mon
 		strings.TrimSpace(meta.Runtime),
 		strings.TrimSpace(meta.SessionID),
 		meta.Memory.Enabled,
-		strings.TrimSpace(meta.MemoryIdentity.FlowInstance),
+		strings.TrimSpace(meta.MemoryIdentity.FlowInstance()),
 		strings.TrimSpace(meta.InputRole),
 		strings.TrimSpace(meta.TargetName),
 		snippetForLog(meta.InputText, 240),

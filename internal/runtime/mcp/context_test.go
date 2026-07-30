@@ -11,6 +11,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
@@ -28,10 +29,13 @@ func managedClaudeProviderTurnTestContext(t testing.TB, executionKind managedcap
 	if executionKind == managedcapabilities.ExecutionSelectedContractFork {
 		actorID = "selected-claude-agent"
 	}
+	identity := agentidentitytest.Runtime(t, actorID, "mcp-managed-turn-test", "claude", "provider-turn", "claude/provider-turn")
 	harness.Token.AgentID = actorID
+	harness.Token.Identity = identity
 	target := runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: actorID,
-		SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "claude-provider-turn",
+		AgentIdentity: identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
+		FlowInstance: identity.FlowInstance(),
 	}
 	var (
 		authority runtimeeffects.Authority
@@ -81,7 +85,9 @@ func managedClaudeProviderTurnTestContext(t testing.TB, executionKind managedcap
 	if err != nil {
 		t.Fatalf("build managed Claude capability surface: %v", err)
 	}
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: actorID})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{
+		ExecutionMode: "live", ID: actorID, Identity: identity, FlowPath: identity.FlowInstance(),
+	})
 	ctx = runtimeeffects.WithAuthority(ctx, authority)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 	ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewController(harness))

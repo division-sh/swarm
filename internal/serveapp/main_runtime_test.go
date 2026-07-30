@@ -35,6 +35,8 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -70,6 +72,41 @@ import (
 )
 
 const serveRuntimeTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+func servedRuntimeRootIdentity(t testing.TB, agentID string) runtimeagentidentity.Identity {
+	t.Helper()
+	return agentidentitytest.RootRuntime(t, agentID, "serveapp-test")
+}
+
+func servedRuntimeRootIdentityFields(t testing.TB, agentID string) runtimeagentidentity.StorageFields {
+	t.Helper()
+	fields, err := servedRuntimeRootIdentity(t, agentID).StorageFields()
+	if err != nil {
+		t.Fatalf("project served runtime agent identity: %v", err)
+	}
+	return fields
+}
+
+func servedRuntimeFlowIdentity(t testing.TB, agentID, scopeKey, instanceID string) runtimeagentidentity.Identity {
+	t.Helper()
+	return agentidentitytest.Runtime(
+		t,
+		agentID,
+		"serveapp-test",
+		scopeKey,
+		instanceID,
+		scopeKey+"/"+instanceID,
+	)
+}
+
+func servedRuntimeFlowIdentityFields(t testing.TB, agentID, scopeKey, instanceID string) runtimeagentidentity.StorageFields {
+	t.Helper()
+	fields, err := servedRuntimeFlowIdentity(t, agentID, scopeKey, instanceID).StorageFields()
+	if err != nil {
+		t.Fatalf("project served runtime flow agent identity: %v", err)
+	}
+	return fields
+}
 
 type delayedRunStatusAgent struct {
 	id            string
@@ -1607,6 +1644,9 @@ func startServedSessionCleanupProof(t *testing.T) servedSessionCleanupProof {
 	case <-time.After(servedEventPublishLifecycleProbeWaitTimeout):
 		t.Fatalf("timed out waiting for lifecycle-authorized session writer\n%s", servedEventPublishDebugSummary(t, db, "postgres", initial.RunID))
 	}
+	if strings.HasPrefix(sessionID, "error: ") {
+		t.Fatalf("lifecycle-authorized session writer failed: %s", strings.TrimPrefix(sessionID, "error: "))
+	}
 	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, hold.EventID, "agent", "load-agent", "in_progress", 1)
 	var sessionRunID, status string
 	if err := db.QueryRowContext(context.Background(), `
@@ -2441,6 +2481,7 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 		Turn1ID: uuid.NewString(), Turn2ID: uuid.NewString(), Event1ID: uuid.NewString(), Event2ID: uuid.NewString(), EntityID: uuid.NewString(),
 		Turn1At: now.Add(-2 * time.Minute), Turn2At: now.Add(-time.Minute),
 	}
+	identity := servedRuntimeFlowIdentityFields(t, fixture.AgentID, "fork-source", "source")
 	ctx := context.Background()
 	capabilityIDs := make([]string, 0, 2)
 	var capabilityStore managedcapabilities.Persistence
@@ -2487,9 +2528,32 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 			query string
 			args  []any
 		}{
-			{`INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor) VALUES ($1, 'fork-source', 'researcher', 'regular', 'openai_compatible', TRUE, 'authored', '{"type":"researcher","model":"regular","resolved_model":"gpt-compatible","resolved_llm_provider":"openai_compatible","resolved_llm_transport":"api","execution_mode":"live"}'::jsonb)`, []any{fixture.AgentID}},
-			{`INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'fork-source', TRUE, 'authored', 'active', $4, $4)`, []any{fixture.SessionID, fixture.RunID, fixture.AgentID, now.Add(-3 * time.Minute)}},
-			{`INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, trigger_event_id, trigger_event_type, capability_surface_id, parse_ok, execution_mode, created_at) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,'fork-source',TRUE,'authored',$5::uuid,'task.ready',$6::uuid,true,'live',$7),($8::uuid,$2::uuid,$3,$4::uuid,'fork-source',TRUE,'authored',$9::uuid,'task.done',$10::uuid,true,'live',$11)`, []any{fixture.Turn1ID, fixture.RunID, fixture.AgentID, fixture.SessionID, fixture.Event1ID, capabilityIDs[0], fixture.Turn1At, fixture.Turn2ID, fixture.Event2ID, capabilityIDs[1], fixture.Turn2At}},
+			{`INSERT INTO agents (
+				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, flow_instance,
+				role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,'researcher','regular','openai_compatible',TRUE,'authored','{"type":"researcher","model":"regular","resolved_model":"gpt-compatible","resolved_llm_provider":"openai_compatible","resolved_llm_transport":"api","execution_mode":"live"}'::jsonb)`,
+				[]any{identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath}},
+			{`INSERT INTO agent_sessions (
+				session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, flow_instance,
+				memory_enabled, memory_source, status, created_at, updated_at
+			) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored','active',$10,$10)`,
+				[]any{fixture.SessionID, fixture.RunID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, now.Add(-3 * time.Minute)}},
+			{`INSERT INTO agent_turns (
+				turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, session_id, flow_instance,
+				memory_enabled, memory_source, trigger_event_id, trigger_event_type,
+				capability_surface_id, parse_ok, execution_mode, created_at
+			) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9::uuid,$10,TRUE,'authored',$11::uuid,'task.ready',$12::uuid,true,'live',$13)`,
+				[]any{fixture.Turn1ID, fixture.RunID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, fixture.SessionID, identity.FlowInstancePath, fixture.Event1ID, capabilityIDs[0], fixture.Turn1At}},
+			{`INSERT INTO agent_turns (
+				turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, session_id, flow_instance,
+				memory_enabled, memory_source, trigger_event_id, trigger_event_type,
+				capability_surface_id, parse_ok, execution_mode, created_at
+			) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9::uuid,$10,TRUE,'authored',$11::uuid,'task.done',$12::uuid,true,'live',$13)`,
+				[]any{fixture.Turn2ID, fixture.RunID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, fixture.SessionID, identity.FlowInstancePath, fixture.Event2ID, capabilityIDs[1], fixture.Turn2At}},
 			{`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid,$2::uuid,'flow/forkchat','default','after','{}'::jsonb,'{"name":"After"}'::jsonb,'{}'::jsonb,2,$3,$3,$3)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second)}},
 			{`INSERT INTO entity_mutations (run_id, entity_id, field, old_value, new_value, writer_type, writer_id, created_at) VALUES ($1::uuid,$2::uuid,'current_state',NULL,'"draft"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'name',NULL,'"Before"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'current_state','"draft"'::jsonb,'"after"'::jsonb,'platform','test',$4)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.Turn1At.Add(10 * time.Second)}},
 		}
@@ -2498,9 +2562,32 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 			query string
 			args  []any
 		}{
-			{`INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor) VALUES (?, 'fork-source', 'researcher', 'regular', 'openai_compatible', 1, 'authored', '{"type":"researcher","model":"regular","resolved_model":"gpt-compatible","resolved_llm_provider":"openai_compatible","resolved_llm_transport":"api","execution_mode":"live"}')`, []any{fixture.AgentID}},
-			{`INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status, created_at, updated_at) VALUES (?, ?, ?, 'fork-source', 1, 'authored', 'active', ?, ?)`, []any{fixture.SessionID, fixture.RunID, fixture.AgentID, now.Add(-3 * time.Minute), now.Add(-3 * time.Minute)}},
-			{`INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, trigger_event_id, trigger_event_type, capability_surface_id, parse_ok, execution_mode, created_at) VALUES (?,?,?,?,'fork-source',1,'authored',?,'task.ready',?,true,'live',?),(?,?,?,?,'fork-source',1,'authored',?,'task.done',?,true,'live',?)`, []any{fixture.Turn1ID, fixture.RunID, fixture.AgentID, fixture.SessionID, fixture.Event1ID, capabilityIDs[0], fixture.Turn1At, fixture.Turn2ID, fixture.RunID, fixture.AgentID, fixture.SessionID, fixture.Event2ID, capabilityIDs[1], fixture.Turn2At}},
+			{`INSERT INTO agents (
+				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, flow_instance,
+				role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor
+			) VALUES (?,?,?,?,?,?,?,'researcher','regular','openai_compatible',1,'authored','{"type":"researcher","model":"regular","resolved_model":"gpt-compatible","resolved_llm_provider":"openai_compatible","resolved_llm_transport":"api","execution_mode":"live"}')`,
+				[]any{identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath}},
+			{`INSERT INTO agent_sessions (
+				session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, flow_instance,
+				memory_enabled, memory_source, status, created_at, updated_at
+			) VALUES (?,?,?,?,?,?,?,?,?,1,'authored','active',?,?)`,
+				[]any{fixture.SessionID, fixture.RunID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, now.Add(-3 * time.Minute), now.Add(-3 * time.Minute)}},
+			{`INSERT INTO agent_turns (
+				turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, session_id, flow_instance,
+				memory_enabled, memory_source, trigger_event_id, trigger_event_type,
+				capability_surface_id, parse_ok, execution_mode, created_at
+			) VALUES (?,?,?,?,?,?,?,?,?,?,1,'authored',?,'task.ready',?,true,'live',?)`,
+				[]any{fixture.Turn1ID, fixture.RunID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, fixture.SessionID, identity.FlowInstancePath, fixture.Event1ID, capabilityIDs[0], fixture.Turn1At}},
+			{`INSERT INTO agent_turns (
+				turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, session_id, flow_instance,
+				memory_enabled, memory_source, trigger_event_id, trigger_event_type,
+				capability_surface_id, parse_ok, execution_mode, created_at
+			) VALUES (?,?,?,?,?,?,?,?,?,?,1,'authored',?,'task.done',?,true,'live',?)`,
+				[]any{fixture.Turn2ID, fixture.RunID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, fixture.SessionID, identity.FlowInstancePath, fixture.Event2ID, capabilityIDs[1], fixture.Turn2At}},
 			{`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?,?,'flow/forkchat','default','after','{}','{"name":"After"}','{}',2,?,?,?)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second), fixture.Turn1At.Add(10 * time.Second), fixture.Turn1At.Add(10 * time.Second)}},
 			{`INSERT INTO entity_mutations (run_id, entity_id, field, old_value, new_value, writer_type, writer_id, created_at) VALUES (?,?,'current_state',NULL,'"draft"','platform','test',?),(?,?,'name',NULL,'"Before"','platform','test',?),(?,?,'current_state','"draft"','"after"','platform','test',?)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second)}},
 		}
@@ -4427,7 +4514,15 @@ func seedServedLiveAgentPendingBacklogDelivery(t *testing.T, rt servedControlPro
 	}
 	event := eventtest.PersistedProjection(eventID, "thing.agent_hold", "test", "", json.RawMessage(`{"note":"backlog"}`), 0, runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	storetest.CommitSemanticEventWithInitialFacts(t, ctx, selectedStore, event,
-		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "load-agent"}},
+		[]events.DeliveryRoute{{
+			SubscriberType: "agent",
+			SubscriberID:   "load-agent",
+			AgentIdentity: agentidentitytest.RootDeclared(
+				t,
+				"load-agent",
+				"served-event-publish-followup://load-agent",
+			),
+		}},
 		runtimepipelineobligation.ScopeSubscribed,
 		storetest.AcknowledgedPipelineDisposition())
 	if got := servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, "platform", "pipeline", "success"); got != 1 {
@@ -4532,7 +4627,11 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 	}
 	event := eventtest.PersistedProjection(eventID, "control.stop.pending", "test", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	storetest.CommitSemanticEventWithInitialFacts(t, ctx, selectedStore, event,
-		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-pending"}},
+		[]events.DeliveryRoute{{
+			SubscriberType: "agent",
+			SubscriberID:   "agent-pending",
+			AgentIdentity:  servedRuntimeRootIdentity(t, "agent-pending"),
+		}},
 		runtimepipelineobligation.ScopeSubscribed,
 		storetest.AcknowledgedPipelineDisposition())
 	if got := servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, "platform", "pipeline", "success"); got != 1 {
@@ -4970,7 +5069,11 @@ func seedServedJoinForkFrontier(t *testing.T, db *sql.DB, runID, entityID, sourc
 		json.RawMessage(`{"marker":"replayed"}`), 0, runID, sourceEventID, envelope, createdAt,
 	)
 	storetest.CommitSemanticForkFrontier(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), event,
-		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "frontier-agent"}},
+		[]events.DeliveryRoute{{
+			SubscriberType: "agent",
+			SubscriberID:   "frontier-agent",
+			AgentIdentity:  servedRuntimeRootIdentity(t, "frontier-agent"),
+		}},
 		storetest.AcknowledgedPipelineDisposition())
 	return eventID
 }
@@ -5940,6 +6043,8 @@ func servedEventPublishDebugSummary(t *testing.T, db *sql.DB, backend, runID str
 		servedEventPublishDebugQuery(t, db, backend, "event_delivery_outcomes", runID),
 		servedEventPublishDebugQuery(t, db, backend, "event_receipts", runID),
 		servedEventPublishDebugQuery(t, db, backend, "dead_letters", runID),
+		servedEventPublishDebugQuery(t, db, backend, "delivery_agents", runID),
+		servedEventPublishDebugQuery(t, db, backend, "runtime_logs", runID),
 	}
 	return strings.Join(sections, "\n")
 }
@@ -5967,6 +6072,10 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 			sqlText = `SELECT r.event_id::text, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, ''), COALESCE(r.side_effects::text, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = $1::uuid ORDER BY r.processed_at, r.event_id LIMIT 8`
 		case "dead_letters":
 			sqlText = `SELECT d.original_event, COALESCE(d.entity_id::text, ''), COALESCE(d.failure->>'class', ''), COALESCE(d.failure->'detail'->>'code', '') FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = $1::uuid ORDER BY d.created_at LIMIT 5`
+		case "delivery_agents":
+			sqlText = `SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source, d.agent_route_presence, d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path, COALESCE(a.status, ''), COALESCE(a.lifecycle_phase, '') FROM event_deliveries d LEFT JOIN agents a ON a.agent_id = d.subscriber_id AND a.agent_name_owner = d.agent_name_owner AND a.agent_name_source = d.agent_name_source AND a.agent_route_presence = d.agent_route_presence AND a.flow_scope_key = d.agent_flow_scope_key AND a.flow_instance_id = d.agent_flow_instance_id AND a.flow_instance = d.agent_flow_instance_path WHERE d.run_id = $1::uuid ORDER BY d.created_at LIMIT 8`
+		case "runtime_logs":
+			sqlText = `SELECT payload::text FROM events WHERE run_id = $1::uuid AND event_name = 'platform.runtime_log' ORDER BY created_at LIMIT 8`
 		}
 	case "sqlite":
 		switch scope {
@@ -5986,6 +6095,10 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 			sqlText = `SELECT r.event_id, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, ''), COALESCE(r.side_effects, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = ? ORDER BY r.processed_at, r.event_id LIMIT 8`
 		case "dead_letters":
 			sqlText = `SELECT d.original_event, COALESCE(d.entity_id, ''), COALESCE(json_extract(d.failure, '$.class'), ''), COALESCE(json_extract(d.failure, '$.detail.code'), '') FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = ? ORDER BY d.created_at LIMIT 5`
+		case "delivery_agents":
+			sqlText = `SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source, d.agent_route_presence, d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path, COALESCE(a.status, ''), COALESCE(a.lifecycle_phase, '') FROM event_deliveries d LEFT JOIN agents a ON a.agent_id = d.subscriber_id AND a.agent_name_owner = d.agent_name_owner AND a.agent_name_source = d.agent_name_source AND a.agent_route_presence = d.agent_route_presence AND a.flow_scope_key = d.agent_flow_scope_key AND a.flow_instance_id = d.agent_flow_instance_id AND a.flow_instance = d.agent_flow_instance_path WHERE d.run_id = ? ORDER BY d.created_at LIMIT 8`
+		case "runtime_logs":
+			sqlText = `SELECT payload FROM events WHERE run_id = ? AND event_name = 'platform.runtime_log' ORDER BY created_at LIMIT 8`
 		}
 	}
 	if sqlText == "" {
@@ -7372,10 +7485,15 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 	})
 	storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 	ctx := context.Background()
+	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "startup-recovery", "agent-a")
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source, runtime_descriptor)
-		VALUES ('agent-a', 'startup-recovery', 'operator', 'default', TRUE, 'authored', '{"type":"default","execution_mode":"live"}'::jsonb)
-	`); err != nil {
+		INSERT INTO agents (
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance,
+			role, model, memory_enabled, memory_source, runtime_descriptor
+		)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,'operator','default',TRUE,'authored','{"type":"default","execution_mode":"live"}'::jsonb)
+	`, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 	contractsRoot, err := cliapp.NormalizeContractsRoot(cliapp.ResolvePath(cliapp.RepoRoot(), filepath.Join("tests", "tier8-boot-verification", "test-boot-success")))
@@ -7480,10 +7598,15 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 	eventID := uuid.NewString()
 	activeSessionID := uuid.NewString()
 	runlifecyclefixture.RequireSQLite(t, ctx, sqliteStore.DB, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now.Add(-time.Hour), BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
+	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "serve-abandon", "agent-a")
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, sqliteStore.DB, runtimeauthoractivity.DialectSQLite,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
-	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
+	route := events.DeliveryRoute{
+		SubscriberType: "agent",
+		SubscriberID:   "agent-a",
+		AgentIdentity:  servedRuntimeFlowIdentity(t, "agent-a", "serve-abandon", "agent-a"),
+	}
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, sqliteStore, event, []events.DeliveryRoute{route})
 	claimCtx := serveDeliveryLifecycleFixtureContext()
 	claimed, err := sqliteStore.ClaimAgentDelivery(claimCtx, event, route)
@@ -7492,16 +7615,24 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 		t.Fatalf("claim sqlite active delivery: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source, runtime_descriptor)
-		VALUES ('agent-a', 'serve-abandon', 'operator', 'default', TRUE, 'authored', '{"type":"default","execution_mode":"live"}')
-	`); err != nil {
+		INSERT INTO agents (
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance,
+			role, model, memory_enabled, memory_source, runtime_descriptor
+		)
+		VALUES (?,?,?,?,?,?,?,'operator','default',TRUE,'authored','{"type":"default","execution_mode":"live"}')
+	`, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath); err != nil {
 		_ = sqliteStore.Close()
 		t.Fatalf("seed sqlite delivery agent: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status)
-		VALUES (?, ?, 'agent-a', 'serve-abandon', TRUE, 'authored', 'active')
-	`, activeSessionID, runID); err != nil {
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source, status
+		)
+		VALUES (?,?,?,?,?,?,?,?,?,TRUE,'authored','active')
+	`, activeSessionID, runID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath); err != nil {
 		_ = sqliteStore.Close()
 		t.Fatalf("seed sqlite delivery session: %v", err)
 	}
@@ -7584,6 +7715,7 @@ func assertPostgresTableExists(t *testing.T, db *sql.DB, tableName string) {
 func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context, runtimePG *store.PostgresStore, runID, source string) {
 	t.Helper()
 	db := runtimePG.DB
+	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "startup-recovery", "agent-a")
 	bundleHash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	admissionSource := source
 	if source == storerunlifecycle.BundleSourceDeleted {
@@ -7596,7 +7728,11 @@ func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
 		eventID, runID, events.EventType("startup."+source+".event"), eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
-	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
+	route := events.DeliveryRoute{
+		SubscriberType: "agent",
+		SubscriberID:   "agent-a",
+		AgentIdentity:  servedRuntimeFlowIdentity(t, "agent-a", "startup-recovery", "agent-a"),
+	}
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, runtimePG, event, []events.DeliveryRoute{route})
 	claimCtx := serveDeliveryLifecycleFixtureContext()
 	claimed, err := runtimePG.ClaimAgentDelivery(claimCtx, event, route)
@@ -7604,17 +7740,21 @@ func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context
 		t.Fatalf("claim delivery %s: %v", source, err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', 'startup-recovery', TRUE, 'authored', 'active')
-	`, sessionID, runID); err != nil {
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source, status
+		)
+		VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored','active')
+	`, sessionID, runID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath); err != nil {
 		t.Fatalf("seed session %s: %v", source, err)
 	}
 	if _, err := runtimePG.BindAgentSession(claimCtx, claimed.Claim, sessionID); err != nil {
 		t.Fatalf("bind delivery session %s: %v", source, err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, status)
-		VALUES ($1::uuid, $2, $3::uuid, 'timer.fired', now() + interval '1 hour', 'active')
+		INSERT INTO timers (timer_id, timer_name, run_id, owner_kind, fire_event, fire_at, status)
+		VALUES ($1::uuid, $2, $3::uuid, 'system', 'timer.fired', now() + interval '1 hour', 'active')
 	`, timerID, "timer-"+source, runID); err != nil {
 		t.Fatalf("seed timer %s: %v", source, err)
 	}
@@ -8820,13 +8960,18 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	activeSessionID := uuid.NewString()
+	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "serve-abandon", "agent-a")
 	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
 	bundleHash := servedEventPublishFixtureBundleHash(t, filepath.Join(cliapp.RepoRoot(), contractsPath))
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
-	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
+	route := events.DeliveryRoute{
+		SubscriberType: "agent",
+		SubscriberID:   "agent-a",
+		AgentIdentity:  servedRuntimeFlowIdentity(t, "agent-a", "serve-abandon", "agent-a"),
+	}
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, runtimePG, event, []events.DeliveryRoute{route})
 	claimCtx := serveDeliveryLifecycleFixtureContext()
 	claimed, err := runtimePG.ClaimAgentDelivery(claimCtx, event, route)
@@ -8834,15 +8979,23 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 		t.Fatalf("claim active delivery: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source, runtime_descriptor)
-		VALUES ('agent-a', 'serve-abandon', 'operator', 'default', TRUE, 'authored', '{"type":"default","execution_mode":"live"}'::jsonb)
-	`); err != nil {
+		INSERT INTO agents (
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance,
+			role, model, memory_enabled, memory_source, runtime_descriptor
+		)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,'operator','default',TRUE,'authored','{"type":"default","execution_mode":"live"}'::jsonb)
+	`, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath); err != nil {
 		t.Fatalf("seed active delivery agent: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', 'serve-abandon', TRUE, 'authored', 'active')
-	`, activeSessionID, runID); err != nil {
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source, status
+		)
+		VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored','active')
+	`, activeSessionID, runID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath); err != nil {
 		t.Fatalf("seed active delivery session: %v", err)
 	}
 	if _, err := runtimePG.BindAgentSession(claimCtx, claimed.Claim, activeSessionID); err != nil {

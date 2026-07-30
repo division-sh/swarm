@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
@@ -233,8 +234,8 @@ func TestRuntimeContextManagerReplacementParksAndRehydratesStandingSchedules(t *
 			}
 			ownerCtx := managerWork.Context()
 			replacementSchedules := []runtimepipeline.Schedule{
-				{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "future-once"},
-				{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: "recurring-cron"},
+				runtimeContextAgentSchedule(t, runtimepipeline.Schedule{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "future-once"}),
+				runtimeContextAgentSchedule(t, runtimepipeline.Schedule{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: "recurring-cron"}),
 			}
 			for _, schedule := range replacementSchedules {
 				if err := predecessor.Runtime.Scheduler.Register(ownerCtx, schedule); err != nil {
@@ -245,7 +246,9 @@ func TestRuntimeContextManagerReplacementParksAndRehydratesStandingSchedules(t *
 				t.Fatalf("settle Manager-composed replacement work: %v", err)
 			}
 			route, err := predecessor.WorkOwner.NewRoute(context.Background(), worklifetime.RouteIdentity{
-				RuntimeEpoch: 1, AgentID: "replacement-route", Generation: 1,
+				RuntimeEpoch: 1,
+				Agent:        agentidentitytest.RootRuntime(t, "replacement-route", "runtime-context-test"),
+				Generation:   1,
 			})
 			if err != nil {
 				t.Fatalf("create replacement route: %v", err)
@@ -393,10 +396,10 @@ func TestRuntimeContextReplacementAggregateFailureLeavesNoPartialCandidateAndRet
 		owner := manager.contexts[runtimeContextTestHashA].standing[target.ServiceID]
 		if err := predecessor.Runtime.Scheduler.Register(
 			worklifetime.WithOccurrence(context.Background(), owner),
-			runtimepipeline.Schedule{
+			runtimeContextAgentSchedule(t, runtimepipeline.Schedule{
 				RunID: target.RunID, AgentID: "timer-agent", EventType: "timer.once", Mode: "once",
 				At: time.Now().Add(time.Hour), TaskID: target.ServiceID,
-			},
+			}),
 		); err != nil {
 			t.Fatalf("register predecessor schedule for %s: %v", target.ServiceID, err)
 		}
@@ -497,6 +500,7 @@ func TestStandingServiceTransitionRollbackRestoresExactOwnerSchedulesBeforeAdmis
 		{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "future-once"},
 		{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: "recurring-cron"},
 	} {
+		schedule = runtimeContextAgentSchedule(t, schedule)
 		if err := contextDef.Runtime.Scheduler.Register(ownerCtx, schedule); err != nil {
 			t.Fatalf("register %s schedule: %v", schedule.Mode, err)
 		}
@@ -557,9 +561,9 @@ func TestStandingServiceTransitionRollbackFailsClosedWhenOriginalManagerRetires(
 	if err != nil {
 		t.Fatalf("begin rollback Manager work: %v", err)
 	}
-	if err := contextDef.Runtime.Scheduler.Register(managerWork.Context(), runtimepipeline.Schedule{
+	if err := contextDef.Runtime.Scheduler.Register(managerWork.Context(), runtimeContextAgentSchedule(t, runtimepipeline.Schedule{
 		RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: "retired-manager-cron",
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("register Manager-composed schedule: %v", err)
 	}
 	if err := managerWork.Done(); err != nil {
@@ -622,6 +626,7 @@ func TestPreparedStandingSuccessorOwnsSchedulesBeforePublication(t *testing.T) {
 		{RunID: successorRunID, AgentID: "timer-agent", EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "future-once"},
 		{RunID: successorRunID, AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: "recurring-cron"},
 	} {
+		schedule = runtimeContextAgentSchedule(t, schedule)
 		if err := contextDef.Runtime.Scheduler.Register(prepared.WorkContext(context.Background()), schedule); err != nil {
 			t.Fatalf("register prepared %s schedule: %v", schedule.Mode, err)
 		}
@@ -645,6 +650,13 @@ func TestPreparedStandingSuccessorOwnsSchedulesBeforePublication(t *testing.T) {
 	if parked.Count() != 2 {
 		t.Fatalf("prepared successor schedules = %#v, want future one-shot and recurring cron", parked)
 	}
+}
+
+func runtimeContextAgentSchedule(t testing.TB, schedule runtimepipeline.Schedule) runtimepipeline.Schedule {
+	t.Helper()
+	schedule.OwnerKind = runtimepipeline.ScheduleOwnerAgent
+	schedule.AgentIdentity = agentidentitytest.RootRuntime(t, schedule.AgentID, "runtime-context-test")
+	return schedule
 }
 
 func TestRuntimeContextManagerBlockedStandingDescendantLeavesReplacementUnavailable(t *testing.T) {

@@ -190,7 +190,9 @@ func newProposedEffectMailboxHandler(
 		DecisionCards:    cards,
 		BundleSourceFact: fact,
 	})
-	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: "workflow-runtime"})
+	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{
+		Identity: runtimebustest.Identity(t, "workflow-runtime", ""),
+	})
 	runtimebustest.Subscribe(t, bus, "workflow-runtime", events.EventType("mailbox.card_decided"), events.EventType("platform.activity_requested"))
 	mailbox, ok := persistence.(MailboxAPIStore)
 	if !ok {

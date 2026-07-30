@@ -420,6 +420,7 @@ func TestEnsureBootWorkflowSchedulesPreservesActiveExactBootSchedule(t *testing.
 	store := &recordingRuntimeScheduleStore{
 		active: []runtimepipeline.Schedule{{
 			AgentID:   "runtime",
+			OwnerKind: runtimepipeline.ScheduleOwnerSystem,
 			EventType: "timer.boot_once",
 			Mode:      "once",
 			At:        activeAt,
@@ -451,6 +452,7 @@ func TestEnsureBootWorkflowSchedulesPreservesActiveExactBootSchedule(t *testing.
 func TestEnsureBootWorkflowSchedulesUsesRestoredSnapshotToAvoidRecreatingBootSchedule(t *testing.T) {
 	restored := runtimepipeline.Schedule{
 		AgentID:   "runtime",
+		OwnerKind: runtimepipeline.ScheduleOwnerSystem,
 		EventType: "timer.boot_once",
 		Mode:      "once",
 		At:        time.Now().UTC().Add(-1 * time.Minute),
@@ -571,6 +573,7 @@ func TestNewRuntime_SchedulerMarksSchedulesFiredThroughCanonicalTerminalHelper(t
 
 	sc := runtimepipeline.Schedule{
 		AgentID:   "runtime",
+		OwnerKind: runtimepipeline.ScheduleOwnerSystem,
 		EventType: "timer.check",
 		Mode:      "once",
 		TaskID:    "check_timer",
@@ -606,6 +609,7 @@ func TestRuntime_StartRestoresExactSchedulesDistinctByFlowInstance(t *testing.T)
 		active: []runtimepipeline.Schedule{
 			{
 				AgentID:      "runtime",
+				OwnerKind:    runtimepipeline.ScheduleOwnerSystem,
 				EventType:    "timer.check",
 				Mode:         "once",
 				At:           time.Now().Add(25 * time.Millisecond),
@@ -616,6 +620,7 @@ func TestRuntime_StartRestoresExactSchedulesDistinctByFlowInstance(t *testing.T)
 			},
 			{
 				AgentID:      "runtime",
+				OwnerKind:    runtimepipeline.ScheduleOwnerSystem,
 				EventType:    "timer.check",
 				Mode:         "once",
 				At:           time.Now().Add(50 * time.Millisecond),

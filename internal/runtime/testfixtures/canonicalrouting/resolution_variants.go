@@ -94,7 +94,7 @@ func CopyTemplateSelectAgentOnlyWithUnrelatedNode(t testing.TB) string {
     account.setup: {}
 `)
 	writeClosedVariantFile(t, root, "flows/account/agents.yaml", `account-agent:
-  id: account-agent-{instance_id}
+  id: account-agent
   model: regular
   subscriptions: [account.ready]
 `)

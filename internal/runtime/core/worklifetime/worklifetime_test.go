@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/google/uuid"
 )
 
@@ -174,7 +175,11 @@ func TestChildOccurrencesIgnoreConstructionCancellationAndFollowOwnerRetirement(
 	if err != nil {
 		t.Fatalf("new standing occurrence: %v", err)
 	}
-	runtimeRoute, err := runtime.NewRoute(constructionCtx, RouteIdentity{RuntimeEpoch: 1, AgentID: "runtime-agent", Generation: 1})
+	runtimeRoute, err := runtime.NewRoute(constructionCtx, RouteIdentity{
+		RuntimeEpoch: 1,
+		Agent:        agentidentitytest.RootRuntime(t, "runtime-agent", "worklifetime-test"),
+		Generation:   1,
+	})
 	if err != nil {
 		t.Fatalf("new runtime route: %v", err)
 	}
@@ -186,7 +191,11 @@ func TestChildOccurrencesIgnoreConstructionCancellationAndFollowOwnerRetirement(
 	if err != nil {
 		t.Fatalf("new process selected fork: %v", err)
 	}
-	forkRoute, err := runtimeFork.NewRoute(constructionCtx, RouteIdentity{RuntimeEpoch: 1, AgentID: "fork-agent", Generation: 1})
+	forkRoute, err := runtimeFork.NewRoute(constructionCtx, RouteIdentity{
+		RuntimeEpoch: 1,
+		Agent:        agentidentitytest.RootRuntime(t, "fork-agent", "worklifetime-test"),
+		Generation:   1,
+	})
 	if err != nil {
 		t.Fatalf("new selected-fork route: %v", err)
 	}
@@ -264,7 +273,11 @@ func TestRuntimeRouteDeliveryComposesStandingOwnerUntilDescendantCompletion(t *t
 	if err != nil {
 		t.Fatalf("new standing occurrence: %v", err)
 	}
-	route, err := runtime.NewRoute(context.Background(), RouteIdentity{RuntimeEpoch: 1, AgentID: "normalizer", Generation: 1})
+	route, err := runtime.NewRoute(context.Background(), RouteIdentity{
+		RuntimeEpoch: 1,
+		Agent:        agentidentitytest.RootRuntime(t, "normalizer", "worklifetime-test"),
+		Generation:   1,
+	})
 	if err != nil {
 		t.Fatalf("new runtime route: %v", err)
 	}
@@ -345,7 +358,11 @@ func TestRuntimeRouteDeliveryRetainsManagerStandingCompositionThroughNestedCompl
 		t.Fatalf("settle nested manager producer: %v", err)
 	}
 
-	route, err := runtimeOwner.NewRoute(context.Background(), RouteIdentity{RuntimeEpoch: 1, AgentID: "normalizer", Generation: 1})
+	route, err := runtimeOwner.NewRoute(context.Background(), RouteIdentity{
+		RuntimeEpoch: 1,
+		Agent:        agentidentitytest.RootRuntime(t, "normalizer", "worklifetime-test"),
+		Generation:   1,
+	})
 	if err != nil {
 		t.Fatalf("new runtime route: %v", err)
 	}
@@ -480,7 +497,11 @@ func TestBufferedRouteDeliveryBlocksRuntimeUntilExactlyOnceCompletion(t *testing
 	if err != nil {
 		t.Fatalf("new runtime occurrence: %v", err)
 	}
-	route, err := runtime.NewRoute(context.Background(), RouteIdentity{RuntimeEpoch: 1, AgentID: "agent-1", Generation: 1})
+	route, err := runtime.NewRoute(context.Background(), RouteIdentity{
+		RuntimeEpoch: 1,
+		Agent:        agentidentitytest.RootRuntime(t, "agent-1", "worklifetime-test"),
+		Generation:   1,
+	})
 	if err != nil {
 		t.Fatalf("new route occurrence: %v", err)
 	}

@@ -15,6 +15,8 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -24,6 +26,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -39,13 +42,14 @@ type completeEventDispatchStore interface {
 }
 
 type completeEventDispatchFixture struct {
-	store   completeEventDispatchStore
-	db      *sql.DB
-	dialect string
-	ctx     context.Context
-	bus     *runtimebus.EventBus
-	event   events.Event
-	agentID string
+	store    completeEventDispatchStore
+	db       *sql.DB
+	dialect  string
+	ctx      context.Context
+	bus      *runtimebus.EventBus
+	event    events.Event
+	agentID  string
+	identity agentidentity.Identity
 }
 
 func TestCompleteEventSnapshotDispatchesThroughRecoveryOwnersOnSQLiteAndPostgres(t *testing.T) {
@@ -53,8 +57,15 @@ func TestCompleteEventSnapshotDispatchesThroughRecoveryOwnersOnSQLiteAndPostgres
 		for _, surface := range []string{"startup", "global_sweeper", "run_queue", "decision_obligation"} {
 			t.Run(backend+"/"+surface, func(t *testing.T) {
 				fixture := newCompleteEventDispatchFixture(t, backend, surface == "decision_obligation")
-				ch := runtimebustest.Subscribe(t, fixture.bus, fixture.agentID, fixture.event.Type())
-				defer runtimebustest.Unsubscribe(fixture.bus, fixture.agentID)
+				admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
+					AgentID: fixture.agentID, Subscriptions: []string{string(fixture.event.Type())},
+				})
+				if err != nil {
+					t.Fatalf("admit complete-event route: %v", err)
+				}
+				fixture.bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{Identity: fixture.identity})
+				ch := runtimebustest.SubscribeIdentity(t, fixture.bus, fixture.identity, admission)
+				defer runtimebustest.UnsubscribeIdentity(fixture.bus, fixture.identity)
 
 				if err := fixture.updateChainDepth(-1); err == nil {
 					t.Fatalf("%s schema admitted negative chain_depth", backend)
@@ -75,6 +86,7 @@ func TestCompleteEventSnapshotDispatchesThroughManagerBacklogOnSQLiteAndPostgres
 			if err := fixture.store.UpsertAgent(fixture.ctx, runtimemanager.PersistedAgent{
 				Config: runtimeactors.AgentConfig{
 					ID:            fixture.agentID,
+					Identity:      fixture.identity,
 					Role:          "complete-event-proof",
 					Type:          "recording",
 					FlowID:        "global",
@@ -114,7 +126,9 @@ func TestCompleteEventSnapshotDispatchesThroughManagerBacklogOnSQLiteAndPostgres
 			if _, err := manager.HydrateForStartup(managerCtx); err != nil {
 				t.Fatalf("hydrate manager: %v", err)
 			}
-			if _, err := manager.ReplayBacklog(managerCtx, runtimeagentcontrol.ReplayBacklogRequest{AgentID: fixture.agentID}); err != nil {
+			if _, err := manager.ReplayBacklog(managerCtx, runtimeagentcontrol.ReplayBacklogRequest{
+				AgentID: fixture.agentID, FlowInstance: fixture.identity.FlowInstance(),
+			}); err != nil {
 				t.Fatalf("manager backlog replay: %v", err)
 			}
 			assertCompleteEventDelivery(t, seen, fixture.event)
@@ -209,14 +223,33 @@ func newCompleteEventDispatchFixtureWithOrigin(
 		createdAt,
 	), executionmode.Mock)
 	agentID := "complete-event-agent"
-	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: agentID}}, runtimepipelineobligation.ScopeSubscribed)
+	identity := agentidentitytest.RootRuntime(t, agentID, "complete-event-dispatch-fixture")
+	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{{
+		SubscriberType: "agent", SubscriberID: agentID, AgentIdentity: identity,
+	}}, runtimepipelineobligation.ScopeSubscribed)
 	fixture := completeEventDispatchFixture{
-		store: selected, db: db, dialect: backend, ctx: ctx, bus: bus, event: event, agentID: agentID,
+		store: selected, db: db, dialect: backend, ctx: ctx, bus: bus, event: event, agentID: agentID, identity: identity,
 	}
 	if decisionObligation {
 		fixture.insertDecisionObligation(t)
 	}
 	return fixture
+}
+
+func (f completeEventDispatchFixture) subscribe(t testing.TB, eventTypes ...events.EventType) <-chan *runtimebus.LocalDelivery {
+	t.Helper()
+	subscriptions := make([]string, 0, len(eventTypes))
+	for _, eventType := range eventTypes {
+		subscriptions = append(subscriptions, string(eventType))
+	}
+	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
+		AgentID: f.agentID, FlowPath: f.identity.FlowInstance(), Subscriptions: subscriptions,
+	})
+	if err != nil {
+		t.Fatalf("admit complete-event route: %v", err)
+	}
+	f.bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{Identity: f.identity})
+	return runtimebustest.SubscribeIdentity(t, f.bus, f.identity, admission)
 }
 
 func seedCompleteEventDispatchRun(t testing.TB, ctx context.Context, db *sql.DB, backend, runID string, startedAt time.Time) {

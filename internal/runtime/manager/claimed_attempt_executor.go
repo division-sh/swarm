@@ -3,8 +3,9 @@ package manager
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync/atomic"
+
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 )
 
 type claimedAttemptLane struct {
@@ -29,19 +30,19 @@ func (lane *claimedAttemptLane) acquire(ctx context.Context) error {
 	}
 }
 
-func (am *AgentManager) acquireClaimedAttemptLane(ctx context.Context, agentID string) (func(), error) {
+func (am *AgentManager) acquireClaimedAttemptLane(ctx context.Context, identity agentidentity.Identity) (func(), error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
-		return nil, fmt.Errorf("claimed-attempt executor requires an agent id")
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		return nil, fmt.Errorf("claimed-attempt executor identity: %w", err)
 	}
 	am.deliveryLaneMu.Lock()
-	lane := am.deliveryLanes[agentID]
+	lane := am.deliveryLanes[identity]
 	if lane == nil {
 		lane = newClaimedAttemptLane()
-		am.deliveryLanes[agentID] = lane
+		am.deliveryLanes[identity] = lane
 	}
 	am.deliveryLaneMu.Unlock()
 	if err := lane.acquire(ctx); err != nil {

@@ -11,6 +11,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -72,7 +74,7 @@ type managedNativeRecoveryDeliveryStore struct {
 
 func (s *managedNativeRecoveryDeliveryStore) ClaimAgentBacklog(
 	ctx context.Context,
-	agentID string,
+	_ agentidentity.Identity,
 	limit int,
 ) ([]runtimedelivery.AgentExecution, error) {
 	s.claimCalls.Add(1)
@@ -87,7 +89,7 @@ func (s *managedNativeRecoveryDeliveryStore) ClaimAgentBacklog(
 func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmission(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	ctx := testAuthorActivityContext(context.Background())
-	managerStore := newManagedNativeLifecycleStore(managedNativeLifecycleAgent("recovered-native-agent"))
+	managerStore := newManagedNativeLifecycleStore(managedNativeLifecycleAgent(t, "recovered-native-agent"))
 	delivery := &managedNativeRecoveryDeliveryStore{}
 	lease := &fakeRuntimeStartupOwnershipLease{}
 	ownership := fakeRuntimeStartupOwnershipStore{
@@ -160,7 +162,7 @@ func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmissio
 func TestRuntimeStart_PreparedReplacementSettlesManagedNativePreflightBeforeCommitAdmission(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	ctx := testAuthorActivityContext(context.Background())
-	managerStore := newManagedNativeLifecycleStore(managedNativeLifecycleAgent("replacement-native-agent"))
+	managerStore := newManagedNativeLifecycleStore(managedNativeLifecycleAgent(t, "replacement-native-agent"))
 	delivery := &managedNativeRecoveryDeliveryStore{}
 	lease := &fakeRuntimeStartupOwnershipLease{}
 	ownership := fakeRuntimeStartupOwnershipStore{
@@ -296,10 +298,12 @@ func managedNativeLifecycleStores(
 	}
 }
 
-func managedNativeLifecycleAgent(agentID string) runtimemanager.PersistedAgent {
+func managedNativeLifecycleAgent(t testing.TB, agentID string) runtimemanager.PersistedAgent {
+	t.Helper()
 	return runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:            agentID,
+			Identity:      agentidentitytest.RootRuntime(t, agentID, "runtime-test/managed-native-lifecycle"),
 			Role:          "researcher",
 			FlowID:        "global",
 			Type:          "stub",

@@ -15,6 +15,8 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -25,6 +27,39 @@ import (
 )
 
 const selectedContractAgentTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+func selectedContractTestRootAgentIdentity(t testing.TB, agentID string) agentidentity.Identity {
+	return selectedContractTestAgentIdentity(t, agentID, "")
+}
+
+func selectedContractTestAgentIdentity(t testing.TB, agentID, flowInstance string) agentidentity.Identity {
+	t.Helper()
+	name, err := agentidentity.DeclaredName(agentID, "test://selected-contract/agents/"+agentID)
+	if err != nil {
+		t.Fatalf("construct selected-contract agent name: %v", err)
+	}
+	route := agentidentity.RootRoute()
+	if flowInstance != "" {
+		route, err = runtimeflowidentity.StoredRoute("", "", flowInstance).AgentIdentityRoute()
+		if err != nil {
+			t.Fatalf("construct selected-contract agent route: %v", err)
+		}
+	}
+	identity, err := agentidentity.New(name, route)
+	if err != nil {
+		t.Fatalf("construct selected-contract agent identity: %v", err)
+	}
+	return identity
+}
+
+func containsSelectedContractAgentID(identities []agentidentity.Identity, agentID string) bool {
+	for _, identity := range identities {
+		if identity.AgentID() == agentID {
+			return true
+		}
+	}
+	return false
+}
 
 func selectedContractAgentTestSourceFact(t *testing.T) runtimecorrelation.BundleSourceFact {
 	t.Helper()
@@ -51,8 +86,9 @@ func TestSelectedContractAgentRuntimeWaitsForCurrentRouteSettlementAfterPredeces
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	oldToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "fork-agent", Generation: 1}
-	newToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "fork-agent", Generation: 2}
+	forkIdentity := selectedContractTestRootAgentIdentity(t, "fork-agent")
+	oldToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, Identity: forkIdentity, AgentID: "fork-agent", Generation: 1}
+	newToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, Identity: forkIdentity, AgentID: "fork-agent", Generation: 2}
 	oldRoute := eventBus.ReplaceAgentRoute(oldToken, selectedContractAgentRouteAdmission(t, oldToken.AgentID, "item.received"))
 	if oldRoute == nil {
 		t.Fatal("predecessor route was not installed")
@@ -175,6 +211,7 @@ func (selectedContractSelfReleaseAgent) OnEvent(context.Context, events.Event) (
 
 func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 	owner := testGatewayWorkOwner(t)
+	mockIdentity := selectedContractTestRootAgentIdentity(t, "mock-agent")
 	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
 		BundleSourceFact: selectedContractAgentTestSourceFact(t),
 		WorkOwner:        owner,
@@ -186,7 +223,7 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 		Store:        &store.PostgresStore{},
 		LoadedSource: LoadedSelectedContractSource{},
 		AgentRuntime: selectedContractAgentRuntimePlan{
-			Proof: SelectedContractAgentRuntimeMaterialization{AgentRecipients: []string{"mock-agent"}},
+			Proof: SelectedContractAgentRuntimeMaterialization{AgentRecipients: []agentidentity.Identity{mockIdentity}},
 			Options: SelectedContractAgentRuntimeOptions{
 				Config:              &config.Config{LLM: config.LLMConfig{Backend: "mock"}},
 				AgentManagerOptions: runtimemanager.AgentManagerOptions{WorkOwner: owner},
@@ -201,6 +238,41 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 	}
 	if builder.cleanup != nil {
 		builder.cleanup()
+	}
+}
+
+func TestSelectedContractAgentRecipientsPreserveConcreteTemplateInstanceIdentity(t *testing.T) {
+	first := selectedContractTestAgentIdentity(t, "shared-agent", "review/inst-1")
+	second := selectedContractTestAgentIdentity(t, "shared-agent", "review/inst-2")
+	planning := store.RunForkSelectedContractRecipientPlanning{
+		Owner: store.RunForkSelectedContractRecipientPlanningOwner,
+		RecipientPlanEvents: []store.RunForkSelectedContractRecipientPlanEvent{{
+			Recipients: []store.RunForkContractFrontierRecipient{
+				{SubscriberType: "agent", SubscriberID: "shared-agent", Path: "review/inst-1", AgentIdentity: first},
+				{SubscriberType: "agent", SubscriberID: "shared-agent", Path: "review/inst-2", AgentIdentity: second},
+			},
+		}},
+	}
+	recipients, err := selectedContractPlannedAgentRecipients(planning)
+	if err != nil {
+		t.Fatalf("selectedContractPlannedAgentRecipients: %v", err)
+	}
+	if len(recipients) != 2 || recipients[0] != first || recipients[1] != second {
+		t.Fatalf("selected-contract recipients = %#v, want both concrete identities", recipients)
+	}
+	runtimeProof := SelectedContractAgentRuntimeMaterialization{
+		Owner:                     store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner,
+		AgentRecipients:           recipients,
+		ConfiguredAgentIdentities: []agentidentity.Identity{first, second},
+		MaterializationSupported:  true,
+	}
+	if !selectedContractAgentRuntimeCoversRecipients(runtimeProof, recipients) {
+		t.Fatal("exact selected-contract runtime did not cover both concrete identities")
+	}
+	runtimeProof.ConfiguredAgentIdentities = []agentidentity.Identity{first}
+	runtimeProof.AgentRecipients = []agentidentity.Identity{first}
+	if selectedContractAgentRuntimeCoversRecipients(runtimeProof, recipients) {
+		t.Fatal("slug-only first-instance runtime covered a sibling concrete identity")
 	}
 }
 
@@ -235,7 +307,8 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 		Store: &store.PostgresStore{},
 		AgentRuntime: selectedContractAgentRuntimePlan{
 			Records: []runtimemanager.PersistedAgent{{Config: runtimeactors.AgentConfig{
-				ID: "fork-agent", Role: "worker", ExecutionMode: "live", Subscriptions: []string{"item.received"},
+				ID: "fork-agent", Identity: selectedContractTestRootAgentIdentity(t, "fork-agent"),
+				Role: "worker", ExecutionMode: "live", Subscriptions: []string{"item.received"},
 			}}},
 			Options: SelectedContractAgentRuntimeOptions{
 				AgentFactory: func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
@@ -289,6 +362,14 @@ func TestSelectedContractStaticAgentRecordsIncludeInferredFlowRequiredAgents(t *
 			},
 			ByID: map[string]*runtimecontracts.FlowContractView{
 				"analysis": &flow,
+			},
+		},
+		URIRegistry: runtimecontracts.ContractURIRegistry{
+			Agents: map[string]runtimecontracts.ContractURIRef{
+				"analysis/analyzer": {
+					Kind: "agent", FlowID: "analysis", LocalID: "analyzer",
+					Full: "test://selected-contract/analysis/analyzer",
+				},
 			},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{Version: "v-test"},

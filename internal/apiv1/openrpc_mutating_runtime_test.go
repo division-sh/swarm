@@ -21,6 +21,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -164,7 +165,7 @@ func TestOpenRPCMutatingHTTPRuntimeProbes(t *testing.T) {
 		}
 	}
 
-	for _, probe := range mutatingHTTPRuntimeErrorProbes() {
+	for _, probe := range mutatingHTTPRuntimeErrorProbes(t) {
 		probe := probe
 		t.Run(probe.Method+"/"+probe.Code, func(t *testing.T) {
 			method := api.MethodCatalog[probe.Method]
@@ -527,7 +528,8 @@ type mutatingHTTPRuntimeErrorProbe struct {
 	Modifiers   []func(*mutatingRuntimeProbeState)
 }
 
-func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
+func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProbe {
+	t.Helper()
 	runID := "00000000-0000-0000-0000-000000000101"
 	missingRunID := "00000000-0000-0000-0000-000000000999"
 	otherBundleHash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -586,23 +588,23 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 
 		{Method: "event.replay", Params: map[string]any{"event_id": "missing", "idempotency_key": "idem-error"}, Code: EventNotFoundCode},
 		{Method: "event.replay", Params: map[string]any{"event_id": "evt-empty", "idempotency_key": "idem-error"}, Code: EventReplayNoDeliveryHistoryCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.observability.events["evt-empty"] = mutatingProbeOriginalEvent("evt-empty", nil, runtimedelivery.StatusDelivered)
+			s.observability.events["evt-empty"] = mutatingProbeOriginalEvent(t, "evt-empty", nil, runtimedelivery.StatusDelivered)
 		}}},
 		{Method: "event.replay", Params: map[string]any{"event_id": "evt-1", "subscribers": []any{"agent-b"}, "idempotency_key": "idem-error"}, Code: EventReplaySubscriberNotOriginalCode},
 		{Method: "event.replay", Params: map[string]any{"event_id": "evt-1", "idempotency_key": "idem-error"}, Code: EventReplaySubscriberUnavailableCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.missingRecipients = []string{"agent-a"} }}},
 		{Method: "event.replay", Params: map[string]any{"event_id": "evt-pending", "idempotency_key": "idem-error"}, Code: EventReplayNotEligibleCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.observability.events["evt-pending"] = mutatingProbeOriginalEvent("evt-pending", []string{"agent-a"}, runtimedelivery.StatusPending)
+			s.observability.events["evt-pending"] = mutatingProbeOriginalEvent(t, "evt-pending", []string{"agent-a"}, runtimedelivery.StatusPending)
 		}}},
 		{Method: "event.replay", Params: map[string]any{"event_id": "evt-1", "idempotency_key": "idem-error"}, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.checkErr = runtimebus.ErrPayloadValidation }}},
 
 		{Method: "agent.replay", Params: map[string]any{"event_id": "missing", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventNotFoundCode},
 		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-empty", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventReplayNoDeliveryHistoryCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.observability.events["evt-empty"] = mutatingProbeOriginalEvent("evt-empty", nil, runtimedelivery.StatusDelivered)
+			s.observability.events["evt-empty"] = mutatingProbeOriginalEvent(t, "evt-empty", nil, runtimedelivery.StatusDelivered)
 		}}},
 		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-1", "agent_id": "agent-b", "idempotency_key": "idem-error"}, Code: EventReplaySubscriberNotOriginalCode},
 		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-1", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventReplaySubscriberUnavailableCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.missingRecipients = []string{"agent-a"} }}},
 		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-pending", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventReplayNotEligibleCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.observability.events["evt-pending"] = mutatingProbeOriginalEvent("evt-pending", []string{"agent-a"}, runtimedelivery.StatusPending)
+			s.observability.events["evt-pending"] = mutatingProbeOriginalEvent(t, "evt-pending", []string{"agent-a"}, runtimedelivery.StatusPending)
 		}}},
 		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-1", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.checkErr = runtimebus.ErrPayloadValidation }}},
 
@@ -707,16 +709,16 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 			s.agentControl.errs["agent.send_directive"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrAmbiguousRunTarget, AgentID: "agent-a", ActiveSessions: []runtimeagentcontrol.ActiveSessionTarget{{SessionID: "sess-1", RunID: runID}}}
 		}}},
 		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "idempotency_key": "idem-error"}, Code: AgentDirectiveInProgressCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.agentControl.errs["agent.send_directive"] = directiveOperationProbeError(runtimeagentcontrol.ErrDirectiveInProgress, runtimeagentcontrol.DirectiveOperationExecuting, runID)
+			s.agentControl.errs["agent.send_directive"] = directiveOperationProbeError(t, runtimeagentcontrol.ErrDirectiveInProgress, runtimeagentcontrol.DirectiveOperationExecuting, runID)
 		}}},
 		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "idempotency_key": "idem-error"}, Code: AgentDirectiveCompletionPendingCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.agentControl.errs["agent.send_directive"] = directiveOperationProbeError(runtimeagentcontrol.ErrDirectiveCompletionPending, runtimeagentcontrol.DirectiveOperationExecuted, runID)
+			s.agentControl.errs["agent.send_directive"] = directiveOperationProbeError(t, runtimeagentcontrol.ErrDirectiveCompletionPending, runtimeagentcontrol.DirectiveOperationExecuted, runID)
 		}}},
 		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "idempotency_key": "idem-error"}, Code: AgentDirectiveExecutionFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.agentControl.errs["agent.send_directive"] = directiveOperationProbeError(runtimeagentcontrol.ErrDirectiveExecutionFailed, runtimeagentcontrol.DirectiveOperationFailed, runID)
+			s.agentControl.errs["agent.send_directive"] = directiveOperationProbeError(t, runtimeagentcontrol.ErrDirectiveExecutionFailed, runtimeagentcontrol.DirectiveOperationFailed, runID)
 		}}},
 		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "idempotency_key": "idem-error"}, Code: AgentDirectiveOutcomeIndeterminateCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.agentControl.errs["agent.send_directive"] = directiveOperationProbeError(runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate, runtimeagentcontrol.DirectiveOperationIndeterminate, runID)
+			s.agentControl.errs["agent.send_directive"] = directiveOperationProbeError(t, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate, runtimeagentcontrol.DirectiveOperationIndeterminate, runID)
 		}}},
 		{Method: "agent.restart", Params: map[string]any{"agent_id": "missing", "idempotency_key": "idem-error"}, Code: AgentNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.agentControl.errs["agent.restart"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrAgentNotFound, AgentID: "missing"}
@@ -763,7 +765,7 @@ func assertMutatingRuntimeDeclaredErrorCoverage(t *testing.T, api *apispec.APISp
 	for _, methodName := range methods {
 		covered[methodName] = map[string]struct{}{IdempotencyConflictCode: {}}
 	}
-	for _, probe := range mutatingHTTPRuntimeErrorProbes() {
+	for _, probe := range mutatingHTTPRuntimeErrorProbes(t) {
 		if _, ok := covered[probe.Method]; !ok {
 			t.Fatalf("%s error probe is outside the approved mutating HTTP method set", probe.Method)
 		}
@@ -897,7 +899,7 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 			bundleHash: runStartTestBundleHash,
 		},
 	}
-	state.observability.events["evt-1"] = mutatingProbeOriginalEvent("evt-1", []string{"agent-a"}, runtimedelivery.StatusDelivered)
+	state.observability.events["evt-1"] = mutatingProbeOriginalEvent(t, "evt-1", []string{"agent-a"}, runtimedelivery.StatusDelivered)
 	state.events = &mutatingProbeEventPublisher{
 		state:            state,
 		bundleSourceFact: mustAPITestPersistedBundleSourceFact(runStartTestBundleHash),
@@ -1033,6 +1035,7 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) OperatorReadOptions {
 		Database:                  fakePinger{},
 		Runs:                      s.runs,
 		Observability:             s.observability,
+		AgentConversations:        &fakeAgentConversationReadStore{},
 		AgentControl:              s.agentControl,
 		ConversationForks:         s.forks,
 		ConversationForkLifecycle: s.forks,
@@ -1325,16 +1328,26 @@ func (p *mutatingProbeEventPublisher) PublishDirectRoutes(_ context.Context, evt
 	return nil
 }
 
-func (p *mutatingProbeEventPublisher) CheckDirectRecipients(_ context.Context, _ events.Event, recipients []string) (runtimebus.DirectRecipientStatus, error) {
-	status := runtimebus.DirectRecipientStatus{Requested: append([]string(nil), recipients...)}
+func (p *mutatingProbeEventPublisher) CheckDirectRoutes(_ context.Context, _ events.Event, routes []events.DeliveryRoute) (runtimebus.ExactDirectRouteStatus, error) {
+	status := runtimebus.ExactDirectRouteStatus{Requested: events.NormalizeDeliveryRoutes(routes)}
 	if p.checkErr != nil {
 		return status, p.checkErr
 	}
 	if len(p.missingRecipients) > 0 {
-		status.Missing = append([]string(nil), p.missingRecipients...)
+		missing := make(map[string]struct{}, len(p.missingRecipients))
+		for _, recipient := range p.missingRecipients {
+			missing[recipient] = struct{}{}
+		}
+		for _, route := range status.Requested {
+			if _, ok := missing[route.SubscriberID]; ok {
+				status.Missing = append(status.Missing, route)
+			} else {
+				status.Deliverable = append(status.Deliverable, route)
+			}
+		}
 		return status, nil
 	}
-	status.Recipients = append([]string(nil), recipients...)
+	status.Deliverable = append([]events.DeliveryRoute(nil), status.Requested...)
 	return status, nil
 }
 
@@ -1396,10 +1409,16 @@ func (s *mutatingRuntimeProbeState) storeEvent(evt events.Event, deliveries []st
 	s.observability.events[evt.ID()] = view
 }
 
-func mutatingProbeOriginalEvent(eventID string, subscribers []string, status runtimedelivery.Status) store.OperatorEventFull {
+func mutatingProbeOriginalEvent(t testing.TB, eventID string, subscribers []string, status runtimedelivery.Status) store.OperatorEventFull {
+	t.Helper()
 	deliveries := make([]store.OperatorEventDelivery, 0, len(subscribers))
 	for _, subscriber := range subscribers {
-		route := events.DeliveryRoute{SubscriberType: eventReplaySubscriberTypeAgent, SubscriberID: subscriber}
+		identity := agentidentitytest.Declared(t, subscriber, "test-bundle", "research", "inst-1", "research/inst-1")
+		route := events.DeliveryRoute{
+			SubscriberType: eventReplaySubscriberTypeAgent,
+			SubscriberID:   subscriber,
+			AgentIdentity:  identity,
+		}
 		deliveries = append(deliveries, store.OperatorEventDelivery{
 			DeliveryID:     "original-" + subscriber,
 			SubscriberType: eventReplaySubscriberTypeAgent,
@@ -1503,9 +1522,11 @@ func (c *mutatingProbeAgentControl) SendDirective(_ context.Context, req runtime
 	return result, nil
 }
 
-func directiveOperationProbeError(err error, state runtimeagentcontrol.DirectiveOperationState, runID string) error {
+func directiveOperationProbeError(t testing.TB, err error, state runtimeagentcontrol.DirectiveOperationState, runID string) error {
+	t.Helper()
 	op := runtimeagentcontrol.DirectiveOperation{
 		OperationID:      "00000000-0000-0000-0000-000000000203",
+		AgentIdentity:    agentidentitytest.Declared(t, "agent-a", "test-bundle", "research", "inst-1", "research/inst-1"),
 		DirectiveEventID: "00000000-0000-0000-0000-000000000202",
 		ResolvedRunID:    runID,
 		State:            state,

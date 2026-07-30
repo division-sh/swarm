@@ -41,9 +41,9 @@ func assertRuntimeStartCarriesMemoryIdentity(t *testing.T, source semanticview.S
 		t.Fatalf("Start: %v", err)
 	}
 
-	cfg, ok := rt.Manager.GetAgentConfig("backend-{vertical_id}")
-	if !ok {
-		t.Fatal("expected package-backed static flow agent config")
+	cfg, err := rt.Manager.ResolveAgentConfig("backend-{vertical_id}", "support")
+	if err != nil {
+		t.Fatalf("resolve package-backed static flow agent config: %v", err)
 	}
 	if cfg.FlowPath != "support" {
 		t.Fatalf("FlowPath = %q, want support", cfg.FlowPath)

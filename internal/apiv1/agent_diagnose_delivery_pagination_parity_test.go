@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -70,9 +71,11 @@ func TestAgentDiagnoseExactDeliveryPaginationParity(t *testing.T) {
 				})
 			}
 			agentID := "diagnose-agent"
+			identity := agentidentitytest.Runtime(t, agentID, "diagnose-pagination-test", "diagnose", "one", "diagnose/one")
 			if err := selected.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 				Config: runtimeactors.AgentConfig{
-					ID: agentID, Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
+					Identity: identity, ID: agentID, Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
+					FlowID: "diagnose", FlowPath: identity.FlowInstance(),
 					Memory: agentmemory.PlatformDefault(), Config: json.RawMessage(`{"system_prompt":"diagnose"}`),
 				},
 				Status: "active", StartedAt: now,
@@ -88,12 +91,14 @@ func TestAgentDiagnoseExactDeliveryPaginationParity(t *testing.T) {
 				{
 					SubscriberType: string(runtimedelivery.SubscriberAgent),
 					SubscriberID:   agentID,
+					AgentIdentity:  identity,
 					Target:         events.RouteIdentity{FlowID: "diagnose", FlowInstance: "diagnose/one", EntityID: uuid.NewString()},
 				},
 				{
 					SubscriberType: string(runtimedelivery.SubscriberAgent),
 					SubscriberID:   agentID,
-					Target:         events.RouteIdentity{FlowID: "diagnose", FlowInstance: "diagnose/two", EntityID: uuid.NewString()},
+					AgentIdentity:  identity,
+					Target:         events.RouteIdentity{FlowID: "diagnose", FlowInstance: "diagnose/one", EntityID: uuid.NewString()},
 				},
 			}
 			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, routes, runtimepipelineobligation.ScopeSubscribed)
@@ -115,16 +120,16 @@ func TestAgentDiagnoseExactDeliveryPaginationParity(t *testing.T) {
 				}),
 			})
 			first := rpcCall(t, handler, fmt.Sprintf(
-				`{"jsonrpc":"2.0","id":"first","method":"agent.diagnose","params":{"agent_id":%q,"queue_limit":1}}`,
-				agentID,
+				`{"jsonrpc":"2.0","id":"first","method":"agent.diagnose","params":{"agent_id":%q,"flow_instance":%q,"queue_limit":1}}`,
+				agentID, identity.FlowInstance(),
 			))
 			firstDeliveryID, cursor := requireAgentDiagnoseDeliveryPage(t, first, 2)
 			if firstDeliveryID != wantDeliveryIDs[0] || cursor == "" {
 				t.Fatalf("first diagnosis page = delivery %q cursor %q, want %q plus cursor", firstDeliveryID, cursor, wantDeliveryIDs[0])
 			}
 			second := rpcCall(t, handler, fmt.Sprintf(
-				`{"jsonrpc":"2.0","id":"second","method":"agent.diagnose","params":{"agent_id":%q,"queue_limit":1,"queue_cursor":%q}}`,
-				agentID, cursor,
+				`{"jsonrpc":"2.0","id":"second","method":"agent.diagnose","params":{"agent_id":%q,"flow_instance":%q,"queue_limit":1,"queue_cursor":%q}}`,
+				agentID, identity.FlowInstance(), cursor,
 			))
 			secondDeliveryID, next := requireAgentDiagnoseDeliveryPage(t, second, 2)
 			if secondDeliveryID != wantDeliveryIDs[1] || next != "" {

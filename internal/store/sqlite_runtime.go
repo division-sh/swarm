@@ -262,13 +262,17 @@ func (s *SQLiteRuntimeStore) UpsertAgent(ctx context.Context, rec runtimemanager
 		}
 		_, err := tx.ExecContext(txctx, `
 			INSERT INTO agents (
-				agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source,
+				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, flow_instance,
+				role, model, llm_backend, memory_enabled, memory_source,
 				parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
 				runtime_descriptor, status, turn_count, last_active_at, created_at
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-			ON CONFLICT(agent_id) DO UPDATE SET
-				flow_instance = excluded.flow_instance,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+			ON CONFLICT(
+				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, flow_instance
+			) DO UPDATE SET
 				role = excluded.role,
 				model = excluded.model,
 				llm_backend = excluded.llm_backend,
@@ -284,7 +288,9 @@ func (s *SQLiteRuntimeStore) UpsertAgent(ctx context.Context, rec runtimemanager
 				runtime_descriptor = excluded.runtime_descriptor,
 				status = excluded.status,
 				last_active_at = excluded.last_active_at
-		`, projection.AgentID, sqliteNullString(projection.FlowInstance), projection.Role, projection.Model, projection.LLMBackend, projection.MemoryEnabled, projection.MemorySource,
+		`, projection.Identity.AgentID, projection.Identity.NameOwner, projection.Identity.NameSource, projection.Identity.RoutePresence,
+			projection.Identity.FlowScopeKey, projection.Identity.FlowInstanceID, projection.Identity.FlowInstancePath,
+			projection.Role, projection.Model, projection.LLMBackend, projection.MemoryEnabled, projection.MemorySource,
 			sqliteNullString(projection.ParentAgentID), sqliteNullUUID(projection.EntityID), string(projection.ConfigJSON), string(projection.SubscriptionsJSON),
 			string(projection.EmitEventsJSON), string(projection.ToolsJSON), string(projection.PermissionsJSON), string(projection.RuntimeDescriptor),
 			agentPersistedStatus(rec.Status), time.Now().UTC(), startedAt.UTC())
@@ -297,7 +303,9 @@ func (s *SQLiteRuntimeStore) UpsertAgent(ctx context.Context, rec runtimemanager
 
 func (s *SQLiteRuntimeStore) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT agent_id, COALESCE(flow_instance, ''), role, model, llm_backend, memory_enabled, memory_source,
+		SELECT agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+		       flow_scope_key, flow_instance_id, flow_instance,
+		       role, model, llm_backend, memory_enabled, memory_source,
 		       COALESCE(parent_agent_id, ''), COALESCE(entity_id, ''), config, COALESCE(runtime_descriptor, '{}'),
 		       COALESCE(subscriptions, '[]'), COALESCE(emit_events, '[]'), COALESCE(tools, '[]'), COALESCE(permissions, '[]'),
 		       COALESCE(status, 'active'), COALESCE(created_at, CURRENT_TIMESTAMP),
@@ -316,7 +324,9 @@ func (s *SQLiteRuntimeStore) LoadAgents(ctx context.Context) ([]runtimemanager.P
 		var row persistedAgentProjection
 		var startedAt any
 		var lifecycleGeneration int64
-		if err := rows.Scan(&row.AgentID, &row.FlowInstance, &row.Role, &row.Model, &row.LLMBackend, &row.MemoryEnabled, &row.MemorySource,
+		if err := rows.Scan(&row.AgentID, &row.Identity.NameOwner, &row.Identity.NameSource, &row.Identity.RoutePresence,
+			&row.Identity.FlowScopeKey, &row.Identity.FlowInstanceID, &row.Identity.FlowInstancePath,
+			&row.Role, &row.Model, &row.LLMBackend, &row.MemoryEnabled, &row.MemorySource,
 			&row.ParentAgentID, &row.EntityID, &row.ConfigJSON, &row.RuntimeDescriptor, &row.SubscriptionsJSON, &row.EmitEventsJSON,
 			&row.ToolsJSON, &row.PermissionsJSON, &rec.Status, &startedAt, &rec.LifecycleEpoch, &lifecycleGeneration, &rec.LifecyclePhase, &rec.LifecycleRunMode); err != nil {
 			return nil, fmt.Errorf("scan sqlite agent: %w", err)
@@ -326,6 +336,8 @@ func (s *SQLiteRuntimeStore) LoadAgents(ctx context.Context) ([]runtimemanager.P
 		} else if ok {
 			rec.StartedAt = at
 		}
+		row.Identity.AgentID = row.AgentID
+		row.FlowInstance = row.Identity.FlowInstancePath
 		cfg, err := hydratePersistedAgentConfig(row)
 		if err != nil {
 			return nil, fmt.Errorf("hydrate sqlite agent row %s: %w", strings.TrimSpace(row.AgentID), err)

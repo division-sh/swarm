@@ -191,6 +191,7 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 	rec.NormalizeEntityID()
 	rec.FlowInstance = strings.TrimSpace(rec.FlowInstance)
 	rec.AgentID = strings.TrimSpace(rec.AgentID)
+	rec.AgentIdentity = rec.AgentIdentity.Normalize()
 	rec.Model = strings.TrimSpace(rec.Model)
 	rec.ModelAlias = strings.TrimSpace(rec.ModelAlias)
 	rec.BackendProfile = strings.TrimSpace(rec.BackendProfile)
@@ -222,6 +223,12 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 	}
 	if rec.AgentID == "" {
 		return fmt.Errorf("spend agent_id is required")
+	}
+	if err := rec.AgentIdentity.Validate(); err != nil {
+		return fmt.Errorf("spend concrete agent identity: %w", err)
+	}
+	if rec.AgentIdentity.AgentID() != rec.AgentID || rec.AgentIdentity.FlowInstance() != rec.FlowInstance {
+		return fmt.Errorf("spend display fields do not match concrete agent identity")
 	}
 	if rec.Model == "" {
 		return fmt.Errorf("spend model is required")

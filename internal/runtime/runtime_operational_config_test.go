@@ -214,6 +214,7 @@ func TestRuntimeStart_FailsWhenRecoveryDisabledAndActiveSchedulesExist(t *testin
 	store := &recordingRuntimeScheduleStore{
 		active: []runtimepipeline.Schedule{{
 			AgentID:   "runtime",
+			OwnerKind: runtimepipeline.ScheduleOwnerSystem,
 			EventType: "timer.check",
 			Mode:      "once",
 			At:        time.Now().Add(time.Minute),
@@ -328,6 +329,7 @@ func TestRuntimeStart_DisablePersistentStartupRecoverySkipsUnscopedStoreReads(t 
 		recordingRuntimeScheduleStore: recordingRuntimeScheduleStore{
 			active: []runtimepipeline.Schedule{{
 				AgentID:   "runtime",
+				OwnerKind: runtimepipeline.ScheduleOwnerSystem,
 				EventType: "timer.check",
 				Mode:      "once",
 				At:        time.Now().Add(time.Minute),

@@ -24,6 +24,7 @@ const (
 type agentDirectiveCommandOptions struct {
 	apiOptions     rootCommandOptions
 	runID          string
+	flowInstance   string
 	idempotencyKey string
 }
 
@@ -55,6 +56,7 @@ func newAgentDirectiveCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	argcount.SetDiscoveryHint(cmd, "List agent ids with `swarm agent list`.")
 	cmd.Flags().StringVar(&directiveOpts.runID, "run-id", "", "Optional explicit nonterminal run target")
+	cmd.Flags().StringVar(&directiveOpts.flowInstance, "flow-instance", "", "Select the exact concrete agent flow instance")
 	cmd.Flags().StringVar(&directiveOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIAPIConnectionFlagsWithClass(cmd, &directiveOpts.apiOptions, cliAPICommandClassMutating, "swarm agent directive")
@@ -108,6 +110,9 @@ func (opts agentDirectiveCommandOptions) params(agentID, directive string) map[s
 	}
 	if runID := strings.TrimSpace(opts.runID); runID != "" {
 		params["run_id"] = runID
+	}
+	if flowInstance := strings.Trim(strings.TrimSpace(opts.flowInstance), "/"); flowInstance != "" {
+		params["flow_instance"] = flowInstance
 	}
 	if key := strings.TrimSpace(opts.idempotencyKey); key != "" {
 		params["idempotency_key"] = key

@@ -1192,7 +1192,9 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	outcomeAgent := "gate-outcome-recorder"
-	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: outcomeAgent})
+	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{
+		Identity: runtimebustest.Identity(t, outcomeAgent, ""),
+	})
 	outcomeEvents := runtimebustest.Subscribe(t, bus, outcomeAgent, events.EventType("launch.approved"))
 	t.Cleanup(func() { runtimebustest.Unsubscribe(bus, outcomeAgent) })
 

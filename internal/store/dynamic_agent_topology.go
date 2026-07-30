@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 )
@@ -20,16 +21,16 @@ type dynamicAgentTopologyOwner struct {
 
 type dynamicAgentTopologyPlan struct {
 	Agents []struct {
-		AgentID        string `json:"agent_id"`
-		ConfigRevision string `json:"config_revision"`
+		Identity       runtimeagentidentity.Identity `json:"identity"`
+		ConfigRevision string                        `json:"config_revision"`
 	} `json:"agents"`
 }
 
 type agentTopologyMutation struct {
+	identity          runtimeagentidentity.Identity
 	agentID           string
 	operation         string
 	configRevision    string
-	candidateFlowPath string
 	desiredPresent    bool
 	changesDesiredSet bool
 	authority         *runtimemanager.DynamicAgentTopologyMutation
@@ -69,6 +70,7 @@ func authorizeSQLiteRawAgentTopologyMutation(
 
 func lifecycleAgentTopologyMutation(req runtimemanager.AgentLifecycleTransition) agentTopologyMutation {
 	mutation := agentTopologyMutation{
+		identity:          req.Identity.Normalize(),
 		agentID:           strings.TrimSpace(req.AgentID),
 		operation:         strings.TrimSpace(req.OperationKind),
 		configRevision:    strings.TrimSpace(req.ConfigRevision),
@@ -76,17 +78,15 @@ func lifecycleAgentTopologyMutation(req runtimemanager.AgentLifecycleTransition)
 		changesDesiredSet: req.Agent != nil || req.TargetPhase == runtimemanager.AgentLifecycleTerminated,
 		authority:         req.DynamicTopology,
 	}
-	if req.Agent != nil {
-		mutation.candidateFlowPath = strings.Trim(req.Agent.Config.CanonicalFlowPath(), "/")
-	}
 	return mutation
 }
 
 func rawAgentTopologyMutation(rec runtimemanager.PersistedAgent) agentTopologyMutation {
+	identity, _ := rec.Config.ConcreteIdentity()
 	return agentTopologyMutation{
+		identity:          identity,
 		agentID:           strings.TrimSpace(rec.Config.ID),
 		operation:         "raw_upsert",
-		candidateFlowPath: strings.Trim(rec.Config.CanonicalFlowPath(), "/"),
 		desiredPresent:    !strings.EqualFold(strings.TrimSpace(rec.Status), "terminated"),
 		changesDesiredSet: true,
 	}
@@ -113,11 +113,7 @@ func authorizeAgentTopologyMutation(
 		}
 		owners = append(owners, items...)
 	}
-	declaringOwners, err := loadDynamicAgentTopologyOwnersForAgent(ctx, tx, mutation.agentID, sqlite)
-	if err != nil {
-		return err
-	}
-	owners = uniqueDynamicAgentTopologyOwners(append(owners, declaringOwners...))
+	owners = uniqueDynamicAgentTopologyOwners(owners)
 	if len(owners) == 0 {
 		if mutation.authority != nil {
 			return dynamicAgentTopologyConflict(mutation, "readiness_owner_missing", nil)
@@ -150,7 +146,7 @@ func authorizeAgentTopologyMutation(
 	}
 	var desiredRevision string
 	for _, agent := range plan.Agents {
-		if strings.TrimSpace(agent.AgentID) != mutation.agentID {
+		if agent.Identity.Normalize() != mutation.identity {
 			continue
 		}
 		if desiredRevision != "" {
@@ -190,35 +186,26 @@ func uniqueDynamicAgentTopologyOwners(owners []dynamicAgentTopologyOwner) []dyna
 }
 
 func agentTopologyMutationFlowPaths(
-	ctx context.Context,
-	tx *sql.Tx,
+	_ context.Context,
+	_ *sql.Tx,
 	mutation agentTopologyMutation,
-	sqlite bool,
+	_ bool,
 ) ([]string, error) {
-	paths := map[string]struct{}{}
-	if mutation.candidateFlowPath != "" {
-		paths[mutation.candidateFlowPath] = struct{}{}
+	identity := mutation.identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		return nil, fmt.Errorf("dynamic agent topology mutation requires exact identity: %w", err)
 	}
-	var current sql.NullString
-	query := `SELECT flow_instance FROM agents WHERE agent_id = $1`
-	if sqlite {
-		query = `SELECT flow_instance FROM agents WHERE agent_id = ?`
+	if identity.AgentID() != mutation.agentID {
+		return nil, fmt.Errorf(
+			"dynamic agent topology mutation identity %q does not match agent_id %q",
+			identity.AgentID(),
+			mutation.agentID,
+		)
 	}
-	err := tx.QueryRowContext(ctx, query, mutation.agentID).Scan(&current)
-	if err != nil && err != sql.ErrNoRows {
-		return nil, err
+	if instancePath := identity.FlowInstance(); instancePath != "" {
+		return []string{instancePath}, nil
 	}
-	if current.Valid {
-		if path := strings.Trim(strings.TrimSpace(current.String), "/"); path != "" {
-			paths[path] = struct{}{}
-		}
-	}
-	out := make([]string, 0, len(paths))
-	for path := range paths {
-		out = append(out, path)
-	}
-	sort.Strings(out)
-	return out, nil
+	return nil, nil
 }
 
 func loadDynamicAgentTopologyOwners(
@@ -253,62 +240,6 @@ func loadDynamicAgentTopologyOwners(
 		`
 	}
 	rows, err := tx.QueryContext(ctx, query, instancePath)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []dynamicAgentTopologyOwner
-	for rows.Next() {
-		var owner dynamicAgentTopologyOwner
-		if err := rows.Scan(&owner.runID, &owner.instancePath, &owner.plan); err != nil {
-			return nil, err
-		}
-		owner.runID = strings.TrimSpace(owner.runID)
-		owner.instancePath = strings.Trim(strings.TrimSpace(owner.instancePath), "/")
-		out = append(out, owner)
-	}
-	return out, rows.Err()
-}
-
-func loadDynamicAgentTopologyOwnersForAgent(
-	ctx context.Context,
-	tx *sql.Tx,
-	agentID string,
-	sqlite bool,
-) ([]dynamicAgentTopologyOwner, error) {
-	query := `
-		SELECT readiness.run_id::text, readiness.instance_id, readiness.plan::text
-		FROM flow_instance_runtime_readiness readiness
-		JOIN runs run ON run.run_id = readiness.run_id
-		JOIN flow_instances instance ON instance.instance_id = readiness.instance_id
-		WHERE run.status IN (` + runLifecycleActiveStateSQLValues + `)
-		  AND instance.status = 'active'
-		  AND instance.terminated_at IS NULL
-		  AND readiness.plan @> jsonb_build_object(
-		      'agents',
-		      jsonb_build_array(jsonb_build_object('agent_id', $1::text))
-		  )
-		ORDER BY readiness.run_id, readiness.instance_id
-		FOR UPDATE OF readiness
-	`
-	if sqlite {
-		query = `
-			SELECT readiness.run_id, readiness.instance_id, readiness.plan
-			FROM flow_instance_runtime_readiness readiness
-			JOIN runs run ON run.run_id = readiness.run_id
-			JOIN flow_instances instance ON instance.instance_id = readiness.instance_id
-			WHERE run.status IN (` + runLifecycleActiveStateSQLValues + `)
-			  AND instance.status = 'active'
-			  AND instance.terminated_at IS NULL
-			  AND EXISTS (
-			      SELECT 1
-			      FROM json_each(readiness.plan, '$.agents') agent
-			      WHERE json_extract(agent.value, '$.agent_id') = ?
-			  )
-			ORDER BY readiness.run_id, readiness.instance_id
-		`
-	}
-	rows, err := tx.QueryContext(ctx, query, strings.TrimSpace(agentID))
 	if err != nil {
 		return nil, err
 	}

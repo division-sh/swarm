@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/google/uuid"
@@ -21,9 +22,9 @@ type OperatorAgentConversationReadSource interface {
 	ListOperatorConversationTurns(ctx context.Context, opts OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error)
 	LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (OperatorPublicConversationTurnDetail, error)
 	LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error)
-	ListPendingAgentDeliveryFacts(ctx context.Context, agentIDs []string, since time.Time) (map[string]PendingAgentDeliveryFacts, error)
+	ListPendingAgentDeliveryFacts(ctx context.Context, identities []agentidentity.Identity, since time.Time) (map[agentidentity.Identity]PendingAgentDeliveryFacts, error)
 	ListPendingAgentDeliveryDetails(ctx context.Context, opts PendingAgentDeliveryListOptions) (PendingAgentDeliveryPage, error)
-	ListAgentDeliveryLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]AgentDeliveryLifecycleFacts, error)
+	ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]AgentDeliveryLifecycleFacts, error)
 }
 
 type OperatorConversationReadSource interface {
@@ -71,6 +72,7 @@ type OperatorAgentSummary struct {
 	MemorySource  string `json:"memory_source"`
 	Status        string `json:"status"`
 
+	Identity              agentidentity.Identity              `json:"-"`
 	RuntimeFlowID         string                              `json:"-"`
 	FlowInstance          string                              `json:"flow_instance,omitempty"`
 	EntityID              string                              `json:"-"`
@@ -201,10 +203,11 @@ type OperatorLiveTurn struct {
 }
 
 type OperatorConversationListOptions struct {
-	AgentID string
-	RunID   string
-	Limit   int
-	Cursor  string
+	AgentID      string
+	FlowInstance string
+	RunID        string
+	Limit        int
+	Cursor       string
 }
 
 type OperatorConversationListResult struct {
@@ -371,12 +374,12 @@ func (s *PostgresStore) ListOperatorAgents(ctx context.Context, opts OperatorAge
 	return NewOperatorAgentConversationReadSurface(s.DB, s, opts.TurnLimit).ListOperatorAgents(ctx, opts)
 }
 
-func (s *PostgresStore) LoadOperatorAgent(ctx context.Context, agentID string) (OperatorAgentDetail, error) {
-	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).LoadOperatorAgent(ctx, agentID)
+func (s *PostgresStore) LoadOperatorAgent(ctx context.Context, identity agentidentity.Identity) (OperatorAgentDetail, error) {
+	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).LoadOperatorAgent(ctx, identity)
 }
 
-func (s *PostgresStore) LoadOperatorAgentDiagnosis(ctx context.Context, agentID string, opts OperatorAgentDiagnosisOptions) (OperatorAgentDiagnosis, error) {
-	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).LoadOperatorAgentDiagnosis(ctx, agentID, opts)
+func (s *PostgresStore) LoadOperatorAgentDiagnosis(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDiagnosisOptions) (OperatorAgentDiagnosis, error) {
+	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).LoadOperatorAgentDiagnosis(ctx, identity, opts)
 }
 
 func (s *PostgresStore) ListOperatorConversations(ctx context.Context, opts OperatorConversationListOptions) (OperatorConversationListResult, error) {
@@ -405,10 +408,13 @@ func (r *OperatorAgentConversationReadSurface) ListOperatorAgents(ctx context.Co
 		if opts.Flow != "" && !operatorAgentFlowMatches(row.Config.CanonicalFlowPath(), opts.Flow) {
 			continue
 		}
-		id := strings.TrimSpace(row.Config.ID)
-		projection, ok := projections[id]
+		identity, err := row.Config.ConcreteIdentity()
+		if err != nil {
+			return OperatorAgentListResult{}, err
+		}
+		projection, ok := projections[identity]
 		if !ok {
-			return OperatorAgentListResult{}, fmt.Errorf("missing agent operator projection: %s", id)
+			return OperatorAgentListResult{}, fmt.Errorf("missing agent operator projection: %s", identity.Description())
 		}
 		agents = append(agents, operatorAgentSummaryFromPersisted(row, projection, r.turnLimit))
 	}
@@ -418,9 +424,9 @@ func (r *OperatorAgentConversationReadSurface) ListOperatorAgents(ctx context.Co
 	return OperatorAgentListResult{Agents: agents}, nil
 }
 
-func (r *OperatorAgentConversationReadSurface) LoadOperatorAgent(ctx context.Context, agentID string) (OperatorAgentDetail, error) {
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
+func (r *OperatorAgentConversationReadSurface) LoadOperatorAgent(ctx context.Context, identity agentidentity.Identity) (OperatorAgentDetail, error) {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
 		return OperatorAgentDetail{}, ErrAgentNotFound
 	}
 	result, err := r.ListOperatorAgents(ctx, OperatorAgentListOptions{})
@@ -428,7 +434,7 @@ func (r *OperatorAgentConversationReadSurface) LoadOperatorAgent(ctx context.Con
 		return OperatorAgentDetail{}, err
 	}
 	for _, agent := range result.Agents {
-		if strings.TrimSpace(agent.AgentID) == agentID {
+		if agent.Identity == identity {
 			return OperatorAgentDetail{
 				Agent:             agent,
 				CurrentSessionRef: agent.CurrentSessionRef,
@@ -439,8 +445,8 @@ func (r *OperatorAgentConversationReadSurface) LoadOperatorAgent(ctx context.Con
 	return OperatorAgentDetail{}, ErrAgentNotFound
 }
 
-func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDiagnosis(ctx context.Context, agentID string, opts OperatorAgentDiagnosisOptions) (OperatorAgentDiagnosis, error) {
-	detail, err := r.LoadOperatorAgent(ctx, agentID)
+func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDiagnosis(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDiagnosisOptions) (OperatorAgentDiagnosis, error) {
+	detail, err := r.LoadOperatorAgent(ctx, identity)
 	if err != nil {
 		return OperatorAgentDiagnosis{}, err
 	}
@@ -449,9 +455,9 @@ func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDiagnosis(ctx co
 		return OperatorAgentDiagnosis{}, err
 	}
 	queue, err := r.source.ListPendingAgentDeliveryDetails(ctx, PendingAgentDeliveryListOptions{
-		AgentID: strings.TrimSpace(agentID),
-		Limit:   opts.QueueLimit,
-		Cursor:  opts.QueueCursor,
+		AgentIdentity: identity,
+		Limit:         opts.QueueLimit,
+		Cursor:        opts.QueueCursor,
 	})
 	if err != nil {
 		return OperatorAgentDiagnosis{}, err
@@ -481,6 +487,10 @@ func (r *OperatorAgentConversationReadSurface) ListOperatorConversations(ctx con
 	if opts.AgentID != "" {
 		n := add(opts.AgentID)
 		where = append(where, fmt.Sprintf("conversations.agent_id = $%d", n))
+	}
+	if opts.FlowInstance != "" {
+		n := add(opts.FlowInstance)
+		where = append(where, fmt.Sprintf("conversations.flow_instance = $%d", n))
 	}
 	if opts.RunID != "" {
 		n := add(opts.RunID)
@@ -607,10 +617,16 @@ func (r *OperatorAgentConversationReadSurface) loadLatestPublicConversationTurn(
 	return loadOperatorLatestConversationTurn(ctx, source, sessionID)
 }
 
-func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx context.Context) (map[string]operatorAgentProjection, error) {
+func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx context.Context) (map[agentidentity.Identity]operatorAgentProjection, error) {
 	rows, err := r.db.QueryContext(ctx, `
 			SELECT
 			a.agent_id,
+			a.agent_name_owner,
+			a.agent_name_source,
+			a.agent_route_presence,
+			a.flow_scope_key,
+			a.flow_instance_id,
+			a.flow_instance,
 			COALESCE(a.status, 'active'),
 			COALESCE(sess.session_id::text, ''),
 			sess.created_at,
@@ -631,6 +647,12 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 				runtime_state
 			FROM agent_sessions
 			WHERE agent_id = a.agent_id
+			  AND agent_name_owner = a.agent_name_owner
+			  AND agent_name_source = a.agent_name_source
+			  AND agent_route_presence = a.agent_route_presence
+			  AND flow_scope_key = a.flow_scope_key
+			  AND flow_instance_id = a.flow_instance_id
+			  AND flow_instance = a.flow_instance
 			  AND status = 'active'
 			  AND memory_enabled = TRUE
 			ORDER BY updated_at DESC, created_at DESC, session_id ASC
@@ -644,18 +666,24 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 	}
 	defer rows.Close()
 
-	out := map[string]operatorAgentProjection{}
-	agentIDs := make([]string, 0)
+	out := map[agentidentity.Identity]operatorAgentProjection{}
+	identities := make([]agentidentity.Identity, 0)
 	for rows.Next() {
 		var (
-			id               string
+			fields           agentidentity.StorageFields
 			projection       operatorAgentProjection
 			lockExpiresAt    sql.NullTime
 			sessionStartedAt sql.NullTime
 			runtimeStateRaw  []byte
 		)
 		if err := rows.Scan(
-			&id,
+			&fields.AgentID,
+			&fields.NameOwner,
+			&fields.NameSource,
+			&fields.RoutePresence,
+			&fields.FlowScopeKey,
+			&fields.FlowInstanceID,
+			&fields.FlowInstancePath,
 			&projection.Status,
 			&projection.SessionID,
 			&sessionStartedAt,
@@ -684,32 +712,35 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 			}
 			enrichOperatorProjectionWithPublicTurn(&projection, turn)
 		}
-		id = strings.TrimSpace(id)
-		out[id] = projection
-		agentIDs = append(agentIDs, id)
+		identity, err := agentidentity.FromStorageFields(fields)
+		if err != nil {
+			return nil, fmt.Errorf("scan agent operator identity: %w", err)
+		}
+		out[identity] = projection
+		identities = append(identities, identity)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read agent operator projection rows: %w", err)
 	}
-	factsByAgent, err := r.source.ListPendingAgentDeliveryFacts(ctx, agentIDs, time.Time{})
+	factsByAgent, err := r.source.ListPendingAgentDeliveryFacts(ctx, identities, time.Time{})
 	if err != nil {
 		return nil, err
 	}
-	lifecycleByAgent, err := r.source.ListAgentDeliveryLifecycleFacts(ctx, agentIDs)
+	lifecycleByAgent, err := r.source.ListAgentDeliveryLifecycleFacts(ctx, identities)
 	if err != nil {
 		return nil, err
 	}
-	for agentID, facts := range factsByAgent {
-		projection := out[strings.TrimSpace(agentID)]
+	for identity, facts := range factsByAgent {
+		projection := out[identity]
 		projection.PendingEvents = facts.PendingCount
 		projection.OldestPendingAgeSec = facts.OldestPendingAgeSec
-		out[strings.TrimSpace(agentID)] = projection
+		out[identity] = projection
 	}
-	for agentID, facts := range lifecycleByAgent {
-		projection := out[strings.TrimSpace(agentID)]
+	for identity, facts := range lifecycleByAgent {
+		projection := out[identity]
 		projection.LifecycleState = strings.TrimSpace(facts.CurrentState)
 		projection.BlockingLayer = strings.TrimSpace(facts.BlockingLayer)
-		out[strings.TrimSpace(agentID)] = projection
+		out[identity] = projection
 	}
 	return out, nil
 }
@@ -721,6 +752,7 @@ func operatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projec
 	}
 	out := OperatorAgentSummary{
 		AgentID:               strings.TrimSpace(row.Config.ID),
+		Identity:              row.Config.Identity.Normalize(),
 		Role:                  strings.TrimSpace(row.Config.Role),
 		Type:                  agentPersistedType(row.Config, strings.TrimSpace(row.Config.Model)),
 		Model:                 strings.TrimSpace(row.Config.Model),
@@ -1042,6 +1074,7 @@ func operatorAgentFlowMatches(agentFlow, filter string) bool {
 
 func defaultOperatorConversationListOptions(opts OperatorConversationListOptions) (OperatorConversationListOptions, error) {
 	opts.AgentID = strings.TrimSpace(opts.AgentID)
+	opts.FlowInstance = strings.Trim(strings.TrimSpace(opts.FlowInstance), "/")
 	opts.RunID = strings.TrimSpace(opts.RunID)
 	opts.Cursor = strings.TrimSpace(opts.Cursor)
 	if opts.RunID != "" {
@@ -1074,6 +1107,11 @@ func operatorConversationQuerySources() []string {
 			SELECT
 				session_id::text AS session_id,
 				agent_id,
+				agent_name_owner,
+				agent_name_source,
+				agent_route_presence,
+				flow_scope_key,
+				flow_instance_id,
 				COALESCE(run_id::text, '') AS run_id,
 				'live_session' AS kind,
 				flow_instance,
@@ -1094,6 +1132,11 @@ func operatorConversationQuerySources() []string {
 			SELECT
 				session_id::text AS session_id,
 				agent_id,
+				agent_name_owner,
+				agent_name_source,
+				agent_route_presence,
+				flow_scope_key,
+				flow_instance_id,
 				COALESCE(run_id::text, '') AS run_id,
 				'turn_audit' AS kind,
 				COALESCE(flow_instance, '') AS flow_instance,

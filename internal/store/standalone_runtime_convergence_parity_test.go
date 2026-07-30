@@ -13,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -44,8 +45,9 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 					t.Fatalf("NewEventBus: %v", err)
 				}
 				agentID := "standalone-convergence-agent"
+				agentIdentity := runtimebustest.Identity(t, agentID, "")
 				if routed {
-					seedStandaloneConvergenceAgent(t, fixture.store, ctx, agentID)
+					seedStandaloneConvergenceAgent(t, fixture.store, ctx, agentIdentity)
 				}
 				for index, test := range tests {
 					test := test
@@ -78,7 +80,11 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 							if status != "running" || countRunConvergenceDeliveries(t, fixture, ctx, event.ID()) != 1 {
 								t.Fatalf("pre-receipt state = run:%q deliveries:%d, want running/1", status, countRunConvergenceDeliveries(t, fixture, ctx, event.ID()))
 							}
-							route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: agentID}
+							route := events.DeliveryRoute{
+								SubscriberType: string(runtimedelivery.SubscriberAgent),
+								SubscriberID:   agentIdentity.AgentID(),
+								AgentIdentity:  agentIdentity,
+							}
 							claimed, err := fixture.store.ClaimAgentDelivery(ctx, event, route)
 							if err != nil {
 								t.Fatalf("ClaimAgentDelivery: %v", err)
@@ -165,15 +171,16 @@ type standaloneConvergenceAgentStore interface {
 	UpsertAgent(context.Context, runtimemanager.PersistedAgent) error
 }
 
-func seedStandaloneConvergenceAgent(t *testing.T, selected any, ctx context.Context, agentID string) {
+func seedStandaloneConvergenceAgent(t *testing.T, selected any, ctx context.Context, identity agentidentity.Identity) {
 	t.Helper()
 	store, ok := selected.(standaloneConvergenceAgentStore)
 	if !ok {
 		t.Fatalf("standalone convergence store %T cannot persist agents", selected)
 	}
+	agentID := identity.AgentID()
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID: agentID, Role: "observer", FlowID: "global", Type: "stub", Model: "regular",
+			ID: agentID, Identity: identity, Role: "observer", FlowID: "global", Type: "stub", Model: "regular",
 			ExecutionMode: "live", Config: json.RawMessage(`{}`),
 		},
 		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
@@ -236,8 +243,8 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 	}
 	agents := []string{"standalone-agent-a", "standalone-agent-b"}
 	routes := []events.DeliveryRoute{
-		{SubscriberType: "agent", SubscriberID: agents[0]},
-		{SubscriberType: "agent", SubscriberID: agents[1]},
+		testAgentDeliveryRoute(t, agents[0], ""),
+		testAgentDeliveryRoute(t, agents[1], ""),
 	}
 	outcome, err := commitAdmittedSemanticEventFixtureOutcome(ctx, pg, admitted, routes, runtimepipelineobligation.ScopeSubscribed)
 	if err != nil || outcome != runtimebus.EventAppendInserted {

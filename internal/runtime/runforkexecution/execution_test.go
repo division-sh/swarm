@@ -30,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -126,7 +127,7 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 				sourceEventID,
 				test.eventName,
 				at,
-				events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "source-agent-that-must-not-route"},
+				selectedExecutionTestAgentRoute(t, "source-agent-that-must-not-route", "flow-a/1"),
 				nil,
 			)
 
@@ -142,11 +143,11 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 				if _, err := db.ExecContext(ctx, `
 					INSERT INTO timers (
 						timer_id, run_id, timer_name, entity_id, flow_instance, fire_event,
-						fire_payload, fire_at, owner_agent, task_type, status, created_at
+						fire_payload, fire_at, owner_agent, owner_kind, task_type, status, created_at
 					)
 					VALUES (
 						$1::uuid, $2::uuid, $3, $4::uuid, 'flow-a/1', 'timer.check',
-						'{}'::jsonb, $5, 'test-node', 'workflow_timer', 'active', $6
+						'{}'::jsonb, $5, 'test-node', 'system', 'workflow_timer', 'active', $6
 					)
 				`, sourceTimerID, sourceRunID, ref.TaskID(), entityID, at.Add(time.Hour), at); err != nil {
 					t.Fatalf("seed source workflow timer: %v", err)
@@ -297,7 +298,7 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 					sourceEventID,
 					test.eventName,
 					at,
-					events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "source-agent-that-must-not-route"},
+					selectedExecutionTestAgentRoute(t, "source-agent-that-must-not-route", "flow-a/1"),
 					nil,
 					loaded.BundleSourceFact,
 				)
@@ -1079,8 +1080,8 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 		!result.AgentRuntimeMaterialization.MaterializationRequired ||
 		!result.AgentRuntimeMaterialization.MaterializationSupported ||
 		!result.AgentRuntimeMaterialization.EphemeralForkLocal ||
-		!containsString(result.AgentRuntimeMaterialization.AgentRecipients, "test-agent") ||
-		!containsString(result.AgentRuntimeMaterialization.ConfiguredAgentIDs, "test-agent") {
+		!containsSelectedContractAgentID(result.AgentRuntimeMaterialization.AgentRecipients, "test-agent") ||
+		!containsSelectedContractAgentID(result.AgentRuntimeMaterialization.ConfiguredAgentIdentities, "test-agent") {
 		t.Fatalf("agent runtime materialization = %#v", result.AgentRuntimeMaterialization)
 	}
 	if result.Owner != store.RunForkSelectedContractExecutionOwner ||
@@ -1315,10 +1316,24 @@ func TestExecuteSelectedContractRunForkAPIProvidersPersistExactManagedCapability
 				},
 			})
 			if err != nil {
-				var receiptFailure, deadLetterFailure string
+				var receiptFailure, deadLetterFailure, deliveryFailure string
 				_ = db.QueryRowContext(ctx, `SELECT COALESCE(failure::text,'') FROM event_receipts WHERE failure IS NOT NULL ORDER BY updated_at DESC LIMIT 1`).Scan(&receiptFailure)
 				_ = db.QueryRowContext(ctx, `SELECT COALESCE(failure::text,'') FROM dead_letters WHERE failure IS NOT NULL ORDER BY created_at DESC LIMIT 1`).Scan(&deadLetterFailure)
-				t.Fatalf("ExecuteSelectedContractRunFork: %v\nlatest receipt failure: %s\nlatest dead letter failure: %s", err, receiptFailure, deadLetterFailure)
+				_ = db.QueryRowContext(ctx, `
+					SELECT COALESCE(jsonb_build_object(
+						'status', d.status,
+						'reason', d.reason_code,
+						'failure', d.failure,
+						'attempt_outcome', a.outcome,
+						'attempt_failure', a.failure
+					)::text, '')
+					FROM event_deliveries d
+					LEFT JOIN event_delivery_attempts a ON a.delivery_id = d.delivery_id
+					WHERE d.run_id = $1::uuid AND d.subscriber_type = 'agent'
+					ORDER BY d.created_at DESC, a.attempt_number DESC
+					LIMIT 1
+				`, result.Materialization.ForkRunID).Scan(&deliveryFailure)
+				t.Fatalf("ExecuteSelectedContractRunFork: %v\nlatest agent delivery: %s\nlatest receipt failure: %s\nlatest dead letter failure: %s", err, deliveryFailure, receiptFailure, deadLetterFailure)
 			}
 			if providerCalls.Load() != 1 {
 				var deliveryDiagnostic string
@@ -1832,7 +1847,10 @@ func TestSelectedContractForkManagedPreflightExecutesEligibleMCPToolCall(t *test
 	executor := &selectedForkStartupProbeExecutor{}
 	turns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
 	const gatewayToken = "selected-fork-startup-token"
-	gateway := runtimemcp.NewGateway(executor, gatewayToken, swaruntime.RuntimeMCPGatewayHooks(nil, nil, manager.GetAgentConfig, nil, turns))
+	gateway := runtimemcp.NewGateway(executor, gatewayToken, swaruntime.RuntimeMCPGatewayHooks(nil, nil, func(agentID string) (runtimeactors.AgentConfig, bool) {
+		cfg, err := manager.ResolveAgentConfig(agentID, "")
+		return cfg, err == nil
+	}, nil, turns))
 	server := httptest.NewServer(gateway.Handler())
 	defer server.Close()
 	binding, err := toolgateway.NewRuntimeOwnedBinding(
@@ -2022,7 +2040,11 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 		"selected_http": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass("write_or_unknown")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: http.MethodPost, URL: target.URL, TimeoutSeconds: 5})),
 	}})
 	executor := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{WorkflowSource: source})
-	actor := runtimeactors.AgentConfig{ID: "selected-tool-agent", Role: "selected_tool", Tools: []string{"selected_http"}}
+	actorIdentity := selectedContractTestAgentIdentity(t, "selected-tool-agent", "global")
+	actor := runtimeactors.AgentConfig{
+		ID: "selected-tool-agent", Identity: actorIdentity, FlowPath: actorIdentity.FlowInstance(),
+		Role: "selected_tool", Tools: []string{"selected_http"},
+	}
 	turnID := uuid.NewString()
 	sessionID := uuid.NewString()
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
@@ -2056,7 +2078,8 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 	effectCtx = runtimeeffects.WithAuthority(effectCtx, container.authority)
 	effectCtx = runtimeeffects.WithUsageTarget(effectCtx, runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: proof.ForkRunID, AgentID: actor.ID,
-		SessionID: sessionID, Memory: agentmemory.PlatformDefault(), FlowInstance: "global",
+		AgentIdentity: actorIdentity, SessionID: sessionID, Memory: agentmemory.PlatformDefault(),
+		FlowInstance: actorIdentity.FlowInstance(),
 	})
 	effectCtx = runtimeeffects.WithController(effectCtx, runtimeeffects.NewController(storetest.AdmitPostgresRuntimeStore(t, db)))
 	effectCtx = managedexecution.WithAdmission(effectCtx, container.admission)
@@ -2372,14 +2395,16 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	}
 
 	authority := winner.container.authority
+	targetIdentity := selectedContractTestAgentIdentity(t, "selected-agent", "selected-authority-race")
 	authority.Target = runtimeeffects.UsageTarget{
-		Kind:         runtimeeffects.UsageTargetAgentTurn,
-		ID:           uuid.NewString(),
-		RunID:        forkRunID,
-		AgentID:      "selected-agent",
-		SessionID:    uuid.NewString(),
-		Memory:       agentmemory.PlatformDefault(),
-		FlowInstance: "selected-authority-race",
+		Kind:          runtimeeffects.UsageTargetAgentTurn,
+		ID:            uuid.NewString(),
+		RunID:         forkRunID,
+		AgentID:       "selected-agent",
+		AgentIdentity: targetIdentity,
+		SessionID:     uuid.NewString(),
+		Memory:        agentmemory.PlatformDefault(),
+		FlowInstance:  targetIdentity.FlowInstance(),
 	}
 	providerCtx := runtimeeffects.WithLogicalOperationIdentity(
 		runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), runtimeeffects.NewController(winner.store)),
@@ -2428,13 +2453,15 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		},
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: authority.Target.ID, RunID: forkRunID, AgentID: authority.Target.AgentID,
+			Identity:  agentmemory.Identity{RunID: forkRunID, Agent: targetIdentity},
 			SessionID: authority.Target.SessionID, Memory: authority.Target.Memory,
 			FlowInstance: authority.Target.FlowInstance, ParseOK: true,
 			CapabilitySurfaceID: capabilitySurface.ID, CapabilitySurface: capabilitySurfaceJSON,
 		},
 		Spend: runtimeeffects.CompletionSpend{
 			FlowInstance: authority.Target.FlowInstance, AgentID: authority.Target.AgentID,
-			Model: "test-model", ModelAlias: "regular", BackendProfile: "test",
+			AgentIdentity: targetIdentity,
+			Model:         "test-model", ModelAlias: "regular", BackendProfile: "test",
 			Provider: "test", Transport: "http", ResolvedModel: "test-model",
 			InvocationType: "test",
 		},
@@ -2570,17 +2597,19 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 		ExecutionMode: runtimeeffects.ExecutionModeLive,
 	}
 	ctx := selectedForkExecutionTestContext(t, context.Background(), authority)
+	badIdentity := selectedContractTestRootAgentIdentity(t, "bad-agent")
 
 	_, _, err = startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
 		Store: &store.PostgresStore{},
 		AgentRuntime: selectedContractAgentRuntimePlan{
 			Proof: SelectedContractAgentRuntimeMaterialization{
-				AgentRecipients: []string{"bad-agent"},
+				AgentRecipients: []agentidentity.Identity{badIdentity},
 			},
 			Records: []runtimemanager.PersistedAgent{{
 				Config: runtimeactors.AgentConfig{
 					ExecutionMode: "live",
 					ID:            "bad-agent",
+					Identity:      badIdentity,
 					Role:          "worker",
 					LLMBackend:    "claude_cli",
 					Model:         "regular",
@@ -2734,7 +2763,7 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002600, 0).UTC()
 	seedSelectedExecutionSourceRunWithPrimaryRoute(t, db, sourceRunID, entityID, sourceEventID, "item.received", at,
-		events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "source-agent-that-must-not-route"}, nil, loaded.BundleSourceFact)
+		selectedExecutionTestAgentRoute(t, "source-agent-that-must-not-route", "flow-a/1"), nil, loaded.BundleSourceFact)
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
@@ -2843,7 +2872,7 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 	afterEventID := uuid.NewString()
 	at := time.Unix(1700002605, 0).UTC()
 	seedSelectedExecutionSourceRunWithPrimaryRoute(t, db, sourceRunID, entityID, sourceEventID, "item.received", at,
-		events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "source-agent-that-must-not-route"}, nil, loaded.BundleSourceFact)
+		selectedExecutionTestAgentRoute(t, "source-agent-that-must-not-route", "flow-a/1"), nil, loaded.BundleSourceFact)
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
@@ -2894,42 +2923,47 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 	turnID := uuid.NewString()
 	at := time.Unix(1700002300, 0).UTC()
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, loaded.BundleSourceFact)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source, status, created_at)
-		VALUES ('agent-a', 'flow-a/1', 'test-agent', 'tier1', TRUE, 'authored', 'active', $1)
-		ON CONFLICT (agent_id) DO NOTHING
-	`, at); err != nil {
-		t.Fatalf("seed source session agent: %v", err)
-	}
+	agentIdentity := selectedContractTestAgentIdentity(t, "agent-a", "flow-a/1")
+	agentFields := selectedExecutionTestAgentFields(t, agentIdentity)
+	seedSelectedExecutionTestAgent(t, ctx, db, agentIdentity, at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
 			status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', 'flow-a/1', TRUE, 'authored',
-			'active', $3, $3)
-	`, sessionID, sourceRunID, at); err != nil {
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
+			'active', $10, $10)
+	`, sessionID, sourceRunID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
+		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath, at); err != nil {
 		t.Fatalf("seed source session: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
-			session_id, run_id, agent_id, entity_id, flow_instance, memory_enabled, memory_source,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, entity_id, flow_instance, memory_enabled, memory_source,
 			runtime_state, status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', FALSE, 'authored',
-			'{}'::jsonb, 'active', $4, $4)
-	`, auditID, sourceRunID, entityID, at); err != nil {
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::uuid, $10, FALSE, 'authored',
+			'{}'::jsonb, 'active', $11, $11)
+	`, auditID, sourceRunID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
+		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, entityID, agentFields.FlowInstancePath, at); err != nil {
 		t.Fatalf("seed source conversation audit: %v", err)
 	}
 	capabilitySurfaceID := seedRunForkAgentTurnCapabilitySurface(t, ctx, pg, sourceRunID, turnID, sessionID, "agent-a", "session_per_entity")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
+			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id,
+			session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, capability_surface_id, execution_mode, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', TRUE, 'authored', $4::uuid,
-			$5::uuid, 'item.received', 'task-a', $6::uuid, 'live', $7)
-	`, turnID, sourceRunID, sessionID, entityID, sourceEventID, capabilitySurfaceID, at); err != nil {
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8,
+			$9::uuid, $10, TRUE, 'authored', $11::uuid,
+			$12::uuid, 'item.received', 'task-a', $13::uuid, 'live', $14)
+	`, turnID, sourceRunID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
+		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID,
+		sessionID, agentFields.FlowInstancePath, entityID, sourceEventID, capabilitySurfaceID, at); err != nil {
 		t.Fatalf("seed source turn: %v", err)
 	}
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
@@ -3006,44 +3040,49 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 	turnID := uuid.NewString()
 	at := time.Unix(1700002303, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
-	agentRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "validation-coordinator"}
+	agentRoute := selectedExecutionTestAgentRoute(t, "validation-coordinator", "flow-a/1")
 	sourceEvent := seedSelectedExecutionSourceRunWithRoutes(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, []events.DeliveryRoute{agentRoute}, loaded.BundleSourceFact)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source, status, created_at)
-		VALUES ('validation-coordinator', 'flow-a/1', 'test-agent', 'tier1', TRUE, 'authored', 'active', $1)
-		ON CONFLICT (agent_id) DO NOTHING
-	`, at); err != nil {
-		t.Fatalf("seed source session agent: %v", err)
-	}
+	agentIdentity := agentRoute.AgentIdentity
+	agentFields := selectedExecutionTestAgentFields(t, agentIdentity)
+	seedSelectedExecutionTestAgent(t, ctx, db, agentIdentity, at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
 			status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'validation-coordinator', 'flow-a/1', TRUE, 'authored',
-			'active', $3, $3)
-	`, sessionID, sourceRunID, at); err != nil {
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
+			'active', $10, $10)
+	`, sessionID, sourceRunID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
+		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath, at); err != nil {
 		t.Fatalf("seed source session: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
-			session_id, run_id, agent_id, entity_id, flow_instance, memory_enabled, memory_source,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, entity_id, flow_instance, memory_enabled, memory_source,
 			runtime_state, status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'validation-coordinator', $3::uuid, 'flow-a/1', FALSE, 'authored',
-			'{}'::jsonb, 'active', $4, $4)
-	`, auditID, sourceRunID, entityID, at); err != nil {
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::uuid, $10, FALSE, 'authored',
+			'{}'::jsonb, 'active', $11, $11)
+	`, auditID, sourceRunID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
+		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, entityID, agentFields.FlowInstancePath, at); err != nil {
 		t.Fatalf("seed source conversation audit: %v", err)
 	}
 	capabilitySurfaceID := seedRunForkAgentTurnCapabilitySurface(t, ctx, pg, sourceRunID, turnID, sessionID, "validation-coordinator", "session_per_entity")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
+			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id,
+			session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, capability_surface_id, execution_mode, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'validation-coordinator', $3::uuid, 'flow-a/1', TRUE, 'authored', $4::uuid,
-			$5::uuid, 'item.received', 'task-a', $6::uuid, 'live', $7)
-	`, turnID, sourceRunID, sessionID, entityID, sourceEventID, capabilitySurfaceID, at); err != nil {
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8,
+			$9::uuid, $10, TRUE, 'authored', $11::uuid,
+			$12::uuid, 'item.received', 'task-a', $13::uuid, 'live', $14)
+	`, turnID, sourceRunID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
+		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID,
+		sessionID, agentFields.FlowInstancePath, entityID, sourceEventID, capabilitySurfaceID, at); err != nil {
 		t.Fatalf("seed source turn: %v", err)
 	}
 	claimed, err := pg.ClaimAgentDelivery(ctx, sourceEvent, agentRoute)
@@ -3146,43 +3185,48 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 	at := time.Unix(1700002305, 0).UTC()
 	after := at.Add(time.Minute)
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, loaded.BundleSourceFact)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source, status, created_at)
-		VALUES ('agent-a', 'flow-a/1', 'test-agent', 'tier1', TRUE, 'authored', 'active', $1)
-		ON CONFLICT (agent_id) DO NOTHING
-	`, at); err != nil {
-		t.Fatalf("seed source session agent: %v", err)
-	}
+	agentIdentity := selectedContractTestAgentIdentity(t, "agent-a", "flow-a/1")
+	agentFields := selectedExecutionTestAgentFields(t, agentIdentity)
+	seedSelectedExecutionTestAgent(t, ctx, db, agentIdentity, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
 			status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', 'flow-a/1', TRUE, 'authored',
-			'active', $3, $3)
-	`, sessionID, sourceRunID, after); err != nil {
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
+			'active', $10, $10)
+	`, sessionID, sourceRunID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
+		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath, after); err != nil {
 		t.Fatalf("seed post-T source session: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
-			session_id, run_id, agent_id, entity_id, flow_instance, memory_enabled, memory_source,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, entity_id, flow_instance, memory_enabled, memory_source,
 			runtime_state, status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', FALSE, 'authored',
-			'{}'::jsonb, 'active', $4, $4)
-	`, auditID, sourceRunID, entityID, after); err != nil {
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::uuid, $10, FALSE, 'authored',
+			'{}'::jsonb, 'active', $11, $11)
+	`, auditID, sourceRunID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
+		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, entityID, agentFields.FlowInstancePath, after); err != nil {
 		t.Fatalf("seed post-T source conversation audit: %v", err)
 	}
 	capabilitySurfaceID := seedRunForkAgentTurnCapabilitySurface(t, ctx, pg, sourceRunID, turnID, sessionID, "agent-a", "session_per_entity")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
+			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id,
+			session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, capability_surface_id, execution_mode, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', TRUE, 'authored', $4::uuid,
-			$5::uuid, 'item.received', 'task-a', $6::uuid, 'live', $7)
-	`, turnID, sourceRunID, sessionID, entityID, sourceEventID, capabilitySurfaceID, after); err != nil {
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8,
+			$9::uuid, $10, TRUE, 'authored', $11::uuid,
+			$12::uuid, 'item.received', 'task-a', $13::uuid, 'live', $14)
+	`, turnID, sourceRunID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
+		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID,
+		sessionID, agentFields.FlowInstancePath, entityID, sourceEventID, capabilitySurfaceID, after); err != nil {
 		t.Fatalf("seed post-T source turn: %v", err)
 	}
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID,
@@ -4198,6 +4242,46 @@ func seedSelectedExecutionSourceRun(
 	sourceFacts ...runtimecorrelation.BundleSourceFact,
 ) {
 	seedSelectedExecutionSourceRunWithRoutes(t, db, sourceRunID, entityID, sourceEventID, eventName, at, nil, sourceFacts...)
+}
+
+func selectedExecutionTestAgentRoute(t testing.TB, agentID, flowInstance string) events.DeliveryRoute {
+	t.Helper()
+	return events.DeliveryRoute{
+		SubscriberType: "agent",
+		SubscriberID:   agentID,
+		AgentIdentity:  selectedContractTestAgentIdentity(t, agentID, flowInstance),
+	}
+}
+
+func selectedExecutionTestAgentFields(t testing.TB, identity agentidentity.Identity) agentidentity.StorageFields {
+	t.Helper()
+	fields, err := identity.StorageFields()
+	if err != nil {
+		t.Fatalf("selected-execution test agent identity: %v", err)
+	}
+	return fields
+}
+
+func seedSelectedExecutionTestAgent(
+	t testing.TB,
+	ctx context.Context,
+	db *sql.DB,
+	identity agentidentity.Identity,
+	at time.Time,
+) {
+	t.Helper()
+	fields := selectedExecutionTestAgentFields(t, identity)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance,
+			role, model, memory_enabled, memory_source, status, created_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'test-agent', 'tier1', TRUE, 'authored', 'active', $8)
+	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, at); err != nil {
+		t.Fatalf("seed selected-execution test agent: %v", err)
+	}
 }
 
 func seedSelectedExecutionStateOnlySourceRun(

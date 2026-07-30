@@ -11,6 +11,9 @@ pins:
       - name: account_register_requested
         event: portfolio.account.register.requested
         source: external
+      - name: accounts_register_requested
+        event: portfolio.accounts.register.requested
+        source: external
       - name: membership_seeded
         event: portfolio.membership.seeded
         source: external

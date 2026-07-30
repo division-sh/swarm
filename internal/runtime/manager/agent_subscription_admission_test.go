@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -45,6 +46,7 @@ func TestSpawnAgentRejectsForeignExactAndPatternBeforeRegistration(t *testing.T)
 			err = am.SpawnAgent(runtimeactors.AgentConfig{
 				ExecutionMode: "live",
 				ID:            "reviewer",
+				Identity:      runtimeagentidentitytest.Runtime(t, "reviewer", "subscription-admission-test", "review", "inst-1", "review/inst-1"),
 				FlowPath:      "review/inst-1",
 				Subscriptions: []string{subscription},
 			})
@@ -69,25 +71,26 @@ func TestReconfigureAgentRejectsForeignSubscriptionWithoutReplacingCurrentAdmiss
 	initial := runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "reviewer",
+		Identity:      runtimeagentidentitytest.Runtime(t, "reviewer", "subscription-admission-test", "review", "inst-1", "review/inst-1"),
 		FlowPath:      "review/inst-1",
 		Subscriptions: []string{"task.ready"},
 	}
 	if err := am.SpawnAgent(initial); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	before, ok := am.lifecycle.executionSnapshot(initial.ID)
+	before, ok := testExecutionSnapshot(t, am, initial.ID, initial.FlowPath)
 	if !ok {
 		t.Fatal("initial execution missing")
 	}
 
-	err = am.ReconfigureAgent(initial.ID, runtimeactors.AgentConfig{
+	err = am.ReconfigureAgentTarget(initial.ID, initial.FlowPath, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		Subscriptions: []string{"foreign/**/task.ready"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
 		t.Fatalf("ReconfigureAgent error = %v, want admission rejection", err)
 	}
-	after, ok := am.lifecycle.executionSnapshot(initial.ID)
+	after, ok := testExecutionSnapshot(t, am, initial.ID, initial.FlowPath)
 	if !ok {
 		t.Fatal("execution disappeared after rejected reconfigure")
 	}

@@ -16,6 +16,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -212,6 +213,13 @@ func (s *directRecipientTransactionalStore) ListEventDeliveryRecipients(_ contex
 	defer s.mu.Unlock()
 	return append([]string(nil), s.deliveries[eventID]...), nil
 }
+
+func (s *directRecipientTransactionalStore) ListEventDeliveryRoutes(_ context.Context, eventID string) ([]events.DeliveryRoute, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]events.DeliveryRoute(nil), s.routes[eventID]...), nil
+}
+
 func (*directRecipientTransactionalStore) SupportsPersistedReplay() bool { return true }
 
 func (s *directRecipientTransactionalStore) ListActiveAgentDescriptors(context.Context) ([]runtimebus.ActiveAgentDescriptor, error) {
@@ -409,7 +417,7 @@ func TestEngineDispatcherQueuesWhenPipelineSQLTxActive(t *testing.T) {
 	}
 	store := &directRecipientTransactionalStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{
-			{AgentID: "agent-a", EntityID: eventtest.UUID("ent-1")},
+			testActiveAgentDescriptor(t, "agent-a", eventtest.UUID("ent-1"), ""),
 		},
 	}
 	eb, err := newScopedTestEventBus(store)
@@ -481,12 +489,24 @@ func TestEngineDispatcherQueuesImmutableIntentSnapshotWhenPipelineSQLTxActive(t 
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
-	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{})
+	originalIdentity := runtimebustest.Identity(t, "agent-original", "flow-original")
+	store := &directRecipientTransactionalStore{
+		descriptors: []runtimebus.ActiveAgentDescriptor{{
+			Identity: originalIdentity, EntityID: eventtest.UUID("entity-original"),
+		}},
+	}
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	originalCh := runtimebustest.Subscribe(t, eb, "agent-original", events.EventType("custom.snapshot"))
-	defer runtimebustest.Unsubscribe(eb, "agent-original")
+	originalAdmission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
+		AgentID: "agent-original", FlowPath: "flow-original", Subscriptions: []string{"custom.snapshot"},
+	})
+	if err != nil {
+		t.Fatalf("admit original snapshot recipient: %v", err)
+	}
+	originalCh := runtimebustest.SubscribeIdentity(t, eb, originalIdentity, originalAdmission)
+	defer runtimebustest.UnsubscribeIdentity(eb, originalIdentity)
 	mutatedCh := runtimebustest.Subscribe(t, eb, "agent-mutated", events.EventType("custom.snapshot"))
 	defer runtimebustest.Unsubscribe(eb, "agent-mutated")
 
@@ -503,16 +523,21 @@ func TestEngineDispatcherQueuesImmutableIntentSnapshotWhenPipelineSQLTxActive(t 
 	postCommitActions := make([]runtimepipeline.OwnerAction, 0, 1)
 	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 1)
 	txctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	txctx = runtimebus.WithCommitPublishTransaction(txctx, store)
 	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommitActions)
 	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
 
+	if err := eb.EngineOutbox().WriteOutbox(txctx, intents); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("WriteOutbox: %v", err)
+	}
 	if err := eb.EngineDispatcher().DispatchPostCommit(txctx, intents); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("DispatchPostCommit: %v", err)
 	}
-	if len(postCommitActions) != 1 {
+	if len(postCommitActions) == 0 {
 		_ = tx.Rollback()
-		t.Fatalf("post-commit actions = %d, want 1", len(postCommitActions))
+		t.Fatal("post-commit dispatch was not queued")
 	}
 	copy(payload, []byte(`{"value":"mutated!"}`))
 	targetSet[0] = events.RouteIdentity{FlowInstance: "flow-mutated", EntityID: "entity-mutated"}
@@ -539,9 +564,9 @@ func TestEngineDispatcherQueuesImmutableIntentSnapshotWhenPipelineSQLTxActive(t 
 	if string(got.Payload()) != `{"value":"original"}` {
 		t.Fatalf("delivered payload = %s, want original snapshot", string(got.Payload()))
 	}
-	routes := got.TargetRoutes()
-	if len(routes) != 1 || routes[0].FlowInstance != "flow-original" || routes[0].EntityID != eventtest.UUID("entity-original") {
-		t.Fatalf("delivered target routes = %#v, want original snapshot", routes)
+	target := got.TargetRoute()
+	if target.FlowInstance != "flow-original" || target.EntityID != eventtest.UUID("entity-original") {
+		t.Fatalf("delivered target route = %#v, want original snapshot", target)
 	}
 	requireNoBusEvent(t, mutatedCh, "mutated recipient delivery")
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -615,7 +640,7 @@ func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 	}
 	recordingStore := &directRecipientTransactionalStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{
-			{AgentID: "reviewer", EntityID: entityID},
+			testActiveAgentDescriptor(t, "reviewer", entityID, ""),
 		},
 	}
 	eb, err := newScopedTestEventBus(recordingStore)
@@ -674,8 +699,8 @@ func TestEngineOutboxExactDuplicateDispatchIsOperationNoOp(t *testing.T) {
 
 	store := &directRecipientTransactionalStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{
-			{AgentID: "reviewer", EntityID: eventtest.UUID("ent-1")},
-			{AgentID: "late-reviewer", EntityID: eventtest.UUID("ent-1")},
+			testActiveAgentDescriptor(t, "reviewer", eventtest.UUID("ent-1"), ""),
+			testActiveAgentDescriptor(t, "late-reviewer", eventtest.UUID("ent-1"), ""),
 		},
 	}
 	eb, err := newScopedTestEventBus(store)
@@ -757,7 +782,9 @@ func TestEngineOutboxPublicationClaimSpansCommitToDispatchAndRollsBack(t *testin
 			defer db.Close()
 
 			store := &outboxClaimStore{directRecipientTransactionalStore: directRecipientTransactionalStore{
-				descriptors: []runtimebus.ActiveAgentDescriptor{{AgentID: "reviewer", EntityID: eventtest.UUID("ent-claim")}},
+				descriptors: []runtimebus.ActiveAgentDescriptor{
+					testActiveAgentDescriptor(t, "reviewer", eventtest.UUID("ent-claim"), ""),
+				},
 			}}
 			eb, err := newScopedTestEventBus(store)
 			if err != nil {
@@ -839,7 +866,9 @@ func TestEngineOutboxPreservesAppendOutcomeForEveryIntentInBatch(t *testing.T) {
 		t.Fatalf("sqlmock: %v", err)
 	}
 	defer db.Close()
-	store := &directRecipientTransactionalStore{descriptors: []runtimebus.ActiveAgentDescriptor{{AgentID: "reviewer", EntityID: eventtest.UUID("ent-1")}}}
+	store := &directRecipientTransactionalStore{descriptors: []runtimebus.ActiveAgentDescriptor{
+		testActiveAgentDescriptor(t, "reviewer", eventtest.UUID("ent-1"), ""),
+	}}
 	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -885,7 +914,9 @@ func TestEngineOutboxPreexistingExactDuplicateBatchDispatchesZero(t *testing.T) 
 		t.Fatalf("sqlmock: %v", err)
 	}
 	defer db.Close()
-	store := &directRecipientTransactionalStore{descriptors: []runtimebus.ActiveAgentDescriptor{{AgentID: "reviewer", EntityID: eventtest.UUID("ent-1")}}}
+	store := &directRecipientTransactionalStore{descriptors: []runtimebus.ActiveAgentDescriptor{
+		testActiveAgentDescriptor(t, "reviewer", eventtest.UUID("ent-1"), ""),
+	}}
 	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -934,7 +965,9 @@ func TestEngineOutboxConflictingSameIDBatchRollsBackOrderedOutcomes(t *testing.T
 		t.Fatalf("sqlmock: %v", err)
 	}
 	defer db.Close()
-	store := &directRecipientTransactionalStore{descriptors: []runtimebus.ActiveAgentDescriptor{{AgentID: "reviewer", EntityID: eventtest.UUID("ent-1")}}}
+	store := &directRecipientTransactionalStore{descriptors: []runtimebus.ActiveAgentDescriptor{
+		testActiveAgentDescriptor(t, "reviewer", eventtest.UUID("ent-1"), ""),
+	}}
 	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -1007,7 +1040,9 @@ func TestEngineOutboxDistinctIntentBatchDispatchesEachOnce(t *testing.T) {
 		t.Fatalf("sqlmock: %v", err)
 	}
 	defer db.Close()
-	store := &directRecipientTransactionalStore{descriptors: []runtimebus.ActiveAgentDescriptor{{AgentID: "reviewer", EntityID: eventtest.UUID("ent-1")}}}
+	store := &directRecipientTransactionalStore{descriptors: []runtimebus.ActiveAgentDescriptor{
+		testActiveAgentDescriptor(t, "reviewer", eventtest.UUID("ent-1"), ""),
+	}}
 	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -1132,9 +1167,9 @@ func TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest(t *testin
 	}
 	store := &directRecipientTransactionalStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{
-			{AgentID: "control-plane"},
-			{AgentID: "reviewer-ent-1", EntityID: eventtest.UUID("ent-1")},
-			{AgentID: "reviewer-ent-2", EntityID: eventtest.UUID("ent-2")},
+			testActiveAgentDescriptor(t, "control-plane", "", ""),
+			testActiveAgentDescriptor(t, "reviewer-ent-1", eventtest.UUID("ent-1"), ""),
+			testActiveAgentDescriptor(t, "reviewer-ent-2", eventtest.UUID("ent-2"), ""),
 		},
 	}
 	eb, err := newScopedTestEventBus(store)
@@ -1259,7 +1294,7 @@ func TestEngineOutboxAndDispatcher_DeliverInternalSubscribersOutsidePersistedMan
 	}
 	store := &directRecipientTransactionalStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{
-			{AgentID: "agent-a"},
+			testActiveAgentDescriptor(t, "agent-a", "", ""),
 		},
 	}
 	eb, err := newScopedTestEventBus(store)
@@ -1440,13 +1475,11 @@ func TestEngineDispatcher_FailsClosedWithoutAuthoritativeRecipientManifestOnInMe
 	}
 }
 
-func TestEngineDispatcher_DirectIntentUsesExplicitRecipientsWhenManifestWasNotPersisted(t *testing.T) {
+func TestEngineDispatcher_DirectIntentWithoutPersistedExactRoutesFailsClosed(t *testing.T) {
 	eb, err := newScopedTestEventBus(nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	recipientCh := runtimebustest.Subscribe(t, eb, "agent-a")
-
 	intent := runtimeengine.EmitIntent{
 		Event: eventtest.RunCreatingRootIngress(
 			eventtest.UUID("evt-direct-no-tx"),
@@ -1464,13 +1497,9 @@ func TestEngineDispatcher_DirectIntentUsesExplicitRecipientsWhenManifestWasNotPe
 		Recipients: []string{"agent-a"},
 	}
 
-	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent}); err != nil {
-		t.Fatalf("DispatchPostCommit: %v", err)
-	}
-
-	evt := requireBusEvent(t, recipientCh, "direct no-tx delivery to explicit recipient")
-	if got := evt.EntityID(); got != eventtest.UUID("ent-1") {
-		t.Fatalf("delivered event entity_id = %q, want ent-1", got)
+	err = eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent})
+	if err == nil || !strings.Contains(err.Error(), "persisted agent recipients without exact identity-bearing delivery routes") {
+		t.Fatalf("DispatchPostCommit error = %v, want missing exact route failure", err)
 	}
 }
 
@@ -1490,7 +1519,7 @@ func TestEngineDispatcher_TransactionalDirectIntentHonorsEmptyPersistedManifest(
 	}
 	store := &directRecipientTransactionalStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{
-			{AgentID: "reviewer-ent-2", EntityID: eventtest.UUID("ent-2")},
+			testActiveAgentDescriptor(t, "reviewer-ent-2", eventtest.UUID("ent-2"), ""),
 		},
 	}
 	eb, err := newScopedTestEventBus(store)
@@ -1556,9 +1585,9 @@ func TestPublishDirectInMutationRejectsFilteredExplicitRecipient(t *testing.T) {
 		t.Fatalf("Begin: %v", err)
 	}
 	store := &directRecipientTransactionalStore{
-		descriptors: []runtimebus.ActiveAgentDescriptor{{
-			AgentID: "requester-agent", EntityID: "requester-entity", FlowInstance: "provider/instance-a",
-		}},
+		descriptors: []runtimebus.ActiveAgentDescriptor{
+			testActiveAgentDescriptor(t, "requester-agent", "requester-entity", "provider/instance-a"),
+		},
 	}
 	eb, err := newScopedTestEventBus(store)
 	if err != nil {

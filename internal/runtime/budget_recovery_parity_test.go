@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -71,10 +73,10 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 				runID  string
 				record budgetspend.SpendRecord
 			}{
-				{runID: runA, record: budgetRecoverySpend(entityA, "flow/a", 9.5, now)},
-				{runID: runB, record: budgetRecoverySpend(entityB, "flow/b", 9.5, now)},
-				{runID: runB, record: budgetRecoverySpend(terminalEntity, "flow/done", 9.5, now)},
-				{record: budgetRecoverySpend("", "global", 9.5, now)},
+				{runID: runA, record: budgetRecoverySpend(t, entityA, "flow/a", 9.5, now)},
+				{runID: runB, record: budgetRecoverySpend(t, entityB, "flow/b", 9.5, now)},
+				{runID: runB, record: budgetRecoverySpend(t, terminalEntity, "flow/done", 9.5, now)},
+				{record: budgetRecoverySpend(t, "", "global", 9.5, now)},
 			} {
 				spendCtx := ctx
 				if seed.runID != "" {
@@ -132,12 +134,18 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 	}
 }
 
-func budgetRecoverySpend(entityID, flowInstance string, cost float64, at time.Time) budgetspend.SpendRecord {
+func budgetRecoverySpend(t *testing.T, entityID, flowInstance string, cost float64, at time.Time) budgetspend.SpendRecord {
+	t.Helper()
+	scopeKey, instanceID, found := strings.Cut(flowInstance, "/")
+	if !found {
+		instanceID = scopeKey
+	}
 	return budgetspend.SpendRecord{
 		ExecutionMode:   "live",
 		EntityID:        entityID,
 		FlowInstance:    flowInstance,
 		AgentID:         "budget-recovery-agent",
+		AgentIdentity:   agentidentitytest.Runtime(t, "budget-recovery-agent", "budget-recovery-test", scopeKey, instanceID, flowInstance),
 		Model:           "test-model",
 		ModelAlias:      "regular",
 		BackendProfile:  "test",

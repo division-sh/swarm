@@ -105,7 +105,15 @@ func normalizeAgentRegistryEntries(entries map[string]AgentRegistryEntry, source
 		if err := validateAgentRegistryMapKey(trimmedKey, sourceFile); err != nil {
 			return nil, err
 		}
-		out[trimmedKey] = EffectiveAgentRegistryEntry(trimmedKey, entry)
+		effective := EffectiveAgentRegistryEntry(trimmedKey, entry)
+		if strings.Contains(strings.TrimSpace(effective.ID), "{instance_id}") {
+			return nil, fmt.Errorf(
+				"%s agent %q: agent IDs are declaration identities and cannot interpolate {instance_id}; remove the interpolation because the runtime carries flow-instance identity separately",
+				strings.TrimSpace(sourceFile),
+				trimmedKey,
+			)
+		}
+		out[trimmedKey] = effective
 	}
 	return out, nil
 }
@@ -133,18 +141,17 @@ func buildFlowTree(bundle *WorkflowContractBundle, flowViewsByID map[string]Flow
 		Events: map[string]ContractURIRef{},
 		ByURI:  map[string]ContractURIRef{},
 	}
-	if len(flowViewsByID) == 0 {
-		bundle.FlowTree = tree
-		bundle.URIRegistry = registry
-		return nil
-	}
-
 	hasPackageNodes := false
 	for _, pkg := range bundle.PackageTree {
 		if _, ok := bundle.ProjectViewByKey(pkg.Key); ok {
 			hasPackageNodes = true
 			break
 		}
+	}
+	if len(flowViewsByID) == 0 && !hasPackageNodes {
+		bundle.FlowTree = tree
+		bundle.URIRegistry = registry
+		return nil
 	}
 	if !hasPackageNodes {
 		root := &FlowContractView{Children: make([]FlowContractView, 0, len(bundle.Paths.Flows))}
@@ -229,6 +236,14 @@ func buildFlowTree(bundle *WorkflowContractBundle, flowViewsByID map[string]Flow
 
 	root := materializeFlowTree(rootNode)
 	tree.Root = &root
+	nodeEntries := func(view *FlowContractView) map[string]SystemNodeContract { return view.Nodes }
+	eventEntries := func(view *FlowContractView) map[string]EventCatalogEntry { return view.Events }
+	if len(flowViewsByID) == 0 {
+		// Root-only packages need declaration URIs for agent identity, but their
+		// event and node catalogs remain owned by the project contract views.
+		nodeEntries = func(*FlowContractView) map[string]SystemNodeContract { return nil }
+		eventEntries = func(*FlowContractView) map[string]EventCatalogEntry { return nil }
+	}
 	flowmodel.IndexAndPopulateScopedURIs(
 		tree.Root,
 		&tree,
@@ -241,14 +256,22 @@ func buildFlowTree(bundle *WorkflowContractBundle, flowViewsByID map[string]Flow
 		func(view *FlowContractView, uri string) { view.URI = uri },
 		func(view *FlowContractView) string { return strings.TrimSpace(view.Paths.ID) },
 		func(view *FlowContractView) string { return strings.Trim(strings.TrimSpace(view.Path), "/") },
-		func(view *FlowContractView) map[string]SystemNodeContract { return view.Nodes },
+		nodeEntries,
 		func(view *FlowContractView) map[string]AgentRegistryEntry { return view.Agents },
-		func(view *FlowContractView) map[string]EventCatalogEntry { return view.Events },
+		eventEntries,
 		func(view *FlowContractView) *map[string]string { return &view.NodeURIs },
 		func(view *FlowContractView) *map[string]string { return &view.AgentURIs },
 		func(view *FlowContractView) *map[string]string { return &view.EventURIs },
 	)
-	if len(tree.ByPath) == 0 {
+	if len(flowViewsByID) == 0 {
+		bundle.FlowTree = FlowTree{
+			ByPath: map[string]*FlowContractView{},
+			ByID:   map[string]*FlowContractView{},
+		}
+		bundle.URIRegistry = registry
+		return nil
+	}
+	if len(tree.ByPath) == 0 && len(flowViewsByID) > 0 {
 		return fmt.Errorf("flow tree build produced no indexed paths")
 	}
 	bundle.FlowTree = tree

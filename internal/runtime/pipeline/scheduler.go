@@ -9,23 +9,33 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/robfig/cron/v3"
 )
 
+type ScheduleOwnerKind string
+
+const (
+	ScheduleOwnerAgent  ScheduleOwnerKind = "agent"
+	ScheduleOwnerSystem ScheduleOwnerKind = "system"
+)
+
 type Schedule struct {
-	Context      events.DeliveryContext
-	RunID        string
-	AgentID      string
-	EventType    string
-	Mode         string // once | cron
-	Cron         string // supports "@every <duration>" and plain duration string
-	At           time.Time
-	EntityID     string
-	FlowInstance string
-	TaskID       string
-	Payload      []byte
+	Context       events.DeliveryContext
+	RunID         string
+	AgentID       string
+	OwnerKind     ScheduleOwnerKind
+	AgentIdentity agentidentity.Identity
+	EventType     string
+	Mode          string // once | cron
+	Cron          string // supports "@every <duration>" and plain duration string
+	At            time.Time
+	EntityID      string
+	FlowInstance  string
+	TaskID        string
+	Payload       []byte
 }
 
 type scheduledProjectionKind uint8
@@ -155,6 +165,34 @@ func (s *Schedule) NormalizeFlowInstance() {
 		return
 	}
 	s.FlowInstance = s.EffectiveFlowInstance()
+}
+
+func (s *Schedule) NormalizeOwner() error {
+	if s == nil {
+		return errors.New("schedule is required")
+	}
+	s.OwnerKind = ScheduleOwnerKind(strings.TrimSpace(string(s.OwnerKind)))
+	s.AgentID = strings.TrimSpace(s.AgentID)
+	s.AgentIdentity = s.AgentIdentity.Normalize()
+	switch s.OwnerKind {
+	case ScheduleOwnerAgent:
+		if err := s.AgentIdentity.Validate(); err != nil {
+			return fmt.Errorf("agent-owned schedule requires concrete agent identity: %w", err)
+		}
+		if s.AgentIdentity.AgentID() != s.AgentID {
+			return errors.New("agent-owned schedule owner does not match concrete agent identity")
+		}
+		if s.AgentIdentity.FlowInstance() != s.EffectiveFlowInstance() {
+			return errors.New("agent-owned schedule flow_instance does not match concrete agent identity")
+		}
+	case ScheduleOwnerSystem:
+		if !s.AgentIdentity.IsZero() {
+			return errors.New("system-owned schedule cannot carry agent identity")
+		}
+	default:
+		return fmt.Errorf("schedule owner_kind %q is invalid", s.OwnerKind)
+	}
+	return nil
 }
 
 type Scheduler struct {
@@ -398,30 +436,9 @@ func (s *Scheduler) Wait(ctx context.Context) error {
 	return nil
 }
 
-func (s *Scheduler) Cancel(agentID string, eventType string) error {
-	if agentID == "" || eventType == "" {
-		return errors.New("agent_id and event_type are required")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for key, transition := range s.reservations {
-		if transition.reservesGenericAgentEvent(key, agentID, eventType) {
-			return errors.New("matching schedule key is reserved by a standing replacement transition")
-		}
-	}
-	for key, task := range s.tasks {
-		if task.projection.kind != scheduledProjectionGeneric ||
-			!scheduleKeyMatchesAgentEvent(key, agentID, eventType) {
-			continue
-		}
-		s.retireTaskLocked(key, task)
-	}
-	return nil
-}
-
 func (s *Scheduler) CancelExact(sc Schedule) error {
-	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
-		return errors.New("agent_id and event_type are required")
+	if _, _, err := validateSchedule(sc); err != nil {
+		return err
 	}
 	key := scheduleKey(sc)
 	s.mu.Lock()
@@ -971,20 +988,6 @@ func (t *PreparedParkedSetRebind) targetsStandingOwner(owner *worklifetime.Stand
 	return false
 }
 
-func (t *PreparedParkedSetRebind) reservesGenericAgentEvent(key, agentID, eventType string) bool {
-	if t == nil {
-		return false
-	}
-	for _, prepared := range t.tasks {
-		if prepared.key == key &&
-			prepared.task.projection.kind == scheduledProjectionGeneric &&
-			scheduleKeyMatchesAgentEvent(key, agentID, eventType) {
-			return true
-		}
-	}
-	return false
-}
-
 func (s *Scheduler) Stop() {
 	for {
 		s.mu.Lock()
@@ -1174,9 +1177,20 @@ func (s *Scheduler) finishTask(key string, task *scheduledTask) {
 }
 
 func scheduleKey(sc Schedule) string {
+	fields := agentidentity.StorageFields{}
+	if !sc.AgentIdentity.IsZero() {
+		fields, _ = sc.AgentIdentity.StorageFields()
+	}
 	return strings.Join([]string{
 		strings.TrimSpace(sc.EffectiveRunID()),
 		strings.TrimSpace(sc.AgentID),
+		strings.TrimSpace(string(sc.OwnerKind)),
+		fields.NameOwner,
+		fields.NameSource,
+		fields.RoutePresence,
+		fields.FlowScopeKey,
+		fields.FlowInstanceID,
+		fields.FlowInstancePath,
 		strings.TrimSpace(sc.EventType),
 		strings.TrimSpace(sc.EffectiveEntityID()),
 		strings.TrimSpace(sc.EffectiveFlowInstance()),
@@ -1197,6 +1211,9 @@ func validateSchedule(sc Schedule) (Schedule, cronSpec, error) {
 	sc.NormalizeDeliveryContext()
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
+	if err := sc.NormalizeOwner(); err != nil {
+		return Schedule{}, cronSpec{}, err
+	}
 	if sc.Mode == "" {
 		sc.Mode = "once"
 	}
@@ -1231,13 +1248,6 @@ func validateScheduledProjection(projection scheduledProjection) (scheduledProje
 	default:
 		return scheduledProjection{}, cronSpec{}, errors.New("scheduled projection kind is invalid")
 	}
-}
-
-func scheduleKeyMatchesAgentEvent(key, agentID, eventType string) bool {
-	parts := strings.Split(key, "|")
-	return len(parts) >= 3 &&
-		strings.TrimSpace(parts[1]) == strings.TrimSpace(agentID) &&
-		strings.TrimSpace(parts[2]) == strings.TrimSpace(eventType)
 }
 
 func parseCronSpec(expr string) (cronSpec, error) {

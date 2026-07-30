@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -119,6 +120,12 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 			route_identity TEXT NOT NULL,
 			subscriber_type TEXT NOT NULL,
 			subscriber_id TEXT NOT NULL,
+			agent_name_owner TEXT NOT NULL,
+			agent_name_source TEXT NOT NULL,
+			agent_route_presence TEXT NOT NULL,
+			agent_flow_scope_key TEXT NOT NULL,
+			agent_flow_instance_id TEXT NOT NULL,
+			agent_flow_instance_path TEXT NOT NULL,
 			delivery_target_route BLOB NOT NULL,
 			delivery_context BLOB NOT NULL,
 			delivery_payload_projection BLOB NOT NULL,
@@ -149,6 +156,12 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 			session_run_id TEXT,
 			session_subscriber_type TEXT,
 			session_agent_id TEXT,
+			session_agent_name_owner TEXT,
+			session_agent_name_source TEXT,
+			session_agent_route_presence TEXT,
+			session_agent_flow_scope_key TEXT,
+			session_agent_flow_instance_id TEXT,
+			session_agent_flow_instance_path TEXT,
 			open_marker BOOLEAN NOT NULL,
 			outcome TEXT,
 			reason_code TEXT,
@@ -187,6 +200,12 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 			session_id TEXT PRIMARY KEY,
 			run_id TEXT NOT NULL,
 			agent_id TEXT NOT NULL,
+			agent_name_owner TEXT NOT NULL,
+			agent_name_source TEXT NOT NULL,
+			agent_route_presence TEXT NOT NULL,
+			flow_scope_key TEXT NOT NULL,
+			flow_instance_id TEXT NOT NULL,
+			flow_instance TEXT NOT NULL,
 			status TEXT NOT NULL
 		)`,
 	} {
@@ -221,11 +240,19 @@ func (s *exactHandoffProofStore) seed(t *testing.T, eventID, runID string, route
 	}
 }
 
-func (s *exactHandoffProofStore) seedSession(t *testing.T, sessionID, runID, agentID string) {
+func (s *exactHandoffProofStore) seedSession(t *testing.T, sessionID, runID string, identity agentidentity.Identity) {
 	t.Helper()
+	fields, err := identity.StorageFields()
+	if err != nil {
+		t.Fatalf("read exact delivery session identity: %v", err)
+	}
 	if _, err := s.db.Exec(
-		`INSERT INTO agent_sessions (session_id, run_id, agent_id, status) VALUES (?, ?, ?, 'active')`,
-		sessionID, runID, agentID,
+		`INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, status
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
+		sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
 	); err != nil {
 		t.Fatalf("seed exact delivery agent session: %v", err)
 	}
@@ -262,19 +289,28 @@ func (s *exactHandoffProofStore) claim(t *testing.T, eventID, runID string, rout
 	return claimed.Claim
 }
 
+func deliverToTestAgent(ctx context.Context, eb *EventBus, evt events.Event, identity agentidentity.Identity) error {
+	route := events.DeliveryRoute{
+		SubscriberType: "agent",
+		SubscriberID:   identity.AgentID(),
+		AgentIdentity:  identity,
+	}
+	return eb.deliverToRecipientsWithRoutes(ctx, evt, []string{identity.AgentID()}, []events.DeliveryRoute{route})
+}
+
 func TestEventBusAgentRouteReplacementWaitsForExactDequeuedPredecessor(t *testing.T) {
 	eb, err := newScopedTestEventBus(nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	oldToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 1}
-	newToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 2}
+	oldToken := testAgentLifecycleToken(t, "agent-a", "", 7, 1)
+	newToken := testAgentLifecycleToken(t, "agent-a", "", 7, 2)
 	oldCh := eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.work")))
 	if oldCh == nil {
 		t.Fatal("predecessor route was not installed")
 	}
 	evt := eventtest.RuntimeControl("work-old", events.EventType("test.work"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
-	if err := eb.deliverToAgents(context.Background(), evt, []string{"agent-a"}); err != nil {
+	if err := deliverToTestAgent(context.Background(), eb, evt, oldToken.Identity); err != nil {
 		t.Fatalf("deliver predecessor event: %v", err)
 	}
 	delivery := <-oldCh
@@ -302,7 +338,7 @@ func TestEventBusAgentRouteReplacementWaitsForExactDequeuedPredecessor(t *testin
 	}
 
 	newEvent := eventtest.RuntimeControl("work-new", events.EventType("test.work"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
-	if err := eb.deliverToAgents(context.Background(), newEvent, []string{"agent-a"}); err != nil {
+	if err := deliverToTestAgent(context.Background(), eb, newEvent, newToken.Identity); err != nil {
 		t.Fatalf("deliver successor event: %v", err)
 	}
 	newDelivery := <-newCh
@@ -319,10 +355,10 @@ func TestEventBusAgentRouteRemovalWaitsForDequeuedWork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	token := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 1}
+	token := testAgentLifecycleToken(t, "agent-a", "", 7, 1)
 	ch := eb.ReplaceAgentRoute(token, testAgentSubscriptionAdmission(t, token.AgentID, events.EventType("test.work")))
 	evt := eventtest.RuntimeControl("work-1", events.EventType("test.work"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
-	if err := eb.deliverToAgents(context.Background(), evt, []string{"agent-a"}); err != nil {
+	if err := deliverToTestAgent(context.Background(), eb, evt, token.Identity); err != nil {
 		t.Fatalf("deliver event: %v", err)
 	}
 	delivery := <-ch
@@ -350,16 +386,25 @@ func TestEventBusSnapshottedAgentRouteSendLinearizesWithRemoval(t *testing.T) {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	for generation := uint64(1); generation <= 64; generation++ {
-		token := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-race", Generation: generation}
+		token := testAgentLifecycleToken(t, "agent-race", "", 7, generation)
 		if ch := eb.ReplaceAgentRoute(token, testAgentSubscriptionAdmission(t, token.AgentID, events.EventType("test.work"))); ch == nil {
 			t.Fatalf("generation %d route was not installed", generation)
 		}
-		recipients := eb.snapshotRecipientChans([]string{token.AgentID})
+		recipients := eb.snapshotRoutePlanRecipientChans(
+			[]string{token.AgentID},
+			[]RoutePlanLiveRecipient{{
+				RecipientID:       token.AgentID,
+				AgentIdentity:     token.Identity,
+				SubscriberType:    routePlanSubscriberAgent,
+				PersistAsDelivery: true,
+				liveAuthority:     liveRecipientAuthorityIdentity,
+			}},
+		)
 		if len(recipients) != 1 || recipients[0].route == nil {
 			t.Fatalf("generation %d snapshot = %#v, want exact route handle", generation, recipients)
 		}
 		eventID, runID := uuid.NewString(), uuid.NewString()
-		route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: token.AgentID}
+		route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: token.AgentID, AgentIdentity: token.Identity}
 		evt := eventtest.RuntimeControl(
 			eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0,
 			runID, "", events.EventEnvelope{}, time.Now(),
@@ -395,7 +440,7 @@ func TestEventBusSnapshottedAgentRouteSendLinearizesWithRemoval(t *testing.T) {
 }
 
 func TestAgentRecipientWithoutExactLifecycleHandleFailsClosed(t *testing.T) {
-	recipient := agentRecipient{agentID: "orphan", kind: inMemorySubscriberAgent}
+	recipient := agentRecipient{identity: testAgentRouteIdentity(t, "orphan", ""), kind: inMemorySubscriberAgent}
 	evt := eventtest.RuntimeControl("orphan-send", events.EventType("test.work"), "test", "", []byte(`{}`), 0,
 		"run-1", "", events.EventEnvelope{}, time.Now())
 	if result := recipient.send(context.Background(), evt, events.DeliveryRoute{}); result != agentRouteSendInactive {
@@ -408,11 +453,11 @@ func TestEventBusAgentRouteBufferedRemovalFailsClosedWithoutDurableHandoff(t *te
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	oldToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 1}
-	newToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 2}
+	oldToken := testAgentLifecycleToken(t, "agent-a", "", 7, 1)
+	newToken := testAgentLifecycleToken(t, "agent-a", "", 7, 2)
 	eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.work")))
 	evt := eventtest.RuntimeControl("work-buffered", events.EventType("test.work"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
-	if err := eb.deliverToAgents(context.Background(), evt, []string{"agent-a"}); err != nil {
+	if err := deliverToTestAgent(context.Background(), eb, evt, oldToken.Identity); err != nil {
 		t.Fatalf("deliver event: %v", err)
 	}
 	if got := eb.ReplaceAgentRoute(newToken, testAgentSubscriptionAdmission(t, newToken.AgentID, events.EventType("test.work"))); got != nil {
@@ -426,13 +471,13 @@ func TestEventBusAgentRouteFailedHandoffRetainsCarrierForExactRetry(t *testing.T
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	oldToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 1}
-	newToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 2}
+	oldToken := testAgentLifecycleToken(t, "agent-a", "", 7, 1)
+	newToken := testAgentLifecycleToken(t, "agent-a", "", 7, 2)
 	eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.work")))
 	eventID, runID := uuid.NewString(), uuid.NewString()
 	evt := eventtest.RuntimeControl(eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now())
-	store.seed(t, eventID, runID, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: oldToken.AgentID})
-	if err := eb.deliverToAgents(context.Background(), evt, []string{"agent-a"}); err != nil {
+	store.seed(t, eventID, runID, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: oldToken.AgentID, AgentIdentity: oldToken.Identity})
+	if err := deliverToTestAgent(context.Background(), eb, evt, oldToken.Identity); err != nil {
 		t.Fatalf("deliver event: %v", err)
 	}
 	if got := eb.ReplaceAgentRoute(newToken, testAgentSubscriptionAdmission(t, newToken.AgentID, events.EventType("test.work"))); got != nil {
@@ -476,11 +521,7 @@ func TestNoContextRouteCleanupCarriesImmutableBundleSourceToHandoff(t *testing.T
 			store := newExactHandoffProofStore(t, false)
 			bus := newSourceMutationProbeBusWithStore(t, store, owned, newSourceMutationProbeOwner())
 			subscriberID := "cleanup-" + strings.ReplaceAll(tc.name, " ", "-")
-			token := runtimeeffects.LifecycleToken{
-				RuntimeEpoch: 7,
-				AgentID:      subscriberID,
-				Generation:   1,
-			}
+			token := testAgentLifecycleToken(t, subscriberID, "", 7, 1)
 			var subscription worklifetime.InternalSubscription
 			if tc.subscriberType == "agent" {
 				if ch := bus.ReplaceAgentRoute(
@@ -499,13 +540,16 @@ func TestNoContextRouteCleanupCarriesImmutableBundleSourceToHandoff(t *testing.T
 
 			eventID, runID := uuid.NewString(), uuid.NewString()
 			route := events.DeliveryRoute{SubscriberType: tc.subscriberType, SubscriberID: subscriberID}
+			if tc.subscriberType == "agent" {
+				route.AgentIdentity = token.Identity
+			}
 			store.seed(t, eventID, runID, route)
 			evt := eventtest.RuntimeControl(
 				eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0,
 				runID, "", events.EventEnvelope{}, time.Now().UTC(),
 			)
 			if tc.subscriberType == "agent" {
-				if err := bus.deliverToAgents(context.Background(), evt, []string{subscriberID}); err != nil {
+				if err := deliverToTestAgent(context.Background(), bus, evt, token.Identity); err != nil {
 					t.Fatalf("buffer agent delivery: %v", err)
 				}
 			} else {
@@ -587,7 +631,7 @@ func TestEventBusResetRetiresAndRestartsInternalSubscriptionGeneration(t *testin
 		t.Fatalf("replacement generation = %d", generation)
 	}
 	evt := eventtest.RuntimeControl("after-reset", events.EventType("test.work"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
-	if err := eb.deliverToAgents(context.Background(), evt, []string{"reset-proof"}); err != nil {
+	if err := eb.deliverToRecipientsWithRoutes(context.Background(), evt, []string{"reset-proof"}, nil); err != nil {
 		t.Fatalf("deliver after reset: %v", err)
 	}
 	select {

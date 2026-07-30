@@ -547,10 +547,14 @@ func TestDeliverySessionBindingRejectsForeignSourceWithExactClaimBeforeStoreMuta
 	bus := newSourceMutationProbeBusWithStore(t, store, owned, newSourceMutationProbeOwner())
 	eventID, runID := uuid.NewString(), uuid.NewString()
 	sessionID := uuid.NewString()
-	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
+	route := events.DeliveryRoute{
+		SubscriberType: "agent",
+		SubscriberID:   "agent-a",
+		AgentIdentity:  testAgentRouteIdentity(t, "agent-a", ""),
+	}
 	store.seed(t, eventID, runID, route)
 	claim := store.claim(t, eventID, runID, route)
-	store.seedSession(t, sessionID, runID, "agent-a")
+	store.seedSession(t, sessionID, runID, route.AgentIdentity)
 
 	foreignCtx := runtimedelivery.WithClaim(context.Background(), claim)
 	foreignCtx = runtimecorrelation.WithBundleSourceFact(foreignCtx, foreign)

@@ -1,1 +1,14 @@
-{}
+account-worker:
+  id: account-worker
+  type: generic
+  role: account_worker
+  prompt_ref: account-worker
+  model: regular
+  memory: false
+  subscriptions:
+    - account.notify.requested
+  emit_events:
+    - account.notification.completed
+  mock:
+    kind: python
+    module: mocks/account-worker.py

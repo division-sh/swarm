@@ -228,7 +228,7 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 	publishedEventID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	seedEvent := seedPostgresSemanticEventRecordFixture(t, ctx, db, seedEventID, runID, "revision.delivery.seed", events.EventProducerPlatform, "revision-test", "", "", time.Now().UTC())
-	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "revision-agent"}
+	route := testAgentDeliveryRoute(t, "revision-agent", "fixture/revision-agent")
 	deliveryID := seedDeliveryStateFixture(t, ctx, postgresDeliveryFixtureStore(db), seedEvent, route, runtimedelivery.StateQueued, nil).DeliveryID
 
 	publishTx, err := db.BeginTx(ctx, nil)
@@ -436,8 +436,10 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 	store := admitTestPostgresStore(t, db)
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
 	agentID := "revision-lifecycle-agent"
+	identity := testAgentIdentity(t, agentID, runForkRevisionFlowInstance)
+	fields := testAgentIdentityStorageFields(t, identity)
 	agent := runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agentID, FlowID: runForkRevisionFlowInstance, FlowPath: runForkRevisionFlowInstance, Role: "worker", Type: "sonnet", Model: "regular",
+		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agentID, Identity: identity, FlowID: runForkRevisionFlowInstance, FlowPath: runForkRevisionFlowInstance, Role: "worker", Type: "sonnet", Model: "regular",
 			Memory: agentmemory.Authored(true),
 			Config: []byte(`{"system_prompt":"revision proof"}`),
 		},
@@ -445,7 +447,7 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 	}
 	spawned, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "spawn", RequestHash: "revision-spawn",
-		AgentID: agentID, Trigger: "spawn", TargetEpoch: 1, TargetGeneration: 1,
+		Identity: identity, AgentID: agentID, Trigger: "spawn", TargetEpoch: 1, TargetGeneration: 1,
 		TargetPhase: runtimemanager.AgentLifecycleRegistered, ConfigRevision: "revision-1",
 		RunMode: runtimemanager.AgentRunModeStopped, Agent: &agent, Now: now,
 	})
@@ -454,7 +456,7 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 	}
 	started, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "start", RequestHash: "revision-start",
-		AgentID: agentID, Trigger: "start", ExpectedEpoch: spawned.RuntimeEpoch,
+		Identity: identity, AgentID: agentID, Trigger: "start", ExpectedEpoch: spawned.RuntimeEpoch,
 		ExpectedGeneration: spawned.Generation, ExpectedPhase: spawned.Phase,
 		TargetEpoch: spawned.RuntimeEpoch, TargetGeneration: spawned.Generation + 1,
 		TargetPhase: runtimemanager.AgentLifecycleRunning, ConfigRevision: "revision-1",
@@ -476,10 +478,16 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 	seedPostgresSemanticEventRecordFixtureTx(t, ctx, tx, eventID, runID, "lifecycle.revision", events.EventProducerPlatform, "revision-test", "", "", now)
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source,
 			conversation, turn_count, runtime_state, status, created_at, updated_at
-		) VALUES ($1::uuid,$2::uuid,$3,$4,TRUE,'authored','[]'::jsonb,0,'{}'::jsonb,'active',$5,$5)
-	`, sessionID, runID, agentID, runForkRevisionFlowInstance, now); err != nil {
+		) VALUES (
+			$1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored',
+			'[]'::jsonb,0,'{}'::jsonb,'active',$10,$10
+		)
+	`, sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, now); err != nil {
 		t.Fatalf("seed lifecycle source session: %v", err)
 	}
 	if _, err := runforkrevision.CaptureCurrentTransaction(ctx, tx); err != nil {
@@ -491,7 +499,7 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 
 	if _, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "teardown", RequestHash: "revision-terminate",
-		AgentID: agentID, Trigger: "terminate", ExpectedEpoch: started.RuntimeEpoch,
+		Identity: identity, AgentID: agentID, Trigger: "terminate", ExpectedEpoch: started.RuntimeEpoch,
 		ExpectedGeneration: started.Generation, ExpectedPhase: started.Phase,
 		TargetEpoch: started.RuntimeEpoch, TargetGeneration: started.Generation + 1,
 		TargetPhase: runtimemanager.AgentLifecycleTerminated, ConfigRevision: "revision-1",
@@ -618,21 +626,9 @@ func TestScheduleNoOpTerminalMutationsDoNotPublishRunForkRevision(t *testing.T) 
 		mutate func(context.Context, *PostgresStore, runtimepipeline.Schedule) error
 	}{
 		{
-			name: "mark fired",
-			mutate: func(ctx context.Context, store *PostgresStore, schedule runtimepipeline.Schedule) error {
-				return store.MarkScheduleFired(ctx, schedule)
-			},
-		},
-		{
 			name: "mark exact fired",
 			mutate: func(ctx context.Context, store *PostgresStore, schedule runtimepipeline.Schedule) error {
 				return store.MarkScheduleFiredExact(ctx, schedule)
-			},
-		},
-		{
-			name: "cancel",
-			mutate: func(ctx context.Context, store *PostgresStore, schedule runtimepipeline.Schedule) error {
-				return store.CancelSchedule(ctx, schedule.AgentID, schedule.EventType)
 			},
 		},
 		{
@@ -645,16 +641,20 @@ func TestScheduleNoOpTerminalMutationsDoNotPublishRunForkRevision(t *testing.T) 
 
 	for index, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			agentID := fmt.Sprintf("revision-agent-%d", index)
+			flowInstance := fmt.Sprintf("revision-flow-%d/instance", index)
 			schedule := runtimepipeline.Schedule{
-				RunID:        runID,
-				AgentID:      fmt.Sprintf("revision-agent-%d", index),
-				EventType:    fmt.Sprintf("revision.timer.%d", index),
-				Mode:         "once",
-				At:           time.Now().Add(time.Hour),
-				EntityID:     uuid.NewString(),
-				FlowInstance: fmt.Sprintf("revision-flow-%d", index),
-				TaskID:       fmt.Sprintf("revision-task-%d", index),
-				Payload:      []byte(`{}`),
+				RunID:         runID,
+				AgentID:       agentID,
+				OwnerKind:     runtimepipeline.ScheduleOwnerAgent,
+				AgentIdentity: testAgentIdentity(t, agentID, flowInstance),
+				EventType:     fmt.Sprintf("revision.timer.%d", index),
+				Mode:          "once",
+				At:            time.Now().Add(time.Hour),
+				EntityID:      uuid.NewString(),
+				FlowInstance:  flowInstance,
+				TaskID:        fmt.Sprintf("revision-task-%d", index),
+				Payload:       []byte(`{}`),
 			}
 			if err := store.UpsertSchedule(ctx, schedule); err != nil {
 				t.Fatalf("upsert schedule: %v", err)
@@ -688,7 +688,7 @@ func TestRunForkRevisionDeletionPublishesTombstoneAndUnrevisionedDriftFailsClose
 	timerID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "revision.delete", events.EventProducerPlatform, "revision-test", "", "", time.Now().UTC())
-	if _, err := db.ExecContext(ctx, `INSERT INTO timers (timer_id,run_id,timer_name,fire_event,fire_at,owner_agent,task_type,status) VALUES ($1::uuid,$2::uuid,'revision-delete','timer.fire',NOW(),'agent-a','timer','active')`, timerID, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO timers (timer_id,run_id,timer_name,fire_event,fire_at,owner_agent,owner_kind,task_type,status) VALUES ($1::uuid,$2::uuid,'revision-delete','timer.fire',NOW(),'agent-a','system','timer','active')`, timerID, runID); err != nil {
 		t.Fatalf("seed timer: %v", err)
 	}
 	firstRevision := captureRunForkTestRevision(t, db, runID)

@@ -21,15 +21,17 @@ type agentListCommandOptions struct {
 }
 
 type agentViewCommandOptions struct {
-	apiOptions rootCommandOptions
-	output     cliOutputOptions
+	apiOptions   rootCommandOptions
+	output       cliOutputOptions
+	flowInstance string
 }
 
 type agentDiagnoseCommandOptions struct {
-	apiOptions  rootCommandOptions
-	output      cliOutputOptions
-	queueLimit  int
-	queueCursor string
+	apiOptions   rootCommandOptions
+	output       cliOutputOptions
+	queueLimit   int
+	queueCursor  string
+	flowInstance string
 
 	queueLimitSet  bool
 	queueCursorSet bool
@@ -42,6 +44,7 @@ type agentDeliveriesCommandOptions struct {
 	deliveryStatuses []string
 	limit            int
 	cursor           string
+	flowInstance     string
 
 	runIDSet  bool
 	limitSet  bool
@@ -226,6 +229,7 @@ func newAgentDeliveriesCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	argcount.SetDiscoveryHint(cmd, "List agent ids with `swarm agent list`.")
 	cmd.Flags().StringVar(&deliveryOpts.runID, "run-id", "", "Filter by run id")
+	cmd.Flags().StringVar(&deliveryOpts.flowInstance, "flow-instance", "", "Select the exact concrete agent flow instance")
 	cmd.Flags().StringArrayVar(&deliveryOpts.deliveryStatuses, "delivery-status", nil, "Delivery status filter; repeat to match any")
 	cmd.Flags().IntVar(&deliveryOpts.limit, "limit", 0, "Max lifecycle rows to return (1-200)")
 	cmd.Flags().StringVar(&deliveryOpts.cursor, "cursor", "", "Opaque cursor returned by the previous lifecycle result")
@@ -252,6 +256,7 @@ func newAgentDiagnoseCommand(opts rootCommandOptions) *cobra.Command {
 	argcount.SetDiscoveryHint(cmd, "List agent ids with `swarm agent list`.")
 	cmd.Flags().IntVar(&diagnoseOpts.queueLimit, "queue-limit", 0, "Max pending-delivery detail rows to return (1-200)")
 	cmd.Flags().StringVar(&diagnoseOpts.queueCursor, "queue-cursor", "", "Opaque queue cursor returned by the previous diagnosis result")
+	cmd.Flags().StringVar(&diagnoseOpts.flowInstance, "flow-instance", "", "Select the exact concrete agent flow instance")
 	bindCLIOutputFlags(cmd, &diagnoseOpts.output)
 	bindCLIAPIConnectionFlags(cmd, &diagnoseOpts.apiOptions)
 	return cmd
@@ -287,6 +292,7 @@ func newAgentViewCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	argcount.SetDiscoveryHint(cmd, "List agent ids with `swarm agent list`.")
+	cmd.Flags().StringVar(&viewOpts.flowInstance, "flow-instance", "", "Select the exact concrete agent flow instance")
 	bindCLIOutputFlags(cmd, &viewOpts.output)
 	bindCLIAPIConnectionFlags(cmd, &viewOpts.apiOptions)
 	return cmd
@@ -318,15 +324,20 @@ func runAgentViewCommand(ctx context.Context, out, errOut io.Writer, opts agentV
 	if err != nil {
 		return returnCLIAPIError(errOut, err, agentViewAPIErrorClassifier())
 	}
+	params := map[string]any{"agent_id": agentID}
+	if flowInstance := strings.Trim(strings.TrimSpace(opts.flowInstance), "/"); flowInstance != "" {
+		params["flow_instance"] = flowInstance
+	}
 	var result agentDetailResult
-	if err := client.call(ctx, "agent.get", map[string]any{"agent_id": agentID}, &result); err != nil {
+	if err := client.call(ctx, "agent.get", params, &result); err != nil {
 		agentID, err = resolveCLIIdentifierAfterNotFound(ctx, client, cliIdentifierResolveRequest{
 			Command: "swarm agent view", Selector: "arg:agent-id", Value: agentID,
 		}, err, "AGENT_NOT_FOUND")
 		if err != nil {
 			return returnCLIAPIError(errOut, err, agentViewAPIErrorClassifier())
 		}
-		if err := client.call(ctx, "agent.get", map[string]any{"agent_id": agentID}, &result); err != nil {
+		params["agent_id"] = agentID
+		if err := client.call(ctx, "agent.get", params, &result); err != nil {
 			return returnCLIAPIError(errOut, err, agentViewAPIErrorClassifier())
 		}
 	}
@@ -441,6 +452,9 @@ func (opts agentDiagnoseCommandOptions) params(agentID string) (map[string]any, 
 		return nil, fmt.Errorf("agent id is required")
 	}
 	params := map[string]any{"agent_id": agentID}
+	if flowInstance := strings.Trim(strings.TrimSpace(opts.flowInstance), "/"); flowInstance != "" {
+		params["flow_instance"] = flowInstance
+	}
 	if opts.queueLimitSet {
 		if opts.queueLimit < 1 || opts.queueLimit > 200 {
 			return nil, fmt.Errorf("--queue-limit must be between 1 and 200")
@@ -466,6 +480,9 @@ func (opts agentDeliveriesCommandOptions) params(agentID string) (map[string]any
 		return nil, err
 	}
 	params := map[string]any{"agent_id": agentID}
+	if flowInstance := strings.Trim(strings.TrimSpace(opts.flowInstance), "/"); flowInstance != "" {
+		params["flow_instance"] = flowInstance
+	}
 	if opts.runIDSet {
 		runID := strings.TrimSpace(opts.runID)
 		if runID == "" {

@@ -272,7 +272,7 @@ func TestParkedSetTransitionLinearizesExactTargetIncumbents(t *testing.T) {
 
 					schedule := Schedule{
 						RunID: uuid.NewString(), AgentID: "timer-agent", EventType: "timer." + mode,
-						Mode: mode, TaskID: "exact-target-" + name,
+						OwnerKind: ScheduleOwnerSystem, Mode: mode, TaskID: "exact-target-" + name,
 					}
 					if mode == "once" {
 						schedule.At = time.Now().Add(80 * time.Millisecond)
@@ -399,7 +399,7 @@ func TestParkedSetTransitionAdmissionFailureIsAtomicAndRetryable(t *testing.T) {
 				successor := newSchedulerTestStanding(t, runtimeOwner, fmt.Sprintf("failed-%d", i), 2)
 				schedule := Schedule{
 					RunID: uuid.NewString(), AgentID: "timer-agent", EventType: "timer.once", Mode: "once",
-					At: time.Now().Add(time.Hour), TaskID: fmt.Sprintf("service-%d", i),
+					OwnerKind: ScheduleOwnerSystem, At: time.Now().Add(time.Hour), TaskID: fmt.Sprintf("service-%d", i),
 				}
 				if err := source.Register(worklifetime.WithOccurrence(context.Background(), predecessor), schedule); err != nil {
 					t.Fatalf("register source %d: %v", i, err)
@@ -471,7 +471,7 @@ func TestParkedSetReservationRejectsConcurrentTargetMutation(t *testing.T) {
 	})
 	schedule := Schedule{
 		RunID: uuid.NewString(), AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron",
-		Cron: "@every 1ms", TaskID: "reserved-key",
+		OwnerKind: ScheduleOwnerSystem, Cron: "@every 1ms", TaskID: "reserved-key",
 	}
 	if err := source.Register(worklifetime.WithOccurrence(context.Background(), predecessor), schedule); err != nil {
 		t.Fatalf("register source: %v", err)
@@ -504,9 +504,6 @@ func TestParkedSetReservationRejectsConcurrentTargetMutation(t *testing.T) {
 	}
 	if err := target.CancelExact(schedule); err == nil {
 		t.Fatal("same-key CancelExact bypassed aggregate reservation")
-	}
-	if err := target.Cancel(schedule.AgentID, schedule.EventType); err == nil {
-		t.Fatal("matching Cancel bypassed aggregate reservation")
 	}
 	if _, err := target.ParkOccurrence(context.Background(), successor); err == nil {
 		t.Fatal("target-owner ParkOccurrence bypassed aggregate reservation")

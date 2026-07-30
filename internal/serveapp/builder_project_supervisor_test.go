@@ -792,7 +792,11 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 						t.Fatal("full-store predecessor manager/outbox consumers did not start")
 					}
 					if err := predecessor.Scheduler.Register(context.Background(), runtimepipeline.Schedule{
-						AgentID: "replacement-proof", EventType: "platform.boot", Mode: "once", At: time.Now().Add(time.Hour),
+						OwnerKind: runtimepipeline.ScheduleOwnerSystem,
+						AgentID:   "replacement-proof",
+						EventType: "platform.boot",
+						Mode:      "once",
+						At:        time.Now().Add(time.Hour),
 					}); err != nil {
 						t.Fatalf("register pending predecessor schedule: %v", err)
 					}
@@ -884,7 +888,11 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 						t.Fatalf("start rollback predecessor: %v", err)
 					}
 					if err := rollbackPredecessor.Scheduler.Register(context.Background(), runtimepipeline.Schedule{
-						AgentID: "rollback-proof", EventType: "platform.boot", Mode: "once", At: time.Now().Add(time.Hour),
+						OwnerKind: runtimepipeline.ScheduleOwnerSystem,
+						AgentID:   "rollback-proof",
+						EventType: "platform.boot",
+						Mode:      "once",
+						At:        time.Now().Add(time.Hour),
 					}); err != nil {
 						t.Fatalf("register pending rollback schedule: %v", err)
 					}
@@ -2343,11 +2351,11 @@ func TestDashboardDynamicAgentControl_DeniesWhenRuntimeShutdownAdmissionClosed(t
 	}
 	control := dashboardDynamicAgentControl{supervisor: supervisor}
 
-	if _, err := control.Restart(context.Background(), runtimeagentcontrol.RestartRequest{AgentID: agent.id}); err == nil || !strings.Contains(err.Error(), "agent not running") {
-		t.Fatalf("Restart err = %v, want agent not running", err)
+	if _, err := control.Restart(context.Background(), runtimeagentcontrol.RestartRequest{AgentID: agent.id}); err == nil || !strings.Contains(err.Error(), "runtime shutting down") {
+		t.Fatalf("Restart err = %v, want runtime shutting down", err)
 	}
-	if _, err := control.ReplayBacklog(context.Background(), runtimeagentcontrol.ReplayBacklogRequest{AgentID: agent.id}); err == nil || !strings.Contains(err.Error(), "agent not running") {
-		t.Fatalf("ReplayBacklog err = %v, want agent not running", err)
+	if _, err := control.ReplayBacklog(context.Background(), runtimeagentcontrol.ReplayBacklogRequest{AgentID: agent.id}); err == nil || !strings.Contains(err.Error(), "runtime shutting down") {
+		t.Fatalf("ReplayBacklog err = %v, want runtime shutting down", err)
 	}
 	if _, err := control.SendDirective(context.Background(), runtimeagentcontrol.SendDirectiveRequest{AgentID: agent.id, Directive: "run corpus"}); err == nil || !strings.Contains(err.Error(), "agent not running") {
 		t.Fatalf("SendDirective err = %v, want agent not running", err)

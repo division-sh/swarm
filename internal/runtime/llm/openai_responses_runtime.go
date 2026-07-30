@@ -182,7 +182,7 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 		defer func() { _ = r.sessions.Release(ctx, lease) }()
 		stopLeaseHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, func(heartbeatErr error) {
 			logPublisherRuntime(ctx, r.events, "warn", "session_lease_heartbeat_failed", "Refreshing the OpenAI Responses session lease heartbeat failed", s.AgentID, s.ID, entityID, map[string]any{
-				"run_id": resolved.Identity.RunID, "flow_instance": resolved.Identity.FlowInstance,
+				"run_id": resolved.Identity.RunID, "flow_instance": resolved.Identity.FlowInstance(),
 			}, heartbeatErr)
 		})
 		defer stopLeaseHeartbeat()
@@ -193,7 +193,7 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 		}
 	}
 	if err := requireInboundDeliveryActiveForSession(ctx, r.events, s, "error", "Marking the reused agent delivery in progress failed", map[string]any{
-		"memory_enabled": resolved.Enabled(), "run_id": resolved.Identity.RunID, "flow_instance": resolved.Identity.FlowInstance,
+		"memory_enabled": resolved.Enabled(), "run_id": resolved.Identity.RunID, "flow_instance": resolved.Identity.FlowInstance(),
 	}, entityID); err != nil {
 		return nil, fmt.Errorf("mark inbound delivery active for reused openai-responses session: %w", err)
 	}
@@ -379,7 +379,7 @@ func (r *OpenAIResponsesRuntime) persistConversation(ctx context.Context, s *Ses
 	if err := r.conversations.UpsertConversation(ctx, record); err != nil {
 		logPublisherRuntime(ctx, r.events, "error", "persist_openai_responses_conversation_failed", "Persisting the OpenAI Responses conversation failed", s.AgentID, s.ID, "", map[string]any{
 			"run_id":        record.Identity.RunID,
-			"flow_instance": record.Identity.FlowInstance,
+			"flow_instance": record.Identity.FlowInstance(),
 		}, err)
 	}
 }

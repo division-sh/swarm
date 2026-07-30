@@ -1252,7 +1252,8 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			if rt.Manager == nil {
 				return runtimeactors.AgentConfig{}, false
 			}
-			return rt.Manager.GetAgentConfig(strings.TrimSpace(agentID))
+			cfg, err := rt.Manager.ResolveAgentConfig(strings.TrimSpace(agentID), "")
+			return cfg, err == nil
 		}, rt.shutdownAdmissionClosed, rt.MCPTurns))
 	}
 
@@ -2199,6 +2200,7 @@ func bootWorkflowTimerSchedule(source semanticview.Source, timer runtimecontract
 	handle := timeridentity.WorkflowTimerHandle(timer.ID)
 	sc := runtimepipeline.Schedule{
 		AgentID:   owner,
+		OwnerKind: runtimepipeline.ScheduleOwnerSystem,
 		EventType: eventType,
 		Mode:      "once",
 		At:        now.Add(interval),

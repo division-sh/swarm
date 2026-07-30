@@ -21,6 +21,7 @@ var ErrInvalidObservabilityCursor = errors.New("store: invalid observability cur
 var ErrEntityNotFound = errors.New("store: entity not found")
 
 var ErrAgentNotFound = errors.New("store: agent not found")
+var ErrAgentTargetAmbiguous = errors.New("store: agent target is ambiguous")
 
 var ErrSessionNotFound = errors.New("store: session not found")
 

@@ -678,9 +678,15 @@ func replayClaimLockKey(eventID string) string {
 }
 
 func scheduleClaimLockKey(sc runtimepipeline.Schedule) string {
+	identityFingerprint := ""
+	if !sc.AgentIdentity.IsZero() {
+		identityFingerprint, _ = sc.AgentIdentity.Fingerprint()
+	}
 	return scheduleClaimNamespace + strings.Join([]string{
 		strings.TrimSpace(sc.EffectiveRunID()),
 		strings.TrimSpace(sc.AgentID),
+		strings.TrimSpace(string(sc.OwnerKind)),
+		identityFingerprint,
 		strings.TrimSpace(sc.EventType),
 		strings.TrimSpace(sc.EffectiveEntityID()),
 		strings.TrimSpace(sc.EffectiveFlowInstance()),

@@ -419,7 +419,7 @@ func TestSelectedContractExecutionMaterializationKeepsActiveDeliverySessionCoupl
 	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	sessionID := uuid.NewString()
 	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, eventID, sessionID, uuid.NewString(), uuid.NewString(), at)
-	activeRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
+	activeRoute := testAgentDeliveryRoute(t, "agent-a", "flow-a/1")
 	event := commitPostgresDeliveryFixture(t, ctx, db, eventID, activeRoute)
 	claimed := claimPostgresDeliveryFixture(t, ctx, db, event, activeRoute)
 	if _, err := pg.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
@@ -731,8 +731,8 @@ func TestSelectedContractExecutionMaterializationRejectsActiveTimerBeforeMutatio
 	at := time.Unix(1700002500, 0).UTC()
 	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO timers (timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload, fire_at, owner_agent, task_type, status, created_at)
-		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb, $5, 'agent-a', 'workflow_timer', 'active', $6)
+		INSERT INTO timers (timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload, fire_at, owner_agent, owner_kind, task_type, status, created_at)
+		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb, $5, 'agent-a', 'system', 'workflow_timer', 'active', $6)
 	`, sourceTimerID, sourceRunID, sourceRef.TaskID(), entityID, at.Add(time.Hour), at); err != nil {
 		t.Fatalf("seed timer: %v", err)
 	}
@@ -783,11 +783,11 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 				if _, err := db.ExecContext(testAuthorActivityContext(), `
 					INSERT INTO timers (
 						run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-						fire_at, owner_agent, task_type, status, fired_at, created_at
+						fire_at, owner_agent, owner_kind, task_type, status, fired_at, created_at
 					)
 					VALUES (
 						$1::uuid, 'selected-fired-timer', $2::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
-						$3, 'agent-a', 'timer', 'fired', $4, $5
+						$3, 'agent-a', 'system', 'timer', 'fired', $4, $5
 					)
 				`, sourceRunID, entityID, at.Add(time.Hour), at.Add(30*time.Minute), at.Add(-time.Minute)); err != nil {
 					t.Fatalf("seed fired timer: %v", err)
@@ -801,11 +801,11 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 				if _, err := db.ExecContext(testAuthorActivityContext(), `
 					INSERT INTO timers (
 						run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-						fire_at, owner_agent, task_type, status, created_at
+						fire_at, owner_agent, owner_kind, task_type, status, created_at
 					)
 					VALUES (
 						$1::uuid, 'selected-cancelled-timer', $2::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
-						$3, 'agent-a', 'timer', 'cancelled', $4
+						$3, 'agent-a', 'system', 'timer', 'cancelled', $4
 					)
 				`, sourceRunID, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
 					t.Fatalf("seed cancelled timer: %v", err)
@@ -819,11 +819,11 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 				if _, err := db.ExecContext(testAuthorActivityContext(), `
 					INSERT INTO timers (
 						run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-						fire_at, owner_node, task_type, status, created_at
+						fire_at, owner_node, owner_kind, task_type, status, created_at
 					)
 					VALUES (
 						$1::uuid, 'selected-ownerless-timer', $2::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
-						$3, 'timer-node', 'timer', 'active', $4
+						$3, 'timer-node', 'system', 'timer', 'active', $4
 					)
 				`, sourceRunID, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
 					t.Fatalf("seed ownerless timer: %v", err)
@@ -837,11 +837,11 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 				if _, err := db.ExecContext(testAuthorActivityContext(), `
 					INSERT INTO timers (
 						run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-						fire_at, owner_agent, task_type, status, created_at
+						fire_at, owner_agent, owner_kind, task_type, status, created_at
 					)
 					VALUES (
 						$1::uuid, 'selected-eventless-timer', $2::uuid, 'flow-a/1', '', '{"source":true}'::jsonb,
-						$3, 'agent-a', 'timer', 'active', $4
+						$3, 'agent-a', 'system', 'timer', 'active', $4
 					)
 				`, sourceRunID, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
 					t.Fatalf("seed eventless timer: %v", err)
@@ -898,11 +898,11 @@ func TestSelectedContractTimerBlockerRemainsFixedWhenSourceTimerIsDeletedLater(t
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
 			timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-			fire_at, owner_agent, task_type, status, created_at
+			fire_at, owner_agent, owner_kind, task_type, status, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'selected-vanishing-timer', $3::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
-			$4, 'agent-a', 'timer', 'active', $5
+			$4, 'agent-a', 'system', 'timer', 'active', $5
 		)
 	`, timerID, sourceRunID, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed timer: %v", err)
@@ -974,11 +974,11 @@ func TestPostTSourceTimerActivatesAsSelectedBranchDivergence(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
 			timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-			fire_at, owner_agent, task_type, status, created_at
+			fire_at, owner_agent, owner_kind, task_type, status, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'post-t-source-timer', $3::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
-			$4, 'agent-a', 'timer', 'active', $5
+			$4, 'agent-a', 'system', 'timer', 'active', $5
 		)
 	`, timerID, sourceRunID, entityID, at.Add(time.Hour), at.Add(time.Minute)); err != nil {
 		t.Fatalf("seed post-T timer: %v", err)
@@ -1040,21 +1040,21 @@ func TestPostTSourceSessionDoesNotChangeFixedEventMaterialization(t *testing.T) 
 	sessionID := uuid.NewString()
 	at := time.Unix(1700003605, 0).UTC()
 	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, created_at)
-		VALUES ('agent-a', 'flow-a/1', 'worker', 'regular', 'mock', TRUE, 'authored', 'active', $1)
-		ON CONFLICT (agent_id) DO NOTHING
-	`, at); err != nil {
-		t.Fatalf("seed agent: %v", err)
-	}
+	identity := testAgentIdentity(t, "agent-a", "flow-a/1")
+	fields := testAgentIdentityStorageFields(t, identity)
+	seedTestAgentRow(t, ctx, db, true, identity, "active")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source,
 			status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', 'flow-a/1', TRUE, 'authored',
-			'active', $3, $3)
-	`, sessionID, sourceRunID, at.Add(time.Minute)); err != nil {
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
+			'active', $10, $10)
+	`, sessionID, sourceRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+		at.Add(time.Minute)); err != nil {
 		t.Fatalf("seed post-T source session: %v", err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
@@ -1288,14 +1288,19 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 			name: "session",
 			code: "source_sessions_advanced_after_fork_point",
 			seed: func(ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
+				fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "agent-a", "flow-a/1"))
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_sessions (
-						session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+						session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+						agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+						memory_enabled, memory_source,
 						status, created_at, updated_at
 					)
-					VALUES ($1::uuid, $2::uuid, 'agent-a', 'flow-a/1', TRUE, 'authored',
-						'active', $3, $3)
-				`, uuid.NewString(), sourceRunID, at.Add(time.Minute))
+					VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
+						'active', $10, $10)
+				`, uuid.NewString(), sourceRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+					fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+					at.Add(time.Minute))
 				return err
 			},
 		},
@@ -1303,14 +1308,19 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 			name: "conversation audit",
 			code: "source_conversation_audits_advanced_after_fork_point",
 			seed: func(ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
+				fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "agent-a", "flow-a/1"))
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_conversation_audits (
-						session_id, run_id, agent_id, entity_id, flow_instance, memory_enabled, memory_source,
+						session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+						agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+						entity_id, memory_enabled, memory_source,
 						runtime_state, status, created_at, updated_at
 					)
-					VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', FALSE, 'authored',
-						'{}'::jsonb, 'active', $4, $4)
-				`, uuid.NewString(), sourceRunID, entityID, at.Add(time.Minute))
+					VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10::uuid, FALSE, 'authored',
+						'{}'::jsonb, 'active', $11, $11)
+				`, uuid.NewString(), sourceRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+					fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+					entityID, at.Add(time.Minute))
 				return err
 			},
 		},
@@ -1320,15 +1330,24 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 			seed: func(ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
 				turnID := uuid.NewString()
 				sessionID := uuid.NewString()
-				capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, admitTestPostgresStore(t, db), sourceRunID, "agent-a", sessionID, turnID, "task", entityID)
+				identity := testAgentIdentity(t, "agent-a", "flow-a/1")
+				fields := testAgentIdentityStorageFields(t, identity)
+				capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(
+					t, admitTestPostgresStore(t, db), sourceRunID, identity, sessionID, turnID, "task", entityID,
+				)
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_turns (
-						turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
+						turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
+						agent_route_presence, flow_scope_key, flow_instance_id,
+						session_id, flow_instance, memory_enabled, memory_source, entity_id,
 						trigger_event_id, trigger_event_type, task_id, capability_surface_id, execution_mode, created_at
 					)
-					VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', FALSE, 'authored', $4::uuid,
-						$5::uuid, 'item.received', 'task-a', $6::uuid, 'live', $7)
-				`, turnID, sourceRunID, sessionID, entityID, eventID, capabilitySurfaceID, at.Add(time.Minute))
+					VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8,
+						$9::uuid, $10, FALSE, 'authored', $11::uuid,
+						$12::uuid, 'item.received', 'task-a', $13::uuid, 'live', $14)
+				`, turnID, sourceRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+					fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, sessionID,
+					fields.FlowInstancePath, entityID, eventID, capabilitySurfaceID, at.Add(time.Minute))
 				return err
 			},
 		},
@@ -1342,13 +1361,7 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 			eventID := uuid.NewString()
 			at := time.Unix(1700003620, 0).UTC()
 			seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
-			if _, err := db.ExecContext(ctx, `
-				INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, created_at)
-				VALUES ('agent-a', 'flow-a/1', 'worker', 'regular', 'mock', TRUE, 'authored', 'active', $1)
-				ON CONFLICT (agent_id) DO NOTHING
-			`, at); err != nil {
-				t.Fatalf("seed agent: %v", err)
-			}
+			seedTestAgentRow(t, ctx, db, true, testAgentIdentity(t, "agent-a", "flow-a/1"), "active")
 
 			materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
 				SourceRunID: sourceRunID,
@@ -1519,59 +1532,89 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 	}
 	forkEventID := seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 	sessionID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, created_at)
-		VALUES ('agent-a', 'flow-a/1', 'worker', 'regular', 'mock', TRUE, 'authored', 'active', $1)
-		ON CONFLICT (agent_id) DO NOTHING
-	`, at); err != nil {
-		t.Fatalf("seed agent: %v", err)
-	}
-	forkRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
+	identity := testAgentIdentity(t, "agent-a", "flow-a/1")
+	fields := testAgentIdentityStorageFields(t, identity)
+	seedTestAgentRow(t, ctx, db, true, identity, "active")
+	forkRoute := testAgentDeliveryRoute(t, "agent-a", "flow-a/1")
 	forkEvent := commitPostgresDeliveryFixture(t, ctx, db, forkEventID, forkRoute)
 	forkClaim := claimPostgresDeliveryFixture(t, ctx, db, forkEvent, forkRoute)
 	if _, err := pg.SettleSuccess(ctx, forkClaim.Claim, nil, time.Second); err != nil {
 		t.Fatalf("settle selected agent delivery: %v", err)
 	}
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, uuid.NewString(), materialized.ForkRunID, "agent.follow_up",
-		events.EventProducerAgent, "agent-a", entityID, "flow-a/1", at.Add(4*time.Second))
+	followUp := eventtest.PersistedChildForProducer(
+		uuid.NewString(),
+		events.EventType("agent.follow_up"),
+		eventtest.Producer(events.EventProducerAgent, "agent-a"),
+		"",
+		[]byte(`{}`),
+		0,
+		materialized.ForkRunID,
+		forkEventID,
+		events.EventEnvelope{
+			EntityID:     entityID,
+			FlowInstance: "flow-a/1",
+			Scope:        events.EventScopeEntity,
+			Source:       events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/1", EntityID: entityID},
+		},
+		at.Add(4*time.Second),
+	)
+	if err := insertPostgresCanonicalEventRecordFixture(ctx, db, followUp); err != nil {
+		t.Fatalf("seed fork-local agent follow-up: %v", err)
+	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source,
 			conversation, turn_count, runtime_state, status, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'agent-a', 'flow-a/1', TRUE, 'authored',
-			'[]'::jsonb, 1, '{}'::jsonb, 'active', $3, $3
+			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
+			'[]'::jsonb, 1, '{}'::jsonb, 'active', $10, $10
 		)
-	`, sessionID, materialized.ForkRunID, at.Add(2*time.Second)); err != nil {
+	`, sessionID, materialized.ForkRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+		at.Add(2*time.Second)); err != nil {
 		t.Fatalf("seed fork session: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
-			session_id, run_id, agent_id, entity_id, flow_instance, memory_enabled, memory_source,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			entity_id, memory_enabled, memory_source,
 			conversation, turn_count, runtime_state, status, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', FALSE, 'authored',
-			'[]'::jsonb, 1, '{}'::jsonb, 'active', $4, $4
+			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10::uuid, FALSE, 'authored',
+			'[]'::jsonb, 1, '{}'::jsonb, 'active', $11, $11
 		)
-	`, uuid.NewString(), materialized.ForkRunID, entityID, at.Add(2*time.Second)); err != nil {
+	`, uuid.NewString(), materialized.ForkRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+		entityID, at.Add(2*time.Second)); err != nil {
 		t.Fatalf("seed fork conversation audit: %v", err)
 	}
 	turnID := uuid.NewString()
-	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, pg, materialized.ForkRunID, "agent-a", sessionID, turnID, "task", "agent-a:entity")
+	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(
+		t, pg, materialized.ForkRunID, identity, sessionID, turnID, "task", "agent-a:entity",
+	)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
+			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id,
+			session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, capability_surface_id, tool_calls, emitted_events,
 			parse_ok, latency_ms, retry_count, execution_mode, created_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', TRUE, 'authored', $4::uuid,
-			$5::uuid, 'item.received', $6::uuid, '[]'::jsonb, '[]'::jsonb,
-			true, 1, 0, 'live', $7
+			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8,
+			$9::uuid, $10, TRUE, 'authored', $11::uuid,
+			$12::uuid, 'item.received', $13::uuid, '[]'::jsonb, '[]'::jsonb,
+			true, 1, 0, 'live', $14
 		)
-	`, turnID, materialized.ForkRunID, sessionID, entityID, forkEventID, capabilitySurfaceID, at.Add(3*time.Second)); err != nil {
+	`, turnID, materialized.ForkRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, sessionID,
+		fields.FlowInstancePath, entityID, forkEventID, capabilitySurfaceID,
+		at.Add(3*time.Second)); err != nil {
 		t.Fatalf("seed fork turn: %v", err)
 	}
 
@@ -2002,42 +2045,53 @@ func seedSelectedContractExecutionStoreSourceRaw(t *testing.T, db *sql.DB, sourc
 func seedSelectedContractSourceConversationHistory(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID, sessionID, auditID, turnID string, at time.Time) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, created_at)
-		VALUES ('agent-a', 'flow-a/1', 'worker', 'regular', 'mock', TRUE, 'authored', 'active', $1)
-		ON CONFLICT (agent_id) DO NOTHING
-	`, at); err != nil {
-		t.Fatalf("seed conversation agent: %v", err)
-	}
+	identity := testAgentIdentity(t, "agent-a", "flow-a/1")
+	fields := testAgentIdentityStorageFields(t, identity)
+	seedTestAgentRow(t, ctx, db, true, identity, "active")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source,
 			status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', 'flow-a/1', TRUE, 'authored',
-			'active', $3, $3)
-	`, sessionID, sourceRunID, at); err != nil {
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
+			'active', $10, $10)
+	`, sessionID, sourceRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, at); err != nil {
 		t.Fatalf("seed source session: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
-			session_id, run_id, agent_id, entity_id, flow_instance, memory_enabled, memory_source,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			entity_id, memory_enabled, memory_source,
 			runtime_state, status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', FALSE, 'authored',
-			'{}'::jsonb, 'active', $4, $4)
-	`, auditID, sourceRunID, entityID, at); err != nil {
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10::uuid, FALSE, 'authored',
+			'{}'::jsonb, 'active', $11, $11)
+	`, auditID, sourceRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+		entityID, at); err != nil {
 		t.Fatalf("seed source conversation audit: %v", err)
 	}
-	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, admitTestPostgresStore(t, db), sourceRunID, "agent-a", sessionID, turnID, "session_per_entity", entityID)
+	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(
+		t, admitTestPostgresStore(t, db), sourceRunID, identity,
+		sessionID, turnID, "session_per_entity", entityID,
+	)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
+			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id,
+			session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, capability_surface_id, execution_mode, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', TRUE, 'authored', $4::uuid,
-			$5::uuid, 'item.received', 'task-a', $6::uuid, 'live', $7)
-	`, turnID, sourceRunID, sessionID, entityID, eventID, capabilitySurfaceID, at); err != nil {
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8,
+			$9::uuid, $10, TRUE, 'authored', $11::uuid,
+			$12::uuid, 'item.received', 'task-a', $13::uuid, 'live', $14)
+	`, turnID, sourceRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, sessionID,
+		fields.FlowInstancePath, entityID, eventID, capabilitySurfaceID, at); err != nil {
 		t.Fatalf("seed source turn: %v", err)
 	}
 }
@@ -2065,24 +2119,24 @@ func seedSelectedContractPostForkSourceEvent(t *testing.T, db *sql.DB, sourceRun
 func seedPostTActiveConversationCoupling(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID, sessionID string, at time.Time) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, created_at)
-		VALUES ('active-agent', 'flow-a/1', 'worker', 'regular', 'mock', TRUE, 'authored', 'active', $1)
-		ON CONFLICT (agent_id) DO NOTHING
-	`, at); err != nil {
-		t.Fatalf("seed active coupling agent: %v", err)
-	}
+	identity := testAgentIdentity(t, "active-agent", "flow-a/1")
+	fields := testAgentIdentityStorageFields(t, identity)
+	seedTestAgentRow(t, ctx, db, true, identity, "active")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source,
 			status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'active-agent', 'flow-a/1', TRUE, 'authored',
-			'active', $3, $3)
-	`, sessionID, sourceRunID, at.Add(time.Minute)); err != nil {
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
+			'active', $10, $10)
+	`, sessionID, sourceRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+		at.Add(time.Minute)); err != nil {
 		t.Fatalf("seed post-T active source session: %v", err)
 	}
-	activeRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "active-agent"}
+	activeRoute := testAgentDeliveryRoute(t, "active-agent", "flow-a/1")
 	event := commitPostgresDeliveryFixture(t, ctx, db, eventID, activeRoute)
 	claimed := claimPostgresDeliveryFixture(t, ctx, db, event, activeRoute)
 	if _, err := postgresDeliveryFixtureStore(db).BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {

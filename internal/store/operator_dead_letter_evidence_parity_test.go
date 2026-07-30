@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -20,7 +21,7 @@ import (
 type operatorDeadLetterEvidenceStore interface {
 	authorActivityReceiptStore
 	UpsertAgent(context.Context, runtimemanager.PersistedAgent) error
-	LoadOperatorAgentDeliveryDiagnostics(context.Context, string, OperatorAgentDeliveryDiagnosticsOptions) (OperatorAgentDeliveryDiagnostics, error)
+	LoadOperatorAgentDeliveryDiagnostics(context.Context, agentidentity.Identity, OperatorAgentDeliveryDiagnosticsOptions) (OperatorAgentDeliveryDiagnostics, error)
 	LoadOperatorEvent(context.Context, string) (OperatorEventFull, error)
 	LoadRunDebugReport(context.Context, string, RunDebugQueryOptions) (RunDebugReport, error)
 	runtimerunlifecycle.OperationOwner
@@ -37,10 +38,11 @@ func TestOperatorDeadLetterEvidenceIsScopedToExactDeliveryParity(t *testing.T) {
 			runID := uuid.NewString()
 			eventID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			identity := testAgentIdentity(t, "agent-a", "global")
 			if err := selected.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 				Config: runtimeactors.AgentConfig{
-					ID: "agent-a", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
-					Memory: agentmemory.PlatformDefault(), Config: json.RawMessage(`{"system_prompt":"delivery evidence"}`),
+					Identity: identity, ID: "agent-a", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
+					Memory: agentmemory.PlatformDefault(), FlowPath: "global", Config: json.RawMessage(`{"system_prompt":"delivery evidence"}`),
 				},
 				Status: "active", StartedAt: now,
 			}); err != nil {
@@ -53,10 +55,12 @@ func TestOperatorDeadLetterEvidenceIsScopedToExactDeliveryParity(t *testing.T) {
 			routes := []events.DeliveryRoute{
 				{
 					SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "agent-a",
+					AgentIdentity: identity,
 					Target: events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/one", EntityID: uuid.NewString()},
 				},
 				{
 					SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "agent-a",
+					AgentIdentity: identity,
 					Target: events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/two", EntityID: uuid.NewString()},
 				},
 			}
@@ -82,7 +86,7 @@ func TestOperatorDeadLetterEvidenceIsScopedToExactDeliveryParity(t *testing.T) {
 				snapshots[snapshot.DeliveryID] = snapshot
 			}
 
-			diagnostics, err := selected.LoadOperatorAgentDeliveryDiagnostics(ctx, "agent-a", OperatorAgentDeliveryDiagnosticsOptions{})
+			diagnostics, err := selected.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, OperatorAgentDeliveryDiagnosticsOptions{})
 			if err != nil {
 				t.Fatalf("load agent diagnostics: %v", err)
 			}
@@ -128,10 +132,11 @@ func TestOperatorRunTerminalizationPreservesExactDeadLetterEvidenceParity(t *tes
 			runID := uuid.NewString()
 			eventID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			identity := testAgentIdentity(t, "terminal-agent", "global")
 			if err := selected.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 				Config: runtimeactors.AgentConfig{
-					ID: "terminal-agent", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
-					Memory: agentmemory.PlatformDefault(), Config: json.RawMessage(`{"system_prompt":"terminal evidence"}`),
+					Identity: identity, ID: "terminal-agent", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
+					Memory: agentmemory.PlatformDefault(), FlowPath: "global", Config: json.RawMessage(`{"system_prompt":"terminal evidence"}`),
 				},
 				Status: "active", StartedAt: now,
 			}); err != nil {
@@ -141,7 +146,11 @@ func TestOperatorRunTerminalizationPreservesExactDeadLetterEvidenceParity(t *tes
 				eventID, events.EventType("delivery.terminalized"), "gateway", "", json.RawMessage(`{"message":"stop"}`), 0,
 				runID, "", events.EventEnvelope{}, now,
 			)
-			route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "terminal-agent"}
+			route := events.DeliveryRoute{
+				SubscriberType: string(runtimedelivery.SubscriberAgent),
+				SubscriberID:   "terminal-agent",
+				AgentIdentity:  identity,
+			}
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
 				t.Fatalf("commit terminalized event: %v", err)
 			}
@@ -187,7 +196,7 @@ func TestOperatorRunTerminalizationPreservesExactDeadLetterEvidenceParity(t *tes
 				t.Fatalf("terminalized delivery = %#v", snapshot)
 			}
 
-			diagnostics, err := selected.LoadOperatorAgentDeliveryDiagnostics(ctx, "terminal-agent", OperatorAgentDeliveryDiagnosticsOptions{})
+			diagnostics, err := selected.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, OperatorAgentDeliveryDiagnosticsOptions{})
 			if err != nil {
 				t.Fatalf("load terminalized agent diagnostics: %v", err)
 			}

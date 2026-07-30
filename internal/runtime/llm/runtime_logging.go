@@ -69,10 +69,10 @@ func logSessionRuntime(ctx context.Context, sink any, action, message, agentID, 
 
 func LogSessionRotatedForRun(ctx context.Context, sink any, identity agentmemory.Identity, oldSessionID, newSessionID, reason string, turnCount, parseFailures int) {
 	identity = identity.Normalize()
-	logSessionRuntime(ctx, sink, "session_rotated", "LLM session was rotated", identity.AgentID, newSessionID, map[string]any{
+	logSessionRuntime(ctx, sink, "session_rotated", "LLM session was rotated", identity.AgentID(), newSessionID, map[string]any{
 		"memory_enabled": true,
 		"run_id":         identity.RunID,
-		"flow_instance":  identity.FlowInstance,
+		"flow_instance":  identity.FlowInstance(),
 		"old_session_id": strings.TrimSpace(oldSessionID),
 		"new_session_id": strings.TrimSpace(newSessionID),
 		"reason":         strings.TrimSpace(reason),
@@ -83,10 +83,10 @@ func LogSessionRotatedForRun(ctx context.Context, sink any, identity agentmemory
 
 func LogSessionAdoptedForRun(ctx context.Context, sink any, identity agentmemory.Identity, oldSessionID, newSessionID string) {
 	identity = identity.Normalize()
-	logSessionRuntime(ctx, sink, "session_adopted", "LLM session was adopted", identity.AgentID, newSessionID, map[string]any{
+	logSessionRuntime(ctx, sink, "session_adopted", "LLM session was adopted", identity.AgentID(), newSessionID, map[string]any{
 		"memory_enabled": true,
 		"run_id":         identity.RunID,
-		"flow_instance":  identity.FlowInstance,
+		"flow_instance":  identity.FlowInstance(),
 		"old_session_id": strings.TrimSpace(oldSessionID),
 		"new_session_id": strings.TrimSpace(newSessionID),
 	})

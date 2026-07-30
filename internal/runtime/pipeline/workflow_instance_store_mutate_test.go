@@ -220,12 +220,12 @@ func TestWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRows(t *testing.T
 		INSERT INTO timers (
 			timer_name, entity_id, flow_instance, fire_event, fire_payload,
 			fire_at, recurring, recurrence_cron, recurrence_interval,
-			owner_node, owner_agent, task_type, status
+			owner_node, owner_agent, owner_kind, task_type, status
 		)
 		VALUES (
 			$1, $2::uuid, $3, $4, '{}'::jsonb,
 			$5, false, NULL, NULL,
-			NULL, $6, 'timer', 'active'
+			NULL, $6, 'system', 'timer', 'active'
 		)
 	`, "task_timer", entityID, storageRef, "timer.task_timeout", now.Add(2*time.Hour), runtimeWorkflowID); err != nil {
 		t.Fatalf("insert scheduler-owned timer row: %v", err)

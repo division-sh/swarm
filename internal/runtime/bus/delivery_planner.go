@@ -3,9 +3,12 @@ package bus
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -20,9 +23,26 @@ type deliveryRoutingResult struct {
 
 type deliveryRecipientCandidate struct {
 	ID                string
+	AgentIdentity     agentidentity.Identity
 	PersistAsDelivery bool
 	LiveAuthority     liveRecipientAuthority
 	AgentRoute        *agentRouteHandle
+}
+
+type exactDirectRecipientsUnavailableError struct {
+	identities []agentidentity.Identity
+}
+
+func (e *exactDirectRecipientsUnavailableError) Error() string {
+	descriptions := make([]string, 0, len(e.identities))
+	for _, identity := range e.identities {
+		descriptions = append(descriptions, identity.Description())
+	}
+	return fmt.Sprintf("%s: %s", ErrExactDirectRecipientUnavailable, strings.Join(descriptions, ", "))
+}
+
+func (e *exactDirectRecipientsUnavailableError) Unwrap() error {
+	return ErrExactDirectRecipientUnavailable
 }
 
 type deliveryRouteResolver struct {
@@ -34,7 +54,11 @@ type deliveryRouteResolver struct {
 
 func (r deliveryRouteResolver) Resolve(evt events.Event) deliveryRoutingResult {
 	routedRecipients := r.resolveRoutedSubscribers(evt)
-	subscribedRecipients := r.resolveSubscribedRecipients(string(evt.Type()))
+	subscribedRecipients := make([]deliveryRecipientCandidate, 0, 8)
+	for _, eventKey := range routedEventKeysForPlan(evt) {
+		subscribedRecipients = append(subscribedRecipients, r.resolveSubscribedRecipients(eventKey)...)
+	}
+	subscribedRecipients = normalizeDeliveryRecipientCandidates(subscribedRecipients)
 	routedCandidates := routedSubscriberCandidates(routedRecipients)
 	if r.resolveRoutedNodeInternalRecipients != nil {
 		routedCandidates = append(routedCandidates, r.resolveRoutedNodeInternalRecipients(evt, routedRecipients)...)
@@ -68,7 +92,7 @@ type deliveryRecipientManifest struct {
 }
 
 type deliveryRecipientPolicy struct {
-	loadActiveAgentDescriptors  func(context.Context) (map[string]ActiveAgentDescriptor, bool, error)
+	loadActiveAgentDescriptors  func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error)
 	loadActiveTargetDescriptors func(context.Context) ([]ActiveTargetDescriptor, bool, error)
 }
 
@@ -90,12 +114,15 @@ func (p deliveryRecipientPolicy) Evaluate(ctx context.Context, evt events.Event,
 		}
 	}
 	if !ok {
+		liveRecipients := normalizeDeliveryRecipientCandidates(recipients)
+		persistedRecipients := persistedDeliveryRecipientCandidates(liveRecipients)
+		targets := deliveryTargetsForManifest(evt, deliveryRecipientIDs(persistedRecipients), nil)
 		manifest := deliveryRecipientManifest{
-			LiveRecipients:      normalizeDeliveryRecipientCandidates(recipients),
+			LiveRecipients:      liveRecipients,
 			Recipients:          deliveryRecipientIDs(recipients),
-			PersistedRecipients: persistedDeliveryRecipientIDs(recipients),
-			DeliveryTargets:     deliveryTargetsForManifest(evt, persistedDeliveryRecipientIDs(recipients), nil),
-			DeliveryRoutes:      agentDeliveryRoutesForRecipients(persistedDeliveryRecipientIDs(recipients), deliveryTargetsForManifest(evt, persistedDeliveryRecipientIDs(recipients), nil)),
+			PersistedRecipients: deliveryRecipientIDs(persistedRecipients),
+			DeliveryTargets:     targets,
+			DeliveryRoutes:      agentDeliveryRoutesForCandidates(persistedRecipients, targets),
 		}
 		if targetDescriptorsOK && len(eventDeliveryTargetRoutes(evt)) > 0 && len(manifest.Recipients) == 0 {
 			manifest.TargetFailure = targetDeliveryFailure(evt, targetDescriptors)
@@ -182,6 +209,9 @@ func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recip
 	if len(requested) == 0 {
 		return RoutePlan{}, errors.New("direct delivery recipients are required")
 	}
+	if err := p.rejectAmbiguousDirectRecipients(ctx, requested); err != nil {
+		return RoutePlan{}, err
+	}
 	manifest, err := p.recipientPolicy.Evaluate(ctx, evt, agentDeliveryRecipientCandidates(requested))
 	if err != nil {
 		return RoutePlan{}, err
@@ -197,6 +227,93 @@ func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recip
 		routePlan.ExtraDetail["filtered_out_recipients_count"] = len(filtered)
 	}
 	return routePlan.Normalized(), nil
+}
+
+func (p deliveryPlanner) PlanExactDirect(ctx context.Context, evt events.Event, routes []events.DeliveryRoute) (RoutePlan, error) {
+	routePlan := newRoutePlan(evt)
+	if evt.Type() == events.EventType("platform.runtime_log") {
+		return routePlan, nil
+	}
+	routes = events.NormalizeDeliveryRoutes(routes)
+	if err := events.ValidateDeliveryRoutes(routes); err != nil {
+		return RoutePlan{}, err
+	}
+	candidates := make([]deliveryRecipientCandidate, 0, len(routes))
+	for _, route := range routes {
+		if route.SubscriberType != routePlanSubscriberAgent {
+			return RoutePlan{}, fmt.Errorf("exact direct delivery route must identify an agent subscriber")
+		}
+		candidates = append(candidates, deliveryRecipientCandidate{
+			ID:                route.SubscriberID,
+			AgentIdentity:     route.AgentIdentity,
+			PersistAsDelivery: true,
+		})
+	}
+	if len(candidates) == 0 {
+		return RoutePlan{}, errors.New("exact direct delivery routes are required")
+	}
+	manifest, err := p.recipientPolicy.Evaluate(ctx, evt, candidates)
+	if err != nil {
+		return RoutePlan{}, err
+	}
+	available := make(map[agentidentity.Identity]struct{}, len(manifest.LiveRecipients))
+	for _, recipient := range manifest.LiveRecipients {
+		if !recipient.AgentIdentity.IsZero() {
+			available[recipient.AgentIdentity.Normalize()] = struct{}{}
+		}
+	}
+	missing := make([]agentidentity.Identity, 0)
+	for _, route := range routes {
+		identity := route.AgentIdentity.Normalize()
+		if _, ok := available[identity]; !ok {
+			missing = append(missing, identity)
+		}
+	}
+	if len(missing) > 0 {
+		return RoutePlan{}, &exactDirectRecipientsUnavailableError{identities: missing}
+	}
+	routePlan = routePlanFromManifest(evt, manifest, routeIntentProducerDirectPolicy)
+	routePlan.DeliveryIntents = routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerDirectPolicy)
+	routePlan.ExtraDetail = map[string]any{
+		"direct":                true,
+		"exact_routes":          true,
+		"requested_route_count": len(routes),
+	}
+	return routePlan.Normalized(), nil
+}
+
+func (p deliveryPlanner) rejectAmbiguousDirectRecipients(ctx context.Context, recipients []string) error {
+	if p.recipientPolicy.loadActiveAgentDescriptors == nil {
+		return nil
+	}
+	descriptors, ok, err := p.recipientPolicy.loadActiveAgentDescriptors(ctx)
+	if err != nil || !ok {
+		return err
+	}
+	for _, recipient := range recipients {
+		matches := make([]agentidentity.Identity, 0, 2)
+		for identity := range descriptors {
+			if identity.MatchesAgentID(recipient) {
+				matches = append(matches, identity.Normalize())
+			}
+		}
+		if len(matches) <= 1 {
+			continue
+		}
+		sort.Slice(matches, func(left, right int) bool {
+			return agentidentity.Less(matches[left], matches[right])
+		})
+		candidates := make([]string, 0, len(matches))
+		for _, identity := range matches {
+			candidates = append(candidates, identity.Description())
+		}
+		return fmt.Errorf(
+			"direct recipient agent_id %q is ambiguous; provide an exact agent route; candidates: %s",
+			recipient,
+			strings.Join(candidates, ", "),
+		)
+	}
+	return nil
 }
 
 func filteredRecipients(requested, allowed []string) []string {
@@ -246,18 +363,32 @@ func normalizeDeliveryRecipientCandidates(in []deliveryRecipientCandidate) []del
 		return nil
 	}
 	out := make([]deliveryRecipientCandidate, 0, len(in))
-	indexByID := make(map[string]int, len(in))
+	type candidateKey struct {
+		identity agentidentity.Identity
+		id       string
+	}
+	indexByKey := make(map[candidateKey]int, len(in))
 	for _, candidate := range in {
 		candidate.ID = strings.TrimSpace(candidate.ID)
 		if candidate.ID == "" {
 			continue
 		}
-		if idx, ok := indexByID[candidate.ID]; ok {
+		candidate.AgentIdentity = candidate.AgentIdentity.Normalize()
+		if !candidate.AgentIdentity.IsZero() {
+			if err := candidate.AgentIdentity.Validate(); err != nil || candidate.AgentIdentity.AgentID() != candidate.ID {
+				continue
+			}
+		}
+		key := candidateKey{id: candidate.ID}
+		if !candidate.AgentIdentity.IsZero() {
+			key = candidateKey{identity: candidate.AgentIdentity}
+		}
+		if idx, ok := indexByKey[key]; ok {
 			out[idx].PersistAsDelivery = out[idx].PersistAsDelivery || candidate.PersistAsDelivery
 			out[idx] = mergeDeliveryRecipientAuthority(out[idx], candidate)
 			continue
 		}
-		indexByID[candidate.ID] = len(out)
+		indexByKey[key] = len(out)
 		out = append(out, candidate)
 	}
 	return out
@@ -291,6 +422,7 @@ func routedSubscriberCandidates(in []Subscriber) []deliveryRecipientCandidate {
 		}
 		out = append(out, deliveryRecipientCandidate{
 			ID:                id,
+			AgentIdentity:     subscriber.AgentIdentity,
 			PersistAsDelivery: true,
 		})
 	}
@@ -418,7 +550,25 @@ func persistedDeliveryRecipientIDs(in []deliveryRecipientCandidate) []string {
 	return uniqueStrings(out)
 }
 
-func filterDeliveryRecipientCandidates(evt events.Event, recipients []deliveryRecipientCandidate, descriptors map[string]ActiveAgentDescriptor, targetDescriptors []ActiveTargetDescriptor) deliveryRecipientManifest {
+func persistedDeliveryRecipientCandidates(in []deliveryRecipientCandidate) []deliveryRecipientCandidate {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]deliveryRecipientCandidate, 0, len(in))
+	for _, candidate := range normalizeDeliveryRecipientCandidates(in) {
+		if candidate.PersistAsDelivery {
+			out = append(out, candidate)
+		}
+	}
+	return out
+}
+
+func filterDeliveryRecipientCandidates(
+	evt events.Event,
+	recipients []deliveryRecipientCandidate,
+	descriptors map[agentidentity.Identity]ActiveAgentDescriptor,
+	targetDescriptors []ActiveTargetDescriptor,
+) deliveryRecipientManifest {
 	recipients = normalizeDeliveryRecipientCandidates(recipients)
 	eventEntityID := strings.TrimSpace(evt.EntityID())
 	targets := eventDeliveryTargetRoutes(evt)
@@ -439,32 +589,33 @@ func filterDeliveryRecipientCandidates(evt events.Event, recipients []deliveryRe
 			allowedCandidates = append(allowedCandidates, recipient)
 			continue
 		}
-		descriptor, ok := descriptors[recipient.ID]
-		if !ok {
-			continue
-		}
-		if descriptor.EntityID != "" {
-			if eventEntityID == "" || descriptor.EntityID != eventEntityID {
-				if len(targets) == 0 {
-					continue
+		for _, descriptor := range matchingAgentDescriptors(recipient, descriptors) {
+			if descriptor.EntityID != "" {
+				if eventEntityID == "" || descriptor.EntityID != eventEntityID {
+					if len(targets) == 0 {
+						continue
+					}
 				}
 			}
+			target, targetOK := deliveryTargetForDescriptor(descriptor, singularTarget, targets)
+			if len(targets) > 0 && !targetOK {
+				continue
+			}
+			scoped := recipient
+			scoped.AgentIdentity = descriptor.Identity
+			allowed = append(allowed, scoped.ID)
+			allowedCandidates = append(allowedCandidates, scoped)
+			persisted = append(persisted, scoped.ID)
+			if !target.Empty() {
+				deliveryTargets[scoped.ID] = target
+			}
+			deliveryRoutes = append(deliveryRoutes, events.DeliveryRoute{
+				SubscriberType: "agent",
+				SubscriberID:   scoped.ID,
+				AgentIdentity:  scoped.AgentIdentity,
+				Target:         target,
+			})
 		}
-		target, targetOK := deliveryTargetForDescriptor(descriptor, singularTarget, targets)
-		if len(targets) > 0 && !targetOK {
-			continue
-		}
-		allowed = append(allowed, recipient.ID)
-		allowedCandidates = append(allowedCandidates, recipient)
-		persisted = append(persisted, recipient.ID)
-		if !target.Empty() {
-			deliveryTargets[recipient.ID] = target
-		}
-		deliveryRoutes = append(deliveryRoutes, events.DeliveryRoute{
-			SubscriberType: "agent",
-			SubscriberID:   recipient.ID,
-			Target:         target,
-		})
 	}
 	persisted = uniqueStrings(persisted)
 	manifest := deliveryRecipientManifest{
@@ -474,23 +625,55 @@ func filterDeliveryRecipientCandidates(evt events.Event, recipients []deliveryRe
 		DeliveryTargets:     deliveryTargetsForManifest(evt, persisted, deliveryTargets),
 		DeliveryRoutes:      events.NormalizeDeliveryRoutes(deliveryRoutes),
 	}
-	if len(targets) > 0 && len(manifest.Recipients) == 0 {
+	if len(targets) > 0 && len(manifest.LiveRecipients) == 0 {
 		manifest.TargetFailure = targetDeliveryFailure(evt, targetDescriptors)
 	}
 	return manifest
 }
 
-func agentDeliveryRoutesForRecipients(recipients []string, deliveryTargets map[string]events.RouteIdentity) []events.DeliveryRoute {
-	recipients = uniqueStrings(recipients)
+func matchingAgentDescriptors(
+	recipient deliveryRecipientCandidate,
+	descriptors map[agentidentity.Identity]ActiveAgentDescriptor,
+) []ActiveAgentDescriptor {
+	if !recipient.AgentIdentity.IsZero() {
+		descriptor, ok := descriptors[recipient.AgentIdentity.Normalize()]
+		if !ok {
+			return nil
+		}
+		return []ActiveAgentDescriptor{descriptor.Normalized()}
+	}
+	out := make([]ActiveAgentDescriptor, 0, 1)
+	for identity, descriptor := range descriptors {
+		descriptor = descriptor.Normalized()
+		if identity.AgentID() != recipient.ID || descriptor.Identity != identity {
+			continue
+		}
+		out = append(out, descriptor)
+	}
+	sort.Slice(out, func(left, right int) bool {
+		return agentidentity.Less(out[left].Identity, out[right].Identity)
+	})
+	return out
+}
+
+func agentDeliveryRoutesForCandidates(
+	recipients []deliveryRecipientCandidate,
+	deliveryTargets map[string]events.RouteIdentity,
+) []events.DeliveryRoute {
+	recipients = persistedDeliveryRecipientCandidates(recipients)
 	if len(recipients) == 0 {
 		return nil
 	}
 	out := make([]events.DeliveryRoute, 0, len(recipients))
 	for _, recipient := range recipients {
+		if err := recipient.AgentIdentity.Validate(); err != nil {
+			continue
+		}
 		out = append(out, events.DeliveryRoute{
 			SubscriberType: "agent",
-			SubscriberID:   recipient,
-			Target:         deliveryTargets[strings.TrimSpace(recipient)],
+			SubscriberID:   recipient.ID,
+			AgentIdentity:  recipient.AgentIdentity,
+			Target:         deliveryTargets[strings.TrimSpace(recipient.ID)],
 		})
 	}
 	return events.NormalizeDeliveryRoutes(out)

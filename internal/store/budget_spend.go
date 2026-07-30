@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -25,6 +26,10 @@ func (s *PostgresStore) RecordSpend(ctx context.Context, rec budgetspend.SpendRe
 		return fmt.Errorf("record postgres spend: execution_mode must be live or mock")
 	}
 	if err := validateBudgetSpendEntity(rec.EntityID); err != nil {
+		return err
+	}
+	identityFields, err := budgetSpendAgentIdentityFields(rec)
+	if err != nil {
 		return err
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -50,12 +55,19 @@ func (s *PostgresStore) RecordSpend(ctx context.Context, rec budgetspend.SpendRe
 	}
 	_, err = tx.ExecContext(ctx, `
 			INSERT INTO spend_ledger (
-				execution_mode, entity_id, flow_instance, agent_id, model, model_alias, backend_profile, provider, transport, resolved_model,
+				execution_mode, entity_id, flow_instance, agent_id, agent_name_owner, agent_name_source,
+				agent_route_presence, agent_flow_scope_key, agent_flow_instance_id,
+				model, model_alias, backend_profile, provider, transport, resolved_model,
 				input_tokens, output_tokens, cost_usd, invocation_type, usage_accounting, created_at
 			) VALUES (
-				$1, NULLIF($2,'')::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+				$1, NULLIF($2,'')::uuid, $3, $4, $5, $6, $7, $8, $9,
+				$10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
 			)
-		`, rec.ExecutionMode, rec.EntityID, rec.FlowInstance, rec.AgentID, rec.Model, rec.ModelAlias, rec.BackendProfile, rec.Provider, rec.Transport, rec.ResolvedModel, rec.InputTokens, rec.OutputTokens, rec.CostUSD, rec.InvocationType, rec.UsageAccounting, rec.RecordedAt)
+		`, rec.ExecutionMode, rec.EntityID, identityFields.FlowInstancePath, identityFields.AgentID,
+		identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence,
+		identityFields.FlowScopeKey, identityFields.FlowInstanceID,
+		rec.Model, rec.ModelAlias, rec.BackendProfile, rec.Provider, rec.Transport, rec.ResolvedModel,
+		rec.InputTokens, rec.OutputTokens, rec.CostUSD, rec.InvocationType, rec.UsageAccounting, rec.RecordedAt)
 	if err != nil {
 		return fmt.Errorf("record postgres spend: %w", err)
 	}
@@ -155,6 +167,10 @@ func (s *SQLiteRuntimeStore) RecordSpend(ctx context.Context, rec budgetspend.Sp
 	if err := validateBudgetSpendEntity(rec.EntityID); err != nil {
 		return err
 	}
+	identityFields, err := budgetSpendAgentIdentityFields(rec)
+	if err != nil {
+		return err
+	}
 	if err := s.runRuntimeMutation(ctx, "sqlite budget spend record", func(txctx context.Context, tx *sql.Tx) error {
 		if rec.EntityID != "" {
 			runID, err := runtimecurrentstate.RequireRunID(txctx)
@@ -174,10 +190,16 @@ func (s *SQLiteRuntimeStore) RecordSpend(ctx context.Context, rec budgetspend.Sp
 		}
 		_, err := tx.ExecContext(txctx, `
 			INSERT INTO spend_ledger (
-				execution_mode, entity_id, flow_instance, agent_id, model, model_alias, backend_profile, provider, transport, resolved_model,
+				execution_mode, entity_id, flow_instance, agent_id, agent_name_owner, agent_name_source,
+				agent_route_presence, agent_flow_scope_key, agent_flow_instance_id,
+				model, model_alias, backend_profile, provider, transport, resolved_model,
 				input_tokens, output_tokens, cost_usd, invocation_type, usage_accounting, created_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, rec.ExecutionMode, sqliteNullUUID(rec.EntityID), rec.FlowInstance, rec.AgentID, rec.Model, rec.ModelAlias, rec.BackendProfile, rec.Provider, rec.Transport, rec.ResolvedModel, rec.InputTokens, rec.OutputTokens, rec.CostUSD, rec.InvocationType, rec.UsageAccounting, rec.RecordedAt.UTC())
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, rec.ExecutionMode, sqliteNullUUID(rec.EntityID), identityFields.FlowInstancePath, identityFields.AgentID,
+			identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence,
+			identityFields.FlowScopeKey, identityFields.FlowInstanceID,
+			rec.Model, rec.ModelAlias, rec.BackendProfile, rec.Provider, rec.Transport, rec.ResolvedModel,
+			rec.InputTokens, rec.OutputTokens, rec.CostUSD, rec.InvocationType, rec.UsageAccounting, rec.RecordedAt.UTC())
 		return err
 	}); err != nil {
 		return fmt.Errorf("record sqlite spend: %w", err)
@@ -281,6 +303,7 @@ func normalizeBudgetSpendRecord(rec budgetspend.SpendRecord) budgetspend.SpendRe
 	rec.NormalizeEntityID()
 	rec.FlowInstance = strings.TrimSpace(rec.FlowInstance)
 	rec.AgentID = strings.TrimSpace(rec.AgentID)
+	rec.AgentIdentity = rec.AgentIdentity.Normalize()
 	rec.Model = strings.TrimSpace(rec.Model)
 	rec.ModelAlias = strings.TrimSpace(rec.ModelAlias)
 	rec.BackendProfile = strings.TrimSpace(rec.BackendProfile)
@@ -310,6 +333,17 @@ func normalizeBudgetSpendRecord(rec budgetspend.SpendRecord) budgetspend.SpendRe
 		rec.RecordedAt = rec.RecordedAt.UTC()
 	}
 	return rec
+}
+
+func budgetSpendAgentIdentityFields(rec budgetspend.SpendRecord) (fields runtimeagentidentity.StorageFields, err error) {
+	fields, err = rec.AgentIdentity.StorageFields()
+	if err != nil {
+		return fields, fmt.Errorf("budget spend concrete agent identity: %w", err)
+	}
+	if fields.AgentID != rec.AgentID || fields.FlowInstancePath != rec.FlowInstance {
+		return fields, fmt.Errorf("budget spend display fields do not match concrete agent identity")
+	}
+	return fields, nil
 }
 
 func normalizeBudgetSpendQuery(query budgetspend.SpendQuery) budgetspend.SpendQuery {

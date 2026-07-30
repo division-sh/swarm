@@ -29,12 +29,12 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 
 	ctx := testAuthorActivityContextForBundle(testCanonicalBundleHash)
 	now := time.Now().UTC().Add(time.Minute)
-	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source)
-		VALUES ('agent-a', 'preservation', 'operator', 'regular', TRUE, 'authored')
-	`); err != nil {
-		t.Fatalf("seed agent: %v", err)
+	agentIdentity := testAgentIdentity(t, "agent-a", "preservation")
+	agentFields, err := agentIdentityFields(agentIdentity)
+	if err != nil {
+		t.Fatalf("agent identity fields: %v", err)
 	}
+	seedTestAgentRow(t, ctx, pg.DB, true, agentIdentity, "active")
 
 	targets := []preservationcleanup.RunTarget{}
 	byRun := map[string]preservationcleanup.RunTarget{}
@@ -55,9 +55,14 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 		timerID := uuid.NewString()
 		requireRunFixtureForTest(t, ctx, &PostgresStore{DB: pg.DB}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, BundleHash: testCanonicalBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
 		if _, err := pg.DB.ExecContext(ctx, `
-			INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status)
-			VALUES ($1::uuid, $2::uuid, 'agent-a', 'preservation', TRUE, 'authored', 'active')
-		`, sessionID, runID); err != nil {
+			INSERT INTO agent_sessions (
+				session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+				agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+				memory_enabled, memory_source, status
+			)
+			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', 'active')
+		`, sessionID, runID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
+			agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath); err != nil {
 			t.Fatalf("seed session %s: %v", source, err)
 		}
 		eventID, activeClaim := seedPreservationClaimedDelivery(t, ctx, pg, runID, "startup."+source.String()+".active")
@@ -73,8 +78,8 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 			t.Fatalf("seed retryable delivery %s: snapshot=%#v err=%v", source, snapshot, err)
 		}
 		if _, err := pg.DB.ExecContext(ctx, `
-			INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, status)
-			VALUES ($1::uuid, $2, $3::uuid, 'timer.fired', now() + interval '1 hour', 'active')
+			INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, owner_kind, status)
+			VALUES ($1::uuid, $2, $3::uuid, 'timer.fired', now() + interval '1 hour', 'system', 'active')
 		`, timerID, aggregateWorkflowTimerTaskID(timerID), runID); err != nil {
 			t.Fatalf("seed timer %s: %v", source, err)
 		}
@@ -230,10 +235,10 @@ func seedPreservationClaimedDelivery(t *testing.T, ctx context.Context, pg *Post
 		uuid.NewString(), events.EventType(eventName), "test", "", []byte(`{}`), 0,
 		runID, events.EventEnvelope{}, time.Now().UTC(),
 	)
-	if err := commitSemanticEventFixtureWithAgents(ctx, pg, event, []string{"agent-a"}); err != nil {
+	route := testAgentDeliveryRoute(t, "agent-a", "preservation")
+	if err := commitSemanticEventFixtureWithRoutes(ctx, pg, event, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("commit preservation delivery %s: %v", eventName, err)
 	}
-	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "agent-a"}
 	claimed, err := pg.ClaimAgentDelivery(ctx, event, route)
 	if err != nil {
 		t.Fatalf("claim preservation delivery %s: %v", eventName, err)

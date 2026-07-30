@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
@@ -190,11 +191,12 @@ func settleEffectTestCompletionFailure(t *testing.T, ctx context.Context, dispat
 		Usage:      runtimeeffects.CompletionUsage{ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageUnavailable},
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
-			Memory: target.Memory, FlowInstance: target.FlowInstance, CapabilitySurfaceID: surface.ID,
+			Identity: agentmemory.Identity{RunID: target.RunID, Agent: target.AgentIdentity},
+			Memory:   target.Memory, FlowInstance: target.FlowInstance, CapabilitySurfaceID: surface.ID,
 			CapabilitySurface: surfaceJSON, Failure: &failure.Failure,
 		},
 		Spend: runtimeeffects.CompletionSpend{
-			FlowInstance: "global", AgentID: target.AgentID, Model: "test-model",
+			FlowInstance: target.FlowInstance, AgentID: target.AgentID, AgentIdentity: target.AgentIdentity, Model: "test-model",
 			BackendProfile: "test", Provider: "test", Transport: "test",
 			ResolvedModel: "test-model", InvocationType: "test",
 		},

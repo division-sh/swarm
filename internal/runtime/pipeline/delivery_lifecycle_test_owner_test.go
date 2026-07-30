@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 )
@@ -134,7 +135,7 @@ func (s *pipelineTestDeliveryOwner) ClaimNodeDelivery(ctx context.Context, event
 	return s.ClaimAgentDelivery(ctx, event, route)
 }
 
-func (*pipelineTestDeliveryOwner) ClaimAgentBacklog(context.Context, string, int) ([]runtimedelivery.AgentExecution, error) {
+func (*pipelineTestDeliveryOwner) ClaimAgentBacklog(context.Context, agentidentity.Identity, int) ([]runtimedelivery.AgentExecution, error) {
 	return nil, fmt.Errorf("pipeline unit fixture does not hydrate agent backlog")
 }
 

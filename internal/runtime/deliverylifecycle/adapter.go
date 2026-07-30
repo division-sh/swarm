@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -82,6 +83,10 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 	if err != nil {
 		return DurableHandoffProof{}, err
 	}
+	agentFields, err := deliveryRouteAgentStorageFields(obligation.Route())
+	if err != nil {
+		return DurableHandoffProof{}, err
+	}
 	now, err := a.databaseNow(ctx, tx)
 	if err != nil {
 		return DurableHandoffProof{}, err
@@ -89,25 +94,42 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 	query := `
 		INSERT INTO event_deliveries (
 			delivery_id, run_id, event_id, route_identity, subscriber_type, subscriber_id,
+			agent_name_owner, agent_name_source, agent_route_presence,
+			agent_flow_scope_key, agent_flow_instance_id, agent_flow_instance_path,
 			delivery_target_route, delivery_context, delivery_payload_projection,
 			status, retry_count, max_retries, next_eligible_at, claim_version,
 			created_at, updated_at
 		) VALUES (
 			$1::uuid, NULLIF($2, '')::uuid, $3::uuid, $4, $5, $6,
-			$7::jsonb, $8::jsonb, $9::jsonb,
-			'pending', 0, $10, $11, 0, $11, $11
+			$7, $8, $9, $10, $11, $12,
+			$13::jsonb, $14::jsonb, $15::jsonb,
+			'pending', 0, $16, $17, 0, $17, $17
 		) ON CONFLICT (event_id, route_identity) DO NOTHING`
-	args := []any{obligation.DeliveryID(), obligation.RunID(), obligation.EventID(), obligation.RouteIdentity().String(), string(obligation.SubscriberClass()), obligation.SubscriberID(), string(target), string(deliveryContext), string(projection), obligation.MaxRetries(), now}
+	args := []any{
+		obligation.DeliveryID(), obligation.RunID(), obligation.EventID(), obligation.RouteIdentity().String(),
+		string(obligation.SubscriberClass()), obligation.SubscriberID(),
+		agentFields.NameOwner, agentFields.NameSource, agentFields.RoutePresence,
+		agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath,
+		string(target), string(deliveryContext), string(projection), obligation.MaxRetries(), now,
+	}
 	if a.dialect == DialectSQLite {
 		query = `
 			INSERT INTO event_deliveries (
 				delivery_id, run_id, event_id, route_identity, subscriber_type, subscriber_id,
+				agent_name_owner, agent_name_source, agent_route_presence,
+				agent_flow_scope_key, agent_flow_instance_id, agent_flow_instance_path,
 				delivery_target_route, delivery_context, delivery_payload_projection,
 				status, retry_count, max_retries, next_eligible_at, claim_version,
 				created_at, updated_at
-			) VALUES (?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, 0, ?, ?)
+			) VALUES (?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, 0, ?, ?)
 			ON CONFLICT(event_id, route_identity) DO NOTHING`
-		args = []any{obligation.DeliveryID(), obligation.RunID(), obligation.EventID(), obligation.RouteIdentity().String(), string(obligation.SubscriberClass()), obligation.SubscriberID(), string(target), string(deliveryContext), string(projection), obligation.MaxRetries(), now, now, now}
+		args = []any{
+			obligation.DeliveryID(), obligation.RunID(), obligation.EventID(), obligation.RouteIdentity().String(),
+			string(obligation.SubscriberClass()), obligation.SubscriberID(),
+			agentFields.NameOwner, agentFields.NameSource, agentFields.RoutePresence,
+			agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath,
+			string(target), string(deliveryContext), string(projection), obligation.MaxRetries(), now, now, now,
+		}
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -150,8 +172,8 @@ func (a *Adapter) ClaimExact(ctx context.Context, tx *sql.Tx, event events.Event
 	return a.claimLocked(ctx, tx, record, leaseTTL)
 }
 
-func (a *Adapter) ClaimPendingAgent(ctx context.Context, tx *sql.Tx, agentID string, limit int, leaseTTL time.Duration) ([]ClaimedObligation, error) {
-	candidates, err := a.AgentClaimCandidates(ctx, tx, agentID, limit)
+func (a *Adapter) ClaimPendingAgent(ctx context.Context, tx *sql.Tx, identity agentidentity.Identity, limit int, leaseTTL time.Duration) ([]ClaimedObligation, error) {
+	candidates, err := a.AgentClaimCandidates(ctx, tx, identity, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -166,15 +188,27 @@ func (a *Adapter) ClaimPendingNode(ctx context.Context, tx *sql.Tx, nodeID strin
 	return a.ClaimCandidates(ctx, tx, candidates, leaseTTL)
 }
 
-func (a *Adapter) AgentClaimCandidates(ctx context.Context, q queryer, agentID string, limit int) ([]ClaimCandidate, error) {
-	return a.claimCandidates(ctx, q, SubscriberAgent, agentID, limit)
+func (a *Adapter) AgentClaimCandidates(ctx context.Context, q queryer, identity agentidentity.Identity, limit int) ([]ClaimCandidate, error) {
+	identity = identity.Normalize()
+	fields, err := identity.StorageFields()
+	if err != nil {
+		return nil, fmt.Errorf("delivery agent claim identity: %w", err)
+	}
+	return a.claimCandidates(ctx, q, SubscriberAgent, fields.AgentID, fields, limit)
 }
 
 func (a *Adapter) NodeClaimCandidates(ctx context.Context, q queryer, nodeID string, limit int) ([]ClaimCandidate, error) {
-	return a.claimCandidates(ctx, q, SubscriberNode, nodeID, limit)
+	return a.claimCandidates(ctx, q, SubscriberNode, nodeID, agentidentity.StorageFields{}, limit)
 }
 
-func (a *Adapter) claimCandidates(ctx context.Context, q queryer, class SubscriberClass, subscriberID string, limit int) ([]ClaimCandidate, error) {
+func (a *Adapter) claimCandidates(
+	ctx context.Context,
+	q queryer,
+	class SubscriberClass,
+	subscriberID string,
+	agentFields agentidentity.StorageFields,
+	limit int,
+) ([]ClaimCandidate, error) {
 	if q == nil {
 		return nil, fmt.Errorf("delivery claim candidate queryer is required")
 	}
@@ -200,17 +234,26 @@ func (a *Adapter) claimCandidates(ctx context.Context, q queryer, class Subscrib
 		 AND current_attempt.claim_version = d.current_attempt_version
 		 AND current_attempt.open_marker = TRUE
 		WHERE d.subscriber_type = $1 AND d.subscriber_id = $2
+		  AND ($1 <> 'agent' OR (
+		    d.agent_name_owner = $3 AND d.agent_name_source = $4 AND d.agent_route_presence = $5
+		    AND d.agent_flow_scope_key = $6 AND d.agent_flow_instance_id = $7 AND d.agent_flow_instance_path = $8
+		  ))
 		  AND (
 			d.status = 'pending'
-			OR (d.status = 'failed' AND d.retry_count <= d.max_retries AND d.next_eligible_at <= $3)
-			OR (d.status = 'in_progress' AND current_attempt.lease_expires_at <= $3)
+			OR (d.status = 'failed' AND d.retry_count <= d.max_retries AND d.next_eligible_at <= $9)
+			OR (d.status = 'in_progress' AND current_attempt.lease_expires_at <= $9)
 		  )
 		ORDER BY CASE
 			WHEN d.status = 'in_progress' THEN current_attempt.lease_expires_at
 			ELSE d.next_eligible_at
 		END ASC, d.created_at ASC, d.delivery_id ASC
-		LIMIT $4`
-	args := []any{string(class), subscriberID, now, limit}
+		LIMIT $10`
+	args := []any{
+		string(class), subscriberID,
+		agentFields.NameOwner, agentFields.NameSource, agentFields.RoutePresence,
+		agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath,
+		now, limit,
+	}
 	if a.dialect == DialectSQLite {
 		query = `
 			SELECT d.delivery_id, d.run_id
@@ -220,6 +263,10 @@ func (a *Adapter) claimCandidates(ctx context.Context, q queryer, class Subscrib
 			 AND current_attempt.claim_version = d.current_attempt_version
 			 AND current_attempt.open_marker = TRUE
 			WHERE d.subscriber_type = ? AND d.subscriber_id = ?
+			  AND (? <> 'agent' OR (
+			    d.agent_name_owner = ? AND d.agent_name_source = ? AND d.agent_route_presence = ?
+			    AND d.agent_flow_scope_key = ? AND d.agent_flow_instance_id = ? AND d.agent_flow_instance_path = ?
+			  ))
 			  AND (
 				d.status = 'pending'
 				OR (d.status = 'failed' AND d.retry_count <= d.max_retries AND d.next_eligible_at <= ?)
@@ -230,7 +277,12 @@ func (a *Adapter) claimCandidates(ctx context.Context, q queryer, class Subscrib
 				ELSE d.next_eligible_at
 			END ASC, d.created_at ASC, d.delivery_id ASC
 			LIMIT ?`
-		args = []any{string(class), subscriberID, now, now, limit}
+		args = []any{
+			string(class), subscriberID, string(class),
+			agentFields.NameOwner, agentFields.NameSource, agentFields.RoutePresence,
+			agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath,
+			now, now, limit,
+		}
 	}
 	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -376,27 +428,49 @@ func (a *Adapter) BindAgentSession(ctx context.Context, tx *sql.Tx, claim Claim,
 	if record.SubscriberClass != SubscriberAgent {
 		return Snapshot{}, fmt.Errorf("%w: node delivery cannot bind an agent session", ErrConflict)
 	}
+	fields, err := record.Route.AgentIdentity.StorageFields()
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("bind delivery agent identity: %w", err)
+	}
 	query := `
 		UPDATE event_delivery_attempts
 		SET active_session_id = $1::uuid, session_delivery_id = $4::uuid,
-			session_run_id = $2::uuid, session_subscriber_type = 'agent', session_agent_id = $3
+			session_run_id = $2::uuid, session_subscriber_type = 'agent', session_agent_id = $3,
+			session_agent_name_owner = $7, session_agent_name_source = $8,
+			session_agent_route_presence = $9, session_agent_flow_scope_key = $10,
+			session_agent_flow_instance_id = $11, session_agent_flow_instance_path = $12
 		WHERE delivery_id = $4::uuid AND claim_version = $5 AND claim_token = $6::uuid AND open_marker = TRUE
 		  AND EXISTS (
 			SELECT 1 FROM agent_sessions session
 			WHERE session.session_id = $1::uuid AND session.run_id = $2::uuid
-			  AND session.agent_id = $3 AND session.status = 'active'
+			  AND session.agent_id = $3
+			  AND session.agent_name_owner = $7 AND session.agent_name_source = $8
+			  AND session.agent_route_presence = $9 AND session.flow_scope_key = $10
+			  AND session.flow_instance_id = $11 AND session.flow_instance = $12
+			  AND session.status = 'active'
 		  )`
-	args := []any{sessionID, record.RunID, record.SubscriberID, claim.deliveryID, claim.version, claim.token}
+	args := []any{
+		sessionID, record.RunID, record.SubscriberID, claim.deliveryID, claim.version, claim.token,
+		fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+	}
 	if a.dialect == DialectSQLite {
 		query = `
 			UPDATE event_delivery_attempts
 			SET active_session_id = ?1, session_delivery_id = ?4,
-				session_run_id = ?2, session_subscriber_type = 'agent', session_agent_id = ?3
+				session_run_id = ?2, session_subscriber_type = 'agent', session_agent_id = ?3,
+				session_agent_name_owner = ?7, session_agent_name_source = ?8,
+				session_agent_route_presence = ?9, session_agent_flow_scope_key = ?10,
+				session_agent_flow_instance_id = ?11, session_agent_flow_instance_path = ?12
 			WHERE delivery_id = ?4 AND claim_version = ?5 AND claim_token = ?6 AND open_marker = TRUE
 			  AND EXISTS (
 				SELECT 1 FROM agent_sessions session
 				WHERE session.session_id = ?1 AND session.run_id = ?2
-				  AND session.agent_id = ?3 AND session.status = 'active'
+				  AND session.agent_id = ?3
+				  AND session.agent_name_owner = ?7 AND session.agent_name_source = ?8
+				  AND session.agent_route_presence = ?9 AND session.flow_scope_key = ?10
+				  AND session.flow_instance_id = ?11 AND session.flow_instance = ?12
+				  AND session.status = 'active'
 			  )`
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
@@ -1185,9 +1259,9 @@ func sqliteTraceWatermarkExpression() string {
 }
 
 func (a *Adapter) LifecycleSnapshotPageForAgent(ctx context.Context, q queryer, page AgentLifecyclePageQuery) (SnapshotPage, error) {
-	agentID := strings.TrimSpace(page.AgentID)
-	if agentID == "" {
-		return SnapshotPage{}, fmt.Errorf("delivery lifecycle page agent id is required")
+	page.AgentIdentity = page.AgentIdentity.Normalize()
+	if err := page.AgentIdentity.Validate(); err != nil {
+		return SnapshotPage{}, fmt.Errorf("delivery lifecycle page agent identity: %w", err)
 	}
 	runID := strings.TrimSpace(page.RunID)
 	if runID != "" {
@@ -1219,49 +1293,53 @@ func (a *Adapter) LifecycleSnapshotPageForAgent(ctx context.Context, q queryer, 
 		cursorAt = page.BeforeCreatedAt.UTC()
 		cursorID = strings.TrimSpace(page.BeforeDeliveryID)
 	}
-	query := `
+	identityPredicate, identityArgs, err := agentIdentityPredicate(a.dialect, "d", []agentidentity.Identity{page.AgentIdentity}, 1)
+	if err != nil {
+		return SnapshotPage{}, err
+	}
+	query := fmt.Sprintf(`
 		SELECT d.delivery_id::text
 		FROM event_deliveries d
-		WHERE d.subscriber_type = 'agent' AND d.subscriber_id = $1
-		  AND ($2::text = '' OR d.run_id = NULLIF($2::text, '')::uuid)
-		  AND (($3 AND d.status = 'pending') OR ($4 AND d.status = 'in_progress') OR
-		       ($5 AND d.status = 'delivered') OR ($6 AND d.status = 'failed') OR
-		       ($7 AND d.status = 'dead_letter'))
-		  AND ($8::timestamptz IS NULL OR d.created_at < $8 OR (d.created_at = $8 AND d.delivery_id < $9::uuid))
+		WHERE d.subscriber_type = 'agent' AND (%s)
+		  AND ($8::text = '' OR d.run_id = NULLIF($8::text, '')::uuid)
+		  AND (($9 AND d.status = 'pending') OR ($10 AND d.status = 'in_progress') OR
+		       ($11 AND d.status = 'delivered') OR ($12 AND d.status = 'failed') OR
+		       ($13 AND d.status = 'dead_letter'))
+		  AND ($14::timestamptz IS NULL OR d.created_at < $14 OR (d.created_at = $14 AND d.delivery_id < $15::uuid))
 		ORDER BY d.created_at DESC, d.delivery_id DESC
-		LIMIT $10`
-	args := []any{
-		agentID, runID,
+		LIMIT $16`, identityPredicate)
+	args := append(identityArgs,
+		runID,
 		statusSelected[StatusPending], statusSelected[StatusInProgress], statusSelected[StatusDelivered],
 		statusSelected[StatusFailed], statusSelected[StatusDeadLetter],
-		cursorAt, cursorID, page.Limit + 1,
-	}
+		cursorAt, cursorID, page.Limit+1,
+	)
 	if a.dialect == DialectSQLite {
-		query = `
+		query = fmt.Sprintf(`
 			SELECT d.delivery_id
 			FROM event_deliveries d
-			WHERE d.subscriber_type = 'agent' AND d.subscriber_id = ?
+			WHERE d.subscriber_type = 'agent' AND (%s)
 			  AND (? = '' OR d.run_id = ?)
 			  AND ((? AND d.status = 'pending') OR (? AND d.status = 'in_progress') OR
 			       (? AND d.status = 'delivered') OR (? AND d.status = 'failed') OR
 			       (? AND d.status = 'dead_letter'))
 			  AND (? IS NULL OR d.created_at < ? OR (d.created_at = ? AND d.delivery_id < ?))
 			ORDER BY d.created_at DESC, d.delivery_id DESC
-			LIMIT ?`
-		args = []any{
-			agentID, runID, runID,
+			LIMIT ?`, identityPredicate)
+		args = append(identityArgs,
+			runID, runID,
 			statusSelected[StatusPending], statusSelected[StatusInProgress], statusSelected[StatusDelivered],
 			statusSelected[StatusFailed], statusSelected[StatusDeadLetter],
-			cursorAt, cursorAt, cursorAt, cursorID, page.Limit + 1,
-		}
+			cursorAt, cursorAt, cursorAt, cursorID, page.Limit+1,
+		)
 	}
 	return a.snapshotPageByIDQuery(ctx, q, page.Limit, query, args...)
 }
 
 func (a *Adapter) DiagnosticSnapshotPageForAgent(ctx context.Context, q queryer, page AgentDiagnosticPageQuery) (SnapshotPage, error) {
-	agentID := strings.TrimSpace(page.AgentID)
-	if agentID == "" {
-		return SnapshotPage{}, fmt.Errorf("delivery diagnostic page agent id is required")
+	page.AgentIdentity = page.AgentIdentity.Normalize()
+	if err := page.AgentIdentity.Validate(); err != nil {
+		return SnapshotPage{}, fmt.Errorf("delivery diagnostic page agent identity: %w", err)
 	}
 	if page.Status != StatusFailed && page.Status != StatusDeadLetter {
 		return SnapshotPage{}, fmt.Errorf("delivery diagnostic page status %q is invalid", page.Status)
@@ -1279,58 +1357,66 @@ func (a *Adapter) DiagnosticSnapshotPageForAgent(ctx context.Context, q queryer,
 	if page.Status == StatusDeadLetter {
 		occurredColumn = "d.settled_at"
 	}
+	identityPredicate, identityArgs, err := agentIdentityPredicate(a.dialect, "d", []agentidentity.Identity{page.AgentIdentity}, 1)
+	if err != nil {
+		return SnapshotPage{}, err
+	}
 	query := fmt.Sprintf(`
 		SELECT d.delivery_id::text
 		FROM event_deliveries d
-		WHERE d.subscriber_type = 'agent' AND d.subscriber_id = $1 AND d.status = $2
-		  AND ($3::timestamptz IS NULL OR %[1]s < $3 OR
-		       (%[1]s = $3 AND d.delivery_id < $4::uuid))
+		WHERE d.subscriber_type = 'agent' AND (%[2]s) AND d.status = $8
+		  AND ($9::timestamptz IS NULL OR %[1]s < $9 OR
+		       (%[1]s = $9 AND d.delivery_id < $10::uuid))
 		ORDER BY %[1]s DESC, d.delivery_id DESC
-		LIMIT $5`, occurredColumn)
-	args := []any{agentID, string(page.Status), cursorAt, cursorID, page.Limit + 1}
+		LIMIT $11`, occurredColumn, identityPredicate)
+	args := append(identityArgs, string(page.Status), cursorAt, cursorID, page.Limit+1)
 	if a.dialect == DialectSQLite {
 		query = fmt.Sprintf(`
 			SELECT d.delivery_id
 			FROM event_deliveries d
-			WHERE d.subscriber_type = 'agent' AND d.subscriber_id = ? AND d.status = ?
+			WHERE d.subscriber_type = 'agent' AND (%[2]s) AND d.status = ?
 			  AND (? IS NULL OR %[1]s < ? OR (%[1]s = ? AND d.delivery_id < ?))
 			ORDER BY %[1]s DESC, d.delivery_id DESC
-			LIMIT ?`, occurredColumn)
-		args = []any{agentID, string(page.Status), cursorAt, cursorAt, cursorAt, cursorID, page.Limit + 1}
+			LIMIT ?`, occurredColumn, identityPredicate)
+		args = append(identityArgs, string(page.Status), cursorAt, cursorAt, cursorAt, cursorID, page.Limit+1)
 	}
 	return a.snapshotPageByIDQuery(ctx, q, page.Limit, query, args...)
 }
 
-func (a *Adapter) DiagnosticCountsForAgentSince(ctx context.Context, q queryer, agentID string, since time.Time) (AgentDiagnosticCounts, error) {
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
-		return AgentDiagnosticCounts{}, fmt.Errorf("delivery diagnostic counts agent id is required")
+func (a *Adapter) DiagnosticCountsForAgentSince(ctx context.Context, q queryer, identity agentidentity.Identity, since time.Time) (AgentDiagnosticCounts, error) {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		return AgentDiagnosticCounts{}, fmt.Errorf("delivery diagnostic counts agent identity: %w", err)
 	}
 	if since.IsZero() {
 		return AgentDiagnosticCounts{}, fmt.Errorf("delivery diagnostic counts cutoff is required")
 	}
-	query := `
+	identityPredicate, identityArgs, err := agentIdentityPredicate(a.dialect, "d", []agentidentity.Identity{identity}, 1)
+	if err != nil {
+		return AgentDiagnosticCounts{}, err
+	}
+	query := fmt.Sprintf(`
 		SELECT COUNT(*) FILTER (WHERE d.status = 'failed'),
 		       COUNT(*) FILTER (WHERE d.status = 'dead_letter')
 		FROM event_deliveries d
-		WHERE d.subscriber_type = 'agent' AND d.subscriber_id = $1
+		WHERE d.subscriber_type = 'agent' AND (%s)
 		  AND d.status IN ('failed', 'dead_letter')
-		  AND ((d.status = 'failed' AND d.updated_at >= $2) OR
-		       (d.status = 'dead_letter' AND d.settled_at >= $2))`
+		  AND ((d.status = 'failed' AND d.updated_at >= $8) OR
+		       (d.status = 'dead_letter' AND d.settled_at >= $8))`, identityPredicate)
 	if a.dialect == DialectSQLite {
-		query = `
+		query = fmt.Sprintf(`
 			SELECT COALESCE(SUM(CASE WHEN d.status = 'failed' THEN 1 ELSE 0 END), 0),
 			       COALESCE(SUM(CASE WHEN d.status = 'dead_letter' THEN 1 ELSE 0 END), 0)
 			FROM event_deliveries d
-			WHERE d.subscriber_type = 'agent' AND d.subscriber_id = ?
+			WHERE d.subscriber_type = 'agent' AND (%s)
 			  AND d.status IN ('failed', 'dead_letter')
 			  AND ((d.status = 'failed' AND d.updated_at >= ?) OR
-			       (d.status = 'dead_letter' AND d.settled_at >= ?))`
+			       (d.status = 'dead_letter' AND d.settled_at >= ?))`, identityPredicate)
 	}
 	var counts AgentDiagnosticCounts
-	args := []any{agentID, since.UTC()}
+	args := append(identityArgs, since.UTC())
 	if a.dialect == DialectSQLite {
-		args = []any{agentID, since.UTC(), since.UTC()}
+		args = append(identityArgs, since.UTC(), since.UTC())
 	}
 	if err := q.QueryRowContext(ctx, query, args...).Scan(&counts.Failures, &counts.DeadLetters); err != nil {
 		return AgentDiagnosticCounts{}, fmt.Errorf("count agent delivery diagnostics: %w", err)
@@ -1816,7 +1902,10 @@ func (a *Adapter) selectRecord() string {
 	if a.dialect == DialectSQLite {
 		return `
 			SELECT d.delivery_id, d.event_id, d.run_id, d.route_identity,
-				d.subscriber_type, d.subscriber_id, d.delivery_target_route, d.delivery_context,
+				d.subscriber_type, d.subscriber_id,
+				d.agent_name_owner, d.agent_name_source, d.agent_route_presence,
+				d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path,
+				d.delivery_target_route, d.delivery_context,
 				d.delivery_payload_projection, d.status, d.retry_count, d.max_retries,
 				d.next_eligible_at, d.claim_version, COALESCE(current_attempt.claim_token, ''), current_attempt.lease_expires_at,
 				COALESCE(current_attempt.active_session_id, ''), COALESCE(d.reason_code, ''), d.failure,
@@ -1831,7 +1920,10 @@ func (a *Adapter) selectRecord() string {
 	}
 	return `
 		SELECT d.delivery_id::text, d.event_id::text, d.run_id::text, d.route_identity,
-			d.subscriber_type, d.subscriber_id, d.delivery_target_route, d.delivery_context,
+			d.subscriber_type, d.subscriber_id,
+			d.agent_name_owner, d.agent_name_source, d.agent_route_presence,
+			d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path,
+			d.delivery_target_route, d.delivery_context,
 			d.delivery_payload_projection, d.status, d.retry_count, d.max_retries,
 			d.next_eligible_at, d.claim_version, COALESCE(current_attempt.claim_token::text, ''), current_attempt.lease_expires_at,
 			COALESCE(current_attempt.active_session_id::text, ''), COALESCE(d.reason_code, ''), d.failure,
@@ -1848,11 +1940,16 @@ func (a *Adapter) selectRecord() string {
 func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 	var record deliveryRecord
 	var routeIdentity, subscriberType, status string
+	var agentNameOwner, agentNameSource, agentRoutePresence string
+	var agentFlowScopeKey, agentFlowInstanceID, agentFlowInstancePath string
 	var targetRaw, contextRaw, projectionRaw, failureRaw []byte
 	var nextEligible, claimExpires, started, settled, created, updated any
 	err := row.Scan(
 		&record.DeliveryID, &record.EventID, &record.RunID, &routeIdentity,
-		&subscriberType, &record.SubscriberID, &targetRaw, &contextRaw, &projectionRaw,
+		&subscriberType, &record.SubscriberID,
+		&agentNameOwner, &agentNameSource, &agentRoutePresence,
+		&agentFlowScopeKey, &agentFlowInstanceID, &agentFlowInstancePath,
+		&targetRaw, &contextRaw, &projectionRaw,
 		&status, &record.RetryCount, &record.MaxRetries, &nextEligible, &record.ClaimVersion,
 		&record.claimToken, &claimExpires, &record.ActiveSessionID, &record.ReasonCode, &failureRaw,
 		&started, &settled, &created, &updated, &record.eventType, &record.entityID, &record.flowID, &record.bundleHash,
@@ -1877,7 +1974,22 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 	if err != nil {
 		return deliveryRecord{}, err
 	}
-	record.Route, err = decodeRoute(class, record.SubscriberID, targetRaw, contextRaw, projectionRaw)
+	record.Route, err = decodeRoute(
+		class,
+		record.SubscriberID,
+		agentidentity.StorageFields{
+			AgentID:          record.SubscriberID,
+			NameOwner:        agentNameOwner,
+			NameSource:       agentNameSource,
+			RoutePresence:    agentRoutePresence,
+			FlowScopeKey:     agentFlowScopeKey,
+			FlowInstanceID:   agentFlowInstanceID,
+			FlowInstancePath: agentFlowInstancePath,
+		},
+		targetRaw,
+		contextRaw,
+		projectionRaw,
+	)
 	if err != nil {
 		return deliveryRecord{}, err
 	}
@@ -2006,7 +2118,34 @@ func encodeRoute(route events.DeliveryRoute) ([]byte, []byte, []byte, error) {
 	return target, deliveryContext, projection, nil
 }
 
-func decodeRoute(class SubscriberClass, subscriberID string, targetRaw, contextRaw, projectionRaw []byte) (events.DeliveryRoute, error) {
+func deliveryRouteAgentStorageFields(route events.DeliveryRoute) (agentidentity.StorageFields, error) {
+	route = route.Normalized()
+	switch route.SubscriberType {
+	case string(SubscriberNode):
+		if !route.AgentIdentity.IsZero() {
+			return agentidentity.StorageFields{}, fmt.Errorf("node delivery route cannot carry agent identity")
+		}
+		return agentidentity.StorageFields{}, nil
+	case string(SubscriberAgent):
+		fields, err := route.AgentIdentity.StorageFields()
+		if err != nil {
+			return agentidentity.StorageFields{}, fmt.Errorf("agent delivery route identity fields: %w", err)
+		}
+		if fields.AgentID != route.SubscriberID {
+			return agentidentity.StorageFields{}, fmt.Errorf("agent delivery route subscriber does not match identity")
+		}
+		return fields, nil
+	default:
+		return agentidentity.StorageFields{}, fmt.Errorf("delivery route subscriber type %q is unsupported", route.SubscriberType)
+	}
+}
+
+func decodeRoute(
+	class SubscriberClass,
+	subscriberID string,
+	agentFields agentidentity.StorageFields,
+	targetRaw, contextRaw, projectionRaw []byte,
+) (events.DeliveryRoute, error) {
 	var target events.RouteIdentity
 	var deliveryContext events.DeliveryContext
 	var projection events.DeliveryPayloadProjection
@@ -2019,7 +2158,31 @@ func decodeRoute(class SubscriberClass, subscriberID string, targetRaw, contextR
 	if err := json.Unmarshal(projectionRaw, &projection); err != nil {
 		return events.DeliveryRoute{}, fmt.Errorf("decode delivery projection: %w", err)
 	}
-	return events.DeliveryRoute{SubscriberType: string(class), SubscriberID: subscriberID, Target: target, Context: deliveryContext, PayloadProjection: projection}.Normalized(), nil
+	identity := agentidentity.Identity{}
+	switch class {
+	case SubscriberAgent:
+		var err error
+		identity, err = agentidentity.FromStorageFields(agentFields)
+		if err != nil {
+			return events.DeliveryRoute{}, fmt.Errorf("decode delivery agent identity: %w", err)
+		}
+		if identity.AgentID() != strings.TrimSpace(subscriberID) {
+			return events.DeliveryRoute{}, fmt.Errorf("delivery subscriber does not match stored agent identity")
+		}
+	case SubscriberNode:
+		if agentFields.NameOwner != "" || agentFields.NameSource != "" || agentFields.RoutePresence != "" ||
+			agentFields.FlowScopeKey != "" || agentFields.FlowInstanceID != "" || agentFields.FlowInstancePath != "" {
+			return events.DeliveryRoute{}, fmt.Errorf("node delivery row carries agent identity fields")
+		}
+	}
+	return events.DeliveryRoute{
+		SubscriberType:    string(class),
+		SubscriberID:      subscriberID,
+		AgentIdentity:     identity,
+		Target:            target,
+		Context:           deliveryContext,
+		PayloadProjection: projection,
+	}.Normalized(), nil
 }
 
 func encodeFailure(failure *runtimefailures.Envelope) (string, error) {

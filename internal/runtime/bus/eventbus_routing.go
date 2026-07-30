@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -338,7 +339,7 @@ func drainBufferedLocalDeliveryChannel(ctx context.Context, store EventStore, ch
 	return nil
 }
 
-func (eb *EventBus) activeAgentDescriptors(ctx context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+func (eb *EventBus) activeAgentDescriptors(ctx context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
 	ephemeral := eb.runtimeActiveAgentDescriptors()
 	lister, ok := eb.store.(ActiveAgentDescriptorLister)
 	if !ok {
@@ -351,16 +352,16 @@ func (eb *EventBus) activeAgentDescriptors(ctx context.Context) (map[string]Acti
 	if err != nil {
 		return nil, true, err
 	}
-	set := make(map[string]ActiveAgentDescriptor, len(descriptors)+len(ephemeral))
+	set := make(map[agentidentity.Identity]ActiveAgentDescriptor, len(descriptors)+len(ephemeral))
 	for _, descriptor := range descriptors {
 		descriptor = descriptor.Normalized()
-		if descriptor.AgentID == "" {
+		if err := descriptor.Identity.Validate(); err != nil {
 			continue
 		}
-		set[descriptor.AgentID] = descriptor
+		set[descriptor.Identity] = descriptor
 	}
-	for id, descriptor := range ephemeral {
-		set[id] = descriptor
+	for identity, descriptor := range ephemeral {
+		set[identity] = descriptor
 	}
 	return set, true, nil
 }
@@ -404,7 +405,7 @@ func (eb *EventBus) activeTargetDescriptors(ctx context.Context) ([]ActiveTarget
 	return out, true, nil
 }
 
-func activeTargetDescriptorsFromAgents(descriptors map[string]ActiveAgentDescriptor) []ActiveTargetDescriptor {
+func activeTargetDescriptorsFromAgents(descriptors map[agentidentity.Identity]ActiveAgentDescriptor) []ActiveTargetDescriptor {
 	if len(descriptors) == 0 {
 		return nil
 	}
@@ -448,18 +449,18 @@ func (eb *EventBus) RegisterRuntimeActiveAgentDescriptor(descriptor ActiveAgentD
 		return
 	}
 	descriptor = descriptor.Normalized()
-	if descriptor.AgentID == "" {
+	if err := descriptor.Identity.Validate(); err != nil {
 		return
 	}
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
 	if eb.runtimeAgentDescriptors == nil {
-		eb.runtimeAgentDescriptors = make(map[string]ActiveAgentDescriptor)
+		eb.runtimeAgentDescriptors = make(map[agentidentity.Identity]ActiveAgentDescriptor)
 	}
-	eb.runtimeAgentDescriptors[descriptor.AgentID] = descriptor
+	eb.runtimeAgentDescriptors[descriptor.Identity] = descriptor
 }
 
-func (eb *EventBus) runtimeActiveAgentDescriptors() map[string]ActiveAgentDescriptor {
+func (eb *EventBus) runtimeActiveAgentDescriptors() map[agentidentity.Identity]ActiveAgentDescriptor {
 	if eb == nil {
 		return nil
 	}
@@ -468,38 +469,9 @@ func (eb *EventBus) runtimeActiveAgentDescriptors() map[string]ActiveAgentDescri
 	if len(eb.runtimeAgentDescriptors) == 0 {
 		return nil
 	}
-	out := make(map[string]ActiveAgentDescriptor, len(eb.runtimeAgentDescriptors))
-	for id, descriptor := range eb.runtimeAgentDescriptors {
-		out[id] = descriptor
-	}
-	return out
-}
-
-func filterRecipientsForExplicitAgentScope(evt events.Event, recipients []string, descriptors map[string]ActiveAgentDescriptor) []string {
-	recipients = uniqueStrings(recipients)
-	if len(recipients) == 0 {
-		return nil
-	}
-	if len(descriptors) == 0 {
-		return nil
-	}
-	eventEntityID := strings.TrimSpace(evt.EntityID())
-	out := make([]string, 0, len(recipients))
-	for _, r := range recipients {
-		r = strings.TrimSpace(r)
-		if r == "" {
-			continue
-		}
-		descriptor, ok := descriptors[r]
-		if !ok {
-			continue
-		}
-		if descriptor.EntityID != "" {
-			if eventEntityID == "" || descriptor.EntityID != eventEntityID {
-				continue
-			}
-		}
-		out = append(out, r)
+	out := make(map[agentidentity.Identity]ActiveAgentDescriptor, len(eb.runtimeAgentDescriptors))
+	for identity, descriptor := range eb.runtimeAgentDescriptors {
+		out[identity] = descriptor
 	}
 	return out
 }
@@ -563,21 +535,30 @@ func (eb *EventBus) resolveRoutedRecipientsForEvent(evt events.Event) []string {
 	return out
 }
 
-func (eb *EventBus) deliverToAgents(ctx context.Context, evt events.Event, agentIDs []string) error {
-	return eb.deliverToAgentsWithTargets(ctx, evt, agentIDs, nil)
-}
-
-func (eb *EventBus) deliverToAgentsWithTargets(ctx context.Context, evt events.Event, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error {
-	return eb.deliverToRecipientsWithRoutes(ctx, evt, agentIDs, deliveryRoutesFromTargetMap(agentIDs, "agent", deliveryTargets))
-}
-
 func (eb *EventBus) deliverToRecipientsWithRoutes(ctx context.Context, evt events.Event, recipientIDs []string, deliveryRoutes []events.DeliveryRoute) error {
-	liveRecipients := make([]RoutePlanLiveRecipient, 0, len(recipientIDs))
+	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
+	if err := events.ValidateDeliveryRoutes(deliveryRoutes); err != nil {
+		return err
+	}
+	liveRecipients := connectRoutePlanLiveRecipients(deliveryRoutes)
+	routed := make(map[string]struct{}, len(liveRecipients))
+	for _, recipient := range liveRecipients {
+		routed[recipient.RecipientID] = struct{}{}
+	}
 	for _, recipientID := range uniqueStrings(recipientIDs) {
+		if _, ok := routed[recipientID]; ok {
+			continue
+		}
+		eb.mu.RLock()
+		internal := eb.internalHandles[recipientID]
+		eb.mu.RUnlock()
+		if internal == nil {
+			return fmt.Errorf("recipient %q has no exact delivery route", recipientID)
+		}
 		liveRecipients = append(liveRecipients, RoutePlanLiveRecipient{
 			RecipientID:       recipientID,
-			SubscriberType:    routePlanSubscriberAgent,
-			PersistAsDelivery: true,
+			SubscriberType:    routePlanSubscriberInternal,
+			PersistAsDelivery: false,
 			liveAuthority:     liveRecipientAuthorityIdentity,
 		})
 	}
@@ -585,11 +566,10 @@ func (eb *EventBus) deliverToRecipientsWithRoutes(ctx context.Context, evt event
 }
 
 func (eb *EventBus) deliverRoutePlanWithRoutes(ctx context.Context, evt events.Event, routePlan RoutePlan) error {
-	routePlan = routePlan.Normalized()
 	if err := routePlan.ValidatePersistentDeliveries(); err != nil {
 		return err
 	}
-	return eb.deliverLiveRecipientsWithRoutes(ctx, evt, routePlan.LiveRecipients, routePlan.DeliveryRoutes())
+	return eb.deliverLiveRecipientsWithRoutes(ctx, evt, routePlan.LiveRecipients, routePlan.liveDispatchDeliveryRoutes())
 }
 
 func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt events.Event, liveRecipients []RoutePlanLiveRecipient, deliveryRoutes []events.DeliveryRoute) error {
@@ -615,7 +595,7 @@ func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt eve
 	delivered := make([]string, 0, len(recipients))
 	seen := make(map[string]struct{}, len(recipients))
 	for _, recipient := range recipients {
-		seen[recipient.agentID] = struct{}{}
+		seen[recipient.subscriberID()] = struct{}{}
 	}
 	missing := make([]string, 0, len(expected))
 	for _, recipient := range expected {
@@ -645,16 +625,16 @@ func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt eve
 			sendResult := recipient.send(ctx, deliverEvent.Event(), route)
 			switch sendResult {
 			case agentRouteSendDelivered:
-				delivered = append(delivered, recipient.agentID)
+				delivered = append(delivered, recipient.subscriberID())
 			case agentRouteSendInactive:
-				if _, required := expectedSet[recipient.agentID]; required {
-					missing = append(missing, recipient.agentID)
+				if _, required := expectedSet[recipient.subscriberID()]; required {
+					missing = append(missing, recipient.subscriberID())
 				}
 			case agentRouteSendContextDone:
 				remaining := make([]string, 0, len(recipients)-len(delivered))
 				for _, candidate := range recipients {
-					if _, ok := seen[candidate.agentID]; ok {
-						delete(seen, candidate.agentID)
+					if _, ok := seen[candidate.subscriberID()]; ok {
+						delete(seen, candidate.subscriberID())
 					}
 				}
 				for _, recipient := range expected {
@@ -671,12 +651,12 @@ func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt eve
 				}
 				return eb.logAuthoritativeDeliveryIncomplete(ctx, evt, expected, delivered, uniqueStrings(missing), remaining, ctx.Err())
 			case agentRouteSendTimedOut:
-				if _, required := expectedSet[recipient.agentID]; required {
-					timedOut = append(timedOut, recipient.agentID)
+				if _, required := expectedSet[recipient.subscriberID()]; required {
+					timedOut = append(timedOut, recipient.subscriberID())
 				}
-				eb.logRuntime(ctx, "warn", "Event delivery to a recipient timed out", "eventbus", "delivery_timeout", evt.ID(), string(evt.Type()), recipient.agentID, evt.EntityID(), "", nil, map[string]any{
+				eb.logRuntime(ctx, "warn", "Event delivery to a recipient timed out", "eventbus", "delivery_timeout", evt.ID(), string(evt.Type()), recipient.subscriberID(), evt.EntityID(), "", nil, map[string]any{
 					"timeout_ms": int(deliverySendTimeout / time.Millisecond),
-				}, targetDeliveryTimeoutFailure(evt, recipient.agentID, deliverySendTimeout), 0)
+				}, targetDeliveryTimeoutFailure(evt, recipient.subscriberID(), deliverySendTimeout), 0)
 			}
 		}
 	}
@@ -699,7 +679,11 @@ func deliveryRoutesBySubscriber(deliveryRoutes []events.DeliveryRoute) map[deliv
 		if route.SubscriberType == "" || route.SubscriberID == "" {
 			continue
 		}
-		key := deliveryRouteTargetKey{subscriberType: route.SubscriberType, subscriberID: route.SubscriberID}
+		key := deliveryRouteTargetKey{
+			subscriberType: route.SubscriberType,
+			subscriberID:   route.SubscriberID,
+			agentIdentity:  route.AgentIdentity,
+		}
 		out[key] = append(out[key], route)
 	}
 	return out
@@ -713,25 +697,27 @@ func agentChannelDeliveryRecipients(recipientIDs []string, deliveryRoutes []even
 	return deliveryRouteRecipientIDsByType(deliveryRoutes, "agent")
 }
 
-func deliveryRoutesFromTargetMap(recipients []string, subscriberType string, deliveryTargets map[string]events.RouteIdentity) []events.DeliveryRoute {
-	recipients = uniqueStrings(recipients)
-	if len(recipients) == 0 {
-		return nil
+func deliveryRoutesCoverAgentRecipients(routes []events.DeliveryRoute, recipients []string) bool {
+	required := make(map[string]struct{}, len(recipients))
+	for _, recipient := range uniqueStrings(recipients) {
+		required[recipient] = struct{}{}
 	}
-	out := make([]events.DeliveryRoute, 0, len(recipients))
-	for _, recipient := range recipients {
-		out = append(out, events.DeliveryRoute{
-			SubscriberType: subscriberType,
-			SubscriberID:   recipient,
-			Target:         deliveryTargets[strings.TrimSpace(recipient)],
-		})
+	for _, route := range events.NormalizeDeliveryRoutes(routes) {
+		if route.SubscriberType != routePlanSubscriberAgent {
+			continue
+		}
+		if err := route.AgentIdentity.Validate(); err != nil || route.AgentIdentity.AgentID() != route.SubscriberID {
+			continue
+		}
+		delete(required, route.SubscriberID)
 	}
-	return events.NormalizeDeliveryRoutes(out)
+	return len(required) == 0
 }
 
 type deliveryRouteTargetKey struct {
 	subscriberType string
 	subscriberID   string
+	agentIdentity  agentidentity.Identity
 }
 
 func deliveryRouteTargetsBySubscriber(deliveryRoutes []events.DeliveryRoute) map[deliveryRouteTargetKey][]events.RouteIdentity {
@@ -752,6 +738,7 @@ func deliveryRouteTargetsBySubscriber(deliveryRoutes []events.DeliveryRoute) map
 		key := deliveryRouteTargetKey{
 			subscriberType: subscriberType,
 			subscriberID:   recipient,
+			agentIdentity:  route.AgentIdentity,
 		}
 		out[key] = append(out[key], route.Target.Normalized())
 	}
@@ -762,10 +749,11 @@ func deliveryRouteTargetsBySubscriber(deliveryRoutes []events.DeliveryRoute) map
 }
 
 type agentRecipient struct {
-	agentID  string
-	kind     inMemorySubscriberKind
-	route    *agentRouteHandle
-	internal *internalSubscriptionHandle
+	identity   agentidentity.Identity
+	internalID string
+	kind       inMemorySubscriberKind
+	route      *agentRouteHandle
+	internal   *internalSubscriptionHandle
 }
 
 func (r agentRecipient) send(ctx context.Context, evt events.Event, handoff events.DeliveryRoute) agentRouteSendResult {
@@ -787,12 +775,20 @@ func (r agentRecipient) deliveryRouteTargetKey() deliveryRouteTargetKey {
 	}
 	return deliveryRouteTargetKey{
 		subscriberType: subscriberType,
-		subscriberID:   strings.TrimSpace(r.agentID),
+		subscriberID:   r.subscriberID(),
+		agentIdentity:  r.identity,
 	}
 }
 
+func (r agentRecipient) subscriberID() string {
+	if r.kind == inMemorySubscriberAgent {
+		return r.identity.AgentID()
+	}
+	return strings.TrimSpace(r.internalID)
+}
+
 func (r agentRecipient) isWorkflowRuntimeInternalCarrier() bool {
-	return r.kind == inMemorySubscriberInternal && strings.TrimSpace(r.agentID) == workflowRuntimeInternalCarrierID
+	return r.kind == inMemorySubscriberInternal && strings.TrimSpace(r.internalID) == workflowRuntimeInternalCarrierID
 }
 
 func workflowRuntimeInternalCarrierTargets(deliveryRoutes []events.DeliveryRoute) []events.RouteIdentity {
@@ -846,9 +842,9 @@ func (eb *EventBus) snapshotRoutePlanRecipientChans(agentIDs []string, planned [
 	if eb == nil || len(agentIDs) == 0 {
 		return nil
 	}
-	plannedByID := make(map[string]RoutePlanLiveRecipient, len(planned))
+	plannedByID := make(map[string][]RoutePlanLiveRecipient, len(planned))
 	for _, recipient := range normalizeRoutePlanLiveRecipients(planned) {
-		plannedByID[recipient.RecipientID] = recipient
+		plannedByID[recipient.RecipientID] = append(plannedByID[recipient.RecipientID], recipient)
 	}
 	eb.mu.RLock()
 	defer eb.mu.RUnlock()
@@ -858,28 +854,44 @@ func (eb *EventBus) snapshotRoutePlanRecipientChans(agentIDs []string, planned [
 		if id == "" {
 			continue
 		}
-		if plannedRecipient, ok := plannedByID[id]; ok && plannedRecipient.liveAuthority == liveRecipientAuthorityAgentRoute {
-			route := plannedRecipient.agentRoute
-			if route == nil {
-				continue
+		if plannedRecipients := plannedByID[id]; len(plannedRecipients) > 0 {
+			plannedInternal := false
+			for _, plannedRecipient := range plannedRecipients {
+				if plannedRecipient.SubscriberType != routePlanSubscriberAgent {
+					plannedInternal = true
+					continue
+				}
+				route := plannedRecipient.agentRoute
+				if plannedRecipient.liveAuthority != liveRecipientAuthorityAgentRoute {
+					route = eb.agentRouteHandles[plannedRecipient.AgentIdentity]
+				}
+				if route == nil {
+					continue
+				}
+				out = append(out, agentRecipient{
+					identity: plannedRecipient.AgentIdentity,
+					kind:     inMemorySubscriberAgent,
+					route:    route,
+				})
 			}
-			out = append(out, agentRecipient{agentID: id, kind: inMemorySubscriberAgent, route: route})
+			if plannedInternal {
+				if internal := eb.internalHandles[id]; internal != nil {
+					out = append(out, agentRecipient{
+						internalID: id,
+						kind:       inMemorySubscriberInternal,
+						internal:   internal,
+					})
+				}
+			}
 			continue
 		}
-		if _, ok := eb.agentChans[id]; !ok {
-			continue
+		if internal := eb.internalHandles[id]; internal != nil {
+			out = append(out, agentRecipient{
+				internalID: id,
+				kind:       inMemorySubscriberInternal,
+				internal:   internal,
+			})
 		}
-		kind := eb.subscriptionKinds[id]
-		if kind == "" {
-			kind = inMemorySubscriberAgent
-		}
-		recipient := agentRecipient{
-			agentID: id, kind: kind, route: eb.agentRouteHandles[id], internal: eb.internalHandles[id],
-		}
-		if recipient.route == nil && recipient.internal == nil {
-			continue
-		}
-		out = append(out, recipient)
 	}
 	return out
 }
@@ -892,20 +904,21 @@ func (eb *EventBus) resolveSubscribedRecipientsForPlanning(eventType string) []d
 	eb.mu.RLock()
 	defer eb.mu.RUnlock()
 	recipients := make([]deliveryRecipientCandidate, 0, len(eb.subscriptions))
-	for agentID, pats := range eb.subscriptions {
+	for key, pats := range eb.subscriptions {
 		for _, pat := range pats {
 			if routeMatches(string(pat), eventType) {
 				authority := liveRecipientAuthorityIdentity
 				var route *agentRouteHandle
-				if eb.subscriptionKinds[agentID] == inMemorySubscriberAgent {
-					route = eb.agentRouteHandles[agentID]
+				if key.kind == inMemorySubscriberAgent {
+					route = eb.agentRouteHandles[key.agent]
 					if route != nil {
 						authority = liveRecipientAuthorityAgentRoute
 					}
 				}
 				recipients = append(recipients, deliveryRecipientCandidate{
-					ID:                agentID,
-					PersistAsDelivery: eb.subscriptionKinds[agentID] != inMemorySubscriberInternal,
+					ID:                key.subscriberID(),
+					AgentIdentity:     key.agent,
+					PersistAsDelivery: key.kind == inMemorySubscriberAgent,
 					LiveAuthority:     authority,
 					AgentRoute:        route,
 				})
@@ -927,8 +940,8 @@ func (eb *EventBus) resolveInternalRecipientsForRoutedNodePlanning(evt events.Ev
 	eb.mu.RLock()
 	defer eb.mu.RUnlock()
 	recipients := make([]deliveryRecipientCandidate, 0, len(eb.subscriptions))
-	for subscriberID, pats := range eb.subscriptions {
-		if eb.subscriptionKinds[subscriberID] != inMemorySubscriberInternal {
+	for key, pats := range eb.subscriptions {
+		if key.kind != inMemorySubscriberInternal {
 			continue
 		}
 		for _, pat := range pats {
@@ -941,7 +954,7 @@ func (eb *EventBus) resolveInternalRecipientsForRoutedNodePlanning(evt events.Ev
 			}
 			if matched {
 				recipients = append(recipients, deliveryRecipientCandidate{
-					ID:                subscriberID,
+					ID:                key.internalID,
 					PersistAsDelivery: false,
 				})
 				break

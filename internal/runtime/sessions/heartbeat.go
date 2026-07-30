@@ -65,7 +65,7 @@ func StartLeaseHeartbeatWithErrorHandler(ctx context.Context, sessions Registry,
 					if onError != nil {
 						onError(err)
 					} else {
-						log.Printf("agent memory lease heartbeat failed: agent=%s run=%s flow_instance=%s err=%v", identity.AgentID, identity.RunID, identity.FlowInstance, err)
+						log.Printf("agent memory lease heartbeat failed: agent=%s run=%s flow_instance=%s err=%v", identity.AgentID(), identity.RunID, identity.FlowInstance(), err)
 					}
 					continue
 				}

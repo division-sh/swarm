@@ -220,7 +220,9 @@ func newMailboxWriteSupportedSurfaceHandler(
 		BundleSourceFact:    fact,
 		TestLifecycleProbe:  probe,
 	})
-	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: "workflow-runtime"})
+	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{
+		Identity: runtimebustest.Identity(t, "workflow-runtime", ""),
+	})
 	workflowDeliveries := runtimebustest.Subscribe(t, bus, "workflow-runtime", events.EventType("thing.created"))
 	workerOwner := worklifetime.NewProcess()
 	workerLease, err := workerOwner.Begin(context.Background())

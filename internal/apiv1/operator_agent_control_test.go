@@ -12,6 +12,7 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -30,9 +31,10 @@ func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Now:          func() time.Time { return time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC) },
-			Idempotency:  sqliteStore,
-			AgentControl: controller,
+			Now:                func() time.Time { return time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC) },
+			Idempotency:        sqliteStore,
+			AgentConversations: &fakeAgentConversationReadStore{},
+			AgentControl:       controller,
 		}),
 	})
 
@@ -114,7 +116,8 @@ func TestOperatorAgentControlHandlersTypedResourceErrors(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Idempotency: sqliteStore,
+			Idempotency:        sqliteStore,
+			AgentConversations: &fakeAgentConversationReadStore{},
 			AgentControl: &fakeAgentControlController{
 				errs: map[string]error{
 					"agent.send_directive": &runtimeagentcontrol.StateError{
@@ -161,6 +164,7 @@ func TestOperatorAgentDirectiveFailureUsesCanonicalNestedEnvelope(t *testing.T) 
 	failure := runtimeagentcontrol.DirectiveExecutionLeaseExpiredFailure()
 	operation := runtimeagentcontrol.DirectiveOperation{
 		OperationID:      "00000000-0000-0000-0000-000000000801",
+		AgentIdentity:    agentidentitytest.Declared(t, "agent-1", "test-bundle", "research", "inst-1", "research/inst-1"),
 		DirectiveEventID: "00000000-0000-0000-0000-000000000802",
 		ResolvedRunID:    "00000000-0000-0000-0000-000000000803",
 		State:            runtimeagentcontrol.DirectiveOperationIndeterminate,
@@ -169,7 +173,8 @@ func TestOperatorAgentDirectiveFailureUsesCanonicalNestedEnvelope(t *testing.T) 
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Idempotency: sqliteStore,
+			Idempotency:        sqliteStore,
+			AgentConversations: &fakeAgentConversationReadStore{},
 			AgentControl: &fakeAgentControlController{errs: map[string]error{
 				"agent.send_directive": &runtimeagentcontrol.DirectiveOperationError{
 					Err:       runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate,
@@ -217,7 +222,8 @@ func TestOperatorAgentSendDirectiveRunTargetErrors(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Idempotency: sqliteStore,
+			Idempotency:        sqliteStore,
+			AgentConversations: &fakeAgentConversationReadStore{},
 			AgentControl: &fakeAgentControlController{
 				errs: map[string]error{
 					"missing": &runtimeagentcontrol.StateError{
@@ -291,8 +297,9 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Idempotency:  pg,
-			AgentControl: manager,
+			Idempotency:        pg,
+			AgentConversations: pg,
+			AgentControl:       manager,
 		}),
 	})
 
@@ -352,8 +359,9 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeBundleSource(t *testing.T
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Idempotency:  pg,
-			AgentControl: manager,
+			Idempotency:        pg,
+			AgentConversations: pg,
+			AgentControl:       manager,
 		}),
 	})
 
@@ -384,7 +392,8 @@ func TestOperatorAgentControlHandlersRestrictAgentNotRunningToSendDirective(t *t
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Idempotency: sqliteStore,
+			Idempotency:        sqliteStore,
+			AgentConversations: &fakeAgentConversationReadStore{},
 			AgentControl: &fakeAgentControlController{
 				errs: map[string]error{
 					"agent.restart": &runtimeagentcontrol.StateError{

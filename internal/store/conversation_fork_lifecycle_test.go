@@ -589,32 +589,38 @@ func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conver
 	}
 	ctx := testAuthorActivityContext()
 	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: source.runID, StartedAt: base.Add(-3 * time.Minute), BundleHash: source.bundleHash})
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source, runtime_descriptor)
-		VALUES ($1, $2, 'researcher', 'cheap', TRUE, 'authored', '{"type":"researcher","execution_mode":"live"}'::jsonb)
-	`, source.agentID, conversationForkSourceFlowInstance); err != nil {
-		t.Fatalf("seed agent: %v", err)
+	identity := testAgentIdentity(t, source.agentID, conversationForkSourceFlowInstance)
+	fields, err := identity.StorageFields()
+	if err != nil {
+		t.Fatalf("conversation fork source identity: %v", err)
 	}
+	seedTestAgentRow(t, ctx, db, true, identity, "active")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source,
 			status, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, TRUE, 'authored', 'active', $5, $5)
-	`, source.sessionID, source.runID, source.agentID, conversationForkSourceFlowInstance, base.Add(-3*time.Minute)); err != nil {
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', 'active', $10, $10)
+	`, source.sessionID, source.runID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, base.Add(-3*time.Minute)); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
-	capability1 := seedManagedAgentTurnCapabilitySurface(t, admitTestPostgresStore(t, db), source.runID, source.agentID, source.sessionID, source.turn1ID, "session", "global")
-	capability2 := seedManagedAgentTurnCapabilitySurface(t, admitTestPostgresStore(t, db), source.runID, source.agentID, source.sessionID, source.turn2ID, "session", "global")
+	capability1 := seedManagedAgentTurnCapabilitySurface(t, admitTestPostgresStore(t, db), source.runID, identity, source.sessionID, source.turn1ID, "session", "global")
+	capability2 := seedManagedAgentTurnCapabilitySurface(t, admitTestPostgresStore(t, db), source.runID, identity, source.sessionID, source.turn2ID, "session", "global")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source,
+			turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, session_id, flow_instance, memory_enabled, memory_source,
 			trigger_event_id, trigger_event_type, capability_surface_id, parse_ok, execution_mode, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, $3, $4::uuid, $5, TRUE, 'authored', $6::uuid, 'task.ready', $7::uuid, true, 'live', $8),
-			($9::uuid, $2::uuid, $3, $4::uuid, $5, TRUE, 'authored', $10::uuid, 'task.done', $11::uuid, true, 'live', $12)
-	`, source.turn1ID, source.runID, source.agentID, source.sessionID, conversationForkSourceFlowInstance, source.event1ID, capability1, source.turn1At, source.turn2ID, source.event2ID, capability2, source.turn2At); err != nil {
+			($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::uuid, $10, TRUE, 'authored', $11::uuid, 'task.ready', $12::uuid, true, 'live', $13),
+			($14::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::uuid, $10, TRUE, 'authored', $15::uuid, 'task.done', $16::uuid, true, 'live', $17)
+	`, source.turn1ID, source.runID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, source.sessionID, fields.FlowInstancePath,
+		source.event1ID, capability1, source.turn1At, source.turn2ID, source.event2ID, capability2, source.turn2At); err != nil {
 		t.Fatalf("seed turns: %v", err)
 	}
 	return source

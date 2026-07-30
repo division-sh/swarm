@@ -111,11 +111,6 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1783,
 			Reason:         "workspace lifecycle construction receives the selected SQL database as process infrastructure",
 		},
-		"internal/dashboard/server/agents_sql.go": {
-			Classification: rawSQLDashboardDigestReadBoundary,
-			Issue:          1783,
-			Reason:         "dashboard agent reader is an explicit derived SQL read-model exception pending selected read-owner migration",
-		},
 		"internal/dashboard/server/conversations_sql.go": {
 			Classification: rawSQLDashboardDigestReadBoundary,
 			Issue:          1783,

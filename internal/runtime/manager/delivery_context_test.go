@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -48,7 +49,8 @@ func TestAgentDeliveryExecutionContextPreservesDeliveryTreeAndGenerationAuthorit
 	if err != nil {
 		t.Fatalf("new event delivery: %v", err)
 	}
-	token := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-1", Generation: 3}
+	identity := runtimeagentidentitytest.RootRuntime(t, "agent-1", "manager-delivery-context-test")
+	token := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, Identity: identity, AgentID: identity.AgentID(), Generation: 3}
 	loopCtx := runtimeeffects.WithLifecycleToken(context.Background(), token)
 	controller := runtimeeffects.NewController(deliveryContextEffectStore{})
 	loopCtx = runtimeeffects.WithController(loopCtx, controller)

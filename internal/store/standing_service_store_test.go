@@ -149,7 +149,9 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 		eventID, events.EventType("standing.work"), "test", "", json.RawMessage(`{}`), 0,
 		created.RunID, "", events.EventEnvelope{}, time.Now().UTC(),
 	)
-	workRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: agentID}
+	identity := testAgentIdentity(t, agentID, "standing/ingress")
+	fields := testAgentIdentityStorageFields(t, identity)
+	workRoute := testAgentDeliveryRoute(t, agentID, "standing/ingress")
 	if err := commitSemanticEventFixtureWithRoutes(fixtureCtx, store, workEvent, []events.DeliveryRoute{workRoute}); err != nil {
 		t.Fatal(err)
 	}
@@ -159,10 +161,15 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, memory_enabled, memory_source) VALUES (?, 'worker', 'test', 1, 'authored')`, agentID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, conversation, runtime_state, status) VALUES (?, ?, ?, 'standing/ingress', 1, 'authored', '[]', '{}', 'active')`, sessionID, created.RunID, agentID); err != nil {
+	seedTestAgentRow(t, ctx, store.DB, false, identity, "active")
+	if _, err := store.DB.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source, conversation, runtime_state, status
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', '[]', '{}', 'active')
+	`, sessionID, created.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
 		t.Fatal(err)
 	}
 	claimed, err := store.ClaimAgentDelivery(fixtureCtx, workEvent, workRoute)
@@ -172,7 +179,7 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	if _, err := store.BindAgentSession(fixtureCtx, claimed.Claim, sessionID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, status) VALUES (?, ?, ?, 'timer.fire', ?, 'active')`, timerID, aggregateWorkflowTimerTaskID(timerID), created.RunID, time.Now().UTC().Add(time.Hour)); err != nil {
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, owner_kind, status) VALUES (?, ?, ?, 'timer.fire', ?, 'system', 'active')`, timerID, aggregateWorkflowTimerTaskID(timerID), created.RunID, time.Now().UTC().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -415,20 +422,27 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 			t.Fatal(err)
 		}
 	}
-	workRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: agentID}
+	identity := testAgentIdentity(t, agentID, "standing/ingress")
+	fields := testAgentIdentityStorageFields(t, identity)
+	workRoute := testAgentDeliveryRoute(t, agentID, "standing/ingress")
 	if err := commitSemanticEventFixtureWithRoutes(fixtureCtx, selected, workEvent, []events.DeliveryRoute{workRoute}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, memory_enabled, memory_source) VALUES ($1, 'worker', 'test', TRUE, 'authored')`, agentID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, conversation, runtime_state, status) VALUES ($1::uuid, $2::uuid, $3, 'standing/ingress', TRUE, 'authored', '[]', '{}', 'active')`, uuid.NewString(), created[0].RunID, agentID); err != nil {
+	seedTestAgentRow(t, ctx, db, true, identity, "active")
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source, conversation, runtime_state, status
+		) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', '[]', '{}', 'active')
+	`, uuid.NewString(), created[0].RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := selected.ClaimAgentDelivery(fixtureCtx, workEvent, workRoute); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, status) VALUES ($1::uuid, $2, $3::uuid, 'timer.fire', $4, 'active')`, timerID, aggregateWorkflowTimerTaskID(timerID), created[0].RunID, time.Now().UTC().Add(time.Hour)); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, owner_kind, status) VALUES ($1::uuid, $2, $3::uuid, 'timer.fire', $4, 'system', 'active')`, timerID, aggregateWorkflowTimerTaskID(timerID), created[0].RunID, time.Now().UTC().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	suspended, err := workflowStore.SuspendStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID, Actor: "tester", Reason: "maintenance"})
