@@ -19,16 +19,18 @@ import (
 )
 
 const (
-	fakeDockerHelperEnv      = "RELEASE_E2E_DOCKER_HELPER"
-	fakeDockerRootEnv        = "RELEASE_E2E_DOCKER_ROOT"
-	releaseE2EOAuthToken     = "release-e2e-oauth-value"
-	releaseE2ERawMCPURL      = "http://host.docker.internal:8082/mcp"
-	releaseE2EHostMCPURL     = "http://127.0.0.1:8082/mcp"
-	releaseE2EWorkspaceImage = "swarm-workspace:latest"
-	releaseE2ENetwork        = "mas_default"
-	releaseE2EAgentContainer = "swarm-agent-release-worker"
-	releaseE2EAgentWorkdir   = "/workspace"
-	releaseE2EOrphanKill     = `if command -v pkill >/dev/null 2>&1; then
+	fakeDockerHelperEnv        = "RELEASE_E2E_DOCKER_HELPER"
+	fakeDockerRootEnv          = "RELEASE_E2E_DOCKER_ROOT"
+	releaseE2EOAuthToken       = "release-e2e-oauth-value"
+	releaseE2ERawMCPURL        = "http://host.docker.internal:8082/mcp"
+	releaseE2EHostMCPURL       = "http://127.0.0.1:8082/mcp"
+	releaseE2EWorkspaceImage   = "swarm-workspace:latest"
+	releaseE2ENetwork          = "mas_default"
+	releaseE2EAgentWorkdir     = "/workspace"
+	releaseE2EAgentFingerprint = "ef1581e2042b4a9932ec6994425466b32b6e05c225780b02d46be87a535524f7"
+	releaseE2EAgentContainer   = "swarm-agent-" + releaseE2EAgentFingerprint
+	releaseE2EAgentVolume      = "workspaces_agent_" + releaseE2EAgentFingerprint
+	releaseE2EOrphanKill       = `if command -v pkill >/dev/null 2>&1; then
   pkill -KILL -f '(^|/)(claude|codex)( |$)' >/dev/null 2>&1 || true
 else
   for p in /proc/[0-9]*; do
@@ -362,7 +364,7 @@ func validateReleaseDockerCreate(root string, args []string) error {
 			resetEligible: "true",
 			source:        "workspace.ResolveWorkspace",
 			scope:         "per-agent",
-			requiredMount: map[string]string{releaseE2EAgentWorkdir: "workspaces_agent_release-worker"},
+			requiredMount: map[string]string{releaseE2EAgentWorkdir: releaseE2EAgentVolume},
 		},
 	}[create.name]
 	if create.workdir != expected.workdir || create.privileged != expected.privileged {
@@ -514,9 +516,20 @@ func validateReleaseDockerLabels(create releaseDockerCreate, kind, resetEligible
 		}
 	}
 	if create.name == releaseE2EAgentContainer {
-		allowed["dev.swarm.agent_id"] = true
-		if create.labels["dev.swarm.agent_id"] != "release-worker" {
-			return fmt.Errorf("create agent identity is incomplete")
+		wantIdentityLabels := map[string]string{
+			"dev.swarm.agent_id":                 "release-worker",
+			"dev.swarm.agent_name_owner":         "claude-cli-release-lifecycle://worker/release-worker",
+			"dev.swarm.agent_name_source":        "declared",
+			"dev.swarm.agent_route_presence":     "present",
+			"dev.swarm.agent_flow_scope_key":     "worker",
+			"dev.swarm.agent_flow_instance_id":   "worker",
+			"dev.swarm.agent_flow_instance_path": "worker",
+		}
+		for key, want := range wantIdentityLabels {
+			allowed[key] = true
+			if create.labels[key] != want {
+				return fmt.Errorf("create agent identity label %s = %q, want %q", key, create.labels[key], want)
+			}
 		}
 		if runID := create.labels["dev.swarm.run_id"]; runID != "" {
 			allowed["dev.swarm.run_id"] = true
@@ -538,10 +551,10 @@ func validateReleaseDockerLabels(create releaseDockerCreate, kind, resetEligible
 
 func releaseE2EContainerName(name string) bool {
 	switch name {
-	case "swarm-scaffold", "swarm-system", releaseE2EAgentContainer:
+	case "swarm-scaffold", "swarm-system":
 		return true
 	default:
-		return false
+		return name == releaseE2EAgentContainer
 	}
 }
 
