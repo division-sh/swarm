@@ -56,6 +56,7 @@ type fakeDockerRecord struct {
 	ToolName  string   `json:"tool_name,omitempty"`
 	RawMCPURL string   `json:"raw_mcp_url,omitempty"`
 	MCPURL    string   `json:"mcp_url,omitempty"`
+	Reason    string   `json:"reason,omitempty"`
 }
 
 type fakeClaudeInvocation struct {
@@ -724,7 +725,15 @@ target:
 	if len(invocation.commandArgs) == 0 || invocation.commandArgs[0] != "claude" {
 		return invocation, fmt.Errorf("Docker exec command is not the configured Claude CLI")
 	}
-	if err := validateReleaseClaudeArgs(invocation.commandArgs[1:]); err != nil {
+	prompt := strings.TrimSpace(string(input))
+	if prompt == "" {
+		return invocation, fmt.Errorf("Claude invocation received empty stdin")
+	}
+	invocation.startup = prompt == "Startup validation probe. Do not call any tools. Reply with the exact text ok."
+	if !invocation.startup && strings.Contains(prompt, "Startup validation probe") {
+		return invocation, fmt.Errorf("startup probe prompt is not exact")
+	}
+	if err := validateReleaseClaudeArgs(invocation.commandArgs[1:], invocation.startup); err != nil {
 		return invocation, err
 	}
 	invocation.sessionID = dockerOptionValue(invocation.commandArgs, "--session-id")
@@ -736,18 +745,10 @@ target:
 	invocation.hostMCPURL = hostMCPURL
 	invocation.headers = headers
 
-	prompt := strings.TrimSpace(string(input))
-	if prompt == "" {
-		return invocation, fmt.Errorf("Claude invocation received empty stdin")
-	}
-	invocation.startup = prompt == "Startup validation probe. Do not call any tools. Reply with the exact text ok."
-	if !invocation.startup && strings.Contains(prompt, "Startup validation probe") {
-		return invocation, fmt.Errorf("startup probe prompt is not exact")
-	}
 	return invocation, nil
 }
 
-func validateReleaseClaudeArgs(args []string) error {
+func validateReleaseClaudeArgs(args []string, startup bool) error {
 	valueFlags := map[string]string{}
 	boolFlags := map[string]bool{}
 	valueNames := map[string]bool{
@@ -801,7 +802,10 @@ func validateReleaseClaudeArgs(args []string) error {
 	if tools := splitAllowedTools(valueFlags["--tools"]); !equalStrings(tools, releaseE2EBuiltinTools()) {
 		return fmt.Errorf("Claude --tools = %q, want exact builtin surface", valueFlags["--tools"])
 	}
-	wantTools := releaseE2EAllowedTools()
+	wantTools := releaseE2ELiveAllowedTools()
+	if startup {
+		wantTools = releaseE2EStartupAllowedTools()
+	}
 	if tools := splitAllowedTools(valueFlags["--allowedTools"]); !equalStrings(tools, wantTools) {
 		return fmt.Errorf("Claude --allowedTools = %q, want fixture tool surface", valueFlags["--allowedTools"])
 	}
@@ -895,37 +899,31 @@ func runFakeClaudeTurn(root string, invocation fakeClaudeInvocation) int {
 		"capabilities":    map[string]any{},
 		"clientInfo":      map[string]any{"name": "release-e2e-claude", "version": "1.0.0"},
 	}, "release-e2e-initialize", true); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 97
+		return fakeDockerUnexpected(root, invocation.commandArgs, err.Error())
 	}
 	if _, err := fakeMCPCall(client, invocation.hostMCPURL, invocation.headers, "notifications/initialized", map[string]any{}, nil, false); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 97
+		return fakeDockerUnexpected(root, invocation.commandArgs, err.Error())
 	}
 	listed, err := fakeMCPCall(client, invocation.hostMCPURL, invocation.headers, "tools/list", map[string]any{}, "release-e2e-list", true)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 97
+		return fakeDockerUnexpected(root, invocation.commandArgs, err.Error())
 	}
-	toolName := firstEmitTool(listed)
-	if toolName == "" {
-		fmt.Fprintf(os.Stderr, "MCP tools/list has no authored emit tool: %#v\n", listed)
-		return 97
+	toolName, err := exactReleaseFlowEmitTool(listed)
+	if err != nil {
+		return fakeDockerUnexpected(root, invocation.commandArgs, err.Error())
 	}
 
 	writeClaudeInit(invocation.sessionID, splitAllowedTools(dockerOptionValue(invocation.commandArgs, "--allowedTools")))
 	result, err := fakeMCPCall(client, invocation.hostMCPURL, invocation.headers, "tools/call", map[string]any{
 		"name":      toolName,
-		"arguments": map[string]any{"result": "release-e2e-complete"},
+		"arguments": map[string]any{"flow_result": "release-e2e-flow-complete"},
 		"_meta":     map[string]any{"claudecode/toolUseId": "toolu-release-e2e"},
 	}, "release-e2e-call", true)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 97
+		return fakeDockerUnexpected(root, invocation.commandArgs, err.Error())
 	}
 	if isError, _ := result["isError"].(bool); isError {
-		fmt.Fprintf(os.Stderr, "MCP emit returned an error result: %#v\n", result)
-		return 97
+		return fakeDockerUnexpected(root, invocation.commandArgs, fmt.Sprintf("MCP emit returned an error result: %#v", result))
 	}
 	if !recordUniqueFakeDocker(root, fakeDockerRecord{
 		Class:     "mcp_emit",
@@ -939,7 +937,7 @@ func runFakeClaudeTurn(root string, invocation fakeClaudeInvocation) int {
 		"type":       "result",
 		"subtype":    "success",
 		"session_id": invocation.sessionID,
-		"result":     "release-e2e-complete",
+		"result":     "release-e2e-flow-complete",
 	})
 	return 0
 }
@@ -1003,16 +1001,55 @@ func fakeMCPCall(client *http.Client, endpoint string, headers map[string]string
 	return rpc.Result, nil
 }
 
-func firstEmitTool(result map[string]any) string {
+func exactReleaseFlowEmitTool(result map[string]any) (string, error) {
 	tools, _ := result["tools"].([]any)
+	wantNames := []string{"emit_agent_completed", "read_worker_state", "read_worker_state_requests"}
+	if names := listedToolNames(tools); !equalStrings(names, wantNames) {
+		return "", fmt.Errorf("MCP tools/list names = %#v, want exact contextual surface %#v", names, wantNames)
+	}
 	for _, raw := range tools {
 		tool, _ := raw.(map[string]any)
 		name, _ := tool["name"].(string)
-		if strings.HasPrefix(name, "emit_") {
-			return name
+		if name != "emit_agent_completed" {
+			continue
 		}
+		description, _ := tool["description"].(string)
+		if description != "Emit worker/agent.completed event\n\nUsage:\n"+releaseE2EEmitToolUsage {
+			return "", fmt.Errorf("MCP flow emit description = %q, want exact actor/flow-scoped definition", description)
+		}
+		wantSchema := map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"flow_result": map[string]any{"type": "string"},
+			},
+			"required":             []any{"flow_result"},
+			"additionalProperties": false,
+		}
+		if !jsonValuesEqual(tool["inputSchema"], wantSchema) {
+			return "", fmt.Errorf("MCP flow emit schema = %#v, want %#v", tool["inputSchema"], wantSchema)
+		}
+		return name, nil
 	}
-	return ""
+	return "", fmt.Errorf("MCP tools/list has no exact flow-scoped emit_agent_completed tool: %#v", listedToolNames(tools))
+}
+
+const releaseE2EEmitToolUsage = "Call this emit_* tool only to publish the named workflow event. Provide concrete JSON payload values matching the input schema. Do not include envelope-owned fields unless the schema declares them. Arguments are concrete payload values, not workflow expressions."
+
+func jsonValuesEqual(left, right any) bool {
+	leftJSON, leftErr := json.Marshal(left)
+	rightJSON, rightErr := json.Marshal(right)
+	return leftErr == nil && rightErr == nil && bytes.Equal(leftJSON, rightJSON)
+}
+
+func listedToolNames(tools []any) []string {
+	names := make([]string, 0, len(tools))
+	for _, raw := range tools {
+		tool, _ := raw.(map[string]any)
+		name, _ := tool["name"].(string)
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func hostReachableMCPURL(raw string) (string, error) {
@@ -1092,7 +1129,7 @@ func redactDockerArgs(args []string) []string {
 }
 
 func fakeDockerUnexpected(root string, args []string, reason string) int {
-	recordFakeDocker(root, fakeDockerRecord{Class: "unexpected", Args: redactDockerArgs(args)})
+	recordFakeDocker(root, fakeDockerRecord{Class: "unexpected", Args: redactDockerArgs(args), Reason: reason})
 	fmt.Fprintf(os.Stderr, "release E2E fake Docker rejected command (%s): %s\n", reason, strings.Join(redactDockerArgs(args), " "))
 	return 97
 }

@@ -1,7 +1,1 @@
-completion:
-  id: completion
-  execution_type: system_node
-  subscribes_to: [work.completed]
-  event_handlers:
-    work.completed:
-      advances_to: done
+{}

@@ -83,13 +83,18 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 		"run", "start",
 		"--backend", "claude_cli",
 		"--api-port", fmt.Sprint(apiPort),
-		"--event", "work.requested",
+		"--event", "worker/task.assigned",
 		"--payload", payloadPath,
 	)
 	if run.err != nil {
 		t.Fatalf("release foreground run failed: %v\n%s\nDocker calls:\n%s", run.err, run.output, fakeDockerLogText(t, fakeRoot))
 	}
-	for _, want := range []string{"run started:", "run terminal:", "status=completed"} {
+	for _, want := range []string{
+		"run started:",
+		"trace ",
+		"run terminal:",
+		"status=completed",
+	} {
 		if !strings.Contains(run.output, want) {
 			t.Fatalf("release foreground output missing %q:\n%s", want, run.output)
 		}
@@ -174,7 +179,7 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 			if selected := splitAllowedTools(dockerOptionValue(record.Args, "--tools")); !equalStrings(selected, releaseE2EBuiltinTools()) {
 				return fmt.Errorf("startup selected builtins = %q, want exact fixture builtin surface", selected)
 			}
-			wantTools := releaseE2EAllowedTools()
+			wantTools := releaseE2EStartupAllowedTools()
 			if allowed := splitAllowedTools(dockerOptionValue(record.Args, "--allowedTools")); !equalStrings(allowed, wantTools) {
 				return fmt.Errorf("startup accepted tools = %q, want exact fixture tool surface", allowed)
 			}
@@ -186,7 +191,7 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 			if selected := splitAllowedTools(dockerOptionValue(record.Args, "--tools")); !equalStrings(selected, releaseE2EBuiltinTools()) {
 				return fmt.Errorf("live selected builtins = %q, want exact fixture builtin surface", selected)
 			}
-			if allowed := splitAllowedTools(dockerOptionValue(record.Args, "--allowedTools")); !equalStrings(allowed, releaseE2EAllowedTools()) {
+			if allowed := splitAllowedTools(dockerOptionValue(record.Args, "--allowedTools")); !equalStrings(allowed, releaseE2ELiveAllowedTools()) {
 				return fmt.Errorf("live accepted tools = %q, want exact fixture tool surface", allowed)
 			}
 			if record.RawMCPURL != releaseE2ERawMCPURL || record.MCPURL != releaseE2EHostMCPURL {
@@ -194,8 +199,8 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 			}
 		case "mcp_emit":
 			emitIndex = index
-			if record.ToolName != "emit_work_completed" {
-				return fmt.Errorf("MCP emit tool = %q, want emit_work_completed", record.ToolName)
+			if record.ToolName != "emit_agent_completed" {
+				return fmt.Errorf("MCP emit tool = %q, want emit_agent_completed", record.ToolName)
 			}
 			if record.RawMCPURL != releaseE2ERawMCPURL || record.MCPURL != releaseE2EHostMCPURL {
 				return fmt.Errorf("MCP emit endpoints = %q/%q, want raw container and translated host defaults", record.RawMCPURL, record.MCPURL)
@@ -229,8 +234,19 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 	return nil
 }
 
-func releaseE2EAllowedTools() []string {
-	return []string{"ExitPlanMode", "WebFetch", "WebSearch", "mcp__runtime-tools__emit_work_completed"}
+func releaseE2EStartupAllowedTools() []string {
+	return []string{"ExitPlanMode", "WebFetch", "WebSearch", "mcp__runtime-tools__emit_agent_completed"}
+}
+
+func releaseE2ELiveAllowedTools() []string {
+	return []string{
+		"ExitPlanMode",
+		"WebFetch",
+		"WebSearch",
+		"mcp__runtime-tools__emit_agent_completed",
+		"mcp__runtime-tools__read_worker_state",
+		"mcp__runtime-tools__read_worker_state_requests",
+	}
 }
 
 func releaseE2EBuiltinTools() []string {

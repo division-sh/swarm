@@ -1,0 +1,23 @@
+intake:
+  id: intake
+  execution_type: system_node
+  subscribes_to: [task.assigned]
+  produces: [agent.requested]
+  event_handlers:
+    task.assigned:
+      create_entity: true
+      advances_to: active
+      data_accumulation:
+        writes:
+          - source_field: request
+            target_field: requests
+      emit:
+        event: agent.requested
+
+worker-completion:
+  id: worker-completion
+  execution_type: system_node
+  subscribes_to: [agent.completed]
+  event_handlers:
+    agent.completed:
+      advances_to: done

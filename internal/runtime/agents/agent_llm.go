@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
-	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -22,7 +21,6 @@ import (
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/sharedjson"
-	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 type LLMAgent struct {
@@ -33,15 +31,11 @@ type LLMAgent struct {
 	promptCache    map[string]string
 	promptResolver runtimecontracts.PromptResolver
 	toolExecutor   actorScopedToolExecutor
-	authority      runtimeauthority.Provider
-	emitRegistry   *runtimetools.EmitRegistry
 	mu             sync.Mutex
 }
 
 type LLMAgentOptions struct {
-	PromptResolver    runtimecontracts.PromptResolver
-	AuthorityProvider runtimeauthority.Provider
-	EmitRegistry      *runtimetools.EmitRegistry
+	PromptResolver runtimecontracts.PromptResolver
 }
 
 type actorScopedToolExecutor interface {
@@ -53,19 +47,7 @@ type contextAwareActorScopedToolExecutor interface {
 	ToolDefinitionsForActorInContext(context.Context, models.AgentConfig) []llm.ToolDefinition
 }
 
-type roleScopedEntityToolCatalog interface {
-	RoleScopedEntityToolNamesForActor(models.AgentConfig) map[string]struct{}
-}
-
-func NewLLMAgentWithOptions(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition, opts LLMAgentOptions) (*LLMAgent, error) {
-	return newLLMAgent(cfg, modelRuntime, toolExecutor, tools, false, opts)
-}
-
-func NewLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition) (*LLMAgent, error) {
-	return newLLMAgent(cfg, modelRuntime, toolExecutor, tools, false, LLMAgentOptions{})
-}
-
-func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition, precomposed bool, opts LLMAgentOptions) (*LLMAgent, error) {
+func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition, opts LLMAgentOptions) (*LLMAgent, error) {
 	subs := make([]events.EventType, 0, len(cfg.Subscriptions))
 	for _, s := range cfg.Subscriptions {
 		if strings.TrimSpace(s) == "" {
@@ -76,12 +58,6 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 
 	systemPrompt := strings.TrimSpace(extractSystemPrompt(cfg))
 	systemPrompt = appendPromptPostamble(systemPrompt)
-	authority := runtimeauthority.ProviderOrNoop(opts.AuthorityProvider)
-	emitRegistry := opts.EmitRegistry
-	if emitRegistry == nil {
-		emitRegistry = runtimetools.NewEmitRegistry(nil, authority)
-	}
-	tools = composeConversationTools(cfg, modelRuntime, toolExecutor, tools, precomposed, authority, emitRegistry)
 
 	maxTurns := 100
 	if cfg.MaxTurnsPerTask > 0 {
@@ -110,25 +86,10 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 		promptCache:    promptCache,
 		promptResolver: opts.PromptResolver,
 		toolExecutor:   toolExecutor,
-		authority:      authority,
-		emitRegistry:   emitRegistry,
 	}, nil
 }
 
-func composeConversationTools(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition, precomposed bool, authority runtimeauthority.Provider, emitRegistry *runtimetools.EmitRegistry) []llm.ToolDefinition {
-	if precomposed {
-		return tools
-	}
-	allowedToolSet, constrained := extractAllowedToolSet(cfg)
-	roleScopedToolSet := map[string]struct{}{}
-	if catalog, ok := toolExecutor.(roleScopedEntityToolCatalog); ok {
-		roleScopedToolSet = catalog.RoleScopedEntityToolNamesForActor(cfg)
-	}
-	tools = mergeTools(filterTools(tools, allowedToolSet, constrained, roleScopedToolSet), emitToolDefinitions(cfg, authority, emitRegistry))
-	return tools
-}
-
-func NewLLMAgentFactory(modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition, opts LLMAgentOptions) runtimemanager.AgentFactory {
+func NewLLMAgentFactory(modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, opts LLMAgentOptions) runtimemanager.AgentFactory {
 	return func(cfg models.AgentConfig) (runtimemanager.Agent, error) {
 		if strings.TrimSpace(extractSystemPrompt(cfg)) == "" {
 			agentID := strings.TrimSpace(cfg.ID)
@@ -140,9 +101,8 @@ func NewLLMAgentFactory(modelRuntime llm.Runtime, toolExecutor actorScopedToolEx
 			}
 			return nil, errors.New("missing required system_prompt for agent " + agentID)
 		}
-		agentTools := tools
-		agentTools = toolExecutor.ToolDefinitionsForActor(cfg)
-		return newLLMAgent(cfg, modelRuntime, toolExecutor, agentTools, true, opts)
+		agentTools := toolExecutor.ToolDefinitionsForActor(cfg)
+		return newLLMAgent(cfg, modelRuntime, toolExecutor, agentTools, opts)
 	}
 }
 
@@ -554,94 +514,6 @@ func extractSystemPrompt(cfg models.AgentConfig) string {
 	return ""
 }
 
-func extractAllowedToolSet(cfg models.AgentConfig) (map[string]struct{}, bool) {
-	allowed := make(map[string]struct{})
-	if len(cfg.Tools) == 0 {
-		return allowed, false
-	}
-	found := false
-	for _, item := range cfg.Tools {
-		name := strings.TrimSpace(item)
-		if name == "" {
-			continue
-		}
-		found = true
-		allowed[name] = struct{}{}
-	}
-	return allowed, found
-}
-
-func extractEmitEvents(cfg models.AgentConfig) []string {
-	return uniqueStrings(cfg.EmitEvents)
-}
-
-func emitToolDefinitions(cfg models.AgentConfig, authority runtimeauthority.Provider, emitRegistry *runtimetools.EmitRegistry) []llm.ToolDefinition {
-	if emitRegistry == nil {
-		emitRegistry = runtimetools.NewEmitRegistry(nil, authority)
-	}
-	if emitEvents := extractEmitEvents(cfg); len(emitEvents) > 0 {
-		return emitRegistry.GenerateEmitToolsForEvents(emitEvents, processWarnOnce)
-	}
-	return emitRegistry.GenerateEmitToolsForRole(cfg.Role, processWarnOnce)
-}
-
-func filterTools(in []llm.ToolDefinition, allowed map[string]struct{}, constrained bool, roleScoped map[string]struct{}) []llm.ToolDefinition {
-	out := make([]llm.ToolDefinition, 0, len(in))
-	for _, t := range in {
-		if runtimetools.IsLegacyEntityToolSurfaceName(t.Name) {
-			continue
-		}
-		if runtimetools.IsUniversal(t.Name) {
-			out = append(out, t)
-			continue
-		}
-		if _, ok := roleScoped[strings.TrimSpace(t.Name)]; ok {
-			out = append(out, t)
-			continue
-		}
-		if !constrained {
-			continue
-		}
-		if _, ok := allowed[t.Name]; ok {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
-func mergeTools(in []llm.ToolDefinition, extra []llm.ToolDefinition) []llm.ToolDefinition {
-	if len(extra) == 0 {
-		return in
-	}
-	if len(in) == 0 {
-		out := make([]llm.ToolDefinition, len(extra))
-		copy(out, extra)
-		return out
-	}
-	out := make([]llm.ToolDefinition, 0, len(in)+len(extra))
-	seen := make(map[string]struct{}, len(in)+len(extra))
-	for _, t := range in {
-		name := strings.TrimSpace(t.Name)
-		if name == "" {
-			continue
-		}
-		seen[name] = struct{}{}
-		out = append(out, t)
-	}
-	for _, t := range extra {
-		name := strings.TrimSpace(t.Name)
-		if name == "" {
-			continue
-		}
-		if _, ok := seen[name]; ok {
-			continue
-		}
-		seen[name] = struct{}{}
-		out = append(out, t)
-	}
-	return out
-}
-
 func formatEventForAgent(cfg models.AgentConfig, evt events.Event, _ []llm.ToolDefinition) string {
 	payload := strings.TrimSpace(string(evt.Payload()))
 	if payload == "" {
@@ -659,30 +531,6 @@ func formatEventForAgent(cfg models.AgentConfig, evt events.Event, _ []llm.ToolD
 		evt.EntityID(),
 		payload,
 	)
-}
-
-func canonicalRuntimeRole(authority runtimeauthority.Provider, role string) string {
-	return runtimeauthority.ProviderOrNoop(authority).CanonicalRole(role)
-}
-
-func uniqueStrings(in []string) []string {
-	if len(in) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(in))
-	out := make([]string, 0, len(in))
-	for _, item := range in {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		if _, ok := seen[item]; ok {
-			continue
-		}
-		seen[item] = struct{}{}
-		out = append(out, item)
-	}
-	return out
 }
 
 func transitionContextKey(primary events.Event, fallback events.Event) string {

@@ -892,7 +892,7 @@ seam_families:
       - internal/runtime/tools/executor_entity_test.go
       - internal/runtime/tools/executor_telemetry_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
-    search_dimensions: [direct_delivery_path, route_plan, publish_plan_consumers]
+    search_dimensions: [direct_delivery_path, route_plan, publish_plan_consumers, live_agent_subscription_route_authority]
     invalid_authority:
       - caller-supplied direct recipient list as subscribed route authority
       - operator replay direct path as fresh publish-time route planner

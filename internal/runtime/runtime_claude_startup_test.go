@@ -247,10 +247,6 @@ func (s *startupProbeToolExecutor) Execute(_ context.Context, name string, _ any
 	return map[string]any{"ok": true, "tool": name}, nil
 }
 
-func (s *startupProbeToolExecutor) ToolDefinitions() []llm.ToolDefinition {
-	return append([]llm.ToolDefinition(nil), s.defs...)
-}
-
 func (s *startupProbeToolExecutor) ToolDefinitionsForActor(runtimeactors.AgentConfig) []llm.ToolDefinition {
 	return append([]llm.ToolDefinition(nil), s.defs...)
 }
@@ -390,7 +386,7 @@ func startupProbeCaps() map[string]toolcapabilities.Capability {
 func setupStartupProbeTransport(t *testing.T, manager *runtimemanager.AgentManager, exec *startupProbeToolExecutor, gatewayToken string) (*runtimemcp.TurnContextRegistry, toolgateway.Binding) {
 	t.Helper()
 	turns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
-	gateway := runtimemcp.NewGateway(exec, gatewayToken, RuntimeMCPGatewayHooks(nil, nil, manager.GetAgentConfig, nil, nil, turns))
+	gateway := runtimemcp.NewGateway(exec, gatewayToken, RuntimeMCPGatewayHooks(nil, nil, manager.GetAgentConfig, nil, turns))
 	server := httptest.NewServer(gateway.Handler())
 	t.Cleanup(server.Close)
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")

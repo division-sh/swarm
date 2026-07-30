@@ -1,0 +1,3 @@
+task.assigned: {}
+task.completed:
+  fork_result: text

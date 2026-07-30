@@ -96,59 +96,6 @@ func (r *EmitRegistry) GenerateEmitToolsForRole(role string, warn func(string, s
 	)
 }
 
-func (r *EmitRegistry) GenerateEmitToolsForEvents(eventTypes []string, warn func(string, string, string, ...any)) []llm.ToolDefinition {
-	if r == nil {
-		return nil
-	}
-	allowed := UniqueNonEmpty(eventTypes)
-	if len(allowed) == 0 {
-		return nil
-	}
-	collisions := duplicateEmitToolNames(allowed)
-	tools := make([]llm.ToolDefinition, 0, len(allowed))
-	for _, eventType := range allowed {
-		eventType = strings.TrimSpace(eventType)
-		if eventType == "" {
-			continue
-		}
-		toolName := EmitToolName(eventType)
-		if collisions[toolName] > 1 {
-			if warn != nil {
-				warn(
-					"emit-tool-ambiguous-name-"+toolName,
-					"event-schema-registry",
-					"skipping emit tool generation for %q because emit tool name %q is ambiguous across configured events",
-					eventType,
-					toolName,
-				)
-			}
-			continue
-		}
-		schema, ok := emitSchemaForEventType(r.activeSchemas, eventType)
-		if !ok {
-			if warn != nil {
-				warn(
-					"emit-tool-missing-schema-"+eventType,
-					"event-schema-registry",
-					"skipping emit tool generation for %q because no explicit schema exists",
-					eventType,
-				)
-			}
-			continue
-		}
-		schema = closeGeneratedEmitSchema(schema)
-		tools = append(tools, llm.ToolDefinition{
-			Name:            toolName,
-			Description:     schema.Description,
-			Usage:           EmitToolUsage(),
-			Schema:          schema.Schema,
-			GeneratedSchema: true,
-		})
-	}
-	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
-	return tools
-}
-
 func (r *EmitRegistry) GenerateEmitToolsForActor(actor models.AgentConfig, warn func(string, string, string, ...any)) []llm.ToolDefinition {
 	if r == nil {
 		return nil

@@ -1,0 +1,9 @@
+test-agent:
+  id: test-agent
+  role: test-agent
+  model: regular
+  prompt_ref: test-agent
+  native_tools:
+    web_search: true
+  subscriptions: [task.assigned]
+  emit_events: [task.completed]

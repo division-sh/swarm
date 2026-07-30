@@ -363,7 +363,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 			return managerRef
 		},
 	}, options.ScheduleStore)
-	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, emitRegistry, mcpTurns, managerOptions.WorkOwner, func(agentID string) (runtimeactors.AgentConfig, bool) {
+	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, mcpTurns, managerOptions.WorkOwner, func(agentID string) (runtimeactors.AgentConfig, bool) {
 		if managerRef == nil {
 			return runtimeactors.AgentConfig{}, false
 		}
@@ -392,10 +392,8 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		}
 	}
 	exec.SetModelRuntime(modelRuntime)
-	factory := runtimeagents.NewLLMAgentFactory(modelRuntime, exec, exec.ToolDefinitions(), runtimeagents.LLMAgentOptions{
-		PromptResolver:    promptResolver,
-		AuthorityProvider: authority,
-		EmitRegistry:      emitRegistry,
+	factory := runtimeagents.NewLLMAgentFactory(modelRuntime, exec, runtimeagents.LLMAgentOptions{
+		PromptResolver: promptResolver,
 	})
 	return selectedContractAgentRuntimeFactory{
 		factory: factory,
@@ -419,7 +417,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	}, nil
 }
 
-func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, emitRegistry *runtimetools.EmitRegistry, mcpTurns *runtimemcp.TurnContextRegistry, owner worklifetime.Occurrence, resolveActorConfig func(string) (runtimeactors.AgentConfig, bool)) (toolgateway.Binding, func(), error) {
+func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, mcpTurns *runtimemcp.TurnContextRegistry, owner worklifetime.Occurrence, resolveActorConfig func(string) (runtimeactors.AgentConfig, bool)) (toolgateway.Binding, func(), error) {
 	if exec == nil {
 		return toolgateway.Binding{}, nil, nil
 	}
@@ -453,7 +451,7 @@ func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, emitR
 		return toolgateway.Binding{}, nil, err
 	}
 
-	gateway := runtimemcp.NewGateway(exec, binding.AuthToken(), swaruntime.RuntimeMCPGatewayHooks(nil, nil, resolveActorConfig, nil, emitRegistry, mcpTurns))
+	gateway := runtimemcp.NewGateway(exec, binding.AuthToken(), swaruntime.RuntimeMCPGatewayHooks(nil, nil, resolveActorConfig, nil, mcpTurns))
 	server := &http.Server{Handler: gateway.Handler()}
 	if owner == nil {
 		_ = ln.Close()

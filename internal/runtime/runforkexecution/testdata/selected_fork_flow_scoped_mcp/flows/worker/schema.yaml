@@ -1,0 +1,9 @@
+name: selected-fork-flow-scoped-worker
+pins:
+  inputs:
+    events:
+      - name: task_assigned
+        event: task.assigned
+        source: harness
+  outputs:
+    events: []

@@ -1,6 +1,5 @@
-work.requested:
+agent.completed:
   swarm:
     source: external
-  request: text
-work.completed:
+    consumer: external
   result: text
