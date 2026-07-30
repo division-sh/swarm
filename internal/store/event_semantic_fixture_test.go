@@ -229,10 +229,10 @@ func commitDeliveryReplayEventFixture(
 		if err := insertCommittedPipelineScopeTx(txctx, tx, forkEventID, runtimepipelineobligation.ScopeDirect, true, time.Now().UTC()); err != nil {
 			return err
 		}
-			route := events.DeliveryRoute{SubscriberType: subscriberType, SubscriberID: subscriberID}
-			if route.Normalized().SubscriberType == string(runtimedelivery.SubscriberAgent) {
-				route.AgentIdentity = mustTestAgentIdentity(subscriberID, "fixture/"+subscriberID)
-			}
+		route := events.DeliveryRoute{SubscriberType: subscriberType, SubscriberID: subscriberID}
+		if route.Normalized().SubscriberType == string(runtimedelivery.SubscriberAgent) {
+			route.AgentIdentity = mustTestAgentIdentity(subscriberID, "fixture/"+subscriberID)
+		}
 		obligation, err := runtimedelivery.NewObligation(forkEventID, forkRunID, route)
 		if err != nil {
 			return err
