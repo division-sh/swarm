@@ -89,6 +89,28 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 	}
 }
 
+func TestRunForkSelectedContractBindingUsesPersistedPostgresTimestampPrecision(t *testing.T) {
+	createdAt := time.Date(2026, time.July, 30, 1, 2, 3, 123456700, time.FixedZone("test", -4*60*60))
+	binding, err := normalizeRunForkSelectedContractBinding(RunForkSelectedContractBindingRequest{
+		ForkRunID:   uuid.NewString(),
+		SourceRunID: uuid.NewString(),
+		ForkEventID: uuid.NewString(),
+		ContractSelection: RunForkContractSelection{
+			Mode:            RunForkContractSelectionModeSelectedContracts,
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	}, createdAt)
+	if err != nil {
+		t.Fatalf("normalizeRunForkSelectedContractBinding: %v", err)
+	}
+	want := createdAt.UTC().Round(time.Microsecond)
+	if !binding.CreatedAt.Equal(want) || binding.CreatedAt.Location() != time.UTC {
+		t.Fatalf("created_at = %s (%s), want %s (UTC)", binding.CreatedAt, binding.CreatedAt.Location(), want)
+	}
+}
+
 func TestSelectedContractExecutionMaterializationStampsPersistedBundleIdentity(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
