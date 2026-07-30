@@ -46,6 +46,7 @@ type postgresSessionAuthority struct {
 	discardPending          bool
 	leases                  map[*sqlAdvisoryLockLease]struct{}
 	pendingLeaseRetirements []*sqlAdvisoryLockLease
+	testEndTxError          func() error
 }
 
 type postgresSessionDiscard struct {
@@ -318,9 +319,13 @@ func (a *postgresSessionAuthority) endTx(tx *sql.Tx) error {
 		err = a.forceDiscardConnectionLocked()
 	}
 	retirements := a.takePendingLeaseRetirementsLocked()
+	testEndTxError := a.testEndTxError
 	a.mu.Unlock()
 	a.operationMu.Unlock()
 	postgresSessionDiscard{leases: retirements}.drain()
+	if testEndTxError != nil {
+		err = errors.Join(err, testEndTxError())
+	}
 	return err
 }
 

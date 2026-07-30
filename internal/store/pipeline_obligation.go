@@ -668,10 +668,9 @@ func (s *postgresPipelineObligationStore) MarkDecisionProcessed(ctx context.Cont
 	if err := tx.Commit(); err != nil {
 		return errors.Join(err, rollbackPostgresSessionTransaction(tx, lease.session))
 	}
-	if err := lease.session.endTx(tx); err != nil {
-		return err
-	}
-	return handoff.commit()
+	endErr := lease.session.endTx(tx)
+	handoffErr := handoff.commit()
+	return errors.Join(endErr, handoffErr)
 }
 
 func (s *sqlitePipelineObligationStore) MarkDecisionProcessed(ctx context.Context, claim runtimepipelineobligation.Claim) error {
@@ -1606,11 +1605,10 @@ func (s *postgresPipelineObligationStore) Settle(ctx context.Context, claim runt
 	if err := tx.Commit(); err != nil {
 		return errors.Join(err, rollbackPostgresSessionTransaction(tx, lease.session))
 	}
-	if err := lease.session.endTx(tx); err != nil {
-		return err
-	}
+	endErr := lease.session.endTx(tx)
 	releaseErr := s.releasePostgresPipelineClaimLocked(context.WithoutCancel(ctx), claim, state)
-	return errors.Join(releaseErr, handoff.commit())
+	handoffErr := handoff.commit()
+	return errors.Join(endErr, releaseErr, handoffErr)
 }
 
 func (s *sqlitePipelineObligationStore) Settle(ctx context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) error {

@@ -13676,9 +13676,13 @@ platform_tables:
           post_commit_handoff: >
             A candidate-producing operation acquires generation work admission before its mutation becomes
             commit-capable. Commit submits the exact durable identity through a detached handoff and releases admission
-            only after representation; rollback cancels that admission. Caller cancellation after commit cannot cancel
-            the handoff. A process crash after commit is recovered by successor startup enumeration because process
-            memory is never durable authority.
+            only after representation; rollback cancels that admission. Successful selected-store commit is the
+            irreversible handoff boundary: subsequent session cleanup, claim release, or other post-commit failures are
+            joined and reported only after every required post-commit action has run, and they never route the reserved
+            admission through rollback. Pipeline settlement retires its exact claim before submitting the candidate so
+            candidate execution cannot observe work already durably settled as still live. Caller cancellation after
+            commit cannot cancel the handoff. A process crash after commit is recovered by successor startup enumeration
+            because process memory is never durable authority.
           retirement: >
             Retirement atomically rejects new candidate admission, cancels process-local waits, and joins every
             accepted chain before selected-store release. Its wait for already-reserved commit/rollback handoffs is

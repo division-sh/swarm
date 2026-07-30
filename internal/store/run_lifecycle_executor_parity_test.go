@@ -11,6 +11,7 @@ import (
 	"time"
 
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
@@ -410,6 +411,127 @@ func TestRunLifecycleDirectHandoffCommitAcrossSinkRegistrationParity(t *testing.
 			candidate := awaitRunLifecycleCandidate(t, intercept.executed, "direct post-registration reconciliation")
 			if candidate.RunID != runID {
 				t.Fatalf("reconciled direct candidate run_id = %s, want %s", candidate.RunID, runID)
+			}
+
+			if err := executor.Retire(context.Background()); err != nil {
+				t.Fatalf("retire candidate executor: %v", err)
+			}
+			retireRunLifecycleExecutorOccurrence(t, occurrence)
+			retireRunLifecycleProcess(t, process)
+		})
+	}
+}
+
+func TestPostgresPipelineCompletionHandoffSurvivesPostCommitCleanupError(t *testing.T) {
+	for _, operation := range []string{"mark_decision_processed", "settle"} {
+		operation := operation
+		t.Run(operation, func(t *testing.T) {
+			fixture := openPostgresAuthorActivityReceiptFixture(t)
+			selected, ok := fixture.store.(*PostgresStore)
+			if !ok {
+				t.Fatalf("fixture store = %T, want *PostgresStore", fixture.store)
+			}
+			ctx := testAuthorActivityContext()
+			runID := uuid.NewString()
+			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
+			owner := selected.PipelineObligations()
+
+			var claim runtimepipelineobligation.Claim
+			switch operation {
+			case "mark_decision_processed":
+				insertProducerIdentityDecisionObligation(t, fixture, ctx, eventID, runID, time.Now().UTC().Add(-time.Minute))
+				work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeDecisionRoute)
+				if err != nil {
+					t.Fatalf("claim decision route: %v", err)
+				}
+				claim = work.Claim
+			case "settle":
+				work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
+				if err != nil {
+					t.Fatalf("claim recovery work: %v", err)
+				}
+				claim = work.Claim
+			default:
+				t.Fatalf("unsupported operation %q", operation)
+			}
+
+			process := worklifetime.NewProcess()
+			occurrence := newRunLifecycleExecutorOccurrence(t, process)
+			runtimeCtx := worklifetime.WithRuntimeOccurrence(ctx, occurrence)
+			intercept := &runLifecycleCandidateInterceptStore{
+				delegate: selected,
+				executed: make(chan runtimerunlifecycle.Candidate, 2),
+			}
+			executor := newRunLifecycleParityExecutor(t, intercept, occurrence)
+			registration, err := selected.RegisterCompletionCandidateSink(
+				runtimeCtx,
+				runtimerunlifecycle.CandidateScope{BundleHash: runLifecycleCandidateParityBundleHash},
+				executor,
+			)
+			if err != nil {
+				t.Fatalf("register candidate executor: %v", err)
+			}
+			defer registration.Release()
+			if err := executor.Start(runtimeCtx); err != nil {
+				t.Fatalf("start candidate executor: %v", err)
+			}
+
+			state, err := selected.postgresPipelineClaimState(claim)
+			if err != nil {
+				t.Fatalf("load pipeline claim state: %v", err)
+			}
+			injectedErr := errors.New("injected post-commit session cleanup failure")
+			session := state.postgresLease.session
+			session.mu.Lock()
+			session.testEndTxError = func() error { return injectedErr }
+			session.mu.Unlock()
+
+			switch operation {
+			case "mark_decision_processed":
+				err = owner.MarkDecisionProcessed(runtimeCtx, claim)
+			case "settle":
+				err = owner.Settle(runtimeCtx, claim, runtimepipelineobligation.Acknowledged("processed"))
+			}
+			session.mu.Lock()
+			session.testEndTxError = nil
+			session.mu.Unlock()
+			if !errors.Is(err, injectedErr) {
+				t.Fatalf("%s error = %v, want injected cleanup failure", operation, err)
+			}
+
+			candidate := awaitRunLifecycleCandidate(t, intercept.executed, operation+" live candidate handoff")
+			if candidate.RunID != runID {
+				t.Fatalf("%s candidate run_id = %s, want %s", operation, candidate.RunID, runID)
+			}
+			lifecycleFixture := runLifecycleCandidateParityFixture{
+				store: selected, db: fixture.db, postgres: true,
+			}
+			stateName, duePresent, revision := loadRunLifecycleCandidateFacts(
+				t, lifecycleFixture, ctx, runID,
+			)
+			if stateName != string(runtimerunlifecycle.StateRunning) || !duePresent || revision != candidate.Revision {
+				t.Fatalf(
+					"%s durable candidate = state:%s due:%v revision:%d, want running/true/%d",
+					operation, stateName, duePresent, revision, candidate.Revision,
+				)
+			}
+
+			if operation == "settle" {
+				if _, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery); !errors.Is(err, runtimepipelineobligation.ErrIneligible) {
+					t.Fatalf("settled claim remained eligible after cleanup failure: %v", err)
+				}
+			} else {
+				count, outcome, reason := readExactPipelineReceipt(t, ctx, fixture, eventID)
+				if count != 1 || outcome != "success" || reason != "decision_route_processed" {
+					t.Fatalf(
+						"decision route receipt = count:%d outcome:%q reason:%q",
+						count, outcome, reason,
+					)
+				}
+				if err := owner.Release(ctx, claim); err != nil {
+					t.Fatalf("release processed decision claim: %v", err)
+				}
 			}
 
 			if err := executor.Retire(context.Background()); err != nil {
