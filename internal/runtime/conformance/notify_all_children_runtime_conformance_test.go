@@ -1003,7 +1003,7 @@ func TestNotifyAllChildrenFixedSlugAgentsCompleteIndependentlyOnBothBackends(t *
 					t.Fatalf("run manager: %v", err)
 				}
 
-				publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.opened", map[string]any{
+				publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime.bus, source, runID, "portfolio.opened", map[string]any{
 					"portfolio_id": "portfolio-main",
 				})
 				accountIDs := make([]string, 0, cardinality)

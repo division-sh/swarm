@@ -53,6 +53,7 @@ func TestPostgresStoreResolveAgentDirectiveRunTarget(t *testing.T) {
 	}
 
 	agentOne := testAgentIdentity(t, "agent-one", "directive/one")
+	seedTestAgentRow(t, ctx, pg.DB, true, agentOne, "active")
 	insertDirectiveSession(t, ctx, pg, "00000000-0000-0000-0000-000000000101", agentOne, runB)
 	active, err := pg.ResolveAgentDirectiveRunTarget(ctx, agentOne, "")
 	if err != nil {
@@ -63,6 +64,7 @@ func TestPostgresStoreResolveAgentDirectiveRunTarget(t *testing.T) {
 	}
 
 	agentMany := testAgentIdentity(t, "agent-many", "directive/many")
+	seedTestAgentRow(t, ctx, pg.DB, true, agentMany, "active")
 	insertDirectiveSession(t, ctx, pg, "00000000-0000-0000-0000-000000000201", agentMany, runA)
 	insertDirectiveSession(t, ctx, pg, "00000000-0000-0000-0000-000000000202", agentMany, runB)
 	_, err = pg.ResolveAgentDirectiveRunTarget(ctx, agentMany, "")
