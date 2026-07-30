@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,9 +16,11 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -480,6 +483,69 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 	}
 	if !rt.shutdownAdmissionClosed() {
 		t.Fatal("runtime shutdown admission was not closed")
+	}
+}
+
+func TestRuntimeShutdownBoundsLifecycleExecutorRetirementByGrace(t *testing.T) {
+	occurrence := runtimeTestOccurrence(t, runtimeTestBundleHash)
+	executor, err := runtimerunlifecycle.NewExecutor(
+		runtimeTestCandidateOwner{},
+		runtimerunlifecycle.CandidateScope{BundleHash: runtimeTestBundleHash},
+		runtimerunlifecycle.TerminalCatalog{},
+		occurrence,
+		runtimerunlifecycle.ExecutorOptions{},
+	)
+	if err != nil {
+		t.Fatalf("create run lifecycle executor: %v", err)
+	}
+	if err := executor.Start(context.Background()); err != nil {
+		t.Fatalf("start run lifecycle executor: %v", err)
+	}
+	admission, err := executor.ReserveCompletionCandidate(context.Background())
+	if err != nil {
+		t.Fatalf("reserve completion candidate admission: %v", err)
+	}
+	probe, err := occurrence.Begin(context.Background())
+	if err != nil {
+		t.Fatalf("begin retirement progress probe: %v", err)
+	}
+	rt := &Runtime{
+		workOccurrence:       occurrence,
+		runLifecycleExecutor: executor,
+	}
+	shutdownErr := make(chan error, 1)
+	go func() {
+		shutdownErr <- rt.ShutdownWithOptions(ShutdownOptions{Grace: 20 * time.Millisecond})
+	}()
+
+	select {
+	case <-probe.Context().Done():
+		if cause := context.Cause(probe.Context()); !errors.Is(cause, worklifetime.ErrRetired) {
+			t.Fatalf("retirement progress probe cause = %v, want %v", cause, worklifetime.ErrRetired)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("runtime did not advance past bounded lifecycle executor retirement")
+	}
+	select {
+	case err := <-shutdownErr:
+		t.Fatalf("shutdown released accepted work after grace expiry: %v", err)
+	default:
+	}
+	candidate := runtimerunlifecycle.Candidate{
+		RunID:      "11111111-1111-4111-8111-111111111111",
+		BundleHash: runtimeTestBundleHash,
+		Revision:   1,
+		DueAt:      time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC),
+	}
+	if err := admission.Submit(candidate); !errors.Is(err, worklifetime.ErrRetired) {
+		t.Fatalf("delayed completion candidate submission error = %v, want %v", err, worklifetime.ErrRetired)
+	}
+	if err := probe.Done(); err != nil {
+		t.Fatalf("settle retirement progress probe: %v", err)
+	}
+	err = <-shutdownErr
+	if err == nil || !strings.Contains(err.Error(), "run lifecycle executor retirement timed out after 20ms") {
+		t.Fatalf("shutdown error = %v, want bounded lifecycle executor timeout", err)
 	}
 }
 

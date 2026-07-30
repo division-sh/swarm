@@ -240,6 +240,10 @@ func (e *Executor) installReserved(lease *worklifetime.Lease, candidate Candidat
 		return fmt.Errorf("completion candidate bundle_hash %s does not match executor scope %s", candidate.BundleHash, e.scope.BundleHash)
 	}
 	e.mu.Lock()
+	if e.retiring {
+		e.mu.Unlock()
+		return worklifetime.ErrRetired
+	}
 	if current, ok := e.chains[candidate.RunID]; ok {
 		if current.candidate.Revision >= candidate.Revision {
 			e.mu.Unlock()
@@ -327,26 +331,35 @@ func (e *Executor) wait(ctx context.Context, delay time.Duration) error {
 	}
 }
 
-func (e *Executor) Retire() {
+func (e *Executor) Retire(ctx context.Context) error {
 	if e == nil {
-		return
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	e.mu.Lock()
-	if e.retiring {
-		e.mu.Unlock()
-		return
+	if !e.retiring {
+		e.retiring = true
 	}
-	e.retiring = true
 	pendingZero := e.pendingZero
-	e.mu.Unlock()
-	if pendingZero != nil {
-		<-pendingZero
-	}
-	e.mu.Lock()
+	chains := make([]candidateChain, 0, len(e.chains))
 	for _, chain := range e.chains {
+		chains = append(chains, chain)
+	}
+	e.mu.Unlock()
+	for _, chain := range chains {
 		chain.cancel(worklifetime.ErrRetired)
 	}
-	e.mu.Unlock()
+	if pendingZero == nil {
+		return nil
+	}
+	select {
+	case <-pendingZero:
+		return nil
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	}
 }
 
 func (e *Executor) ActiveCandidates() int {

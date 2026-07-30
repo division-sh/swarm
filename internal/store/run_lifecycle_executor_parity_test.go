@@ -121,7 +121,9 @@ func TestRunLifecycleExecutorNoGapParity(t *testing.T) {
 				t.Fatal("candidate executor did not publish readiness after complete enumeration")
 			}
 
-			executor.Retire()
+			if err := executor.Retire(context.Background()); err != nil {
+				t.Fatalf("retire candidate executor: %v", err)
+			}
 			retireRunLifecycleExecutorOccurrence(t, occurrence)
 
 			if got, err := transitionRunLifecycleParity(
@@ -167,7 +169,9 @@ func TestRunLifecycleExecutorNoGapParity(t *testing.T) {
 			if recovered.RunID != runID {
 				t.Fatalf("successor candidate run_id = %s, want %s", recovered.RunID, runID)
 			}
-			successor.Retire()
+			if err := successor.Retire(context.Background()); err != nil {
+				t.Fatalf("retire successor candidate executor: %v", err)
+			}
 			retireRunLifecycleExecutorOccurrence(t, successorOccurrence)
 			successorRegistration.Release()
 			retireRunLifecycleProcess(t, process)
