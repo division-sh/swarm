@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
@@ -390,6 +391,11 @@ func newTestTurnContextRegistry() *TurnContextRegistry {
 
 func putTestTurnContext(t testing.TB, registry *TurnContextRegistry, token string, turn TurnContext) {
 	t.Helper()
+	if turn.CapabilitySurface != nil && turn.Actor.Identity.IsZero() &&
+		turn.Actor.ID == turn.CapabilitySurface.ActorID {
+		turn.Actor.Identity = turn.CapabilitySurface.ActorIdentity
+		turn.Actor.FlowPath = turn.CapabilitySurface.ActorIdentity.FlowInstance()
+	}
 	if turn.CapabilitySurface != nil && !turn.HasExecutionAdmission {
 		generation := uint64(1)
 		if turn.LifecycleToken.Generation > 0 {
@@ -442,6 +448,9 @@ func testCapabilitySurface(t testing.TB, actor models.AgentConfig, names ...stri
 
 func testCapabilitySurfaceForDefinitions(t testing.TB, actor models.AgentConfig, definitions ...llm.ToolDefinition) *managedcapabilities.Surface {
 	t.Helper()
+	if actor.Identity.IsZero() {
+		actor.Identity = agentidentitytest.RootRuntime(t, actor.ID, "mcp-gateway-test")
+	}
 	planned := make([]managedcapabilities.PlannedTool, 0, len(definitions))
 	for _, definition := range definitions {
 		canonical := toolidentity.CanonicalName(definition.Name)
@@ -456,7 +465,7 @@ func testCapabilitySurfaceForDefinitions(t testing.TB, actor models.AgentConfig,
 		})
 	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorID: actor.ID, RuntimeMode: "task", Provider: "test", Transport: "cli", ProviderContract: "test-contract",
+		ActorIdentity: actor.Identity, RuntimeMode: "task", Provider: "test", Transport: "cli", ProviderContract: "test-contract",
 		Authority: managedcapabilities.Authority{Kind: managedcapabilities.AuthorityProviderTurn, ID: uuid.NewString(), ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: actor.ID, RunID: uuid.NewString(), SessionID: uuid.NewString(), TurnOrdinal: 1},
 		Tools:     planned,
 	})
@@ -508,13 +517,13 @@ func TestGatewayHandleMCP_ProviderCallCoordinateSeparatesSiblingsAndFencesReplay
 	controller := runtimeeffects.NewController(harness)
 	putTurn := func(token, identity string) {
 		putTestTurnContext(t, registry, token, TurnContext{
-			Actor:              models.AgentConfig{ExecutionMode: "live", ID: harness.Token.AgentID},
+			Actor:              models.AgentConfig{ExecutionMode: "live", ID: harness.Token.AgentID, Identity: harness.Token.Identity, FlowPath: harness.Token.Identity.FlowInstance()},
 			LifecycleToken:     harness.Token,
 			HasLifecycleToken:  true,
 			EffectController:   controller,
 			LogicalIdentity:    identity,
 			HasLogicalIdentity: true,
-			CapabilitySurface:  testCapabilitySurface(t, models.AgentConfig{ID: harness.Token.AgentID}, "write_file"),
+			CapabilitySurface:  testCapabilitySurface(t, models.AgentConfig{ID: harness.Token.AgentID, Identity: harness.Token.Identity, FlowPath: harness.Token.Identity.FlowInstance()}, "write_file"),
 		})
 	}
 	putTurn("ctx-provider-turn-1", "provider-turn-1")
@@ -594,6 +603,50 @@ func TestGatewayHandleMCP_ProviderCallCoordinateSeparatesSiblingsAndFencesReplay
 	}
 	if primitiveDispatches != 3 || len(harness.Attempts) != 3 {
 		t.Fatalf("cross-turn sibling dispatches=%d attempts=%d, want 3/3", primitiveDispatches, len(harness.Attempts))
+	}
+}
+
+func TestGatewayRejectsSameSlugSiblingCapabilityPrincipalBeforeToolExecution(t *testing.T) {
+	ctx, surface, _ := managedClaudeProviderTurnTestContext(t, managedcapabilities.ExecutionNormalAgent)
+	registry := NewTurnContextRegistry(models.ActorFromContext)
+	token := registry.RegisterTurnContextWithCapabilitySurface(ctx, time.Minute, surface)
+	if token == "" {
+		t.Fatal("register exact managed provider turn")
+	}
+	turn, ok := registry.ResolveTurnContext(token)
+	if !ok {
+		t.Fatal("resolve exact managed provider turn")
+	}
+	siblingIdentity := agentidentitytest.Runtime(
+		t,
+		surface.ActorID,
+		"mcp-managed-turn-test",
+		"claude",
+		"sibling",
+		"claude/sibling",
+	)
+	turn.Actor.Identity = siblingIdentity
+	turn.Actor.FlowPath = siblingIdentity.FlowInstance()
+	registry.PutTurnContextForTest(token, turn)
+
+	executorCalls := 0
+	gateway := NewGateway(testToolExecutor(func(context.Context, string, any) (any, error) {
+		executorCalls++
+		return map[string]any{"ok": true}, nil
+	}), testGatewayToken, managedCLIGatewayHooks(registry))
+	response := callMCPGateway(t, gateway, token, RPCRequest{
+		JSONRPC: "2.0", Method: "tools/call", ID: float64(1),
+		Params: map[string]any{
+			"name": "write_file", "arguments": map[string]any{"path": "/workspace/result.txt", "content": "x"},
+			"_meta": map[string]any{claudeCodeToolUseIDMetaKey: "toolu-same-slug-sibling"},
+		},
+	})
+	result, ok := response.Result.(map[string]any)
+	if !ok || result["isError"] != true || result["runtimeError"] == nil {
+		t.Fatalf("same-slug sibling gateway response = %#v, want typed context rejection", response)
+	}
+	if executorCalls != 0 {
+		t.Fatalf("same-slug sibling reached executor %d times", executorCalls)
 	}
 }
 
@@ -838,13 +891,13 @@ func TestGatewayHandleMCP_ManagedCallWithoutProviderCoordinateFailsBeforeExecuto
 	harness := effecttest.New()
 	registry := newTestTurnContextRegistry()
 	putTestTurnContext(t, registry, "ctx-managed", TurnContext{
-		Actor:              models.AgentConfig{ExecutionMode: "live", ID: harness.Token.AgentID},
+		Actor:              models.AgentConfig{ExecutionMode: "live", ID: harness.Token.AgentID, Identity: harness.Token.Identity, FlowPath: harness.Token.Identity.FlowInstance()},
 		LifecycleToken:     harness.Token,
 		HasLifecycleToken:  true,
 		EffectController:   runtimeeffects.NewController(harness),
 		LogicalIdentity:    "provider-turn",
 		HasLogicalIdentity: true,
-		CapabilitySurface:  testCapabilitySurface(t, models.AgentConfig{ID: harness.Token.AgentID}, "write_file"),
+		CapabilitySurface:  testCapabilitySurface(t, models.AgentConfig{ID: harness.Token.AgentID, Identity: harness.Token.Identity, FlowPath: harness.Token.Identity.FlowInstance()}, "write_file"),
 	})
 	executed := false
 	gateway := NewGateway(testToolExecutor(func(context.Context, string, any) (any, error) {

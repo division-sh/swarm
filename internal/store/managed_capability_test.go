@@ -36,7 +36,7 @@ func managedCompletionTestSurface(t testing.TB, authority runtimeeffects.Authori
 		runtimeMode = "session"
 	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorID: authority.Target.AgentID, RuntimeMode: runtimeMode,
+		ActorIdentity: authority.Target.AgentIdentity, RuntimeMode: runtimeMode,
 		Provider: adapter, Transport: transport, ProviderContract: "store-test-provider-contract",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityProviderTurn, ID: authority.Target.ID,
@@ -72,8 +72,12 @@ func managedNormalEffectStoreTestContext(t testing.TB, ctx context.Context, auth
 	t.Helper()
 	ctx = managedExecutionStoreTestContext(t, ctx)
 	admission, _ := managedexecution.FromContext(ctx)
-	turnID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("managed-effect-turn:"+authority.Normal.AgentID)).String()
-	sessionID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("managed-effect-session:"+authority.Normal.AgentID)).String()
+	principal, err := authority.Normal.Identity.Fingerprint()
+	if err != nil {
+		t.Fatalf("fingerprint normal managed-effect identity: %v", err)
+	}
+	turnID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("managed-effect-turn:"+principal)).String()
+	sessionID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("managed-effect-session:"+principal)).String()
 	runID := managedNormalEffectStoreTestRunID(authority.Normal.AgentID)
 	target := runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: runID, AgentID: authority.Normal.AgentID,
@@ -82,7 +86,7 @@ func managedNormalEffectStoreTestContext(t testing.TB, ctx context.Context, auth
 	}
 	ctx = runtimeeffects.WithUsageTarget(ctx, target)
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorID: authority.Normal.AgentID, RuntimeMode: "task", Provider: "store-test", Transport: "api",
+		ActorIdentity: authority.Normal.Identity, RuntimeMode: "task", Provider: "store-test", Transport: "api",
 		ProviderContract: "store-test-provider-contract",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityProviderTurn, ID: turnID,
@@ -244,4 +248,76 @@ func seedManagedAgentTurnCapabilitySurface(
 		t.Fatalf("seed managed agent-turn capability surface: %v", err)
 	}
 	return surface.ID
+}
+
+func TestCompletionRecoveryRejectsSameSlugSiblingCapabilityPrincipal(t *testing.T) {
+	identityA := testAgentIdentity(t, "recovery-worker", "review/inst-a")
+	identityB := testAgentIdentity(t, "recovery-worker", "review/inst-b")
+	targetA := runtimeeffects.UsageTarget{
+		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(),
+		AgentID: identityA.AgentID(), AgentIdentity: identityA, SessionID: uuid.NewString(),
+		Memory: agentmemory.PlatformDefault(), FlowInstance: identityA.FlowInstance(),
+	}
+	authorityFor := func(identity agentidentity.Identity) runtimeeffects.Authority {
+		target := targetA
+		target.AgentIdentity = identity
+		target.FlowInstance = identity.FlowInstance()
+		token := runtimeeffects.LifecycleToken{
+			RuntimeEpoch: 1, Identity: identity, AgentID: identity.AgentID(), Generation: 1,
+		}
+		authority := runtimeeffects.NormalAgentAuthority(token, "recovery-test-owner", time.Now().UTC().Add(time.Minute))
+		authority.Target = target
+		return authority
+	}
+	surfaceA := managedCompletionTestSurface(t, authorityFor(identityA), "anthropic_api")
+	surfaceB := managedCompletionTestSurface(t, authorityFor(identityB), "anthropic_api")
+	evidence := completionRecoveryAuthorityEvidence{
+		ActorTokenID: identityA.AgentID(), ExecutionMode: string(runtimeeffects.ExecutionModeLive),
+	}
+	evidence.UsageTarget.Kind = string(targetA.Kind)
+	evidence.UsageTarget.ID = targetA.ID
+	evidence.UsageTarget.RunID = targetA.RunID
+	evidence.UsageTarget.AgentID = targetA.AgentID
+	evidence.UsageTarget.AgentIdentity = targetA.AgentIdentity
+	evidence.UsageTarget.SessionID = targetA.SessionID
+	evidence.UsageTarget.MemoryEnabled = targetA.Memory.Enabled
+	evidence.UsageTarget.MemorySource = string(targetA.Memory.Source)
+	evidence.UsageTarget.FlowInstance = targetA.FlowInstance
+	authorityEvidence, err := json.Marshal(evidence)
+	if err != nil {
+		t.Fatalf("marshal recovery authority evidence: %v", err)
+	}
+	recovered := completionRecoveryAttempt{
+		OperationID: uuid.NewString(), AttemptID: uuid.NewString(),
+		AuthorityKind: string(runtimeeffects.AuthorityNormalAgent), AuthorityID: identityA.AgentID(),
+		AuthorityEvidence: string(authorityEvidence),
+		OperationMode:     string(runtimeeffects.ExecutionModeLive), AttemptMode: string(runtimeeffects.ExecutionModeLive),
+		Adapter: "anthropic_api", Transport: "api", State: string(runtimeeffects.StateAuthorized),
+		TargetKind: string(targetA.Kind), TargetID: targetA.ID,
+	}
+	encodeSurface := func(surface managedcapabilities.Surface) string {
+		raw, err := json.Marshal(surface)
+		if err != nil {
+			t.Fatalf("marshal recovery capability surface: %v", err)
+		}
+		return string(raw)
+	}
+
+	recovered.CapabilitySurfaceID = surfaceB.ID
+	recovered.CapabilitySurface = encodeSurface(surfaceB)
+	if _, _, err := completionRecoverySettlement(
+		recovered, runtimeeffects.StateTerminalFailure, nil, time.Now().UTC(),
+	); err == nil {
+		t.Fatal("completion recovery accepted a same-slug sibling capability principal")
+	}
+
+	recovered.CapabilitySurfaceID = surfaceA.ID
+	recovered.CapabilitySurface = encodeSurface(surfaceA)
+	if _, settlement, err := completionRecoverySettlement(
+		recovered, runtimeeffects.StateTerminalFailure, nil, time.Now().UTC(),
+	); err != nil {
+		t.Fatalf("completion recovery rejected exact capability principal: %v", err)
+	} else if settlement.AgentTurn == nil || settlement.AgentTurn.Identity.Agent != identityA {
+		t.Fatalf("recovered exact agent turn = %#v", settlement.AgentTurn)
+	}
 }

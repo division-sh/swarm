@@ -437,12 +437,16 @@ func TestConversationStep_ResolvesToolCalls(t *testing.T) {
 
 func TestConversationStep_SeparatesManagedProviderRoundsAndToolCalls(t *testing.T) {
 	harness := effecttest.New()
+	setEffectHarnessAgent(t, harness, "effect-test-agent", "effect-test/instance")
 	runtime := &managedRoundRuntime{harness: harness}
 	tools := &managedEffectToolExecutor{harness: harness}
 	conversation := NewConversation("effect-test-agent", "task-1", "system", []ToolDefinition{{Name: "echo"}}, testMemory(), 10, runtime)
 	conversation.SetToolExecutor(tools)
 
-	ctx := models.WithActor(harness.CompletionContext("inbound-event-1"), models.AgentConfig{ExecutionMode: "live", ID: "effect-test-agent", Role: "analysis"})
+	ctx := models.WithActor(harness.CompletionContext("inbound-event-1"), models.AgentConfig{
+		ExecutionMode: "live", ID: "effect-test-agent", Identity: harness.Token.Identity,
+		FlowPath: harness.Token.Identity.FlowInstance(), Role: "analysis",
+	})
 	response, err := conversation.Step(ctx, "start")
 	if err != nil {
 		t.Fatalf("Step: %v", err)

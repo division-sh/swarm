@@ -24,3 +24,27 @@ func TestPlatformSpecManagedCapabilitySurfaceCandidateDefinitionOwner(t *testing
 		}
 	}
 }
+
+func TestPlatformSpecManagedCapabilitySurfaceOwnsConcreteActorIdentity(t *testing.T) {
+	root := loadPlatformSpecYAMLNode(t)
+	surface := mustMappingValue(t, root, "managed_agent_capability_surface")
+	externalEffects := mustMappingValue(t, root, "managed_external_effect_authority")
+
+	for name, value := range map[string]string{
+		"surface identity": scalarValue(mustMappingValue(t, mustMappingValue(t, surface, "surface_identity"), "rule")),
+		"provider turn":    scalarValue(mustMappingValue(t, mustMappingValue(t, surface, "provider_turn"), "rule")),
+		"persistence":      scalarValue(mustMappingValue(t, mustMappingValue(t, surface, "persistence"), "rule")),
+		"effect context":   scalarValue(mustMappingValue(t, mustMappingValue(t, externalEffects, "context_authority"), "managed_agent")),
+		"operation ID":     scalarValue(mustMappingValue(t, mustMappingValue(t, externalEffects, "logical_operation"), "identity")),
+	} {
+		if !strings.Contains(value, "typed concrete") {
+			t.Fatalf("%s does not name typed concrete identity authority:\n%s", name, value)
+		}
+	}
+	operation := scalarValue(mustMappingValue(t, mustMappingValue(t, externalEffects, "logical_operation"), "identity"))
+	for _, fragment := range []string{"Same-slug concrete siblings are distinct", "successor lifecycle generations", "exact execution authorities"} {
+		if !strings.Contains(operation, fragment) {
+			t.Fatalf("logical operation identity missing %q:\n%s", fragment, operation)
+		}
+	}
+}

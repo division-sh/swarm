@@ -208,7 +208,7 @@ func prepareCompletionContext(ctx context.Context, controller *runtimeeffects.Co
 		entityID = effectiveEntityID
 	}
 	if surface, ok := managedcapabilities.FromContext(ctx); ok {
-		if surface.Authority.Kind != managedcapabilities.AuthorityProviderTurn || surface.Authority.ID != target.ID {
+		if !runtimeeffects.ProviderTurnTargetMatchesCapabilitySurface(target, surface) {
 			return ctx, "", runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_turn_identity_mismatch", "llm-completion-authority", "prepare_completion", map[string]any{"surface_id": surface.ID, "surface_authority_id": surface.Authority.ID, "target_id": target.ID})
 		}
 	}

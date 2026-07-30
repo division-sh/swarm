@@ -16,6 +16,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
@@ -677,6 +678,9 @@ func newRateLimitedMCPTestServer(t *testing.T, recorder *dispatchTimeRecorder, t
 
 func fixedTurnContextResolver(t testing.TB, actor models.AgentConfig) func(string) (runtimemcp.TurnContext, bool) {
 	t.Helper()
+	if actor.Identity.IsZero() {
+		actor.Identity = agentidentitytest.RootRuntime(t, actor.ID, "external-dispatch-admission-test")
+	}
 	planned := make([]managedcapabilities.PlannedTool, 0, len(actor.Tools))
 	for _, raw := range actor.Tools {
 		name := toolidentity.CanonicalName(raw)
@@ -690,7 +694,7 @@ func fixedTurnContextResolver(t testing.TB, actor models.AgentConfig) func(strin
 		})
 	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorID: actor.ID, RuntimeMode: "task", Provider: "test", Transport: "cli", ProviderContract: "rate-limit-test",
+		ActorIdentity: actor.Identity, RuntimeMode: "task", Provider: "test", Transport: "cli", ProviderContract: "rate-limit-test",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityProviderTurn, ID: uuid.NewString(), ExecutionKind: managedcapabilities.ExecutionNormalAgent,
 			ExecutionAuthorityID: actor.ID, SessionID: uuid.NewString(), TurnOrdinal: 1,

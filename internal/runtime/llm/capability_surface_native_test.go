@@ -21,6 +21,7 @@ func TestManagedCapabilityPlanSeparatesAllProviderNativeFamiliesFromConcreteFall
 			FileIO:    true,
 		},
 	}
+	actor.Identity = testAgentIdentity(actor.ID, "")
 	definitions := nativeFallbackDefinitions()
 	denied := make([]toolcapabilities.Capability, 0, len(definitions))
 	for _, definition := range definitions {
@@ -89,7 +90,8 @@ func TestManagedCapabilityPlanRejectsUnsupportedProviderNativeFamilies(t *testin
 			contract := ClaudeCLIProviderContract()
 			test.clear(&contract.NativeTools.Capabilities)
 			runtime := nativeCapabilityContractRuntime{contract: contract}
-			ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "unsupported-agent", NativeTools: test.native})
+			actor := runtimeactors.AgentConfig{ID: "unsupported-agent", Identity: testAgentIdentity("unsupported-agent", ""), NativeTools: test.native}
+			ctx := runtimeactors.WithActor(context.Background(), actor)
 
 			_, err := managedCapabilityPlan(ctx, runtime, "", nil, toolcapabilities.Set{}, nativeCapabilityTestAuthority())
 			if err == nil || !strings.Contains(err.Error(), test.want) {
@@ -101,6 +103,7 @@ func TestManagedCapabilityPlanRejectsUnsupportedProviderNativeFamilies(t *testin
 
 func TestManagedCapabilityPlanPreservesConcreteAPIFallbackDefinition(t *testing.T) {
 	actor := runtimeactors.AgentConfig{ID: "fallback-agent", NativeTools: runtimeactors.NativeToolConfig{WebSearch: true}}
+	actor.Identity = testAgentIdentity(actor.ID, "")
 	definition := ToolDefinition{Name: "web_search", Schema: map[string]any{"type": "object"}}
 	ctx := runtimeactors.WithActor(context.Background(), actor)
 
@@ -134,6 +137,7 @@ func TestManagedCapabilityPlanPreservesConcreteAPIFallbackDefinition(t *testing.
 
 func TestManagedCapabilityPlanRejectsFallbackWithoutConcreteDefinition(t *testing.T) {
 	actor := runtimeactors.AgentConfig{ID: "fallback-agent", NativeTools: runtimeactors.NativeToolConfig{WebSearch: true}}
+	actor.Identity = testAgentIdentity(actor.ID, "")
 	_, err := managedCapabilityPlan(
 		runtimeactors.WithActor(context.Background(), actor),
 		&AnthropicAPIRuntime{},
@@ -149,6 +153,7 @@ func TestManagedCapabilityPlanRejectsFallbackWithoutConcreteDefinition(t *testin
 
 func TestManagedCapabilityPlanRejectsMissingAndUnexpectedProviderBuiltins(t *testing.T) {
 	actor := runtimeactors.AgentConfig{ID: "native-agent", NativeTools: runtimeactors.NativeToolConfig{WebSearch: true}}
+	actor.Identity = testAgentIdentity(actor.ID, "")
 	surface, err := managedCapabilityPlan(
 		runtimeactors.WithActor(context.Background(), actor),
 		&ClaudeCLIRuntime{},

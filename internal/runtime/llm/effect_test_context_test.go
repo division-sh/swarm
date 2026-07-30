@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -41,6 +42,21 @@ func llmTestWorkContext(t testing.TB, ctx context.Context) context.Context {
 
 func managedProviderTestContext(t *testing.T, ctx context.Context, runtime Runtime, session *Session, tools []ToolDefinition) context.Context {
 	t.Helper()
+	actor, ok := models.ActorFromContext(ctx)
+	if !ok {
+		t.Fatal("managed provider test context requires actor")
+	}
+	if actor.Identity.IsZero() {
+		actor.Identity = session.MemoryIdentity.Agent
+		if actor.Identity.IsZero() {
+			if token, hasToken := runtimeeffects.LifecycleTokenFromContext(ctx); hasToken {
+				actor.Identity = token.Identity
+			}
+		}
+		actor.ID = actor.Identity.AgentID()
+		actor.FlowPath = actor.Identity.FlowInstance()
+		ctx = models.WithActor(ctx, actor)
+	}
 	ctx = llmTestWorkContext(t, ctx)
 	var err error
 	ctx, _, err = withProviderTurnAuthority(ctx, session)

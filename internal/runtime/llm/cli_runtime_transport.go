@@ -73,7 +73,8 @@ func BuildMCPHTTPBinding(ctx context.Context, cfg *config.Config, turns MCPTurnC
 		}
 		return buildConversationForkSandboxMCPHTTPBinding(ctx, cfg, turns, gateway, endpoint, allowed)
 	}
-	if surface.ActorID != strings.TrimSpace(actor.ID) {
+	actorIdentity, identityErr := actor.ConcreteIdentity()
+	if identityErr != nil || !surface.MatchesActor(actorIdentity) {
 		return MCPHTTPBinding{}, false, errors.New("mcp bridge capability surface actor mismatch")
 	}
 	if len(surface.BindingNames(managedcapabilities.BindingMCPTool)) == 0 {

@@ -454,12 +454,14 @@ func managedEffectCapabilitySurface(ctx context.Context, authority Authority) (m
 	}
 	switch authority.Kind {
 	case AuthorityNormalAgent:
-		normalActorID := strings.TrimSpace(authority.Normal.AgentID)
+		sameSurfaceActor, surfaceActorErr := runtimeagentidentity.Equal(authority.Normal.Identity, surface.ActorIdentity)
+		sameTargetActor, targetActorErr := runtimeagentidentity.Equal(authority.Normal.Identity, authority.Target.AgentIdentity)
 		if !admission.AuthorizesNormal() || surface.Authority.ExecutionKind != managedcapabilities.ExecutionNormalAgent ||
-			surface.Authority.ExecutionAuthorityID != admission.ExecutionAuthorityID || surface.ActorID != normalActorID {
+			surface.Authority.ExecutionAuthorityID != admission.ExecutionAuthorityID ||
+			surfaceActorErr != nil || !sameSurfaceActor {
 			return managedcapabilities.Surface{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_effect_execution_authority_mismatch", "external-effects", "authorize_attempt", map[string]any{"authority_kind": authority.Kind, "surface_id": surface.ID})
 		}
-		if strings.TrimSpace(authority.Target.AgentID) != normalActorID {
+		if targetActorErr != nil || !sameTargetActor {
 			return managedcapabilities.Surface{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_effect_turn_identity_mismatch", "external-effects", "authorize_attempt", map[string]any{"authority_kind": authority.Kind, "surface_id": surface.ID})
 		}
 	case AuthoritySelectedContractFork:
@@ -574,8 +576,17 @@ func canonicalOperationID(ctx context.Context, authority Authority, adapter stri
 	if err != nil {
 		return "", fmt.Errorf("marshal external effect lineage identity: %w", err)
 	}
+	authorityPrincipal := strings.TrimSpace(authority.ID)
+	operationIdentityVersion := "runtime-effect-v2"
+	if authority.Kind == AuthorityNormalAgent {
+		authorityPrincipal, err = authority.Normal.Identity.Fingerprint()
+		if err != nil {
+			return "", runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "external_effect_authority_identity_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": adapter, "authority_kind": authority.Kind}, err)
+		}
+		operationIdentityVersion = "runtime-effect-v3"
+	}
 	seed := strings.Join([]string{
-		"runtime-effect-v2", string(authority.Kind), authority.ID, identity, adapter, string(lineageJSON),
+		operationIdentityVersion, string(authority.Kind), authorityPrincipal, identity, adapter, string(lineageJSON),
 	}, "\x00")
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(seed)).String(), nil
 }

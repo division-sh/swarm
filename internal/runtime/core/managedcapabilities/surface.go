@@ -10,12 +10,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/google/uuid"
 )
 
-const SurfaceVersion = "managed-agent-capability-surface.v1"
+const SurfaceVersion = "managed-agent-capability-surface.v2"
 
 type AuthorityKind string
 
@@ -132,18 +133,19 @@ type Tool struct {
 }
 
 type Surface struct {
-	Version          string             `json:"version"`
-	ID               string             `json:"id"`
-	IntegrityHash    string             `json:"integrity_hash"`
-	ActorID          string             `json:"actor_id"`
-	RuntimeMode      string             `json:"runtime_mode"`
-	Provider         string             `json:"provider"`
-	Transport        string             `json:"transport"`
-	ProviderContract string             `json:"provider_contract"`
-	Authority        Authority          `json:"authority"`
-	Tools            []Tool             `json:"tools"`
-	Mismatches       []DeliveryMismatch `json:"mismatches,omitempty"`
-	CreatedAt        time.Time          `json:"created_at"`
+	Version          string                 `json:"version"`
+	ID               string                 `json:"id"`
+	IntegrityHash    string                 `json:"integrity_hash"`
+	ActorID          string                 `json:"actor_id"`
+	ActorIdentity    agentidentity.Identity `json:"actor_identity"`
+	RuntimeMode      string                 `json:"runtime_mode"`
+	Provider         string                 `json:"provider"`
+	Transport        string                 `json:"transport"`
+	ProviderContract string                 `json:"provider_contract"`
+	Authority        Authority              `json:"authority"`
+	Tools            []Tool                 `json:"tools"`
+	Mismatches       []DeliveryMismatch     `json:"mismatches,omitempty"`
+	CreatedAt        time.Time              `json:"created_at"`
 }
 
 type Persistence interface {
@@ -158,7 +160,7 @@ type PlannedTool struct {
 }
 
 type Plan struct {
-	ActorID          string
+	ActorIdentity    agentidentity.Identity
 	RuntimeMode      string
 	Provider         string
 	Transport        string
@@ -191,26 +193,31 @@ func (s Surface) PlanFingerprint() (string, error) {
 	authority.ID = ""
 	return hashValue(struct {
 		Version          string
-		ActorID          string
+		ActorIdentity    agentidentity.Identity
 		RuntimeMode      string
 		Provider         string
 		Transport        string
 		ProviderContract string
 		Authority        Authority
 		Tools            []plannedTool
-	}{s.Version, s.ActorID, s.RuntimeMode, s.Provider, s.Transport, s.ProviderContract, authority, tools})
+	}{s.Version, s.ActorIdentity, s.RuntimeMode, s.Provider, s.Transport, s.ProviderContract, authority, tools})
 }
 
 func New(plan Plan) (Surface, error) {
 	if err := plan.Authority.Validate(); err != nil {
 		return Surface{}, err
 	}
-	if strings.TrimSpace(plan.ActorID) == "" || strings.TrimSpace(plan.Provider) == "" || strings.TrimSpace(plan.Transport) == "" || strings.TrimSpace(plan.ProviderContract) == "" {
+	actorIdentity := plan.ActorIdentity.Normalize()
+	if err := actorIdentity.Validate(); err != nil {
+		return Surface{}, fmt.Errorf("managed capability actor identity: %w", err)
+	}
+	if strings.TrimSpace(plan.Provider) == "" || strings.TrimSpace(plan.Transport) == "" || strings.TrimSpace(plan.ProviderContract) == "" {
 		return Surface{}, fmt.Errorf("managed capability surface requires actor, provider, transport, and provider contract")
 	}
 	s := Surface{
 		Version:          SurfaceVersion,
-		ActorID:          strings.TrimSpace(plan.ActorID),
+		ActorID:          actorIdentity.AgentID(),
+		ActorIdentity:    actorIdentity,
 		RuntimeMode:      strings.TrimSpace(plan.RuntimeMode),
 		Provider:         strings.TrimSpace(plan.Provider),
 		Transport:        strings.TrimSpace(plan.Transport),
@@ -252,14 +259,14 @@ func New(plan Plan) (Surface, error) {
 	slices.SortFunc(s.Tools, func(a, b Tool) int { return strings.Compare(a.Name, b.Name) })
 	planHash, err := hashValue(struct {
 		Version          string
-		ActorID          string
+		ActorIdentity    agentidentity.Identity
 		RuntimeMode      string
 		Provider         string
 		Transport        string
 		ProviderContract string
 		Authority        Authority
 		Tools            []Tool
-	}{s.Version, s.ActorID, s.RuntimeMode, s.Provider, s.Transport, s.ProviderContract, s.Authority, s.Tools})
+	}{s.Version, s.ActorIdentity, s.RuntimeMode, s.Provider, s.Transport, s.ProviderContract, s.Authority, s.Tools})
 	if err != nil {
 		return Surface{}, err
 	}
@@ -279,6 +286,13 @@ func (s Surface) Validate() error {
 	}
 	if err := s.Authority.Validate(); err != nil {
 		return err
+	}
+	actorIdentity := s.ActorIdentity.Normalize()
+	if err := actorIdentity.Validate(); err != nil {
+		return fmt.Errorf("managed capability actor identity: %w", err)
+	}
+	if actorIdentity.AgentID() != strings.TrimSpace(s.ActorID) {
+		return fmt.Errorf("managed capability actor id is not the typed identity projection")
 	}
 	if strings.TrimSpace(s.IntegrityHash) == "" || strings.TrimSpace(s.ActorID) == "" || strings.TrimSpace(s.RuntimeMode) == "" || strings.TrimSpace(s.Provider) == "" || strings.TrimSpace(s.Transport) == "" || strings.TrimSpace(s.ProviderContract) == "" || s.CreatedAt.IsZero() {
 		return fmt.Errorf("managed capability surface identity is incomplete")
@@ -588,6 +602,11 @@ func (s Surface) Clone() Surface {
 	return out
 }
 
+func (s Surface) MatchesActor(identity agentidentity.Identity) bool {
+	equal, err := agentidentity.Equal(s.ActorIdentity, identity)
+	return err == nil && equal && strings.TrimSpace(s.ActorID) == s.ActorIdentity.Normalize().AgentID()
+}
+
 func (s *Surface) refreshIntegrityHash() error {
 	s.IntegrityHash = ""
 	hash, err := hashValue(*s)
@@ -609,14 +628,14 @@ func (s Surface) planID() (string, error) {
 	}
 	planHash, err := hashValue(struct {
 		Version          string
-		ActorID          string
+		ActorIdentity    agentidentity.Identity
 		RuntimeMode      string
 		Provider         string
 		Transport        string
 		ProviderContract string
 		Authority        Authority
 		Tools            []Tool
-	}{planned.Version, planned.ActorID, planned.RuntimeMode, planned.Provider, planned.Transport, planned.ProviderContract, planned.Authority, planned.Tools})
+	}{planned.Version, planned.ActorIdentity, planned.RuntimeMode, planned.Provider, planned.Transport, planned.ProviderContract, planned.Authority, planned.Tools})
 	if err != nil {
 		return "", err
 	}

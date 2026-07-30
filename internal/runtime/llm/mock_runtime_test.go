@@ -19,6 +19,7 @@ import (
 func TestObserveMockRuntimeCapabilitySurfaceBindsExactInterpreterInput(t *testing.T) {
 	tool := ToolDefinition{Name: "echo", Description: "Echo text", Schema: map[string]any{"type": "object"}}
 	actor := runtimeactors.AgentConfig{ID: "mock-agent", ExecutionMode: runtimeeffects.ExecutionModeMock}
+	actor.Identity = testAgentIdentity(actor.ID, "")
 	ctx := runtimeactors.WithActor(context.Background(), actor)
 	surface, err := managedCapabilityPlan(ctx, &MockRuntime{}, "mock", []ToolDefinition{tool}, toolcapabilities.NewSet([]toolcapabilities.Capability{{
 		Name: tool.Name, Visible: true, Callable: true,

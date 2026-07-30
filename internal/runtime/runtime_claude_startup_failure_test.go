@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -93,7 +94,10 @@ func TestStartupCallRejectsManualOrMutatedTransportBinding(t *testing.T) {
 func startupFailureTestBinding(t *testing.T, serverURL string) (context.Context, llm.MCPHTTPBinding) {
 	t.Helper()
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
-	ctx := runtimeactors.WithActor(testAuthorActivityContext(context.Background()), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "startup-agent"})
+	identity := agentidentitytest.RootRuntime(t, "startup-agent", "runtime-startup-failure-test")
+	ctx := runtimeactors.WithActor(testAuthorActivityContext(context.Background()), runtimeactors.AgentConfig{
+		ExecutionMode: "live", ID: identity.AgentID(), Identity: identity,
+	})
 	surface, err := llm.ManagedCapabilitySurfaceForStartup(
 		ctx,
 		&llm.ClaudeCLIRuntime{},

@@ -99,6 +99,7 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-startup-
 			FileIO: true,
 		},
 	}
+	actor.Identity = testAgentIdentity(actor.ID, "")
 	tools := []ToolDefinition{
 		{Name: "read_file"},
 		{Name: "write_file"},
@@ -182,6 +183,7 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-startup-
 			FileIO: true,
 		},
 	}
+	actor.Identity = testAgentIdentity(actor.ID, "")
 	tools := []ToolDefinition{
 		{Name: "read_file"},
 		{Name: "write_file"},
@@ -243,6 +245,7 @@ exit 127
 		})
 
 	actor := runtimeactors.AgentConfig{ID: "market-research-agent"}
+	actor.Identity = testAgentIdentity(actor.ID, "")
 	tools := []ToolDefinition{{Name: "emit_event"}}
 	_, err := runtime.ProbeStartupVisibleToolSurface(managedStartupProbeTestContext(t, actor, tools), actor, "system prompt", tools)
 	failure, ok := runtimefailures.As(err)
@@ -292,6 +295,7 @@ exit 1
 		})
 
 	actor := runtimeactors.AgentConfig{ID: "market-research-agent"}
+	actor.Identity = testAgentIdentity(actor.ID, "")
 	tools := []ToolDefinition{{Name: "emit_event"}}
 	_, err := runtime.ProbeStartupVisibleToolSurface(managedStartupProbeTestContext(t, actor, tools), actor, "system prompt", tools)
 	assertClaudeAuthenticationFailure(t, err)
@@ -338,6 +342,7 @@ exit 2
 		ClaudeCLIRuntimeOptions{ProviderCredentials: testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")},
 	)
 	actor := runtimeactors.AgentConfig{ID: "selector-agent", NativeTools: runtimeactors.NativeToolConfig{WebSearch: true}}
+	actor.Identity = testAgentIdentity(actor.ID, "")
 	_, err := runtime.ProbeStartupVisibleToolSurface(managedStartupProbeTestContext(t, actor, nil), actor, "system prompt", nil)
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassConnectorFailure || failure.Failure.Detail.Code != "claude_cli_startup_probe_failed" {

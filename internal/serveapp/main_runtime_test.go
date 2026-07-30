@@ -2482,6 +2482,10 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 		Turn1At: now.Add(-2 * time.Minute), Turn2At: now.Add(-time.Minute),
 	}
 	identity := servedRuntimeFlowIdentityFields(t, fixture.AgentID, "fork-source", "source")
+	actorIdentity, err := runtimeagentidentity.FromStorageFields(identity)
+	if err != nil {
+		t.Fatalf("build %s conversation fork source identity: %v", backend, err)
+	}
 	ctx := context.Background()
 	capabilityIDs := make([]string, 0, 2)
 	var capabilityStore managedcapabilities.Persistence
@@ -2501,7 +2505,7 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 	}
 	for i, turnID := range []string{fixture.Turn1ID, fixture.Turn2ID} {
 		surface, err := managedcapabilities.New(managedcapabilities.Plan{
-			ActorID: fixture.AgentID, RuntimeMode: "session", Provider: "served-fork-source", Transport: "api",
+			ActorIdentity: actorIdentity, RuntimeMode: "session", Provider: "served-fork-source", Transport: "api",
 			ProviderContract: "served-conversation-fork-source-v1",
 			Authority: managedcapabilities.Authority{
 				Kind: managedcapabilities.AuthorityProviderTurn, ID: turnID,

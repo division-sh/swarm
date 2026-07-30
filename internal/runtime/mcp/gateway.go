@@ -75,6 +75,9 @@ func (g *Gateway) hydrateActor(actor models.AgentConfig) models.AgentConfig {
 	if resolved, ok := g.hooks.ResolveActorConfig(actor.ID); ok {
 		resolved.NormalizeRuntimeDescriptor()
 		resolved.NormalizeEntityID()
+		resolved.ID = actor.ID
+		resolved.Identity = actor.Identity
+		resolved.FlowPath = actor.FlowPath
 		return resolved
 	}
 	return actor
@@ -634,7 +637,8 @@ func (g *Gateway) mcpToolsForCapabilitySurface(ctx context.Context, turn TurnCon
 	if turn.CapabilitySurface == nil {
 		return nil, nil, nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_surface", nil, map[string]any{"reason": "surface_missing"})
 	}
-	if err := turn.CapabilitySurface.Validate(); err != nil || turn.CapabilitySurface.ActorID != strings.TrimSpace(turn.Actor.ID) {
+	actorIdentity, identityErr := turn.Actor.ConcreteIdentity()
+	if err := turn.CapabilitySurface.Validate(); err != nil || identityErr != nil || !turn.CapabilitySurface.MatchesActor(actorIdentity) {
 		return nil, nil, nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_surface", err, map[string]any{"reason": "surface_invalid_or_mismatched"})
 	}
 	definitions, err := g.toolDefinitionsInContext(ctx, turn.Actor, true)
@@ -841,8 +845,11 @@ func (g *Gateway) runtimeTurnContextForRequest(r *http.Request, operation string
 	if turn.CapabilitySurface == nil && len(turn.ForkSandboxAllowed) == 0 {
 		return TurnContext{}, g.newGatewayError(ErrCodeContextNotFound, operation, nil, map[string]any{"reason": "capability_surface_missing_or_mismatched"})
 	}
-	if turn.CapabilitySurface != nil && turn.CapabilitySurface.ActorID != strings.TrimSpace(turn.Actor.ID) {
-		return TurnContext{}, g.newGatewayError(ErrCodeContextNotFound, operation, nil, map[string]any{"reason": "capability_surface_missing_or_mismatched"})
+	if turn.CapabilitySurface != nil {
+		actorIdentity, err := turn.Actor.ConcreteIdentity()
+		if err != nil || !turn.CapabilitySurface.MatchesActor(actorIdentity) {
+			return TurnContext{}, g.newGatewayError(ErrCodeContextNotFound, operation, err, map[string]any{"reason": "capability_surface_missing_or_mismatched"})
+		}
 	}
 	return turn, nil
 }

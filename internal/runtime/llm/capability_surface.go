@@ -11,6 +11,7 @@ import (
 	"time"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
@@ -34,7 +35,25 @@ func withProviderTurnAuthority(ctx context.Context, session *Session) (context.C
 	if session == nil {
 		return ctx, managedcapabilities.Authority{}, fmt.Errorf("managed capability provider turn requires session")
 	}
+	actor, ok := models.ActorFromContext(ctx)
+	if !ok {
+		return ctx, managedcapabilities.Authority{}, fmt.Errorf("managed capability provider turn requires actor context")
+	}
+	actorIdentity, err := actor.ConcreteIdentity()
+	if err != nil {
+		return ctx, managedcapabilities.Authority{}, fmt.Errorf("managed capability provider turn actor identity: %w", err)
+	}
+	sessionIdentity := session.MemoryIdentity.Agent.Normalize()
+	sameSessionActor, sessionIdentityErr := runtimeagentidentity.Equal(actorIdentity, sessionIdentity)
+	if sessionIdentityErr != nil || !sameSessionActor || strings.TrimSpace(session.AgentID) != actorIdentity.AgentID() {
+		return ctx, managedcapabilities.Authority{}, fmt.Errorf("managed capability provider turn session actor mismatch")
+	}
 	if existing, ok := providerTurnAuthorityFromContext(ctx); ok {
+		if existing.Kind != managedcapabilities.AuthorityProviderTurn ||
+			existing.SessionID != strings.TrimSpace(session.ID) ||
+			existing.TurnOrdinal != session.TurnCount+1 {
+			return ctx, managedcapabilities.Authority{}, fmt.Errorf("managed capability provider turn authority does not match session")
+		}
 		return ctx, existing, nil
 	}
 	executionKind := managedcapabilities.ExecutionNormalAgent
@@ -54,6 +73,9 @@ func withProviderTurnAuthority(ctx context.Context, session *Session) (context.C
 			if !admission.AuthorizesNormal() {
 				return ctx, managedcapabilities.Authority{}, fmt.Errorf("normal managed execution admission mismatch")
 			}
+			if equal, equalErr := runtimeagentidentity.Equal(authority.Normal.Identity, actorIdentity); equalErr != nil || !equal {
+				return ctx, managedcapabilities.Authority{}, fmt.Errorf("normal managed provider turn actor identity mismatch")
+			}
 			executionID = strings.TrimSpace(admission.ExecutionAuthorityID)
 		} else {
 			return ctx, managedcapabilities.Authority{}, fmt.Errorf("managed provider turn rejects execution authority %q", authority.Kind)
@@ -62,7 +84,7 @@ func withProviderTurnAuthority(ctx context.Context, session *Session) (context.C
 		if !admitted || !admission.AuthorizesNormal() {
 			return ctx, managedcapabilities.Authority{}, fmt.Errorf("normal managed provider turn requires execution admission")
 		}
-		if strings.TrimSpace(token.AgentID) != strings.TrimSpace(session.AgentID) {
+		if equal, equalErr := runtimeagentidentity.Equal(token.Identity, actorIdentity); equalErr != nil || !equal {
 			return ctx, managedcapabilities.Authority{}, fmt.Errorf("normal managed provider turn lifecycle actor mismatch")
 		}
 		executionID = strings.TrimSpace(admission.ExecutionAuthorityID)
@@ -105,6 +127,16 @@ func managedCapabilityPlanForTurn(ctx context.Context, runtime Runtime, session 
 	if !ok || strings.TrimSpace(actor.ID) == "" {
 		return managedcapabilities.Surface{}, fmt.Errorf("managed capability surface requires actor context")
 	}
+	actorIdentity, err := actor.ConcreteIdentity()
+	if err != nil {
+		return managedcapabilities.Surface{}, fmt.Errorf("managed capability surface actor identity: %w", err)
+	}
+	if session == nil || strings.TrimSpace(session.AgentID) != actorIdentity.AgentID() {
+		return managedcapabilities.Surface{}, fmt.Errorf("managed capability surface requires exact session actor")
+	}
+	if equal, equalErr := runtimeagentidentity.Equal(session.MemoryIdentity.Agent, actorIdentity); equalErr != nil || !equal {
+		return managedcapabilities.Surface{}, fmt.Errorf("managed capability surface session identity mismatch")
+	}
 	authority, ok := providerTurnAuthorityFromContext(ctx)
 	if !ok {
 		return managedcapabilities.Surface{}, fmt.Errorf("managed capability surface requires provider-turn authority")
@@ -123,6 +155,10 @@ func managedCapabilityPlan(ctx context.Context, runtime Runtime, runtimeMode str
 	actor, ok := models.ActorFromContext(ctx)
 	if !ok || strings.TrimSpace(actor.ID) == "" {
 		return managedcapabilities.Surface{}, fmt.Errorf("managed capability surface requires actor context")
+	}
+	actorIdentity, err := actor.ConcreteIdentity()
+	if err != nil {
+		return managedcapabilities.Surface{}, fmt.Errorf("managed capability surface actor identity: %w", err)
 	}
 	contract, ok := ProviderContractForRuntime(runtime)
 	if !ok {
@@ -186,7 +222,7 @@ func managedCapabilityPlan(ctx context.Context, runtime Runtime, runtimeMode str
 		})
 	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorID:          actor.ID,
+		ActorIdentity:    actorIdentity,
 		RuntimeMode:      strings.TrimSpace(runtimeMode),
 		Provider:         contract.Provider,
 		Transport:        string(contract.Transport),

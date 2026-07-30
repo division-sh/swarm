@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 )
 
@@ -209,11 +210,11 @@ func advanceConflictingManagedCapabilitySurfaceSQLite(ctx context.Context, tx *s
 	return surface, nil
 }
 
-func validateManagedAgentTurnSurface(surface managedcapabilities.Surface, agentID, sessionID, runID string) error {
+func validateManagedAgentTurnSurface(surface managedcapabilities.Surface, identity agentidentity.Identity, sessionID, runID string) error {
 	if surface.Authority.Kind != managedcapabilities.AuthorityProviderTurn {
 		return fmt.Errorf("agent turn capability surface authority kind %q is not provider_turn", surface.Authority.Kind)
 	}
-	if surface.ActorID != strings.TrimSpace(agentID) || surface.Authority.SessionID != strings.TrimSpace(sessionID) {
+	if !surface.MatchesActor(identity) || surface.Authority.SessionID != strings.TrimSpace(sessionID) {
 		return fmt.Errorf("agent turn capability surface owner does not match persisted turn")
 	}
 	if surface.Authority.RunID != strings.TrimSpace(runID) {

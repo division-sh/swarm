@@ -435,10 +435,10 @@ func assertSelectedContractDeferredWorkRejectionHasNoForkMutation(t testing.TB, 
 	}
 }
 
-func seedRunForkAgentTurnCapabilitySurface(t testing.TB, ctx context.Context, pg *store.PostgresStore, runID, turnID, sessionID, agentID, runtimeMode string) string {
+func seedRunForkAgentTurnCapabilitySurface(t testing.TB, ctx context.Context, pg *store.PostgresStore, runID, turnID, sessionID string, identity agentidentity.Identity, runtimeMode string) string {
 	t.Helper()
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorID: agentID, RuntimeMode: runtimeMode, Provider: "test", Transport: "api", ProviderContract: "run-fork-test",
+		ActorIdentity: identity, RuntimeMode: runtimeMode, Provider: "test", Transport: "api", ProviderContract: "run-fork-test",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityProviderTurn, ID: turnID,
 			ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: "run-fork-test-runtime",
@@ -2048,7 +2048,7 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 	turnID := uuid.NewString()
 	sessionID := uuid.NewString()
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorID: actor.ID, RuntimeMode: "task", Provider: "test", Transport: "api", ProviderContract: "selected-http-proof",
+		ActorIdentity: actorIdentity, RuntimeMode: "task", Provider: "test", Transport: "api", ProviderContract: "selected-http-proof",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityProviderTurn, ID: turnID,
 			ExecutionKind: managedcapabilities.ExecutionSelectedContractFork, ExecutionAuthorityID: proof.RuntimeExecutionID,
@@ -2125,7 +2125,7 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 	}
 
 	crossRunSurface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorID: actor.ID, RuntimeMode: "task", Provider: "test", Transport: "api", ProviderContract: "selected-http-proof",
+		ActorIdentity: actorIdentity, RuntimeMode: "task", Provider: "test", Transport: "api", ProviderContract: "selected-http-proof",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityProviderTurn, ID: uuid.NewString(),
 			ExecutionKind: managedcapabilities.ExecutionSelectedContractFork, ExecutionAuthorityID: proof.RuntimeExecutionID,
@@ -2412,7 +2412,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	)
 	providerCtx = managedexecution.WithAdmission(providerCtx, winner.container.admission)
 	capabilitySurface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorID: authority.Target.AgentID, RuntimeMode: "task",
+		ActorIdentity: authority.Target.AgentIdentity, RuntimeMode: "task",
 		Provider: "openai", Transport: "api", ProviderContract: "run-fork-race-test",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityProviderTurn, ID: authority.Target.ID,
@@ -2950,7 +2950,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, entityID, agentFields.FlowInstancePath, at); err != nil {
 		t.Fatalf("seed source conversation audit: %v", err)
 	}
-	capabilitySurfaceID := seedRunForkAgentTurnCapabilitySurface(t, ctx, pg, sourceRunID, turnID, sessionID, "agent-a", "session_per_entity")
+	capabilitySurfaceID := seedRunForkAgentTurnCapabilitySurface(t, ctx, pg, sourceRunID, turnID, sessionID, agentIdentity, "session_per_entity")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -3069,7 +3069,7 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, entityID, agentFields.FlowInstancePath, at); err != nil {
 		t.Fatalf("seed source conversation audit: %v", err)
 	}
-	capabilitySurfaceID := seedRunForkAgentTurnCapabilitySurface(t, ctx, pg, sourceRunID, turnID, sessionID, "validation-coordinator", "session_per_entity")
+	capabilitySurfaceID := seedRunForkAgentTurnCapabilitySurface(t, ctx, pg, sourceRunID, turnID, sessionID, agentIdentity, "session_per_entity")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -3213,7 +3213,7 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, entityID, agentFields.FlowInstancePath, after); err != nil {
 		t.Fatalf("seed post-T source conversation audit: %v", err)
 	}
-	capabilitySurfaceID := seedRunForkAgentTurnCapabilitySurface(t, ctx, pg, sourceRunID, turnID, sessionID, "agent-a", "session_per_entity")
+	capabilitySurfaceID := seedRunForkAgentTurnCapabilitySurface(t, ctx, pg, sourceRunID, turnID, sessionID, agentIdentity, "session_per_entity")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,

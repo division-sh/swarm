@@ -81,7 +81,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		if err != nil {
 			return err
 		}
-		if err := validateManagedAgentTurnSurface(surface, identity.AgentID(), rec.SessionID, identity.RunID); err != nil {
+		if err := validateManagedAgentTurnSurface(surface, identity.Agent, rec.SessionID, identity.RunID); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `
