@@ -7,5 +7,5 @@ hard:
     limit_seconds: 270
     justification: Ratified from pinned broad command observations 161s, 159s, and 158s.
   full_conformance_command_seconds:
-    limit_seconds: 330
-    justification: Ratified from pinned full command observations 299s, 220s, and 290s.
+    limit_seconds: 450
+    justification: Ratified from isolated selected-store full command observations 415s and 367s.

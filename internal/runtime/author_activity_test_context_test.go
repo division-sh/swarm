@@ -48,6 +48,7 @@ func (runtimeTestCandidateOwner) ExecuteCompletionCandidate(
 }
 
 func (runtimeTestCandidateOwner) RegisterCompletionCandidateSink(
+	context.Context,
 	runtimerunlifecycle.CandidateScope,
 	runtimerunlifecycle.CandidateSink,
 ) (runtimerunlifecycle.CandidateRegistration, error) {

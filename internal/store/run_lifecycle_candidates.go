@@ -15,8 +15,14 @@ import (
 )
 
 type runLifecycleCandidateSinkRegistry struct {
-	mu    sync.Mutex
-	sinks map[string]runtimerunlifecycle.CandidateSink
+	mu      sync.Mutex
+	entries map[string]*runLifecycleCandidateSinkEntry
+}
+
+type runLifecycleCandidateSinkEntry struct {
+	sink        runtimerunlifecycle.CandidateSink
+	pending     int
+	pendingZero chan struct{}
 }
 
 type runLifecycleCandidateRegistration struct {
@@ -26,9 +32,16 @@ type runLifecycleCandidateRegistration struct {
 
 type runLifecycleCandidateHandoffReservation struct {
 	lease      *worklifetime.Lease
+	ctx        context.Context
 	handoffs   []runLifecycleCandidateHandoff
+	barriers   []*runLifecycleCandidateRegistrationBarrier
 	identities map[string]struct{}
 	settled    bool
+}
+
+type runLifecycleCandidateRegistrationBarrier struct {
+	once    sync.Once
+	release func()
 }
 
 type runLifecycleCandidateHandoff struct {
@@ -37,39 +50,36 @@ type runLifecycleCandidateHandoff struct {
 }
 
 func detachedRunLifecycleCandidateContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	ctx = context.WithoutCancel(ctx)
 	ctx = runtimepipeline.WithoutPipelineSQLTxContext(ctx)
 	return runtimepipeline.WithoutPipelineSQLConnContext(ctx)
 }
 
 func reserveRunLifecycleCandidateHandoff(ctx context.Context) (*runLifecycleCandidateHandoffReservation, error) {
+	detached := detachedRunLifecycleCandidateContext(ctx)
 	owner, ok := worklifetime.OccurrenceFromContext(ctx)
 	if !ok {
-		return &runLifecycleCandidateHandoffReservation{}, nil
+		return &runLifecycleCandidateHandoffReservation{ctx: detached}, nil
 	}
-	lease, err := owner.Begin(detachedRunLifecycleCandidateContext(ctx))
+	lease, err := owner.Begin(detached)
 	if err != nil {
 		return nil, fmt.Errorf("reserve completion candidate handoff: %w", err)
 	}
-	return &runLifecycleCandidateHandoffReservation{lease: lease}, nil
+	return &runLifecycleCandidateHandoffReservation{lease: lease, ctx: detached}, nil
 }
 
 func (r *runLifecycleCandidateHandoffReservation) prepare(
 	sinks *runLifecycleCandidateSinkRegistry,
 	result runtimerunlifecycle.CandidateRequestResult,
 ) error {
-	if r == nil || r.lease == nil || !result.RequiresRepresentation() {
+	if r == nil || !result.RequiresRepresentation() {
 		return nil
 	}
 	if err := result.Candidate.Validate(); err != nil {
 		return err
-	}
-	sink := sinks.load(result.Candidate.BundleHash)
-	if sink == nil {
-		// No runtime generation is currently serving this selected store.
-		// The durable candidate remains authoritative and startup enumeration
-		// will represent it when a generation registers.
-		return nil
 	}
 	identity := fmt.Sprintf("%s/%d", result.Candidate.RunID, result.Candidate.Revision)
 	if r.identities == nil {
@@ -78,11 +88,20 @@ func (r *runLifecycleCandidateHandoffReservation) prepare(
 	if _, exists := r.identities[identity]; exists {
 		return nil
 	}
-	admission, err := sink.ReserveCompletionCandidate(detachedRunLifecycleCandidateContext(r.lease.Context()))
+	r.identities[identity] = struct{}{}
+	sink, barrier := sinks.reserve(result.Candidate.BundleHash)
+	if sink == nil {
+		r.barriers = append(r.barriers, barrier)
+		return nil
+	}
+	handoffCtx := r.ctx
+	if r.lease != nil {
+		handoffCtx = detachedRunLifecycleCandidateContext(r.lease.Context())
+	}
+	admission, err := sink.ReserveCompletionCandidate(handoffCtx)
 	if err != nil {
 		return fmt.Errorf("reserve completion candidate executor admission: %w", err)
 	}
-	r.identities[identity] = struct{}{}
 	r.handoffs = append(r.handoffs, runLifecycleCandidateHandoff{
 		admission: admission, candidate: result.Candidate,
 	})
@@ -101,6 +120,9 @@ func (r *runLifecycleCandidateHandoffReservation) commit() error {
 			handoff.admission.Submit(handoff.candidate),
 		)
 	}
+	for _, barrier := range r.barriers {
+		barrier.Settle()
+	}
 	if r.lease != nil {
 		submitErr = errors.Join(submitErr, r.lease.Done())
 	}
@@ -115,8 +137,17 @@ func (r *runLifecycleCandidateHandoffReservation) rollback() {
 	for _, handoff := range r.handoffs {
 		_ = handoff.admission.Cancel()
 	}
+	for _, barrier := range r.barriers {
+		barrier.Settle()
+	}
 	if r.lease != nil {
 		_ = r.lease.Done()
+	}
+}
+
+func (b *runLifecycleCandidateRegistrationBarrier) Settle() {
+	if b != nil {
+		b.once.Do(b.release)
 	}
 }
 
@@ -127,6 +158,7 @@ func (r *runLifecycleCandidateRegistration) Release() {
 }
 
 func (r *runLifecycleCandidateSinkRegistry) register(
+	ctx context.Context,
 	scope runtimerunlifecycle.CandidateScope,
 	sink runtimerunlifecycle.CandidateSink,
 ) (runtimerunlifecycle.CandidateRegistration, error) {
@@ -136,49 +168,112 @@ func (r *runLifecycleCandidateSinkRegistry) register(
 	if sink == nil {
 		return nil, errors.New("completion candidate sink is required")
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	bundleHash := strings.TrimSpace(scope.BundleHash)
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.sinks == nil {
-		r.sinks = make(map[string]runtimerunlifecycle.CandidateSink)
+	if r.entries == nil {
+		r.entries = make(map[string]*runLifecycleCandidateSinkEntry)
 	}
-	if _, exists := r.sinks[bundleHash]; exists {
+	entry := r.entries[bundleHash]
+	if entry == nil {
+		entry = &runLifecycleCandidateSinkEntry{}
+		r.entries[bundleHash] = entry
+	}
+	if entry.sink != nil {
+		r.mu.Unlock()
 		return nil, fmt.Errorf("completion candidate sink already registered for bundle_hash %s", bundleHash)
 	}
-	r.sinks[bundleHash] = sink
+	entry.sink = sink
+	pendingZero := entry.pendingZero
+	r.mu.Unlock()
+
+	if pendingZero != nil {
+		select {
+		case <-ctx.Done():
+			r.mu.Lock()
+			if entry.sink == sink {
+				entry.sink = nil
+			}
+			if entry.pending == 0 {
+				delete(r.entries, bundleHash)
+			}
+			r.mu.Unlock()
+			return nil, fmt.Errorf("wait for pre-registration completion candidate mutations: %w", context.Cause(ctx))
+		case <-pendingZero:
+		}
+	}
 	return &runLifecycleCandidateRegistration{release: func() {
 		r.mu.Lock()
 		defer r.mu.Unlock()
-		if r.sinks[bundleHash] == sink {
-			delete(r.sinks, bundleHash)
+		if entry.sink == sink {
+			entry.sink = nil
+		}
+		if entry.pending == 0 {
+			delete(r.entries, bundleHash)
 		}
 	}}, nil
 }
 
-func (r *runLifecycleCandidateSinkRegistry) load(bundleHash string) runtimerunlifecycle.CandidateSink {
+func (r *runLifecycleCandidateSinkRegistry) reserve(
+	bundleHash string,
+) (runtimerunlifecycle.CandidateSink, *runLifecycleCandidateRegistrationBarrier) {
+	bundleHash = strings.TrimSpace(bundleHash)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.sinks[strings.TrimSpace(bundleHash)]
+	if r.entries == nil {
+		r.entries = make(map[string]*runLifecycleCandidateSinkEntry)
+	}
+	entry := r.entries[bundleHash]
+	if entry == nil {
+		entry = &runLifecycleCandidateSinkEntry{}
+		r.entries[bundleHash] = entry
+	}
+	if entry.sink != nil {
+		return entry.sink, nil
+	}
+	if entry.pending == 0 {
+		entry.pendingZero = make(chan struct{})
+	}
+	entry.pending++
+	return nil, &runLifecycleCandidateRegistrationBarrier{release: func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		entry.pending--
+		if entry.pending < 0 {
+			panic("completion candidate registration barrier underflow")
+		}
+		if entry.pending == 0 {
+			close(entry.pendingZero)
+			entry.pendingZero = nil
+			if entry.sink == nil {
+				delete(r.entries, bundleHash)
+			}
+		}
+	}}
 }
 
 func (s *PostgresStore) RegisterCompletionCandidateSink(
+	ctx context.Context,
 	scope runtimerunlifecycle.CandidateScope,
 	sink runtimerunlifecycle.CandidateSink,
 ) (runtimerunlifecycle.CandidateRegistration, error) {
 	if s == nil {
 		return nil, errors.New("postgres store is required")
 	}
-	return s.runLifecycleSinks.register(scope, sink)
+	return s.runLifecycleSinks.register(ctx, scope, sink)
 }
 
 func (s *SQLiteRuntimeStore) RegisterCompletionCandidateSink(
+	ctx context.Context,
 	scope runtimerunlifecycle.CandidateScope,
 	sink runtimerunlifecycle.CandidateSink,
 ) (runtimerunlifecycle.CandidateRegistration, error) {
 	if s == nil {
 		return nil, errors.New("sqlite runtime store is required")
 	}
-	return s.runLifecycleSinks.register(scope, sink)
+	return s.runLifecycleSinks.register(ctx, scope, sink)
 }
 
 func queueCompletionCandidateSignal(
@@ -189,10 +284,12 @@ func queueCompletionCandidateSignal(
 	if err := candidate.Validate(); err != nil {
 		return err
 	}
-	sink := sinks.load(candidate.BundleHash)
+	sink, barrier := sinks.reserve(candidate.BundleHash)
 	if sink == nil {
-		// A selected store may be mutated without a live runtime generation
-		// (operator/test setup). Startup enumeration owns the later handoff.
+		if err := runtimepipeline.QueueRunLifecycleCandidateRegistrationBarrier(ctx, barrier); err != nil {
+			barrier.Settle()
+			return fmt.Errorf("settle completion candidate startup reconciliation: %w", err)
+		}
 		return nil
 	}
 	admission, err := sink.ReserveCompletionCandidate(detachedRunLifecycleCandidateContext(ctx))

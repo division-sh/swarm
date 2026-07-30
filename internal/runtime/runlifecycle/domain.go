@@ -972,7 +972,7 @@ type CandidateRegistration interface {
 }
 
 type CandidateRegistrar interface {
-	RegisterCompletionCandidateSink(CandidateScope, CandidateSink) (CandidateRegistration, error)
+	RegisterCompletionCandidateSink(context.Context, CandidateScope, CandidateSink) (CandidateRegistration, error)
 }
 
 type CandidateOwner interface {

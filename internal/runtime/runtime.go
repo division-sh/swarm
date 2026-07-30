@@ -1391,6 +1391,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	if rt.runLifecycleExecutor != nil {
 		scope := runtimerunlifecycle.CandidateScope{BundleHash: rt.Options.BundleSourceFact.BundleHash()}
 		registration, err := rt.Stores.RunLifecycleCandidates.RegisterCompletionCandidateSink(
+			startCtx,
 			scope,
 			rt.runLifecycleExecutor,
 		)

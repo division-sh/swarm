@@ -13665,10 +13665,14 @@ platform_tables:
           registration_and_startup: >
             Runtime construction registers one generation-owned candidate sink before EventBus, managers, standing
             reconciliation, public admission, or any candidate producer becomes reachable. The executor accepts exact
-            revision notifications while it enumerates the complete selected-store projection. Registration plus
-            monotonic per-run revision representation closes the startup race without a timestamp watermark. Runtime
-            readiness publishes only after enumeration is exhausted and every accepted identity is represented by an
-            execution chain or exact future wake.
+            revision notifications while it enumerates the complete selected-store projection. A candidate-producing
+            selected-store transaction that observes no registered sink retains one store-owned registration barrier
+            until its exact commit or rollback outcome. Registration installs the sink, then waits context-bounded for
+            every such earlier transaction before enumeration begins; later transactions observe the sink and reserve
+            the normal post-commit handoff. Registration, transaction-outcome reconciliation, and monotonic per-run
+            revision representation close the startup race without a timestamp watermark, fallback scan, or polling.
+            Runtime readiness publishes only after enumeration is exhausted and every accepted identity is represented
+            by an execution chain or exact future wake.
           post_commit_handoff: >
             A candidate-producing operation acquires generation work admission before its mutation becomes
             commit-capable. Commit submits the exact durable identity through a detached handoff and releases admission
