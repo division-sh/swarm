@@ -213,23 +213,25 @@ func testCompletionEffectBlockers(t *testing.T, fixture runLifecycleCandidatePar
 
 func testCompletionEntityBlockers(t *testing.T, fixture runLifecycleCandidateParityFixture, ctx context.Context) {
 	t.Helper()
-	runID := seedCompletionBlockerRun(t, fixture, ctx)
-	update := `UPDATE entity_state SET flow_instance = ? WHERE run_id = ?`
-	args := []any{"unknown/instance", runID}
-	if fixture.postgres {
-		update = `UPDATE entity_state SET flow_instance = $1 WHERE run_id = $2::uuid`
-	}
-	if _, err := fixture.db.ExecContext(ctx, update, args...); err != nil {
-		t.Fatal(err)
-	}
-	summaries := readCompletionBlockerSummaries(
-		t, fixture, ctx, runID,
-		time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC),
-	)
-	if summaries.Entities.ReadyForCompletion() || summaries.Entities.Malformed != 1 {
-		t.Fatalf("unknown entity terminal descriptor did not fail closed: %#v", summaries.Entities)
-	}
-	assertCompletionBlockerExecution(t, fixture, ctx, runID, true)
+	t.Run("entity_malformed_descriptor", func(t *testing.T) {
+		runID := seedCompletionBlockerRun(t, fixture, ctx)
+		update := `UPDATE entity_state SET flow_instance = ? WHERE run_id = ?`
+		args := []any{"unknown/instance", runID}
+		if fixture.postgres {
+			update = `UPDATE entity_state SET flow_instance = $1 WHERE run_id = $2::uuid`
+		}
+		if _, err := fixture.db.ExecContext(ctx, update, args...); err != nil {
+			t.Fatal(err)
+		}
+		summaries := readCompletionBlockerSummaries(
+			t, fixture, ctx, runID,
+			time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC),
+		)
+		if summaries.Entities.ReadyForCompletion() || summaries.Entities.Malformed != 1 {
+			t.Fatalf("unknown entity terminal descriptor did not fail closed: %#v", summaries.Entities)
+		}
+		assertCompletionBlockerExecution(t, fixture, ctx, runID, true)
+	})
 }
 
 func seedCompletionBlockerRun(t *testing.T, fixture runLifecycleCandidateParityFixture, ctx context.Context) string {
