@@ -171,31 +171,50 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	}
 	_ = budgetFile.Close()
 
-	const runtimePackage = "github.com/division-sh/swarm/internal/runtime"
+	const (
+		runtimePackage = "github.com/division-sh/swarm/internal/runtime"
+		storePackage   = "github.com/division-sh/swarm/internal/store"
+	)
 	runtimeIsSpecial := false
+	storeIsSpecial := false
 	for _, pkg := range policy.SpecialPackages {
 		if pkg == runtimePackage {
 			runtimeIsSpecial = true
-			break
+		}
+		if pkg == storePackage {
+			storeIsSpecial = true
 		}
 	}
 	if !runtimeIsSpecial {
 		t.Fatal("internal/runtime must remain isolated from broad package co-scheduling")
 	}
+	if !storeIsSpecial {
+		t.Fatal("internal/store must remain isolated from broad package co-scheduling")
+	}
 	runtimeUnit, ok := policy.Units["runtime-full"]
 	if !ok || len(runtimeUnit.Packages) != 1 || runtimeUnit.Packages[0] != runtimePackage || runtimeUnit.Run != "" || runtimeUnit.CountMode != "count-1" {
 		t.Fatalf("runtime-full unit = %#v, want one complete uncached internal/runtime proof", runtimeUnit)
 	}
+	storeUnit, ok := policy.Units["store-full"]
+	if !ok || len(storeUnit.Packages) != 1 || storeUnit.Packages[0] != storePackage || storeUnit.Run != "" || storeUnit.CountMode != "count-1" {
+		t.Fatalf("store-full unit = %#v, want one complete uncached internal/store proof", storeUnit)
+	}
 	for _, profileName := range []string{testplanning.ProfilePRCommon, testplanning.ProfilePREscalated, testplanning.ProfileFull, testplanning.ProfileNightly} {
-		found := false
+		foundRuntime := false
+		foundStore := false
 		for _, unit := range policy.Profiles[profileName].Units {
 			if unit == "runtime-full" {
-				found = true
-				break
+				foundRuntime = true
+			}
+			if unit == "store-full" {
+				foundStore = true
 			}
 		}
-		if !found {
+		if !foundRuntime {
 			t.Errorf("profile %s does not include runtime-full", profileName)
+		}
+		if !foundStore {
+			t.Errorf("profile %s does not include store-full", profileName)
 		}
 	}
 

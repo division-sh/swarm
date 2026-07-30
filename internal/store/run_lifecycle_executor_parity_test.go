@@ -2,7 +2,10 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -93,6 +96,7 @@ func TestRunLifecycleExecutorNoGapParity(t *testing.T) {
 			}
 			executor := newRunLifecycleParityExecutor(t, intercept, occurrence)
 			registration, err := registrar.RegisterCompletionCandidateSink(
+				runtimeCtx,
 				runtimerunlifecycle.CandidateScope{BundleHash: runLifecycleCandidateParityBundleHash},
 				executor,
 			)
@@ -156,6 +160,7 @@ func TestRunLifecycleExecutorNoGapParity(t *testing.T) {
 			}
 			successor := newRunLifecycleParityExecutor(t, successorStore, successorOccurrence)
 			successorRegistration, err := registrar.RegisterCompletionCandidateSink(
+				successorCtx,
 				runtimerunlifecycle.CandidateScope{BundleHash: runLifecycleCandidateParityBundleHash},
 				successor,
 			)
@@ -177,6 +182,281 @@ func TestRunLifecycleExecutorNoGapParity(t *testing.T) {
 			retireRunLifecycleProcess(t, process)
 			retireRunLifecycleProcess(t, successorProcess)
 		})
+	}
+}
+
+func TestRunLifecycleCandidateCommitAcrossSinkRegistrationParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			fixture := openRunLifecycleCandidateParityFixture(t, backend)
+			registrar, ok := fixture.store.(runtimerunlifecycle.CandidateRegistrar)
+			if !ok {
+				t.Fatalf("%s store does not expose candidate registration", backend)
+			}
+			baseCtx := testAuthorActivityBundleSourceContext()
+			runID := uuid.NewString()
+			ensureRunLifecycleCandidateParityRun(
+				t,
+				fixture,
+				baseCtx,
+				runID,
+				time.Date(2026, 7, 29, 16, 30, 0, 0, time.UTC),
+			)
+
+			process := worklifetime.NewProcess()
+			occurrence := newRunLifecycleExecutorOccurrence(t, process)
+			runtimeCtx := worklifetime.WithRuntimeOccurrence(baseCtx, occurrence)
+			intercept := &runLifecycleCandidateInterceptStore{
+				delegate: fixture.store,
+				executed: make(chan runtimerunlifecycle.Candidate, 2),
+			}
+			executor := newRunLifecycleParityExecutor(t, intercept, occurrence)
+
+			candidatePrepared := make(chan struct{})
+			allowCommit := make(chan struct{})
+			mutationDone := make(chan error, 1)
+			go func() {
+				mutationDone <- fixture.store.RunRuntimeMutationContext(runtimeCtx, func(txctx context.Context) error {
+					disposition, err := fixture.store.RequestCompletionCandidate(
+						txctx,
+						runtimerunlifecycle.ImmediateCandidate(runID),
+					)
+					if err != nil {
+						return err
+					}
+					if disposition != runtimerunlifecycle.CandidateRequested {
+						return fmt.Errorf("candidate disposition = %s, want requested", disposition)
+					}
+					close(candidatePrepared)
+					select {
+					case <-txctx.Done():
+						return context.Cause(txctx)
+					case <-allowCommit:
+						return nil
+					}
+				})
+			}()
+			awaitRunLifecycleSignal(t, candidatePrepared, "uncommitted candidate preparation")
+
+			type registrationResult struct {
+				registration runtimerunlifecycle.CandidateRegistration
+				err          error
+			}
+			registered := make(chan registrationResult, 1)
+			go func() {
+				registration, err := registrar.RegisterCompletionCandidateSink(
+					runtimeCtx,
+					runtimerunlifecycle.CandidateScope{BundleHash: runLifecycleCandidateParityBundleHash},
+					executor,
+				)
+				registered <- registrationResult{registration: registration, err: err}
+			}()
+			awaitRunLifecycleSinkInstallation(t, fixture, executor)
+			select {
+			case result := <-registered:
+				if result.registration != nil {
+					result.registration.Release()
+				}
+				t.Fatalf("registration returned before the pre-registration candidate transaction settled: %v", result.err)
+			default:
+			}
+
+			close(allowCommit)
+			if err := awaitRunLifecycleError(t, mutationDone, "candidate commit"); err != nil {
+				t.Fatalf("commit candidate across sink registration: %v", err)
+			}
+			result := <-registered
+			if result.err != nil {
+				t.Fatalf("register candidate executor: %v", result.err)
+			}
+			defer result.registration.Release()
+
+			if err := executor.Start(runtimeCtx); err != nil {
+				t.Fatalf("start candidate executor: %v", err)
+			}
+			candidate := awaitRunLifecycleCandidate(t, intercept.executed, "post-registration reconciliation")
+			if candidate.RunID != runID {
+				t.Fatalf("reconciled candidate run_id = %s, want %s", candidate.RunID, runID)
+			}
+
+			if err := executor.Retire(context.Background()); err != nil {
+				t.Fatalf("retire candidate executor: %v", err)
+			}
+			retireRunLifecycleExecutorOccurrence(t, occurrence)
+			retireRunLifecycleProcess(t, process)
+		})
+	}
+}
+
+func TestRunLifecycleDirectHandoffCommitAcrossSinkRegistrationParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			fixture := openRunLifecycleCandidateParityFixture(t, backend)
+			registrar, ok := fixture.store.(runtimerunlifecycle.CandidateRegistrar)
+			if !ok {
+				t.Fatalf("%s store does not expose candidate registration", backend)
+			}
+			baseCtx := testAuthorActivityBundleSourceContext()
+			runID := uuid.NewString()
+			ensureRunLifecycleCandidateParityRun(
+				t,
+				fixture,
+				baseCtx,
+				runID,
+				time.Date(2026, 7, 29, 16, 45, 0, 0, time.UTC),
+			)
+
+			process := worklifetime.NewProcess()
+			occurrence := newRunLifecycleExecutorOccurrence(t, process)
+			runtimeCtx := worklifetime.WithRuntimeOccurrence(baseCtx, occurrence)
+			intercept := &runLifecycleCandidateInterceptStore{
+				delegate: fixture.store,
+				executed: make(chan runtimerunlifecycle.Candidate, 2),
+			}
+			executor := newRunLifecycleParityExecutor(t, intercept, occurrence)
+			registry := candidateRegistryForFixture(t, fixture)
+
+			candidatePrepared := make(chan struct{})
+			allowCommit := make(chan struct{})
+			mutationDone := make(chan error, 1)
+			go func() {
+				handoff, err := reserveRunLifecycleCandidateHandoff(runtimeCtx)
+				if err != nil {
+					mutationDone <- err
+					return
+				}
+				defer handoff.rollback()
+				var tx *sql.Tx
+				switch store := fixture.store.(type) {
+				case *PostgresStore:
+					tx, err = store.DB.BeginTx(runtimeCtx, nil)
+				case *SQLiteRuntimeStore:
+					tx, err = store.DB.BeginTx(runtimeCtx, nil)
+				default:
+					err = errors.New("unsupported direct candidate handoff store")
+				}
+				if err != nil {
+					mutationDone <- err
+					return
+				}
+				defer func() { _ = tx.Rollback() }()
+				var result runtimerunlifecycle.CandidateRequestResult
+				switch store := fixture.store.(type) {
+				case *PostgresStore:
+					result, err = requestPostgresCompletionCandidateTx(runtimeCtx, tx, runID, nil, false)
+				case *SQLiteRuntimeStore:
+					result, err = requestSQLiteCompletionCandidateTx(runtimeCtx, tx, runID, nil, store.now(), false)
+				}
+				if err == nil {
+					err = handoff.prepare(registry, result)
+				}
+				if err != nil {
+					mutationDone <- err
+					return
+				}
+				close(candidatePrepared)
+				select {
+				case <-runtimeCtx.Done():
+					mutationDone <- context.Cause(runtimeCtx)
+					return
+				case <-allowCommit:
+				}
+				if err := tx.Commit(); err != nil {
+					mutationDone <- err
+					return
+				}
+				mutationDone <- handoff.commit()
+			}()
+			awaitRunLifecycleSignal(t, candidatePrepared, "uncommitted direct candidate preparation")
+
+			type registrationResult struct {
+				registration runtimerunlifecycle.CandidateRegistration
+				err          error
+			}
+			registered := make(chan registrationResult, 1)
+			go func() {
+				registration, err := registrar.RegisterCompletionCandidateSink(
+					runtimeCtx,
+					runtimerunlifecycle.CandidateScope{BundleHash: runLifecycleCandidateParityBundleHash},
+					executor,
+				)
+				registered <- registrationResult{registration: registration, err: err}
+			}()
+			awaitRunLifecycleSinkInstallation(t, fixture, executor)
+			select {
+			case result := <-registered:
+				if result.registration != nil {
+					result.registration.Release()
+				}
+				t.Fatalf("registration returned before the direct candidate transaction settled: %v", result.err)
+			default:
+			}
+
+			close(allowCommit)
+			if err := awaitRunLifecycleError(t, mutationDone, "direct candidate commit"); err != nil {
+				t.Fatalf("commit direct candidate across sink registration: %v", err)
+			}
+			result := <-registered
+			if result.err != nil {
+				t.Fatalf("register candidate executor: %v", result.err)
+			}
+			defer result.registration.Release()
+
+			if err := executor.Start(runtimeCtx); err != nil {
+				t.Fatalf("start candidate executor: %v", err)
+			}
+			candidate := awaitRunLifecycleCandidate(t, intercept.executed, "direct post-registration reconciliation")
+			if candidate.RunID != runID {
+				t.Fatalf("reconciled direct candidate run_id = %s, want %s", candidate.RunID, runID)
+			}
+
+			if err := executor.Retire(context.Background()); err != nil {
+				t.Fatalf("retire candidate executor: %v", err)
+			}
+			retireRunLifecycleExecutorOccurrence(t, occurrence)
+			retireRunLifecycleProcess(t, process)
+		})
+	}
+}
+
+func candidateRegistryForFixture(
+	t *testing.T,
+	fixture runLifecycleCandidateParityFixture,
+) *runLifecycleCandidateSinkRegistry {
+	t.Helper()
+	switch store := fixture.store.(type) {
+	case *PostgresStore:
+		return &store.runLifecycleSinks
+	case *SQLiteRuntimeStore:
+		return &store.runLifecycleSinks
+	default:
+		t.Fatal("unsupported candidate registry store")
+		return nil
+	}
+}
+
+func awaitRunLifecycleSinkInstallation(
+	t *testing.T,
+	fixture runLifecycleCandidateParityFixture,
+	sink runtimerunlifecycle.CandidateSink,
+) {
+	t.Helper()
+	registry := candidateRegistryForFixture(t, fixture)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		registry.mu.Lock()
+		entry := registry.entries[runLifecycleCandidateParityBundleHash]
+		installed := entry != nil && entry.sink == sink
+		registry.mu.Unlock()
+		if installed {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for candidate sink installation")
+		}
+		runtime.Gosched()
 	}
 }
 

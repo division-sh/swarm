@@ -485,6 +485,46 @@ func QueueRunLifecycleCandidateHandoff(
 	)
 }
 
+// RunLifecycleCandidateRegistrationBarrier settles one selected-store
+// transaction that observed no live completion-candidate sink.
+type RunLifecycleCandidateRegistrationBarrier interface {
+	Settle()
+}
+
+func requireRunLifecycleCandidateTransactionOutcome(ctx context.Context) error {
+	if ctx == nil {
+		return fmt.Errorf("candidate registration barrier requires transaction context")
+	}
+	postCommit, commitOK := ctx.Value(pipelinePostCommitActionsKey{}).(*[]OwnerAction)
+	if !commitOK || postCommit == nil {
+		return fmt.Errorf("candidate registration barrier requires post-commit ownership")
+	}
+	rollbackActions, rollbackOK := ctx.Value(pipelineRollbackActionsKey{}).(*[]OwnerAction)
+	if !rollbackOK || rollbackActions == nil {
+		return fmt.Errorf("candidate registration barrier requires rollback ownership")
+	}
+	return nil
+}
+
+// QueueRunLifecycleCandidateRegistrationBarrier binds a selected-store-owned
+// startup reconciliation barrier to the exact transaction outcome.
+func QueueRunLifecycleCandidateRegistrationBarrier(
+	ctx context.Context,
+	barrier RunLifecycleCandidateRegistrationBarrier,
+) error {
+	if barrier == nil {
+		return fmt.Errorf("candidate registration barrier is required")
+	}
+	if err := requireRunLifecycleCandidateTransactionOutcome(ctx); err != nil {
+		return err
+	}
+	postCommit := ctx.Value(pipelinePostCommitActionsKey{}).(*[]OwnerAction)
+	rollbackActions := ctx.Value(pipelineRollbackActionsKey{}).(*[]OwnerAction)
+	*postCommit = append(*postCommit, func(context.Context) { barrier.Settle() })
+	*rollbackActions = append(*rollbackActions, func(context.Context) { barrier.Settle() })
+	return nil
+}
+
 func flushPipelinePostCommitActions(actions []OwnerAction) {
 	for _, fn := range actions {
 		if fn != nil {

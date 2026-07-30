@@ -113,7 +113,7 @@ func startAPIRunLifecycleExecutor(
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
-	registration, err := pg.RegisterCompletionCandidateSink(scope, executor)
+	registration, err := pg.RegisterCompletionCandidateSink(context.Background(), scope, executor)
 	if err != nil {
 		t.Fatalf("RegisterCompletionCandidateSink: %v", err)
 	}

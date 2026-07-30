@@ -65,8 +65,8 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"go|internal/runtime/runlifecycle/executor.go|Executor.installReserved|258":                                          {asyncSiteCanonicalOwner, "the run-lifecycle executor owns each pre-admitted completion candidate until the exact lease settles"},
 	"go|internal/runtime/runforkexecution/agent_runtime_materialization.go|startSelectedContractAgentRuntimeGateway|466": {asyncSiteCanonicalOwner, "the selected-fork gateway is admitted under and joined by its selected-fork occurrence"},
 	"go|internal/runtime/runforkexecution/runtime_container.go|selectedContractForkLocalRuntimeContainer.Publish|291":    {asyncSiteCanonicalOwner, "selected-fork publication acquires a local occurrence lease before launch and joins it"},
-	"go|internal/runtime/runtime.go|Runtime.Start|1465":                                                                  {asyncSiteCanonicalOwner, "pipeline background nodes acquire runtime leases before launch and settle on exit"},
-	"go|internal/runtime/runtime.go|Runtime.startSystemNodesAndWaitForSubscriptions|1811":                                {asyncSiteCanonicalOwner, "system-node runners acquire standing/runtime ownership and publish readiness before return"},
+	"go|internal/runtime/runtime.go|Runtime.Start|1466":                                                                  {asyncSiteCanonicalOwner, "pipeline background nodes acquire runtime leases before launch and settle on exit"},
+	"go|internal/runtime/runtime.go|Runtime.startSystemNodesAndWaitForSubscriptions|1812":                                {asyncSiteCanonicalOwner, "system-node runners acquire standing/runtime ownership and publish readiness before return"},
 	"go|internal/runtime/sessions/heartbeat.go|StartLeaseHeartbeatWithErrorHandler|51":                                   {asyncSiteCanonicalOwner, "the session heartbeat exposes a stop-and-wait owner and cannot outlive it"},
 	"go|internal/serveapp/main.go|Run|1258":                                                                              {asyncSiteCanonicalOwner, "the API listener is admitted under served-process ownership and joined at shutdown"},
 	"go|internal/serveapp/main.go|Run|1262":                                                                              {asyncSiteCanonicalOwner, "the MCP listener is admitted under served-process ownership and joined at shutdown"},
@@ -90,9 +90,9 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"owner_action|internal/runtime/pipeline/coordinator.go|PipelineCoordinator.recordInterceptedEmitDeadLetters|737":     {asyncSiteCanonicalOwner, "dead-letter publication is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/pipeline/generic_schedule_lifecycle.go|PipelineCoordinator.cancelGenericSchedule|64":  {asyncSiteCanonicalOwner, "schedule cancellation is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/pipeline/generic_schedule_lifecycle.go|PipelineCoordinator.persistGenericSchedule|37": {asyncSiteCanonicalOwner, "schedule registration is wrapped by an owner-bound action lease"},
-	"owner_action|internal/runtime/pipeline/runtime_support.go|QueuePipelineAfterPublishAction|583":                      {asyncSiteCanonicalOwner, "the exported after-publish facade delegates to the canonical owner-bound queue"},
+	"owner_action|internal/runtime/pipeline/runtime_support.go|QueuePipelineAfterPublishAction|623":                      {asyncSiteCanonicalOwner, "the exported after-publish facade delegates to the canonical owner-bound queue"},
 	"owner_action|internal/runtime/pipeline/runtime_support.go|QueuePipelinePostCommitAction|438":                        {asyncSiteCanonicalOwner, "the exported post-commit facade delegates to the canonical owner-bound queue"},
-	"owner_action|internal/runtime/pipeline/runtime_support.go|QueuePipelineRollbackAction|536":                          {asyncSiteCanonicalOwner, "the exported rollback facade delegates to the canonical owner-bound queue"},
+	"owner_action|internal/runtime/pipeline/runtime_support.go|QueuePipelineRollbackAction|576":                          {asyncSiteCanonicalOwner, "the exported rollback facade delegates to the canonical owner-bound queue"},
 	"owner_action|internal/runtime/pipeline/workflow_timer_owner.go|WorkflowTimerLifecycle.queueWakeupReconcile|801":     {asyncSiteCanonicalOwner, "timer registration and cancellation converge through one owner-bound post-commit action"},
 }
 

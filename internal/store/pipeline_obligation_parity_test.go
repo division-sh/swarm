@@ -134,6 +134,7 @@ func provePipelineClaimRetiredBeforeLifecycleHandoff(
 		owner: owner, eventID: eventID, result: make(chan error, 1),
 	}
 	registration, err := registrar.RegisterCompletionCandidateSink(
+		runtimeCtx,
 		runtimerunlifecycle.CandidateScope{BundleHash: runLifecycleCandidateParityBundleHash},
 		probe,
 	)

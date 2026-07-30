@@ -16,6 +16,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -483,10 +484,25 @@ func commitRunForkSourceFreezeForTest(ctx context.Context, store *PostgresStore,
 	if err != nil {
 		return err
 	}
+	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
+	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 1)
+	storyctx = runtimepipeline.WithPipelinePostCommitActions(storyctx, &postCommit)
+	storyctx = runtimepipeline.WithPipelineRollbackActions(storyctx, &rollbackActions)
+	committed := false
+	defer func() {
+		if !committed {
+			runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
+		}
+	}()
 	if err := store.applyRunForkSourceFreeze(storyctx, tx, lineage, now, confirmed); err != nil {
 		return err
 	}
-	return commitRunForkAuthorActivityTransaction(storyctx, tx)
+	if err := commitRunForkAuthorActivityTransaction(storyctx, tx); err != nil {
+		return err
+	}
+	committed = true
+	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	return nil
 }
 
 func assertRunForkSourceFreezeLifecycleUnchanged(t *testing.T, db *sql.DB, lineage runForkActivationLineage, sourceStatus, childStatus string) {
