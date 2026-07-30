@@ -726,6 +726,9 @@ func (c Candidate) Validate() error {
 	if c.DueAt.IsZero() {
 		return errors.New("completion candidate requires selected-store due_at")
 	}
+	if !c.DueAt.Equal(CanonicalTimestamp(c.DueAt)) {
+		return errors.New("completion candidate due_at must use canonical microsecond precision")
+	}
 	return nil
 }
 
@@ -796,6 +799,9 @@ func (r CandidateRequest) Validate() error {
 	case CandidateAt:
 		if r.DueAt.IsZero() {
 			return errors.New("scheduled completion candidate request requires due_at")
+		}
+		if !r.DueAt.Equal(CanonicalTimestamp(r.DueAt)) {
+			return errors.New("scheduled completion candidate due_at must use canonical microsecond precision")
 		}
 	default:
 		return fmt.Errorf("invalid completion candidate timing %q", r.Timing)

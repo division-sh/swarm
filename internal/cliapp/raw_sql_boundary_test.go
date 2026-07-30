@@ -224,6 +224,30 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			SpecRef:        "platform-spec.yaml#platform_tables.event_deliveries",
 			Reason:         "the private backend-neutral delivery adapter owns bounded purpose-specific lifecycle read projections before canonical hydration",
 		},
+		"internal/runtime/decisioncard/run_summary_store.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2111,
+			SpecRef:        "platform-spec.yaml#run_model.normal_completion",
+			Reason:         "the decision-card owner privately validates decision and gate evidence into the typed normal-completion summary",
+		},
+		"internal/runtime/effects/run_summary.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2111,
+			SpecRef:        "platform-spec.yaml#run_model.normal_completion",
+			Reason:         "the external-effect owner privately validates operation, attempt, and reservation evidence into the typed normal-completion summary",
+		},
+		"internal/runtime/entityruntime/run_summary.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2111,
+			SpecRef:        "platform-spec.yaml#run_model.normal_completion",
+			Reason:         "the entity-runtime owner privately validates terminal descriptors into the typed normal-completion summary",
+		},
+		"internal/runtime/sessions/run_summary.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2111,
+			SpecRef:        "platform-spec.yaml#run_model.normal_completion",
+			Reason:         "the session owner privately validates complete lease shapes into the typed normal-completion summary",
+		},
 		"internal/runtime/pipeline/engine_adapter.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,

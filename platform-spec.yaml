@@ -13605,7 +13605,14 @@ platform_tables:
           consumes typed run summaries from the delivery, pipeline, workflow-timer, session, decision-card,
           external-effect, and entity owners. Every summary must carry the same run_id and validate its own finite
           states. Missing, malformed, identity-inconsistent, unresolved, active, or orphaned facts fail closed as a
-          blocker or typed execution failure; the completion owner does not reinterpret another owner's rows. A
+          blocker or typed execution failure; the completion owner does not reinterpret another owner's rows. Session
+          ownership classifies the complete selected-run session set, including partial or malformed lease coordinates.
+          Decision-card ownership validates exact continuation outcome events and strict typed gate activations, including
+          bucket identity and terminal evidence. External-effect ownership starts from exact run-bound logical operations
+          and validates prepared operations, latest-attempt coherence, terminal retry history, usage-target identity, and
+          subordinate reservation ownership. Entity ownership resolves exact terminal descriptors through the admitted
+          terminal catalog. Lifecycle completion SQL is forbidden from naming or classifying those owners' tables or
+          status vocabularies. A
           standalone runtime run consumes its typed durable creation evidence and delivery summary only. When all
           required summaries are terminally eligible, the executor commits completed status, ended_at, terminal side
           effects, author activity, and candidate absorption atomically. Local runtime or builder quiescence is
@@ -13647,7 +13654,11 @@ platform_tables:
           selected_store_time: >
             PostgreSQL clock_timestamp() admitted to canonical UTC microsecond precision and the selected SQLite store
             clock are the only eligibility-time authorities. PostgreSQL transaction-start time is not an eligibility
-            observation. If selected-store time precedes started_at, execution retains and retries the exact current
+            observation. Candidate request inputs, immediate selected-store time, persisted completion_due_at values,
+            list/readback projections, exact duplicate comparisons, execution coordinates, and rearm coordinates all use
+            that shared canonical precision. A noncanonical typed candidate is rejected before selected-store access; a
+            backend-specific timestamp representation never becomes semantic identity. If selected-store time precedes
+            started_at, execution retains and retries the exact current
             candidate without terminal mutation until the selected-store clock reaches that coordinate. It never rewrites
             either timestamp to conceal the ordering conflict. Process clocks, timers, and backoff merely wake an
             execution chain and never establish durable eligibility.
