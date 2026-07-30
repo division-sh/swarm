@@ -169,13 +169,14 @@ func normalizeRunForkSelectedContractBinding(req RunForkSelectedContractBindingR
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
+	createdAt = createdAt.UTC().Round(time.Microsecond)
 	return RunForkSelectedContractBinding{
 		Owner:             RunForkSelectedContractBindingOwner,
 		ForkRunID:         forkRunID,
 		SourceRunID:       sourceRunID,
 		ForkEventID:       forkEventID,
 		ContractSelection: selection,
-		CreatedAt:         createdAt.UTC(),
+		CreatedAt:         createdAt,
 	}, nil
 }
 
