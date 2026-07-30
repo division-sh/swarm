@@ -1459,19 +1459,10 @@ func TestExecuteSelectedContractRunForkClaudeOAuthPersistsStartupAndTurnCapabili
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
-	sourceContractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
+	sourceContractsRoot := filepath.Join(repoRoot, "internal/runtime/runforkexecution/testdata/selected_fork_flow_scoped_mcp")
 	contractsRoot := filepath.Join(t.TempDir(), "contracts")
 	if err := os.CopyFS(contractsRoot, os.DirFS(sourceContractsRoot)); err != nil {
 		t.Fatalf("copy selected contract fixture: %v", err)
-	}
-	agentsPath := filepath.Join(contractsRoot, "agents.yaml")
-	agentsYAML, err := os.ReadFile(agentsPath)
-	if err != nil {
-		t.Fatalf("read selected contract agents: %v", err)
-	}
-	agentsYAML = append(agentsYAML, []byte("  native_tools:\n    web_search: true\n")...)
-	if err := os.WriteFile(agentsPath, agentsYAML, 0o644); err != nil {
-		t.Fatalf("author selected contract native capability: %v", err)
 	}
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{Mode: "selected_contracts", ContractsRoot: contractsRoot})
@@ -1501,26 +1492,54 @@ for arg in "$@"; do
 done
 if [ -z "$session_id" ]; then echo "missing session id" >&2; exit 2; fi
 if [ "$count" -gt 1 ]; then
-  python3 - "$mcp_config" <<'PY'
+  python3 - "$mcp_config" 2> "$capture_dir/$count.mcp-error" <<'PY'
 import json, sys, urllib.request
 config = json.loads(sys.argv[1])
 server = config["mcpServers"]["runtime-tools"]
 url = server["url"].replace("host.docker.internal", "127.0.0.1")
 headers = {"Content-Type": "application/json", **server.get("headers", {})}
-for payload in (
+responses = []
+for payload in [
     {"jsonrpc":"2.0","id":"init","method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"fake-claude","version":"1"}}},
     {"jsonrpc":"2.0","method":"notifications/initialized","params":{}},
     {"jsonrpc":"2.0","id":"list","method":"tools/list","params":{}},
-):
+]:
     request = urllib.request.Request(url, json.dumps(payload).encode(), headers=headers)
     with urllib.request.urlopen(request) as response:
-        response.read()
+        raw = response.read()
+        if payload.get("id") is not None:
+            responses.append(json.loads(raw))
+listed = responses[-1]["result"]["tools"]
+emit = next((tool for tool in listed if tool["name"] == "emit_task_completed"), None)
+expected_schema = {
+    "type": "object",
+    "properties": {"fork_result": {"type": "string"}},
+    "required": ["fork_result"],
+    "additionalProperties": False,
+}
+expected_description = "Emit worker/task.completed event\n\nUsage:\nCall this emit_* tool only to publish the named workflow event. Provide concrete JSON payload values matching the input schema. Do not include envelope-owned fields unless the schema declares them. Arguments are concrete payload values, not workflow expressions."
+if emit is None or emit.get("description") != expected_description or emit.get("inputSchema") != expected_schema:
+    raise SystemExit(f"selected-fork flow emit mismatch: {emit!r}")
+call = {
+    "jsonrpc": "2.0",
+    "id": "call",
+    "method": "tools/call",
+    "params": {
+        "name": "emit_task_completed",
+        "arguments": {"fork_result": "selected-fork-flow-complete"},
+        "_meta": {"claudecode/toolUseId": "toolu-selected-fork-flow"},
+    },
+}
+request = urllib.request.Request(url, json.dumps(call).encode(), headers=headers)
+with urllib.request.urlopen(request) as response:
+    result = json.loads(response.read())
+if result.get("error") is not None or result.get("result", {}).get("isError") is True:
+    raise SystemExit(f"selected-fork MCP call failed: {result!r}")
 PY
 fi
 printf '%s\n' "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"$session_id\",\"mcp_servers\":[{\"name\":\"runtime-tools\",\"status\":\"connected\"}],\"tools\":[\"WebFetch\",\"WebSearch\",\"mcp__runtime-tools__emit_task_completed\"]}"
 if [ "$count" -gt 1 ]; then
-  printf '%s\n' "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"emit-1\",\"name\":\"mcp__runtime-tools__emit_task_completed\",\"input\":{}}},\"session_id\":\"$session_id\"}"
-  printf '%s\n' "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_stop\",\"index\":0},\"session_id\":\"$session_id\"}"
+  printf '%s\n' "{\"type\":\"result\",\"subtype\":\"success\",\"session_id\":\"$session_id\",\"result\":\"selected-fork-flow-complete\"}"
 fi
 `
 	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
@@ -1565,14 +1584,29 @@ fi
 		},
 	})
 	if err != nil {
-		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
+		var receiptFailure, deadLetterFailure string
+		_ = db.QueryRowContext(ctx, `SELECT COALESCE(failure::text,'') FROM event_receipts WHERE failure IS NOT NULL ORDER BY updated_at DESC LIMIT 1`).Scan(&receiptFailure)
+		_ = db.QueryRowContext(ctx, `SELECT COALESCE(failure::text,'') FROM dead_letters WHERE failure IS NOT NULL ORDER BY created_at DESC LIMIT 1`).Scan(&deadLetterFailure)
+		captures := map[string]string{}
+		for _, name := range []string{"count", "1.args", "1.stdin", "2.args", "2.stdin", "2.mcp-error", "3.mcp-error"} {
+			if raw, readErr := os.ReadFile(filepath.Join(captureDir, name)); readErr == nil {
+				captures[name] = string(raw)
+			}
+		}
+		t.Fatalf("ExecuteSelectedContractRunFork: %v\nlatest receipt failure: %s\nlatest dead letter failure: %s\ncaptures: %#v", err, receiptFailure, deadLetterFailure, captures)
 	}
 	countRaw, err := os.ReadFile(filepath.Join(captureDir, "count"))
 	if err != nil {
 		t.Fatalf("read Claude invocation count: %v", err)
 	}
 	if strings.TrimSpace(string(countRaw)) != "2" {
-		t.Fatalf("Claude invocations = %q, want startup probe plus live turn", countRaw)
+		captures := map[string]string{}
+		for _, name := range []string{"1.args", "1.stdin", "2.args", "2.stdin", "2.mcp-error", "3.args", "3.stdin", "3.mcp-error"} {
+			if raw, readErr := os.ReadFile(filepath.Join(captureDir, name)); readErr == nil {
+				captures[name] = string(raw)
+			}
+		}
+		t.Fatalf("Claude invocations = %q, want startup probe plus live turn; captures: %#v", countRaw, captures)
 	}
 	for _, invocation := range []string{"1", "2"} {
 		args, err := os.ReadFile(filepath.Join(captureDir, invocation+".args"))
@@ -1606,6 +1640,18 @@ fi
 	}
 	if !strings.Contains(string(startupInput), "Startup validation probe") || strings.Contains(string(liveInput), "Startup validation probe") {
 		t.Fatalf("selected-fork invocation order is not startup then live: startup=%q live=%q", startupInput, liveInput)
+	}
+	var emitted int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM events
+		WHERE run_id = $1::uuid
+		  AND payload->>'fork_result' = 'selected-fork-flow-complete'
+	`, result.Materialization.ForkRunID).Scan(&emitted); err != nil {
+		t.Fatalf("count selected-fork flow-scoped MCP emission: %v", err)
+	}
+	if emitted != 1 {
+		t.Fatalf("selected-fork flow-scoped MCP emissions = %d, want 1", emitted)
 	}
 	assertSelectedForkClaudeCapabilityEvidence(t, ctx, db, result)
 }
@@ -1784,7 +1830,7 @@ func TestSelectedContractForkManagedPreflightExecutesEligibleMCPToolCall(t *test
 	executor := &selectedForkStartupProbeExecutor{}
 	turns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
 	const gatewayToken = "selected-fork-startup-token"
-	gateway := runtimemcp.NewGateway(executor, gatewayToken, swaruntime.RuntimeMCPGatewayHooks(nil, nil, manager.GetAgentConfig, nil, nil, turns))
+	gateway := runtimemcp.NewGateway(executor, gatewayToken, swaruntime.RuntimeMCPGatewayHooks(nil, nil, manager.GetAgentConfig, nil, turns))
 	server := httptest.NewServer(gateway.Handler())
 	defer server.Close()
 	binding, err := toolgateway.NewRuntimeOwnedBinding(
@@ -1852,10 +1898,6 @@ type selectedForkStartupProbeExecutor struct {
 func (e *selectedForkStartupProbeExecutor) Execute(_ context.Context, name string, _ any) (any, error) {
 	e.executed = append(e.executed, strings.TrimSpace(name))
 	return map[string]any{"ok": true}, nil
-}
-
-func (*selectedForkStartupProbeExecutor) ToolDefinitions() []runtimellm.ToolDefinition {
-	return selectedForkStartupProbeDefinitions()
 }
 
 func (*selectedForkStartupProbeExecutor) ToolDefinitionsForActor(runtimeactors.AgentConfig) []runtimellm.ToolDefinition {
@@ -2434,7 +2476,7 @@ func TestStartSelectedContractAgentRuntimeGatewayReturnsGeneratedBinding(t *test
 
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{})
 	turns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
-	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, nil, turns, testGatewayWorkOwner(t), nil)
+	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, testGatewayWorkOwner(t), nil)
 	if err != nil {
 		t.Fatalf("startSelectedContractAgentRuntimeGateway: %v", err)
 	}
@@ -2485,7 +2527,7 @@ func TestStartSelectedContractAgentRuntimeGatewayRejectsRetiredTokenEnv(t *testi
 
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{})
 	turns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
-	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, nil, turns, testGatewayWorkOwner(t), nil)
+	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, testGatewayWorkOwner(t), nil)
 	if err == nil || !strings.Contains(err.Error(), "SWARM_TOOL_GATEWAY_TOKEN is retired") || !strings.Contains(err.Error(), "ToolGatewayBinding") {
 		t.Fatalf("startSelectedContractAgentRuntimeGateway error = %v, want retired token env rejection", err)
 	}

@@ -204,15 +204,6 @@ func (e *Executor) resolveExecutionTool(actor models.AgentConfig, name string) (
 	return tool, true, nil
 }
 
-func (e *Executor) ToolDefinitions() []llm.ToolDefinition {
-	defs, err := e.contractDefinitions()
-	if err != nil {
-		processWarn("tool-executor", "failed to load contract tool definitions: %v", err)
-		return nil
-	}
-	return defs
-}
-
 func (e *Executor) ToolDefinitionsForActor(actor models.AgentConfig) []llm.ToolDefinition {
 	e.mu.RLock()
 	source := e.workflowSource

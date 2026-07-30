@@ -108,7 +108,7 @@ func (f testToolExecutor) Execute(ctx context.Context, name string, input any) (
 	return f(ctx, name, input)
 }
 
-func (f testToolExecutor) ToolDefinitions() []llm.ToolDefinition {
+func (f testToolExecutor) ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition {
 	return []llm.ToolDefinition{
 		{Name: "query_entities"},
 		{Name: "read_file"},
@@ -116,10 +116,6 @@ func (f testToolExecutor) ToolDefinitions() []llm.ToolDefinition {
 		{Name: "emit_scan_requested"},
 		{Name: "emit_score_dimension_complete"},
 	}
-}
-
-func (f testToolExecutor) ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition {
-	return f.ToolDefinitions()
 }
 
 func (f testToolExecutor) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
@@ -170,12 +166,8 @@ func (s *relayAwareToolExecutorStub) Execute(ctx context.Context, name string, i
 	return map[string]any{"ok": true}, nil
 }
 
-func (s *relayAwareToolExecutorStub) ToolDefinitions() []llm.ToolDefinition {
-	return []llm.ToolDefinition{{Name: "read_file"}, {Name: "query_entities"}}
-}
-
 func (s *relayAwareToolExecutorStub) ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition {
-	return s.ToolDefinitions()
+	return []llm.ToolDefinition{{Name: "read_file"}, {Name: "query_entities"}}
 }
 
 func (s *relayAwareToolExecutorStub) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
@@ -209,7 +201,6 @@ func (s *relayAwareToolExecutorStub) PersistOversizedToolResultRelay(_ context.C
 }
 
 type actorScopedToolExecutorStub struct {
-	defs      []llm.ToolDefinition
 	actorDefs []llm.ToolDefinition
 	callCount *int
 }
@@ -219,10 +210,6 @@ func (s actorScopedToolExecutorStub) Execute(context.Context, string, any) (any,
 		*s.callCount++
 	}
 	return map[string]any{"ok": true}, nil
-}
-
-func (s actorScopedToolExecutorStub) ToolDefinitions() []llm.ToolDefinition {
-	return append([]llm.ToolDefinition(nil), s.defs...)
 }
 
 func (s actorScopedToolExecutorStub) ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition {
@@ -258,12 +245,8 @@ func (s *contextAwareRoleScopedExecutorStub) Execute(context.Context, string, an
 	return map[string]any{"ok": true}, nil
 }
 
-func (s *contextAwareRoleScopedExecutorStub) ToolDefinitions() []llm.ToolDefinition {
-	return []llm.ToolDefinition{{Name: "read_scan_campaign"}, {Name: "save_scan_campaign_mode"}, {Name: "emit_market_research_scan_complete"}}
-}
-
 func (s *contextAwareRoleScopedExecutorStub) ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition {
-	return s.ToolDefinitions()
+	return []llm.ToolDefinition{{Name: "read_scan_campaign"}, {Name: "save_scan_campaign_mode"}, {Name: "emit_market_research_scan_complete"}}
 }
 
 func (s *contextAwareRoleScopedExecutorStub) ToolDefinitionsForActorInContext(ctx context.Context, actor models.AgentConfig) []llm.ToolDefinition {
@@ -323,15 +306,11 @@ func (s *capabilityAwareExecutorStub) Execute(context.Context, string, any) (any
 	return map[string]any{"ok": true}, nil
 }
 
-func (s *capabilityAwareExecutorStub) ToolDefinitions() []llm.ToolDefinition {
+func (s *capabilityAwareExecutorStub) ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition {
 	return []llm.ToolDefinition{
 		{Name: "emit_score_dimension_complete", Description: "emit"},
 		{Name: "query_entities", Description: "query"},
 	}
-}
-
-func (s *capabilityAwareExecutorStub) ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition {
-	return s.ToolDefinitions()
 }
 
 func (s *capabilityAwareExecutorStub) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
@@ -365,15 +344,16 @@ func (s *actorAwareToolExecutorStub) Execute(context.Context, string, any) (any,
 	return map[string]any{"ok": true}, nil
 }
 
-func (s *actorAwareToolExecutorStub) ToolDefinitions() []llm.ToolDefinition {
-	return []llm.ToolDefinition{
-		{Name: "query_entities"},
-		{Name: "emit_score_dimension_complete"},
+func (s *actorAwareToolExecutorStub) ToolDefinitionsForActor(actor models.AgentConfig) []llm.ToolDefinition {
+	definitions := []llm.ToolDefinition{{Name: "query_entities"}}
+	if strings.TrimSpace(actor.Role) == "campaign_coordinator" {
+		definitions = append(definitions, llm.ToolDefinition{
+			Name:        "emit_score_dimension_complete",
+			Description: "Emit score.dimension_complete",
+			Schema:      map[string]any{"type": "object"},
+		})
 	}
-}
-
-func (s *actorAwareToolExecutorStub) ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition {
-	return s.ToolDefinitions()
+	return definitions
 }
 
 func (s *actorAwareToolExecutorStub) ToolCapabilitiesForActor(actor models.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
@@ -1046,9 +1026,9 @@ func TestParseToolListHeaderCanonicalizesAliases(t *testing.T) {
 	}
 }
 
-func TestGatewayMCPToolsForRequest_UsesHydratedActorRoleForEmitTools(t *testing.T) {
+func TestGatewayMCPToolsForRequest_UsesHydratedActorWithCanonicalExecutorCatalog(t *testing.T) {
 	registry := newTestTurnContextRegistry()
-	g := NewGateway(nil, "", GatewayHooks{
+	g := NewGateway(&actorAwareToolExecutorStub{}, "", GatewayHooks{
 		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
 			if agentID != "campaign-coordinator" {
 				return models.AgentConfig{}, false
@@ -1059,22 +1039,12 @@ func TestGatewayMCPToolsForRequest_UsesHydratedActorRoleForEmitTools(t *testing.
 				Role:          "campaign_coordinator",
 			}, true
 		},
-		EmitTools: func(role string) []llm.ToolDefinition {
-			if role != "campaign_coordinator" {
-				return nil
-			}
-			return []llm.ToolDefinition{{
-				Name:        "emit_scan_requested",
-				Description: "Emit scan.requested",
-				Schema:      map[string]any{"type": "object"},
-			}}
-		},
 		ResolveTurnContext: registry.ResolveTurnContext,
 	})
 
 	putTestTurnContext(t, registry, "ctx-hydrated-role", TurnContext{
 		Actor:             models.AgentConfig{ID: "campaign-coordinator"},
-		CapabilitySurface: testCapabilitySurfaceForDefinitions(t, models.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"}, llm.ToolDefinition{Name: "emit_scan_requested", Description: "Emit scan.requested", Schema: map[string]any{"type": "object"}}),
+		CapabilitySurface: testCapabilitySurfaceForDefinitions(t, models.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"}, llm.ToolDefinition{Name: "query_entities"}, llm.ToolDefinition{Name: "emit_score_dimension_complete", Description: "Emit score.dimension_complete", Schema: map[string]any{"type": "object"}}),
 		CreatedAt:         time.Now().UTC(),
 		ExpiresAt:         time.Now().UTC().Add(time.Hour),
 	})
@@ -1082,62 +1052,16 @@ func TestGatewayMCPToolsForRequest_UsesHydratedActorRoleForEmitTools(t *testing.
 	req := withContextToken(httptest.NewRequest("POST", "/mcp", nil), "ctx-hydrated-role")
 	tools := mustMCPToolsForRequest(t, g, req)
 	for _, tool := range tools {
-		if tool.Name == "emit_scan_requested" {
+		if tool.Name == "emit_score_dimension_complete" {
 			return
 		}
 	}
-	t.Fatalf("emit_scan_requested not found in MCP tools: %#v", tools)
+	t.Fatalf("canonical actor emit not found in MCP tools: %#v", tools)
 }
 
-func TestGatewayMCPToolsForRequest_KeepsEmitToolsForDirectMCPContext(t *testing.T) {
-	registry := newTestTurnContextRegistry()
-	g := NewGateway(nil, "", GatewayHooks{
-		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
-			if agentID != "campaign-coordinator" {
-				return models.AgentConfig{}, false
-			}
-			return models.AgentConfig{
-				ExecutionMode: "live",
-				ID:            "campaign-coordinator",
-				Role:          "campaign_coordinator",
-			}, true
-		},
-		EmitTools: func(role string) []llm.ToolDefinition {
-			if role != "campaign_coordinator" {
-				return nil
-			}
-			return []llm.ToolDefinition{{
-				Name:        "emit_scan_requested",
-				Description: "Emit scan.requested",
-				Schema:      map[string]any{"type": "object"},
-			}}
-		},
-		ResolveTurnContext: registry.ResolveTurnContext,
-	})
-
-	putTestTurnContext(t, registry, "ctx-1", TurnContext{
-		Actor:             models.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"},
-		CapabilitySurface: testCapabilitySurfaceForDefinitions(t, models.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"}, llm.ToolDefinition{Name: "emit_scan_requested", Description: "Emit scan.requested", Schema: map[string]any{"type": "object"}}),
-		CreatedAt:         time.Now().UTC(),
-		ExpiresAt:         time.Now().UTC().Add(time.Hour),
-	})
-
-	req := withContextToken(httptest.NewRequest("POST", "/mcp", nil), "ctx-1")
-	tools := mustMCPToolsForRequest(t, g, req)
-	for _, tool := range tools {
-		if tool.Name == "emit_scan_requested" {
-			return
-		}
-	}
-	t.Fatalf("emit_scan_requested should remain visible for direct MCP context: %#v", tools)
-}
-
-func TestGatewayMCPToolsForRequest_PrefersActorScopedToolDefinitions(t *testing.T) {
+func TestGatewayMCPToolsForRequest_UsesActorScopedToolDefinitions(t *testing.T) {
 	registry := newTestTurnContextRegistry()
 	g := NewGateway(actorScopedToolExecutorStub{
-		defs: []llm.ToolDefinition{
-			{Name: "workflow_custom_tool", Description: "global"},
-		},
 		actorDefs: []llm.ToolDefinition{
 			{Name: "query_entities", Description: "actor scoped", Usage: "Use CEL equality with ==."},
 		},
@@ -1183,9 +1107,6 @@ func TestGatewayMCPToolsForRequest_ExposesFlowDataOnlyFromActorScopedCatalog(t *
 	req := withContextToken(httptest.NewRequest("POST", "/mcp", nil), "ctx-flow-data")
 
 	declaredGateway := NewGateway(actorScopedToolExecutorStub{
-		defs: []llm.ToolDefinition{
-			{Name: "read_flow_data", Description: "runtime-wide fallback must not leak"},
-		},
 		actorDefs: []llm.ToolDefinition{
 			{Name: "read_flow_data", Description: "actor declared flow data", GeneratedSchema: true},
 		},
@@ -1205,9 +1126,6 @@ func TestGatewayMCPToolsForRequest_ExposesFlowDataOnlyFromActorScopedCatalog(t *
 	}
 
 	undeclaredGateway := NewGateway(actorScopedToolExecutorStub{
-		defs: []llm.ToolDefinition{
-			{Name: "read_flow_data", Description: "runtime-wide fallback must not leak"},
-		},
 		actorDefs: nil,
 	}, "", GatewayHooks{
 		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
@@ -1218,34 +1136,6 @@ func TestGatewayMCPToolsForRequest_ExposesFlowDataOnlyFromActorScopedCatalog(t *
 
 	if tools, err := undeclaredGateway.mcpToolsForRequest(req); err == nil {
 		t.Fatalf("undeclared actor resolved tools %#v, want fail-closed planned-definition mismatch", tools)
-	}
-}
-
-func TestGatewayMCPToolsForRequest_DoesNotFallbackToRuntimeWideToolsForEmptyActorCatalog(t *testing.T) {
-	registry := newTestTurnContextRegistry()
-	g := NewGateway(actorScopedToolExecutorStub{
-		defs: []llm.ToolDefinition{
-			{Name: "get_entity", Description: "runtime-wide legacy entity tool"},
-		},
-		actorDefs: nil,
-	}, "", GatewayHooks{
-		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
-			return models.AgentConfig{ExecutionMode: "live", ID: agentID, Role: "validation_orchestrator"}, true
-		},
-		ResolveTurnContext: registry.ResolveTurnContext,
-	})
-
-	putTestTurnContext(t, registry, "ctx-role-scoped-empty", TurnContext{
-		Actor:             models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator"},
-		CapabilitySurface: testCapabilitySurface(t, models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator"}),
-		CreatedAt:         time.Now().UTC(),
-		ExpiresAt:         time.Now().UTC().Add(time.Hour),
-	})
-
-	req := withContextToken(httptest.NewRequest("POST", "/mcp", nil), "ctx-role-scoped-empty")
-	tools := mustMCPToolsForRequest(t, g, req)
-	if len(tools) != 0 {
-		t.Fatalf("empty actor catalog fell back to runtime-wide tools: %#v", tools)
 	}
 }
 
@@ -1266,7 +1156,6 @@ func TestGatewayMCPToolsForRoleScopedActor_RetiresLegacyEntitySurface(t *testing
 		{Name: "save_validation_case_business_brief", Description: "role scoped save"},
 	}
 	g := NewGateway(actorScopedToolExecutorStub{
-		defs:      legacyDefs,
 		actorDefs: generatedDefs,
 		callCount: &executeCount,
 	}, testGatewayToken, GatewayHooks{

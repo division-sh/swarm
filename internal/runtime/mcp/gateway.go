@@ -38,9 +38,6 @@ type GatewayHooks struct {
 	ObserveCapabilityMismatch      func(string, ...managedcapabilities.DeliveryMismatch) (managedcapabilities.Surface, bool)
 	ObserveMCPProviderCall         func(string, string, string) (managedcapabilities.Surface, error)
 	MarkEmitKeyUsed                func(string, string) bool
-	EmitToolsForActor              func(models.AgentConfig) []llm.ToolDefinition
-	EmitTools                      func(string) []llm.ToolDefinition
-	EmitSchemaForTool              func(string) (description string, schema any, ok bool)
 	Log                            func(context.Context, string, string, string, string, map[string]any, *failures.Envelope)
 	AfterToolSuccess               func(context.Context, *http.Request, string)
 }
@@ -53,7 +50,6 @@ type Gateway struct {
 
 type runtimeGatewayExecutor interface {
 	llm.CapabilityAwareToolExecutor
-	ToolDefinitions() []llm.ToolDefinition
 	ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition
 }
 
@@ -734,31 +730,18 @@ func (g *Gateway) mcpToolsForActorInContext(ctx context.Context, actor models.Ag
 	sort.Strings(names)
 	out := make([]ToolDef, 0, len(names))
 	for _, name := range names {
-		def, ok := catalog[name]
+		def := catalog[name]
 		desc := "Runtime tool"
 		schema := any(map[string]any{
 			"type":                 "object",
 			"properties":           map[string]any{},
 			"additionalProperties": true,
 		})
-		if ok {
-			if delivered := strings.TrimSpace(llm.DeliveredToolDescription(def)); delivered != "" {
-				desc = delivered
-			}
-			if def.Schema != nil {
-				schema = def.Schema
-			}
-		} else if g.hooks.EmitSchemaForTool != nil {
-			if hookDesc, hookSchema, ok := g.hooks.EmitSchemaForTool(name); ok {
-				if strings.TrimSpace(hookDesc) != "" {
-					desc = hookDesc
-				} else {
-					desc = "Emit event tool"
-				}
-				if hookSchema != nil {
-					schema = hookSchema
-				}
-			}
+		if delivered := strings.TrimSpace(llm.DeliveredToolDescription(def)); delivered != "" {
+			desc = delivered
+		}
+		if def.Schema != nil {
+			schema = def.Schema
 		}
 		out = append(out, ToolDef{Name: name, Description: desc, InputSchema: schema})
 	}
@@ -784,27 +767,6 @@ func (g *Gateway) toolCatalogInContext(ctx context.Context, actor models.AgentCo
 			if name != "" {
 				def.Name = name
 				catalog[name] = def
-			}
-		}
-	}
-	if g.hooks.EmitToolsForActor != nil {
-		for _, def := range g.hooks.EmitToolsForActor(actor) {
-			name := normalizeGatewayToolName(def.Name)
-			if name != "" {
-				def.Name = name
-				catalog[name] = def
-			}
-		}
-	}
-	if g.hooks.EmitTools != nil {
-		role := strings.TrimSpace(actor.Role)
-		if role != "" {
-			for _, def := range g.hooks.EmitTools(role) {
-				name := normalizeGatewayToolName(def.Name)
-				if name != "" {
-					def.Name = name
-					catalog[name] = def
-				}
 			}
 		}
 	}

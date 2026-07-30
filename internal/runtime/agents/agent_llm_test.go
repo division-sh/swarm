@@ -150,99 +150,6 @@ func TestFormatEventForAgent_DoesNotAdvertiseCLIOnlyControlTools(t *testing.T) {
 	}
 }
 
-func TestFilterTools_RemovesLegacyEntityToolsWhenConstrained(t *testing.T) {
-	allowed, constrained := extractAllowedToolSet(models.AgentConfig{
-		ExecutionMode: "live",
-		Tools:         []string{"emit_example", "get_entity"},
-	})
-	if !constrained {
-		t.Fatal("expected constrained tool set")
-	}
-	tools := []llm.ToolDefinition{
-		{Name: "get_entity"},
-		{Name: "search_entities"},
-		{Name: "agent_message"},
-		{Name: "non_universal"},
-	}
-	filtered := filterTools(tools, allowed, constrained, nil)
-	names := make([]string, 0, len(filtered))
-	for _, tool := range filtered {
-		names = append(names, tool.Name)
-	}
-	if containsString(names, "get_entity") || containsString(names, "search_entities") {
-		t.Fatalf("legacy entity tools should not be preserved by constrained filtering, got %v", names)
-	}
-	if !containsString(names, "agent_message") {
-		t.Fatalf("expected non-entity universal tool preserved, got %v", names)
-	}
-	if containsString(names, "non_universal") {
-		t.Fatalf("expected non-universal tool filtered out, got %v", names)
-	}
-	if runtimetools.IsUniversal("get_entity") {
-		t.Fatal("get_entity must not remain universal")
-	}
-}
-
-func TestFilterTools_DefaultDeniesLegacyEntityToolsWhenNoToolList(t *testing.T) {
-	allowed, constrained := extractAllowedToolSet(models.AgentConfig{})
-	if constrained {
-		t.Fatal("expected unconstrained tool set when no tools are configured")
-	}
-	tools := []llm.ToolDefinition{
-		{Name: "get_entity"},
-		{Name: "agent_message"},
-		{Name: "schedule"},
-	}
-	filtered := filterTools(tools, allowed, constrained, nil)
-	names := make([]string, 0, len(filtered))
-	for _, tool := range filtered {
-		names = append(names, tool.Name)
-	}
-	if containsString(names, "get_entity") {
-		t.Fatalf("legacy entity tool should not be preserved by default filtering, got %v", names)
-	}
-	if !containsString(names, "agent_message") {
-		t.Fatalf("expected non-entity universal tool preserved, got %v", names)
-	}
-	if containsString(names, "schedule") {
-		t.Fatalf("expected non-universal tool filtered out, got %v", names)
-	}
-}
-
-func TestFilterTools_RetainsRoleScopedEntityToolsOnNonPrecomposedPath(t *testing.T) {
-	allowed, constrained := extractAllowedToolSet(models.AgentConfig{})
-	if constrained {
-		t.Fatal("expected unconstrained tool set when no tools are configured")
-	}
-	tools := []llm.ToolDefinition{
-		{Name: "read_validation_case"},
-		{Name: "save_validation_case_business_brief"},
-		{Name: "update_validation_case_business_brief_summary"},
-		{Name: "read_unrelated_prefix_tool"},
-		{Name: "schedule"},
-	}
-	filtered := filterTools(tools, allowed, constrained, map[string]struct{}{
-		"read_validation_case":                          {},
-		"save_validation_case_business_brief":           {},
-		"update_validation_case_business_brief_summary": {},
-	})
-	names := make([]string, 0, len(filtered))
-	for _, tool := range filtered {
-		names = append(names, tool.Name)
-	}
-	for _, want := range []string{"read_validation_case", "save_validation_case_business_brief", "update_validation_case_business_brief_summary"} {
-		if !containsString(names, want) {
-			t.Fatalf("expected role-scoped entity tool %s preserved, got %v", want, names)
-		}
-	}
-	if containsString(names, "schedule") {
-		t.Fatalf("expected unrelated non-universal tool filtered out, got %v", names)
-	}
-	if containsString(names, "read_unrelated_prefix_tool") {
-		t.Fatalf("expected unproven read_* tool filtered out, got %v", names)
-	}
-}
-
 func TestResolvePromptForMode_ExpandsConfigVariables(t *testing.T) {
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	bundleRoot := writeAgentPromptTestBundle(t, repoRoot)
@@ -358,68 +265,16 @@ func copyBundleTree(t *testing.T, srcRoot, dstRoot string) {
 	}
 }
 
-func mustNewLLMAgent(t *testing.T, cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition) *LLMAgent {
+func mustBuildLLMAgent(t *testing.T, cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition) *LLMAgent {
 	t.Helper()
 	if !cfg.ExecutionMode.Valid() {
 		cfg.ExecutionMode = runtimeeffects.ExecutionModeLive
 	}
-	agent, err := NewLLMAgent(cfg, modelRuntime, toolExecutor, tools)
+	agent, err := newLLMAgent(cfg, modelRuntime, toolExecutor, tools, LLMAgentOptions{})
 	if err != nil {
-		t.Fatalf("NewLLMAgent: %v", err)
+		t.Fatalf("newLLMAgent: %v", err)
 	}
 	return agent
-}
-
-func TestNewLLMAgent_UsesConfiguredEmitEventsAndAllowedTools(t *testing.T) {
-	emitRegistry := runtimetools.NewEmitRegistry(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"coord.done": {
-				Payload: runtimecontracts.EventPayloadSpec{
-					Properties: map[string]runtimecontracts.EventFieldSpec{
-						"entity_id": {Type: "string"},
-						"task_id":   {Type: "string"},
-					},
-					Required: []string{"entity_id"},
-				},
-			},
-		},
-	}), nil)
-	agent, err := NewLLMAgentWithOptions(
-		models.AgentConfig{
-			ExecutionMode: "live",
-			ID:            "coordinator-1",
-			Role:          "coordinator",
-			Tools:         []string{"schedule"},
-			EmitEvents:    []string{"coord.done"},
-		},
-		nil,
-		nil,
-		[]llm.ToolDefinition{
-			{Name: "schedule"},
-			{Name: "check_status"},
-			{Name: "agent_message"},
-		},
-		LLMAgentOptions{EmitRegistry: emitRegistry},
-	)
-	if err != nil {
-		t.Fatalf("NewLLMAgentWithOptions: %v", err)
-	}
-	names := make([]string, 0, len(agent.conversation.Tools))
-	for _, tool := range agent.conversation.Tools {
-		names = append(names, tool.Name)
-	}
-	if !containsString(names, "schedule") {
-		t.Fatalf("expected configured tier2 tool in session, got %v", names)
-	}
-	if !containsString(names, "agent_message") {
-		t.Fatalf("expected universal tool in session, got %v", names)
-	}
-	if !containsString(names, "emit_coord_done") {
-		t.Fatalf("expected explicit emit tool in session, got %v", names)
-	}
-	if containsString(names, "check_status") {
-		t.Fatalf("expected unconstrained non-universal tool to be filtered out, got %v", names)
-	}
 }
 
 type boardTestRuntime struct {
@@ -475,7 +330,7 @@ func TestLLMAgent_OnEvent_UsesSinglePostStepExecutionPath(t *testing.T) {
 			{Message: llm.Message{Role: "assistant", Content: "Handled."}},
 		},
 	}
-	agent := mustNewLLMAgent(t,
+	agent := mustBuildLLMAgent(t,
 		models.AgentConfig{ExecutionMode: "live", ID: "analysis-1", Role: "analysis"},
 		rt,
 		nil,
@@ -602,7 +457,7 @@ func roleScopedCapabilitiesForAgentTest(names []string, currentEntityEligible bo
 }
 
 func TestBoardStep_ReturnsErrorWhenDirectiveDoesNotAct(t *testing.T) {
-	agent := mustNewLLMAgent(t,
+	agent := mustBuildLLMAgent(t,
 		models.AgentConfig{ExecutionMode: "live", ID: "coordinator-1", Role: "coordinator"},
 		&boardTestRuntime{
 			steps: []*llm.Response{
@@ -624,7 +479,7 @@ func TestBoardStep_ReturnsErrorWhenDirectiveDoesNotAct(t *testing.T) {
 }
 
 func TestBoardStep_RemediatesAndSucceedsWhenDirectiveEmits(t *testing.T) {
-	agent := mustNewLLMAgent(t,
+	agent := mustBuildLLMAgent(t,
 		models.AgentConfig{ExecutionMode: "live", ID: "coordinator-1", Role: "coordinator"},
 		&boardTestRuntime{
 			steps: []*llm.Response{
@@ -652,7 +507,7 @@ func TestBoardStep_RemediatesAndSucceedsWhenDirectiveEmits(t *testing.T) {
 }
 
 func TestNewLLMAgentDefaultsToMemoryDisabled(t *testing.T) {
-	agent := mustNewLLMAgent(t,
+	agent := mustBuildLLMAgent(t,
 		models.AgentConfig{
 			ExecutionMode: "live",
 			ID:            "entity-agent-1",
@@ -668,10 +523,8 @@ func TestNewLLMAgentDefaultsToMemoryDisabled(t *testing.T) {
 	}
 }
 
-func TestNewLLMAgentFactory_PrefersActorScopedToolDefinitions(t *testing.T) {
-	factory := NewLLMAgentFactory(nil, actorScopedFactoryToolExec{}, []llm.ToolDefinition{
-		{Name: "global_only"},
-	}, LLMAgentOptions{})
+func TestNewLLMAgentFactory_UsesActorScopedToolDefinitions(t *testing.T) {
+	factory := NewLLMAgentFactory(nil, actorScopedFactoryToolExec{}, LLMAgentOptions{})
 	agent, err := factory(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "analysis-agent",
@@ -694,11 +547,8 @@ func TestNewLLMAgentFactory_PrefersActorScopedToolDefinitions(t *testing.T) {
 	if !containsString(names, "query_entities") {
 		t.Fatalf("expected actor-scoped tool in conversation, got %v", names)
 	}
-	if containsString(names, "global_only") {
-		t.Fatalf("expected global fallback tool to be absent when actor-scoped definitions exist, got %v", names)
-	}
 	if !containsString(names, "scoped_analysis-agent") {
-		t.Fatalf("expected precomposed actor-scoped tool to survive local filtering, got %v", names)
+		t.Fatalf("expected actor-scoped tool to reach the conversation, got %v", names)
 	}
 }
 
@@ -708,7 +558,7 @@ func TestLLMAgentOnEvent_FiltersRoleScopedToolsByTurnEntityEligibility(t *testin
 			{Message: llm.Message{Role: "assistant", Content: "handled"}},
 		},
 	}
-	factory := NewLLMAgentFactory(rt, contextAwareFactoryToolExec{}, nil, LLMAgentOptions{})
+	factory := NewLLMAgentFactory(rt, contextAwareFactoryToolExec{}, LLMAgentOptions{})
 	agent, err := factory(models.AgentConfig{
 		ID:            "market-research-agent",
 		Role:          "market_research",
@@ -806,10 +656,7 @@ func newFactoryDirectiveAgent(t *testing.T, cfg models.AgentConfig, modelRuntime
 		EmitRegistry:      emitRegistry,
 	})
 
-	factory := NewLLMAgentFactory(modelRuntime, exec, exec.ToolDefinitions(), LLMAgentOptions{
-		AuthorityProvider: authority,
-		EmitRegistry:      emitRegistry,
-	})
+	factory := NewLLMAgentFactory(modelRuntime, exec, LLMAgentOptions{})
 	agent, err := factory(cfg)
 	if err != nil {
 		t.Fatalf("factory error: %v", err)
@@ -971,7 +818,7 @@ func (r *taskRetryRuntime) ContinueSession(_ context.Context, _ *llm.Session, _ 
 
 func TestLLMAgent_StatelessTurnBudgetFailureResetsConversationAndRetries(t *testing.T) {
 	rt := &taskRetryRuntime{}
-	agent := mustNewLLMAgent(t,
+	agent := mustBuildLLMAgent(t,
 		models.AgentConfig{
 			ExecutionMode: "live",
 			ID:            "spec-reviewer",
@@ -1025,7 +872,7 @@ func (r *runIDCaptureRuntime) ContinueSession(ctx context.Context, _ *llm.Sessio
 
 func TestLLMAgent_OnEvent_SeedsRunIDIntoConversationContext(t *testing.T) {
 	rt := &runIDCaptureRuntime{}
-	agent := mustNewLLMAgent(t,
+	agent := mustBuildLLMAgent(t,
 		models.AgentConfig{
 			ExecutionMode: "live",
 			ID:            "analysis-agent",
@@ -1088,77 +935,6 @@ func TestAppendPromptPostamble_AppendsWhenPartialPostambleMissingRequiredMounts(
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected appended canonical postamble to include %q, got %q", want, got)
-		}
-	}
-}
-
-type nativeCapabilityRuntimeStub struct {
-	llm.NoopRuntime
-	caps llm.NativeToolCapabilities
-}
-
-func (s nativeCapabilityRuntimeStub) ProviderContract() llm.ProviderContract {
-	contract := llm.AnthropicAPIProviderContract()
-	contract.RuntimeMode = "stub"
-	contract.Provider = "stub"
-	contract.NativeTools.Capabilities = s.caps
-	return contract
-}
-
-func TestNewLLMAgent_DoesNotInjectNativeFallbackToolsWithoutExecutorAdmission(t *testing.T) {
-	agent := mustNewLLMAgent(t,
-		models.AgentConfig{
-			ExecutionMode: "live",
-			ID:            "researcher-1",
-			Role:          "researcher",
-			NativeTools: models.NativeToolConfig{
-				Bash:      true,
-				WebSearch: true,
-				FileIO:    true,
-			},
-		},
-		nativeCapabilityRuntimeStub{},
-		nil,
-		nil,
-	)
-	names := make([]string, 0, len(agent.conversation.Tools))
-	for _, tool := range agent.conversation.Tools {
-		names = append(names, tool.Name)
-	}
-	for _, forbidden := range []string{"bash", "web_search", "read_file", "write_file"} {
-		if containsString(names, forbidden) {
-			t.Fatalf("did not expect unproven native fallback tool %s in %v", forbidden, names)
-		}
-	}
-}
-
-func TestNewLLMAgent_DoesNotInjectNativeFallbackToolsWhenProviderSupportsCapability(t *testing.T) {
-	agent := mustNewLLMAgent(t,
-		models.AgentConfig{
-			ExecutionMode: "live",
-			ID:            "ops-1",
-			Role:          "ops",
-			NativeTools: models.NativeToolConfig{
-				Bash:      true,
-				WebSearch: true,
-				FileIO:    true,
-			},
-		},
-		nativeCapabilityRuntimeStub{caps: llm.NativeToolCapabilities{
-			Bash:      true,
-			WebSearch: true,
-			FileIO:    true,
-		}},
-		nil,
-		nil,
-	)
-	names := make([]string, 0, len(agent.conversation.Tools))
-	for _, tool := range agent.conversation.Tools {
-		names = append(names, tool.Name)
-	}
-	for _, forbidden := range []string{"bash", "web_search", "read_file", "write_file"} {
-		if containsString(names, forbidden) {
-			t.Fatalf("did not expect fallback tool %s in %v", forbidden, names)
 		}
 	}
 }

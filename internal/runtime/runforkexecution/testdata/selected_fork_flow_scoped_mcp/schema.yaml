@@ -1,0 +1,12 @@
+name: selected-fork-flow-scoped-mcp
+initial_state: pending
+terminal_states: [done]
+states: [pending, assigned, done]
+pins:
+  inputs:
+    events:
+      - task.assigned
+      - name: task_completed
+        event: task.completed
+  outputs:
+    events: []

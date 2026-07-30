@@ -1161,7 +1161,7 @@ func TestHandler_AgentDirective_UsesLiveFactoryCreatedEmitToolSurface(t *testing
 			EmitRegistry:   runtimetools.NewEmitRegistry(source, nil),
 		}),
 	}
-	factory := runtimeagents.NewLLMAgentFactory(&directiveSurfaceRuntime{requiredTool: "emit_scan_requested"}, exec, nil, runtimeagents.LLMAgentOptions{})
+	factory := runtimeagents.NewLLMAgentFactory(&directiveSurfaceRuntime{requiredTool: "emit_scan_requested"}, exec, runtimeagents.LLMAgentOptions{})
 	manager := runtimemanager.NewAgentManager(nil, factory)
 	if err := manager.SpawnAgent(runtimeactors.AgentConfig{
 		ExecutionMode: "live",

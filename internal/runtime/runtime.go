@@ -1168,10 +1168,8 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			slog.Warn("managed credential requirement warning", "key", item.Key, "status", item.Status, "required_by", strings.Join(requiredBy, ", "))
 		}
 	}
-	factory := runtimeagents.NewLLMAgentFactory(rt.LLM, rt.ToolExecutor, rt.ToolExecutor.ToolDefinitions(), runtimeagents.LLMAgentOptions{
-		PromptResolver:    rt.PromptResolver,
-		AuthorityProvider: rt.Authority,
-		EmitRegistry:      rt.EmitRegistry,
+	factory := runtimeagents.NewLLMAgentFactory(rt.LLM, rt.ToolExecutor, runtimeagents.LLMAgentOptions{
+		PromptResolver: rt.PromptResolver,
 	})
 	var workflowInstances runtimepipeline.WorkflowInstancePersistence
 	if rt.Pipeline != nil {
@@ -1235,7 +1233,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 				return runtimeactors.AgentConfig{}, false
 			}
 			return rt.Manager.GetAgentConfig(strings.TrimSpace(agentID))
-		}, rt.shutdownAdmissionClosed, rt.EmitRegistry, rt.MCPTurns))
+		}, rt.shutdownAdmissionClosed, rt.MCPTurns))
 	}
 
 	workOccurrenceOwned = false

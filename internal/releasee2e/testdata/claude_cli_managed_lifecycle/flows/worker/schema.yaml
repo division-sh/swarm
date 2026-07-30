@@ -1,0 +1,13 @@
+name: claude-cli-release-worker
+mode: singleton
+initial_state: pending
+terminal_states: [done]
+states: [pending, active, done]
+pins:
+  inputs:
+    events:
+      - name: task_assigned
+        event: task.assigned
+        source: external
+  outputs:
+    events: []

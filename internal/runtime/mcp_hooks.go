@@ -12,9 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
-	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
-	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 const (
@@ -30,10 +28,7 @@ const (
 	ErrCodeMCPInvalidRequest    = runtimemcp.ErrCodeInvalidRequest
 )
 
-func RuntimeMCPGatewayHooks(logger *RuntimeLogger, runtimeIngress *runtimeingress.Controller, resolveActorConfig func(string) (runtimeactors.AgentConfig, bool), runtimeShutdownAdmissionClosed func() bool, emitRegistry *runtimetools.EmitRegistry, turnContexts *runtimemcp.TurnContextRegistry) runtimemcp.GatewayHooks {
-	if emitRegistry == nil {
-		emitRegistry = runtimetools.NewEmitRegistry(nil, nil)
-	}
+func RuntimeMCPGatewayHooks(logger *RuntimeLogger, runtimeIngress *runtimeingress.Controller, resolveActorConfig func(string) (runtimeactors.AgentConfig, bool), runtimeShutdownAdmissionClosed func() bool, turnContexts *runtimemcp.TurnContextRegistry) runtimemcp.GatewayHooks {
 	runtimeIngressRequestPaused := func(ctx context.Context) (bool, error) {
 		if runtimeIngress == nil {
 			return false, nil
@@ -79,40 +74,12 @@ func RuntimeMCPGatewayHooks(logger *RuntimeLogger, runtimeIngress *runtimeingres
 			}
 			return turnContexts.MarkEmitKeyUsed(token, key)
 		},
-		EmitToolsForActor: func(actor runtimeactors.AgentConfig) []llm.ToolDefinition {
-			return emitRegistry.GenerateEmitToolsForActor(actor, processWarnOnce)
-		},
-		EmitTools: func(role string) []llm.ToolDefinition {
-			return emitRegistry.GenerateEmitToolsForRole(role, processWarnOnce)
-		},
-		EmitSchemaForTool: runtimeGatewayEmitSchemaForTool(emitRegistry),
 		Log: func(ctx context.Context, level, action, agentID, entityID string, detail map[string]any, failure *runtimefailures.Envelope) {
 			runtimeMCPLog(logger, ctx, level, action, agentID, entityID, detail, failure)
 		},
 		AfterToolSuccess: func(ctx context.Context, r *http.Request, toolName string) {
 			runtimeMCPAfterToolSuccess(logger, ctx, r, toolName)
 		},
-	}
-}
-
-func runtimeGatewayEmitSchemaForTool(emitRegistry *runtimetools.EmitRegistry) func(string) (string, any, bool) {
-	return func(name string) (string, any, bool) {
-		if !strings.HasPrefix(name, "emit_") || emitRegistry == nil {
-			return "", nil, false
-		}
-		evtType, mapped := emitRegistry.EventTypeFromToolName(name)
-		if !mapped {
-			return "", nil, false
-		}
-		evtSchema, ok := emitRegistry.EventSchemaSnapshot()[evtType]
-		if !ok {
-			return "", nil, false
-		}
-		desc := strings.TrimSpace(evtSchema.Description)
-		if desc == "" {
-			desc = "Emit event tool"
-		}
-		return desc, evtSchema.Schema, true
 	}
 }
 

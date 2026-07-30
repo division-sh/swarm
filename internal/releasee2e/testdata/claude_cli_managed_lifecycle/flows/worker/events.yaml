@@ -1,0 +1,6 @@
+task.assigned:
+  request: "[text]"
+agent.requested:
+  request: "[text]"
+agent.completed:
+  flow_result: text

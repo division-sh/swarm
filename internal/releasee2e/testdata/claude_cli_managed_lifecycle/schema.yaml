@@ -1,12 +1,9 @@
 name: claude-cli-release-lifecycle
-initial_state: pending
-terminal_states: [done]
-states: [pending, done]
 pins:
   inputs:
     events:
-      - name: work_requested
-        event: work.requested
+      - name: worker_task_assigned
+        event: worker/task.assigned
         source: external
   outputs:
     events: []

@@ -1,0 +1,3 @@
+task.assigned: {}
+task.completed:
+  result: text

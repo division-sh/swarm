@@ -8,9 +8,13 @@ import (
 	"strings"
 	"testing"
 
+	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 func canonicalExampleNames() []ArtifactID {
@@ -77,9 +81,46 @@ func TestReleaseE2EClaudeLifecycleFixtureLoadsAndVerifies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load release E2E Claude lifecycle fixture: %v", err)
 	}
-	report := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{})
+	source := semanticview.Wrap(bundle)
+	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
 	if findings := report.HardInvalidities(); len(findings) != 0 {
 		t.Fatalf("release E2E Claude lifecycle fixture hard invalidities: %#v", findings)
+	}
+	registry := runtimetools.NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
+	actorDefinitions := registry.GenerateEmitToolsForActor(models.AgentConfig{
+		ID:         "release-worker",
+		Role:       "release-worker",
+		FlowID:     "worker",
+		FlowPath:   "worker",
+		EmitEvents: []string{"worker/agent.completed"},
+	}, nil)
+	if len(actorDefinitions) != 1 {
+		t.Fatalf("release E2E actor definitions = %#v, want one flow-scoped emit definition", actorDefinitions)
+	}
+	roleDefinitions := registry.GenerateEmitToolsForRole("release-worker", nil)
+	if len(roleDefinitions) != 1 {
+		t.Fatalf("release E2E role/global definitions = %#v, want one deliberately different definition", roleDefinitions)
+	}
+	if runtimellm.ToolDefinitionIdentity(roleDefinitions[0]) == runtimellm.ToolDefinitionIdentity(actorDefinitions[0]) {
+		t.Fatalf("release E2E role/global definition unexpectedly equals actor/flow definition: %#v", actorDefinitions[0])
+	}
+}
+
+func TestSelectedForkFlowScopedMCPFixtureLoadsAndVerifies(t *testing.T) {
+	const fixture = ArtifactID("internal/runtime/runforkexecution/testdata/selected_fork_flow_scoped_mcp")
+	Prove(t, ArtifactID("internal/runtime/runforkexecution/testdata/selected_fork_flow_scoped_mcp"))
+	repo := RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repo,
+		filepath.Join(repo, filepath.FromSlash(string(fixture))),
+		runtimecontracts.DefaultPlatformSpecFile(repo),
+	)
+	if err != nil {
+		t.Fatalf("load selected-fork flow-scoped MCP fixture: %v", err)
+	}
+	report := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{})
+	if findings := report.HardInvalidities(); len(findings) != 0 {
+		t.Fatalf("selected-fork flow-scoped MCP fixture hard invalidities: %#v", findings)
 	}
 }
 
