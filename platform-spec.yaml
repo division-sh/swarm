@@ -15100,50 +15100,50 @@ run_model:
     run_resume: 'POST /runs/:run_id/resume — resume a paused run.'
     run_cancel: 'POST /runs/:run_id/cancel — cancel a running run. Drains in-flight events.'
 agent_identity_model:
-  status: current_global_slug_constraint_promoted_source_authority
-  promoted_by: '#977'
+  status: concrete_route_identity_promoted_source_authority
+  promoted_by: '#2133'
   merge_bearing_owner: platform-spec.yaml#agent_identity_model
-  current_supported_posture: global_live_slug_identity
+  current_supported_posture: concrete_name_and_route_identity
   authority_rule: >
-    This section is the merge-bearing source authority for agent identity semantics under multi-bundle until a later
-    #977 child promotes and proves a UUID-internal migration. Current runtime/store/API/CLI/dashboard behavior treats
-    agent_id as the authored contract slug and as the globally unique live runtime identity. Issue prose that sketches
-    agents.id UUID or bundle-scoped slug aliases is design evidence only until promoted here with matching schema,
-    runtime, API/OpenRPC, CLI/dashboard, and historical-record proof.
+    This section is the merge-bearing source authority for agent identity semantics. A concrete live identity consists
+    of an explicitly sourced authored or runtime-created name plus an explicit flow route. The route is either present
+    with scope_key, instance_id, and instance_path, or explicitly root with no route fields. agent_id remains the
+    operator-facing authored/runtime name but is not by itself a live runtime, store, EventBus, delivery, session, timer,
+    workspace, recovery, or control identity.
   concepts:
-    authored_slug:
+    agent_name:
       source: agents.yaml map key or explicit id field after contract loading
       current_public_name: agent_id
-      role: Human-authored and operator-facing display/lookup alias.
-    current_live_identity:
-      source: agents.agent_id and runtime Agent.ID()
-      role: Current durable primary key, runtime map key, EventBus subscriber key, session owner, delivery subscriber id,
-        and public agent lookup token.
-      limitation: This identity is global in the current platform and is not bundle-scoped.
+      role: Human-authored or runtime-created operator-facing name with explicit provenance and owner.
+    concrete_live_identity:
+      source: agent name provenance plus explicit present-or-root route
+      role: Durable composite primary key, runtime map key, EventBus target key, delivery/session/timer/workspace owner,
+        recovery selector, and internal control identity.
+      repeated_template_instances: >
+        Repeated instances of one template may carry the same declared agent_id because their explicit routes differ.
+        No ownership-bearing consumer may collapse those siblings to the display slug.
     bundle_scoped_lookup:
       status: not_supported_for_duplicate_agent_slugs
       rule: >
         bundle_hash and RuntimeContextManager BundleContext selection identify runtime bundle context, not an immutable
-        agent identity. Current agent.* reads/control, conversation.list, conversation.list_turns, conversation.get_turn, CLI agent commands, dashboard
-        read models, delivery/session/timer owners, and replay subscriber selection do not promise disambiguation of the
-        same authored agent_id across multiple live bundles.
+        agent identity. Duplicate declarations across live bundles remain unsupported under #977; this does not prevent
+        repeated concrete instances of one admitted template from sharing the declaration name and differing by route.
     historical_agent_reference:
       role: Existing agent_id, subscriber_id, owner_agent, from_agent, source_agent_id, log, audit, delivery, receipt,
         spend, timer, mailbox, and provenance rows record the identity value used when the fact was written.
-      migration_rule: >
-        Historical rows must not be blindly rewritten as part of a future UUID migration. A later child must classify
-        each table as immutable history, new-row UUID owner, display alias, or explicitly split surface.
+      rule: Historical display/provenance strings never select or mutate live ownership.
   current_multi_bundle_constraint:
     rule: >
       Every currently supported live loaded/boot-pinned runtime bundle sharing the same platform store/read model must
       use globally unique authored agent_id values. Duplicate authored agent slugs across live loaded BundleContexts are
-      unsupported and must not be advertised as bundle-scoped or UUID-disambiguated behavior.
+      unsupported and must not be advertised as bundle-scoped or UUID-disambiguated behavior. This declaration-level
+      constraint is distinct from supported same-name concrete instances of one template.
     enforcement_status: >
       RuntimeContextManager admission enforces this current-model live constraint for registered loaded BundleContexts:
       duplicate authored agent slugs fail closed before API readiness and report the duplicate slug plus conflicting
       bundle hashes/source labels when available. This enforcement does not add duplicate-slug support, UUID identity,
       bundle-scoped public lookup, store schema migration, API/CLI disambiguation, slug prefixing, or compatibility
-      remapping; #977 remains the parent for those behaviors.
+      remapping; #977 remains the parent for cross-bundle duplicate declarations.
     final_matrix_dependency: >
       #1025 must treat duplicate agent slugs across live bundles as unsupported unless a later #977 implementation child
       promotes UUID-internal identity and proves bundle-scoped lookup across all affected surfaces.
@@ -15163,21 +15163,21 @@ agent_identity_model:
       - CLI/dashboard UUID display or disambiguation behavior
       - duplicate slug support across loaded bundles
   consumer_disposition:
-    uuid_internal_candidates:
-      - agents table durable primary key after future migration
+    concrete_identity_owners:
+      - agents table durable composite primary key
       - runtime AgentManager maps and loop cancellation keys
-      - EventBus agent subscriptions and live delivery subscriber keys
+      - EventBus exact target keys and live delivery obligations
       - agent_sessions live ownership and session lookup
-      - executable timers owned by agents
+      - executable timers and workspaces owned by agents
     slug_display_aliases:
       - agents.yaml authored map keys and explicit id fields
       - CLI positional agent-id inputs and normal text/table display
       - dashboard/read-model display labels
       - bundle.agents definition-only catalog output
-    bundle_scoped_lookup_candidates:
-      - agent-facing API methods when run_id or bundle context is explicit
-      - RuntimeContextManager-selected control paths that dispatch through a chosen BundleContext
-      - future duplicate-slug-safe dashboard/API reads
+    boundary_resolution:
+      - agent-facing API and CLI methods accept agent_id plus optional flow_instance
+      - exact agent_id plus flow_instance resolves one concrete identity
+      - bare agent_id resolves only when exactly one live identity matches and otherwise fails closed with candidates
     historical_immutable_records:
       - agent_turns.agent_id
       - agent_conversation_audits.agent_id
@@ -15187,7 +15187,6 @@ agent_identity_model:
       - runtime logs, dead letters, source_agent_id, and audit payload identity fields
     split_or_escalate:
       - tool/MCP target_agent_id, to_agent_id, and gateway agent_id fields
-      - container/workspace identity labels
       - broad UUID schema/runtime/API migration children
 multi_bundle_persistence:
   status: promoted_source_authority_with_partial_runtime_behavior
@@ -15226,12 +15225,11 @@ multi_bundle_persistence:
   agent_identity_boundary:
     owner: platform-spec.yaml#agent_identity_model
     tracker: '#977'
-    status: current_global_slug_constraint
+    status: concrete_route_identity_with_cross_bundle_slug_constraint
     rule: >
-      Multi-bundle BundleContext selection is governed by bundle_hash. It does not by itself provide duplicate agent slug
-      disambiguation. Current agent-facing runtime/store/API/CLI/dashboard surfaces consume agent_id under
-      agent_identity_model.current_supported_posture, so live loaded or boot-pinned bundles with duplicate authored
-      agent slugs are unsupported until a separately gated #977 UUID-internal identity migration lands.
+      Runtime/store ownership consumes agent_identity_model.concrete_live_identity. Multi-bundle BundleContext selection
+      does not by itself provide duplicate declaration-name disambiguation, so live loaded or boot-pinned bundles with
+      duplicate authored agent slugs remain unsupported under #977.
   bundle_identity:
     canonical_name: bundle_hash
     format: 'bundle-v1:sha256:<64 lowercase hex>'
@@ -19122,14 +19120,14 @@ cli_specification:
     - stale v1 `swarm investigate *` command catalog entries
   agent_identity_boundary:
     owner: platform-spec.yaml#agent_identity_model
-    status: current_global_slug_constraint
+    status: exact_concrete_target_resolution
     rule: >
-      Agent-facing CLI commands accept and display agent-id values as the current public authored slug. Read-only CLI
-      inputs registered by `cli_specification.foundations.output_contract.identifier_resolution` may resolve a unique,
-      case-sensitive authored-slug prefix through the complete `agent.list` result. That lookup does not change agent
-      identity: the CLI MUST NOT infer UUIDs, bundle-scoped aliases from bundle_hash, duplicate-slug support, or case
-      folding, and mutating agent selectors remain full-slug-only unless an explicit confirmation contract is promoted.
-      The staged UUID/display-alias migration remains parked under #977.
+      Agent-facing CLI commands accept and display agent-id as the public authored/runtime name and carry flow_instance
+      when exact selection is required. The API resolves agent_id plus flow_instance to one concrete identity. Bare
+      agent-id matching is case-sensitive, and convenience succeeds only when exactly one live identity matches uniquely;
+      otherwise it fails closed with the candidates. The CLI MUST NOT construct internal identities, infer bundle
+      aliases, or add cross-bundle duplicate
+      declaration support.
   catalog_accounting_model:
     owner: platform-spec.yaml#cli_specification.command_catalog
     accounting_unit: explicit_command_catalog_row
@@ -24442,12 +24440,12 @@ api_specification:
       agent_identity_duplicate_slug_migration: '#977'
   agent_identity_boundary:
     owner: platform-spec.yaml#agent_identity_model
-    status: current_global_slug_constraint
+    status: exact_concrete_target_resolution
     rule: >
-      Agent-facing method params named agent_id currently accept the public authored slug that is also the current global
-      live agent identity. The generated OpenRPC shape does not publish agents.id UUID, UUID-or-slug resolution, or
-      duplicate-slug bundle-scoped lookup. Methods that need duplicate-slug safety must either receive a separately
-      promoted #977 identity child or fail closed under their existing multi-context ambiguity rules.
+      Agent-facing method params named agent_id carry the public authored/runtime name. Methods accept flow_instance where
+      exact selection is supported and resolve the boundary input once to the concrete name-plus-route identity. A bare
+      agent_id succeeds only when exactly one live identity matches and otherwise fails closed with candidates. The
+      generated OpenRPC shape does not publish an internal UUID or cross-bundle duplicate-declaration lookup.
   foundations:
     transport:
       json_rpc_over_http:

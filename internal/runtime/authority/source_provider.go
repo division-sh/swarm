@@ -86,7 +86,7 @@ func (p *sourceProvider) HasMessageAuthority(actor, target models.AgentConfig) b
 	if sender == "" || recipient == "" {
 		return false
 	}
-	if strings.TrimSpace(actor.ID) == strings.TrimSpace(target.ID) {
+	if same, err := SameAgent(actor, target); err == nil && same {
 		return true
 	}
 	if !SameFlowInstance(actor, target) {
@@ -107,7 +107,7 @@ func (p *sourceProvider) AuthorizeRouting(actor, target models.AgentConfig, stat
 	if !hasToolGrant(permissionSet(actor.Permissions), "configure_routing") {
 		return authorizationDenied("configure_routing", actor, target)
 	}
-	if strings.TrimSpace(actor.ID) == strings.TrimSpace(target.ID) {
+	if same, err := SameAgent(actor, target); err == nil && same {
 		return nil
 	}
 	if err := p.AuthorizeManagement(actor, target); err != nil {
@@ -123,7 +123,11 @@ func (p *sourceProvider) AuthorizeManagement(actor, target models.AgentConfig) e
 	if strings.TrimSpace(actor.ID) == "" || strings.TrimSpace(target.ID) == "" {
 		return authorizationDenied("agent_manage", actor, target)
 	}
-	if strings.TrimSpace(actor.ID) == strings.TrimSpace(target.ID) {
+	same, err := SameAgent(actor, target)
+	if err != nil && !target.Identity.IsZero() {
+		return authorizationDenied("agent_manage", actor, target)
+	}
+	if err == nil && same {
 		return authorizationDenied("agent_manage", actor, target)
 	}
 	if !SameFlowInstance(actor, target) {
@@ -147,7 +151,11 @@ func (p *sourceProvider) UpsertManagedAgent(identity, parent agentidentity.Ident
 	if err := parent.Validate(); err != nil {
 		return fmt.Errorf("managed parent identity: %w", err)
 	}
-	if identity == parent {
+	same, err := agentidentity.Equal(identity, parent)
+	if err != nil {
+		return err
+	}
+	if same {
 		return fmt.Errorf("managed agent identity cannot be its own parent")
 	}
 	if identity.Route != parent.Route {
@@ -330,7 +338,11 @@ func (p *sourceProvider) isConcreteManagedDescendant(actor, target models.AgentC
 		if !ok {
 			return false
 		}
-		if parent == actorIdentity {
+		same, err := agentidentity.Equal(parent, actorIdentity)
+		if err != nil {
+			return false
+		}
+		if same {
 			return true
 		}
 		if _, seen := visited[parent]; seen {

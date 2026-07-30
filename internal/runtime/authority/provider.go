@@ -1,6 +1,7 @@
 package authority
 
 import (
+	"fmt"
 	"strings"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -37,10 +38,8 @@ func (noopProvider) ProducerRoles() []string { return nil }
 func (noopProvider) ProducerEventsForRole(string) []string { return nil }
 
 func (noopProvider) HasMessageAuthority(actor, target models.AgentConfig) bool {
-	if strings.TrimSpace(actor.ID) == "" || strings.TrimSpace(target.ID) == "" {
-		return false
-	}
-	return strings.TrimSpace(actor.ID) == strings.TrimSpace(target.ID)
+	same, err := SameAgent(actor, target)
+	return err == nil && same
 }
 
 func (noopProvider) AuthorizeRouting(actor, target models.AgentConfig, status string) error {
@@ -64,6 +63,20 @@ func ProviderOrNoop(provider Provider) Provider {
 		return noopProvider{}
 	}
 	return provider
+}
+
+// SameAgent compares the complete concrete identity carried by two runtime
+// descriptors. Malformed descriptors cannot participate in authorization.
+func SameAgent(actor, target models.AgentConfig) (bool, error) {
+	actorIdentity, err := actor.ConcreteIdentity()
+	if err != nil {
+		return false, fmt.Errorf("actor concrete identity: %w", err)
+	}
+	targetIdentity, err := target.ConcreteIdentity()
+	if err != nil {
+		return false, fmt.Errorf("target concrete identity: %w", err)
+	}
+	return agentidentity.Equal(actorIdentity, targetIdentity)
 }
 
 func UpsertManagedAgent(provider Provider, identity, parent agentidentity.Identity) error {

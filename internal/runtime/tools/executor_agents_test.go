@@ -282,7 +282,9 @@ func TestExecAgentFire_UsesAuthorizedManagerLifecyclePath(t *testing.T) {
 
 	result, err := exec.ExecAgentFireDirect(models.AgentConfig{
 		ExecutionMode: "live",
-		ID:            "manager-1", Role: "manager", Permissions: []string{"agent_fire"}, FlowPath: "review/inst-1",
+		ID:            "manager-1",
+		Identity:      agentidentitytest.Runtime(t, "manager-1", "runtime-tools-test", "review", "inst-1", "review/inst-1"),
+		Role:          "manager", Permissions: []string{"agent_fire"}, FlowPath: "review/inst-1",
 	}, map[string]any{"agent_id": "worker-1"})
 	if err != nil {
 		t.Fatalf("ExecAgentFireDirect: %v", err)
@@ -417,6 +419,7 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 	actor := models.AgentConfig{
 		ExecutionMode: "mock",
 		ID:            "control",
+		Identity:      agentidentitytest.Runtime(t, "control", "runtime-tools-test", "review", "inst-1", "review/inst-1"),
 		Role:          "control",
 		Permissions:   []string{"message_flow"},
 		EntityID:      "entity-a",
@@ -502,6 +505,34 @@ func TestExecAgentMessage_PublishesOnlyResolvedSameSlugRoute(t *testing.T) {
 	}
 	if bus.routes[0].AgentIdentity == workerA.Identity {
 		t.Fatal("message route crossed to unrelated same-slug sibling")
+	}
+}
+
+func TestAuthorizeAgentMessageSelfRequiresExactConcreteIdentity(t *testing.T) {
+	t.Parallel()
+
+	workerA := models.AgentConfig{
+		ID:       "worker",
+		Identity: agentidentitytest.Runtime(t, "worker", "runtime-tools-test", "review", "inst-a", "review/inst-a"),
+		Role:     "worker",
+		FlowPath: "review/inst-a",
+	}
+	workerB := models.AgentConfig{
+		ID:       "worker",
+		Identity: agentidentitytest.Runtime(t, "worker", "runtime-tools-test", "review", "inst-b", "review/inst-b"),
+		Role:     "worker",
+		FlowPath: "review/inst-b",
+	}
+	if err := authorizeAgentMessage(runtimeauthority.NoopProvider(), workerA, workerA, nil); err != nil {
+		t.Fatalf("exact self authorization: %v", err)
+	}
+	if err := authorizeAgentMessage(runtimeauthority.NoopProvider(), workerA, workerB, nil); err == nil {
+		t.Fatal("same-slug sibling bypassed message authorization")
+	}
+	malformed := workerA
+	malformed.Identity = agentidentity.Identity{}
+	if err := authorizeAgentMessage(runtimeauthority.NoopProvider(), malformed, malformed, nil); err == nil {
+		t.Fatal("malformed identity bypassed message authorization")
 	}
 }
 
@@ -688,6 +719,45 @@ func TestExecAgentHire_AllowsDelegablePrivileges(t *testing.T) {
 	}
 	if len(manager.spawnedConfig.EmitEvents) != 1 || manager.spawnedConfig.EmitEvents[0] != "review.started" {
 		t.Fatalf("spawned emit events = %#v, want [review.started]", manager.spawnedConfig.EmitEvents)
+	}
+}
+
+func TestExecAgentHire_RejectsUnresolvedParentBeforeSpawn(t *testing.T) {
+	t.Parallel()
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"manager": {ID: "manager", Role: "manager"},
+			"worker":  {ID: "worker", Role: "worker", ManagerFallback: "manager"},
+		},
+	})
+	manager := &captureManagerStub{}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+		Manager:           manager,
+		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
+		WorkflowSource:    source,
+	})
+	actor := models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "manager",
+		Identity:      agentidentitytest.Runtime(t, "manager", "runtime-tools-test", "review", "inst-1", "review/inst-1"),
+		Role:          "manager",
+		Permissions:   []string{"agent_hire"},
+		FlowPath:      "review/inst-1",
+	}
+
+	_, err := exec.ExecAgentHireDirect(actor, map[string]any{
+		"config": map[string]any{
+			"id":               "worker-1",
+			"role":             "worker",
+			"manager_fallback": "missing-manager",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "resolve managed parent missing-manager") {
+		t.Fatalf("ExecAgentHireDirect error = %v, want unresolved parent preflight", err)
+	}
+	if manager.spawnCalled {
+		t.Fatal("unresolved parent was discovered after spawning")
 	}
 }
 
@@ -900,6 +970,7 @@ func TestExecAgentReconfigure_DeniesNativeToolEscalation(t *testing.T) {
 	_, err := exec.ExecAgentReconfigureDirect(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "manager-1",
+		Identity:      agentidentitytest.Runtime(t, "manager-1", "runtime-tools-test", "review", "inst-1", "review/inst-1"),
 		Role:          "manager",
 		Permissions:   []string{"agent_reconfigure"},
 		FlowPath:      "review/inst-1",
@@ -948,6 +1019,7 @@ func TestExecAgentReconfigure_FailsClosedWhenNativeToolFallbackIsNotAdmitted(t *
 	_, err := exec.ExecAgentReconfigureDirect(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "manager-1",
+		Identity:      agentidentitytest.Runtime(t, "manager-1", "runtime-tools-test", "review", "inst-1", "review/inst-1"),
 		Role:          "manager",
 		Permissions:   []string{"agent_reconfigure"},
 		NativeTools:   models.NativeToolConfig{FileIO: true},

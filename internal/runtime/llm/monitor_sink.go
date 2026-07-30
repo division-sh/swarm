@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 )
 
 const defaultMonitorDir = "/tmp/runtime-monitor"
@@ -53,12 +54,16 @@ func DefaultMonitorDir() string {
 	return defaultMonitorDir
 }
 
-func MonitorLogPath(rootDir, agentID string) string {
+func MonitorLogPath(rootDir string, identity agentidentity.Identity) (string, error) {
 	rootDir = strings.TrimSpace(rootDir)
 	if rootDir == "" {
 		rootDir = DefaultMonitorDir()
 	}
-	return filepath.Join(rootDir, sanitizeMonitorName(agentID)+".log")
+	fingerprint, err := identity.Fingerprint()
+	if err != nil {
+		return "", fmt.Errorf("monitor agent identity: %w", err)
+	}
+	return filepath.Join(rootDir, fingerprint+".log"), nil
 }
 
 func NewFileMonitorSink(rootDir string) MonitorSink {
@@ -73,7 +78,10 @@ func (s *fileMonitorSink) OpenTurn(_ context.Context, meta MonitorTurnMeta) (Mon
 	if s == nil {
 		return nil, nil
 	}
-	path := MonitorLogPath(s.rootDir, meta.AgentID)
+	path, err := MonitorLogPath(s.rootDir, meta.MemoryIdentity.Agent)
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("create monitor dir: %w", err)
 	}
@@ -130,29 +138,6 @@ func (w *fileMonitorTurnWriter) writeLine(msg string) {
 		return
 	}
 	_, _ = fmt.Fprintf(w.file, "%s %s\n", time.Now().UTC().Format(time.RFC3339), msg)
-}
-
-func sanitizeMonitorName(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "unknown"
-	}
-	var b strings.Builder
-	for _, r := range raw {
-		switch {
-		case r >= 'a' && r <= 'z':
-			b.WriteRune(r)
-		case r >= 'A' && r <= 'Z':
-			b.WriteRune(r)
-		case r >= '0' && r <= '9':
-			b.WriteRune(r)
-		case r == '-', r == '_', r == '.':
-			b.WriteRune(r)
-		default:
-			b.WriteRune('_')
-		}
-	}
-	return strings.Trim(b.String(), "_")
 }
 
 func summarizeMonitorEventLine(line []byte) string {

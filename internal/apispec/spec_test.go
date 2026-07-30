@@ -1047,18 +1047,26 @@ func TestPlatformEventsCatalogOwnsPlatformEmittedEvents(t *testing.T) {
 	}
 }
 
-func TestAgentIdentityModelRecordsCurrentSlugConstraint(t *testing.T) {
+func TestAgentIdentityModelPromotesConcreteRouteIdentity(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
 	identity := mustMappingValue(t, root, "agent_identity_model")
-	assertScalarValue(t, mappingValue(identity, "status"), "current_global_slug_constraint_promoted_source_authority")
-	assertScalarValue(t, mappingValue(identity, "promoted_by"), "#977")
-	assertScalarValue(t, mappingValue(identity, "current_supported_posture"), "global_live_slug_identity")
-	assertScalarContains(t, mappingValue(identity, "authority_rule"), "agent_id as the authored contract slug")
-	assertScalarContains(t, mappingValue(identity, "authority_rule"), "globally unique live runtime identity")
+	assertScalarValue(t, mappingValue(identity, "status"), "concrete_route_identity_promoted_source_authority")
+	assertScalarValue(t, mappingValue(identity, "promoted_by"), "#2133")
+	assertScalarValue(t, mappingValue(identity, "current_supported_posture"), "concrete_name_and_route_identity")
+	assertScalarContains(t, mappingValue(identity, "authority_rule"), "explicitly sourced authored or runtime-created name")
+	assertScalarContains(t, mappingValue(identity, "authority_rule"), "explicit flow route")
+	assertScalarContains(t, mappingValue(identity, "authority_rule"), "is not by itself a live runtime")
+
+	concepts := mustMappingValue(t, identity, "concepts")
+	live := mustMappingValue(t, concepts, "concrete_live_identity")
+	assertScalarContains(t, mappingValue(live, "role"), "Durable composite primary key")
+	assertScalarContains(t, mappingValue(live, "repeated_template_instances"), "same declared agent_id")
+	assertScalarContains(t, mappingValue(live, "repeated_template_instances"), "routes differ")
 
 	constraint := mustMappingValue(t, identity, "current_multi_bundle_constraint")
 	assertScalarContains(t, mappingValue(constraint, "rule"), "globally unique authored agent_id values")
 	assertScalarContains(t, mappingValue(constraint, "rule"), "Duplicate authored agent slugs across live loaded BundleContexts are unsupported")
+	assertScalarContains(t, mappingValue(constraint, "rule"), "same-name concrete instances of one template")
 	assertScalarContains(t, mappingValue(constraint, "enforcement_status"), "RuntimeContextManager admission enforces")
 	assertScalarContains(t, mappingValue(constraint, "enforcement_status"), "fail closed before API readiness")
 	assertScalarContains(t, mappingValue(constraint, "enforcement_status"), "does not add duplicate-slug support")
@@ -1071,9 +1079,9 @@ func TestAgentIdentityModelRecordsCurrentSlugConstraint(t *testing.T) {
 
 	disposition := mustMappingValue(t, identity, "consumer_disposition")
 	for _, key := range []string{
-		"uuid_internal_candidates",
+		"concrete_identity_owners",
 		"slug_display_aliases",
-		"bundle_scoped_lookup_candidates",
+		"boundary_resolution",
 		"historical_immutable_records",
 		"split_or_escalate",
 	} {
@@ -1083,17 +1091,28 @@ func TestAgentIdentityModelRecordsCurrentSlugConstraint(t *testing.T) {
 	}
 
 	multiBundle := mustMappingValue(t, root, "multi_bundle_persistence")
-	assertScalarValue(t, mappingValue(mustMappingValue(t, multiBundle, "agent_identity_boundary"), "owner"), "platform-spec.yaml#agent_identity_model")
+	multiBundleIdentity := mustMappingValue(t, multiBundle, "agent_identity_boundary")
+	assertScalarValue(t, mappingValue(multiBundleIdentity, "owner"), "platform-spec.yaml#agent_identity_model")
+	assertScalarValue(t, mappingValue(multiBundleIdentity, "status"), "concrete_route_identity_with_cross_bundle_slug_constraint")
+	assertScalarContains(t, mappingValue(multiBundleIdentity, "rule"), "concrete_live_identity")
 	sourceEvidence := mustMappingValue(t, multiBundle, "source_evidence")
 	assertScalarValue(t, mappingValue(sourceEvidence, "agent_identity_source_authority"), "#977")
 
 	api := mustMappingValue(t, root, "api_specification")
-	assertScalarValue(t, mappingValue(mustMappingValue(t, api, "agent_identity_boundary"), "owner"), "platform-spec.yaml#agent_identity_model")
+	apiIdentity := mustMappingValue(t, api, "agent_identity_boundary")
+	assertScalarValue(t, mappingValue(apiIdentity, "owner"), "platform-spec.yaml#agent_identity_model")
+	assertScalarValue(t, mappingValue(apiIdentity, "status"), "exact_concrete_target_resolution")
+	assertScalarContains(t, mappingValue(apiIdentity, "rule"), "flow_instance")
+	assertScalarContains(t, mappingValue(apiIdentity, "rule"), "exactly one live identity")
 	blocked := mustMappingValue(t, mustMappingValue(t, api, "multi_bundle_publication_boundary"), "blocked_children")
 	assertScalarValue(t, mappingValue(blocked, "agent_identity_duplicate_slug_migration"), "#977")
 
 	cli := mustMappingValue(t, root, "cli_specification")
-	assertScalarValue(t, mappingValue(mustMappingValue(t, cli, "agent_identity_boundary"), "owner"), "platform-spec.yaml#agent_identity_model")
+	cliIdentity := mustMappingValue(t, cli, "agent_identity_boundary")
+	assertScalarValue(t, mappingValue(cliIdentity, "owner"), "platform-spec.yaml#agent_identity_model")
+	assertScalarValue(t, mappingValue(cliIdentity, "status"), "exact_concrete_target_resolution")
+	assertScalarContains(t, mappingValue(cliIdentity, "rule"), "flow_instance")
+	assertScalarContains(t, mappingValue(cliIdentity, "rule"), "exactly one live identity")
 }
 
 func TestContentDescriptorsDeclareRequiredFlag(t *testing.T) {

@@ -186,6 +186,20 @@ func (i Identity) MatchesAgentID(agentID string) bool {
 	return i.AgentID() == strings.TrimSpace(agentID)
 }
 
+// Equal compares two complete, validated live identities. Callers must not
+// infer identity equality from the authored agent ID or route alone.
+func Equal(left, right Identity) (bool, error) {
+	left = left.Normalize()
+	if err := left.Validate(); err != nil {
+		return false, fmt.Errorf("left agent identity: %w", err)
+	}
+	right = right.Normalize()
+	if err := right.Validate(); err != nil {
+		return false, fmt.Errorf("right agent identity: %w", err)
+	}
+	return left == right, nil
+}
+
 func (i Identity) StorageFields() (StorageFields, error) {
 	i = i.Normalize()
 	if err := i.Validate(); err != nil {
