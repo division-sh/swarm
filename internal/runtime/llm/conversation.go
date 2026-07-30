@@ -200,11 +200,12 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 				actor, _ := models.ActorFromContext(ctx)
 				flowInstance := strings.TrimSpace(actor.CanonicalFlowPath())
 				if c.Session.Memory.Enabled {
-					flowInstance = strings.TrimSpace(c.Session.MemoryIdentity.FlowInstance)
+					flowInstance = strings.TrimSpace(c.Session.MemoryIdentity.FlowInstance())
 				}
 				ctx = runtimeeffects.WithUsageTarget(ctx, runtimeeffects.UsageTarget{
 					Kind: runtimeeffects.UsageTargetAgentTurn, ID: surface.Authority.ID, RunID: surface.Authority.RunID,
-					AgentID: surface.ActorID, SessionID: surface.Authority.SessionID, Memory: c.Session.Memory,
+					AgentID: surface.ActorID, AgentIdentity: c.Session.MemoryIdentity.Agent,
+					SessionID: surface.Authority.SessionID, Memory: c.Session.Memory,
 					FlowInstance: flowInstance, EntityID: strings.TrimSpace(actor.EffectiveEntityID()),
 				})
 				authority, hasAuthority := runtimeeffects.AuthorityFromContext(ctx)

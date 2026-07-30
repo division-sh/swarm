@@ -55,6 +55,7 @@ func loadSQLiteDeliveryFixtureEvent(t testing.TB, ctx context.Context, db *sql.D
 
 func commitPostgresDeliveryFixture(t testing.TB, ctx context.Context, db *sql.DB, eventID string, route events.DeliveryRoute) events.Event {
 	t.Helper()
+	route = canonicalDeliveryFixtureRoute(t, route)
 	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
 	store := postgresDeliveryFixtureStore(db)
 	if err := store.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
@@ -68,6 +69,7 @@ func commitPostgresDeliveryFixture(t testing.TB, ctx context.Context, db *sql.DB
 
 func claimPostgresDeliveryFixture(t testing.TB, ctx context.Context, db *sql.DB, event events.Event, route events.DeliveryRoute) runtimedelivery.ClaimedObligation {
 	t.Helper()
+	route = canonicalDeliveryFixtureRoute(t, route)
 	store := postgresDeliveryFixtureStore(db)
 	var (
 		claimed runtimedelivery.ClaimedObligation
@@ -116,6 +118,7 @@ func seedDeliveryStateFixture(
 	failure *runtimefailures.Envelope,
 ) runtimedelivery.Snapshot {
 	t.Helper()
+	route = canonicalDeliveryFixtureRoute(t, route)
 	if err := commitDeliveryObligationFixture(ctx, store, event, route); err != nil {
 		t.Fatalf("commit delivery fixture %s/%s: %v", event.ID(), route.SubscriberID, err)
 	}
@@ -178,6 +181,15 @@ func seedDeliveryStateFixture(
 	}
 }
 
+func canonicalDeliveryFixtureRoute(t testing.TB, route events.DeliveryRoute) events.DeliveryRoute {
+	t.Helper()
+	route = route.Normalized()
+	if route.SubscriberType == string(runtimedelivery.SubscriberAgent) && route.AgentIdentity.IsZero() {
+		route.AgentIdentity = mustTestAgentIdentity(route.SubscriberID, "fixture/"+route.SubscriberID)
+	}
+	return route
+}
+
 func commitAgentDeliveryObligationFixture(ctx context.Context, store deliveryFixtureStore, event events.Event, route events.DeliveryRoute) error {
 	return commitDeliveryObligationFixture(ctx, store, event, route)
 }
@@ -205,6 +217,7 @@ func loadAgentDeliverySnapshotFixture(t testing.TB, ctx context.Context, store d
 
 func loadDeliverySnapshotFixture(t testing.TB, ctx context.Context, store deliveryFixtureStore, eventID string, route events.DeliveryRoute) runtimedelivery.Snapshot {
 	t.Helper()
+	route = canonicalDeliveryFixtureRoute(t, route)
 	var (
 		snapshots []runtimedelivery.Snapshot
 		err       error

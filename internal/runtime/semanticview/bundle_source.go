@@ -177,6 +177,7 @@ func (s bundleSource) ProjectScopes() []ProjectScope {
 			Nodes:        view.Nodes,
 			Events:       view.Events,
 			Agents:       runtimecontracts.EffectiveAgentRegistryEntries(view.Agents),
+			AgentURIs:    nil,
 			Tools:        toolEntryMapSnapshot(view.Tools),
 			Policy:       view.Policy,
 		})

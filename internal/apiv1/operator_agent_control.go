@@ -62,6 +62,10 @@ func executeAgentSendDirective(ctx context.Context, req Request, opts OperatorRe
 	if err != nil {
 		return nil, err
 	}
+	flowInstance, _, err := optionalStringParam(req.Params, "flow_instance")
+	if err != nil {
+		return nil, err
+	}
 	directive, err := requiredStringParam(req.Params, "directive")
 	if err != nil {
 		return nil, err
@@ -89,6 +93,7 @@ func executeAgentSendDirective(ctx context.Context, req Request, opts OperatorRe
 	}
 	result, err := selectedOpts.AgentControl.SendDirective(ctx, runtimeagentcontrol.SendDirectiveRequest{
 		AgentID:        agentID,
+		FlowInstance:   flowInstance,
 		Directive:      directive,
 		RunID:          runID,
 		Source:         runtimeagentcontrol.DirectiveSourceV1RPC,
@@ -119,6 +124,10 @@ func executeAgentRestart(ctx context.Context, req Request, opts OperatorReadOpti
 	if err != nil {
 		return nil, err
 	}
+	flowInstance, _, err := optionalStringParam(req.Params, "flow_instance")
+	if err != nil {
+		return nil, err
+	}
 	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
 	if err != nil {
 		return nil, err
@@ -132,11 +141,11 @@ func executeAgentRestart(ctx context.Context, req Request, opts OperatorReadOpti
 		ActorTokenID:   req.ActorTokenID,
 		IdempotencyKey: idempotencyKey,
 		RequestHash:    req.RequestHash,
-		ResourceID:     agentID,
+		ResourceID:     agentControlResourceID(agentID, flowInstance),
 		TTL:            agentControlIdempotencyTTL,
 		Now:            now,
 	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
-		result, err := opts.AgentControl.Restart(ctx, runtimeagentcontrol.RestartRequest{AgentID: agentID, OperationID: operationID})
+		result, err := opts.AgentControl.Restart(ctx, runtimeagentcontrol.RestartRequest{AgentID: agentID, FlowInstance: flowInstance, OperationID: operationID})
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, agentControlError(req.Method, agentID, err)
 		}
@@ -167,6 +176,10 @@ func executeAgentReplayBacklog(ctx context.Context, req Request, opts OperatorRe
 	if err != nil {
 		return nil, err
 	}
+	flowInstance, _, err := optionalStringParam(req.Params, "flow_instance")
+	if err != nil {
+		return nil, err
+	}
 	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
 	if err != nil {
 		return nil, err
@@ -176,11 +189,11 @@ func executeAgentReplayBacklog(ctx context.Context, req Request, opts OperatorRe
 		ActorTokenID:   req.ActorTokenID,
 		IdempotencyKey: idempotencyKey,
 		RequestHash:    req.RequestHash,
-		ResourceID:     agentID,
+		ResourceID:     agentControlResourceID(agentID, flowInstance),
 		TTL:            agentControlIdempotencyTTL,
 		Now:            now,
 	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
-		result, err := opts.AgentControl.ReplayBacklog(ctx, runtimeagentcontrol.ReplayBacklogRequest{AgentID: agentID})
+		result, err := opts.AgentControl.ReplayBacklog(ctx, runtimeagentcontrol.ReplayBacklogRequest{AgentID: agentID, FlowInstance: flowInstance})
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, agentControlError(req.Method, agentID, err)
 		}
@@ -201,6 +214,10 @@ func executeAgentReplayBacklog(ctx context.Context, req Request, opts OperatorRe
 		return nil, fmt.Errorf("decode %s response: %w", req.Method, err)
 	}
 	return stored, nil
+}
+
+func agentControlResourceID(agentID, flowInstance string) string {
+	return strings.TrimSpace(agentID) + "\x00" + strings.Trim(strings.TrimSpace(flowInstance), "/")
 }
 
 func agentControlError(method, agentID string, err error) error {

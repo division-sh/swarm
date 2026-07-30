@@ -118,6 +118,7 @@ func TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext(t 
 				TaskID:    "reply-resume",
 				Payload:   []byte(`{"resume":true}`),
 			}
+			schedule = testAgentOwnedSchedule(t, schedule)
 			if err := store.UpsertSchedule(ctx, schedule); err != nil {
 				t.Fatalf("UpsertSchedule: %v", err)
 			}

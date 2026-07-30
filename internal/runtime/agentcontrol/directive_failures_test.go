@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -64,13 +65,14 @@ func TestDirectiveBoardStepFailurePreservesTypedEnvelope(t *testing.T) {
 func TestValidateDirectiveOperationEvidenceMatrix(t *testing.T) {
 	response := json.RawMessage(`{"ok":true}`)
 	failure := DirectiveExecutionNotAdmittedFailure()
+	identity := agentidentitytest.RootRuntime(t, "directive-agent", "directive-evidence-test")
 	valid := []DirectiveOperation{
-		{State: DirectiveOperationPrepared},
-		{State: DirectiveOperationExecuting},
-		{State: DirectiveOperationExecuted, Response: response},
-		{State: DirectiveOperationSucceeded, Response: response},
-		{State: DirectiveOperationFailed, Failure: &failure},
-		{State: DirectiveOperationIndeterminate, Failure: &failure},
+		{AgentIdentity: identity, State: DirectiveOperationPrepared},
+		{AgentIdentity: identity, State: DirectiveOperationExecuting},
+		{AgentIdentity: identity, State: DirectiveOperationExecuted, Response: response},
+		{AgentIdentity: identity, State: DirectiveOperationSucceeded, Response: response},
+		{AgentIdentity: identity, State: DirectiveOperationFailed, Failure: &failure},
+		{AgentIdentity: identity, State: DirectiveOperationIndeterminate, Failure: &failure},
 	}
 	for _, op := range valid {
 		if err := ValidateDirectiveOperationEvidence(op); err != nil {
@@ -78,12 +80,12 @@ func TestValidateDirectiveOperationEvidenceMatrix(t *testing.T) {
 		}
 	}
 	for _, op := range []DirectiveOperation{
-		{State: DirectiveOperationPrepared, Response: response},
-		{State: DirectiveOperationExecuting, Failure: &failure},
-		{State: DirectiveOperationExecuted},
-		{State: DirectiveOperationSucceeded, Failure: &failure},
-		{State: DirectiveOperationFailed},
-		{State: DirectiveOperationIndeterminate, Response: response, Failure: &failure},
+		{AgentIdentity: identity, State: DirectiveOperationPrepared, Response: response},
+		{AgentIdentity: identity, State: DirectiveOperationExecuting, Failure: &failure},
+		{AgentIdentity: identity, State: DirectiveOperationExecuted},
+		{AgentIdentity: identity, State: DirectiveOperationSucceeded, Failure: &failure},
+		{AgentIdentity: identity, State: DirectiveOperationFailed},
+		{AgentIdentity: identity, State: DirectiveOperationIndeterminate, Response: response, Failure: &failure},
 	} {
 		if err := ValidateDirectiveOperationEvidence(op); err == nil {
 			t.Fatalf("state %s accepted invalid evidence %#v", op.State, op)

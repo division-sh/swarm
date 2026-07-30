@@ -143,3 +143,11 @@ func TestNormalizeConstraintTreatsPostgresBooleanDeparseAsEquivalent(t *testing.
 		t.Fatalf("normalized deparsed status constraint = %q, want %q", got, want)
 	}
 }
+
+func TestNormalizeConstraintTreatsPostgresReferenceSpacingAsEquivalent(t *testing.T) {
+	authored := `FOREIGN KEY (agent_id, flow_instance) REFERENCES agents(agent_id, flow_instance)`
+	deparsed := `FOREIGN KEY (agent_id, flow_instance) REFERENCES agents (agent_id, flow_instance)`
+	if got, want := normalizeConstraint(deparsed), normalizeConstraint(authored); got != want {
+		t.Fatalf("normalized deparsed constraint = %q, want %q", got, want)
+	}
+}

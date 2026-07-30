@@ -462,7 +462,7 @@ func sqliteRenderPredicate(raw string) (string, error) {
 		sqliteBundleHashPredicate("bundle_hash"),
 	)
 	predicate = strings.ReplaceAll(predicate,
-		"route_identity ~ '^delivery-route-v1:sha256:[0-9a-f]{64}$'",
+		"route_identity ~ '^delivery-route-v2:sha256:[0-9a-f]{64}$'",
 		sqliteDeliveryRouteIdentityPredicate("route_identity"),
 	)
 	predicate = strings.ReplaceAll(predicate, "source_route <> '{}'::jsonb", "source_route <> '{}'")
@@ -479,7 +479,7 @@ func sqliteBundleHashPredicate(column string) string {
 }
 
 func sqliteDeliveryRouteIdentityPredicate(column string) string {
-	return fmt.Sprintf("(length(%s) = 89 AND substr(%s, 1, 25) = 'delivery-route-v1:sha256:' AND substr(%s, 26) GLOB '%s')",
+	return fmt.Sprintf("(length(%s) = 89 AND substr(%s, 1, 25) = 'delivery-route-v2:sha256:' AND substr(%s, 26) GLOB '%s')",
 		column, column, column, strings.Repeat("[0-9a-f]", 64))
 }
 

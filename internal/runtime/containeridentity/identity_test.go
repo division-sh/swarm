@@ -1,6 +1,10 @@
 package containeridentity
 
-import "testing"
+import (
+	"testing"
+
+	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+)
 
 func TestIdentityLabelsRoundTripResetEligibleAgent(t *testing.T) {
 	identity := Identity{
@@ -11,7 +15,14 @@ func TestIdentityLabelsRoundTripResetEligibleAgent(t *testing.T) {
 		ContainerName:  "swarm-agent-agent-a",
 		WorkspaceScope: "per-agent",
 		RunID:          "11111111-1111-1111-1111-111111111111",
-		AgentID:        "agent-a",
+		AgentIdentity: runtimeagentidentitytest.Declared(
+			t,
+			"agent-a",
+			"test/agents.yaml",
+			"flow",
+			"instance-a",
+			"flow/instance-a",
+		),
 	}
 	labels := identity.Labels()
 	got, ok, err := FromLabels(labels)
@@ -21,8 +32,21 @@ func TestIdentityLabelsRoundTripResetEligibleAgent(t *testing.T) {
 	if !ok {
 		t.Fatal("FromLabels ok = false, want true")
 	}
-	if !got.ResetEligibleManaged() || got.AgentID != "agent-a" || got.RunID == "" {
+	if !got.ResetEligibleManaged() || got.AgentIdentity.AgentID() != "agent-a" || got.RunID == "" {
 		t.Fatalf("identity = %#v, want reset-eligible agent with run lineage", got)
+	}
+}
+
+func TestIdentityRejectsPartialAgentLabels(t *testing.T) {
+	_, _, err := FromLabels(map[string]string{
+		LabelOwner:         OwnerRuntime,
+		LabelKind:          KindAgent,
+		LabelResetEligible: "true",
+		LabelContainerName: "swarm-agent-agent-a",
+		LabelAgentID:       "agent-a",
+	})
+	if err == nil {
+		t.Fatal("FromLabels error = nil, want partial concrete identity rejection")
 	}
 }
 

@@ -107,7 +107,9 @@ func (s *bootSelfCheckDescriptorStore) appendedEvents() []events.Event {
 func TestRuntimeStart_SelfCheckUsesInternalSubscriberVisibility(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	store := &bootSelfCheckDescriptorStore{
-		descriptors: []runtimebus.ActiveAgentDescriptor{{AgentID: "agent-a"}},
+		descriptors: []runtimebus.ActiveAgentDescriptor{{
+			Identity: runtimebustest.Identity(t, "agent-a", ""),
+		}},
 	}
 	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		EventStore: store,

@@ -212,7 +212,7 @@ func TestResetRuntimeStateFailureAlwaysLeavesResetPhase(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			am := newTestAgentManagerWithOptions(t, tt.bus, nil, AgentManagerOptions{})
-			rec := lifecycleTestPersistedAgent()
+			rec := lifecycleTestPersistedAgent(t)
 			if err := am.lifecycle.register(testAuthorActivityContext(context.Background()), rec, false); err != nil {
 				t.Fatalf("register lifecycle cell: %v", err)
 			}
@@ -223,9 +223,7 @@ func TestResetRuntimeStateFailureAlwaysLeavesResetPhase(t *testing.T) {
 			if phase := am.lifecycle.phaseSnapshot(); phase != runtimeLifecycleStopped {
 				t.Fatalf("lifecycle phase = %q, want stopped", phase)
 			}
-			am.lifecycle.mu.Lock()
-			_, cellExists := am.lifecycle.cells[rec.Config.ID]
-			am.lifecycle.mu.Unlock()
+			_, cellExists := testLifecycleCell(t, am.lifecycle, rec.Config.ID, "")
 			if cellExists != tt.wantCellAfter {
 				t.Fatalf("lifecycle cell exists = %v, want %v", cellExists, tt.wantCellAfter)
 			}

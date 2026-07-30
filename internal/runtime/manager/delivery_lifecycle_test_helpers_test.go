@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/google/uuid"
@@ -68,6 +69,12 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 			route_identity TEXT NOT NULL,
 			subscriber_type TEXT NOT NULL,
 			subscriber_id TEXT NOT NULL,
+			agent_name_owner TEXT NOT NULL,
+			agent_name_source TEXT NOT NULL,
+			agent_route_presence TEXT NOT NULL,
+			agent_flow_scope_key TEXT NOT NULL,
+			agent_flow_instance_id TEXT NOT NULL,
+			agent_flow_instance_path TEXT NOT NULL,
 			delivery_target_route TEXT NOT NULL,
 			delivery_context TEXT NOT NULL,
 			delivery_payload_projection TEXT NOT NULL,
@@ -98,6 +105,12 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 			session_run_id TEXT,
 			session_subscriber_type TEXT,
 			session_agent_id TEXT,
+			session_agent_name_owner TEXT,
+			session_agent_name_source TEXT,
+			session_agent_route_presence TEXT,
+			session_agent_flow_scope_key TEXT,
+			session_agent_flow_instance_id TEXT,
+			session_agent_flow_instance_path TEXT,
 			open_marker BOOLEAN NOT NULL,
 			outcome TEXT,
 			reason_code TEXT,
@@ -157,7 +170,7 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 
 func (s *managerDeliveryTestStore) seedAgentDeliveries(t *testing.T, agentID string, pending []events.Event) {
 	t.Helper()
-	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: agentID}
+	route := managerAgentDeliveryRoute(agentID)
 	for _, evt := range pending {
 		if _, err := uuid.Parse(evt.ID()); err != nil {
 			t.Fatalf("manager delivery fixture event id %q is not durable: %v", evt.ID(), err)
@@ -272,12 +285,12 @@ func (s *managerDeliveryTestStore) ClaimNodeDelivery(ctx context.Context, evt ev
 	return s.claimExact(ctx, evt, route)
 }
 
-func (s *managerDeliveryTestStore) claimBacklog(ctx context.Context, class runtimedelivery.SubscriberClass, subscriberID string, limit int) ([]runtimedelivery.AgentExecution, error) {
+func (s *managerDeliveryTestStore) claimBacklog(ctx context.Context, class runtimedelivery.SubscriberClass, identity runtimeagentidentity.Identity, subscriberID string, limit int) ([]runtimedelivery.AgentExecution, error) {
 	var claimed []runtimedelivery.ClaimedObligation
 	err := s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
 		var err error
 		if class == runtimedelivery.SubscriberAgent {
-			claimed, err = s.adapter.ClaimPendingAgent(story, tx, subscriberID, limit, runtimedelivery.DefaultLeaseTTL)
+			claimed, err = s.adapter.ClaimPendingAgent(story, tx, identity, limit, runtimedelivery.DefaultLeaseTTL)
 		} else {
 			claimed, err = s.adapter.ClaimPendingNode(story, tx, subscriberID, limit, runtimedelivery.DefaultLeaseTTL)
 		}
@@ -299,12 +312,12 @@ func (s *managerDeliveryTestStore) claimBacklog(ctx context.Context, class runti
 	return executions, nil
 }
 
-func (s *managerDeliveryTestStore) ClaimAgentBacklog(ctx context.Context, agentID string, limit int) ([]runtimedelivery.AgentExecution, error) {
-	return s.claimBacklog(ctx, runtimedelivery.SubscriberAgent, agentID, limit)
+func (s *managerDeliveryTestStore) ClaimAgentBacklog(ctx context.Context, identity runtimeagentidentity.Identity, limit int) ([]runtimedelivery.AgentExecution, error) {
+	return s.claimBacklog(ctx, runtimedelivery.SubscriberAgent, identity, identity.AgentID(), limit)
 }
 
 func (s *managerDeliveryTestStore) ClaimNodeBacklog(ctx context.Context, nodeID string, limit int) ([]runtimedelivery.NodeExecution, error) {
-	return s.claimBacklog(ctx, runtimedelivery.SubscriberNode, nodeID, limit)
+	return s.claimBacklog(ctx, runtimedelivery.SubscriberNode, runtimeagentidentity.Identity{}, nodeID, limit)
 }
 
 func (s *managerDeliveryTestStore) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (snapshot runtimedelivery.Snapshot, err error) {
@@ -366,7 +379,7 @@ func (s *managerDeliveryTestStore) TerminalizeRun(ctx context.Context, runID, re
 func (s *managerDeliveryTestStore) markDelivered(t *testing.T, evt events.Event, agentID string) {
 	t.Helper()
 	ctx := testAuthorActivityContext(context.Background())
-	claimed, err := s.ClaimAgentDelivery(ctx, evt, events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: agentID})
+	claimed, err := s.ClaimAgentDelivery(ctx, evt, managerAgentDeliveryRoute(agentID))
 	if err != nil {
 		t.Fatalf("claim delivered manager fixture event %s: %v", evt.ID(), err)
 	}
@@ -380,17 +393,38 @@ func (s *managerDeliveryTestStore) markDelivered(t *testing.T, evt events.Event,
 
 func (s *managerDeliveryTestStore) markInProgress(t *testing.T, evt events.Event, agentID string) {
 	t.Helper()
-	if _, err := s.ClaimAgentDelivery(testAuthorActivityContext(context.Background()), evt, events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: agentID}); err != nil {
+	if _, err := s.ClaimAgentDelivery(testAuthorActivityContext(context.Background()), evt, managerAgentDeliveryRoute(agentID)); err != nil {
 		t.Fatalf("claim in-progress manager fixture event %s: %v", evt.ID(), err)
 	}
 }
 
 func managerAgentDeliveryRoute(agentID string) events.DeliveryRoute {
-	return events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: agentID}
+	identity := managerAgentIdentity(agentID)
+	return events.DeliveryRoute{
+		SubscriberType: string(runtimedelivery.SubscriberAgent),
+		SubscriberID:   identity.AgentID(),
+		AgentIdentity:  identity,
+	}
+}
+
+func managerAgentIdentity(agentID string) runtimeagentidentity.Identity {
+	name, err := runtimeagentidentity.RuntimeName(agentID, "manager.delivery_test")
+	if err != nil {
+		panic(err)
+	}
+	identity, err := runtimeagentidentity.New(name, runtimeagentidentity.RootRoute())
+	if err != nil {
+		panic(err)
+	}
+	return identity
 }
 
 func managerAgentDeliveryContext(ctx context.Context, agentID string) context.Context {
 	return runtimedelivery.WithRoute(ctx, managerAgentDeliveryRoute(agentID))
+}
+
+func managerAgentClaimContext(ctx context.Context, claim runtimedelivery.Claim, agentID string) context.Context {
+	return runtimedelivery.WithRoute(runtimedelivery.WithClaim(ctx, claim), managerAgentDeliveryRoute(agentID))
 }
 
 func (s *managerDeliveryTestStore) makeRetryEligible(t *testing.T, evt events.Event, agentID string) {

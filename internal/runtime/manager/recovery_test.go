@@ -158,6 +158,9 @@ func TestRecoverRejectsPersistedForeignExactAndPatternBeforeRouteOrPendingQuery(
 			store := &recoveryTestStore{agents: []PersistedAgent{{Config: models.AgentConfig{
 				ExecutionMode: "live",
 				ID:            "reviewer",
+				Identity: managerScopedRuntimeAgentIdentity(
+					"reviewer", "test://recovery/reviewer", "review", "inst-1", "review/inst-1",
+				),
 				FlowPath:      "review/inst-1",
 				Subscriptions: []string{subscription},
 			}}}}
@@ -216,10 +219,15 @@ func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 		agents: []PersistedAgent{{
 			Config: models.AgentConfig{
 				ExecutionMode: "live",
-				ID:            "reviewer-inst-1",
-				Role:          "reviewer",
-				EntityID:      "ent-1",
-				Config:        mustRecoveryJSON(t, map[string]any{"tools": []string{"agent_message"}}),
+				ID:            "reviewer",
+				Identity: managerScopedRuntimeAgentIdentity(
+					"reviewer", "test://recovery/reviewer", "review", "inst-1", "review/inst-1",
+				),
+				Role:     "reviewer",
+				EntityID: "ent-1",
+				FlowID:   "review",
+				FlowPath: "review/inst-1",
+				Config:   mustRecoveryJSON(t, map[string]any{"tools": []string{"agent_message"}}),
 			},
 			StartedAt: time.Now().UTC(),
 		}},
@@ -520,8 +528,11 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 	store := &recoveryTestStore{
 		agents: []PersistedAgent{{
 			Config: models.AgentConfig{
-				ExecutionMode:   "live",
-				ID:              "reviewer-inst-1",
+				ExecutionMode: "live",
+				ID:            "reviewer",
+				Identity: managerScopedRuntimeAgentIdentity(
+					"reviewer", "test://recovery/reviewer", "review", "inst-1", "review/inst-1",
+				),
 				Type:            "review-worker",
 				Role:            "reviewer",
 				FlowID:          "review",
@@ -555,8 +566,8 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 	if err := am.Recover(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
-	if hydrated.ID != "reviewer-inst-1" {
-		t.Fatalf("hydrated id = %q, want reviewer-inst-1", hydrated.ID)
+	if hydrated.ID != "reviewer" {
+		t.Fatalf("hydrated id = %q, want reviewer", hydrated.ID)
 	}
 	if hydrated.Memory != agentmemory.Authored(true) {
 		t.Fatalf("memory = %+v, want authored true", hydrated.Memory)
@@ -602,6 +613,7 @@ func TestRecoverWithStartupReplayDiagnostics_LogsCanonicalManagerReplayAftermath
 			Config: models.AgentConfig{
 				ExecutionMode: "live",
 				ID:            "agent-a",
+				Identity:      managerAgentIdentity("agent-a"),
 			},
 			StartedAt: now,
 		}},
@@ -681,12 +693,12 @@ func TestReplayAgentBacklog_DoesNotEmitStartupAftermathOutsideStartupRecovery(t 
 		return startupReplayTestAgent{id: cfg.ID}, nil
 	}, store)
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: models.AgentConfig{ExecutionMode: "live", ID: "agent-a"},
+		Config: managerRootAgentConfig("agent-a"),
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 
-	if err := am.ReplayAgentBacklog(testAuthorActivityContext(context.Background()), "agent-a"); err != nil {
+	if _, err := am.ReplayBacklog(testAuthorActivityContext(context.Background()), runtimeagentcontrol.ReplayBacklogRequest{AgentID: "agent-a"}); err != nil {
 		t.Fatalf("ReplayAgentBacklog: %v", err)
 	}
 	foundLegacyFailure := false
@@ -715,7 +727,7 @@ func TestReplayBacklogReportsDirectReplayCount(t *testing.T) {
 		return startupReplayTestAgent{id: cfg.ID}, nil
 	}, store)
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: models.AgentConfig{ExecutionMode: "live", ID: "agent-a"},
+		Config: managerRootAgentConfig("agent-a"),
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}

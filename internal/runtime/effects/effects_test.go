@@ -6,14 +6,25 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
 
+func effectLifecycleToken(t testing.TB, runtimeEpoch int64, agentID string, generation uint64) LifecycleToken {
+	t.Helper()
+	return LifecycleToken{
+		Identity:     agentidentitytest.Runtime(t, agentID, "effects-test", "effects-test", "instance", "effects-test/instance"),
+		RuntimeEpoch: runtimeEpoch,
+		AgentID:      agentID,
+		Generation:   generation,
+	}
+}
+
 func TestCompletionAuthorityPreservesExecutionMode(t *testing.T) {
-	token := LifecycleToken{RuntimeEpoch: 1, AgentID: "agent-1", Generation: 2}
+	token := effectLifecycleToken(t, 1, "agent-1", 2)
 	ctx := WithExecutionMode(WithLifecycleToken(context.Background(), token), ExecutionModeMock)
 	authority, ok := CompletionAuthorityFromContext(ctx)
 	if !ok {
@@ -22,7 +33,11 @@ func TestCompletionAuthorityPreservesExecutionMode(t *testing.T) {
 	if authority.ExecutionMode != ExecutionModeMock {
 		t.Fatalf("execution mode = %q, want mock", authority.ExecutionMode)
 	}
-	ctx = WithUsageTarget(ctx, UsageTarget{Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: "agent-1", SessionID: uuid.NewString(), Memory: agentmemory.Authored(false)})
+	ctx = WithUsageTarget(ctx, UsageTarget{
+		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: "agent-1",
+		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.Authored(false),
+		FlowInstance: token.Identity.FlowInstance(),
+	})
 	authority, ok = CompletionAuthorityFromContext(ctx)
 	if !ok || authority.ExecutionMode != ExecutionModeMock {
 		t.Fatalf("targeted authority = %#v, want mock mode preserved", authority)
@@ -106,7 +121,7 @@ func TestBeginFailsClosedWithoutManagedLifecycleAuthority(t *testing.T) {
 }
 
 func TestBeginRequiresControllerAndLogicalIdentity(t *testing.T) {
-	token := LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 3}
+	token := effectLifecycleToken(t, 7, "agent-a", 3)
 	withToken := WithLifecycleToken(context.Background(), token)
 	if _, err := Begin(withToken, "authored_http_tool", []byte("request"), nil); err == nil {
 		t.Fatal("managed effect was admitted without a controller")
@@ -129,14 +144,15 @@ func TestCompletionControllerRequiresSettlementProjectionOwner(t *testing.T) {
 }
 
 func TestBeginCompletionRejectsCapabilitySurfaceFromDifferentRun(t *testing.T) {
-	token := LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 3}
+	token := effectLifecycleToken(t, 7, "agent-a", 3)
 	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "test-execution-authority", 1, "", "test-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
 	if err != nil {
 		t.Fatalf("build managed execution admission: %v", err)
 	}
 	target := UsageTarget{
 		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: token.AgentID,
-		SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "global",
+		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
+		FlowInstance: token.Identity.FlowInstance(),
 	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
 		ActorID: target.AgentID, RuntimeMode: "task", Provider: "test", Transport: "api", ProviderContract: "test-contract",
@@ -167,7 +183,7 @@ func TestBeginCompletionRejectsCapabilitySurfaceFromDifferentRun(t *testing.T) {
 }
 
 func TestBeginNormalEffectRejectsCrossContextCapabilitySurfacesBeforeAuthorization(t *testing.T) {
-	token := LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 3}
+	token := effectLifecycleToken(t, 7, "agent-a", 3)
 	tests := []struct {
 		name     string
 		mutate   func(*UsageTarget, *UsageTarget) string
@@ -223,7 +239,8 @@ func TestBeginNormalEffectRejectsCrossContextCapabilitySurfacesBeforeAuthorizati
 			}
 			authorityTarget := UsageTarget{
 				Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: token.AgentID,
-				SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "global",
+				AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
+				FlowInstance: token.Identity.FlowInstance(),
 			}
 			surfaceTarget := authorityTarget
 			surfaceActor := token.AgentID
@@ -282,7 +299,8 @@ func TestBeginSelectedEffectRejectsMissingOrCrossActorTurnBeforeAuthorization(t 
 	}
 	target := UsageTarget{
 		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: forkRunID, AgentID: "agent-a",
-		SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "global",
+		AgentIdentity: effectLifecycleToken(t, 1, "agent-a", 1).Identity,
+		SessionID:     uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "effects-test/instance",
 	}
 
 	for _, tc := range []struct {
@@ -327,11 +345,12 @@ func TestBeginSelectedEffectRejectsMissingOrCrossActorTurnBeforeAuthorization(t 
 }
 
 func TestCompletionSettlementRejectsTurnCoordinateMismatch(t *testing.T) {
-	token := LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 3}
+	token := effectLifecycleToken(t, 7, "agent-a", 3)
 	authority := testAuthority(token)
 	authority.Target = UsageTarget{
 		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: token.AgentID,
-		SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "global", EntityID: uuid.NewString(),
+		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
+		FlowInstance: token.Identity.FlowInstance(), EntityID: uuid.NewString(),
 	}
 	inputTokens, outputTokens := int64(1), int64(1)
 	settlement := CompletionSettlement{
@@ -345,7 +364,8 @@ func TestCompletionSettlementRejectsTurnCoordinateMismatch(t *testing.T) {
 			EntityID: authority.Target.EntityID, CapabilitySurfaceID: uuid.NewString(), CapabilitySurface: []byte(`{}`),
 		},
 		Spend: CompletionSpend{
-			FlowInstance: "global", AgentID: token.AgentID, Model: "test-model", BackendProfile: "test",
+			FlowInstance: token.Identity.FlowInstance(), AgentID: token.AgentID, AgentIdentity: token.Identity,
+			Model: "test-model", BackendProfile: "test",
 			Provider: "test", Transport: "api", ResolvedModel: "test-model", InvocationType: "task",
 		},
 	}
@@ -357,7 +377,7 @@ func TestCompletionSettlementRejectsTurnCoordinateMismatch(t *testing.T) {
 
 func TestBeginDerivesStableOperationAndAttemptIdentity(t *testing.T) {
 	probe := &effectStoreProbe{}
-	token := LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 3}
+	token := effectLifecycleToken(t, 7, "agent-a", 3)
 	ctx := WithLogicalOperationIdentity(
 		WithController(WithLifecycleToken(context.Background(), token), NewController(probe)),
 		"event-123",
@@ -387,7 +407,8 @@ func managedEffectTestContext(t testing.TB, ctx context.Context, agentID string)
 	}
 	target := UsageTarget{
 		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: agentID,
-		SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "global",
+		AgentIdentity: agentidentitytest.Runtime(t, agentID, "effects-test", "effects-test", "instance", "effects-test/instance"),
+		SessionID:     uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "effects-test/instance",
 	}
 	ctx = managedexecution.WithAdmission(ctx, admission)
 	ctx = WithUsageTarget(ctx, target)
@@ -429,11 +450,11 @@ func selectedManagedEffectSurface(t testing.TB, admission managedexecution.Admis
 
 func TestCanonicalOperationIdentitySurvivesLifecycleGenerationChange(t *testing.T) {
 	ctx := WithLogicalOperationIdentity(context.Background(), "event-123")
-	first, err := canonicalOperationID(ctx, testAuthority(LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 3}), "authored_http_tool", map[string]string{"tool": "lookup"})
+	first, err := canonicalOperationID(ctx, testAuthority(effectLifecycleToken(t, 7, "agent-a", 3)), "authored_http_tool", map[string]string{"tool": "lookup"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := canonicalOperationID(ctx, testAuthority(LifecycleToken{RuntimeEpoch: 8, AgentID: "agent-a", Generation: 4}), "authored_http_tool", map[string]string{"tool": "lookup"})
+	second, err := canonicalOperationID(ctx, testAuthority(effectLifecycleToken(t, 8, "agent-a", 4)), "authored_http_tool", map[string]string{"tool": "lookup"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +468,7 @@ func TestLogicalOperationIdentitySegmentsSeparateSiblingEffectsAndRemainStable(t
 	first := WithLogicalOperationIdentitySegment(base, "provider_turn:1")
 	replay := WithLogicalOperationIdentitySegment(base, "provider_turn:1")
 	second := WithLogicalOperationIdentitySegment(base, "provider_turn:2")
-	token := LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 3}
+	token := effectLifecycleToken(t, 7, "agent-a", 3)
 	firstID, err := canonicalOperationID(first, testAuthority(token), "anthropic_api", nil)
 	if err != nil {
 		t.Fatal(err)

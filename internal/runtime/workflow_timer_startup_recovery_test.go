@@ -151,6 +151,7 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 			schedule := runtimepipeline.Schedule{
 				RunID:        runID,
 				AgentID:      "runtime",
+				OwnerKind:    runtimepipeline.ScheduleOwnerSystem,
 				EventType:    "generic.tick",
 				Mode:         "once",
 				At:           occurrence.DueAt,

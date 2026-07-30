@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 )
 
 type sqliteOperatorAgentConversationReadSurface struct {
@@ -25,30 +27,33 @@ func (s *SQLiteRuntimeStore) ListOperatorAgents(ctx context.Context, opts Operat
 	return newSQLiteOperatorAgentConversationReadSurface(s, opts.TurnLimit).ListOperatorAgents(ctx, opts)
 }
 
-func (s *SQLiteRuntimeStore) LoadOperatorAgent(ctx context.Context, agentID string) (OperatorAgentDetail, error) {
-	return newSQLiteOperatorAgentConversationReadSurface(s, 0).LoadOperatorAgent(ctx, agentID)
+func (s *SQLiteRuntimeStore) LoadOperatorAgent(ctx context.Context, identity agentidentity.Identity) (OperatorAgentDetail, error) {
+	return newSQLiteOperatorAgentConversationReadSurface(s, 0).LoadOperatorAgent(ctx, identity)
 }
 
-func (s *SQLiteRuntimeStore) LoadOperatorAgentDiagnosis(ctx context.Context, agentID string, opts OperatorAgentDiagnosisOptions) (OperatorAgentDiagnosis, error) {
-	return newSQLiteOperatorAgentConversationReadSurface(s, 0).LoadOperatorAgentDiagnosis(ctx, agentID, opts)
+func (s *SQLiteRuntimeStore) LoadOperatorAgentDiagnosis(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDiagnosisOptions) (OperatorAgentDiagnosis, error) {
+	return newSQLiteOperatorAgentConversationReadSurface(s, 0).LoadOperatorAgentDiagnosis(ctx, identity, opts)
 }
 
-func (s *SQLiteRuntimeStore) LoadOperatorAgentDeliveryDiagnostics(ctx context.Context, agentID string, opts OperatorAgentDeliveryDiagnosticsOptions) (OperatorAgentDeliveryDiagnostics, error) {
-	return newSQLiteOperatorAgentConversationReadSurface(s, 0).LoadOperatorAgentDeliveryDiagnostics(ctx, agentID, opts)
+func (s *SQLiteRuntimeStore) LoadOperatorAgentDeliveryDiagnostics(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDeliveryDiagnosticsOptions) (OperatorAgentDeliveryDiagnostics, error) {
+	return newSQLiteOperatorAgentConversationReadSurface(s, 0).LoadOperatorAgentDeliveryDiagnostics(ctx, identity, opts)
 }
 
 func (s *SQLiteRuntimeStore) ListOperatorConversations(ctx context.Context, opts OperatorConversationListOptions) (OperatorConversationListResult, error) {
 	return newSQLiteOperatorAgentConversationReadSurface(s, 0).ListOperatorConversations(ctx, opts)
 }
 
-func (s *SQLiteRuntimeStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]AgentDeliveryLifecycleFacts, error) {
+func (s *SQLiteRuntimeStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]AgentDeliveryLifecycleFacts, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
-	normalized := normalizePendingAgentIDs(agentIDs)
-	out := make(map[string]AgentDeliveryLifecycleFacts, len(normalized))
-	for _, agentID := range normalized {
-		out[agentID] = AgentDeliveryLifecycleFacts{}
+	normalized, err := normalizePendingAgentIdentities(identities)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[agentidentity.Identity]AgentDeliveryLifecycleFacts, len(normalized))
+	for _, identity := range normalized {
+		out[identity] = AgentDeliveryLifecycleFacts{}
 	}
 	if len(normalized) == 0 {
 		return out, nil
@@ -57,18 +62,18 @@ func (s *SQLiteRuntimeStore) ListAgentDeliveryLifecycleFacts(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
-	grouped := make(map[string][]agentLifecycleDeliveryRecord, len(normalized))
+	grouped := make(map[agentidentity.Identity][]agentLifecycleDeliveryRecord, len(normalized))
 	for _, record := range records {
-		grouped[record.AgentID] = append(grouped[record.AgentID], record)
+		grouped[record.AgentIdentity] = append(grouped[record.AgentIdentity], record)
 	}
-	for _, agentID := range normalized {
-		out[agentID] = canonicalAgentDeliveryLifecycleFactsFromRecords(grouped[agentID])
+	for _, identity := range normalized {
+		out[identity] = canonicalAgentDeliveryLifecycleFactsFromRecords(grouped[identity])
 	}
 	return out, nil
 }
 
-func (s *SQLiteRuntimeStore) listSQLiteAgentLifecycleRecords(ctx context.Context, agentIDs []string) ([]agentLifecycleDeliveryRecord, error) {
-	snapshots, err := sqliteDeliveryAdapter.CurrentAgentSnapshots(ctx, s.DB, agentIDs)
+func (s *SQLiteRuntimeStore) listSQLiteAgentLifecycleRecords(ctx context.Context, identities []agentidentity.Identity) ([]agentLifecycleDeliveryRecord, error) {
+	snapshots, err := sqliteDeliveryAdapter.CurrentAgentSnapshots(ctx, s.DB, identities)
 	if err != nil {
 		return nil, err
 	}
@@ -97,10 +102,13 @@ func (r *sqliteOperatorAgentConversationReadSurface) ListOperatorAgents(ctx cont
 		if opts.Flow != "" && !operatorAgentFlowMatches(row.Config.CanonicalFlowPath(), opts.Flow) {
 			continue
 		}
-		id := strings.TrimSpace(row.Config.ID)
-		projection, ok := projections[id]
+		identity, err := row.Config.ConcreteIdentity()
+		if err != nil {
+			return OperatorAgentListResult{}, err
+		}
+		projection, ok := projections[identity]
 		if !ok {
-			return OperatorAgentListResult{}, fmt.Errorf("missing sqlite agent operator projection: %s", id)
+			return OperatorAgentListResult{}, fmt.Errorf("missing sqlite agent operator projection: %s", identity.Description())
 		}
 		agents = append(agents, operatorAgentSummaryFromPersisted(row, projection, r.turnLimit))
 	}
@@ -110,9 +118,9 @@ func (r *sqliteOperatorAgentConversationReadSurface) ListOperatorAgents(ctx cont
 	return OperatorAgentListResult{Agents: agents}, nil
 }
 
-func (r *sqliteOperatorAgentConversationReadSurface) LoadOperatorAgent(ctx context.Context, agentID string) (OperatorAgentDetail, error) {
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
+func (r *sqliteOperatorAgentConversationReadSurface) LoadOperatorAgent(ctx context.Context, identity agentidentity.Identity) (OperatorAgentDetail, error) {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
 		return OperatorAgentDetail{}, ErrAgentNotFound
 	}
 	result, err := r.ListOperatorAgents(ctx, OperatorAgentListOptions{})
@@ -120,7 +128,7 @@ func (r *sqliteOperatorAgentConversationReadSurface) LoadOperatorAgent(ctx conte
 		return OperatorAgentDetail{}, err
 	}
 	for _, agent := range result.Agents {
-		if strings.TrimSpace(agent.AgentID) == agentID {
+		if agent.Identity == identity {
 			return OperatorAgentDetail{
 				Agent:             agent,
 				CurrentSessionRef: agent.CurrentSessionRef,
@@ -131,8 +139,8 @@ func (r *sqliteOperatorAgentConversationReadSurface) LoadOperatorAgent(ctx conte
 	return OperatorAgentDetail{}, ErrAgentNotFound
 }
 
-func (r *sqliteOperatorAgentConversationReadSurface) LoadOperatorAgentDiagnosis(ctx context.Context, agentID string, opts OperatorAgentDiagnosisOptions) (OperatorAgentDiagnosis, error) {
-	detail, err := r.LoadOperatorAgent(ctx, agentID)
+func (r *sqliteOperatorAgentConversationReadSurface) LoadOperatorAgentDiagnosis(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDiagnosisOptions) (OperatorAgentDiagnosis, error) {
+	detail, err := r.LoadOperatorAgent(ctx, identity)
 	if err != nil {
 		return OperatorAgentDiagnosis{}, err
 	}
@@ -141,9 +149,9 @@ func (r *sqliteOperatorAgentConversationReadSurface) LoadOperatorAgentDiagnosis(
 		return OperatorAgentDiagnosis{}, err
 	}
 	queue, err := r.store.ListPendingAgentDeliveryDetails(ctx, PendingAgentDeliveryListOptions{
-		AgentID: strings.TrimSpace(agentID),
-		Limit:   opts.QueueLimit,
-		Cursor:  opts.QueueCursor,
+		AgentIdentity: identity,
+		Limit:         opts.QueueLimit,
+		Cursor:        opts.QueueCursor,
 	})
 	if err != nil {
 		return OperatorAgentDiagnosis{}, err
@@ -169,6 +177,10 @@ func (r *sqliteOperatorAgentConversationReadSurface) ListOperatorConversations(c
 	if opts.AgentID != "" {
 		where = append(where, "conversations.agent_id = ?")
 		args = append(args, opts.AgentID)
+	}
+	if opts.FlowInstance != "" {
+		where = append(where, "conversations.flow_instance = ?")
+		args = append(args, opts.FlowInstance)
 	}
 	if opts.RunID != "" {
 		where = append(where, "conversations.run_id = ?")
@@ -264,10 +276,16 @@ func (r *sqliteOperatorAgentConversationReadSurface) requireConversationAccess()
 	return r.store.requireCurrentSchema()
 }
 
-func (r *sqliteOperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx context.Context) (map[string]operatorAgentProjection, error) {
+func (r *sqliteOperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx context.Context) (map[agentidentity.Identity]operatorAgentProjection, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			a.agent_id,
+			a.agent_name_owner,
+			a.agent_name_source,
+			a.agent_route_presence,
+			a.flow_scope_key,
+			a.flow_instance_id,
+			a.flow_instance,
 			COALESCE(a.status, 'active'),
 			COALESCE(sess.session_id, ''),
 			sess.created_at,
@@ -282,6 +300,12 @@ func (r *sqliteOperatorAgentConversationReadSurface) loadAgentOperatorProjection
 			SELECT session_id
 			FROM agent_sessions s
 			WHERE s.agent_id = a.agent_id
+			  AND s.agent_name_owner = a.agent_name_owner
+			  AND s.agent_name_source = a.agent_name_source
+			  AND s.agent_route_presence = a.agent_route_presence
+			  AND s.flow_scope_key = a.flow_scope_key
+			  AND s.flow_instance_id = a.flow_instance_id
+			  AND s.flow_instance = a.flow_instance
 			  AND s.status = 'active'
 			  AND s.memory_enabled = 1
 			ORDER BY s.updated_at DESC, s.created_at DESC, s.session_id ASC
@@ -295,18 +319,24 @@ func (r *sqliteOperatorAgentConversationReadSurface) loadAgentOperatorProjection
 	}
 	defer rows.Close()
 
-	out := map[string]operatorAgentProjection{}
-	agentIDs := make([]string, 0)
+	out := map[agentidentity.Identity]operatorAgentProjection{}
+	identities := make([]agentidentity.Identity, 0)
 	for rows.Next() {
 		var (
-			id                string
+			fields            agentidentity.StorageFields
 			projection        operatorAgentProjection
 			lockExpiresAtRaw  any
 			sessionStartedRaw any
 			runtimeStateRaw   []byte
 		)
 		if err := rows.Scan(
-			&id,
+			&fields.AgentID,
+			&fields.NameOwner,
+			&fields.NameSource,
+			&fields.RoutePresence,
+			&fields.FlowScopeKey,
+			&fields.FlowInstanceID,
+			&fields.FlowInstancePath,
 			&projection.Status,
 			&projection.SessionID,
 			&sessionStartedRaw,
@@ -339,32 +369,35 @@ func (r *sqliteOperatorAgentConversationReadSurface) loadAgentOperatorProjection
 			}
 			enrichOperatorProjectionWithPublicTurn(&projection, turn)
 		}
-		id = strings.TrimSpace(id)
-		out[id] = projection
-		agentIDs = append(agentIDs, id)
+		identity, err := agentidentity.FromStorageFields(fields)
+		if err != nil {
+			return nil, fmt.Errorf("scan sqlite agent operator identity: %w", err)
+		}
+		out[identity] = projection
+		identities = append(identities, identity)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read sqlite agent operator projection rows: %w", err)
 	}
-	factsByAgent, err := r.store.ListPendingAgentDeliveryFacts(ctx, agentIDs, time.Time{})
+	factsByAgent, err := r.store.ListPendingAgentDeliveryFacts(ctx, identities, time.Time{})
 	if err != nil {
 		return nil, err
 	}
-	lifecycleByAgent, err := r.store.ListAgentDeliveryLifecycleFacts(ctx, agentIDs)
+	lifecycleByAgent, err := r.store.ListAgentDeliveryLifecycleFacts(ctx, identities)
 	if err != nil {
 		return nil, err
 	}
-	for agentID, facts := range factsByAgent {
-		projection := out[strings.TrimSpace(agentID)]
+	for identity, facts := range factsByAgent {
+		projection := out[identity]
 		projection.PendingEvents = facts.PendingCount
 		projection.OldestPendingAgeSec = facts.OldestPendingAgeSec
-		out[strings.TrimSpace(agentID)] = projection
+		out[identity] = projection
 	}
-	for agentID, facts := range lifecycleByAgent {
-		projection := out[strings.TrimSpace(agentID)]
+	for identity, facts := range lifecycleByAgent {
+		projection := out[identity]
 		projection.LifecycleState = strings.TrimSpace(facts.CurrentState)
 		projection.BlockingLayer = strings.TrimSpace(facts.BlockingLayer)
-		out[strings.TrimSpace(agentID)] = projection
+		out[identity] = projection
 	}
 	return out, nil
 }
@@ -424,6 +457,11 @@ func sqliteOperatorConversationQuerySources() []string {
 			SELECT
 				session_id AS session_id,
 				agent_id,
+				agent_name_owner,
+				agent_name_source,
+				agent_route_presence,
+				flow_scope_key,
+				flow_instance_id,
 				COALESCE(run_id, '') AS run_id,
 				'live_session' AS kind,
 				flow_instance,
@@ -444,6 +482,11 @@ func sqliteOperatorConversationQuerySources() []string {
 			SELECT
 				session_id AS session_id,
 				agent_id,
+				agent_name_owner,
+				agent_name_source,
+				agent_route_presence,
+				flow_scope_key,
+				flow_instance_id,
 				COALESCE(run_id, '') AS run_id,
 				'turn_audit' AS kind,
 				COALESCE(flow_instance, '') AS flow_instance,
@@ -463,24 +506,24 @@ func sqliteOperatorConversationQuerySources() []string {
 		`}
 }
 
-func (r *sqliteOperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryDiagnostics(ctx context.Context, agentID string, opts OperatorAgentDeliveryDiagnosticsOptions) (OperatorAgentDeliveryDiagnostics, error) {
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
+func (r *sqliteOperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryDiagnostics(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDeliveryDiagnosticsOptions) (OperatorAgentDeliveryDiagnostics, error) {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
 		return OperatorAgentDeliveryDiagnostics{}, ErrAgentNotFound
 	}
 	if err := r.requireAgentDeliveryDiagnosticsAccess(); err != nil {
 		return OperatorAgentDeliveryDiagnostics{}, err
 	}
-	if err := r.ensureAgentDeliveryDiagnosticsAgentExists(ctx, agentID); err != nil {
+	if err := r.ensureAgentDeliveryDiagnosticsAgentExists(ctx, identity); err != nil {
 		return OperatorAgentDeliveryDiagnostics{}, err
 	}
 
 	opts = defaultOperatorAgentDeliveryDiagnosticsOptions(opts)
-	counts, failures, deadLetters, err := loadAgentDeliveryDiagnosticSnapshotPages(ctx, r.store, agentID, opts)
+	counts, failures, deadLetters, err := loadAgentDeliveryDiagnosticSnapshotPages(ctx, r.store, identity, opts)
 	if err != nil {
 		return OperatorAgentDeliveryDiagnostics{}, err
 	}
-	return buildAgentDeliveryDiagnostics(agentID, counts, failures, deadLetters,
+	return buildAgentDeliveryDiagnostics(identity.AgentID(), counts, failures, deadLetters,
 		func(eventID string) (deliveryLifecycleEventMetadata, error) {
 			record, found, err := loadSQLiteEventIdentity(ctx, r.db, eventID)
 			if err != nil {
@@ -508,16 +551,27 @@ func (r *sqliteOperatorAgentConversationReadSurface) requireAgentDeliveryDiagnos
 	return r.store.requireCurrentSchema()
 }
 
-func (r *sqliteOperatorAgentConversationReadSurface) ensureAgentDeliveryDiagnosticsAgentExists(ctx context.Context, agentID string) error {
+func (r *sqliteOperatorAgentConversationReadSurface) ensureAgentDeliveryDiagnosticsAgentExists(ctx context.Context, identity agentidentity.Identity) error {
+	fields, err := agentIdentityFields(identity)
+	if err != nil {
+		return ErrAgentNotFound
+	}
 	var exists bool
 	if err := r.db.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM agents
 			WHERE agent_id = ?
+			  AND agent_name_owner = ?
+			  AND agent_name_source = ?
+			  AND agent_route_presence = ?
+			  AND flow_scope_key = ?
+			  AND flow_instance_id = ?
+			  AND flow_instance = ?
 			  AND status NOT IN ('terminated', 'ephemeral')
 		)
-	`, agentID).Scan(&exists); err != nil {
+	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&exists); err != nil {
 		return fmt.Errorf("load sqlite agent delivery diagnostics agent: %w", err)
 	}
 	if !exists {

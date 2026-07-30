@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/google/uuid"
@@ -404,12 +403,12 @@ func TestEventBusResetPreservesPendingOperationUntilPriorRetirementSucceeds(t *t
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	token := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: "agent-a", Generation: 1}
+	token := testAgentLifecycleToken(t, "agent-a", "", 7, 1)
 	bus.ReplaceAgentRoute(token, testAgentSubscriptionAdmission(t, token.AgentID, events.EventType("test.work")))
 	eventID, runID := uuid.NewString(), uuid.NewString()
 	event := eventtest.RuntimeControl(eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now())
-	store.seed(t, eventID, runID, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: token.AgentID})
-	if err := bus.deliverToAgents(context.Background(), event, []string{token.AgentID}); err != nil {
+	store.seed(t, eventID, runID, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: token.AgentID, AgentIdentity: token.Identity})
+	if err := deliverToTestAgent(context.Background(), bus, event, token.Identity); err != nil {
 		t.Fatalf("queue buffered delivery: %v", err)
 	}
 	claim, err := bus.claimPipelinePublication(context.Background(), eventID)

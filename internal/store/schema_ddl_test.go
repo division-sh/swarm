@@ -325,6 +325,34 @@ func TestGeneratePlatformTableDDLs_OrdersRunsBeforeEvents(t *testing.T) {
 	}
 }
 
+func TestGeneratePlatformTableDDLs_OrdersAgentsBeforeIdentityDependents(t *testing.T) {
+	var spec runtimecontracts.PlatformSpecDocument
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"agent_directive_operations": {
+			DDL: "CREATE TABLE agent_directive_operations (\n    operation_id UUID PRIMARY KEY,\n    agent_id TEXT REFERENCES agents(agent_id)\n);",
+		},
+		"agents": {
+			DDL: "CREATE TABLE agents (\n    agent_id TEXT PRIMARY KEY\n);",
+		},
+	}
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	if len(plans) != 2 {
+		t.Fatalf("expected 2 platform DDL plans, got %d", len(plans))
+	}
+	if plans[0].TableName != "agents" {
+		t.Fatalf("first table = %q, want agents", plans[0].TableName)
+	}
+	if plans[1].TableName != "agent_directive_operations" {
+		t.Fatalf("second table = %q, want agent_directive_operations", plans[1].TableName)
+	}
+}
+
 func TestGenerateNodeStateTableDDLs(t *testing.T) {
 	nodes := map[string]runtimecontracts.SystemNodeContract{
 		"processing-node": {

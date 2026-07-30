@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -1440,30 +1441,14 @@ func (eb *EventBus) planExactDirectRoutePlan(ctx context.Context, evt events.Eve
 	if err := events.ValidateDeliveryRoutes(routes); err != nil {
 		return RoutePlan{}, err
 	}
-	recipients := make([]string, 0, len(routes))
-	for _, route := range routes {
-		if strings.TrimSpace(route.SubscriberType) != routePlanSubscriberAgent {
-			return RoutePlan{}, fmt.Errorf("exact direct delivery route must identify an agent subscriber")
-		}
-		recipients = append(recipients, route.SubscriberID)
-	}
-	recipients = uniqueStrings(recipients)
-	if len(recipients) == 0 {
-		return RoutePlan{}, errors.New("exact direct delivery routes are required")
-	}
-	plan, err := eb.planDirectRoutePlan(ctx, evt, recipients)
+	plan, err := eb.deliveryPlanner.PlanExactDirect(ctx, evt, routes)
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	if filtered := filteredRecipients(recipients, plan.RecipientIDs()); len(filtered) > 0 {
-		return RoutePlan{}, fmt.Errorf("exact direct delivery rejected recipients: %s", strings.Join(filtered, ", "))
-	}
-	plan.DeliveryIntents = routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerDirectPolicy)
-	plan = plan.Normalized()
 	if err := plan.ValidatePersistentDeliveries(); err != nil {
 		return RoutePlan{}, fmt.Errorf("validate exact direct delivery routes: %w", err)
 	}
-	return plan, nil
+	return plan.WithDefaultDeliveryContext(events.DeliveryContextFromContext(ctx)), nil
 }
 
 // PublishDirect persists an event and delivers it to an explicit caller-supplied
@@ -1564,15 +1549,13 @@ func bindWorkContext(ctx context.Context, lease *worklifetime.Lease, owner workl
 	return workCtx
 }
 
-// CheckDirectRecipients applies the same direct-recipient policy used by
-// PublishDirect, then verifies the allowed recipients are currently deliverable.
-// It is intentionally side-effect free so public API owners can fail closed
-// before creating replay evidence.
-func (eb *EventBus) CheckDirectRecipients(ctx context.Context, evt events.Event, recipients []string) (DirectRecipientStatus, error) {
-	requested := uniqueStrings(recipients)
-	status := DirectRecipientStatus{Requested: append([]string(nil), requested...)}
+// CheckDirectRoutes applies the same exact-route policy used by
+// PublishDirectRoutes without creating replay evidence.
+func (eb *EventBus) CheckDirectRoutes(ctx context.Context, evt events.Event, routes []events.DeliveryRoute) (ExactDirectRouteStatus, error) {
+	requested := events.NormalizeDeliveryRoutes(routes)
+	status := ExactDirectRouteStatus{Requested: append([]events.DeliveryRoute(nil), requested...)}
 	if eb == nil {
-		status.Missing = append([]string(nil), requested...)
+		status.Missing = append([]events.DeliveryRoute(nil), requested...)
 		return status, nil
 	}
 	if evt.Type() == "" {
@@ -1586,24 +1569,40 @@ func (eb *EventBus) CheckDirectRecipients(ctx context.Context, evt events.Event,
 			return status, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
-	plan, err := eb.planDirectRoutePlan(ctx, evt, requested)
+	plan, err := eb.planExactDirectRoutePlan(ctx, evt, requested)
 	if err != nil {
+		var unavailable *exactDirectRecipientsUnavailableError
+		if errors.As(err, &unavailable) {
+			missing := make(map[agentidentity.Identity]struct{}, len(unavailable.identities))
+			for _, identity := range unavailable.identities {
+				missing[identity.Normalize()] = struct{}{}
+			}
+			for _, route := range requested {
+				if _, ok := missing[route.AgentIdentity.Normalize()]; ok {
+					status.Missing = append(status.Missing, route)
+				} else {
+					status.Deliverable = append(status.Deliverable, route)
+				}
+			}
+			return status, nil
+		}
 		return status, err
 	}
 	plannedRecipients := plan.RecipientIDs()
-	status.Recipients = append([]string(nil), plannedRecipients...)
-	status.Filtered = filteredRecipients(requested, plannedRecipients)
-	liveRecipients := eb.snapshotRecipientChans(plannedRecipients)
-	live := make(map[string]struct{}, len(liveRecipients))
+	liveRecipients := eb.snapshotRoutePlanRecipientChans(plannedRecipients, plan.LiveRecipients)
+	live := make(map[agentidentity.Identity]struct{}, len(liveRecipients))
 	for _, recipient := range liveRecipients {
-		live[recipient.agentID] = struct{}{}
-	}
-	for _, recipient := range plannedRecipients {
-		if _, ok := live[recipient]; !ok {
-			status.Missing = append(status.Missing, recipient)
+		if !recipient.identity.IsZero() {
+			live[recipient.identity.Normalize()] = struct{}{}
 		}
 	}
-	status.Missing = uniqueStrings(append(status.Missing, status.Filtered...))
+	for _, route := range requested {
+		if _, ok := live[route.AgentIdentity.Normalize()]; ok {
+			status.Deliverable = append(status.Deliverable, route)
+		} else {
+			status.Missing = append(status.Missing, route)
+		}
+	}
 	return status, nil
 }
 
@@ -1761,15 +1760,7 @@ func (eb *EventBus) deliveryRoutesForEvent(ctx context.Context, eventID string) 
 			return events.NormalizeDeliveryRoutes(routes)
 		}
 	}
-	targets := eb.deliveryTargetsForEvent(ctx, eventID)
-	if len(targets) == 0 {
-		return nil
-	}
-	recipients := make([]string, 0, len(targets))
-	for recipient := range targets {
-		recipients = append(recipients, recipient)
-	}
-	return deliveryRoutesFromTargetMap(recipients, "agent", targets)
+	return nil
 }
 
 func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.Event, plan RoutePlan) {

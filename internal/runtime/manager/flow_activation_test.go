@@ -23,6 +23,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -899,6 +900,7 @@ func (*flowActivationTestBus) PrepareAgentRoute(
 	}
 }
 func (*flowActivationTestBus) RemoveAgentRoute(runtimeeffects.LifecycleToken) {}
+func (*flowActivationTestBus) FenceAgentRoute(runtimeeffects.LifecycleToken)  {}
 func (b *flowActivationTestBus) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {
 	b.runtimeLogs = append(b.runtimeLogs, entry)
 	return nil
@@ -1112,6 +1114,20 @@ func (flowActivationStubAgent) OnEvent(context.Context, events.Event) ([]events.
 	return nil, nil
 }
 
+func testFlowAgentURIRef(flowID, logicalID string) runtimecontracts.ContractURIRef {
+	return runtimecontracts.ContractURIRef{
+		Kind: "agent", FlowID: flowID, LocalID: logicalID,
+		Full: "test://flow-activation/" + flowID + "/" + logicalID,
+	}
+}
+
+func registerTestFlowAgentOwner(bundle *runtimecontracts.WorkflowContractBundle, flowID, logicalID string) {
+	if bundle.URIRegistry.Agents == nil {
+		bundle.URIRegistry.Agents = map[string]runtimecontracts.ContractURIRef{}
+	}
+	bundle.URIRegistry.Agents[flowID+"/"+logicalID] = testFlowAgentURIRef(flowID, logicalID)
+}
+
 func testFlowBundle(autoEmit string) *runtimecontracts.WorkflowContractBundle {
 	reviewFlow := &runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "review"},
@@ -1124,7 +1140,7 @@ func testFlowBundle(autoEmit string) *runtimecontracts.WorkflowContractBundle {
 		},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"reviewer": {
-				ID:            "reviewer-{instance_id}",
+				ID:            "reviewer",
 				Type:          "generic",
 				Role:          "reviewer",
 				Subscriptions: []string{"task.started"},
@@ -1132,6 +1148,11 @@ func testFlowBundle(autoEmit string) *runtimecontracts.WorkflowContractBundle {
 		},
 	}
 	return &runtimecontracts.WorkflowContractBundle{
+		URIRegistry: runtimecontracts.ContractURIRegistry{
+			Agents: map[string]runtimecontracts.ContractURIRef{
+				"review/reviewer": testFlowAgentURIRef("review", "reviewer"),
+			},
+		},
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &runtimecontracts.FlowContractView{
 				Children: []runtimecontracts.FlowContractView{*reviewFlow},
@@ -1176,8 +1197,9 @@ func testFlowRouteRevisionBundle(nodeEvent string) *runtimecontracts.WorkflowCon
 func testFlowBundleWithTwoAgents(autoEmit string) *runtimecontracts.WorkflowContractBundle {
 	bundle := testFlowBundle(autoEmit)
 	bundle.FlowTree.ByID["review"].Agents["writer"] = runtimecontracts.AgentRegistryEntry{
-		ID: "writer-{instance_id}", Type: "generic", Role: "writer", Subscriptions: []string{"task.started"},
+		ID: "writer", Type: "generic", Role: "writer", Subscriptions: []string{"task.started"},
 	}
+	registerTestFlowAgentOwner(bundle, "review", "writer")
 	return bundle
 }
 
@@ -1200,7 +1222,7 @@ func testNestedFlowBundle() *runtimecontracts.WorkflowContractBundle {
 		Paths: runtimecontracts.FlowContractPaths{ID: "grandchild", Flow: "grandchild"},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"worker": {
-				ID:            "worker-{instance_id}",
+				ID:            "worker",
 				Type:          "generic",
 				Role:          "worker",
 				Subscriptions: []string{"micro.started"},
@@ -1213,6 +1235,11 @@ func testNestedFlowBundle() *runtimecontracts.WorkflowContractBundle {
 		Children: []runtimecontracts.FlowContractView{*grandchild},
 	}
 	return &runtimecontracts.WorkflowContractBundle{
+		URIRegistry: runtimecontracts.ContractURIRegistry{
+			Agents: map[string]runtimecontracts.ContractURIRef{
+				"grandchild/worker": testFlowAgentURIRef("grandchild", "worker"),
+			},
+		},
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &runtimecontracts.FlowContractView{
 				Children: []runtimecontracts.FlowContractView{*child},
@@ -1248,6 +1275,11 @@ func testStaticFlowBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 	}
 	return &runtimecontracts.WorkflowContractBundle{
+		URIRegistry: runtimecontracts.ContractURIRegistry{
+			Agents: map[string]runtimecontracts.ContractURIRef{
+				"analyzer-flow/analyzer": testFlowAgentURIRef("analyzer-flow", "analyzer"),
+			},
+		},
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &runtimecontracts.FlowContractView{
 				Children: []runtimecontracts.FlowContractView{*analysisFlow},
@@ -1363,10 +1395,10 @@ func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
 	if len(bus.addedPaths) != 1 || bus.addedPaths[0] != "review/inst-1" {
 		t.Fatalf("added paths = %#v, want [review/inst-1]", bus.addedPaths)
 	}
-	if _, ok := am.GetAgentConfig("reviewer-inst-1"); !ok {
+	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
 		t.Fatal("expected activated flow agent config")
 	}
-	cfg, _ := am.GetAgentConfig("reviewer-inst-1")
+	cfg, _ := testAgentConfig(t, am, "reviewer", "review/inst-1")
 	if got := strings.TrimSpace(cfg.EntityID); got != runtimepipeline.FlowInstanceEntityID("review/inst-1") {
 		t.Fatalf("agent entity_id = %q, want %q", got, runtimepipeline.FlowInstanceEntityID("review/inst-1"))
 	}
@@ -1386,7 +1418,7 @@ func TestActivateFlowInstanceDefersAgentStartupUntilMutationCommit(t *testing.T)
 	if len(bus.addedPaths) != 0 {
 		t.Fatalf("transactional route materialized before commit: %#v", bus.addedPaths)
 	}
-	if _, ok := am.GetAgentConfig("reviewer-inst-1"); ok {
+	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
 		t.Fatal("flow agent started before the activation transaction committed")
 	}
 	if len(postCommit) != 1 {
@@ -1394,7 +1426,7 @@ func TestActivateFlowInstanceDefersAgentStartupUntilMutationCommit(t *testing.T)
 	}
 
 	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-	if _, ok := am.GetAgentConfig("reviewer-inst-1"); !ok {
+	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
 		t.Fatal("flow agent did not start after activation commit")
 	}
 	if len(bus.addedPaths) != 1 || bus.addedPaths[0] != "review/inst-1" {
@@ -1421,7 +1453,7 @@ func TestActivateFlowInstanceArmsInitialTimersOnlyAfterRuntimeInstallation(t *te
 				if len(bus.addedPaths) != 1 || bus.addedPaths[0] != "review/inst-1" {
 					return fmt.Errorf("timer armed before route installation: %#v", bus.addedPaths)
 				}
-				if _, ok := am.GetAgentConfig("reviewer-inst-1"); !ok {
+				if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
 					return errors.New("timer armed before agent installation")
 				}
 				return nil
@@ -1493,7 +1525,7 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 
 				switch boundary {
 				case "partial_agent":
-					agentStore.failAgentID = "writer-inst-1"
+					agentStore.failAgentID = "writer"
 				case "route":
 					if mode.postCommit {
 						break
@@ -1767,8 +1799,9 @@ func TestDynamicFlowRuntimeReadinessRejectsCurrentFactWithOldSemanticSource(t *t
 	oldBundle := testFlowBundle("")
 	currentBundle := testFlowBundle("")
 	currentBundle.FlowTree.ByID["review"].Agents["editor"] = runtimecontracts.AgentRegistryEntry{
-		ID: "editor-{instance_id}", Type: "generic", Role: "editor",
+		ID: "editor", Type: "generic", Role: "editor",
 	}
+	registerTestFlowAgentOwner(currentBundle, "review", "editor")
 	oldSource := semanticview.Wrap(oldBundle)
 	currentSource := semanticview.Wrap(currentBundle)
 	currentFact, err := runtimecorrelation.NewPersistedBundleSourceFact(
@@ -1808,8 +1841,9 @@ func TestFlowActivationRejectsForeignSemanticSourceBeforeAnyMutation(t *testing.
 				currentBundle := testFlowBundle("")
 				foreignBundle := testFlowBundle("")
 				foreignBundle.FlowTree.ByID["review"].Agents["editor"] = runtimecontracts.AgentRegistryEntry{
-					ID: "editor-{instance_id}", Type: "generic", Role: "editor",
+					ID: "editor", Type: "generic", Role: "editor",
 				}
+				registerTestFlowAgentOwner(foreignBundle, "review", "editor")
 				setFlowActivationManagerSemanticSource(manager, semanticview.Wrap(currentBundle))
 				ctx := testAuthorActivityContext(context.Background())
 				currentReq := testActivationRequest(
@@ -2030,7 +2064,7 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	if !bus.HasFlowInstanceRoute(req.Instance.Route()) {
 		t.Fatal("post-CAS revised topology route was not published")
 	}
-	if _, ok := am.GetAgentConfig("reviewer-inst-1"); !ok {
+	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
 		t.Fatal("post-CAS revised topology agent was not published")
 	}
 }
@@ -2444,8 +2478,8 @@ func TestDynamicFlowRuntimeReadinessTerminalBeforeCreationCommitRetiresMateriali
 	if len(bus.published) != 0 {
 		t.Fatalf("terminal creation boundary published events: %#v", bus.published)
 	}
-	for _, agentID := range []string{"reviewer-inst-1", "writer-inst-1"} {
-		if _, ok := am.GetAgentConfig(agentID); ok {
+	for _, agentID := range []string{"reviewer", "writer"} {
+		if _, ok := testAgentConfig(t, am, agentID, "review/inst-1"); ok {
 			t.Fatalf("terminal creation boundary left process agent %s", agentID)
 		}
 	}
@@ -2485,7 +2519,7 @@ func TestRecoverableStateSnapshotIncludesReadinessOnlyPendingWork(t *testing.T) 
 
 func TestHydrateForStartupFinalizesIncompleteDynamicFlowRuntimeReadiness(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
-	agents := &flowActivationTestStore{failAgentID: "writer-inst-1"}
+	agents := &flowActivationTestStore{failAgentID: "writer"}
 	firstBus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
 	first := newFlowActivationManager(t, firstBus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents("task.started")
@@ -2511,10 +2545,10 @@ func TestHydrateForStartupFinalizesIncompleteDynamicFlowRuntimeReadiness(t *test
 	if _, err := restarted.HydrateForStartup(ctx); err != nil {
 		t.Fatalf("HydrateForStartup: %v", err)
 	}
-	if _, ok := restarted.GetAgentConfig("reviewer-inst-1"); !ok {
+	if _, ok := testAgentConfig(t, restarted, "reviewer", "review/inst-1"); !ok {
 		t.Fatal("restarted manager did not restore first declared agent")
 	}
-	if _, ok := restarted.GetAgentConfig("writer-inst-1"); !ok {
+	if _, ok := testAgentConfig(t, restarted, "writer", "review/inst-1"); !ok {
 		t.Fatal("restarted manager did not reconcile missing declared agent")
 	}
 	if len(instances.armedEntries) != 1 {
@@ -2540,7 +2574,20 @@ func TestHydrateForStartupRetiresTerminalDynamicFlowProcessTopology(t *testing.T
 		RunID:    req.TriggerEvent.RunID(), BundleHash: bundleHash, BundleSource: bundleSource,
 		WorkflowVersion: bundle.WorkflowVersion(),
 		Agents: []runtimepipeline.DynamicFlowRuntimeAgentExpectation{{
-			AgentID: "reviewer-inst-1", ConfigRevision: strings.Repeat("a", 64),
+			Identity: runtimeagentidentity.Identity{
+				Name: runtimeagentidentity.Name{
+					AgentID: "reviewer",
+					Owner:   testFlowAgentURIRef("review", "reviewer").Full,
+					Source:  runtimeagentidentity.NameSourceDeclared,
+				},
+				Route: runtimeagentidentity.Route{
+					Presence:     runtimeagentidentity.RoutePresent,
+					ScopeKey:     req.Instance.ScopeKey,
+					InstanceID:   req.Instance.InstanceID,
+					InstancePath: req.Instance.InstancePath,
+				},
+			},
+			ConfigRevision: strings.Repeat("a", 64),
 		}},
 	}.Normalized()
 	if err != nil {
@@ -2562,7 +2609,11 @@ func TestHydrateForStartupRetiresTerminalDynamicFlowProcessTopology(t *testing.T
 		},
 	}
 	agents := &flowActivationTestStore{upserts: []PersistedAgent{{
-		Config: models.AgentConfig{ID: "reviewer-inst-1", FlowPath: req.Instance.InstancePath},
+		Config: models.AgentConfig{
+			ID:       "reviewer",
+			Identity: plan.Agents[0].Identity,
+			FlowPath: req.Instance.InstancePath,
+		},
 		Status: "active",
 	}}}
 	routeStore := &flowActivationTestRouteStore{statusByPath: map[string]string{
@@ -2579,7 +2630,7 @@ func TestHydrateForStartupRetiresTerminalDynamicFlowProcessTopology(t *testing.T
 	if _, err := am.HydrateForStartup(testAuthorActivityContext(context.Background())); err != nil {
 		t.Fatalf("HydrateForStartup: %v", err)
 	}
-	if _, ok := am.GetAgentConfig("reviewer-inst-1"); ok {
+	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
 		t.Fatal("terminal readiness retained a process agent")
 	}
 	if bus.HasFlowInstanceRoute(req.Instance.Route()) {
@@ -2618,8 +2669,8 @@ func TestEnsureFlowInstanceRestoresPersistedDeclaredAgentsWithoutNewLifecycleTra
 	if len(agents.upserts) != persistedCount {
 		t.Fatalf("persisted agent transitions = %d, want unchanged %d", len(agents.upserts), persistedCount)
 	}
-	for _, agentID := range []string{"reviewer-inst-1", "writer-inst-1"} {
-		if _, ok := restarted.GetAgentConfig(agentID); !ok {
+	for _, agentID := range []string{"reviewer", "writer"} {
+		if _, ok := testAgentConfig(t, restarted, agentID, "review/inst-1"); !ok {
 			t.Fatalf("persisted declared agent %s was not restored into process state", agentID)
 		}
 	}
@@ -2643,8 +2694,9 @@ func TestEnsureFlowInstanceReconcilesRevisedSemanticSourceIntoReadinessOwner(t *
 	writer.Role = "writer-v2"
 	revisedBundle.FlowTree.ByID["review"].Agents["writer"] = writer
 	revisedBundle.FlowTree.ByID["review"].Agents["editor"] = runtimecontracts.AgentRegistryEntry{
-		ID: "editor-{instance_id}", Type: "generic", Role: "editor", Subscriptions: []string{"task.started"},
+		ID: "editor", Type: "generic", Role: "editor", Subscriptions: []string{"task.started"},
 	}
+	registerTestFlowAgentOwner(revisedBundle, "review", "editor")
 	revisedReq := testActivationRequest(revisedBundle, "review", "inst-1", "ent-1", "review/inst-1")
 	restarted := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances, agents)
 	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(revisedBundle))
@@ -2664,17 +2716,17 @@ func TestEnsureFlowInstanceReconcilesRevisedSemanticSourceIntoReadinessOwner(t *
 	if readiness.Plan.WorkflowVersion != "v-revised" || readiness.TopologyReadyAt.IsZero() {
 		t.Fatalf("revised readiness = %#v", readiness)
 	}
-	if _, ok := restarted.GetAgentConfig("reviewer-inst-1"); ok {
+	if _, ok := testAgentConfig(t, restarted, "reviewer", "review/inst-1"); ok {
 		t.Fatal("removed reviewer remains process-visible")
 	}
-	if cfg, ok := restarted.GetAgentConfig("writer-inst-1"); !ok || cfg.Role != "writer-v2" {
+	if cfg, ok := testAgentConfig(t, restarted, "writer", "review/inst-1"); !ok || cfg.Role != "writer-v2" {
 		t.Fatalf("changed writer config = %#v found=%t", cfg, ok)
 	}
-	if cfg, ok := restarted.GetAgentConfig("editor-inst-1"); !ok || cfg.Role != "editor" {
+	if cfg, ok := testAgentConfig(t, restarted, "editor", "review/inst-1"); !ok || cfg.Role != "editor" {
 		t.Fatalf("added editor config = %#v found=%t", cfg, ok)
 	}
-	if len(agents.terminated) != 1 || agents.terminated[0] != "reviewer-inst-1" {
-		t.Fatalf("retired agents = %#v, want reviewer-inst-1", agents.terminated)
+	if len(agents.terminated) != 1 || agents.terminated[0] != "reviewer" {
+		t.Fatalf("retired agents = %#v, want reviewer", agents.terminated)
 	}
 	persisted, err := agents.LoadAgents(ctx)
 	if err != nil {
@@ -2717,8 +2769,8 @@ func TestEnsureFlowInstanceDefersReadinessVerificationUntilMutationCommit(t *tes
 	if !restartBus.HasFlowInstanceRoute(req.Instance.Route()) {
 		t.Fatal("flow route was not process-ready before readiness verification")
 	}
-	for _, agentID := range []string{"reviewer-inst-1", "writer-inst-1"} {
-		if _, ok := restarted.GetAgentConfig(agentID); !ok {
+	for _, agentID := range []string{"reviewer", "writer"} {
+		if _, ok := testAgentConfig(t, restarted, agentID, "review/inst-1"); !ok {
 			t.Fatalf("persisted declared agent %s was not restored after commit", agentID)
 		}
 	}
@@ -2796,7 +2848,7 @@ func TestActivateFlowInstanceUsesSameBuiltinsForAgentAndRouteMaterialization(t *
 	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	if _, ok := am.GetAgentConfig("reviewer-review/inst-1"); !ok {
+	if _, ok := testAgentConfig(t, am, "reviewer-review/inst-1", ""); !ok {
 		t.Fatalf("expected flow agent rendered with built-in flow_instance_path, configs=%#v", am.ListAgentConfigs())
 	}
 	if len(bus.addedRouteRequests) != 1 {
@@ -3173,7 +3225,7 @@ func TestActivateFlowInstanceFailsClosedOnAutoEmitMissingRequiredField(t *testin
 	if len(bus.addedPaths) != 0 {
 		t.Fatalf("added paths = %#v, want none", bus.addedPaths)
 	}
-	if _, ok := am.GetAgentConfig("reviewer-inst-1"); ok {
+	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
 		t.Fatal("unexpected activated agent config after auto-emit schema failure")
 	}
 }
@@ -3209,7 +3261,7 @@ func TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField(t 
 	if len(bus.addedPaths) != 0 {
 		t.Fatalf("added paths = %#v, want none", bus.addedPaths)
 	}
-	if _, ok := am.GetAgentConfig("reviewer-inst-1"); ok {
+	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
 		t.Fatal("unexpected activated agent config after queued auto-emit schema failure")
 	}
 }
@@ -3440,7 +3492,7 @@ func TestActivateFlowInstanceResolvesAgentPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	cfg, ok := am.GetAgentConfig("reviewer-inst-1")
+	cfg, ok := testAgentConfig(t, am, "reviewer", "review/inst-1")
 	if !ok {
 		t.Fatal("expected activated flow agent config")
 	}
@@ -3462,7 +3514,7 @@ func TestDeactivateFlowInstanceRemovesAgentsAndRoutes(t *testing.T) {
 	if err := am.DeactivateFlowInstance(flowActivationRunContext(), "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
 		t.Fatalf("DeactivateFlowInstance: %v", err)
 	}
-	if _, ok := am.GetAgentConfig("reviewer-inst-1"); ok {
+	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
 		t.Fatal("expected flow agent teardown")
 	}
 	if len(bus.removedPairs) != 1 || bus.removedPairs[0] != "review/inst-1" {
@@ -3494,7 +3546,7 @@ func TestDeactivateFlowInstanceQueuesTerminalSideEffectsUntilPostCommitWhenAvail
 		t.Fatalf("DeactivateFlowInstance: %v", err)
 	}
 
-	if _, ok := am.GetAgentConfig("reviewer-inst-1"); !ok {
+	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
 		t.Fatal("flow agent was torn down before post-commit flush")
 	}
 	if len(bus.unsubscribed) != 0 {
@@ -3517,14 +3569,14 @@ func TestDeactivateFlowInstanceQueuesTerminalSideEffectsUntilPostCommitWhenAvail
 	}
 
 	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-	if _, ok := am.GetAgentConfig("reviewer-inst-1"); ok {
+	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
 		t.Fatal("expected flow agent teardown after post-commit flush")
 	}
 	if len(bus.unsubscribed) != 0 {
 		t.Fatalf("generic unsubscribe used after post-commit flush: %#v", bus.unsubscribed)
 	}
-	if len(managerStore.terminated) != 1 || managerStore.terminated[0] != "reviewer-inst-1" {
-		t.Fatalf("agent terminations after post-commit flush = %#v, want reviewer-inst-1", managerStore.terminated)
+	if len(managerStore.terminated) != 1 || managerStore.terminated[0] != "reviewer" {
+		t.Fatalf("agent terminations after post-commit flush = %#v, want reviewer", managerStore.terminated)
 	}
 	if len(bus.removedPairs) != 1 || bus.removedPairs[0] != "review/inst-1" {
 		t.Fatalf("removed routes after post-commit flush = %#v, want [review/inst-1]", bus.removedPairs)
@@ -3666,8 +3718,15 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 	sharedConfig := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "shared-subject-agent",
-		EntityID:      req.Instance.EntityID,
-		FlowPath:      "review/other-inst",
+		Identity: managerScopedRuntimeAgentIdentity(
+			"shared-subject-agent",
+			"test://flow-activation/shared-subject-agent",
+			"review",
+			"other-inst",
+			"review/other-inst",
+		),
+		EntityID: req.Instance.EntityID,
+		FlowPath: "review/other-inst",
 	}
 	if err := am.lifecycle.registerExecution(ctx, PersistedAgent{Config: sharedConfig, Status: "active", HiredBy: "test"}, false, sharedAgent, testManagerSubscriptionAdmission(t, sharedConfig)); err != nil {
 		t.Fatalf("register shared-subject-agent: %v", err)
@@ -3719,10 +3778,10 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 	if instance.TerminatedAt.IsZero() {
 		t.Fatal("loaded workflow instance terminated_at is zero")
 	}
-	if _, ok := am.GetAgentConfig("reviewer-inst-1"); ok {
+	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
 		t.Fatal("expected flow-scoped agent teardown")
 	}
-	if _, ok := am.GetAgentConfig("shared-subject-agent"); !ok {
+	if _, ok := testAgentConfig(t, am, "shared-subject-agent", ""); !ok {
 		t.Fatal("expected unrelated flow agent to remain active")
 	}
 }
@@ -3766,7 +3825,7 @@ func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t
 		}); err != nil {
 			return err
 		}
-		if _, ok := am.GetAgentConfig("reviewer-inst-1"); !ok {
+		if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
 			return errors.New("flow agent was torn down before terminal transaction commit")
 		}
 		if len(managerStore.terminated) != 0 || len(bus.unsubscribed) != 0 || len(bus.removedPairs) != 0 {
@@ -3807,11 +3866,11 @@ func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t
 	if strings.TrimSpace(status) != "terminated" {
 		t.Fatalf("external flow_instances status after commit = %q, want terminated", status)
 	}
-	if _, ok := am.GetAgentConfig("reviewer-inst-1"); ok {
+	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
 		t.Fatal("expected flow agent teardown after terminal transaction commit")
 	}
-	if len(managerStore.terminated) != 1 || managerStore.terminated[0] != "reviewer-inst-1" {
-		t.Fatalf("agent terminations after commit = %#v, want reviewer-inst-1", managerStore.terminated)
+	if len(managerStore.terminated) != 1 || managerStore.terminated[0] != "reviewer" {
+		t.Fatalf("agent terminations after commit = %#v, want reviewer", managerStore.terminated)
 	}
 	if len(bus.unsubscribed) != 0 {
 		t.Fatalf("generic unsubscribe used after commit: %#v", bus.unsubscribed)
@@ -3833,7 +3892,7 @@ func TestBuildFlowAgentConfig_ExternalizesLocalSubscriptionsFromExactFlowPath(t 
 		"child/grandchild/inst-1",
 		"worker",
 		runtimecontracts.AgentRegistryEntry{
-			ID:            "worker-{instance_id}",
+			ID:            "worker",
 			Type:          "generic",
 			Role:          "worker",
 			Subscriptions: []string{"micro.started"},
@@ -3859,7 +3918,7 @@ func TestEnsureStaticFlowRequiredAgentsRegistersStaticFlowSubscriptions(t *testi
 	if err := am.EnsureStaticFlowRequiredAgents(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle)); err != nil {
 		t.Fatalf("EnsureStaticFlowRequiredAgents: %v", err)
 	}
-	cfg, ok := am.GetAgentConfig("analyzer")
+	cfg, ok := testAgentConfig(t, am, "analyzer", "")
 	if !ok {
 		t.Fatal("expected static flow required agent config")
 	}
@@ -3919,7 +3978,7 @@ func TestEnsureStaticFlowRequiredAgentsInfersFromOmittedRequiredAgents(t *testin
 	if err := am.EnsureStaticFlowRequiredAgents(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle)); err != nil {
 		t.Fatalf("EnsureStaticFlowRequiredAgents: %v", err)
 	}
-	cfg, ok := am.GetAgentConfig("analyzer")
+	cfg, ok := testAgentConfig(t, am, "analyzer", "")
 	if !ok {
 		t.Fatal("expected inferred static flow required agent config")
 	}
@@ -3954,6 +4013,16 @@ func TestEnsureStaticAgentsForScopeRegistersRootAndFlowSubscriptions(t *testing.
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		URIRegistry: runtimecontracts.ContractURIRegistry{
+			Agents: map[string]runtimecontracts.ContractURIRef{
+				"test-agent": {
+					Kind: "agent", LocalID: "test-agent", Full: "test://root/test-agent",
+				},
+				"ops-flow/operator": {
+					Kind: "agent", FlowID: "ops-flow", LocalID: "operator", Full: "test://ops-flow/operator",
+				},
+			},
+		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Version: "v-test",
 			FlowPrefix: map[string]string{
@@ -3987,7 +4056,7 @@ func TestEnsureStaticAgentsForScopeRegistersRootAndFlowSubscriptions(t *testing.
 		t.Fatalf("ensureStaticAgentsForScope(flow): %v", err)
 	}
 
-	rootCfg, ok := am.GetAgentConfig("test-agent")
+	rootCfg, ok := testAgentConfig(t, am, "test-agent", "")
 	if !ok {
 		t.Fatal("expected root static agent config")
 	}
@@ -3995,7 +4064,7 @@ func TestEnsureStaticAgentsForScopeRegistersRootAndFlowSubscriptions(t *testing.
 		t.Fatalf("root subscriptions = %#v, want [task.assigned]", rootCfg.Subscriptions)
 	}
 
-	flowCfg, ok := am.GetAgentConfig("operator")
+	flowCfg, ok := testAgentConfig(t, am, "operator", "")
 	if !ok {
 		t.Fatal("expected flow static agent config")
 	}
@@ -4214,7 +4283,7 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 		"review/inst-1",
 		"reviewer",
 		runtimecontracts.AgentRegistryEntry{
-			ID:              "reviewer-{instance_id}",
+			ID:              "reviewer",
 			Type:            "generic",
 			Role:            "reviewer",
 			Tools:           []string{"schedule", "check_status"},
@@ -4349,7 +4418,7 @@ worker:
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "template_support", "agents.yaml"), `
 worker:
-  id: worker-{instance_id}
+  id: worker
   model: regular
   subscriptions:
     - template_support.requested

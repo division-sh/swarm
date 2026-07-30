@@ -28,7 +28,7 @@ func (r *ClaudeCLIRuntime) persistConversation(ctx context.Context, s *Session) 
 	if err := r.conversations.UpsertConversation(ctx, record); err != nil {
 		logPublisherRuntime(ctx, r.events, "error", "persist_cli_conversation_failed", "Persisting the CLI conversation failed", s.AgentID, s.ID, "", map[string]any{
 			"run_id":        record.Identity.RunID,
-			"flow_instance": record.Identity.FlowInstance,
+			"flow_instance": record.Identity.FlowInstance(),
 		}, err)
 	}
 }

@@ -589,13 +589,14 @@ func TestValidateCLIResponseToolCallsForTurn_FailsClosedForNonEmitToolOutsideObs
 }
 
 func TestValidateCLIResponseToolCallsForTurn_ManagedTurnRejectsMissingCapabilitySurface(t *testing.T) {
-	actor := models.AgentConfig{ID: "market-research-agent"}
+	identity := testMemoryIdentity("market-research-agent", "market/instance-1").Agent
+	actor := models.AgentConfig{ID: "market-research-agent", Identity: identity, FlowPath: identity.FlowInstance()}
 	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "runtime-owner", 1, "", "actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
 	if err != nil {
 		t.Fatalf("build managed execution admission: %v", err)
 	}
 	ctx := managedexecution.WithAdmission(context.Background(), admission)
-	ctx = runtimeeffects.WithLifecycleToken(ctx, runtimeeffects.LifecycleToken{RuntimeEpoch: 1, AgentID: actor.ID, Generation: 1})
+	ctx = runtimeeffects.WithLifecycleToken(ctx, runtimeeffects.LifecycleToken{Identity: identity, RuntimeEpoch: 1, AgentID: actor.ID, Generation: 1})
 	err = validateCLIResponseToolCallsForTurn(ctx, actor, []ToolDefinition{{Name: "query_entities"}}, &Response{
 		ToolCalls: []ToolCall{{Name: "query_entities"}},
 	})

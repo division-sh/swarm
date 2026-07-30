@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -41,7 +42,7 @@ type DirectiveOperation struct {
 	ActorTokenID            string
 	IdempotencyKey          string
 	RequestHash             string
-	AgentID                 string
+	AgentIdentity           runtimeagentidentity.Identity
 	Directive               string
 	RequestedRunID          string
 	ResolvedRunID           string
@@ -68,7 +69,7 @@ func (o DirectiveOperation) Normalized() DirectiveOperation {
 	o.ActorTokenID = strings.TrimSpace(o.ActorTokenID)
 	o.IdempotencyKey = strings.TrimSpace(o.IdempotencyKey)
 	o.RequestHash = strings.TrimSpace(o.RequestHash)
-	o.AgentID = strings.TrimSpace(o.AgentID)
+	o.AgentIdentity = o.AgentIdentity.Normalize()
 	o.Directive = strings.TrimSpace(o.Directive)
 	o.RequestedRunID = strings.TrimSpace(o.RequestedRunID)
 	o.ResolvedRunID = strings.TrimSpace(o.ResolvedRunID)
@@ -81,8 +82,19 @@ func (o DirectiveOperation) Normalized() DirectiveOperation {
 	return o
 }
 
+func (o DirectiveOperation) AgentID() string {
+	return o.AgentIdentity.AgentID()
+}
+
+func (o DirectiveOperation) FlowInstance() string {
+	return o.AgentIdentity.FlowInstance()
+}
+
 func ValidateDirectiveOperationEvidence(op DirectiveOperation) error {
 	op = op.Normalized()
+	if err := op.AgentIdentity.Validate(); err != nil {
+		return fmt.Errorf("directive operation agent identity is invalid: %w", err)
+	}
 	hasResponse := len(bytes.TrimSpace(op.Response)) > 0
 	hasFailure := op.Failure != nil
 	wantsResponse := op.State == DirectiveOperationExecuted || op.State == DirectiveOperationSucceeded

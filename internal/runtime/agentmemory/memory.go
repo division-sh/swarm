@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 )
 
 func Authored(enabled bool) Plan {
@@ -60,35 +62,43 @@ func ValidateFlowOwnership(plan Plan, flowInstance string) error {
 }
 
 type Identity struct {
-	RunID        string `json:"run_id"`
-	AgentID      string `json:"agent_id"`
-	FlowInstance string `json:"flow_instance"`
+	RunID string                 `json:"run_id"`
+	Agent agentidentity.Identity `json:"agent"`
 }
 
 func (i Identity) Normalize() Identity {
 	i.RunID = strings.TrimSpace(i.RunID)
-	i.AgentID = strings.TrimSpace(i.AgentID)
-	i.FlowInstance = strings.Trim(strings.TrimSpace(i.FlowInstance), "/")
+	i.Agent = i.Agent.Normalize()
 	return i
 }
 
 func (i Identity) Validate() error {
-	i = i.Normalize()
-	if i.RunID == "" {
-		return fmt.Errorf("agent memory run_id is required")
+	if err := i.ValidateOwner(); err != nil {
+		return err
 	}
-	if i.AgentID == "" {
-		return fmt.Errorf("agent memory agent_id is required")
-	}
-	if i.FlowInstance == "" {
+	if i.Normalize().Agent.Route.Presence != agentidentity.RoutePresent {
 		return fmt.Errorf("agent memory flow_instance is required")
 	}
 	return nil
 }
 
-func (i Identity) Key() string {
+func (i Identity) ValidateOwner() error {
 	i = i.Normalize()
-	return i.RunID + "\x00" + i.AgentID + "\x00" + i.FlowInstance
+	if i.RunID == "" {
+		return fmt.Errorf("agent memory run_id is required")
+	}
+	if err := i.Agent.Validate(); err != nil {
+		return fmt.Errorf("agent memory identity: %w", err)
+	}
+	return nil
+}
+
+func (i Identity) AgentID() string {
+	return i.Normalize().Agent.AgentID()
+}
+
+func (i Identity) FlowInstance() string {
+	return i.Normalize().Agent.FlowInstance()
 }
 
 type executionContextKey struct{}

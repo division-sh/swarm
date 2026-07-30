@@ -131,10 +131,10 @@ func LogSessionRotated(identity agentmemory.Identity, oldSessionID, newSessionID
 	identity = identity.Normalize()
 	reason = snippetForLog(reason, 180)
 	diaglog.ProcessLog("info", "llm-runtime", "session rotated",
-		"agent_id", identity.AgentID,
+		"agent_id", identity.AgentID(),
 		"memory_enabled", true,
 		"run_id", identity.RunID,
-		"flow_instance", identity.FlowInstance,
+		"flow_instance", identity.FlowInstance(),
 		"reason", reason,
 		"old_session_id", strings.TrimSpace(oldSessionID),
 		"new_session_id", strings.TrimSpace(newSessionID),
@@ -146,10 +146,10 @@ func LogSessionRotated(identity agentmemory.Identity, oldSessionID, newSessionID
 func LogSessionAdopted(identity agentmemory.Identity, oldSessionID, newSessionID string) {
 	identity = identity.Normalize()
 	diaglog.ProcessLog("info", "llm-runtime", "session adopted",
-		"agent_id", identity.AgentID,
+		"agent_id", identity.AgentID(),
 		"memory_enabled", true,
 		"run_id", identity.RunID,
-		"flow_instance", identity.FlowInstance,
+		"flow_instance", identity.FlowInstance(),
 		"old_session_id", strings.TrimSpace(oldSessionID),
 		"new_session_id", strings.TrimSpace(newSessionID),
 	)

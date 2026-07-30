@@ -24,9 +24,9 @@ func (s *PostgresStore) ListActiveAgentDescriptors(ctx context.Context) ([]runti
 	}
 	query := `
 		SELECT
-			agent_id,
-			COALESCE(entity_id::text, ''),
-			COALESCE(flow_instance, '')
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance,
+			COALESCE(entity_id::text, '')
 		FROM agents
 		WHERE COALESCE(status, '') <> 'terminated'
 		ORDER BY agent_id ASC
@@ -48,12 +48,15 @@ func (s *PostgresStore) ListActiveAgentDescriptors(ctx context.Context) ([]runti
 	out := make([]runtimebus.ActiveAgentDescriptor, 0, 64)
 	for rows.Next() {
 		var descriptor runtimebus.ActiveAgentDescriptor
-		if err := rows.Scan(&descriptor.AgentID, &descriptor.EntityID, &descriptor.FlowInstance); err != nil {
+		var agentID, nameOwner, nameSource, routePresence, flowScopeKey, flowInstanceID, flowInstance string
+		if err := rows.Scan(&agentID, &nameOwner, &nameSource, &routePresence, &flowScopeKey, &flowInstanceID, &flowInstance, &descriptor.EntityID); err != nil {
 			return nil, err
 		}
-		if descriptor.AgentID != "" {
-			out = append(out, descriptor.Normalized())
+		descriptor.Identity, err = agentIdentityFromColumns(agentID, nameOwner, nameSource, routePresence, flowScopeKey, flowInstanceID, flowInstance)
+		if err != nil {
+			return nil, fmt.Errorf("decode active agent descriptor: %w", err)
 		}
+		out = append(out, descriptor.Normalized())
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -72,7 +75,8 @@ func (s *SQLiteRuntimeStore) ListActiveAgentDescriptors(ctx context.Context) ([]
 		q = tx
 	}
 	rows, err := q.QueryContext(ctx, `
-		SELECT agent_id, COALESCE(entity_id, ''), COALESCE(flow_instance, '')
+		SELECT agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+		       flow_scope_key, flow_instance_id, flow_instance, COALESCE(entity_id, '')
 		FROM agents
 		WHERE COALESCE(status, '') <> 'terminated'
 		ORDER BY agent_id ASC
@@ -84,12 +88,15 @@ func (s *SQLiteRuntimeStore) ListActiveAgentDescriptors(ctx context.Context) ([]
 	out := make([]runtimebus.ActiveAgentDescriptor, 0, 64)
 	for rows.Next() {
 		var descriptor runtimebus.ActiveAgentDescriptor
-		if err := rows.Scan(&descriptor.AgentID, &descriptor.EntityID, &descriptor.FlowInstance); err != nil {
+		var agentID, nameOwner, nameSource, routePresence, flowScopeKey, flowInstanceID, flowInstance string
+		if err := rows.Scan(&agentID, &nameOwner, &nameSource, &routePresence, &flowScopeKey, &flowInstanceID, &flowInstance, &descriptor.EntityID); err != nil {
 			return nil, err
 		}
-		if descriptor.AgentID != "" {
-			out = append(out, descriptor.Normalized())
+		descriptor.Identity, err = agentIdentityFromColumns(agentID, nameOwner, nameSource, routePresence, flowScopeKey, flowInstanceID, flowInstance)
+		if err != nil {
+			return nil, fmt.Errorf("decode sqlite active agent descriptor: %w", err)
 		}
+		out = append(out, descriptor.Normalized())
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

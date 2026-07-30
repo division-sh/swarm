@@ -170,11 +170,11 @@ func (s *WorkflowInstanceStore) insertWorkflowTimerActivation(ctx context.Contex
 		result, err = tx.ExecContext(ctx, `
 			INSERT INTO timers (
 				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-				fire_at, recurring, recurrence_interval, owner_node, owner_agent, task_type,
+				fire_at, recurring, recurrence_interval, owner_node, owner_agent, owner_kind, task_type,
 				status, created_at, source_timer_id, forked_from_run_id, forked_from_event_id,
 				reconstruction_owner
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULL, ?, ?, 'active', ?,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULL, ?, 'system', ?, 'active', ?,
 			        NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))
 			ON CONFLICT(timer_id) DO NOTHING
 		`, activation.Ref.ActivationID, activation.RunID, activation.Ref.TaskID(), activation.EntityID,
@@ -186,12 +186,12 @@ func (s *WorkflowInstanceStore) insertWorkflowTimerActivation(ctx context.Contex
 		result, err = tx.ExecContext(ctx, `
 			INSERT INTO timers (
 				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-				fire_at, recurring, recurrence_interval, owner_node, owner_agent, task_type,
+				fire_at, recurring, recurrence_interval, owner_node, owner_agent, owner_kind, task_type,
 				status, created_at, source_timer_id, forked_from_run_id, forked_from_event_id,
 				reconstruction_owner
 			)
 			VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7::jsonb, $8, $9, NULLIF($10, ''),
-			        NULL, $11, $12, 'active', $13, NULLIF($14, '')::uuid, NULLIF($15, '')::uuid,
+			        NULL, $11, 'system', $12, 'active', $13, NULLIF($14, '')::uuid, NULLIF($15, '')::uuid,
 			        NULLIF($16, '')::uuid, NULLIF($17, ''))
 			ON CONFLICT(timer_id) DO NOTHING
 		`, activation.Ref.ActivationID, activation.RunID, activation.Ref.TaskID(), activation.EntityID,

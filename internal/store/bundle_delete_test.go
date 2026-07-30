@@ -34,9 +34,12 @@ func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
 
 	ctx := withStoreTestPersistedBundleSource(testAuthorActivityContextForBundle(bundleDeleteTestHash), bundleDeleteTestHash)
 	now := time.Now().UTC().Add(time.Minute)
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source) VALUES ('agent-a', 'bundle-delete', 'operator', 'regular', TRUE, 'authored')`); err != nil {
-		t.Fatalf("seed agent: %v", err)
+	identity := testAgentIdentity(t, "agent-a", "bundle-delete")
+	identityFields, err := identity.StorageFields()
+	if err != nil {
+		t.Fatal(err)
 	}
+	seedTestAgentRow(t, ctx, pg.DB, true, identity, "active")
 	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteTestHash)
 	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteOtherHash)
 
@@ -50,15 +53,19 @@ func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
 	seedBundleDeleteRun(t, ctx, pg, otherRunID, "running", bundleDeleteOtherHash)
 	eventID := seedBundleDeleteDelivery(t, ctx, pg, activeRunID, "agent-a")
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status)
-		VALUES ($1::uuid, $2::uuid, 'agent-a', 'bundle-delete', TRUE, 'authored', 'active')
-	`, sessionID, activeRunID); err != nil {
+			INSERT INTO agent_sessions (
+				session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+				agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+				memory_enabled, memory_source, status
+			) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', 'active')
+		`, sessionID, activeRunID, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource,
+		identityFields.RoutePresence, identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, status)
-		VALUES ($1::uuid, 'bundle-delete-timer', $2::uuid, 'timer.fired', now() + interval '1 hour', 'active')
-	`, timerID, activeRunID); err != nil {
+			INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, owner_kind, status)
+			VALUES ($1::uuid, 'bundle-delete-timer', $2::uuid, 'timer.fired', now() + interval '1 hour', 'system', 'active')
+		`, timerID, activeRunID); err != nil {
 		t.Fatalf("seed timer: %v", err)
 	}
 

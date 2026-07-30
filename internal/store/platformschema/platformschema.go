@@ -189,8 +189,10 @@ func platformTableOrder(name string) int {
 		return 12
 	case "run_fork_fact_revisions":
 		return 13
-	case "agent_directive_operations":
+	case "agents":
 		return 14
+	case "agent_directive_operations":
+		return 15
 	case "reply_contexts":
 		return 15
 	case "activity_attempts":
@@ -211,8 +213,6 @@ func platformTableOrder(name string) int {
 		return 23
 	case "dead_letters":
 		return 24
-	case "agents":
-		return 30
 	case "flow_instances":
 		return 40
 	case "flow_instance_runtime_readiness":

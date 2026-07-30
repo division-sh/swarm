@@ -335,8 +335,8 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		recipients = uniqueStrings(intent.Recipients)
 	}
 	pendingInternalRoutes := d.bus.pendingInternalDeliveryRoutes(intent.Event.ID())
-	if len(recipients) > 0 {
-		deliveryRoutes = events.NormalizeDeliveryRoutes(append(deliveryRoutes, deliveryRoutesFromTargetMap(recipients, "agent", d.bus.deliveryTargetsForEvent(ctx, intent.Event.ID()))...))
+	if len(recipients) > 0 && !deliveryRoutesCoverAgentRecipients(deliveryRoutes, recipients) {
+		return false, runtimepipelineobligation.Continue(), fmt.Errorf("event %s has persisted agent recipients without exact identity-bearing delivery routes", intent.Event.ID())
 	}
 	internalRecipients := deliveryRouteRecipientIDsByType(pendingInternalRoutes, "node")
 	if len(internalRecipients) == 0 {
@@ -356,9 +356,6 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 			return false, runtimepipelineobligation.DeadLetterExecution(string(plan.TargetFailure), targetDeliveryFailureEnvelope(plan.TargetFailure)), nil
 		}
 		return false, runtimepipelineobligation.Continue(), nil
-	}
-	if len(deliveryRoutes) == 0 {
-		deliveryRoutes = deliveryRoutesFromTargetMap(recipients, "agent", d.bus.deliveryTargetsForEvent(ctx, intent.Event.ID()))
 	}
 	if err := d.bus.deliverToRecipientsWithRoutes(ctx, intent.Event, liveRecipients, deliveryRoutes); err != nil {
 		return false, runtimepipelineobligation.Continue(), err

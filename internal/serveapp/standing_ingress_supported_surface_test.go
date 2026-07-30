@@ -206,6 +206,10 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	default:
 		t.Fatalf("unknown standing served parity backend %q", backend)
 	}
+	debugBackend := "postgres"
+	if backend == servedparity.BackendDefaultSQLite {
+		debugBackend = "sqlite"
+	}
 	contextsReady := make(chan *runtimepkg.RuntimeContextManager, 2)
 	opts.TestRuntimeContextsReadyHook = func(manager *runtimepkg.RuntimeContextManager) {
 		contextsReady <- manager
@@ -224,7 +228,9 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	if entity := sendStandingTelegramUpdate(t, strings.TrimSuffix(firstEndpoint, "/v1/rpc"), 9000, 42); entity == "" {
 		t.Fatalf("%s initial standing service returned empty entity", backend)
 	}
-	firstSchedules := waitForServedManagerScheduleProjection(t, firstScheduleResult, backend, "suspend")
+	firstSchedules := waitForServedManagerScheduleProjection(t, firstScheduleResult, backend, "suspend", func() string {
+		return first.outputString() + "\n" + servedEventPublishDebugSummary(t, db, debugBackend, firstRunID)
+	})
 	telegramGate.waitForStart(t, firstRouteStarted, backend, "suspend")
 	suspendKey := "standing-suspend-" + string(backend)
 	suspendOutcome := startServedStandingOperation(firstEndpoint, "standing.suspend", serviceID, suspendKey)
@@ -262,7 +268,9 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	if entity := sendStandingTelegramUpdate(t, strings.TrimSuffix(secondEndpoint, "/v1/rpc"), 9002, 84); entity == "" {
 		t.Fatalf("%s resumed standing service returned empty entity", backend)
 	}
-	resumedSchedules := waitForServedManagerScheduleProjection(t, resumedScheduleResult, backend, "reset")
+	resumedSchedules := waitForServedManagerScheduleProjection(t, resumedScheduleResult, backend, "reset", func() string {
+		return second.outputString() + "\n" + servedEventPublishDebugSummary(t, db, debugBackend, firstRunID)
+	})
 	telegramGate.waitForStart(t, resetRouteStarted, backend, "reset")
 	assertServedStandingState(t, db, string(backend), serviceID, firstRunID, firstGeneration, "active", "running")
 
@@ -299,10 +307,6 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 		t.Fatalf("%s settle reset successor ingress: %v", backend, err)
 	}
 	assertServedStandingState(t, db, string(backend), serviceID, reset.RunID, reset.Generation, "active", "running")
-	debugBackend := "postgres"
-	if backend == servedparity.BackendDefaultSQLite {
-		debugBackend = "sqlite"
-	}
 	debugRun := func(runID string) func() string {
 		return func() string { return servedEventPublishDebugSummary(t, db, debugBackend, runID) }
 	}
@@ -399,8 +403,8 @@ func (p *servedManagerScheduleProjectionProbe) observe(ctx context.Context, _ *r
 		return fail(fmt.Errorf("Manager event execution standing projection = %p/%t, want %p", standing, ok, request.standing))
 	}
 	for _, schedule := range []runtimepipeline.Schedule{
-		{RunID: request.runID, AgentID: "standing-manager-proof", EventType: "standing.manager.proof.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: uuid.NewString()},
-		{RunID: request.runID, AgentID: "standing-manager-proof", EventType: "standing.manager.proof.cron", Mode: "cron", Cron: "@every 1h", TaskID: uuid.NewString()},
+		{RunID: request.runID, OwnerKind: runtimepipeline.ScheduleOwnerSystem, AgentID: "standing-manager-proof", EventType: "standing.manager.proof.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: uuid.NewString()},
+		{RunID: request.runID, OwnerKind: runtimepipeline.ScheduleOwnerSystem, AgentID: "standing-manager-proof", EventType: "standing.manager.proof.cron", Mode: "cron", Cron: "@every 1h", TaskID: uuid.NewString()},
 	} {
 		if err := request.scheduler.Register(ctx, schedule); err != nil {
 			return fail(fmt.Errorf("register Manager-composed served standing %s schedule: %w", schedule.Mode, err))
@@ -411,16 +415,22 @@ func (p *servedManagerScheduleProjectionProbe) observe(ctx context.Context, _ *r
 	return nil
 }
 
-func waitForServedManagerScheduleProjection(t testing.TB, result <-chan servedManagerScheduleProjectionResult, backend servedparity.Backend, operation string) servedStandingScheduleProbe {
+func waitForServedManagerScheduleProjection(
+	t testing.TB,
+	result <-chan servedManagerScheduleProjectionResult,
+	backend servedparity.Backend,
+	operation string,
+	debug func() string,
+) servedStandingScheduleProbe {
 	t.Helper()
 	select {
 	case completed := <-result:
 		if completed.err != nil {
-			t.Fatalf("%s Manager-composed schedule registration before %s: %v", backend, operation, completed.err)
+			t.Fatalf("%s Manager-composed schedule registration before %s: %v\n%s", backend, operation, completed.err, debug())
 		}
 		return completed.probe
 	case <-time.After(5 * time.Second):
-		t.Fatalf("%s timed out waiting for Manager-composed schedule registration before %s", backend, operation)
+		t.Fatalf("%s timed out waiting for Manager-composed schedule registration before %s\n%s", backend, operation, debug())
 		return servedStandingScheduleProbe{}
 	}
 }

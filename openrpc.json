@@ -24,6 +24,14 @@
           }
         },
         {
+          "name": "flow_instance",
+          "required": false,
+          "description": "Exact concrete flow-instance target. A bare agent_id is accepted only when it resolves to one live agent.",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
           "name": "failure_limit",
           "required": false,
           "description": "Max failed-delivery detail rows to return.",
@@ -119,6 +127,14 @@
           "required": true,
           "schema": {
             "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "flow_instance",
+          "required": false,
+          "description": "Exact concrete flow-instance target. A bare agent_id is accepted only when it resolves to one live agent.",
+          "schema": {
+            "type": "string"
           }
         },
         {
@@ -220,6 +236,14 @@
           }
         },
         {
+          "name": "flow_instance",
+          "required": false,
+          "description": "Exact concrete flow-instance target. A bare agent_id is accepted only when it resolves to one live agent.",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
           "name": "queue_limit",
           "required": false,
           "description": "Max pending-delivery detail rows to return. pending_count remains the total pending count for the selected queue, not the page length.",
@@ -296,6 +320,14 @@
           "required": true,
           "schema": {
             "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "flow_instance",
+          "required": false,
+          "description": "Exact concrete flow-instance target. A bare agent_id is accepted only when it resolves to one live agent.",
+          "schema": {
+            "type": "string"
           }
         }
       ],
@@ -400,6 +432,14 @@
         {
           "name": "agent_id",
           "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "flow_instance",
+          "required": false,
+          "description": "Exact concrete flow-instance target. A bare agent_id is accepted only when it resolves to one live agent.",
           "schema": {
             "type": "string"
           }
@@ -796,6 +836,14 @@
           }
         },
         {
+          "name": "flow_instance",
+          "required": false,
+          "description": "Exact concrete flow-instance target. A bare agent_id is accepted only when it resolves to one live agent.",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
           "name": "idempotency_key",
           "required": false,
           "schema": {
@@ -937,6 +985,14 @@
           }
         },
         {
+          "name": "flow_instance",
+          "required": false,
+          "description": "Exact concrete flow-instance target. A bare agent_id is accepted only when it resolves to one live agent.",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
           "name": "idempotency_key",
           "required": false,
           "schema": {
@@ -1060,6 +1116,14 @@
           "required": true,
           "schema": {
             "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "flow_instance",
+          "required": false,
+          "description": "Exact concrete flow-instance target. A bare agent_id is accepted only when it resolves to one live agent.",
+          "schema": {
+            "type": "string"
           }
         },
         {
@@ -1645,6 +1709,14 @@
           "required": true,
           "schema": {
             "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "flow_instance",
+          "required": false,
+          "description": "Exact concrete flow-instance target. A bare agent_id is accepted only when it resolves to one live agent.",
+          "schema": {
+            "type": "string"
           }
         },
         {
@@ -2932,6 +3004,14 @@
           "required": false,
           "schema": {
             "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "flow_instance",
+          "required": false,
+          "description": "Exact concrete flow-instance filter; requires agent_id. A bare agent_id is accepted only when it resolves to one live agent.",
+          "schema": {
+            "type": "string"
           }
         },
         {

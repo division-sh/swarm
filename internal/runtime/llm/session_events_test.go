@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -93,7 +94,7 @@ func (r atomicLiveSessionTestRegistry) AcquireLiveSession(ctx context.Context, i
 	}
 	record := r.hydrated
 	record.SessionID = lease.SessionID
-	record.AgentID = identity.AgentID
+	record.AgentID = identity.AgentID()
 	record.Identity = identity
 	record.Memory = testMemory()
 	record.Status = "active"
@@ -175,7 +176,7 @@ func (s *captureConversationStore) capturedWatchdogUpdate() ConversationWatchdog
 func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	publisher := &eventPublisherStub{}
 	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, publisher)
-	ctx := runtimeactors.WithActor(withTestStatelessMemory(unmanagedLLMTestContext()), runtimeactors.AgentConfig{
+	ctx := runtimeactors.WithActor(withTestStatelessMemory(t, unmanagedLLMTestContext(), "agent-1", ""), runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "agent-1",
 		Model:         "regular",
@@ -226,7 +227,7 @@ func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	publisher := &eventPublisherStub{}
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, publisher)
-	ctx := runtimeactors.WithActor(withTestStatelessMemory(unmanagedLLMTestContext()), runtimeactors.AgentConfig{
+	ctx := runtimeactors.WithActor(withTestStatelessMemory(t, unmanagedLLMTestContext(), "agent-2", ""), runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "agent-2",
 		Model:         "cheap",
@@ -266,7 +267,7 @@ func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 
 func TestClaudeCLIRuntime_StartSessionPreservesBusinessPrompt(t *testing.T) {
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil)
-	ctx := withTestStatelessMemory(unmanagedLLMTestContext())
+	ctx := withTestStatelessMemory(t, unmanagedLLMTestContext(), "agent-2", "")
 
 	s, err := runtime.StartSession(ctx, "agent-2", "base prompt", []ToolDefinition{
 		{Name: "emit_market_research_scan_complete"},
@@ -286,7 +287,7 @@ func TestClaudeCLIRuntime_StartSessionPreservesBusinessPrompt(t *testing.T) {
 func TestAnthropicAPIRuntime_StartSessionPreservesBusinessPrompt(t *testing.T) {
 	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil)
 	ctx := runtimeactors.WithActor(
-		withTestStatelessMemory(unmanagedLLMTestContext()),
+		withTestStatelessMemory(t, unmanagedLLMTestContext(), "agent-3", ""),
 		runtimeactors.AgentConfig{
 			ExecutionMode: "live",
 			ID:            "agent-3",
@@ -414,6 +415,40 @@ func TestEnrichTurnRecord_CarriesInboundFlowInstance(t *testing.T) {
 	}
 	if rec.EntityID != "" {
 		t.Fatalf("entity_id = %q, want empty for flow-only inbound event", rec.EntityID)
+	}
+}
+
+func TestEnrichTurnRecord_RootAgentIdentityRejectsInboundFlowProjection(t *testing.T) {
+	ctx := runtimebus.WithInboundEvent(unmanagedLLMTestContext(), eventtest.RunCreatingRootIngress(
+		"11111111-1111-1111-1111-111111111111",
+		events.EventType("analysis.requested"),
+		"tester",
+		"",
+		nil,
+		0,
+		testMemoryRunID,
+		"",
+		events.EventEnvelope{FlowInstance: "review/inst-1"},
+		time.Now(),
+	))
+	identity := agentmemory.Identity{
+		RunID: testMemoryRunID,
+		Agent: agentidentitytest.RootRuntime(t, "analysis-agent", "llm-root-agent-test"),
+	}
+	rec := enrichTurnRecord(ctx, &Session{
+		ID:             "session-1",
+		Memory:         agentmemory.Authored(false),
+		MemoryIdentity: identity,
+	}, AgentTurnRecord{
+		AgentID:   "analysis-agent",
+		SessionID: "session-1",
+	}, nil)
+
+	if rec.Identity != identity {
+		t.Fatalf("identity = %#v, want %#v", rec.Identity, identity)
+	}
+	if rec.FlowInstance != "" {
+		t.Fatalf("flow_instance = %q, want explicit root absence", rec.FlowInstance)
 	}
 }
 
@@ -609,7 +644,7 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 
 	publisher := &eventPublisherStub{}
 	effects := effecttest.New()
-	effects.Token.AgentID = "agent-1"
+	setEffectHarnessAgent(t, effects, "agent-1", "support/inst-1")
 	runtime := NewAnthropicAPIRuntime(&config.Config{
 		LLM: config.LLMConfig{
 			ClaudeAPI: config.ClaudeAPIConfig{

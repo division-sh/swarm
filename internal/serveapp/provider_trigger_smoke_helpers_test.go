@@ -214,6 +214,7 @@ func seedProviderTriggerSmokeRuntime(
 	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:            agentID,
+			Identity:      servedRuntimeRootIdentity(t, agentID),
 			Role:          "observer",
 			FlowID:        "global",
 			Type:          "stub",

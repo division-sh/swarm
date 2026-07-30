@@ -1,16 +1,39 @@
 package bus
 
 import (
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 var testAgentRouteGeneration atomic.Uint64
+
+func testAgentRouteIdentity(t testing.TB, agentID, flowPath string) agentidentity.Identity {
+	t.Helper()
+	if flowPath == "" {
+		return agentidentitytest.RootRuntime(t, agentID, "bus-test-route")
+	}
+	scopeKey, instanceID := flowPath, flowPath
+	if slash := strings.IndexByte(flowPath, '/'); slash >= 0 {
+		scopeKey, instanceID = flowPath[:slash], flowPath[slash+1:]
+	}
+	return agentidentitytest.Runtime(t, agentID, "bus-test-route", scopeKey, instanceID, flowPath)
+}
+
+func testAgentLifecycleToken(t testing.TB, agentID, flowPath string, epoch int64, generation uint64) runtimeeffects.LifecycleToken {
+	t.Helper()
+	identity := testAgentRouteIdentity(t, agentID, flowPath)
+	return runtimeeffects.LifecycleToken{
+		Identity: identity, RuntimeEpoch: epoch, AgentID: identity.AgentID(), Generation: generation,
+	}
+}
 
 var testAgentRoutes = struct {
 	sync.Mutex
@@ -18,8 +41,8 @@ var testAgentRoutes = struct {
 }{active: map[testAgentRouteKey]*testAgentRoute{}}
 
 type testAgentRouteKey struct {
-	bus     *EventBus
-	agentID string
+	bus      *EventBus
+	identity agentidentity.Identity
 }
 
 type testAgentRoute struct {
@@ -44,9 +67,35 @@ func subscribeTestAgent(t testing.TB, eventBus *EventBus, agentID string, eventT
 func subscribeTestAgentAdmission(t testing.TB, eventBus *EventBus, admission semanticview.FlowOwnedAgentSubscriptionAdmission) <-chan *LocalDelivery {
 	t.Helper()
 	agentID := admission.AgentID()
-	key := testAgentRouteKey{bus: eventBus, agentID: agentID}
+	return subscribeTestAgentAdmissionWithIdentity(
+		t,
+		eventBus,
+		admission,
+		testAgentRouteIdentity(t, agentID, admission.FlowPath()),
+		"",
+	)
+}
+
+func subscribeTestAgentAdmissionWithIdentity(
+	t testing.TB,
+	eventBus *EventBus,
+	admission semanticview.FlowOwnedAgentSubscriptionAdmission,
+	identity agentidentity.Identity,
+	entityID string,
+) <-chan *LocalDelivery {
+	t.Helper()
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		t.Fatalf("validate exact test agent identity: %v", err)
+	}
+	agentID := admission.AgentID()
+	if identity.AgentID() != agentID {
+		t.Fatalf("test agent identity %q does not match admission %q", identity.AgentID(), agentID)
+	}
+	key := testAgentRouteKey{bus: eventBus, identity: identity}
 	retireCurrentTestAgentRoute(key)
 	token := runtimeeffects.LifecycleToken{
+		Identity:     identity,
 		RuntimeEpoch: CurrentRuntimeEpoch(), AgentID: agentID, Generation: testAgentRouteGeneration.Add(1),
 	}
 	source := eventBus.ReplaceAgentRoute(token, admission)
@@ -57,13 +106,35 @@ func subscribeTestAgentAdmission(t testing.TB, eventBus *EventBus, admission sem
 	testAgentRoutes.Lock()
 	testAgentRoutes.active[key] = route
 	testAgentRoutes.Unlock()
+	descriptor := ActiveAgentDescriptor{Identity: identity, EntityID: strings.TrimSpace(entityID)}.Normalized()
+	eventBus.RegisterRuntimeActiveAgentDescriptor(descriptor)
 	t.Cleanup(func() { retireExactTestAgentRoute(key, route) })
+	t.Cleanup(func() {
+		eventBus.mu.Lock()
+		if current, ok := eventBus.runtimeAgentDescriptors[identity]; ok && current == descriptor {
+			delete(eventBus.runtimeAgentDescriptors, identity)
+		}
+		eventBus.mu.Unlock()
+	})
 	return source
 }
 
 func unsubscribeTestAgent(eventBus *EventBus, agentID string) {
-	key := testAgentRouteKey{bus: eventBus, agentID: agentID}
-	retireCurrentTestAgentRoute(key)
+	agentID = strings.TrimSpace(agentID)
+	testAgentRoutes.Lock()
+	matches := make([]testAgentRouteKey, 0, 1)
+	for key := range testAgentRoutes.active {
+		if key.bus == eventBus && key.identity.AgentID() == agentID {
+			matches = append(matches, key)
+		}
+	}
+	testAgentRoutes.Unlock()
+	if len(matches) > 1 {
+		panic("ambiguous test agent route teardown for " + agentID)
+	}
+	if len(matches) == 1 {
+		retireCurrentTestAgentRoute(matches[0])
+	}
 }
 
 func retireCurrentTestAgentRoute(key testAgentRouteKey) {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -37,16 +38,17 @@ type completionRecoveryAuthorityEvidence struct {
 	ActorTokenID  string `json:"actor_token_id"`
 	ExecutionMode string `json:"execution_mode"`
 	UsageTarget   struct {
-		Kind          string `json:"kind"`
-		ID            string `json:"id"`
-		Ordinal       int    `json:"ordinal"`
-		RunID         string `json:"run_id"`
-		AgentID       string `json:"agent_id"`
-		SessionID     string `json:"session_id"`
-		MemoryEnabled bool   `json:"memory_enabled"`
-		MemorySource  string `json:"memory_source"`
-		FlowInstance  string `json:"flow_instance"`
-		EntityID      string `json:"entity_id"`
+		Kind          string                 `json:"kind"`
+		ID            string                 `json:"id"`
+		Ordinal       int                    `json:"ordinal"`
+		RunID         string                 `json:"run_id"`
+		AgentID       string                 `json:"agent_id"`
+		AgentIdentity agentidentity.Identity `json:"agent_identity"`
+		SessionID     string                 `json:"session_id"`
+		MemoryEnabled bool                   `json:"memory_enabled"`
+		MemorySource  string                 `json:"memory_source"`
+		FlowInstance  string                 `json:"flow_instance"`
+		EntityID      string                 `json:"entity_id"`
 	} `json:"usage_target"`
 }
 
@@ -59,7 +61,14 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, now ti
 		FROM runtime_external_effect_operations o
 		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
 		LEFT JOIN managed_agent_capability_surfaces s ON s.surface_id=a.capability_surface_id
-		LEFT JOIN agents g ON o.authority_kind='normal_agent' AND g.agent_id=o.agent_id
+		LEFT JOIN agents g ON o.authority_kind='normal_agent'
+		  AND g.agent_id=o.agent_id
+		  AND g.agent_name_owner=o.agent_name_owner
+		  AND g.agent_name_source=o.agent_name_source
+		  AND g.agent_route_presence=o.agent_route_presence
+		  AND g.flow_scope_key=o.flow_scope_key
+		  AND g.flow_instance_id=o.flow_instance_id
+		  AND g.flow_instance=o.flow_instance
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
 		  AND `+postgresExternalEffectActiveOwnerPredicate+`
@@ -92,7 +101,14 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, now time
 		FROM runtime_external_effect_operations o
 		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
 		LEFT JOIN managed_agent_capability_surfaces s ON s.surface_id=a.capability_surface_id
-		LEFT JOIN agents g ON o.authority_kind='normal_agent' AND g.agent_id=o.agent_id
+		LEFT JOIN agents g ON o.authority_kind='normal_agent'
+		  AND g.agent_id=o.agent_id
+		  AND g.agent_name_owner=o.agent_name_owner
+		  AND g.agent_name_source=o.agent_name_source
+		  AND g.agent_route_presence=o.agent_route_presence
+		  AND g.flow_scope_key=o.flow_scope_key
+		  AND g.flow_instance_id=o.flow_instance_id
+		  AND g.flow_instance=o.flow_instance
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
 		  AND `+sqliteExternalEffectActiveOwnerPredicate+`
@@ -210,7 +226,8 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 	}
 	target := runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetKind(recovered.TargetKind), ID: recovered.TargetID, Ordinal: recovered.TargetOrdinal,
-		RunID: evidence.UsageTarget.RunID, AgentID: evidence.UsageTarget.AgentID, SessionID: evidence.UsageTarget.SessionID,
+		RunID: evidence.UsageTarget.RunID, AgentID: evidence.UsageTarget.AgentID,
+		AgentIdentity: evidence.UsageTarget.AgentIdentity, SessionID: evidence.UsageTarget.SessionID,
 		Memory:       agentmemory.Plan{Enabled: evidence.UsageTarget.MemoryEnabled, Source: agentmemory.Source(evidence.UsageTarget.MemorySource)},
 		FlowInstance: evidence.UsageTarget.FlowInstance, EntityID: evidence.UsageTarget.EntityID,
 	}
@@ -262,9 +279,11 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 		}
 		settlement.AgentTurn = &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: agentID, SessionID: target.SessionID,
-			Memory: target.Memory, FlowInstance: target.FlowInstance, EntityID: target.EntityID,
+			Identity: agentmemory.Identity{RunID: target.RunID, Agent: target.AgentIdentity},
+			Memory:   target.Memory, FlowInstance: target.FlowInstance, EntityID: target.EntityID,
 			CapabilitySurfaceID: surface.ID, CapabilitySurface: json.RawMessage(recovered.CapabilitySurface), Failure: failure,
 		}
+		settlement.Spend.AgentIdentity = target.AgentIdentity
 	}
 	return attempt, settlement, nil
 }

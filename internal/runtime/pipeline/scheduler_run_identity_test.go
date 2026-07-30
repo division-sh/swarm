@@ -17,6 +17,7 @@ func TestSchedulerKeysSchedulesByRunID(t *testing.T) {
 	runB := "22222222-2222-2222-2222-222222222222"
 	base := Schedule{
 		AgentID:      "agent-a",
+		OwnerKind:    ScheduleOwnerSystem,
 		EventType:    "timer.fire",
 		Mode:         "once",
 		At:           time.Now().Add(time.Hour),
@@ -67,7 +68,7 @@ func TestSchedulerBindsTaskToContextualStandingOccurrence(t *testing.T) {
 	}
 	scheduler := NewSchedulerWithWorkOwner(runtimeOwner)
 	requestCtx, cancelRequest := context.WithCancel(worklifetime.WithOccurrence(context.Background(), standing))
-	schedule := Schedule{AgentID: "agent-a", EventType: "timer.fire", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "standing-owner"}
+	schedule := Schedule{AgentID: "agent-a", OwnerKind: ScheduleOwnerSystem, EventType: "timer.fire", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "standing-owner"}
 	if err := scheduler.Register(requestCtx, schedule); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -142,8 +143,8 @@ func TestSchedulerParksDirectAndManagerComposedStandingSchedules(t *testing.T) {
 			}
 			scheduler := NewSchedulerWithWorkOwner(runtimeOwner)
 			schedules := []Schedule{
-				{RunID: uuid.NewString(), AgentID: "agent-a", EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: uuid.NewString()},
-				{RunID: uuid.NewString(), AgentID: "agent-a", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: uuid.NewString()},
+				{RunID: uuid.NewString(), AgentID: "agent-a", OwnerKind: ScheduleOwnerSystem, EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: uuid.NewString()},
+				{RunID: uuid.NewString(), AgentID: "agent-a", OwnerKind: ScheduleOwnerSystem, EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: uuid.NewString()},
 			}
 			ctx := worklifetime.WithOccurrence(context.Background(), owner)
 			registered := make([]*scheduledTask, 0, len(schedules))
@@ -299,7 +300,7 @@ func TestSchedulerParkRestoreLinearizesFiringOnceAndCron(t *testing.T) {
 				})
 				schedule := Schedule{
 					RunID: uuid.NewString(), AgentID: "agent-a", EventType: "timer." + mode,
-					Mode: mode, TaskID: uuid.NewString(),
+					OwnerKind: ScheduleOwnerSystem, Mode: mode, TaskID: uuid.NewString(),
 				}
 				if mode == "once" {
 					schedule.At = time.Now()
@@ -412,7 +413,7 @@ func TestSchedulerPrunesCompletedOneShotHistory(t *testing.T) {
 	scheduler := NewSchedulerWithWorkOwner(pipelineTestWorkOwner(t))
 	for i := 0; i < 100; i++ {
 		if err := scheduler.Register(context.Background(), Schedule{
-			AgentID: "agent-a", EventType: "timer.fire", Mode: "once", At: time.Now(), TaskID: uuid.NewString(),
+			AgentID: "agent-a", OwnerKind: ScheduleOwnerSystem, EventType: "timer.fire", Mode: "once", At: time.Now(), TaskID: uuid.NewString(),
 		}); err != nil {
 			t.Fatalf("Register(%d): %v", i, err)
 		}
@@ -437,6 +438,7 @@ func TestSchedulerOneShotPreservesReplyContextToFire(t *testing.T) {
 	if err := scheduler.Register(context.Background(), Schedule{
 		Context:   events.DeliveryContext{Reply: &events.ReplyContextRef{ID: want}},
 		AgentID:   "provider-agent",
+		OwnerKind: ScheduleOwnerSystem,
 		EventType: "provider.resume",
 		Mode:      "once",
 		At:        time.Now().Add(10 * time.Millisecond),

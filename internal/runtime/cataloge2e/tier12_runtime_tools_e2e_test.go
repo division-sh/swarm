@@ -23,9 +23,9 @@ func TestTier12RuntimeTools_FlowDataAccessFixture(t *testing.T) {
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier12-runtime-tools", "test-flow-data-access")
 
 	h := newRuntimeHarness(t, fixtureRoot, true)
-	cfg, ok := h.rt.Manager.GetAgentConfig("reference-agent")
-	if !ok {
-		t.Fatal("reference-agent config was not registered")
+	cfg, err := h.rt.Manager.ResolveAgentConfig("reference-agent", "support")
+	if err != nil {
+		t.Fatalf("resolve reference-agent config: %v", err)
 	}
 	if cfg.FlowPath != "support" {
 		t.Fatalf("flow path = %q, want support", cfg.FlowPath)

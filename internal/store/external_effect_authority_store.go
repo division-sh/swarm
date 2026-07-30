@@ -23,9 +23,20 @@ func externalEffectAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer
 	}
 	switch authority.Kind {
 	case runtimeeffects.AuthorityNormalAgent:
+		fields, err := agentIdentityFields(authority.Normal.Identity)
+		if err != nil {
+			return false, err
+		}
 		var epoch, generation int64
 		var phase string
-		err := q.QueryRowContext(ctx, `SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase FROM agents WHERE agent_id=$1`, authority.Normal.AgentID).Scan(&epoch, &generation, &phase)
+		err = q.QueryRowContext(ctx, `
+			SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase
+			FROM agents
+			WHERE agent_id=$1 AND agent_name_owner=$2 AND agent_name_source=$3
+			  AND agent_route_presence=$4 AND flow_scope_key=$5
+			  AND flow_instance_id=$6 AND flow_instance=$7
+		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&epoch, &generation, &phase)
 		if err == sql.ErrNoRows {
 			return false, nil
 		}
@@ -65,9 +76,20 @@ func externalEffectAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, 
 	}
 	switch authority.Kind {
 	case runtimeeffects.AuthorityNormalAgent:
+		fields, err := agentIdentityFields(authority.Normal.Identity)
+		if err != nil {
+			return false, err
+		}
 		var epoch, generation int64
 		var phase string
-		err := q.QueryRowContext(ctx, `SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase FROM agents WHERE agent_id=?`, authority.Normal.AgentID).Scan(&epoch, &generation, &phase)
+		err = q.QueryRowContext(ctx, `
+			SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase
+			FROM agents
+			WHERE agent_id=? AND agent_name_owner=? AND agent_name_source=?
+			  AND agent_route_presence=? AND flow_scope_key=?
+			  AND flow_instance_id=? AND flow_instance=?
+		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&epoch, &generation, &phase)
 		if err == sql.ErrNoRows {
 			return false, nil
 		}
@@ -200,10 +222,19 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 	var err error
 	switch authority.Kind {
 	case runtimeeffects.AuthorityNormalAgent:
+		fields, fieldsErr := agentIdentityFields(authority.Normal.Identity)
+		if fieldsErr != nil {
+			return fieldsErr
+		}
 		res, err = tx.ExecContext(ctx, `
 			UPDATE agents SET lifecycle_generation=lifecycle_generation
-			WHERE agent_id=$1 AND lifecycle_runtime_epoch=$2 AND lifecycle_generation=$3 AND lifecycle_phase='running'
-		`, authority.Normal.AgentID, authority.Normal.RuntimeEpoch, authority.Normal.Generation)
+			WHERE agent_id=$1 AND agent_name_owner=$2 AND agent_name_source=$3
+			  AND agent_route_presence=$4 AND flow_scope_key=$5
+			  AND flow_instance_id=$6 AND flow_instance=$7
+			  AND lifecycle_runtime_epoch=$8 AND lifecycle_generation=$9 AND lifecycle_phase='running'
+		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+			authority.Normal.RuntimeEpoch, authority.Normal.Generation)
 	case runtimeeffects.AuthoritySelectedContractFork:
 		selected := authority.SelectedFork
 		res, err = tx.ExecContext(ctx, `
@@ -249,10 +280,19 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 	var err error
 	switch authority.Kind {
 	case runtimeeffects.AuthorityNormalAgent:
+		fields, fieldsErr := agentIdentityFields(authority.Normal.Identity)
+		if fieldsErr != nil {
+			return fieldsErr
+		}
 		res, err = tx.ExecContext(ctx, `
 			UPDATE agents SET lifecycle_generation=lifecycle_generation
-			WHERE agent_id=? AND lifecycle_runtime_epoch=? AND lifecycle_generation=? AND lifecycle_phase='running'
-		`, authority.Normal.AgentID, authority.Normal.RuntimeEpoch, authority.Normal.Generation)
+			WHERE agent_id=? AND agent_name_owner=? AND agent_name_source=?
+			  AND agent_route_presence=? AND flow_scope_key=?
+			  AND flow_instance_id=? AND flow_instance=?
+			  AND lifecycle_runtime_epoch=? AND lifecycle_generation=? AND lifecycle_phase='running'
+		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+			authority.Normal.RuntimeEpoch, authority.Normal.Generation)
 	case runtimeeffects.AuthoritySelectedContractFork:
 		selected := authority.SelectedFork
 		res, err = tx.ExecContext(ctx, `

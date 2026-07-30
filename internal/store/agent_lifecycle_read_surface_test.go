@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -62,13 +63,14 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_CoversEveryCurrentStateLa
 		{agentID: "agent-retrying", state: runtimedelivery.StateRetrying, wantState: "retrying", wantLayer: "delivery_retry"},
 		{agentID: "agent-exhausted", state: runtimedelivery.StateExhausted, wantState: "exhausted", wantLayer: "delivery_terminal"},
 	}
-	agentIDs := make([]string, 0, len(cases))
+	identities := make([]agentidentity.Identity, 0, len(cases))
 	for _, tc := range cases {
 		eventID := uuid.NewString()
-		route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: tc.agentID}
+		identity := testAgentIdentity(t, tc.agentID, "lifecycle/"+tc.agentID)
+		route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: tc.agentID, AgentIdentity: identity}
 		event := seedAgentLifecycleEvent(t, ctx, pg, eventID, runID, route, time.Now().UTC())
 		if tc.activeSession != "" {
-			seedAgentLifecycleSession(t, ctx, db, runID, tc.agentID, tc.activeSession)
+			seedAgentLifecycleSession(t, ctx, db, runID, identity, tc.activeSession)
 		}
 		if tc.state != runtimedelivery.StateQueued {
 			claimed, err := pg.ClaimAgentDelivery(ctx, event, route)
@@ -100,15 +102,16 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_CoversEveryCurrentStateLa
 				}
 			}
 		}
-		agentIDs = append(agentIDs, tc.agentID)
+		identities = append(identities, identity)
 	}
 
-	facts, err := pg.ListAgentDeliveryLifecycleFacts(ctx, agentIDs)
+	facts, err := pg.ListAgentDeliveryLifecycleFacts(ctx, identities)
 	if err != nil {
 		t.Fatalf("ListAgentDeliveryLifecycleFacts: %v", err)
 	}
 	for _, tc := range cases {
-		got := facts[tc.agentID]
+		identity := testAgentIdentity(t, tc.agentID, "lifecycle/"+tc.agentID)
+		got := facts[identity]
 		if got.CurrentState != tc.wantState || got.BlockingLayer != tc.wantLayer {
 			t.Errorf("%s lifecycle facts = %#v, want state=%q layer=%q", tc.agentID, got, tc.wantState, tc.wantLayer)
 		}
@@ -132,11 +135,12 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalLiveLifecycl
 
 	activeEventID := uuid.NewString()
 	oldDeadLetterEventID := uuid.NewString()
-	activeRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"}
+	identity := testAgentIdentity(t, "agent-1", "lifecycle/agent-1")
+	activeRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1", AgentIdentity: identity}
 	activeEvent := seedAgentLifecycleEvent(t, ctx, pg, activeEventID, runID, activeRoute, time.Now().UTC())
 	deadLetterEvent := seedAgentLifecycleEvent(t, ctx, pg, oldDeadLetterEventID, runID, activeRoute, time.Now().UTC().Add(-time.Hour))
 	activeSessionID := uuid.NewString()
-	seedAgentLifecycleSession(t, ctx, db, runID, "agent-1", activeSessionID)
+	seedAgentLifecycleSession(t, ctx, db, runID, identity, activeSessionID)
 	deadLetterClaim, err := pg.ClaimAgentDelivery(ctx, deadLetterEvent, activeRoute)
 	if err != nil {
 		t.Fatalf("claim old delivery: %v", err)
@@ -153,14 +157,14 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalLiveLifecycl
 		t.Fatalf("bind active delivery: %v", err)
 	}
 
-	facts, err := pg.ListAgentDeliveryLifecycleFacts(ctx, []string{"agent-1"})
+	facts, err := pg.ListAgentDeliveryLifecycleFacts(ctx, []agentidentity.Identity{identity})
 	if err != nil {
 		t.Fatalf("ListAgentDeliveryLifecycleFacts: %v", err)
 	}
-	if got := facts["agent-1"].CurrentState; got != "active" {
+	if got := facts[identity].CurrentState; got != "active" {
 		t.Fatalf("current_state = %q, want active", got)
 	}
-	if got := facts["agent-1"].BlockingLayer; got != "session_execution" {
+	if got := facts[identity].BlockingLayer; got != "session_execution" {
 		t.Fatalf("blocking_layer = %q, want session_execution", got)
 	}
 }
@@ -180,7 +184,8 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalTerminalLife
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
-	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"}
+	identity := testAgentIdentity(t, "agent-1", "lifecycle/agent-1")
+	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1", AgentIdentity: identity}
 	event := seedAgentLifecycleEvent(t, ctx, pg, eventID, runID, route, time.Now().UTC())
 	claimed, err := pg.ClaimAgentDelivery(ctx, event, route)
 	if err != nil {
@@ -191,14 +196,14 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalTerminalLife
 		t.Fatalf("settle terminal delivery: %v", err)
 	}
 
-	facts, err := pg.ListAgentDeliveryLifecycleFacts(ctx, []string{"agent-1"})
+	facts, err := pg.ListAgentDeliveryLifecycleFacts(ctx, []agentidentity.Identity{identity})
 	if err != nil {
 		t.Fatalf("ListAgentDeliveryLifecycleFacts: %v", err)
 	}
-	if got := facts["agent-1"].CurrentState; got != "exhausted" {
+	if got := facts[identity].CurrentState; got != "exhausted" {
 		t.Fatalf("current_state = %q, want exhausted", got)
 	}
-	if got := facts["agent-1"].BlockingLayer; got != "delivery_terminal" {
+	if got := facts[identity].BlockingLayer; got != "delivery_terminal" {
 		t.Fatalf("blocking_layer = %q, want delivery_terminal", got)
 	}
 }
@@ -219,19 +224,34 @@ func seedAgentLifecycleEvent(t *testing.T, ctx context.Context, pg *PostgresStor
 	return event
 }
 
-func seedAgentLifecycleSession(t *testing.T, ctx context.Context, db *sql.DB, runID, agentID, sessionID string) {
+func seedAgentLifecycleSession(t *testing.T, ctx context.Context, db *sql.DB, runID string, identity agentidentity.Identity, sessionID string) {
 	t.Helper()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model, memory_enabled, memory_source)
-		VALUES ($1, 'worker', 'test', TRUE, 'authored')
-		ON CONFLICT (agent_id) DO NOTHING
-	`, agentID); err != nil {
-		t.Fatalf("seed lifecycle agent %s: %v", agentID, err)
+	fields, err := agentIdentityFields(identity)
+	if err != nil {
+		t.Fatalf("seed lifecycle identity: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, conversation, runtime_state, status)
-		VALUES ($1::uuid, $2::uuid, $3, 'lifecycle/test', TRUE, 'authored', '[]'::jsonb, '{}'::jsonb, 'active')
-	`, sessionID, runID, agentID); err != nil {
+		INSERT INTO agents (
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance,
+			role, model, memory_enabled, memory_source
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'worker', 'test', TRUE, 'authored')
+		ON CONFLICT (
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance
+		) DO NOTHING
+	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
+		t.Fatalf("seed lifecycle agent %s: %v", fields.AgentID, err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source, conversation, runtime_state, status
+		)
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', '[]'::jsonb, '{}'::jsonb, 'active')
+	`, sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
 		t.Fatalf("seed lifecycle session %s: %v", sessionID, err)
 	}
 }

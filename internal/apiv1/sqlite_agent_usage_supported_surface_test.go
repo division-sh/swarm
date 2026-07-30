@@ -10,6 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	storepkg "github.com/division-sh/swarm/internal/store"
@@ -22,15 +24,17 @@ func TestSQLiteAgentUsageOwnerBacksSupportedAPISurface(t *testing.T) {
 	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx)
 	seedSQLiteAgentUsageAgent(t, ctx, sqliteStore, "agent-1")
 	seedSQLiteAgentUsageAgent(t, ctx, sqliteStore, "agent-2")
+	agent1 := sqliteAgentUsageIdentity(t, "agent-1")
+	agent2 := sqliteAgentUsageIdentity(t, "agent-2")
 
 	since := time.Date(2026, 5, 21, 9, 0, 0, 0, time.UTC)
 	until := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
 	for _, rec := range []budgetspend.SpendRecord{
-		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 100, OutputTokens: 25, CostUSD: 0.000675, InvocationType: "anthropic", UsageAccounting: storepkg.AgentUsageAccountingExact, RecordedAt: since},
-		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", Model: "sonnet", ModelAlias: "regular", BackendProfile: "claude_cli", Provider: "claude", Transport: "cli", ResolvedModel: "sonnet", InputTokens: 50, OutputTokens: 10, CostUSD: 0.000300, InvocationType: "claude_cli", UsageAccounting: storepkg.AgentUsageAccountingEstimated, RecordedAt: since.Add(time.Minute)},
-		{ExecutionMode: "mock", FlowInstance: "flow/a", AgentID: "agent-1", Model: "mock-regular", ModelAlias: "regular", BackendProfile: "mock", Provider: "mock", Transport: "in_process", ResolvedModel: "mock-regular", InputTokens: 5, OutputTokens: 2, CostUSD: 0.000025, InvocationType: "mock_python", UsageAccounting: storepkg.AgentUsageAccountingEstimated, RecordedAt: since.Add(2 * time.Minute)},
-		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 7, OutputTokens: 3, CostUSD: 0.000010, InvocationType: "anthropic", UsageAccounting: storepkg.AgentUsageAccountingExact, RecordedAt: until},
-		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-2", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 999, OutputTokens: 999, CostUSD: 1.000000, InvocationType: "anthropic", UsageAccounting: storepkg.AgentUsageAccountingExact, RecordedAt: since.Add(time.Minute)},
+		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", AgentIdentity: agent1, Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 100, OutputTokens: 25, CostUSD: 0.000675, InvocationType: "anthropic", UsageAccounting: storepkg.AgentUsageAccountingExact, RecordedAt: since},
+		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", AgentIdentity: agent1, Model: "sonnet", ModelAlias: "regular", BackendProfile: "claude_cli", Provider: "claude", Transport: "cli", ResolvedModel: "sonnet", InputTokens: 50, OutputTokens: 10, CostUSD: 0.000300, InvocationType: "claude_cli", UsageAccounting: storepkg.AgentUsageAccountingEstimated, RecordedAt: since.Add(time.Minute)},
+		{ExecutionMode: "mock", FlowInstance: "flow/a", AgentID: "agent-1", AgentIdentity: agent1, Model: "mock-regular", ModelAlias: "regular", BackendProfile: "mock", Provider: "mock", Transport: "in_process", ResolvedModel: "mock-regular", InputTokens: 5, OutputTokens: 2, CostUSD: 0.000025, InvocationType: "mock_python", UsageAccounting: storepkg.AgentUsageAccountingEstimated, RecordedAt: since.Add(2 * time.Minute)},
+		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", AgentIdentity: agent1, Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 7, OutputTokens: 3, CostUSD: 0.000010, InvocationType: "anthropic", UsageAccounting: storepkg.AgentUsageAccountingExact, RecordedAt: until},
+		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-2", AgentIdentity: agent2, Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 999, OutputTokens: 999, CostUSD: 1.000000, InvocationType: "anthropic", UsageAccounting: storepkg.AgentUsageAccountingExact, RecordedAt: since.Add(time.Minute)},
 	} {
 		if err := sqliteStore.RecordSpend(ctx, rec); err != nil {
 			t.Fatalf("RecordSpend(%s/%s): %v", rec.AgentID, rec.UsageAccounting, err)
@@ -97,7 +101,11 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity},
 		now.Add(-time.Minute),
 	)
-	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "agent-1"}
+	route := events.DeliveryRoute{
+		SubscriberType: string(runtimedelivery.SubscriberAgent),
+		SubscriberID:   "agent-1",
+		AgentIdentity:  sqliteAgentUsageIdentity(t, "agent-1"),
+	}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, sqliteStore, evt, []events.DeliveryRoute{route}, "subscribed")
 	claimed, err := sqliteStore.ClaimAgentDelivery(ctx, evt, route)
 	if err != nil {
@@ -148,11 +156,13 @@ func seedSQLiteAgentUsageAgent(t *testing.T, ctx context.Context, sqliteStore *s
 	t.Helper()
 	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
+			Identity:      sqliteAgentUsageIdentity(t, agentID),
 			ID:            agentID,
 			Role:          "researcher",
 			Type:          "managed",
 			Model:         "cheap",
 			ExecutionMode: "live",
+			FlowPath:      "flow/a",
 			Config:        json.RawMessage(`{"system_prompt":"usage"}`),
 		},
 		Status:    "active",
@@ -160,4 +170,9 @@ func seedSQLiteAgentUsageAgent(t *testing.T, ctx context.Context, sqliteStore *s
 	}); err != nil {
 		t.Fatalf("UpsertAgent %s: %v", agentID, err)
 	}
+}
+
+func sqliteAgentUsageIdentity(t *testing.T, agentID string) agentidentity.Identity {
+	t.Helper()
+	return agentidentitytest.Runtime(t, agentID, "api-agent-usage-test", "flow", "a", "flow/a")
 }

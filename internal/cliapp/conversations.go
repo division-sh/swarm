@@ -23,15 +23,17 @@ type conversationListCommandOptions struct {
 	output     cliOutputOptions
 	logging    cliLoggingOptions
 
-	agentID string
-	runID   string
-	limit   int
-	cursor  string
+	agentID      string
+	flowInstance string
+	runID        string
+	limit        int
+	cursor       string
 
-	agentIDSet bool
-	runIDSet   bool
-	limitSet   bool
-	cursorSet  bool
+	agentIDSet      bool
+	flowInstanceSet bool
+	runIDSet        bool
+	limitSet        bool
+	cursorSet       bool
 }
 
 type conversationViewCommandOptions struct {
@@ -174,6 +176,7 @@ func newConversationsListCommand(opts rootCommandOptions) *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			listOpts.agentIDSet = cmd.Flags().Changed("agent-id")
+			listOpts.flowInstanceSet = cmd.Flags().Changed("flow-instance")
 			listOpts.runIDSet = cmd.Flags().Changed("run-id")
 			listOpts.limitSet = cmd.Flags().Changed("limit")
 			listOpts.cursorSet = cmd.Flags().Changed("cursor")
@@ -187,6 +190,7 @@ func newConversationsListCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&listOpts.agentID, "agent-id", "", "Filter by agent id")
+	cmd.Flags().StringVar(&listOpts.flowInstance, "flow-instance", "", "Filter by the exact concrete agent flow instance")
 	cmd.Flags().StringVar(&listOpts.runID, "run-id", "", "Filter by run id")
 	cmd.Flags().IntVar(&listOpts.limit, "limit", 0, "Optional page size, 1-500")
 	cmd.Flags().StringVar(&listOpts.cursor, "cursor", "", "Pagination cursor")
@@ -363,6 +367,16 @@ func (opts conversationListCommandOptions) params() (map[string]any, error) {
 			return nil, err
 		}
 		params["agent_id"] = agentID
+	}
+	if opts.flowInstanceSet {
+		if !opts.agentIDSet {
+			return nil, fmt.Errorf("--flow-instance requires --agent-id")
+		}
+		flowInstance, err := conversationNonEmptyFlag("--flow-instance", opts.flowInstance)
+		if err != nil {
+			return nil, err
+		}
+		params["flow_instance"] = strings.Trim(flowInstance, "/")
 	}
 	if opts.runIDSet {
 		runID, err := conversationNonEmptyFlag("--run-id", opts.runID)

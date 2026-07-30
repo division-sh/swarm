@@ -324,6 +324,7 @@ func selectedContractDynamicTopologyEvidence(frontier store.RunForkContractFront
 				SubscriberID:   strings.TrimSpace(recipient.SubscriberID),
 				Path:           strings.TrimSpace(recipient.Path),
 				RouteSource:    strings.TrimSpace(recipient.RouteSource),
+				AgentIdentity:  recipient.AgentIdentity.Normalize(),
 			})
 		}
 	}

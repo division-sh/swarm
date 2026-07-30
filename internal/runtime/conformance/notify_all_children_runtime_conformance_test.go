@@ -12,20 +12,30 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeagents "github.com/division-sh/swarm/internal/runtime/agents"
+	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -156,6 +166,98 @@ type notifyAllChildrenRuntime struct {
 	workOwner   *worklifetime.RuntimeOccurrence
 }
 
+type notifyAllChildrenRuntimeOptions struct {
+	realMockAgents bool
+	agentGate      *notifyAllChildrenAgentGate
+}
+
+type notifyAllChildrenAgentGate struct {
+	mu      sync.Mutex
+	entries map[string]*notifyAllChildrenAgentGateEntry
+}
+
+type notifyAllChildrenAgentGateEntry struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+type gatedNotifyAllChildrenAgent struct {
+	runtimemanager.Agent
+	flowInstance string
+	gate         *notifyAllChildrenAgentGate
+}
+
+func newNotifyAllChildrenAgentGate() *notifyAllChildrenAgentGate {
+	return &notifyAllChildrenAgentGate{entries: map[string]*notifyAllChildrenAgentGateEntry{}}
+}
+
+func (g *notifyAllChildrenAgentGate) block(flowInstance string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.entries[strings.Trim(strings.TrimSpace(flowInstance), "/")] = &notifyAllChildrenAgentGateEntry{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+}
+
+func (g *notifyAllChildrenAgentGate) wrapFactory(delegate runtimemanager.AgentFactory) runtimemanager.AgentFactory {
+	return func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+		agent, err := delegate(cfg)
+		if err != nil {
+			return nil, err
+		}
+		return &gatedNotifyAllChildrenAgent{
+			Agent:        agent,
+			flowInstance: cfg.Identity.FlowInstance(),
+			gate:         g,
+		}, nil
+	}
+}
+
+func (a *gatedNotifyAllChildrenAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Event, error) {
+	a.gate.mu.Lock()
+	entry := a.gate.entries[a.flowInstance]
+	a.gate.mu.Unlock()
+	if entry != nil {
+		entry.once.Do(func() { close(entry.started) })
+		select {
+		case <-entry.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return a.Agent.OnEvent(ctx, evt)
+}
+
+func (g *notifyAllChildrenAgentGate) waitStarted(t testing.TB, flowInstance string) {
+	t.Helper()
+	g.mu.Lock()
+	entry := g.entries[strings.Trim(strings.TrimSpace(flowInstance), "/")]
+	g.mu.Unlock()
+	if entry == nil {
+		t.Fatalf("no agent gate for %s", flowInstance)
+	}
+	select {
+	case <-entry.started:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("agent at %s did not reach the execution gate", flowInstance)
+	}
+}
+
+func (g *notifyAllChildrenAgentGate) release(flowInstance string) {
+	g.mu.Lock()
+	entry := g.entries[strings.Trim(strings.TrimSpace(flowInstance), "/")]
+	g.mu.Unlock()
+	if entry != nil {
+		select {
+		case <-entry.release:
+		default:
+			close(entry.release)
+		}
+	}
+}
+
 func TestDynamicFlowSourceRevisionConvergesExactAgentSetAndFencesPredecessorsOnBothBackends(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -250,9 +352,9 @@ func proveDynamicFlowSourceRevisionConvergence(
 		t.Fatalf("initial creation completion = %t, want %t", got, autoEmit)
 	}
 	instanceID := descriptor.InstanceID
-	readerID := "account-reader-" + instanceID
-	retiredID := "account-retired-" + instanceID
-	writerID := "account-writer-" + instanceID
+	readerID := "account-reader"
+	retiredID := "account-retired"
+	writerID := "account-writer"
 	v1Agents := loadNotifyAllChildrenAgentsByID(t, ctx, selected)
 	if v1Agents[readerID].Config.Role != "reader-v1" || v1Agents[retiredID].Config.Role != "retired" {
 		t.Fatalf("v1 dynamic agents = %#v", v1Agents)
@@ -292,7 +394,8 @@ func proveDynamicFlowSourceRevisionConvergence(
 		defer mutations.Done()
 		<-start
 		rogue := v1Agents[readerID].Config
-		rogue.ID = "account-rogue-" + instanceID
+		rogue.ID = "account-rogue"
+		rogue.Identity = runtimeagentidentity.Identity{}
 		rogue.Role = "rogue"
 		genericMutationErrs <- runtimeV2.manager.SpawnAgent(rogue)
 	}()
@@ -301,18 +404,24 @@ func proveDynamicFlowSourceRevisionConvergence(
 		<-start
 		generic := v1Agents[readerID].Config
 		generic.Role = "generic-reconfigure"
-		genericMutationErrs <- runtimeV2.manager.ReconfigureAgent(readerID, generic)
+		genericMutationErrs <- runtimeV2.manager.ReconfigureAgentTarget(readerID, descriptor.FlowInstance, generic)
 	}()
 	go func() {
 		defer mutations.Done()
 		<-start
-		genericMutationErrs <- runtimeV2.manager.TeardownAgent(retiredID)
+		genericMutationErrs <- runtimeV2.manager.TeardownAgentTarget(retiredID, descriptor.FlowInstance)
 	}()
 	go func() {
 		defer mutations.Done()
 		<-start
 		rogue := v1Agents[readerID]
-		rogue.Config.ID = "account-raw-rogue-" + instanceID
+		rogue.Config = notifyAllChildrenRuntimeCreatedAgentConfig(
+			t,
+			rogue.Config,
+			"account-raw-rogue",
+			"notify-all-children-conformance.raw-rogue",
+			descriptor.FlowInstance,
+		)
 		rogue.Config.Role = "raw-rogue"
 		rogue.Status = "active"
 		genericMutationErrs <- selected.UpsertAgent(ctx, rogue)
@@ -335,14 +444,14 @@ func proveDynamicFlowSourceRevisionConvergence(
 	}
 
 	v2Agents := loadNotifyAllChildrenAgentsByID(t, ctx, selected)
-	rogueID := "account-rogue-" + instanceID
+	rogueID := "account-rogue"
 	if _, found := v2Agents[rogueID]; found {
 		t.Fatalf("generic hire escaped readiness ownership: %#v", v2Agents[rogueID])
 	}
 	if _, found := v2Agents[retiredID]; found {
 		t.Fatalf("removed agent %s remains active: %#v", retiredID, v2Agents[retiredID])
 	}
-	if _, found := v2Agents["account-raw-rogue-"+instanceID]; found {
+	if _, found := v2Agents["account-raw-rogue"]; found {
 		t.Fatalf("raw upsert escaped readiness ownership: %#v", v2Agents)
 	}
 	reader := v2Agents[readerID]
@@ -352,17 +461,18 @@ func proveDynamicFlowSourceRevisionConvergence(
 	if writer := v2Agents[writerID]; writer.Config.Role != "writer" || writer.LifecycleGeneration == 0 {
 		t.Fatalf("added writer = %#v", writer)
 	}
-	if _, ok := runtimeV2.manager.GetAgentConfig(retiredID); ok {
+	if _, err := runtimeV2.manager.ResolveAgentConfig(retiredID, descriptor.FlowInstance); err == nil {
 		t.Fatalf("removed agent %s remains process-visible", retiredID)
 	}
-	if cfg, ok := runtimeV2.manager.GetAgentConfig(readerID); !ok || cfg.Role != "reader-v2" {
-		t.Fatalf("changed reader process config = %#v found=%t", cfg, ok)
+	if cfg, err := runtimeV2.manager.ResolveAgentConfig(readerID, descriptor.FlowInstance); err != nil || cfg.Role != "reader-v2" {
+		t.Fatalf("changed reader process config = %#v err=%v", cfg, err)
 	}
-	if cfg, ok := runtimeV2.manager.GetAgentConfig(writerID); !ok || cfg.Role != "writer" {
-		t.Fatalf("added writer process config = %#v found=%t", cfg, ok)
+	if cfg, err := runtimeV2.manager.ResolveAgentConfig(writerID, descriptor.FlowInstance); err != nil || cfg.Role != "writer" {
+		t.Fatalf("added writer process config = %#v err=%v", cfg, err)
 	}
 	rogue := v1Agents[readerID].Config
 	rogue.ID = rogueID
+	rogue.Identity = runtimeagentidentity.Identity{}
 	rogue.Role = "rogue"
 	assertNotifyAllChildrenReadinessOwnershipFailure(t, "generic hire", runtimeV2.manager.SpawnAgent(rogue))
 	genericReconfigure := reader.Config
@@ -370,12 +480,12 @@ func proveDynamicFlowSourceRevisionConvergence(
 	assertNotifyAllChildrenReadinessOwnershipFailure(
 		t,
 		"generic reconfigure",
-		runtimeV2.manager.ReconfigureAgent(readerID, genericReconfigure),
+		runtimeV2.manager.ReconfigureAgentTarget(readerID, descriptor.FlowInstance, genericReconfigure),
 	)
 	assertNotifyAllChildrenReadinessOwnershipFailure(
 		t,
 		"generic teardown",
-		runtimeV2.manager.TeardownAgent(writerID),
+		runtimeV2.manager.TeardownAgentTarget(writerID, descriptor.FlowInstance),
 	)
 	recordingStore, ok := selected.(lifecycleTransitionRecordingStore)
 	if !ok {
@@ -396,13 +506,13 @@ func proveDynamicFlowSourceRevisionConvergence(
 	} else {
 		assertNotifyAllChildrenReadinessOwnershipFailure(t, "unauthorized stored-result replay", err)
 	}
-	if err := runtimeV1.manager.ReconfigureAgent(readerID, reader.Config); err == nil {
+	if err := runtimeV1.manager.ReconfigureAgentTarget(readerID, descriptor.FlowInstance, reader.Config); err == nil {
 		t.Fatal("stale predecessor manager republished canonical source-owned successor")
 	} else {
 		assertNotifyAllChildrenReadinessOwnershipFailure(t, "stale predecessor exact replay", err)
 	}
-	if cfg, ok := runtimeV1.manager.GetAgentConfig(readerID); !ok || cfg.Role != "reader-v1" {
-		t.Fatalf("stale predecessor process projection changed after replay rejection: %#v found=%t", cfg, ok)
+	if cfg, err := runtimeV1.manager.ResolveAgentConfig(readerID, descriptor.FlowInstance); err != nil || cfg.Role != "reader-v1" {
+		t.Fatalf("stale predecessor process projection changed after replay rejection: %#v err=%v", cfg, err)
 	}
 	proveNotifyAllChildrenRawAgentTopologyAdmission(
 		t,
@@ -431,10 +541,10 @@ func proveDynamicFlowSourceRevisionConvergence(
 	}
 	staleMutation := v1Agents[readerID].Config
 	staleMutation.Role = "stale-predecessor-write"
-	if err := runtimeV1.manager.ReconfigureAgent(readerID, staleMutation); err == nil {
+	if err := runtimeV1.manager.ReconfigureAgentTarget(readerID, descriptor.FlowInstance, staleMutation); err == nil {
 		t.Fatal("stale predecessor generation mutated after successor convergence")
 	}
-	terminated, found, err := selected.LoadAgentLifecycleState(ctx, retiredID)
+	terminated, found, err := selected.LoadAgentLifecycleState(ctx, v1Agents[retiredID].Config.Identity)
 	if err != nil || !found || terminated.Phase != runtimemanager.AgentLifecycleTerminated {
 		t.Fatalf("removed lifecycle state = %#v found=%t err=%v", terminated, found, err)
 	}
@@ -444,11 +554,11 @@ func proveDynamicFlowSourceRevisionConvergence(
 		t.Fatalf("restart hydration: %v", err)
 	}
 	for _, agentID := range []string{readerID, writerID} {
-		if _, ok := runtimeV3.manager.GetAgentConfig(agentID); !ok {
+		if _, err := runtimeV3.manager.ResolveAgentConfig(agentID, descriptor.FlowInstance); err != nil {
 			t.Fatalf("restart omitted exact active agent %s", agentID)
 		}
 	}
-	if _, ok := runtimeV3.manager.GetAgentConfig(retiredID); ok {
+	if _, err := runtimeV3.manager.ResolveAgentConfig(retiredID, descriptor.FlowInstance); err == nil {
 		t.Fatalf("restart resurrected removed agent %s", retiredID)
 	}
 
@@ -491,7 +601,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	}
 	if _, err := selected.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "restart", RequestHash: "stale-predecessor-restart",
-		AgentID: retiredID, Trigger: "restart",
+		Identity: terminated.Identity, AgentID: retiredID, Trigger: "restart",
 		ExpectedEpoch: terminated.RuntimeEpoch, ExpectedGeneration: terminated.Generation, ExpectedPhase: terminated.Phase,
 		TargetEpoch: terminated.RuntimeEpoch, TargetGeneration: terminated.Generation + 1,
 		TargetPhase: runtimemanager.AgentLifecycleRegistered, ConfigRevision: terminated.ConfigRevision,
@@ -502,8 +612,8 @@ func proveDynamicFlowSourceRevisionConvergence(
 	if reader := v3Agents[readerID]; reader.Config.Role != "reader-v3" {
 		t.Fatalf("v3 reader = %#v", reader)
 	}
-	if cfg, ok := runtimeV4.manager.GetAgentConfig(retiredID); !ok || cfg.Role != "returned" {
-		t.Fatalf("reintroduced process config = %#v found=%t", cfg, ok)
+	if cfg, err := runtimeV4.manager.ResolveAgentConfig(retiredID, descriptor.FlowInstance); err != nil || cfg.Role != "returned" {
+		t.Fatalf("reintroduced process config = %#v err=%v", cfg, err)
 	}
 	if _, err := selected.CommitAgentLifecycleTransition(ctx, canonicalReconfigure); err == nil {
 		t.Fatal("stale authorized replay survived readiness-plan revision")
@@ -516,7 +626,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 		t.Fatalf("reintroduced restart hydration: %v", err)
 	}
 	for _, agentID := range []string{readerID, writerID, retiredID} {
-		if _, ok := runtimeV5.manager.GetAgentConfig(agentID); !ok {
+		if _, err := runtimeV5.manager.ResolveAgentConfig(agentID, descriptor.FlowInstance); err != nil {
 			t.Fatalf("reintroduced restart omitted active agent %s", agentID)
 		}
 	}
@@ -527,6 +637,35 @@ func assertNotifyAllChildrenReadinessOwnershipFailure(t *testing.T, action strin
 	if err == nil || !strings.Contains(err.Error(), "dynamic_agent_topology_owned_by_readiness") {
 		t.Fatalf("%s error = %v, want dynamic readiness ownership rejection", action, err)
 	}
+}
+
+func notifyAllChildrenRuntimeCreatedAgentConfig(
+	t testing.TB,
+	cfg runtimeactors.AgentConfig,
+	agentID string,
+	owner string,
+	flowInstance string,
+) runtimeactors.AgentConfig {
+	t.Helper()
+	name, err := runtimeagentidentity.RuntimeName(agentID, owner)
+	if err != nil {
+		t.Fatalf("runtime-created agent name: %v", err)
+	}
+	route := runtimeagentidentity.RootRoute()
+	if strings.Trim(strings.TrimSpace(flowInstance), "/") != "" {
+		route, err = runtimeflowidentity.StoredRoute("", "", flowInstance).AgentIdentityRoute()
+		if err != nil {
+			t.Fatalf("runtime-created agent route: %v", err)
+		}
+	}
+	identity, err := runtimeagentidentity.New(name, route)
+	if err != nil {
+		t.Fatalf("runtime-created agent identity: %v", err)
+	}
+	cfg.ID = agentID
+	cfg.Identity = identity
+	cfg.FlowPath = identity.FlowInstance()
+	return cfg
 }
 
 type notifyAllChildrenTopologySnapshot struct {
@@ -548,10 +687,15 @@ func proveNotifyAllChildrenRawAgentTopologyAdmission(
 ) {
 	t.Helper()
 	outside := reader
-	outside.Config.ID = "outside-agent-" + instanceID
+	outside.Config = notifyAllChildrenRuntimeCreatedAgentConfig(
+		t,
+		outside.Config,
+		"outside-agent-"+instanceID,
+		"notify-all-children-conformance.outside",
+		"outside/"+instanceID,
+	)
 	outside.Config.Role = "outside"
 	outside.Config.FlowID = ""
-	outside.Config.FlowPath = "outside/" + instanceID
 	outside.Config.Subscriptions = nil
 	outside.Config.EmitEvents = nil
 	outside.Status = "active"
@@ -561,7 +705,13 @@ func proveNotifyAllChildrenRawAgentTopologyAdmission(
 	before := snapshotNotifyAllChildrenTopology(t, ctx, selected, runtime, runID, descriptor)
 
 	rawAdd := reader
-	rawAdd.Config.ID = "raw-add-" + instanceID
+	rawAdd.Config = notifyAllChildrenRuntimeCreatedAgentConfig(
+		t,
+		rawAdd.Config,
+		"raw-add-"+instanceID,
+		"notify-all-children-conformance.raw-add",
+		descriptor.FlowInstance,
+	)
 	rawAdd.Config.Role = "raw-add"
 	rawAdd.Status = "active"
 	configRewrite := reader
@@ -571,7 +721,13 @@ func proveNotifyAllChildrenRawAgentTopologyAdmission(
 	moveOut.Config.FlowPath = ""
 	moveOut.Status = "active"
 	moveIn := outside
-	moveIn.Config.FlowPath = descriptor.FlowInstance
+	moveIn.Config = notifyAllChildrenRuntimeCreatedAgentConfig(
+		t,
+		moveIn.Config,
+		moveIn.Config.ID,
+		"notify-all-children-conformance.move-in",
+		descriptor.FlowInstance,
+	)
 	moveIn.Status = "active"
 	activeRewrite := reader
 	activeRewrite.Status = "active"
@@ -580,13 +736,15 @@ func proveNotifyAllChildrenRawAgentTopologyAdmission(
 	terminatedRewrite := reader
 	terminatedRewrite.Status = "terminated"
 
+	if err := selected.UpsertAgent(ctx, moveOut); err == nil {
+		t.Fatal("raw path move escaped concrete identity validation")
+	}
 	for _, tc := range []struct {
 		name string
 		rec  runtimemanager.PersistedAgent
 	}{
 		{name: "raw_add", rec: rawAdd},
 		{name: "declared_config_rewrite", rec: configRewrite},
-		{name: "path_move_out", rec: moveOut},
 		{name: "path_move_in", rec: moveIn},
 		{name: "active_status", rec: activeRewrite},
 		{name: "failed_status", rec: failedRewrite},
@@ -611,7 +769,11 @@ func proveNotifyAllChildrenTerminalTopologyAdmission(
 	agentID string,
 ) {
 	t.Helper()
-	state, found, err := selected.LoadAgentLifecycleState(ctx, agentID)
+	agent, found := loadNotifyAllChildrenAgentsByID(t, ctx, selected)[agentID]
+	if !found {
+		t.Fatalf("load terminal-matrix agent %s", agentID)
+	}
+	state, found, err := selected.LoadAgentLifecycleState(ctx, agent.Config.Identity)
 	if err != nil || !found {
 		t.Fatalf("load terminal-matrix lifecycle state: state=%#v found=%t err=%v", state, found, err)
 	}
@@ -621,7 +783,7 @@ func proveNotifyAllChildrenTerminalTopologyAdmission(
 			_, err := selected.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
 				OperationID: uuid.NewString(), OperationKind: operationKind,
 				RequestHash: "terminal-matrix-" + operationKind + "-" + trigger,
-				AgentID:     agentID, Trigger: trigger,
+				Identity:    state.Identity, AgentID: agentID, Trigger: trigger,
 				ExpectedEpoch: state.RuntimeEpoch, ExpectedGeneration: state.Generation, ExpectedPhase: state.Phase,
 				TargetEpoch: state.RuntimeEpoch + 1, TargetGeneration: state.Generation + 1,
 				TargetPhase: runtimemanager.AgentLifecycleTerminated, ConfigRevision: state.ConfigRevision,
@@ -800,6 +962,103 @@ func TestDynamicFlowTerminalizationAndRouteReplacementRollbackTogetherOnBothBack
 	}
 }
 
+func TestNotifyAllChildrenFixedSlugAgentsCompleteIndependentlyOnBothBackends(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
+	}{
+		{
+			name: "postgres",
+			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				return storetest.AdmitPostgresRuntimeStore(t, db), db
+			},
+		},
+		{
+			name: "sqlite",
+			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
+				backend := storetest.StartSQLiteRuntimeStore(t)
+				return backend, backend.DB
+			},
+		},
+	} {
+		for _, cardinality := range []int{2, 3} {
+			t.Run(fmt.Sprintf("%s/n=%d", tc.name, cardinality), func(t *testing.T) {
+				ctx := testAuthorActivityContext(context.Background())
+				backend, db := tc.setup(t)
+				runID := uuid.NewString()
+				ctx = runtimecorrelation.WithRunID(ctx, runID)
+				source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
+				gate := newNotifyAllChildrenAgentGate()
+				runtime := newNotifyAllChildrenRuntime(
+					t,
+					backend,
+					db,
+					source,
+					time.Now,
+					notifyAllChildrenRuntimeOptions{realMockAgents: true, agentGate: gate},
+				)
+				if err := runtime.manager.Run(managedConformanceExecutionContext(t, ctx, "notify-all-children-fixed-slug")); err != nil {
+					t.Fatalf("run manager: %v", err)
+				}
+
+				publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.opened", map[string]any{
+					"portfolio_id": "portfolio-main",
+				})
+				accountIDs := make([]string, 0, cardinality)
+				for i := 0; i < cardinality; i++ {
+					accountIDs = append(accountIDs, fmt.Sprintf("acct-%d", i+1))
+				}
+				publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.accounts.register.requested", map[string]any{
+					"portfolio_id": "portfolio-main",
+					"account_ids":  accountIDs,
+				})
+
+				descriptors := notifyAllChildrenAccountDescriptors(t, ctx, backend)
+				if len(descriptors) != cardinality {
+					t.Fatalf("active account descriptors = %#v, want %d", descriptors, cardinality)
+				}
+				assertNotifyAllChildrenConcreteAgentSet(t, ctx, backend, descriptors)
+
+				blocked := descriptors[accountIDs[len(accountIDs)-1]].FlowInstance
+				gate.block(blocked)
+				publishNotifyAllChildrenEventAsync(t, ctx, runtime.bus, source, runID, "portfolio.notify.requested", map[string]any{
+					"portfolio_id": "portfolio-main",
+					"command":      "notify-every-account",
+				})
+				gate.waitStarted(t, blocked)
+
+				for _, accountID := range accountIDs[:len(accountIDs)-1] {
+					waitNotifyAllChildrenEntityState(t, ctx, backend, db, descriptors[accountID].FlowInstance, "completed")
+				}
+				if got := loadNotifyAllChildrenEntityState(t, ctx, backend, db, blocked); got != "active" {
+					t.Fatalf("blocked sibling status = %q, want active while another instance is terminal", got)
+				}
+				if _, err := runtime.manager.ResolveAgentConfig("account-worker", blocked); err != nil {
+					t.Fatalf("blocked sibling agent disappeared after another instance terminated: %v", err)
+				}
+				waitNotifyAllChildrenAgentDeliveryStatus(t, ctx, backend, db, runID, blocked, "in_progress")
+
+				gate.release(blocked)
+				waitNotifyAllChildrenBus(t, runtime.bus)
+				for _, accountID := range accountIDs {
+					instancePath := descriptors[accountID].FlowInstance
+					waitNotifyAllChildrenEntityState(t, ctx, backend, db, instancePath, "completed")
+					waitNotifyAllChildrenAgentDeliveryStatus(t, ctx, backend, db, runID, instancePath, "delivered")
+					waitNotifyAllChildrenAgentAbsent(t, runtime.manager, instancePath)
+				}
+				assertNotifyAllChildrenCompletedTurns(t, ctx, backend, db, runID, cardinality)
+				if active, err := backend.LoadAgents(ctx); err != nil {
+					t.Fatalf("LoadAgents after independent terminalization: %v", err)
+				} else if len(active) != 0 {
+					t.Fatalf("active agents after independent terminalization = %#v, want none", active)
+				}
+			})
+		}
+	}
+}
+
 func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndReplayOnBothBackends(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -829,6 +1088,9 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			ctx = runtimecorrelation.WithRunID(ctx, runID)
 			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
 			runtime := newNotifyAllChildrenRuntime(t, backend, db, source, func() time.Time { return fixedEngineNow })
+			if err := runtime.manager.Run(managedConformanceExecutionContext(t, ctx, "notify-all-children-stale-route")); err != nil {
+				t.Fatalf("run manager: %v", err)
+			}
 
 			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime.bus, source, runID, "portfolio.opened", map[string]any{
 				"portfolio_id": "portfolio-main",
@@ -863,6 +1125,10 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				"command":      "ordered-duplicate",
 			})
 			orderedItems := loadNotifyAllChildrenItemEvents(t, ctx, backend, db, runID, orderedNotifyID)
+			if len(orderedItems) != len(orderedMembership) {
+				dumpNotifyAllChildrenRuntimeState(t, ctx, backend, db)
+				t.Logf("notify-all-children runtime diagnostics: %#v", runtime.diagnostics.snapshot())
+			}
 			assertNotifyAllChildrenItemSequence(t, orderedItems, orderedMembership)
 			assertNotifyAllChildrenDistinctItemTimestamps(t, ctx, backend, db, runID, orderedNotifyID, len(orderedMembership))
 			for index, item := range orderedItems {
@@ -871,9 +1137,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 					t.Fatalf("ordered item %d ListEventDeliveryRoutes(%s): %v", index, item.AccountID, err)
 				}
 				want := descriptors[item.AccountID]
-				if len(routes) != 1 || routes[0].Target.FlowInstance != want.FlowInstance || routes[0].Target.EntityID != want.EntityID {
-					t.Fatalf("ordered item %d persisted routes = %#v, want only %s/%s", index, routes, want.FlowInstance, want.EntityID)
-				}
+				assertNotifyAllChildrenExactRoutes(t, routes, want)
 			}
 
 			publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.membership.seeded", map[string]any{
@@ -915,9 +1179,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 					t.Fatalf("ListEventDeliveryRoutes(%s): %v", accountID, err)
 				}
 				want := descriptors[accountID]
-				if len(routes) != 1 || routes[0].Target.FlowInstance != want.FlowInstance || routes[0].Target.EntityID != want.EntityID {
-					t.Fatalf("persisted %s routes = %#v, want only %s/%s", accountID, routes, want.FlowInstance, want.EntityID)
-				}
+				assertNotifyAllChildrenExactRoutes(t, routes, want)
 				assertNotifyAllChildrenMetadata(t, ctx, backend, db, want.FlowInstance, "last_command", "refresh")
 			}
 
@@ -958,9 +1220,10 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				t.Fatalf("release original pipeline obligation: %v", err)
 			}
 			routes, err := backend.ListEventDeliveryRoutes(ctx, originalA)
-			if err != nil || len(routes) != 1 {
-				t.Fatalf("original A persisted routes = %#v err=%v, want one exact route", routes, err)
+			if err != nil {
+				t.Fatalf("original A persisted routes: %v", err)
 			}
+			assertNotifyAllChildrenExactRoutes(t, routes, descriptors["acct-a"])
 			recoveryEvent := eventtest.RuntimeControl(
 				uuid.NewString(), replay.Type(), "workflow-runtime", "", replay.Payload(), replay.ChainDepth()+1,
 				runID, replay.ID(), replay.Envelope(), fixedEngineNow.Add(time.Second),
@@ -977,15 +1240,59 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				t.Fatalf("item event count after replay = %d, want %d; replay must not re-expand current membership", got, eventCountBefore)
 			}
 			routes, err = backend.ListEventDeliveryRoutes(ctx, recoveryEvent.ID())
-			if err != nil || len(routes) != 1 || routes[0].Target.FlowInstance != descriptors["acct-a"].FlowInstance {
-				t.Fatalf("recovered persisted A route = %#v err=%v", routes, err)
+			if err != nil {
+				t.Fatalf("recovered persisted A routes: %v", err)
 			}
+			assertNotifyAllChildrenExactRoutes(t, routes, descriptors["acct-a"])
 		})
 	}
 }
 
-func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, db *sql.DB, source semanticview.Source, engineNow func() time.Time) notifyAllChildrenRuntime {
+func assertNotifyAllChildrenExactRoutes(
+	t testing.TB,
+	routes []events.DeliveryRoute,
+	want runtimebus.ActiveFlowInstanceDescriptor,
+) {
 	t.Helper()
+	if len(routes) != 2 {
+		t.Fatalf("persisted routes = %#v, want exact node and agent routes", routes)
+	}
+	var nodeFound, agentFound bool
+	for _, route := range routes {
+		if route.Target.FlowInstance != want.FlowInstance || route.Target.EntityID != want.EntityID {
+			t.Fatalf("persisted route = %#v, want target %s/%s", route, want.FlowInstance, want.EntityID)
+		}
+		switch route.SubscriberType {
+		case "node":
+			nodeFound = route.SubscriberID == "account-node"
+		case "agent":
+			identity := route.AgentIdentity.Normalize()
+			if err := identity.Validate(); err != nil {
+				t.Fatalf("persisted account-worker identity = %#v: %v", route.AgentIdentity, err)
+			}
+			agentFound = route.SubscriberID == "account-worker" &&
+				identity.AgentID() == "account-worker" &&
+				identity.FlowInstance() == want.FlowInstance
+		}
+	}
+	if !nodeFound || !agentFound {
+		t.Fatalf("persisted routes = %#v, want account-node and exact account-worker", routes)
+	}
+}
+
+func newNotifyAllChildrenRuntime(
+	t *testing.T,
+	backend notifyAllChildrenStore,
+	db *sql.DB,
+	source semanticview.Source,
+	engineNow func() time.Time,
+	options ...notifyAllChildrenRuntimeOptions,
+) notifyAllChildrenRuntime {
+	t.Helper()
+	var opts notifyAllChildrenRuntimeOptions
+	if len(options) > 0 {
+		opts = options[0]
+	}
 	var coordinator *runtimepipeline.PipelineCoordinator
 	var manager *runtimemanager.AgentManager
 	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
@@ -1019,6 +1326,57 @@ func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, d
 			}
 		}
 	}
+	var (
+		agentFactory   runtimemanager.AgentFactory
+		promptResolver runtimecontracts.PromptResolver
+		sessionStore   runtimesessions.Registry
+		llmBackend     string
+	)
+	if opts.realMockAgents {
+		bundle, ok := semanticview.Bundle(source)
+		if !ok || bundle == nil {
+			t.Fatal("notify-all-children mock runtime requires a bundle-backed source")
+		}
+		effectStore, ok := backend.(runtimeeffects.Store)
+		if !ok {
+			t.Fatalf("notify-all-children store %T does not implement completion effect persistence", backend)
+		}
+		conversations, ok := backend.(runtimellm.ConversationPersistence)
+		if !ok {
+			t.Fatalf("notify-all-children store %T does not implement conversation persistence", backend)
+		}
+		cfg := &config.Config{}
+		cfg.LLM.Backend = llmselection.BackendMock
+		cfg.LLM.Session.LockTTL = time.Minute
+		sessionStore = runtimesessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL)
+		modelRuntime := runtimellm.NewMockRuntime(
+			cfg,
+			sessionStore,
+			"notify-all-children-conformance",
+			conversations,
+			eventBus,
+			runtimeeffects.NewCompletionController(effectStore, discardCompletionSpendProjection{}),
+		)
+		authority := runtimeauthority.NewSourceProvider(source)
+		emitRegistry := runtimetools.NewEmitRegistry(source, authority)
+		toolExecutor := runtimetools.NewExecutorWithOptions(eventBus, nil, runtimetools.ExecutorOptions{
+			Config:            cfg,
+			WorkflowSource:    source,
+			ModelRuntime:      modelRuntime,
+			AuthorityProvider: authority,
+			EmitRegistry:      emitRegistry,
+		})
+		promptResolver = runtimecontracts.NewBundlePromptResolver(bundle)
+		agentFactory = runtimeagents.NewLLMAgentFactory(
+			modelRuntime,
+			toolExecutor,
+			runtimeagents.LLMAgentOptions{PromptResolver: promptResolver},
+		)
+		if opts.agentGate != nil {
+			agentFactory = opts.agentGate.wrapFactory(agentFactory)
+		}
+		llmBackend = llmselection.BackendMock
+	}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	switch sqliteStore := backend.(type) {
 	case *store.SQLiteRuntimeStore:
@@ -1026,7 +1384,7 @@ func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, d
 	case *failingNotifyAllChildrenSQLiteStore:
 		workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, sqliteStore)
 	}
-	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, nil, runtimemanager.AgentManagerOptions{
+	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, agentFactory, runtimemanager.AgentManagerOptions{
 		BaseContext:       testAuthorActivityContext(context.Background()),
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
 		WorkflowInstances: workflowStore,
@@ -1034,6 +1392,9 @@ func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, d
 		DeliveryStore:     backend,
 		LifecycleStore:    backend,
 		SemanticSource:    source,
+		PromptResolver:    promptResolver,
+		Sessions:          sessionStore,
+		LLMBackend:        llmBackend,
 	}, backend))
 	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
 	if err != nil {
@@ -1052,12 +1413,13 @@ func newNotifyAllChildrenRuntime(t *testing.T, backend notifyAllChildrenStore, d
 	}
 	diagnosticBus := &fanInBarrierDiagnosticBus{EventBus: eventBus}
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(diagnosticBus, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:            module,
-		InstanceActivator: manager.ActivateFlowInstance,
-		WorkflowStore:     workflowStore,
-		DeliveryStore:     backend,
-		TestEngineEmitNow: engineNow,
-		WorkOwner:         workOwner,
+		Module:              module,
+		InstanceActivator:   manager.ActivateFlowInstance,
+		InstanceDeactivator: manager.DeactivateFlowInstanceModel,
+		WorkflowStore:       workflowStore,
+		DeliveryStore:       backend,
+		TestEngineEmitNow:   engineNow,
+		WorkOwner:           workOwner,
 	})
 	return notifyAllChildrenRuntime{
 		bus: eventBus, diagnostics: diagnosticBus, manager: manager, pipeline: coordinator,
@@ -1080,6 +1442,41 @@ func loadNotifyAllChildrenAgentsByID(
 		out[strings.TrimSpace(agent.Config.ID)] = agent
 	}
 	return out
+}
+
+func assertNotifyAllChildrenConcreteAgentSet(
+	t testing.TB,
+	ctx context.Context,
+	selected notifyAllChildrenStore,
+	descriptors map[string]runtimebus.ActiveFlowInstanceDescriptor,
+) {
+	t.Helper()
+	agents, err := selected.LoadAgents(ctx)
+	if err != nil {
+		t.Fatalf("LoadAgents: %v", err)
+	}
+	remaining := make(map[string]struct{}, len(descriptors))
+	for _, descriptor := range descriptors {
+		remaining[descriptor.FlowInstance] = struct{}{}
+	}
+	var matched int
+	for _, agent := range agents {
+		if agent.Config.ID != "account-worker" {
+			continue
+		}
+		identity, err := agent.Config.ConcreteIdentity()
+		if err != nil {
+			t.Fatalf("account-worker concrete identity: %v", err)
+		}
+		if _, ok := remaining[identity.FlowInstance()]; !ok {
+			t.Fatalf("account-worker has unexpected concrete route %#v", identity)
+		}
+		delete(remaining, identity.FlowInstance())
+		matched++
+	}
+	if matched != len(descriptors) || len(remaining) != 0 {
+		t.Fatalf("fixed-slug concrete agents matched=%d remaining=%v all=%#v", matched, remaining, agents)
+	}
 }
 
 func waitNotifyAllChildrenRuntimeReadiness(
@@ -1107,8 +1504,161 @@ func waitNotifyAllChildrenRuntimeReadiness(
 	return runtimepipeline.DynamicFlowRuntimeReadiness{}
 }
 
+func waitNotifyAllChildrenEntityState(
+	t testing.TB,
+	ctx context.Context,
+	backend notifyAllChildrenStore,
+	db *sql.DB,
+	instancePath string,
+	want string,
+) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := loadNotifyAllChildrenEntityState(t, ctx, backend, db, instancePath); got == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if concrete, ok := t.(*testing.T); ok {
+		dumpNotifyAllChildrenRuntimeState(concrete, ctx, backend, db)
+	}
+	t.Fatalf(
+		"flow instance %s status = %q, want %q",
+		instancePath,
+		loadNotifyAllChildrenEntityState(t, ctx, backend, db, instancePath),
+		want,
+	)
+}
+
+func loadNotifyAllChildrenEntityState(
+	t testing.TB,
+	ctx context.Context,
+	backend notifyAllChildrenStore,
+	db *sql.DB,
+	instancePath string,
+) string {
+	t.Helper()
+	query := `SELECT current_state FROM entity_state WHERE flow_instance = $1`
+	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
+		query = `SELECT current_state FROM entity_state WHERE flow_instance = ?`
+	}
+	var state string
+	if err := db.QueryRowContext(ctx, query, instancePath).Scan(&state); err != nil {
+		t.Fatalf("load entity state %s: %v", instancePath, err)
+	}
+	return strings.TrimSpace(state)
+}
+
+func waitNotifyAllChildrenAgentDeliveryStatus(
+	t testing.TB,
+	ctx context.Context,
+	backend notifyAllChildrenStore,
+	db *sql.DB,
+	runID string,
+	flowInstance string,
+	want string,
+) {
+	t.Helper()
+	query := `
+		SELECT status
+		FROM event_deliveries
+		WHERE run_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = 'account-worker'
+		  AND agent_flow_instance_path = $2
+		ORDER BY created_at DESC, delivery_id DESC
+		LIMIT 1
+	`
+	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
+		query = `
+			SELECT status
+			FROM event_deliveries
+			WHERE run_id = ?
+			  AND subscriber_type = 'agent'
+			  AND subscriber_id = 'account-worker'
+			  AND agent_flow_instance_path = ?
+			ORDER BY created_at DESC, delivery_id DESC
+			LIMIT 1
+		`
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	var (
+		got     string
+		lastErr error
+	)
+	for time.Now().Before(deadline) {
+		lastErr = db.QueryRowContext(ctx, query, runID, flowInstance).Scan(&got)
+		if lastErr == nil && strings.TrimSpace(got) == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf(
+		"account-worker delivery at %s = %q err=%v, want %q",
+		flowInstance,
+		strings.TrimSpace(got),
+		lastErr,
+		want,
+	)
+}
+
+func assertNotifyAllChildrenCompletedTurns(
+	t testing.TB,
+	ctx context.Context,
+	backend notifyAllChildrenStore,
+	db *sql.DB,
+	runID string,
+	wantInstances int,
+) {
+	t.Helper()
+	query := `
+		SELECT COUNT(*), COUNT(DISTINCT flow_instance)
+		FROM agent_turns
+		WHERE run_id = $1::uuid AND agent_id = 'account-worker' AND failure IS NULL
+	`
+	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
+		query = `
+			SELECT COUNT(*), COUNT(DISTINCT flow_instance)
+			FROM agent_turns
+			WHERE run_id = ? AND agent_id = 'account-worker' AND failure IS NULL
+		`
+	}
+	var turns, instances int
+	if err := db.QueryRowContext(ctx, query, runID).Scan(&turns, &instances); err != nil {
+		t.Fatalf("count completed account-worker turns: %v", err)
+	}
+	if turns < wantInstances || instances != wantInstances {
+		t.Fatalf(
+			"completed account-worker turns=%d distinct instances=%d, want at least %d turns across %d instances",
+			turns,
+			instances,
+			wantInstances,
+			wantInstances,
+		)
+	}
+}
+
+func waitNotifyAllChildrenAgentAbsent(
+	t testing.TB,
+	manager *runtimemanager.AgentManager,
+	flowInstance string,
+) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		_, lastErr = manager.ResolveAgentConfig("account-worker", flowInstance)
+		if lastErr != nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("terminated concrete agent %s remains process-visible: %v", flowInstance, lastErr)
+}
+
 func loadNotifyAllChildrenFlowInstanceStatus(
-	t *testing.T,
+	t testing.TB,
 	ctx context.Context,
 	backend notifyAllChildrenStore,
 	db *sql.DB,
@@ -1128,12 +1678,16 @@ func loadNotifyAllChildrenFlowInstanceStatus(
 
 func publishNotifyAllChildrenEvent(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, source semanticview.Source, runID, localEvent string, payload map[string]any) string {
 	t.Helper()
-	return publishNotifyAllChildrenEventClass(t, ctx, eventBus, source, runID, localEvent, payload, false)
+	id := publishNotifyAllChildrenEventClass(t, ctx, eventBus, source, runID, localEvent, payload, false)
+	waitNotifyAllChildrenBus(t, eventBus)
+	return id
 }
 
 func publishNotifyAllChildrenRunCreatingEvent(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, source semanticview.Source, runID, localEvent string, payload map[string]any) string {
 	t.Helper()
-	return publishNotifyAllChildrenEventClass(t, ctx, eventBus, source, runID, localEvent, payload, true)
+	id := publishNotifyAllChildrenEventClass(t, ctx, eventBus, source, runID, localEvent, payload, true)
+	waitNotifyAllChildrenBus(t, eventBus)
+	return id
 }
 
 func publishNotifyAllChildrenEventClass(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, source semanticview.Source, runID, localEvent string, payload map[string]any, runCreating bool) string {
@@ -1156,8 +1710,12 @@ func publishNotifyAllChildrenEventClass(t *testing.T, ctx context.Context, event
 	if err := eventBus.PublishAcknowledged(ctx, evt); err != nil {
 		t.Fatalf("PublishAcknowledged(%s): %v", localEvent, err)
 	}
-	waitNotifyAllChildrenBus(t, eventBus)
 	return id
+}
+
+func publishNotifyAllChildrenEventAsync(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, source semanticview.Source, runID, localEvent string, payload map[string]any) string {
+	t.Helper()
+	return publishNotifyAllChildrenEventClass(t, ctx, eventBus, source, runID, localEvent, payload, false)
 }
 
 func waitNotifyAllChildrenBus(t *testing.T, eventBus *runtimebus.EventBus) {
@@ -1384,8 +1942,8 @@ func dumpNotifyAllChildrenRuntimeState(t *testing.T, ctx context.Context, backen
 	t.Helper()
 	queries := []string{
 		`SELECT event_name, event_id, payload FROM events ORDER BY created_at, event_id`,
-		`SELECT event_id, subscriber_type, subscriber_id, outcome, COALESCE(reason_code, ''), COALESCE(failure, '') FROM event_receipts ORDER BY event_id, subscriber_type, subscriber_id`,
-		`SELECT event_id, subscriber_type, subscriber_id, status, COALESCE(reason_code, ''), COALESCE(failure, ''), COALESCE(delivery_target_route, '') FROM event_deliveries ORDER BY event_id, subscriber_type, subscriber_id`,
+		`SELECT event_id, subscriber_type, subscriber_id, outcome, COALESCE(reason_code, ''), COALESCE(failure::text, '') FROM event_receipts ORDER BY event_id, subscriber_type, subscriber_id`,
+		`SELECT event_id, subscriber_type, subscriber_id, status, COALESCE(reason_code, ''), COALESCE(failure::text, ''), COALESCE(delivery_target_route::text, '') FROM event_deliveries ORDER BY event_id, subscriber_type, subscriber_id`,
 		`SELECT flow_instance, current_state, fields FROM entity_state ORDER BY flow_instance`,
 		`SELECT instance_id, flow_template, status, config FROM flow_instances ORDER BY instance_id`,
 		`SELECT original_event_id, failure FROM dead_letters ORDER BY created_at`,

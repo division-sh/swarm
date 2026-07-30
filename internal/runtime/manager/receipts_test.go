@@ -18,6 +18,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
@@ -81,12 +82,13 @@ func (projectedEmergencyBudgetGuard) IsThrottle(string) bool        { return tru
 func TestProjectedBudgetEmergencySuppressesDeliveryButNotThresholdEvent(t *testing.T) {
 	am := newTestAgentManagerWithOptions(t, &recordingReceiptBus{}, nil, AgentManagerOptions{Budget: projectedEmergencyBudgetGuard{}})
 	registerReceiptTestAgent(t, am, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-a", EntityID: "entity-a"})
+	identity := testAgentIdentity(t, am, "agent-a", "")
 	work := eventtest.RunCreatingRootIngress("evt-work", events.EventType("work.requested"), "source", "", nil, 0, "", "", events.EventEnvelope{}, time.Now())
-	if suppressed, reason := am.shouldSuppressForBudget("agent-a", work); !suppressed || reason != "suppressed by budget emergency guardrail" {
+	if suppressed, reason := am.shouldSuppressForBudget(identity, work); !suppressed || reason != "suppressed by budget emergency guardrail" {
 		t.Fatalf("projected emergency suppression=%v reason=%q", suppressed, reason)
 	}
 	threshold := eventtest.RunCreatingRootIngress("evt-budget", events.EventType("platform.budget_threshold_crossed"), "runtime", "", nil, 0, "", "", events.EventEnvelope{}, time.Now())
-	if suppressed, reason := am.shouldSuppressForBudget("agent-a", threshold); suppressed || reason != "" {
+	if suppressed, reason := am.shouldSuppressForBudget(identity, threshold); suppressed || reason != "" {
 		t.Fatalf("threshold event suppression=%v reason=%q, want exempt", suppressed, reason)
 	}
 }
@@ -237,6 +239,11 @@ func (a panicStubAgent) OnEvent(context.Context, events.Event) ([]events.Event, 
 
 func registerReceiptTestAgent(t *testing.T, am *AgentManager, cfg runtimeactors.AgentConfig) {
 	t.Helper()
+	if strings.TrimSpace(cfg.FlowPath) == "" {
+		cfg.Identity = managerAgentIdentity(cfg.ID)
+	} else {
+		cfg.Identity = managerRuntimeAgentIdentityForFlowPath(cfg.ID, cfg.FlowPath)
+	}
 	if err := am.lifecycle.registerExecution(testAuthorActivityContext(context.Background()), PersistedAgent{Config: cfg, Status: "active", HiredBy: "test"}, false, panicStubAgent{id: cfg.ID}, testManagerSubscriptionAdmission(t, cfg)); err != nil {
 		t.Fatalf("register receipt test agent: %v", err)
 	}
@@ -269,7 +276,7 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 
 	ctx := runtimecorrelation.WithInboundEvent(testAuthorActivityContext(context.Background()), inbound)
 	ctx = runtimecorrelation.WithRunID(ctx, inbound.RunID())
-	am.maybeTripAuthCircuitBreaker(ctx, "agent-a", inbound, testAuthFailure())
+	am.maybeTripAuthCircuitBreaker(ctx, testAgentIdentity(t, am, "agent-a", "review/inst-1"), inbound, testAuthFailure())
 
 	if len(bus.published) != 2 {
 		t.Fatalf("published events = %d, want 2", len(bus.published))
@@ -328,7 +335,7 @@ func TestMaybeTripAuthCircuitBreaker_PreservesCanceledEventLineage(t *testing.T)
 	ctx, cancel := context.WithCancel(ctx)
 	cancel()
 
-	am.maybeTripAuthCircuitBreaker(ctx, "agent-a", inbound, testAuthFailure())
+	am.maybeTripAuthCircuitBreaker(ctx, managerAgentDeliveryRoute("agent-a").AgentIdentity, inbound, testAuthFailure())
 
 	var authEvt events.Event
 	for _, evt := range bus.published {
@@ -439,7 +446,7 @@ func TestMaybeEscalateDeadLetter_PublishesTypedFlowInstanceEnvelope(t *testing.T
 		UpdatedAt:  time.Now().UTC(),
 	}
 	for i := 0; i < deadLetterEscalationThreshold; i++ {
-		am.maybeEscalateDeadLetter(testAuthorActivityContext(context.Background()), evt, "agent-a", snapshot)
+		am.maybeEscalateDeadLetter(testAuthorActivityContext(context.Background()), evt, testAgentIdentity(t, am, "agent-a", "review/inst-1"), snapshot)
 	}
 
 	if len(bus.published) != 1 {
@@ -489,7 +496,7 @@ func TestHandleAgentLoopPanic_PublishesTypedFlowInstanceEnvelope(t *testing.T) {
 		executionmode.Mock,
 	)
 	ctx := runtimecorrelation.WithInboundEvent(testAuthorActivityContext(context.Background()), inbound)
-	am.handleAgentLoopPanic(ctx, panicStubAgent{id: "agent-a"}, 5, "scan.requested", "boom", "stack")
+	am.handleAgentLoopPanic(ctx, testAgentIdentity(t, am, "agent-a", "review/inst-1"), panicStubAgent{id: "agent-a"}, 5, "scan.requested", "boom", "stack")
 
 	if len(bus.published) != 2 {
 		t.Fatalf("published events = %d, want 2", len(bus.published))
@@ -728,7 +735,7 @@ func (s *renewalTrackingManagerDeliveryStore) RenewClaim(ctx context.Context, cl
 	return s.Store.RenewClaim(ctx, claim)
 }
 
-func (s *deliveryLifecycleStoreStub) ActiveRunDeliveryQuiesced(context.Context, string, string, string) (string, bool, error) {
+func (s *deliveryLifecycleStoreStub) ActiveRunDeliveryQuiesced(context.Context, string, events.DeliveryRoute) (string, bool, error) {
 	s.quiescenceChecks++
 	ok := s.quiescedAfterChecks > 0 && s.quiescenceChecks >= s.quiescedAfterChecks
 	if !ok {
@@ -903,6 +910,7 @@ func TestClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBusDescend
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            agent.ID(),
+		Identity:      managerAgentIdentity(agent.ID()),
 		Subscriptions: []string{"test.lane.root", "test.lane.child"},
 	}}, false); err != nil {
 		t.Fatalf("spawn lane test agent: %v", err)
@@ -926,7 +934,7 @@ func TestClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBusDescend
 	go func() {
 		laterResult <- am.processEventDetailed(managerAgentDeliveryContext(testAuthorActivityContext(context.Background()), agent.ID()), agent, later)
 	}()
-	requireClaimedAttemptLaneWaiters(t, am, agent.ID(), 1)
+	requireClaimedAttemptLaneWaiters(t, am, testAgentIdentity(t, am, agent.ID(), ""), 1)
 	close(agent.releaseRoot)
 	select {
 	case <-agent.laterStarted:
@@ -960,18 +968,18 @@ func TestClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBusDescend
 	}
 }
 
-func requireClaimedAttemptLaneWaiters(t *testing.T, am *AgentManager, agentID string, want int64) {
+func requireClaimedAttemptLaneWaiters(t *testing.T, am *AgentManager, identity runtimeagentidentity.Identity, want int64) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
 	for {
 		am.deliveryLaneMu.Lock()
-		lane := am.deliveryLanes[agentID]
+		lane := am.deliveryLanes[identity]
 		am.deliveryLaneMu.Unlock()
 		if lane != nil && lane.waiters.Load() == want {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("claimed-attempt lane waiters for %q did not reach %d", agentID, want)
+			t.Fatalf("claimed-attempt lane waiters for %q did not reach %d", identity.Description(), want)
 		}
 		runtime.Gosched()
 	}
@@ -1070,7 +1078,7 @@ func TestWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransitions(t *te
 				t.Fatalf("claim delivery: %v", err)
 			}
 			if tc.exhaust {
-				am.writeReceipt(runtimedelivery.WithClaim(testAuthorActivityContext(context.Background()), claim.Claim), evt, "agent-a", ReceiptStatusError, testFailure("handler_failed"))
+				am.writeReceipt(managerAgentClaimContext(testAuthorActivityContext(context.Background()), claim.Claim, "agent-a"), evt, ReceiptStatusError, testFailure("handler_failed"))
 				deliveryStore.makeRetryEligible(t, evt, "agent-a")
 				claim, err = deliveryStore.ClaimAgentDelivery(testAuthorActivityContext(context.Background()), evt, managerAgentDeliveryRoute("agent-a"))
 				if err != nil {
@@ -1078,7 +1086,7 @@ func TestWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransitions(t *te
 				}
 				bus.runtimeLogs = nil
 			}
-			am.writeReceipt(runtimedelivery.WithClaim(testAuthorActivityContext(context.Background()), claim.Claim), evt, "agent-a", ReceiptStatusError, testFailure("handler_failed"))
+			am.writeReceipt(managerAgentClaimContext(testAuthorActivityContext(context.Background()), claim.Claim, "agent-a"), evt, ReceiptStatusError, testFailure("handler_failed"))
 
 			if len(bus.runtimeLogs) != 1 {
 				t.Fatalf("runtime logs = %d, want 1", len(bus.runtimeLogs))
@@ -1127,7 +1135,7 @@ func TestWriteReceiptUsesCanonicalHandlerRetryBase(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			settled, err := am.writeReceipt(runtimedelivery.WithClaim(testAuthorActivityContext(context.Background()), claimed.Claim), evt, "agent-a", ReceiptStatusError, testFailure("handler_failed"))
+			settled, err := am.writeReceipt(managerAgentClaimContext(testAuthorActivityContext(context.Background()), claimed.Claim, "agent-a"), evt, ReceiptStatusError, testFailure("handler_failed"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1149,7 +1157,7 @@ func TestWriteReceipt_ContextCancellationReturnsFailureAndLeavesClaimForLeaseRec
 	}
 	ctx, cancel := context.WithCancel(testAuthorActivityContext(context.Background()))
 	cancel()
-	if _, err := am.writeReceipt(runtimedelivery.WithClaim(ctx, claimed.Claim), evt, "agent-a", ReceiptStatusError, testFailure("handler_failed")); err == nil {
+	if _, err := am.writeReceipt(managerAgentClaimContext(ctx, claimed.Claim, "agent-a"), evt, ReceiptStatusError, testFailure("handler_failed")); err == nil {
 		t.Fatal("writeReceipt error = nil, want canceled settlement failure")
 	}
 	snapshot, err := deliveryStore.Snapshot(context.Background(), claimed.Claim.DeliveryID())
@@ -1182,7 +1190,7 @@ func TestWriteReceiptLongRunningClaimUsesExactRenewalTime(t *testing.T) {
 		t.Fatalf("age long-running attempt affected %d rows, err=%v", rows, rowsErr)
 	}
 
-	settled, err := am.writeReceipt(runtimedelivery.WithClaim(testAuthorActivityContext(context.Background()), claimed.Claim), evt, "agent-a", ReceiptStatusError, testFailure("handler_failed"))
+	settled, err := am.writeReceipt(managerAgentClaimContext(testAuthorActivityContext(context.Background()), claimed.Claim, "agent-a"), evt, ReceiptStatusError, testFailure("handler_failed"))
 	if err != nil {
 		t.Fatalf("settle long-running claim: %v", err)
 	}

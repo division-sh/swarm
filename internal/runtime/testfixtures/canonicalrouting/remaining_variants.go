@@ -602,7 +602,7 @@ pins:
       chat_id: "{{input.chat_id}}"
       text: "{{input.text}}"
 `, toolURL),
-		"flows/telegram-chat/agents.yaml":           "phrase-bot:\n  id: phrase-bot-{instance_id}\n  role: phrase_bot\n  prompt_ref: phrase-bot\n  model: regular\n  memory: true\n  subscriptions: [inbound.telegram.text_message]\n  emit_events: [telegram.reply_requested]\n",
+		"flows/telegram-chat/agents.yaml":           "phrase-bot:\n  id: phrase-bot\n  role: phrase_bot\n  prompt_ref: phrase-bot\n  model: regular\n  memory: true\n  subscriptions: [inbound.telegram.text_message]\n  emit_events: [telegram.reply_requested]\n",
 		"flows/telegram-chat/prompts/phrase-bot.md": "Reply to each Telegram message by emitting telegram.reply_requested with chat_id set to the event conversation_reference.\n",
 	}
 	for name, source := range files {
@@ -696,7 +696,7 @@ telegram-revision:
 	files := map[string]string{
 		"flows/telegram-chat/tools.yaml": "{}\n",
 		"flows/telegram-chat/agents.yaml": `phrase-bot:
-  id: phrase-bot-{instance_id}
+  id: phrase-bot
   role: phrase_bot
   prompt_ref: phrase-bot
   model: regular

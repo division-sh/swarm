@@ -126,7 +126,7 @@ func containerRefFromIdentity(identity ContainerIdentity, action string) Contain
 		WorkspaceScope: strings.TrimSpace(identity.WorkspaceScope),
 		RunID:          strings.TrimSpace(identity.RunID),
 		EntityID:       strings.TrimSpace(identity.EntityID),
-		AgentID:        strings.TrimSpace(identity.AgentID),
+		AgentIdentity:  identity.AgentIdentity.Normalize(),
 		FlowInstance:   strings.Trim(strings.TrimSpace(identity.FlowInstance), "/"),
 	}
 }
@@ -146,7 +146,7 @@ func withContainerAction(ref ContainerRef, action string) ContainerRef {
 	ref.WorkspaceScope = strings.TrimSpace(ref.WorkspaceScope)
 	ref.RunID = strings.TrimSpace(ref.RunID)
 	ref.EntityID = strings.TrimSpace(ref.EntityID)
-	ref.AgentID = strings.TrimSpace(ref.AgentID)
+	ref.AgentIdentity = ref.AgentIdentity.Normalize()
 	ref.FlowInstance = strings.Trim(strings.TrimSpace(ref.FlowInstance), "/")
 	return ref
 }

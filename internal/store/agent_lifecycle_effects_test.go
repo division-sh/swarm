@@ -32,17 +32,19 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	t.Helper()
 	ctx := testAuthorActivityContext()
 	now := time.Date(2026, 7, 10, 18, 0, 0, 0, time.UTC)
+	identity := testAgentIdentity(t, "lifecycle-agent", "global")
 	rec := runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID: "lifecycle-agent", Type: "sonnet", Role: "worker", FlowID: "global", Model: "regular",
+			ID: "lifecycle-agent", Identity: identity, Type: "sonnet", Role: "worker", FlowID: "global", Model: "regular",
 			ExecutionMode: runtimeeffects.ExecutionModeLive,
+			FlowPath:      identity.FlowInstance(),
 			Config:        []byte(`{"system_prompt":"x"}`),
 		},
 		Status: "active", HiredBy: "test", StartedAt: now,
 	}
 	spawn := runtimemanager.AgentLifecycleTransition{
 		OperationID: "00000000-0000-0000-0000-000000001901", OperationKind: "spawn", RequestHash: "spawn-hash",
-		AgentID: rec.Config.ID, Trigger: "spawn", TargetEpoch: 11, TargetGeneration: 1,
+		Identity: identity, AgentID: rec.Config.ID, Trigger: "spawn", TargetEpoch: 11, TargetGeneration: 1,
 		TargetPhase: runtimemanager.AgentLifecycleRegistered, ConfigRevision: "revision-1",
 		RunMode: runtimemanager.AgentRunModeStopped, Agent: &rec, Now: now,
 	}
@@ -52,7 +54,7 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	}
 	start := runtimemanager.AgentLifecycleTransition{
 		OperationID: "00000000-0000-0000-0000-000000001902", OperationKind: "start", RequestHash: "start-hash",
-		AgentID: rec.Config.ID, Trigger: "start", ExpectedEpoch: spawned.RuntimeEpoch,
+		Identity: identity, AgentID: rec.Config.ID, Trigger: "start", ExpectedEpoch: spawned.RuntimeEpoch,
 		ExpectedGeneration: spawned.Generation, ExpectedPhase: spawned.Phase,
 		TargetEpoch: 11, TargetGeneration: 2, TargetPhase: runtimemanager.AgentLifecycleRunning,
 		ConfigRevision: "revision-1", RunMode: runtimemanager.AgentRunModeStandard, Now: now.Add(time.Second),
@@ -74,10 +76,10 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 
 	controller := runtimeeffects.NewController(store)
 	activeCtx := runtimeeffects.WithController(runtimeeffects.WithLifecycleToken(ctx, runtimeeffects.LifecycleToken{
-		RuntimeEpoch: started.RuntimeEpoch, AgentID: started.AgentID, Generation: started.Generation,
+		RuntimeEpoch: started.RuntimeEpoch, Identity: identity, AgentID: started.AgentID, Generation: started.Generation,
 	}), controller)
 	activeCtx = runtimeeffects.WithLogicalOperationIdentity(activeCtx, "effect-authority-primary")
-	authority := runtimeeffects.NormalAgentAuthority(runtimeeffects.LifecycleToken{RuntimeEpoch: started.RuntimeEpoch, AgentID: started.AgentID, Generation: started.Generation}, "lifecycle-test-owner", now.Add(time.Minute))
+	authority := runtimeeffects.NormalAgentAuthority(runtimeeffects.LifecycleToken{RuntimeEpoch: started.RuntimeEpoch, Identity: identity, AgentID: started.AgentID, Generation: started.Generation}, "lifecycle-test-owner", now.Add(time.Minute))
 	activeCtx = managedNormalEffectStoreTestContext(t, activeCtx, authority)
 	handle, err := runtimeeffects.Begin(activeCtx, "authored_http_tool", []byte("request"), map[string]string{"test": "true"})
 	if err != nil {
@@ -136,7 +138,7 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 
 	restarted, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
 		OperationID: "00000000-0000-0000-0000-000000001903", OperationKind: "restart", RequestHash: "restart-hash",
-		AgentID: rec.Config.ID, Trigger: "restart", ExpectedEpoch: started.RuntimeEpoch,
+		Identity: identity, AgentID: rec.Config.ID, Trigger: "restart", ExpectedEpoch: started.RuntimeEpoch,
 		ExpectedGeneration: started.Generation, ExpectedPhase: started.Phase,
 		TargetEpoch: started.RuntimeEpoch, TargetGeneration: started.Generation + 1, TargetPhase: runtimemanager.AgentLifecycleRunning,
 		ConfigRevision: "revision-1", RunMode: runtimemanager.AgentRunModeStandard, Now: now.Add(3 * time.Second),
@@ -145,10 +147,10 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 		t.Fatalf("restart lifecycle transition: %v", err)
 	}
 	restartedCtx := runtimeeffects.WithController(runtimeeffects.WithLifecycleToken(ctx, runtimeeffects.LifecycleToken{
-		RuntimeEpoch: restarted.RuntimeEpoch, AgentID: restarted.AgentID, Generation: restarted.Generation,
+		RuntimeEpoch: restarted.RuntimeEpoch, Identity: identity, AgentID: restarted.AgentID, Generation: restarted.Generation,
 	}), controller)
 	restartedCtx = runtimeeffects.WithLogicalOperationIdentity(restartedCtx, "effect-authority-launched")
-	restartedAuthority := runtimeeffects.NormalAgentAuthority(runtimeeffects.LifecycleToken{RuntimeEpoch: restarted.RuntimeEpoch, AgentID: restarted.AgentID, Generation: restarted.Generation}, "lifecycle-test-restarted-owner", now.Add(time.Minute))
+	restartedAuthority := runtimeeffects.NormalAgentAuthority(runtimeeffects.LifecycleToken{RuntimeEpoch: restarted.RuntimeEpoch, Identity: identity, AgentID: restarted.AgentID, Generation: restarted.Generation}, "lifecycle-test-restarted-owner", now.Add(time.Minute))
 	restartedCtx = managedNormalEffectStoreTestContext(t, restartedCtx, restartedAuthority)
 	if _, err := runtimeeffects.Begin(restartedCtx, "authored_http_tool", []byte("recover-launched"), nil); err == nil {
 		t.Fatal("successor generation redispatched the uncertain logical operation")
@@ -170,10 +172,10 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	}
 
 	staleCtx := runtimeeffects.WithController(runtimeeffects.WithLifecycleToken(ctx, runtimeeffects.LifecycleToken{
-		RuntimeEpoch: started.RuntimeEpoch, AgentID: started.AgentID, Generation: started.Generation - 1,
+		RuntimeEpoch: started.RuntimeEpoch, Identity: identity, AgentID: started.AgentID, Generation: started.Generation - 1,
 	}), controller)
 	staleCtx = runtimeeffects.WithLogicalOperationIdentity(staleCtx, "effect-authority-stale")
-	staleAuthority := runtimeeffects.NormalAgentAuthority(runtimeeffects.LifecycleToken{RuntimeEpoch: started.RuntimeEpoch, AgentID: started.AgentID, Generation: started.Generation - 1}, "lifecycle-test-stale-owner", now.Add(time.Minute))
+	staleAuthority := runtimeeffects.NormalAgentAuthority(runtimeeffects.LifecycleToken{RuntimeEpoch: started.RuntimeEpoch, Identity: identity, AgentID: started.AgentID, Generation: started.Generation - 1}, "lifecycle-test-stale-owner", now.Add(time.Minute))
 	staleCtx = managedNormalEffectStoreTestContext(t, staleCtx, staleAuthority)
 	if current, err := runtimeeffects.ProjectionCurrent(staleCtx); err != nil || current {
 		t.Fatalf("stale generation projection authorization = %v, err=%v", current, err)
@@ -194,7 +196,7 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	}
 	if _, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
 		OperationID: "00000000-0000-0000-0000-000000001904", OperationKind: "restart", RequestHash: "restart-launch-fence-hash",
-		AgentID: rec.Config.ID, Trigger: "restart", ExpectedEpoch: restarted.RuntimeEpoch,
+		Identity: identity, AgentID: rec.Config.ID, Trigger: "restart", ExpectedEpoch: restarted.RuntimeEpoch,
 		ExpectedGeneration: restarted.Generation, ExpectedPhase: restarted.Phase,
 		TargetEpoch: restarted.RuntimeEpoch, TargetGeneration: restarted.Generation + 1, TargetPhase: runtimemanager.AgentLifecycleRunning,
 		ConfigRevision: "revision-1", RunMode: runtimemanager.AgentRunModeStandard, Now: now.Add(4 * time.Second),

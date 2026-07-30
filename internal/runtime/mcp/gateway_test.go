@@ -419,8 +419,8 @@ func putTestTurnContext(t testing.TB, registry *TurnContextRegistry, token strin
 		authority.Target = runtimeeffects.UsageTarget{
 			Kind: runtimeeffects.UsageTargetAgentTurn, ID: turn.CapabilitySurface.Authority.ID,
 			RunID: turn.CapabilitySurface.Authority.RunID, AgentID: turn.CapabilitySurface.ActorID,
-			SessionID: turn.CapabilitySurface.Authority.SessionID, Memory: agentmemory.PlatformDefault(),
-			FlowInstance: strings.TrimSpace(turn.Actor.CanonicalFlowPath()),
+			AgentIdentity: turn.LifecycleToken.Identity, SessionID: turn.CapabilitySurface.Authority.SessionID,
+			Memory: agentmemory.PlatformDefault(), FlowInstance: turn.LifecycleToken.Identity.FlowInstance(),
 		}
 		turn.EffectAuthority = authority
 		turn.HasEffectAuthority = true

@@ -3,13 +3,38 @@ package bus
 import (
 	"context"
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"time"
 )
+
+func testActiveAgentDescriptor(t testing.TB, agentID, entityID, flowInstance string) ActiveAgentDescriptor {
+	t.Helper()
+	identity := agentidentitytest.RootRuntime(t, agentID, "bus-test")
+	if flowInstance != "" {
+		scopeKey, instanceID := flowInstance, flowInstance
+		if slash := strings.IndexByte(flowInstance, '/'); slash >= 0 {
+			scopeKey, instanceID = flowInstance[:slash], flowInstance[slash+1:]
+		}
+		identity = agentidentitytest.Runtime(t, agentID, "bus-test", scopeKey, instanceID, flowInstance)
+	}
+	return ActiveAgentDescriptor{Identity: identity, EntityID: entityID}
+}
+
+func testActiveAgentDescriptors(descriptors ...ActiveAgentDescriptor) map[agentidentity.Identity]ActiveAgentDescriptor {
+	out := make(map[agentidentity.Identity]ActiveAgentDescriptor, len(descriptors))
+	for _, descriptor := range descriptors {
+		out[descriptor.Identity] = descriptor
+	}
+	return out
+}
 
 func TestDeliveryRouteResolver_SeparatesRouteResolutionAndDiagnostics(t *testing.T) {
 	resolver := deliveryRouteResolver{
@@ -60,8 +85,8 @@ func TestDeliveryRouteResolver_SeparatesRouteResolutionAndDiagnostics(t *testing
 	if got := result.ExtraDetail["routed_recipients_count"]; got != 1 {
 		t.Fatalf("routed_recipients_count = %#v, want 1", got)
 	}
-	if got := result.ExtraDetail["subscription_recipients_count"]; got != 3 {
-		t.Fatalf("subscription_recipients_count = %#v, want 3", got)
+	if got := result.ExtraDetail["subscription_recipients_count"]; got != 2 {
+		t.Fatalf("subscription_recipients_count = %#v, want 2 unique recipients", got)
 	}
 	routed, _ := result.ExtraDetail["routed_recipients"].([]map[string]any)
 	if len(routed) != 1 || routed[0]["id"] != "scan-orchestrator" {
@@ -69,14 +94,53 @@ func TestDeliveryRouteResolver_SeparatesRouteResolutionAndDiagnostics(t *testing
 	}
 }
 
+func TestDeliveryRouteResolver_ResolvesConcreteFlowInstanceSubscriptionKey(t *testing.T) {
+	var resolvedKeys []string
+	resolver := deliveryRouteResolver{
+		resolveRoutedSubscribers: func(events.Event) []Subscriber { return nil },
+		resolveSubscribedRecipients: func(eventKey string) []deliveryRecipientCandidate {
+			resolvedKeys = append(resolvedKeys, eventKey)
+			if eventKey != "support/instance-a/inbound.github.push" {
+				return nil
+			}
+			return []deliveryRecipientCandidate{{
+				ID:                "support-agent",
+				AgentIdentity:     agentidentitytest.Runtime(t, "support-agent", "bus-test", "support", "instance-a", "support/instance-a"),
+				PersistAsDelivery: true,
+			}}
+		},
+		describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient { return nil },
+	}
+	evt := eventtest.RunCreatingRootIngress(
+		"",
+		"inbound.github.push",
+		"",
+		"",
+		nil,
+		0,
+		"",
+		"",
+		events.EnvelopeForFlowInstance(events.EventEnvelope{}, "support/instance-a"),
+		time.Time{},
+	)
+
+	result := resolver.Resolve(evt)
+	if got, want := resolvedKeys, []string{"inbound.github.push", "support/instance-a/inbound.github.push"}; !slices.Equal(got, want) {
+		t.Fatalf("resolved subscription keys = %#v, want %#v", got, want)
+	}
+	if len(result.Recipients) != 1 || result.Recipients[0].ID != "support-agent" {
+		t.Fatalf("resolved recipients = %#v, want exact support-agent", result.Recipients)
+	}
+}
+
 func TestDeliveryRecipientPolicy_FiltersExplicitAgentScopeIntoManifest(t *testing.T) {
 	policy := deliveryRecipientPolicy{
-		loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-			return map[string]ActiveAgentDescriptor{
-				"entity-agent": {AgentID: "entity-agent", EntityID: "ent-1"},
-				"other-agent":  {AgentID: "other-agent", EntityID: "ent-2"},
-				"shared-agent": {AgentID: "shared-agent"},
-			}, true, nil
+		loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+			return testActiveAgentDescriptors(
+				testActiveAgentDescriptor(t, "entity-agent", "ent-1", ""),
+				testActiveAgentDescriptor(t, "other-agent", "ent-2", ""),
+				testActiveAgentDescriptor(t, "shared-agent", "", ""),
+			), true, nil
 		},
 	}
 
@@ -97,10 +161,8 @@ func TestDeliveryRecipientPolicy_FiltersExplicitAgentScopeIntoManifest(t *testin
 
 func TestDeliveryRecipientPolicy_KeepsInternalSubscribersLiveOnlyUnderDescriptorPlanning(t *testing.T) {
 	policy := deliveryRecipientPolicy{
-		loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-			return map[string]ActiveAgentDescriptor{
-				"agent-a": {AgentID: "agent-a"},
-			}, true, nil
+		loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+			return testActiveAgentDescriptors(testActiveAgentDescriptor(t, "agent-a", "", "")), true, nil
 		},
 	}
 
@@ -123,10 +185,8 @@ func TestDeliveryRecipientPolicy_KeepsInternalSubscribersLiveOnlyUnderDescriptor
 
 func TestDeliveryRecipientPolicy_TargetedEventFailsWhenTargetInstanceIsGone(t *testing.T) {
 	policy := deliveryRecipientPolicy{
-		loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-			return map[string]ActiveAgentDescriptor{
-				"agent-a": {AgentID: "agent-a", EntityID: "ent-1", FlowInstance: "flow/active"},
-			}, true, nil
+		loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+			return testActiveAgentDescriptors(testActiveAgentDescriptor(t, "agent-a", "ent-1", "flow/active")), true, nil
 		},
 	}
 
@@ -155,10 +215,8 @@ func TestDeliveryRecipientPolicy_TargetedEventFailsWhenTargetInstanceIsGone(t *t
 
 func TestDeliveryRecipientPolicy_TargetedEventFailsWhenTargetDoesNotSubscribe(t *testing.T) {
 	policy := deliveryRecipientPolicy{
-		loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-			return map[string]ActiveAgentDescriptor{
-				"target-agent": {AgentID: "target-agent", EntityID: "ent-1", FlowInstance: "flow/target"},
-			}, true, nil
+		loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+			return testActiveAgentDescriptors(testActiveAgentDescriptor(t, "target-agent", "ent-1", "flow/target")), true, nil
 		},
 	}
 
@@ -187,8 +245,8 @@ func TestDeliveryRecipientPolicy_TargetedEventFailsWhenTargetDoesNotSubscribe(t 
 
 func TestDeliveryRecipientPolicy_TargetedFlowInstanceWithoutSubscriberIsNotSubscribed(t *testing.T) {
 	policy := deliveryRecipientPolicy{
-		loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-			return map[string]ActiveAgentDescriptor{}, true, nil
+		loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+			return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 		},
 		loadActiveTargetDescriptors: func(context.Context) ([]ActiveTargetDescriptor, bool, error) {
 			return []ActiveTargetDescriptor{{
@@ -228,8 +286,8 @@ func TestDeliveryRecipientPolicy_TargetedFlowInstanceWithoutSubscriberIsNotSubsc
 
 func TestDeliveryRecipientPolicy_TargetedFlowInstanceMissingIsUnreachableTerminated(t *testing.T) {
 	policy := deliveryRecipientPolicy{
-		loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-			return map[string]ActiveAgentDescriptor{}, true, nil
+		loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+			return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 		},
 		loadActiveTargetDescriptors: func(context.Context) ([]ActiveTargetDescriptor, bool, error) {
 			return []ActiveTargetDescriptor{{
@@ -267,6 +325,7 @@ func TestDeliveryRecipientPolicy_TargetedFlowInstanceMissingIsUnreachableTermina
 }
 
 func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
+	observerIdentity := agentidentitytest.RootRuntime(t, "observer", "delivery-planner-test")
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
@@ -275,7 +334,7 @@ func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return []deliveryRecipientCandidate{
 					{ID: "worker", PersistAsDelivery: false},
-					{ID: "observer", PersistAsDelivery: true},
+					{ID: "observer", AgentIdentity: observerIdentity, PersistAsDelivery: true},
 				}
 			},
 			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
@@ -283,8 +342,10 @@ func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 			},
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-				return nil, false, nil
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return map[agentidentity.Identity]ActiveAgentDescriptor{
+					observerIdentity: {Identity: observerIdentity},
+				}, true, nil
 			},
 		},
 	)
@@ -337,8 +398,8 @@ func TestDeliveryPlanner_DoesNotDeadLetterTargetedWorkflowNodeSubscriber(t *test
 			},
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-				return map[string]ActiveAgentDescriptor{}, true, nil
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 			},
 		},
 	)
@@ -390,8 +451,8 @@ func TestDeliveryPlanner_TargetedParentRoutePersistsSemanticNodeRoute(t *testing
 			},
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-				return map[string]ActiveAgentDescriptor{}, true, nil
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 			},
 		},
 	)
@@ -426,8 +487,8 @@ func TestDeliveryPlanner_PreservesTargetFailureWhenRoutedNodeDoesNotMatchTarget(
 			},
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-				return map[string]ActiveAgentDescriptor{}, true, nil
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 			},
 		},
 	)
@@ -469,8 +530,8 @@ func TestDeliveryPlanner_ExpandsTargetSetForInternalWorkflowRecipient(t *testing
 			},
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-				return map[string]ActiveAgentDescriptor{}, true, nil
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 			},
 		},
 	)
@@ -547,8 +608,8 @@ func TestDeliveryPlanner_ExpandsTargetSetForSameSemanticNode(t *testing.T) {
 			},
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-				return map[string]ActiveAgentDescriptor{}, true, nil
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 			},
 		},
 	)
@@ -606,8 +667,8 @@ func TestDeliveryPlanner_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 			},
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-				return map[string]ActiveAgentDescriptor{}, true, nil
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 			},
 		},
 	)
@@ -822,8 +883,8 @@ func TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 			},
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-				return map[string]ActiveAgentDescriptor{}, true, nil
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 			},
 		},
 	)
@@ -874,8 +935,8 @@ func TestDeliveryPlanner_NoTargetRootLocalEventWithFlowInstanceUsesRootNodeRoute
 			},
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-				return map[string]ActiveAgentDescriptor{}, true, nil
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 			},
 		},
 	)
@@ -943,8 +1004,8 @@ func TestDeliveryPlanner_NoTargetScopedRoutedNodeUsesSemanticNodeDeliveryRoute(t
 			},
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-				return map[string]ActiveAgentDescriptor{}, true, nil
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 			},
 		},
 	)
@@ -1009,8 +1070,8 @@ func TestDeliveryPlanner_NoTargetScopedEventPreservesPathlessRoutedNodeRoute(t *
 			},
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-				return map[string]ActiveAgentDescriptor{}, true, nil
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 			},
 		},
 	)
@@ -1066,8 +1127,8 @@ func TestDeliveryPlanner_NoTargetCrossFlowStaticRoutedNodeUsesSubscriberScope(t 
 			},
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-				return map[string]ActiveAgentDescriptor{}, true, nil
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 			},
 		},
 	)
@@ -1135,8 +1196,8 @@ func TestDeliveryPlanner_NoTargetWildcardStaticServiceRoutedNodeUsesSubscriberSc
 			},
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-				return map[string]ActiveAgentDescriptor{}, true, nil
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 			},
 		},
 	)
@@ -1204,8 +1265,8 @@ func TestDeliveryPlanner_NoTargetDescendantScopedRoutedNodeUsesParentInstanceRou
 			},
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-				return map[string]ActiveAgentDescriptor{}, true, nil
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 			},
 		},
 	)
@@ -1260,7 +1321,7 @@ func TestDeliveryPlanner_FailsClosedOnPolicyError(t *testing.T) {
 			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient { return nil },
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
 				return nil, false, errors.New("descriptor store unavailable")
 			},
 		},

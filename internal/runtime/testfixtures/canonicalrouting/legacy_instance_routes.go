@@ -136,7 +136,7 @@ pins:
 		if opts.Consumer == LegacyInstanceAgentConsumer {
 			consumerNodes = "{}\n"
 		}
-		consumerAgents = "consumer-agent:\n  id: consumer-agent-{instance_id}\n  model: regular\n  subscriptions: [" + subscriptions + "]\n"
+		consumerAgents = "consumer-agent:\n  id: consumer-agent\n  model: regular\n  subscriptions: [" + subscriptions + "]\n"
 	} else if opts.Consumer != LegacyInstanceNodeConsumer {
 		t.Fatalf("unsupported legacy instance consumer %d", opts.Consumer)
 	}

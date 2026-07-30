@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
@@ -27,10 +28,10 @@ type PendingAgentDeliveryFacts struct {
 }
 
 type PendingAgentDeliveryListOptions struct {
-	AgentID string
-	Since   time.Time
-	Limit   int
-	Cursor  string
+	AgentIdentity agentidentity.Identity
+	Since         time.Time
+	Limit         int
+	Cursor        string
 }
 
 type PendingAgentDeliveryPage struct {
@@ -56,11 +57,14 @@ type pendingAgentDeliveryCursor struct {
 	DeliveryID string `json:"delivery_id"`
 }
 
-func (s *PostgresStore) ListPendingAgentDeliveryFacts(ctx context.Context, agentIDs []string, since time.Time) (map[string]PendingAgentDeliveryFacts, error) {
+func (s *PostgresStore) ListPendingAgentDeliveryFacts(ctx context.Context, identities []agentidentity.Identity, since time.Time) (map[agentidentity.Identity]PendingAgentDeliveryFacts, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
-	normalized := normalizePendingAgentIDs(agentIDs)
+	normalized, err := normalizePendingAgentIdentities(identities)
+	if err != nil {
+		return nil, err
+	}
 	aggregates, err := postgresDeliveryAdapter.AgentPendingAggregates(ctx, s.DB, normalized, since)
 	if err != nil {
 		return nil, err
@@ -76,46 +80,49 @@ func (s *PostgresStore) ListPendingAgentDeliveryDetails(ctx context.Context, opt
 	if err := s.requireCurrentSchema(); err != nil {
 		return PendingAgentDeliveryPage{}, err
 	}
-	aggregates, err := postgresDeliveryAdapter.AgentPendingAggregates(ctx, s.DB, []string{opts.AgentID}, opts.Since)
+	aggregates, err := postgresDeliveryAdapter.AgentPendingAggregates(ctx, s.DB, []agentidentity.Identity{opts.AgentIdentity}, opts.Since)
 	if err != nil {
 		return PendingAgentDeliveryPage{}, err
 	}
 	page, err := postgresDeliveryAdapter.AgentPendingReferencePage(ctx, s.DB, runtimedelivery.AgentPendingPageQuery{
-		AgentID: opts.AgentID,
-		Since:   opts.Since,
-		Limit:   opts.Limit,
-		After:   cursor,
+		AgentIdentity: opts.AgentIdentity,
+		Since:         opts.Since,
+		Limit:         opts.Limit,
+		After:         cursor,
 	})
 	if err != nil {
 		return PendingAgentDeliveryPage{}, err
 	}
-	return pendingAgentDeliveryPageFromProjection(ctx, opts.AgentID, aggregates, page, time.Now(), func(ctx context.Context, eventID string) (eventrecord.Record, bool, error) {
+	return pendingAgentDeliveryPageFromProjection(ctx, opts.AgentIdentity, aggregates, page, time.Now(), func(ctx context.Context, eventID string) (eventrecord.Record, bool, error) {
 		return eventrecordpostgres.Load(ctx, s.DB, eventID)
 	})
 }
 
-func normalizePendingAgentIDs(agentIDs []string) []string {
-	seen := make(map[string]struct{}, len(agentIDs))
-	out := make([]string, 0, len(agentIDs))
-	for _, agentID := range agentIDs {
-		agentID = strings.TrimSpace(agentID)
-		if agentID == "" {
+func normalizePendingAgentIdentities(identities []agentidentity.Identity) ([]agentidentity.Identity, error) {
+	seen := make(map[agentidentity.Identity]struct{}, len(identities))
+	out := make([]agentidentity.Identity, 0, len(identities))
+	for _, identity := range identities {
+		identity = identity.Normalize()
+		if err := identity.Validate(); err != nil {
+			return nil, fmt.Errorf("pending agent identity: %w", err)
+		}
+		if _, ok := seen[identity]; ok {
 			continue
 		}
-		if _, ok := seen[agentID]; ok {
-			continue
-		}
-		seen[agentID] = struct{}{}
-		out = append(out, agentID)
+		seen[identity] = struct{}{}
+		out = append(out, identity)
 	}
-	return out
+	return out, nil
 }
 
 func normalizePendingAgentDeliveryOptions(opts PendingAgentDeliveryListOptions) (PendingAgentDeliveryListOptions, *runtimedelivery.AgentPendingPosition, bool, error) {
-	opts.AgentID = strings.TrimSpace(opts.AgentID)
+	opts.AgentIdentity = opts.AgentIdentity.Normalize()
 	opts.Cursor = strings.TrimSpace(opts.Cursor)
-	if opts.AgentID == "" {
+	if opts.AgentIdentity.IsZero() {
 		return opts, nil, true, nil
+	}
+	if err := opts.AgentIdentity.Validate(); err != nil {
+		return opts, nil, false, fmt.Errorf("pending agent delivery identity: %w", err)
 	}
 	if opts.Limit == 0 {
 		opts.Limit = DefaultPendingAgentDeliveryDetailLimit
@@ -133,17 +140,17 @@ func normalizePendingAgentDeliveryOptions(opts PendingAgentDeliveryListOptions) 
 	return opts, &cursor, false, nil
 }
 
-func pendingAgentDeliveryFactsFromAggregates(agentIDs []string, aggregates []runtimedelivery.AgentPendingAggregate, now time.Time) map[string]PendingAgentDeliveryFacts {
-	out := make(map[string]PendingAgentDeliveryFacts, len(agentIDs))
-	for _, agentID := range agentIDs {
-		out[agentID] = PendingAgentDeliveryFacts{}
+func pendingAgentDeliveryFactsFromAggregates(identities []agentidentity.Identity, aggregates []runtimedelivery.AgentPendingAggregate, now time.Time) map[agentidentity.Identity]PendingAgentDeliveryFacts {
+	out := make(map[agentidentity.Identity]PendingAgentDeliveryFacts, len(identities))
+	for _, identity := range identities {
+		out[identity] = PendingAgentDeliveryFacts{}
 	}
 	for _, aggregate := range aggregates {
 		age := int(now.Sub(aggregate.OldestEventAt).Seconds())
 		if age < 0 {
 			age = 0
 		}
-		out[strings.TrimSpace(aggregate.AgentID)] = PendingAgentDeliveryFacts{
+		out[aggregate.AgentIdentity] = PendingAgentDeliveryFacts{
 			PendingCount:        aggregate.Count,
 			OldestPendingAgeSec: age,
 		}
@@ -153,13 +160,13 @@ func pendingAgentDeliveryFactsFromAggregates(agentIDs []string, aggregates []run
 
 func pendingAgentDeliveryPageFromProjection(
 	ctx context.Context,
-	agentID string,
+	identity agentidentity.Identity,
 	aggregates []runtimedelivery.AgentPendingAggregate,
 	page runtimedelivery.AgentPendingReferencePage,
 	now time.Time,
 	load func(context.Context, string) (eventrecord.Record, bool, error),
 ) (PendingAgentDeliveryPage, error) {
-	facts := pendingAgentDeliveryFactsFromAggregates([]string{agentID}, aggregates, now)[agentID]
+	facts := pendingAgentDeliveryFactsFromAggregates([]agentidentity.Identity{identity}, aggregates, now)[identity]
 	out := PendingAgentDeliveryPage{
 		PendingCount:        facts.PendingCount,
 		OldestPendingAgeSec: facts.OldestPendingAgeSec,

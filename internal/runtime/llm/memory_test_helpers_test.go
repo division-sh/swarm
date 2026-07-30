@@ -2,9 +2,14 @@ package llm
 
 import (
 	"context"
+	"strings"
+	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 )
 
 const testMemoryRunID = "11111111-1111-1111-1111-111111111111"
@@ -14,14 +19,54 @@ func testMemory() agentmemory.Plan {
 }
 
 func testMemoryIdentity(agentID, flowInstance string) agentmemory.Identity {
-	return agentmemory.Identity{RunID: testMemoryRunID, AgentID: agentID, FlowInstance: flowInstance}
+	scopeKey, instanceID, ok := strings.Cut(strings.Trim(flowInstance, "/"), "/")
+	if !ok {
+		panic("test memory flow instance must contain a scope and instance ID")
+	}
+	return agentmemory.Identity{
+		RunID: testMemoryRunID,
+		Agent: agentidentity.Identity{
+			Name: agentidentity.Name{
+				AgentID: agentID,
+				Owner:   "test-fixture",
+				Source:  agentidentity.NameSourceRuntimeCreated,
+			},
+			Route: agentidentity.Route{
+				Presence:     agentidentity.RoutePresent,
+				ScopeKey:     scopeKey,
+				InstanceID:   instanceID,
+				InstancePath: strings.Trim(flowInstance, "/"),
+			},
+		},
+	}
 }
 
 func withTestMemory(ctx context.Context, agentID, flowInstance string) context.Context {
 	return agentmemory.WithExecution(ctx, testMemory(), testMemoryIdentity(agentID, flowInstance))
 }
 
-func withTestStatelessMemory(ctx context.Context) context.Context {
+func withTestStatelessMemory(t testing.TB, ctx context.Context, agentID, flowInstance string) context.Context {
+	t.Helper()
 	ctx = runtimecorrelation.WithRunID(ctx, testMemoryRunID)
-	return agentmemory.WithExecution(ctx, agentmemory.Authored(false), agentmemory.Identity{})
+	identity := agentidentitytest.RootRuntime(t, agentID, "llm-stateless-test")
+	if strings.Trim(strings.TrimSpace(flowInstance), "/") != "" {
+		identity = testMemoryIdentity(agentID, flowInstance).Agent
+	}
+	return agentmemory.WithExecution(ctx, agentmemory.Authored(false), agentmemory.Identity{
+		RunID: testMemoryRunID,
+		Agent: identity,
+	})
+}
+
+func setEffectHarnessAgent(t testing.TB, harness *effecttest.Harness, agentID, flowInstance string) {
+	t.Helper()
+	if harness == nil {
+		t.Fatal("effect harness is nil")
+	}
+	identity := agentidentitytest.RootRuntime(t, agentID, "llm-effect-test")
+	if strings.Trim(strings.TrimSpace(flowInstance), "/") != "" {
+		identity = testMemoryIdentity(agentID, flowInstance).Agent
+	}
+	harness.Token.AgentID = agentID
+	harness.Token.Identity = identity
 }

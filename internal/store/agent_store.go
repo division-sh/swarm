@@ -29,13 +29,21 @@ func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.Pers
 	if err != nil {
 		return err
 	}
+	identity, err := rec.Config.ConcreteIdentity()
+	if err != nil {
+		return err
+	}
+	identityFingerprint, err := identity.Fingerprint()
+	if err != nil {
+		return err
+	}
 
 	var startedAt any
 	if !rec.StartedAt.IsZero() {
 		startedAt = rec.StartedAt
 	}
 	return s.runAuthorActivityMutation(ctx, "postgres agent upsert", func(txctx context.Context, tx *sql.Tx) error {
-		if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "swarm:agent-lifecycle:"+projection.AgentID); err != nil {
+		if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "swarm:agent-lifecycle:"+identityFingerprint); err != nil {
 			return err
 		}
 		if err := authorizePostgresRawAgentTopologyMutation(txctx, tx, rec); err != nil {
@@ -55,17 +63,22 @@ func (s *PostgresStore) LoadAgents(ctx context.Context) ([]runtimemanager.Persis
 func (s *PostgresStore) upsertAgentSpec(ctx context.Context, tx *sql.Tx, rec runtimemanager.PersistedAgent, projection persistedAgentProjection, startedAt any) error {
 	const q = `
 		INSERT INTO agents (
-			agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source,
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance,
+			role, model, llm_backend, memory_enabled, memory_source,
 			parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
 			runtime_descriptor, status, turn_count, last_active_at, created_at
 		)
 		VALUES (
-			$1, NULLIF($2,''), $3, $4, $5, $6, $7,
-			NULLIF($8,''), NULLIF($9,'')::uuid, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb,
-			$15::jsonb, $16, 0, now(), COALESCE($17, now())
+			$1, $2, $3, $4, $5, $6, $7,
+			$8, $9, $10, $11, $12,
+			NULLIF($13,''), NULLIF($14,'')::uuid, $15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb, $19::jsonb,
+			$20::jsonb, $21, 0, now(), COALESCE($22, now())
 		)
-		ON CONFLICT (agent_id) DO UPDATE SET
-			flow_instance = EXCLUDED.flow_instance,
+		ON CONFLICT (
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance
+		) DO UPDATE SET
 			role = EXCLUDED.role,
 			model = EXCLUDED.model,
 			llm_backend = EXCLUDED.llm_backend,
@@ -83,8 +96,13 @@ func (s *PostgresStore) upsertAgentSpec(ctx context.Context, tx *sql.Tx, rec run
 			last_active_at = now()
 	`
 	_, err := tx.ExecContext(ctx, q,
-		projection.AgentID,
-		projection.FlowInstance,
+		projection.Identity.AgentID,
+		projection.Identity.NameOwner,
+		projection.Identity.NameSource,
+		projection.Identity.RoutePresence,
+		projection.Identity.FlowScopeKey,
+		projection.Identity.FlowInstanceID,
+		projection.Identity.FlowInstancePath,
 		projection.Role,
 		projection.Model,
 		projection.LLMBackend,
@@ -108,7 +126,12 @@ func (s *PostgresStore) loadAgentsSpec(ctx context.Context) ([]runtimemanager.Pe
 	const q = `
 		SELECT
 			agent_id,
-			COALESCE(flow_instance, ''),
+			agent_name_owner,
+			agent_name_source,
+			agent_route_presence,
+			flow_scope_key,
+			flow_instance_id,
+			flow_instance,
 			role,
 			model,
 			llm_backend,
@@ -142,7 +165,12 @@ func (s *PostgresStore) loadAgentsSpec(ctx context.Context) ([]runtimemanager.Pe
 		var lifecycleGeneration int64
 		if err := rows.Scan(
 			&row.AgentID,
-			&row.FlowInstance,
+			&row.Identity.NameOwner,
+			&row.Identity.NameSource,
+			&row.Identity.RoutePresence,
+			&row.Identity.FlowScopeKey,
+			&row.Identity.FlowInstanceID,
+			&row.Identity.FlowInstancePath,
 			&row.Role,
 			&row.Model,
 			&row.LLMBackend,
@@ -165,6 +193,8 @@ func (s *PostgresStore) loadAgentsSpec(ctx context.Context) ([]runtimemanager.Pe
 		); err != nil {
 			return nil, fmt.Errorf("scan agent row: %w", err)
 		}
+		row.Identity.AgentID = row.AgentID
+		row.FlowInstance = row.Identity.FlowInstancePath
 		cfg, err := hydratePersistedAgentConfig(row)
 		if err != nil {
 			return nil, fmt.Errorf("hydrate agent row %s: %w", strings.TrimSpace(row.AgentID), err)

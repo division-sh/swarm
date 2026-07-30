@@ -170,7 +170,11 @@ func eventProducerIdentityReadbacks(t testing.TB, surface eventProducerIdentityL
 			name:         "pending_delivery_diagnostics",
 			runtimeEvent: true,
 			load: func() (events.Event, error) {
-				page, err := surface.ListPendingAgentDeliveryDetails(ctx, PendingAgentDeliveryListOptions{AgentID: agentID, Since: since, Limit: 10})
+				page, err := surface.ListPendingAgentDeliveryDetails(ctx, PendingAgentDeliveryListOptions{
+					AgentIdentity: mustTestAgentIdentity(agentID, "fixture/"+agentID),
+					Since:         since,
+					Limit:         10,
+				})
 				if err != nil {
 					return events.Event{}, err
 				}
@@ -355,7 +359,7 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 	if outcome != runtimebus.EventAppendInserted {
 		t.Fatalf("append replay event outcome = %d, want inserted", outcome)
 	}
-	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "replay-agent"}
+	route := testAgentDeliveryRoute(t, "replay-agent", "fixture/replay-agent")
 	sourceProofs, err := postgresDeliveryAdapter.CommitInitial(txctx, tx, sourceEventID, sourceRunID, []events.DeliveryRoute{route})
 	if err != nil || len(sourceProofs) != 1 {
 		t.Fatalf("commit source replay delivery fixture: proofs=%d err=%v", len(sourceProofs), err)

@@ -13,6 +13,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -584,7 +586,7 @@ func TestEventBusRecipientPlanMaterializerNormalizesRoutePlanDirectly(t *testing
 	}
 }
 
-func TestEventBusAgentDispatchIgnoresSameIDNodeRouteTargets(t *testing.T) {
+func TestEventBusAgentDispatchDoesNotCrossSameIDNodeRouteTargets(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	eb, err := newScopedTestEventBus(store)
 	if err != nil {
@@ -605,10 +607,7 @@ func TestEventBusAgentDispatchIgnoresSameIDNodeRouteTargets(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("deliverToRecipientsWithRoutes: %v", err)
 	}
-	got := requireBusEvent(t, ch, "same-id agent delivery")
-	if got.HasTargetRoute() || got.FlowInstance() != "" {
-		t.Fatalf("agent delivery target = route:%#v flow:%q, want no node target leakage", got.TargetRoute(), got.FlowInstance())
-	}
+	requireNoBusEvent(t, ch, "same-id node route crossing into agent subscriber class")
 }
 
 func TestEventBusWorkflowRuntimeCarrierPrefersConcreteNodeRouteOverPlaceholder(t *testing.T) {
@@ -674,14 +673,16 @@ func nodeOnlyDeliveryPlanner(nodeID string) deliveryPlanner {
 			},
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-				return map[string]ActiveAgentDescriptor{}, true, nil
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 			},
 		},
 	)
 }
 
-func mixedNodeAgentDeliveryPlanner(nodeID, agentID string) deliveryPlanner {
+func mixedNodeAgentDeliveryPlanner(t testing.TB, nodeID, agentID string) deliveryPlanner {
+	t.Helper()
+	identity := agentidentitytest.RootRuntime(t, agentID, "eventbus-target-test")
 	return newDeliveryPlanner(
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
@@ -690,7 +691,7 @@ func mixedNodeAgentDeliveryPlanner(nodeID, agentID string) deliveryPlanner {
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return []deliveryRecipientCandidate{
 					{ID: nodeID, PersistAsDelivery: false},
-					{ID: agentID, PersistAsDelivery: true},
+					{ID: agentID, AgentIdentity: identity, PersistAsDelivery: true},
 				}
 			},
 			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
@@ -698,8 +699,10 @@ func mixedNodeAgentDeliveryPlanner(nodeID, agentID string) deliveryPlanner {
 			},
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-				return map[string]ActiveAgentDescriptor{agentID: {AgentID: agentID}}, true, nil
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return map[agentidentity.Identity]ActiveAgentDescriptor{
+					identity: {Identity: identity},
+				}, true, nil
 			},
 		},
 	)
@@ -821,7 +824,7 @@ func TestEventBusPublish_MixedNodeAgentRouteStillRequiresAgentChannel(t *testing
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	eb.deliveryPlanner = mixedNodeAgentDeliveryPlanner("workflow-node", "agent-missing")
+	eb.deliveryPlanner = mixedNodeAgentDeliveryPlanner(t, "workflow-node", "agent-missing")
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
 		events.EventType("custom.mixed_node_agent"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -858,8 +861,8 @@ func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing
 			},
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-				return map[string]ActiveAgentDescriptor{}, true, nil
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 			},
 		},
 	)
@@ -940,8 +943,8 @@ func TestEventBusPublish_TargetSetSameSemanticNodePersistsPerTargetRoutes(t *tes
 			},
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-				return map[string]ActiveAgentDescriptor{}, true, nil
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 			},
 		},
 	)
@@ -1001,8 +1004,8 @@ func TestEventBusPublish_TargetedRouteTableNodePersistsSemanticNodeRoute(t *test
 			},
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
-				return map[string]ActiveAgentDescriptor{}, true, nil
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
 			},
 		},
 	)
@@ -2044,9 +2047,11 @@ func TestEventBusPublish_TopLevelProjectNodePersistsRouteBeforeInterceptor(t *te
 		SubscriberType: "node",
 		SubscriberID:   "reviewer",
 	}
+	workflowRuntimeIdentity := testAgentRouteIdentity(t, "workflow-runtime", "")
 	workflowRuntimeRoute := events.DeliveryRoute{
 		SubscriberType: "agent",
 		SubscriberID:   "workflow-runtime",
+		AgentIdentity:  workflowRuntimeIdentity,
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: semanticview.Wrap(routedTopLevelProjectNodeBundle()),
@@ -2060,8 +2065,13 @@ func TestEventBusPublish_TopLevelProjectNodePersistsRouteBeforeInterceptor(t *te
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	eb.RegisterRuntimeActiveAgentDescriptor(ActiveAgentDescriptor{AgentID: "workflow-runtime"})
-	ch := subscribeTestAgent(t, eb, "workflow-runtime", events.EventType("thing.created"))
+	ch := subscribeTestAgentAdmissionWithIdentity(
+		t,
+		eb,
+		testAgentSubscriptionAdmission(t, "workflow-runtime", events.EventType("thing.created")),
+		workflowRuntimeIdentity,
+		"",
+	)
 	evt := eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("thing.created"),

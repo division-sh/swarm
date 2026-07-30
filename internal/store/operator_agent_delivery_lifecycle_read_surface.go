@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
@@ -91,13 +92,13 @@ var agentDeliveryLifecycleStatuses = map[string]struct{}{
 	"dead_letter": {},
 }
 
-func (s *PostgresStore) LoadOperatorAgentDeliveryLifecycle(ctx context.Context, agentID string, opts OperatorAgentDeliveryLifecycleOptions) (OperatorAgentDeliveryLifecycleList, error) {
-	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).LoadOperatorAgentDeliveryLifecycle(ctx, agentID, opts)
+func (s *PostgresStore) LoadOperatorAgentDeliveryLifecycle(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDeliveryLifecycleOptions) (OperatorAgentDeliveryLifecycleList, error) {
+	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).LoadOperatorAgentDeliveryLifecycle(ctx, identity, opts)
 }
 
-func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryLifecycle(ctx context.Context, agentID string, opts OperatorAgentDeliveryLifecycleOptions) (OperatorAgentDeliveryLifecycleList, error) {
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
+func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryLifecycle(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDeliveryLifecycleOptions) (OperatorAgentDeliveryLifecycleList, error) {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
 		return OperatorAgentDeliveryLifecycleList{}, ErrAgentNotFound
 	}
 	opts, err := defaultOperatorAgentDeliveryLifecycleOptions(opts)
@@ -107,10 +108,10 @@ func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryLifecycl
 	if err := r.requireAgentDeliveryLifecycleAccess(); err != nil {
 		return OperatorAgentDeliveryLifecycleList{}, err
 	}
-	if err := r.ensureAgentDeliveryLifecycleAgentExists(ctx, agentID); err != nil {
+	if err := r.ensureAgentDeliveryLifecycleAgentExists(ctx, identity); err != nil {
 		return OperatorAgentDeliveryLifecycleList{}, err
 	}
-	deliveries, next, err := r.listAgentDeliveryLifecycleRows(ctx, agentID, opts)
+	deliveries, next, err := r.listAgentDeliveryLifecycleRows(ctx, identity, opts)
 	if err != nil {
 		return OperatorAgentDeliveryLifecycleList{}, err
 	}
@@ -118,15 +119,15 @@ func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryLifecycl
 		deliveries = []OperatorAgentDeliveryLifecycleRow{}
 	}
 	return OperatorAgentDeliveryLifecycleList{
-		AgentID:    agentID,
+		AgentID:    identity.AgentID(),
 		Deliveries: deliveries,
 		NextCursor: next,
 	}, nil
 }
 
-func (s *SQLiteRuntimeStore) LoadOperatorAgentDeliveryLifecycle(ctx context.Context, agentID string, opts OperatorAgentDeliveryLifecycleOptions) (OperatorAgentDeliveryLifecycleList, error) {
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
+func (s *SQLiteRuntimeStore) LoadOperatorAgentDeliveryLifecycle(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDeliveryLifecycleOptions) (OperatorAgentDeliveryLifecycleList, error) {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
 		return OperatorAgentDeliveryLifecycleList{}, ErrAgentNotFound
 	}
 	opts, err := defaultOperatorAgentDeliveryLifecycleOptions(opts)
@@ -136,10 +137,10 @@ func (s *SQLiteRuntimeStore) LoadOperatorAgentDeliveryLifecycle(ctx context.Cont
 	if err := s.requireSQLiteAgentDeliveryLifecycleAccess(); err != nil {
 		return OperatorAgentDeliveryLifecycleList{}, err
 	}
-	if err := s.ensureSQLiteAgentDeliveryLifecycleAgentExists(ctx, agentID); err != nil {
+	if err := s.ensureSQLiteAgentDeliveryLifecycleAgentExists(ctx, identity); err != nil {
 		return OperatorAgentDeliveryLifecycleList{}, err
 	}
-	deliveries, next, err := s.listSQLiteAgentDeliveryLifecycleRows(ctx, agentID, opts)
+	deliveries, next, err := s.listSQLiteAgentDeliveryLifecycleRows(ctx, identity, opts)
 	if err != nil {
 		return OperatorAgentDeliveryLifecycleList{}, err
 	}
@@ -147,7 +148,7 @@ func (s *SQLiteRuntimeStore) LoadOperatorAgentDeliveryLifecycle(ctx context.Cont
 		deliveries = []OperatorAgentDeliveryLifecycleRow{}
 	}
 	return OperatorAgentDeliveryLifecycleList{
-		AgentID:    agentID,
+		AgentID:    identity.AgentID(),
 		Deliveries: deliveries,
 		NextCursor: next,
 	}, nil
@@ -196,16 +197,27 @@ func (s *SQLiteRuntimeStore) requireSQLiteAgentDeliveryLifecycleAccess() error {
 	return s.requireCurrentSchema()
 }
 
-func (r *OperatorAgentConversationReadSurface) ensureAgentDeliveryLifecycleAgentExists(ctx context.Context, agentID string) error {
+func (r *OperatorAgentConversationReadSurface) ensureAgentDeliveryLifecycleAgentExists(ctx context.Context, identity agentidentity.Identity) error {
+	fields, err := agentIdentityFields(identity)
+	if err != nil {
+		return ErrAgentNotFound
+	}
 	var exists bool
 	if err := r.db.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM agents
 			WHERE agent_id = $1
+			  AND agent_name_owner = $2
+			  AND agent_name_source = $3
+			  AND agent_route_presence = $4
+			  AND flow_scope_key = $5
+			  AND flow_instance_id = $6
+			  AND flow_instance = $7
 			  AND status NOT IN ('terminated', 'ephemeral')
 		)
-	`, agentID).Scan(&exists); err != nil {
+	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&exists); err != nil {
 		return fmt.Errorf("load agent delivery lifecycle agent: %w", err)
 	}
 	if !exists {
@@ -214,16 +226,27 @@ func (r *OperatorAgentConversationReadSurface) ensureAgentDeliveryLifecycleAgent
 	return nil
 }
 
-func (s *SQLiteRuntimeStore) ensureSQLiteAgentDeliveryLifecycleAgentExists(ctx context.Context, agentID string) error {
+func (s *SQLiteRuntimeStore) ensureSQLiteAgentDeliveryLifecycleAgentExists(ctx context.Context, identity agentidentity.Identity) error {
+	fields, err := agentIdentityFields(identity)
+	if err != nil {
+		return ErrAgentNotFound
+	}
 	var exists bool
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM agents
 			WHERE agent_id = ?
+			  AND agent_name_owner = ?
+			  AND agent_name_source = ?
+			  AND agent_route_presence = ?
+			  AND flow_scope_key = ?
+			  AND flow_instance_id = ?
+			  AND flow_instance = ?
 			  AND status NOT IN ('terminated', 'ephemeral')
 		)
-	`, agentID).Scan(&exists); err != nil {
+	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&exists); err != nil {
 		return fmt.Errorf("load sqlite agent delivery lifecycle agent: %w", err)
 	}
 	if !exists {
@@ -232,14 +255,14 @@ func (s *SQLiteRuntimeStore) ensureSQLiteAgentDeliveryLifecycleAgentExists(ctx c
 	return nil
 }
 
-func (r *OperatorAgentConversationReadSurface) listAgentDeliveryLifecycleRows(ctx context.Context, agentID string, opts OperatorAgentDeliveryLifecycleOptions) ([]OperatorAgentDeliveryLifecycleRow, string, error) {
+func (r *OperatorAgentConversationReadSurface) listAgentDeliveryLifecycleRows(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDeliveryLifecycleOptions) ([]OperatorAgentDeliveryLifecycleRow, string, error) {
 	reader, ok := r.owner.(interface {
 		deliveryLifecycleSnapshotPageForAgent(context.Context, runtimedelivery.AgentLifecyclePageQuery) (runtimedelivery.SnapshotPage, error)
 	})
 	if !ok {
 		return nil, "", fmt.Errorf("operator agent delivery lifecycle requires canonical bounded delivery snapshots")
 	}
-	query, err := agentDeliveryLifecyclePageQuery(agentID, opts)
+	query, err := agentDeliveryLifecyclePageQuery(identity, opts)
 	if err != nil {
 		return nil, "", err
 	}
@@ -265,8 +288,8 @@ func (r *OperatorAgentConversationReadSurface) listAgentDeliveryLifecycleRows(ct
 	return rows, agentDeliveryLifecyclePageCursor(rows, page.HasMore), err
 }
 
-func (s *SQLiteRuntimeStore) listSQLiteAgentDeliveryLifecycleRows(ctx context.Context, agentID string, opts OperatorAgentDeliveryLifecycleOptions) ([]OperatorAgentDeliveryLifecycleRow, string, error) {
-	query, err := agentDeliveryLifecyclePageQuery(agentID, opts)
+func (s *SQLiteRuntimeStore) listSQLiteAgentDeliveryLifecycleRows(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDeliveryLifecycleOptions) ([]OperatorAgentDeliveryLifecycleRow, string, error) {
+	query, err := agentDeliveryLifecyclePageQuery(identity, opts)
 	if err != nil {
 		return nil, "", err
 	}
@@ -331,11 +354,11 @@ func deliveryLifecycleRowsFromSnapshots(
 	return rows, nil
 }
 
-func agentDeliveryLifecyclePageQuery(agentID string, opts OperatorAgentDeliveryLifecycleOptions) (runtimedelivery.AgentLifecyclePageQuery, error) {
+func agentDeliveryLifecyclePageQuery(identity agentidentity.Identity, opts OperatorAgentDeliveryLifecycleOptions) (runtimedelivery.AgentLifecyclePageQuery, error) {
 	query := runtimedelivery.AgentLifecyclePageQuery{
-		AgentID: agentID,
-		RunID:   opts.RunID,
-		Limit:   opts.Limit,
+		AgentIdentity: identity,
+		RunID:         opts.RunID,
+		Limit:         opts.Limit,
 	}
 	for _, raw := range opts.Statuses {
 		status, err := runtimedelivery.ParseStatus(raw)

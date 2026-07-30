@@ -11,6 +11,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -128,6 +129,7 @@ type AgentLifecycleTransition struct {
 	OperationID        string
 	OperationKind      string
 	RequestHash        string
+	Identity           runtimeagentidentity.Identity
 	AgentID            string
 	Trigger            string
 	ExpectedEpoch      int64
@@ -156,6 +158,7 @@ func (m DynamicAgentTopologyMutation) AuthorityFacts() (runID, instancePath, pla
 }
 
 type AgentLifecycleState struct {
+	Identity       runtimeagentidentity.Identity
 	AgentID        string
 	RuntimeEpoch   int64
 	Generation     uint64
@@ -167,6 +170,7 @@ type AgentLifecycleState struct {
 type AgentLifecycleTransitionResult struct {
 	OperationID        string                            `json:"operation_id"`
 	TransitionID       string                            `json:"transition_id"`
+	Identity           runtimeagentidentity.Identity     `json:"identity"`
 	AgentID            string                            `json:"agent_id"`
 	PreviousEpoch      int64                             `json:"previous_epoch"`
 	RuntimeEpoch       int64                             `json:"runtime_epoch"`
@@ -185,12 +189,13 @@ type AgentLifecyclePersistence interface {
 }
 
 type AgentLifecycleStateReader interface {
-	LoadAgentLifecycleState(context.Context, string) (AgentLifecycleState, bool, error)
+	LoadAgentLifecycleState(context.Context, runtimeagentidentity.Identity) (AgentLifecycleState, bool, error)
 }
 
 type AgentLifecycleDiagnostic struct {
 	OutboxID    string
 	OperationID string
+	Identity    runtimeagentidentity.Identity
 	AgentID     string
 	EventName   string
 	Payload     map[string]any

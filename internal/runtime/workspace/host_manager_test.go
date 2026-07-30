@@ -9,6 +9,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -71,6 +72,7 @@ func TestHostManagerResolveWorkspaceCreatesScopedHostTargets(t *testing.T) {
 	dedicated, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
 		ExecutionMode:  "live",
 		ID:             "Dedicated Agent",
+		Identity:       runtimeagentidentitytest.RootDeclared(t, "Dedicated Agent", "test/agents.yaml"),
 		WorkspaceClass: "dedicated",
 	})
 	if err != nil {
@@ -86,6 +88,7 @@ func TestHostManagerResolveWorkspaceCreatesScopedHostTargets(t *testing.T) {
 	shared, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
 		ExecutionMode:  "live",
 		ID:             "shared-agent",
+		Identity:       runtimeagentidentitytest.Declared(t, "shared-agent", "test/agents.yaml", "flows/acme", "review", "flows/acme/review"),
 		FlowPath:       "flows/acme/review",
 		WorkspaceClass: "shared_flow",
 	})
@@ -185,7 +188,11 @@ func TestHostManagerRejectsSymlinkedWorkspaceChildEscape(t *testing.T) {
 		t.Fatalf("ValidateSource: %v", err)
 	}
 	manager.SetSemanticSource(source)
-	_, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "agent-1"})
+	_, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "agent-1",
+		Identity:      runtimeagentidentitytest.RootDeclared(t, "agent-1", "test/agents.yaml"),
+	})
 	if err == nil || !strings.Contains(err.Error(), "escapes root") {
 		t.Fatalf("ResolveWorkspace error = %v, want symlink child escape rejection", err)
 	}
@@ -214,7 +221,11 @@ func TestHostManagerResolveWorkspaceValidatesRootBeforeCreate(t *testing.T) {
 	})
 	manager.SetSemanticSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
 
-	_, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{ExecutionMode: "live", ID: "agent-1"})
+	_, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "agent-1",
+		Identity:      runtimeagentidentitytest.RootDeclared(t, "agent-1", "test/agents.yaml"),
+	})
 	if err == nil || !strings.Contains(err.Error(), "must not overlap /data source") {
 		t.Fatalf("ResolveWorkspace error = %v, want validation-before-create overlap rejection", err)
 	}

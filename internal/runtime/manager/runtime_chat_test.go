@@ -13,6 +13,8 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
@@ -65,7 +67,7 @@ type directiveTargetStore struct {
 	calls  int
 }
 
-func (s *directiveTargetStore) ResolveAgentDirectiveRunTarget(context.Context, string, string) (runtimeagentcontrol.RunTargetResolution, error) {
+func (s *directiveTargetStore) ResolveAgentDirectiveRunTarget(context.Context, runtimeagentidentity.Identity, string) (runtimeagentcontrol.RunTargetResolution, error) {
 	s.calls++
 	if s.err != nil {
 		return runtimeagentcontrol.RunTargetResolution{}, s.err
@@ -114,15 +116,24 @@ func (b *directiveTestBus) LogRuntime(context.Context, runtimepipeline.RuntimeLo
 
 func installDirectiveTestAgent(t *testing.T, am *AgentManager, agent Agent) {
 	t.Helper()
-	rec := PersistedAgent{Config: models.AgentConfig{ExecutionMode: "live", ID: agent.ID()}, Status: "active", HiredBy: "test"}
+	rec := PersistedAgent{Config: models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            agent.ID(),
+		Identity:      directiveTestAgentIdentity(t, agent.ID()),
+	}, Status: "active", HiredBy: "test"}
 	if err := am.lifecycle.registerExecution(testAuthorActivityContext(context.Background()), rec, false, agent, testManagerSubscriptionAdmission(t, rec.Config)); err != nil {
 		t.Fatalf("register directive test agent: %v", err)
 	}
+	cell, _ := testLifecycleCell(t, am.lifecycle, agent.ID(), "")
 	am.lifecycle.mu.Lock()
-	cell := am.lifecycle.cells[agent.ID()]
 	cell.phase = AgentLifecycleRunning
 	cell.runMode = AgentRunModeStandard
 	am.lifecycle.mu.Unlock()
+}
+
+func directiveTestAgentIdentity(t testing.TB, agentID string) runtimeagentidentity.Identity {
+	t.Helper()
+	return runtimeagentidentitytest.RootRuntime(t, agentID, "manager.directive_test")
 }
 
 type directiveEventStore struct {
@@ -890,7 +901,7 @@ func TestAgentManager_SendDirectiveRejectsSourceBeforeExpiredReplayReconciliatio
 				ActorTokenID:   "operator-token",
 				IdempotencyKey: "expired-source-key",
 				RequestHash:    "request-hash",
-				AgentID:        "campaign-coordinator",
+				AgentIdentity:  directiveTestAgentIdentity(t, "campaign-coordinator"),
 				Directive:      "inspect",
 				State:          tc.state,
 			}
@@ -910,12 +921,13 @@ func TestAgentManager_SendDirectiveRejectsSourceBeforeExpiredReplayReconciliatio
 				RunID: "00000000-0000-0000-0000-000000000799",
 				Mode:  runtimeagentcontrol.RunResolutionSpecified,
 			}}
-			agent := &chatTestAgent{id: operation.AgentID}
+			agent := &chatTestAgent{id: operation.AgentID()}
 			am := newTestAgentManager(t, bus, nil, store)
 			installDirectiveTestAgent(t, am, agent)
 
 			_, err := am.SendDirective(testAuthorActivityContext(context.Background()), runtimeagentcontrol.SendDirectiveRequest{
-				AgentID:        operation.AgentID,
+				AgentID:        operation.AgentID(),
+				FlowInstance:   operation.FlowInstance(),
 				Directive:      operation.Directive,
 				ActorTokenID:   operation.ActorTokenID,
 				IdempotencyKey: operation.IdempotencyKey,

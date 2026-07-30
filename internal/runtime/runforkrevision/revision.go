@@ -531,6 +531,17 @@ const canonicalEventDeliveriesProjectionSQL = `
 	           'delivery_id', d.delivery_id, 'event_id', d.event_id,
 	           'run_id', d.run_id, 'route_identity', d.route_identity,
 	           'subscriber_type', d.subscriber_type, 'subscriber_id', d.subscriber_id,
+	           'agent_identity', CASE WHEN d.subscriber_type = 'agent' THEN jsonb_build_object(
+	               'name', jsonb_build_object(
+	                   'agent_id', d.subscriber_id,
+	                   'owner', d.agent_name_owner,
+	                   'source', d.agent_name_source),
+	               'route', jsonb_build_object(
+	                   'presence', d.agent_route_presence,
+	                   'scope_key', d.agent_flow_scope_key,
+	                   'instance_id', d.agent_flow_instance_id,
+	                   'instance_path', d.agent_flow_instance_path)
+	           ) ELSE '{}'::jsonb END,
 	           'delivery_target_route', d.delivery_target_route,
 	           'delivery_context', d.delivery_context,
 	           'delivery_payload_projection', d.delivery_payload_projection, 'status', d.status,

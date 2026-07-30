@@ -13,9 +13,12 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
@@ -74,6 +77,8 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 		`CREATE TABLE event_deliveries (
 			delivery_id TEXT PRIMARY KEY, run_id TEXT, event_id TEXT NOT NULL, route_identity TEXT NOT NULL,
 			subscriber_type TEXT NOT NULL, subscriber_id TEXT NOT NULL, delivery_target_route BLOB NOT NULL,
+			agent_name_owner TEXT NOT NULL, agent_name_source TEXT NOT NULL, agent_route_presence TEXT NOT NULL,
+			agent_flow_scope_key TEXT NOT NULL, agent_flow_instance_id TEXT NOT NULL, agent_flow_instance_path TEXT NOT NULL,
 			delivery_context BLOB NOT NULL, delivery_payload_projection BLOB NOT NULL, status TEXT NOT NULL,
 			retry_count INTEGER NOT NULL, max_retries INTEGER NOT NULL, next_eligible_at TIMESTAMP,
 			claim_version INTEGER NOT NULL, current_attempt_version INTEGER, current_attempt_open BOOLEAN,
@@ -86,6 +91,8 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 			started_at TIMESTAMP NOT NULL, lease_expires_at TIMESTAMP NOT NULL,
 			current_delivery_id TEXT, active_session_id TEXT, session_delivery_id TEXT, session_run_id TEXT,
 			session_subscriber_type TEXT, session_agent_id TEXT, open_marker BOOLEAN NOT NULL,
+			session_agent_name_owner TEXT, session_agent_name_source TEXT, session_agent_route_presence TEXT,
+			session_agent_flow_scope_key TEXT, session_agent_flow_instance_id TEXT, session_agent_flow_instance_path TEXT,
 			outcome TEXT,
 			reason_code TEXT, failure BLOB, side_effects BLOB NOT NULL DEFAULT '[]', duration_ms INTEGER,
 			completed_at TIMESTAMP, PRIMARY KEY(delivery_id, claim_version)
@@ -157,7 +164,7 @@ func (s *runtimeShutdownDeliveryStore) ClaimAgentDelivery(ctx context.Context, e
 	return claimed, err
 }
 
-func (s *runtimeShutdownDeliveryStore) seedAgentDelivery(t *testing.T, ctx context.Context, evt events.Event, agentID string) {
+func (s *runtimeShutdownDeliveryStore) seedAgentDelivery(t *testing.T, ctx context.Context, evt events.Event, identity agentidentity.Identity) {
 	t.Helper()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -165,7 +172,11 @@ func (s *runtimeShutdownDeliveryStore) seedAgentDelivery(t *testing.T, ctx conte
 		t.Fatalf("seed runtime delivery event: %v", err)
 	}
 	s.events[evt.ID()] = evt
-	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: agentID}
+	route := events.DeliveryRoute{
+		SubscriberType: string(runtimedelivery.SubscriberAgent),
+		SubscriberID:   identity.AgentID(),
+		AgentIdentity:  identity,
+	}
 	if err := s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
 		_, err := s.adapter.CommitInitial(story, tx, evt.ID(), evt.RunID(), []events.DeliveryRoute{route})
 		return err
@@ -174,12 +185,12 @@ func (s *runtimeShutdownDeliveryStore) seedAgentDelivery(t *testing.T, ctx conte
 	}
 }
 
-func (s *runtimeShutdownDeliveryStore) ClaimAgentBacklog(ctx context.Context, agentID string, limit int) (executions []runtimedelivery.AgentExecution, err error) {
+func (s *runtimeShutdownDeliveryStore) ClaimAgentBacklog(ctx context.Context, identity agentidentity.Identity, limit int) (executions []runtimedelivery.AgentExecution, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var claimed []runtimedelivery.ClaimedObligation
 	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
-		claimed, err = s.adapter.ClaimPendingAgent(story, tx, agentID, limit, runtimedelivery.DefaultLeaseTTL)
+		claimed, err = s.adapter.ClaimPendingAgent(story, tx, identity, limit, runtimedelivery.DefaultLeaseTTL)
 		return err
 	})
 	if err != nil {
@@ -332,6 +343,7 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 	if err := am.SpawnAgent(runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            agent.id,
+		Identity:      agentidentitytest.RootRuntime(t, agent.id, "runtime-test/shutdown-admission"),
 		Subscriptions: []string{"test.in"},
 	}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
@@ -370,7 +382,9 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 	if !rt.shutdownAdmissionClosed() {
 		t.Fatal("runtime shutdown admission was not closed before manager drain")
 	}
-	if err := am.ReplayAgentBacklog(testAuthorActivityContext(context.Background()), agent.id); err == nil || !strings.Contains(err.Error(), "runtime shutting down") {
+	if _, err := am.ReplayBacklog(testAuthorActivityContext(context.Background()), runtimeagentcontrol.ReplayBacklogRequest{
+		AgentID: agent.id,
+	}); err == nil || !strings.Contains(err.Error(), "runtime shutting down") {
 		t.Fatalf("ReplayAgentBacklog during shutdown err = %v, want runtime shutting down", err)
 	}
 	if managerStore.listPendingCalled {
@@ -441,6 +455,7 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 	if err := am.SpawnAgent(runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            agent.id,
+		Identity:      agentidentitytest.RootRuntime(t, agent.id, "runtime-test/shutdown-admission"),
 		Subscriptions: []string{"test.in"},
 	}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)

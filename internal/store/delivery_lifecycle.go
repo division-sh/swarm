@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -132,10 +133,10 @@ func requireDeliveryRouteClass(route events.DeliveryRoute, want runtimedelivery.
 	return nil
 }
 
-func (s *PostgresStore) ClaimAgentBacklog(ctx context.Context, agentID string, limit int) ([]runtimedelivery.AgentExecution, error) {
+func (s *PostgresStore) ClaimAgentBacklog(ctx context.Context, identity agentidentity.Identity, limit int) ([]runtimedelivery.AgentExecution, error) {
 	claimed := []runtimedelivery.AgentExecution{}
 	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		candidates, err := postgresDeliveryAdapter.AgentClaimCandidates(txctx, tx, agentID, limit)
+		candidates, err := postgresDeliveryAdapter.AgentClaimCandidates(txctx, tx, identity, limit)
 		if err != nil {
 			return err
 		}
@@ -152,10 +153,10 @@ func (s *PostgresStore) ClaimAgentBacklog(ctx context.Context, agentID string, l
 	return claimed, err
 }
 
-func (s *SQLiteRuntimeStore) ClaimAgentBacklog(ctx context.Context, agentID string, limit int) ([]runtimedelivery.AgentExecution, error) {
+func (s *SQLiteRuntimeStore) ClaimAgentBacklog(ctx context.Context, identity agentidentity.Identity, limit int) ([]runtimedelivery.AgentExecution, error) {
 	claimed := []runtimedelivery.AgentExecution{}
 	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		candidates, err := sqliteDeliveryAdapter.AgentClaimCandidates(txctx, tx, agentID, limit)
+		candidates, err := sqliteDeliveryAdapter.AgentClaimCandidates(txctx, tx, identity, limit)
 		if err != nil {
 			return err
 		}
@@ -594,12 +595,12 @@ func (s *SQLiteRuntimeStore) deliveryDiagnosticSnapshotPageForAgent(ctx context.
 	return sqliteDeliveryAdapter.DiagnosticSnapshotPageForAgent(ctx, eventReadQueryerFromContext(ctx, s.DB), query)
 }
 
-func (s *PostgresStore) deliveryDiagnosticCountsForAgentSince(ctx context.Context, agentID string, since time.Time) (runtimedelivery.AgentDiagnosticCounts, error) {
-	return postgresDeliveryAdapter.DiagnosticCountsForAgentSince(ctx, eventReadQueryerFromContext(ctx, s.DB), agentID, since)
+func (s *PostgresStore) deliveryDiagnosticCountsForAgentSince(ctx context.Context, identity agentidentity.Identity, since time.Time) (runtimedelivery.AgentDiagnosticCounts, error) {
+	return postgresDeliveryAdapter.DiagnosticCountsForAgentSince(ctx, eventReadQueryerFromContext(ctx, s.DB), identity, since)
 }
 
-func (s *SQLiteRuntimeStore) deliveryDiagnosticCountsForAgentSince(ctx context.Context, agentID string, since time.Time) (runtimedelivery.AgentDiagnosticCounts, error) {
-	return sqliteDeliveryAdapter.DiagnosticCountsForAgentSince(ctx, eventReadQueryerFromContext(ctx, s.DB), agentID, since)
+func (s *SQLiteRuntimeStore) deliveryDiagnosticCountsForAgentSince(ctx context.Context, identity agentidentity.Identity, since time.Time) (runtimedelivery.AgentDiagnosticCounts, error) {
+	return sqliteDeliveryAdapter.DiagnosticCountsForAgentSince(ctx, eventReadQueryerFromContext(ctx, s.DB), identity, since)
 }
 
 func (s *PostgresStore) terminalizeRunDeliveriesTx(ctx context.Context, tx *sql.Tx, runID, reason string) ([]runtimedelivery.Terminalization, error) {

@@ -19,6 +19,7 @@ import (
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -37,11 +38,11 @@ func TestOperatorEventReplayPublishesDistinctReplayEventAuditAndIdempotency(t *t
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	bus := eventReplayTestBus(t, pg)
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-b")
-	chA := runtimebustest.Subscribe(t, bus, "agent-a")
+	seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
+	seedActiveOperatorReplayAgent(t, ctx, pg, "agent-b")
+	chA := subscribeOperatorReplayAgent(t, bus, "agent-a")
 	defer runtimebustest.Unsubscribe(bus, "agent-a")
-	chB := runtimebustest.Subscribe(t, bus, "agent-b")
+	chB := subscribeOperatorReplayAgent(t, bus, "agent-b")
 	defer runtimebustest.Unsubscribe(bus, "agent-b")
 	original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a", "agent-b"}, runtimedelivery.StatusDelivered)
 	handler := eventReplayTestHandler(t, pg, bus)
@@ -155,6 +156,7 @@ type completeOperatorReplayProofStore interface {
 	RunReadStore
 	ObservabilityReadStore
 	APIIdempotencyStore
+	AgentConversationReadStore
 	activeAPIV1RuntimeBusAgentStore
 }
 
@@ -223,7 +225,8 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					t.Fatalf("NewEventBusWithOptions: %v", err)
 				}
 				const agentID = "complete-replay-agent"
-				ch := runtimebustest.Subscribe(t, bus, agentID)
+				agentIdentity := runtimebustest.Identity(t, agentID, "target-flow/instance")
+				ch := subscribeOperatorReplayIdentity(t, bus, agentIdentity)
 				defer runtimebustest.Unsubscribe(bus, agentID)
 
 				runID := uuid.NewString()
@@ -236,7 +239,8 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				envelope := routeShape.envelope(entityID)
 				if err := f.store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 					Config: runtimeactors.AgentConfig{
-						ID: agentID, Role: "observer", FlowID: "target-flow", FlowPath: "target-flow/instance", EntityID: entityID,
+						Identity: agentIdentity, ID: agentID, Role: "observer",
+						FlowID: "target-flow", FlowPath: agentIdentity.FlowInstance(), EntityID: entityID,
 						Type: "stub", Model: "regular", ExecutionMode: "live", Config: []byte(`{}`), Subscriptions: []string{"scan.requested"},
 					},
 					Status: "active", HiredBy: "test", StartedAt: createdAt,
@@ -251,7 +255,10 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					originalID, events.EventType("scan.requested"), eventtest.Producer(events.EventProducerAgent, "origin-agent"), "event-owned-task",
 					json.RawMessage(`{"task_id":"payload-owned-task","topic":"medicine"}`), 4, runID, parentID, envelope, createdAt,
 				), "mock")
-				originalRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: agentID, Target: deliveryTarget}
+				originalRoute := events.DeliveryRoute{
+					SubscriberType: "agent", SubscriberID: agentID,
+					AgentIdentity: agentIdentity, Target: deliveryTarget,
+				}
 				storetest.CommitSemanticEvent(t, ctx, f.store, parent)
 				storetest.CommitSemanticEventWithRoutes(t, ctx, f.store, original,
 					[]events.DeliveryRoute{originalRoute},
@@ -365,8 +372,9 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			const agentID = "route-sibling-replay-agent"
-			ch := runtimebustest.Subscribe(t, bus, agentID)
-			defer runtimebustest.Unsubscribe(bus, agentID)
+			identity := runtimebustest.Identity(t, agentID, "target-flow/instance")
+			ch := subscribeOperatorReplayIdentity(t, bus, identity)
+			defer runtimebustest.UnsubscribeIdentity(bus, identity)
 
 			runID := uuid.NewString()
 			parentID := uuid.NewString()
@@ -375,12 +383,14 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 			seedCompleteReplayRun(t, ctx, f.db, tc.name == "sqlite", runID, createdAt.Add(-time.Minute))
 			if err := f.store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 				Config: runtimeactors.AgentConfig{
-					ID: agentID, Role: "observer", Type: "stub", Model: "regular", ExecutionMode: "live",
+					Identity: identity, ID: agentID,
+					Role: "observer", Type: "stub", Model: "regular", ExecutionMode: "live",
+					FlowID: "target-flow", FlowPath: identity.FlowInstance(),
 					Config: []byte(`{}`), Subscriptions: []string{"scan.requested"},
 				},
 				Status: "active", HiredBy: "test", StartedAt: createdAt,
 			}); err != nil {
-				t.Fatalf("UpsertAgent: %v", err)
+				t.Fatalf("UpsertAgent(%s): %v", identity, err)
 			}
 			firstProjection, err := events.NewDeliveryPayloadProjection(map[string]string{"route_marker": "first"})
 			if err != nil {
@@ -393,13 +403,15 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 			routes := []events.DeliveryRoute{
 				{
 					SubscriberType: "agent", SubscriberID: agentID,
-					Target:  events.RouteIdentity{FlowID: "target-flow", FlowInstance: "target-flow/first", EntityID: uuid.NewString()},
-					Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-first"}}, PayloadProjection: firstProjection,
+					AgentIdentity: identity,
+					Target:        events.RouteIdentity{FlowID: "target-flow", FlowInstance: identity.FlowInstance(), EntityID: uuid.NewString()},
+					Context:       events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-first"}}, PayloadProjection: firstProjection,
 				},
 				{
 					SubscriberType: "agent", SubscriberID: agentID,
-					Target:  events.RouteIdentity{FlowID: "target-flow", FlowInstance: "target-flow/second", EntityID: uuid.NewString()},
-					Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-second"}}, PayloadProjection: secondProjection,
+					AgentIdentity: identity,
+					Target:        events.RouteIdentity{FlowID: "target-flow", FlowInstance: identity.FlowInstance(), EntityID: uuid.NewString()},
+					Context:       events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-second"}}, PayloadProjection: secondProjection,
 				},
 			}
 			parent := eventtest.InExecutionMode(eventtest.PersistedRuntimeControlForProducer(
@@ -482,11 +494,11 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 			}
 
 			received := map[string]events.Event{}
-			for range routes {
+			for index := range routes {
 				delivery := requireAPIV1RuntimeBusEvent(t, ch, "exact route sibling replay")
 				var payload map[string]any
 				if err := json.Unmarshal(delivery.Payload(), &payload); err != nil {
-					t.Fatalf("decode projected payload: %v", err)
+					t.Fatalf("decode projected payload %d: %v", index, err)
 				}
 				received[fmt.Sprint(payload["route_marker"])] = delivery
 			}
@@ -564,6 +576,7 @@ func TestOpaqueMissingEventIDReturnsNotFoundAcrossOperatorConsumersParity(t *tes
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
 			f := tc.open(t, ctx)
+			seedActiveOperatorReplayAgent(t, ctx, f.store, "agent-a")
 			if _, err := f.store.LoadOperatorEvent(ctx, "missing"); !errors.Is(err, store.ErrEventNotFound) {
 				t.Fatalf("operator reader error = %v, want ErrEventNotFound", err)
 			}
@@ -611,7 +624,7 @@ func completeOperatorReplayTestHandler(t *testing.T, owner completeOperatorRepla
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
 			Now: func() time.Time { return now }, Ready: func() bool { return true }, Database: fakePinger{},
-			Runs: owner, Observability: owner, Idempotency: owner, Events: bus,
+			Runs: owner, Observability: owner, AgentConversations: owner, Idempotency: owner, Events: bus,
 			Source: semanticview.Wrap(runStartTestBundle("scan.requested")),
 			Bundle: runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0", BundleHash: runStartTestBundleHash},
 		}),
@@ -624,8 +637,7 @@ func markOperatorReplayDeliveryTerminal(t *testing.T, ctx context.Context, owner
 	if err != nil {
 		t.Fatalf("claim original delivery: %v", err)
 	}
-	agentID := route.SubscriberID
-	sessionID := seedOperatorReplayDeliverySession(t, ctx, db, sqlite, evt.RunID(), agentID)
+	sessionID := seedOperatorReplayDeliverySession(t, ctx, db, sqlite, evt.RunID(), route.AgentIdentity)
 	if _, err := owner.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 		t.Fatalf("bind original delivery session: %v", err)
 	}
@@ -634,27 +646,61 @@ func markOperatorReplayDeliveryTerminal(t *testing.T, ctx context.Context, owner
 	}
 }
 
-func seedOperatorReplayDeliverySession(t testing.TB, ctx context.Context, db *sql.DB, sqlite bool, runID, agentID string) string {
+func seedOperatorReplayDeliverySession(t testing.TB, ctx context.Context, db *sql.DB, sqlite bool, runID string, identity agentidentity.Identity) string {
 	t.Helper()
+	identity = identity.Normalize()
+	fields, err := identity.StorageFields()
+	if err != nil {
+		t.Fatalf("operator replay identity fields: %v", err)
+	}
 	sessionID := uuid.NewString()
 	agentQuery := `
-		INSERT INTO agents (agent_id, role, model, memory_enabled, memory_source)
-		VALUES ($1, 'operator-replay-test', 'operator-replay-test', TRUE, 'authored')
-		ON CONFLICT (agent_id) DO NOTHING
+		INSERT INTO agents (
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance,
+			role, model, memory_enabled, memory_source
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'operator-replay-test', 'operator-replay-test', TRUE, 'authored')
+		ON CONFLICT (
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance
+		) DO NOTHING
 	`
-	query := `INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance) VALUES ($1::uuid, $2::uuid, $3, $4)`
+	query := `
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance
+		) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9)
+	`
 	if sqlite {
 		agentQuery = `
-			INSERT INTO agents (agent_id, role, model, memory_enabled, memory_source)
-			VALUES (?, 'operator-replay-test', 'operator-replay-test', 1, 'authored')
-			ON CONFLICT (agent_id) DO NOTHING
+			INSERT INTO agents (
+				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, flow_instance,
+				role, model, memory_enabled, memory_source
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, 'operator-replay-test', 'operator-replay-test', 1, 'authored')
+			ON CONFLICT (
+				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, flow_instance
+			) DO NOTHING
 		`
-		query = `INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance) VALUES (?, ?, ?, ?)`
+		query = `
+			INSERT INTO agent_sessions (
+				session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, flow_instance
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`
 	}
-	if _, err := db.ExecContext(ctx, agentQuery, agentID); err != nil {
+	identityArgs := []any{
+		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+	}
+	if _, err := db.ExecContext(ctx, agentQuery, identityArgs...); err != nil {
 		t.Fatalf("seed operator replay delivery agent: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, query, sessionID, runID, agentID, "operator-replay/"+sessionID); err != nil {
+	sessionArgs := append([]any{sessionID, runID}, identityArgs...)
+	if _, err := db.ExecContext(ctx, query, sessionArgs...); err != nil {
 		t.Fatalf("seed operator replay delivery session: %v", err)
 	}
 	return sessionID
@@ -795,8 +841,8 @@ func TestOperatorEventReplayStoresIdempotencyBeforeAuditPublishReadiness(t *test
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	inner := eventReplayTestBus(t, pg)
 	publisher := &failOnceAuditEventPublisher{inner: inner, err: errors.New("audit publish temporarily unavailable")}
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
-	ch := runtimebustest.Subscribe(t, inner, "agent-a")
+	seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
+	ch := subscribeOperatorReplayAgent(t, inner, "agent-a")
 	defer runtimebustest.Unsubscribe(inner, "agent-a")
 	original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, runtimedelivery.StatusDelivered)
 	handler := eventReplayTestHandler(t, pg, publisher)
@@ -836,8 +882,8 @@ func TestOperatorEventReplayStoresIdempotencyBeforeDirectPublishFanoutError(t *t
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	bus := eventReplayTestBus(t, pg)
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
-	ch := runtimebustest.Subscribe(t, bus, "agent-a")
+	seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
+	ch := subscribeOperatorReplayAgent(t, bus, "agent-a")
 	defer runtimebustest.Unsubscribe(bus, "agent-a")
 	fillAgentChannel(t, ctx, bus, "agent-a", cap(ch))
 	original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, runtimedelivery.StatusDelivered)
@@ -887,11 +933,11 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		bus := eventReplayTestBus(t, pg)
-		seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
-		seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-b")
-		chA := runtimebustest.Subscribe(t, bus, "agent-a")
+		seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
+		seedActiveOperatorReplayAgent(t, ctx, pg, "agent-b")
+		chA := subscribeOperatorReplayAgent(t, bus, "agent-a")
 		defer runtimebustest.Unsubscribe(bus, "agent-a")
-		chB := runtimebustest.Subscribe(t, bus, "agent-b")
+		chB := subscribeOperatorReplayAgent(t, bus, "agent-b")
 		defer runtimebustest.Unsubscribe(bus, "agent-b")
 		original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a", "agent-b"}, runtimedelivery.StatusDelivered)
 		handler := eventReplayTestHandler(t, pg, bus)
@@ -994,8 +1040,9 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		bus := eventReplayTestBus(t, pg)
-		seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
-		runtimebustest.Subscribe(t, bus, "agent-a")
+		seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
+		seedActiveOperatorReplayAgent(t, ctx, pg, "agent-b")
+		subscribeOperatorReplayAgent(t, bus, "agent-a")
 		defer runtimebustest.Unsubscribe(bus, "agent-a")
 		original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, runtimedelivery.StatusDelivered)
 		handler := eventReplayTestHandler(t, pg, bus)
@@ -1016,7 +1063,7 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		bus := eventReplayTestBus(t, pg)
-		seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
+		seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
 		original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, runtimedelivery.StatusDelivered)
 		handler := eventReplayTestHandler(t, pg, bus)
 		resp := rpcCall(t, handler, eventReplayBody(original.EventID, nil, "idem-unavailable"))
@@ -1037,8 +1084,8 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
 			pg := storetest.AdmitPostgresRuntimeStore(t, db)
 			bus := eventReplayTestBus(t, pg)
-			seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
-			runtimebustest.Subscribe(t, bus, "agent-a")
+			seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
+			subscribeOperatorReplayAgent(t, bus, "agent-a")
 			defer runtimebustest.Unsubscribe(bus, "agent-a")
 			original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, status)
 			handler := eventReplayTestHandler(t, pg, bus)
@@ -1077,11 +1124,11 @@ func TestOperatorAgentReplayProjectsSingletonEventReplayOwner(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	bus := eventReplayTestBus(t, pg)
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-b")
-	chA := runtimebustest.Subscribe(t, bus, "agent-a")
+	seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
+	seedActiveOperatorReplayAgent(t, ctx, pg, "agent-b")
+	chA := subscribeOperatorReplayAgent(t, bus, "agent-a")
 	defer runtimebustest.Unsubscribe(bus, "agent-a")
-	chB := runtimebustest.Subscribe(t, bus, "agent-b")
+	chB := subscribeOperatorReplayAgent(t, bus, "agent-b")
 	defer runtimebustest.Unsubscribe(bus, "agent-b")
 	original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a", "agent-b"}, runtimedelivery.StatusDelivered)
 	handler := eventReplayTestHandler(t, pg, bus)
@@ -1150,8 +1197,9 @@ func TestOperatorAgentReplayFailClosedCases(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		bus := eventReplayTestBus(t, pg)
-		seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
-		runtimebustest.Subscribe(t, bus, "agent-a")
+		seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
+		seedActiveOperatorReplayAgent(t, ctx, pg, "agent-b")
+		subscribeOperatorReplayAgent(t, bus, "agent-a")
 		defer runtimebustest.Unsubscribe(bus, "agent-a")
 		original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, runtimedelivery.StatusDelivered)
 		handler := eventReplayTestHandler(t, pg, bus)
@@ -1173,7 +1221,7 @@ func TestOperatorAgentReplayFailClosedCases(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		bus := eventReplayTestBus(t, pg)
-		seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
+		seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
 		original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, runtimedelivery.StatusDelivered)
 		handler := eventReplayTestHandler(t, pg, bus)
 
@@ -1194,8 +1242,8 @@ func TestOperatorAgentReplayFailClosedCases(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		bus := eventReplayTestBus(t, pg)
-		seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
-		runtimebustest.Subscribe(t, bus, "agent-a")
+		seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
+		subscribeOperatorReplayAgent(t, bus, "agent-a")
 		defer runtimebustest.Unsubscribe(bus, "agent-a")
 		original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, runtimedelivery.StatusPending)
 		handler := eventReplayTestHandler(t, pg, bus)
@@ -1226,8 +1274,8 @@ func TestOperatorEventReplayQueuesWhenDispatchGated(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
-			ch := runtimebustest.Subscribe(t, bus, "agent-a")
+			seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
+			ch := subscribeOperatorReplayAgent(t, bus, "agent-a")
 			defer runtimebustest.Unsubscribe(bus, "agent-a")
 			original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, runtimedelivery.StatusDelivered)
 			handler := eventReplayTestHandler(t, pg, bus)
@@ -1290,8 +1338,8 @@ func (p *failOnceAuditEventPublisher) PublishDirectRoutes(ctx context.Context, e
 	return p.inner.PublishDirectRoutes(ctx, evt, routes)
 }
 
-func (p *failOnceAuditEventPublisher) CheckDirectRecipients(ctx context.Context, evt events.Event, recipients []string) (runtimebus.DirectRecipientStatus, error) {
-	return p.inner.CheckDirectRecipients(ctx, evt, recipients)
+func (p *failOnceAuditEventPublisher) CheckDirectRoutes(ctx context.Context, evt events.Event, routes []events.DeliveryRoute) (runtimebus.ExactDirectRouteStatus, error) {
+	return p.inner.CheckDirectRoutes(ctx, evt, routes)
 }
 
 func eventReplayTestHandler(t *testing.T, pg *store.PostgresStore, bus eventReplayPublisher) *Handler {
@@ -1299,14 +1347,15 @@ func eventReplayTestHandler(t *testing.T, pg *store.PostgresStore, bus eventRepl
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Now:           func() time.Time { return time.Now().UTC() },
-			Ready:         func() bool { return true },
-			Database:      fakePinger{},
-			Runs:          pg,
-			Observability: pg,
-			Idempotency:   pg,
-			Events:        bus,
-			Source:        semanticview.Wrap(runStartTestBundle("scan.requested")),
+			Now:                func() time.Time { return time.Now().UTC() },
+			Ready:              func() bool { return true },
+			Database:           fakePinger{},
+			Runs:               pg,
+			Observability:      pg,
+			AgentConversations: pg,
+			Idempotency:        pg,
+			Events:             bus,
+			Source:             semanticview.Wrap(runStartTestBundle("scan.requested")),
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "review",
 				WorkflowVersion: "1.0.0",
@@ -1335,15 +1384,19 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 	)
 	routes := make([]events.DeliveryRoute, 0, len(subscribers))
 	for _, subscriber := range subscribers {
-		routes = append(routes, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: subscriber})
+		routes = append(routes, events.DeliveryRoute{
+			SubscriberType: "agent",
+			SubscriberID:   subscriber,
+			AgentIdentity:  operatorReplayAgentIdentity(t, subscriber),
+		})
 	}
 	scope := runtimepipelineobligation.ScopeDirect
 	if len(routes) > 0 {
 		scope = runtimepipelineobligation.ScopeSubscribed
 	}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, semanticEvent, routes, scope)
-	for _, subscriber := range subscribers {
-		route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: subscriber}
+	for _, route := range routes {
+		subscriber := route.SubscriberID
 		switch status {
 		case runtimedelivery.StatusPending:
 			continue
@@ -1352,7 +1405,7 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 			if err != nil {
 				t.Fatalf("claim original delivery %s %s: %v", eventID, subscriber, err)
 			}
-			sessionID := seedOperatorReplayDeliverySession(t, ctx, pg.DB, false, runID, subscriber)
+			sessionID := seedOperatorReplayDeliverySession(t, ctx, pg.DB, false, runID, route.AgentIdentity)
 			if _, err := pg.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 				t.Fatalf("bind original delivery %s %s: %v", eventID, subscriber, err)
 			}
@@ -1529,6 +1582,48 @@ func stringSliceValue(t *testing.T, value any, field string) []string {
 		out = append(out, text)
 	}
 	return out
+}
+
+func operatorReplayAgentIdentity(t testing.TB, agentID string) agentidentity.Identity {
+	t.Helper()
+	return runtimebustest.Identity(t, agentID, "operator-replay/"+agentID)
+}
+
+func seedActiveOperatorReplayAgent(
+	t *testing.T,
+	ctx context.Context,
+	owner activeAPIV1RuntimeBusAgentStore,
+	agentID string,
+) {
+	t.Helper()
+	seedActiveAPIV1RuntimeBusAgentAt(t, ctx, owner, agentID, operatorReplayAgentIdentity(t, agentID).FlowInstance())
+}
+
+func subscribeOperatorReplayAgent(
+	t *testing.T,
+	bus *runtimebus.EventBus,
+	agentID string,
+) <-chan *runtimebus.LocalDelivery {
+	t.Helper()
+	return subscribeOperatorReplayIdentity(t, bus, operatorReplayAgentIdentity(t, agentID))
+}
+
+func subscribeOperatorReplayIdentity(
+	t *testing.T,
+	bus *runtimebus.EventBus,
+	identity agentidentity.Identity,
+) <-chan *runtimebus.LocalDelivery {
+	t.Helper()
+	flowID, _, _ := strings.Cut(identity.FlowInstance(), "/")
+	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
+		AgentID:  identity.AgentID(),
+		FlowID:   flowID,
+		FlowPath: identity.FlowInstance(),
+	})
+	if err != nil {
+		t.Fatalf("admit operator replay agent %s: %v", identity, err)
+	}
+	return runtimebustest.SubscribeIdentity(t, bus, identity, admission)
 }
 
 func assertStringSet(t *testing.T, got, want []string) {

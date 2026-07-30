@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -22,6 +23,15 @@ import (
 )
 
 const dashboardObservabilityBundleHash = "bundle-v1:sha256:dadadadadadadadadadadadadadadadadadadadadadadadadadadadadadadada"
+
+func dashboardObservabilityAgentRoute(t testing.TB, agentID string) events.DeliveryRoute {
+	t.Helper()
+	return events.DeliveryRoute{
+		SubscriberType: "agent",
+		SubscriberID:   agentID,
+		AgentIdentity:  agentidentitytest.RootRuntime(t, agentID, "dashboard-observability-test"),
+	}
+}
 
 func canonicalRuntimeLogTestPayload(t *testing.T, component, action, code, message, agentID string) string {
 	t.Helper()
@@ -65,11 +75,11 @@ func TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle(t *tes
 	event := eventtest.ExistingRunRootIngress(eventID, "task.completed", "runtime", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, runID,
 		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, now)
 	routes := []events.DeliveryRoute{
-		{SubscriberType: "agent", SubscriberID: "agent-pending"},
-		{SubscriberType: "agent", SubscriberID: "agent-progress"},
-		{SubscriberType: "agent", SubscriberID: "agent-delivered"},
-		{SubscriberType: "agent", SubscriberID: "agent-failed"},
-		{SubscriberType: "agent", SubscriberID: "agent-dead"},
+		dashboardObservabilityAgentRoute(t, "agent-pending"),
+		dashboardObservabilityAgentRoute(t, "agent-progress"),
+		dashboardObservabilityAgentRoute(t, "agent-delivered"),
+		dashboardObservabilityAgentRoute(t, "agent-failed"),
+		dashboardObservabilityAgentRoute(t, "agent-dead"),
 	}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, routes, runtimepipelineobligation.ScopeSubscribed)
 
@@ -161,7 +171,11 @@ func TestSQLObservabilityReader_ListEvents_FiltersTypedSubscriberIdentity(t *tes
 			events.EventEnvelope{Scope: events.EventScopeGlobal}, at.UTC())
 		routes := make([]events.DeliveryRoute, 0, len(deliveries))
 		for _, delivery := range deliveries {
-			routes = append(routes, events.DeliveryRoute{SubscriberType: delivery.subscriberType, SubscriberID: delivery.subscriberID})
+			route := events.DeliveryRoute{SubscriberType: delivery.subscriberType, SubscriberID: delivery.subscriberID}
+			if delivery.subscriberType == "agent" {
+				route = dashboardObservabilityAgentRoute(t, delivery.subscriberID)
+			}
+			routes = append(routes, route)
 		}
 		storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, routes, runtimepipelineobligation.ScopeSubscribed)
 		return eventID
@@ -202,7 +216,7 @@ func TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows(t *testing.T)
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	event := eventtest.ExistingRunRootIngress(eventID, "task.completed", "runtime", "", []byte(`{}`), 0, runID,
 		events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
-	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
+	route := dashboardObservabilityAgentRoute(t, "agent-a")
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 	claimed, err := pg.ClaimAgentDelivery(ctx, event, route)
 	if err != nil {

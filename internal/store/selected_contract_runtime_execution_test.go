@@ -434,7 +434,7 @@ func TestSelectedForkDiscardDeletesClaimedAndSettledDeliveryHistoryPostgres(t *t
 	store := admitTestPostgresStore(t, db)
 	fixture := newSelectedCompletionFixture(t, store, db, false)
 	ctx := testAuthorActivityContext()
-	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "selected-agent"}
+	route := testAgentDeliveryRoute(t, "selected-agent", "fixture/selected-agent")
 	eventsByState := []events.Event{
 		eventtest.PersistedProjection(uuid.NewString(), "selected.claimed", "selected-test", "", json.RawMessage(`{}`), 0, fixture.forkRun, "", events.EventEnvelope{}, time.Now().UTC()),
 		eventtest.PersistedProjection(uuid.NewString(), "selected.settled", "selected-test", "", json.RawMessage(`{}`), 0, fixture.forkRun, "", events.EventEnvelope{}, time.Now().UTC()),
@@ -754,9 +754,11 @@ func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorit
 }
 
 func selectedAgentTurnTarget(runID string) runtimeeffects.UsageTarget {
+	identity := mustTestAgentIdentity("selected-agent", "selected-test")
 	return runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: runID,
-		AgentID: "selected-agent", SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "selected-test",
+		AgentID: "selected-agent", AgentIdentity: identity, SessionID: uuid.NewString(),
+		Memory: agentmemory.PlatformDefault(), FlowInstance: "selected-test",
 	}
 }
 
@@ -771,10 +773,12 @@ func settleSelectedCompletionForTest(t *testing.T, ctx context.Context, handle *
 		},
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
-			Memory: target.Memory, FlowInstance: target.FlowInstance, ParseOK: true,
+			Identity: agentmemory.Identity{RunID: target.RunID, Agent: target.AgentIdentity},
+			Memory:   target.Memory, FlowInstance: target.FlowInstance, ParseOK: true,
 		},
 		Spend: runtimeeffects.CompletionSpend{
-			FlowInstance: target.FlowInstance, AgentID: target.AgentID, Model: "test-model", ModelAlias: "regular",
+			FlowInstance: target.FlowInstance, AgentID: target.AgentID, AgentIdentity: target.AgentIdentity,
+			Model: "test-model", ModelAlias: "regular",
 			BackendProfile: "test", Provider: "test", Transport: "http", ResolvedModel: "test-model", CostUSD: 0.01,
 			InvocationType: "agent_turn",
 		},

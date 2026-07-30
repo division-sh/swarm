@@ -32,6 +32,7 @@ var (
 type StateError struct {
 	Err            error
 	AgentID        string
+	FlowInstance   string
 	RunID          string
 	CurrentStatus  string
 	ActiveSessions []ActiveSessionTarget
@@ -115,6 +116,7 @@ func (r RunTargetResolution) Normalized() RunTargetResolution {
 
 type SendDirectiveRequest struct {
 	AgentID        string
+	FlowInstance   string
 	Directive      string
 	RunID          string
 	Source         string
@@ -127,6 +129,7 @@ type SendDirectiveRequest struct {
 type SendDirectiveResult struct {
 	OK                 bool   `json:"ok"`
 	AgentID            string `json:"-"`
+	FlowInstance       string `json:"flow_instance,omitempty"`
 	OperationID        string `json:"operation_id"`
 	Response           string `json:"response,omitempty"`
 	RunID              string `json:"run_id"`
@@ -188,6 +191,9 @@ func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, ope
 		"source":            source,
 		"timestamp":         now.Format(time.RFC3339Nano),
 	}
+	if flowInstance := strings.Trim(strings.TrimSpace(req.FlowInstance), "/"); flowInstance != "" {
+		payload["flow_instance"] = flowInstance
+	}
 	if operatorID != "" {
 		payload["operator_id"] = operatorID
 	}
@@ -228,22 +234,26 @@ func ValidateBoardDirective(d BoardDirective) error {
 }
 
 type RestartRequest struct {
-	AgentID     string
-	OperationID string
+	AgentID      string
+	FlowInstance string
+	OperationID  string
 }
 
 type RestartResult struct {
-	AgentID     string `json:"agent_id"`
-	OperationID string `json:"operation_id,omitempty"`
-	Generation  uint64 `json:"generation,omitempty"`
+	AgentID      string `json:"agent_id"`
+	FlowInstance string `json:"flow_instance,omitempty"`
+	OperationID  string `json:"operation_id,omitempty"`
+	Generation   uint64 `json:"generation,omitempty"`
 }
 
 type ReplayBacklogRequest struct {
-	AgentID string
+	AgentID      string
+	FlowInstance string
 }
 
 type ReplayBacklogResult struct {
 	AgentID       string
+	FlowInstance  string
 	ReplayedCount int
 }
 

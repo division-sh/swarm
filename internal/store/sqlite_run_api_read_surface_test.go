@@ -302,39 +302,36 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO timers (
 			timer_id, run_id, timer_name, fire_event, fire_payload,
-			fire_at, owner_agent, task_type, status, created_at
+			fire_at, owner_agent, owner_kind, task_type, status, created_at
 		)
 		VALUES
-			(?, ?, 'due', 'quiescence.timeout', '{}', ?, 'timer-agent', 'timer', 'active', ?),
-			(?, ?, 'settled', 'quiescence.timeout', '{}', ?, 'timer-agent', 'timer', 'fired', ?)
+			(?, ?, 'due', 'quiescence.timeout', '{}', ?, 'timer-agent', 'system', 'timer', 'active', ?),
+			(?, ?, 'settled', 'quiescence.timeout', '{}', ?, 'timer-agent', 'system', 'timer', 'fired', ?)
 	`, uuid.NewString(), blockedRunID, now.Add(-time.Minute), now,
 		uuid.NewString(), readyRunID, now.Add(-time.Minute), now); err != nil {
 		t.Fatalf("seed sqlite timers: %v", err)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO agents (
-			agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source,
-			config, subscriptions, emit_events, tools, permissions, runtime_descriptor, status, created_at
-		)
-		VALUES (
-			'quiescence-agent', 'quiescence', 'worker', 'regular', 'mock', 1, 'authored',
-			'{}', '[]', '[]', '[]', '{}', '{}', 'active', ?
-		)
-	`, now); err != nil {
-		t.Fatalf("seed sqlite agent: %v", err)
-	}
+	quiescenceIdentity := testAgentIdentity(t, "quiescence-agent", "quiescence")
+	quiescenceFields := testAgentIdentityStorageFields(t, quiescenceIdentity)
+	seedTestAgentRow(t, ctx, sqliteStore.DB, false, quiescenceIdentity, "active")
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, runtime_state,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source, runtime_state,
 			lease_holder, lease_expires_at, status, created_at, updated_at
 		)
 		VALUES
-			(?, ?, 'quiescence-agent', 'quiescence', 1, 'authored', '{}',
-				'worker-1', ?, 'active', ?, ?),
-			(?, ?, 'quiescence-agent', 'quiescence', 1, 'authored', '{}',
-				'worker-1', ?, 'active', ?, ?)
-	`, uuid.NewString(), blockedRunID, now.Add(time.Minute), now, now,
-		uuid.NewString(), readyRunID, now.Add(-time.Minute), now, now); err != nil {
+			(?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', '{}', 'worker-1', ?, 'active', ?, ?),
+			(?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', '{}', 'worker-1', ?, 'active', ?, ?)
+	`, uuid.NewString(), blockedRunID,
+		quiescenceFields.AgentID, quiescenceFields.NameOwner, quiescenceFields.NameSource,
+		quiescenceFields.RoutePresence, quiescenceFields.FlowScopeKey, quiescenceFields.FlowInstanceID, quiescenceFields.FlowInstancePath,
+		now.Add(time.Minute), now, now,
+		uuid.NewString(), readyRunID,
+		quiescenceFields.AgentID, quiescenceFields.NameOwner, quiescenceFields.NameSource,
+		quiescenceFields.RoutePresence, quiescenceFields.FlowScopeKey, quiescenceFields.FlowInstanceID, quiescenceFields.FlowInstancePath,
+		now.Add(-time.Minute), now, now); err != nil {
 		t.Fatalf("seed sqlite sessions: %v", err)
 	}
 

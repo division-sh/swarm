@@ -27,6 +27,10 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
+	fields, err := agentIdentityFields(identity.Agent)
+	if err != nil {
+		return err
+	}
 
 	return s.runAuthorActivityMutation(ctx, "postgres append agent turn", func(txctx context.Context, tx *sql.Tx) error {
 		ctx = txctx
@@ -36,14 +40,17 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		if plan.Enabled {
 			res, err := tx.ExecContext(ctx, `
 			UPDATE agent_sessions SET updated_at=now()
-			WHERE session_id=$1::uuid AND run_id=$2::uuid AND agent_id=$3 AND flow_instance=$4
-			  AND memory_enabled=TRUE AND status='active'
-		`, strings.TrimSpace(rec.SessionID), identity.RunID, identity.AgentID, identity.FlowInstance)
+				WHERE session_id=$1::uuid AND run_id=$2::uuid AND agent_id=$3
+				  AND agent_name_owner=$4 AND agent_name_source=$5 AND agent_route_presence=$6
+				  AND flow_scope_key=$7 AND flow_instance_id=$8 AND flow_instance=$9
+				  AND memory_enabled=TRUE AND status='active'
+			`, strings.TrimSpace(rec.SessionID), identity.RunID, fields.AgentID, fields.NameOwner,
+				fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath)
 			if err != nil {
 				return fmt.Errorf("touch exact live memory row: %w", err)
 			}
 			if rows, _ := res.RowsAffected(); rows != 1 {
-				return fmt.Errorf("no exact active memory row found for run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID, identity.FlowInstance, rec.SessionID)
+				return fmt.Errorf("no exact active memory row found for run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID(), identity.FlowInstance(), rec.SessionID)
 			}
 		} else if err := ensurePostgresStatelessAuditTx(ctx, tx, rec, plan, identity); err != nil {
 			return err
@@ -74,21 +81,23 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		if err != nil {
 			return err
 		}
-		if err := validateManagedAgentTurnSurface(surface, identity.AgentID, rec.SessionID, identity.RunID); err != nil {
+		if err := validateManagedAgentTurnSurface(surface, identity.AgentID(), rec.SessionID, identity.RunID); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO agent_turns (
-				turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
+				turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 				trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
 				emitted_events, request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, execution_mode, failure, created_at
 			) VALUES (
-				$1::uuid,$2::uuid,$3,$4::uuid,NULLIF($5,''),$6,$7,NULLIF($8,'')::uuid,
-				NULLIF($9,'')::uuid,NULLIF($10,''),NULLIF($11,''),$12::uuid,$13::jsonb,$14::jsonb,
-				CASE WHEN $15='' THEN NULL ELSE $15::jsonb END,CASE WHEN $16='' THEN NULL ELSE $16::jsonb END,
-				$17::jsonb,$18,$19,$20,$21,CASE WHEN $22='' THEN NULL ELSE $22::jsonb END,now()
+				$1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9::uuid,$10,$11,$12,NULLIF($13,'')::uuid,
+				NULLIF($14,'')::uuid,NULLIF($15,''),NULLIF($16,''),$17::uuid,$18::jsonb,$19::jsonb,
+				CASE WHEN $20='' THEN NULL ELSE $20::jsonb END,CASE WHEN $21='' THEN NULL ELSE $21::jsonb END,
+				$22::jsonb,$23,$24,$25,$26,CASE WHEN $27='' THEN NULL ELSE $27::jsonb END,now()
 			)
-		`, surface.Authority.ID, identity.RunID, identity.AgentID, strings.TrimSpace(rec.SessionID), identity.FlowInstance,
+		`, surface.Authority.ID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+			fields.FlowScopeKey, fields.FlowInstanceID, strings.TrimSpace(rec.SessionID), fields.FlowInstancePath,
 			plan.Enabled, string(plan.Source), strings.TrimSpace(rec.EntityID), strings.TrimSpace(rec.TriggerEventID),
 			strings.TrimSpace(rec.TriggerEventType), strings.TrimSpace(rec.TaskID), surface.ID, normalizeJSONArray(rec.ToolCalls),
 			normalizeJSONArray(rec.EmittedEvents), normalizeJSONPayload(rec.RequestPayload), normalizeJSONPayload(rec.ResponseRaw),
@@ -97,8 +106,8 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			return fmt.Errorf("insert agent turn: %w", err)
 		}
 		return recordAuthorActivityTurn(ctx, authorActivityTurn{
-			TurnID: surface.Authority.ID, RunID: identity.RunID, AgentID: identity.AgentID, SessionID: rec.SessionID, EntityID: rec.EntityID,
-			FlowID: identity.FlowInstance, TriggerEventType: rec.TriggerEventType, Blocks: rec.TurnBlocks,
+			TurnID: surface.Authority.ID, RunID: identity.RunID, AgentID: identity.AgentID(), SessionID: rec.SessionID, EntityID: rec.EntityID,
+			FlowID: identity.FlowInstance(), TriggerEventType: rec.TriggerEventType, Blocks: rec.TurnBlocks,
 			ParseOK: rec.ParseOK, DurationMS: latencyMS, RetryCount: rec.RetryCount, UsageExactness: "unavailable",
 			ExecutionMode: string(executionMode), Failure: rec.Failure, OccurredAt: time.Now().UTC(),
 		})
@@ -110,32 +119,47 @@ func validateTurnMemory(rec runtimellm.AgentTurnRecord) (agentmemory.Plan, agent
 	if err != nil {
 		return agentmemory.Plan{}, agentmemory.Identity{}, err
 	}
-	identity := agentmemory.Identity{RunID: rec.RunID, AgentID: rec.AgentID, FlowInstance: rec.FlowInstance}.Normalize()
+	identity := rec.Identity.Normalize()
 	if strings.TrimSpace(rec.SessionID) == "" {
 		return agentmemory.Plan{}, agentmemory.Identity{}, fmt.Errorf("session_id is required")
 	}
-	if identity.RunID == "" || identity.AgentID == "" {
-		return agentmemory.Plan{}, agentmemory.Identity{}, fmt.Errorf("run_id and agent_id are required")
+	if err := identity.ValidateOwner(); err != nil {
+		return agentmemory.Plan{}, agentmemory.Identity{}, err
 	}
 	if plan.Enabled {
 		if err := identity.Validate(); err != nil {
 			return agentmemory.Plan{}, agentmemory.Identity{}, err
 		}
 	}
+	if strings.TrimSpace(rec.RunID) != identity.RunID ||
+		strings.TrimSpace(rec.AgentID) != identity.AgentID() ||
+		strings.Trim(strings.TrimSpace(rec.FlowInstance), "/") != identity.FlowInstance() {
+		return agentmemory.Plan{}, agentmemory.Identity{}, fmt.Errorf("agent turn display fields do not match concrete identity")
+	}
 	return plan, identity, nil
 }
 
 func ensurePostgresStatelessAuditTx(ctx context.Context, tx *sql.Tx, rec runtimellm.AgentTurnRecord, plan agentmemory.Plan, identity agentmemory.Identity) error {
-	_, err := tx.ExecContext(ctx, `
+	fields, err := agentIdentityFields(identity.Agent)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, entity_id,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source, entity_id,
 			conversation, turn_count, runtime_state, status, created_at, updated_at
-		) VALUES ($1::uuid,$2::uuid,$3,NULLIF($4,''),FALSE,$5,NULLIF($6,'')::uuid,'[]'::jsonb,1,'{}'::jsonb,'active',now(),now())
+		) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,FALSE,$10,NULLIF($11,'')::uuid,'[]'::jsonb,1,'{}'::jsonb,'active',now(),now())
 		ON CONFLICT (session_id) DO UPDATE SET
-			run_id=EXCLUDED.run_id, agent_id=EXCLUDED.agent_id, flow_instance=EXCLUDED.flow_instance,
+			run_id=EXCLUDED.run_id, agent_id=EXCLUDED.agent_id,
+			agent_name_owner=EXCLUDED.agent_name_owner, agent_name_source=EXCLUDED.agent_name_source,
+			agent_route_presence=EXCLUDED.agent_route_presence, flow_scope_key=EXCLUDED.flow_scope_key,
+			flow_instance_id=EXCLUDED.flow_instance_id, flow_instance=EXCLUDED.flow_instance,
 			memory_enabled=FALSE, memory_source=EXCLUDED.memory_source, entity_id=EXCLUDED.entity_id,
 			turn_count=agent_conversation_audits.turn_count + 1, status='active', updated_at=now()
-	`, strings.TrimSpace(rec.SessionID), identity.RunID, identity.AgentID, identity.FlowInstance, string(plan.Source), strings.TrimSpace(rec.EntityID))
+	`, strings.TrimSpace(rec.SessionID), identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+		string(plan.Source), strings.TrimSpace(rec.EntityID))
 	if err != nil {
 		return fmt.Errorf("ensure stateless conversation audit row: %w", err)
 	}
@@ -154,26 +178,33 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 	if err != nil {
 		return err
 	}
+	fields, err := agentIdentityFields(identity.Agent)
+	if err != nil {
+		return err
+	}
 	return s.runAuthorActivityMutation(ctx, "postgres upsert exact conversation", func(txctx context.Context, tx *sql.Tx) error {
 		ctx = txctx
 		if err := requirePostgresRunActive(ctx, tx, identity.RunID); err != nil {
 			return err
 		}
-		if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.AgentID, "upsert_conversation", false); err != nil {
+		if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.Agent, "upsert_conversation", false); err != nil {
 			return err
 		}
 		res, err := tx.ExecContext(ctx, `
 		UPDATE agent_sessions SET conversation=$1::jsonb, turn_count=$2,
 			runtime_state=COALESCE(runtime_state,'{}'::jsonb) || $3::jsonb, updated_at=now()
-		WHERE session_id=$4::uuid AND run_id=$5::uuid AND agent_id=$6 AND flow_instance=$7
-		  AND memory_enabled=$8 AND memory_source=$9 AND status='active'
-	`, string(messages), rec.TurnCount, state, strings.TrimSpace(rec.SessionID), identity.RunID,
-			identity.AgentID, identity.FlowInstance, plan.Enabled, string(plan.Source))
+			WHERE session_id=$4::uuid AND run_id=$5::uuid AND agent_id=$6
+			  AND agent_name_owner=$7 AND agent_name_source=$8 AND agent_route_presence=$9
+			  AND flow_scope_key=$10 AND flow_instance_id=$11 AND flow_instance=$12
+			  AND memory_enabled=$13 AND memory_source=$14 AND status='active'
+		`, string(messages), rec.TurnCount, state, strings.TrimSpace(rec.SessionID), identity.RunID,
+			fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
+			fields.FlowInstanceID, fields.FlowInstancePath, plan.Enabled, string(plan.Source))
 		if err != nil {
 			return fmt.Errorf("update exact live conversation: %w", err)
 		}
 		if rows, _ := res.RowsAffected(); rows != 1 {
-			return fmt.Errorf("no exact active memory row found for run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID, identity.FlowInstance, rec.SessionID)
+			return fmt.Errorf("no exact active memory row found for run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID(), identity.FlowInstance(), rec.SessionID)
 		}
 		return nil
 	})
@@ -191,7 +222,7 @@ func validateConversationMemory(rec runtimellm.ConversationRecord) (agentmemory.
 	if err := identity.Validate(); err != nil {
 		return agentmemory.Plan{}, agentmemory.Identity{}, err
 	}
-	if strings.TrimSpace(rec.AgentID) != identity.AgentID {
+	if strings.TrimSpace(rec.AgentID) != identity.AgentID() {
 		return agentmemory.Plan{}, agentmemory.Identity{}, fmt.Errorf("conversation agent_id does not match memory identity")
 	}
 	if strings.TrimSpace(rec.SessionID) == "" {
@@ -222,17 +253,24 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, identity age
 	if err := identity.Validate(); err != nil {
 		return runtimellm.ConversationRecord{}, false, err
 	}
+	fields, err := agentIdentityFields(identity.Agent)
+	if err != nil {
+		return runtimellm.ConversationRecord{}, false, err
+	}
 	var sessionID, status string
 	var conversation, runtimeState []byte
 	var turnCount int
-	err := s.DB.QueryRowContext(ctx, `
+	err = s.DB.QueryRowContext(ctx, `
 		SELECT s.session_id::text,s.status,COALESCE(s.conversation,'[]'::jsonb),COALESCE(s.runtime_state,'{}'::jsonb),s.turn_count
 		FROM agent_sessions s
 		JOIN runs run ON run.run_id = s.run_id
-		WHERE s.run_id=$1::uuid AND s.agent_id=$2 AND s.flow_instance=$3
+		WHERE s.run_id=$1::uuid AND s.agent_id=$2 AND s.agent_name_owner=$3
+		  AND s.agent_name_source=$4 AND s.agent_route_presence=$5
+		  AND s.flow_scope_key=$6 AND s.flow_instance_id=$7 AND s.flow_instance=$8
 		  AND s.memory_enabled=TRUE AND s.status='active'
 		  AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
-	`, identity.RunID, identity.AgentID, identity.FlowInstance).Scan(&sessionID, &status, &conversation, &runtimeState, &turnCount)
+	`, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&sessionID, &status, &conversation, &runtimeState, &turnCount)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimellm.ConversationRecord{}, false, nil
 	}
@@ -248,11 +286,15 @@ func (s *PostgresStore) UpdateLiveSessionWatchdog(ctx context.Context, update ru
 	if err := identity.Validate(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(update.AgentID) != identity.AgentID || strings.TrimSpace(update.SessionID) == "" {
+	if strings.TrimSpace(update.AgentID) != identity.AgentID() || strings.TrimSpace(update.SessionID) == "" {
 		return fmt.Errorf("watchdog agent_id/session_id must match an exact memory identity")
 	}
 	if update.Watchdog == nil {
 		return fmt.Errorf("watchdog is required")
+	}
+	fields, err := agentIdentityFields(identity.Agent)
+	if err != nil {
+		return err
 	}
 	patch, err := marshalConversationRuntimeStatePatch(nil, update.Watchdog)
 	if err != nil {
@@ -266,14 +308,17 @@ func (s *PostgresStore) UpdateLiveSessionWatchdog(ctx context.Context, update ru
 	if err := requirePostgresRunActive(ctx, tx, identity.RunID); err != nil {
 		return err
 	}
-	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.AgentID, "update_watchdog", false); err != nil {
+	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.Agent, "update_watchdog", false); err != nil {
 		return err
 	}
 	res, err := tx.ExecContext(ctx, `
 		UPDATE agent_sessions SET runtime_state=COALESCE(runtime_state,'{}'::jsonb) || $1::jsonb,updated_at=now()
-		WHERE session_id=$2::uuid AND run_id=$3::uuid AND agent_id=$4 AND flow_instance=$5
+		WHERE session_id=$2::uuid AND run_id=$3::uuid AND agent_id=$4
+		  AND agent_name_owner=$5 AND agent_name_source=$6 AND agent_route_presence=$7
+		  AND flow_scope_key=$8 AND flow_instance_id=$9 AND flow_instance=$10
 		  AND memory_enabled=TRUE AND status='active'
-	`, patch, update.SessionID, identity.RunID, identity.AgentID, identity.FlowInstance)
+	`, patch, update.SessionID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath)
 	if err != nil {
 		return fmt.Errorf("update exact memory watchdog: %w", err)
 	}

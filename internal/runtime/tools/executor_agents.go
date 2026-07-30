@@ -27,6 +27,7 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 		TargetAgentIDs []string `json:"target_agent_ids"`
 		ToAgentID      string   `json:"to_agent_id"`
 		ToAgentIDs     []string `json:"to_agent_ids"`
+		FlowInstance   string   `json:"flow_instance"`
 		EventType      string   `json:"event_type"`
 		SourceAgent    string   `json:"source_agent"`
 		EntityID       string   `json:"entity_id"`
@@ -67,9 +68,9 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 	targetEntity := strings.TrimSpace(in.EntityID)
 	in.EntityID = targetEntity
 	for _, targetID := range targets {
-		targetCfg, ok := manager.GetAgentConfig(targetID)
-		if !ok {
-			return nil, fmt.Errorf("target agent not found: %s", targetID)
+		targetCfg, err := manager.ResolveAgentConfig(targetID, in.FlowInstance)
+		if err != nil {
+			return nil, fmt.Errorf("resolve target agent %s: %w", targetID, err)
 		}
 		targetCfgEntityID := targetCfg.EffectiveEntityID()
 		if targetEntity == "" {
@@ -217,16 +218,18 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 	}
 
 	schedule := Schedule{
-		RunID:        runtimecorrelation.RunIDFromContext(ctx),
-		AgentID:      in.AgentID,
-		EventType:    in.EventType,
-		Mode:         in.Mode,
-		Cron:         in.Cron,
-		At:           at,
-		EntityID:     entityID,
-		FlowInstance: actor.CanonicalFlowPath(),
-		TaskID:       in.TaskID,
-		Payload:      payload,
+		RunID:         runtimecorrelation.RunIDFromContext(ctx),
+		AgentID:       in.AgentID,
+		OwnerKind:     ScheduleOwnerAgent,
+		AgentIdentity: actor.Identity,
+		EventType:     in.EventType,
+		Mode:          in.Mode,
+		Cron:          in.Cron,
+		At:            at,
+		EntityID:      entityID,
+		FlowInstance:  actor.CanonicalFlowPath(),
+		TaskID:        in.TaskID,
+		Payload:       payload,
 	}
 	if err := e.scheduler.Register(ctx, schedule); err != nil {
 		return nil, err
@@ -286,7 +289,7 @@ func (e *Executor) execAgentHire(ctx context.Context, actor models.AgentConfig, 
 	if err := manager.SpawnAgentForEntity(in.Config.EffectiveEntityID(), in.Config); err != nil {
 		return nil, err
 	}
-	if cfg, ok := manager.GetAgentConfig(in.Config.ID); ok {
+	if cfg, err := manager.ResolveAgentConfig(in.Config.ID, in.Config.CanonicalFlowPath()); err == nil {
 		runtimeauthority.UpsertManagedAgent(e.authority, cfg)
 	} else {
 		runtimeauthority.UpsertManagedAgent(e.authority, in.Config)
@@ -300,7 +303,8 @@ func (e *Executor) execAgentFire(actor models.AgentConfig, input any) (any, erro
 		return nil, errors.New("agent manager is not configured")
 	}
 	var in struct {
-		AgentID string `json:"agent_id"`
+		AgentID      string `json:"agent_id"`
+		FlowInstance string `json:"flow_instance"`
 	}
 	if err := decodeToolInput(input, &in); err != nil {
 		return nil, err
@@ -308,14 +312,14 @@ func (e *Executor) execAgentFire(actor models.AgentConfig, input any) (any, erro
 	if strings.TrimSpace(in.AgentID) == "" {
 		return nil, errors.New("agent_id is required")
 	}
-	targetCfg, ok := manager.GetAgentConfig(in.AgentID)
-	if !ok {
-		return nil, fmt.Errorf("target agent not found: %s", in.AgentID)
+	targetCfg, err := manager.ResolveAgentConfig(in.AgentID, in.FlowInstance)
+	if err != nil {
+		return nil, fmt.Errorf("resolve target agent %s: %w", in.AgentID, err)
 	}
 	if err := authorizeManage(e.authority, actor, targetCfg, manager); err != nil {
 		return nil, err
 	}
-	if err := manager.TeardownAgent(in.AgentID); err != nil {
+	if err := manager.TeardownAgentTarget(in.AgentID, in.FlowInstance); err != nil {
 		return nil, err
 	}
 	runtimeauthority.RemoveManagedAgent(e.authority, in.AgentID)
@@ -334,9 +338,9 @@ func (e *Executor) execAgentReconfigure(ctx context.Context, actor models.AgentC
 	if strings.TrimSpace(in.AgentID) == "" {
 		return nil, errors.New("agent_id is required")
 	}
-	targetCfg, ok := manager.GetAgentConfig(in.AgentID)
-	if !ok {
-		return nil, fmt.Errorf("target agent not found: %s", in.AgentID)
+	targetCfg, err := manager.ResolveAgentConfig(in.AgentID, in.FlowInstance)
+	if err != nil {
+		return nil, fmt.Errorf("resolve target agent %s: %w", in.AgentID, err)
 	}
 	if err := authorizeManage(e.authority, actor, targetCfg, manager); err != nil {
 		return nil, err
@@ -354,10 +358,10 @@ func (e *Executor) execAgentReconfigure(ctx context.Context, actor models.AgentC
 	if err := e.ValidateNativeToolAdmission(ctx, updatedCfg); err != nil {
 		return nil, err
 	}
-	if err := manager.ReconfigureAgent(in.AgentID, in.Config); err != nil {
+	if err := manager.ReconfigureAgentTarget(in.AgentID, in.FlowInstance, in.Config); err != nil {
 		return nil, err
 	}
-	if cfg, ok := manager.GetAgentConfig(in.AgentID); ok {
+	if cfg, err := manager.ResolveAgentConfig(in.AgentID, in.FlowInstance); err == nil {
 		runtimeauthority.UpsertManagedAgent(e.authority, cfg)
 	} else {
 		in.Config.ID = in.AgentID
@@ -367,9 +371,10 @@ func (e *Executor) execAgentReconfigure(ctx context.Context, actor models.AgentC
 }
 
 type agentMutationInput struct {
-	AgentID  string
-	EntityID string
-	Config   models.AgentConfig
+	AgentID      string
+	FlowInstance string
+	EntityID     string
+	Config       models.AgentConfig
 }
 
 func decodeAgentMutationInput(toolName string, input any) (agentMutationInput, error) {
@@ -408,9 +413,10 @@ func decodeAgentMutationInput(toolName string, input any) (agentMutationInput, e
 	payload["config"] = configMap
 
 	var decoded struct {
-		AgentID  string             `json:"agent_id"`
-		EntityID string             `json:"entity_id"`
-		Config   models.AgentConfig `json:"config"`
+		AgentID      string             `json:"agent_id"`
+		FlowInstance string             `json:"flow_instance"`
+		EntityID     string             `json:"entity_id"`
+		Config       models.AgentConfig `json:"config"`
 	}
 	if err := decodeToolInput(payload, &decoded); err != nil {
 		return agentMutationInput{}, err
@@ -419,9 +425,10 @@ func decodeAgentMutationInput(toolName string, input any) (agentMutationInput, e
 		decoded.Config.Memory, _ = agentmemory.NewPlan(topMemory, agentmemory.SourceAuthored)
 	}
 	return agentMutationInput{
-		AgentID:  decoded.AgentID,
-		EntityID: decoded.EntityID,
-		Config:   decoded.Config,
+		AgentID:      decoded.AgentID,
+		FlowInstance: decoded.FlowInstance,
+		EntityID:     decoded.EntityID,
+		Config:       decoded.Config,
 	}, nil
 }
 
@@ -463,7 +470,12 @@ func rejectAgentMemoryForgery(value any, path string, allowMemory bool) error {
 			switch field {
 			case "mode", "conversation_mode", "session_scope", "session_scope_authority":
 				return fmt.Errorf("%s is retired; use memory", fieldPath)
-			case "run_id", "flow_id", "flow_path", "flow_instance", "scope", "scope_key", "authority", "memory_plan":
+			case "flow_instance":
+				if path == "input" {
+					continue
+				}
+				return fmt.Errorf("%s is runtime-owned and cannot be supplied by agent mutation callers", fieldPath)
+			case "run_id", "flow_id", "flow_path", "scope", "scope_key", "authority", "memory_plan":
 				return fmt.Errorf("%s is runtime-owned and cannot be supplied by agent mutation callers", fieldPath)
 			case "memory":
 				if !allowMemory {

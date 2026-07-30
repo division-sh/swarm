@@ -13,12 +13,27 @@ import (
 )
 
 const (
-	OwnerFlowID       = "portfolio"
-	OwnerOutputPin    = "account_notify_requested"
-	OwnerTriggerEvent = "portfolio.notify.requested"
-	NotifyEvent       = "account.notify.requested"
-	ChildFlowID       = "account"
-	ChildInputPin     = "account_notify_requested"
+	OwnerFlowID            = "portfolio"
+	OwnerOutputPin         = "account_notify_requested"
+	OwnerTriggerEvent      = "portfolio.notify.requested"
+	NotifyEvent            = "account.notify.requested"
+	ChildFlowID            = "account"
+	ChildInputPin          = "account_notify_requested"
+	canonicalAccountAgents = `account-worker:
+  id: account-worker
+  type: generic
+  role: account_worker
+  prompt_ref: account-worker
+  model: regular
+  memory: false
+  subscriptions:
+    - account.notify.requested
+  emit_events:
+    - account.notification.completed
+  mock:
+    kind: python
+    module: mocks/account-worker.py
+`
 )
 
 // Options produces verifier-only corruptions of the checked-in canonical example.
@@ -140,8 +155,8 @@ func WriteVariant(t testing.TB, opts Options) string {
   required: [account_id]
 account.notify.requested:
 `)
-		replaceFile(t, accountSchema, `states: [active]
-`, `states: [active]
+		replaceFile(t, accountSchema, `states: [active, completed]
+`, `states: [active, completed]
 auto_emit_on_create:
   event: account.created
 `)
@@ -165,15 +180,15 @@ auto_emit_on_create:
 	switch opts.AgentTopologyRevision {
 	case 0:
 	case 1:
-		replaceFile(t, accountAgents, "{}\n", `reader:
-  id: account-reader-{instance_id}
+		replaceFile(t, accountAgents, canonicalAccountAgents, `reader:
+  id: account-reader
   type: generic
   role: reader-v1
   model: regular
   subscriptions:
     - account.registered
 retired:
-  id: account-retired-{instance_id}
+  id: account-retired
   type: generic
   role: retired
   model: regular
@@ -182,8 +197,8 @@ retired:
 `)
 	case 2:
 		replaceFile(t, packageFile, `version: "1.0.0"`, `version: "2.0.0"`)
-		replaceFile(t, accountAgents, "{}\n", `reader:
-  id: account-reader-{instance_id}
+		replaceFile(t, accountAgents, canonicalAccountAgents, `reader:
+  id: account-reader
   type: generic
   role: reader-v2
   model: regular
@@ -191,7 +206,7 @@ retired:
     - account.registered
     - account.notify.requested
 writer:
-  id: account-writer-{instance_id}
+  id: account-writer
   type: generic
   role: writer
   model: regular
@@ -200,8 +215,8 @@ writer:
 `)
 	case 3:
 		replaceFile(t, packageFile, `version: "1.0.0"`, `version: "3.0.0"`)
-		replaceFile(t, accountAgents, "{}\n", `reader:
-  id: account-reader-{instance_id}
+		replaceFile(t, accountAgents, canonicalAccountAgents, `reader:
+  id: account-reader
   type: generic
   role: reader-v3
   model: regular
@@ -209,14 +224,14 @@ writer:
     - account.registered
     - account.notify.requested
 writer:
-  id: account-writer-{instance_id}
+  id: account-writer
   type: generic
   role: writer
   model: regular
   subscriptions:
     - account.notify.requested
 retired:
-  id: account-retired-{instance_id}
+  id: account-retired
   type: generic
   role: returned
   model: regular

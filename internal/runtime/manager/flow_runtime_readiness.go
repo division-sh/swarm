@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -180,12 +181,20 @@ func (am *AgentManager) reconcileEnsuredDynamicFlowRuntimeReadinessPlan(
 	expected.WorkflowVersion = strings.TrimSpace(req.ContractBundle.WorkflowVersion())
 	expected.Agents = make([]runtimepipeline.DynamicFlowRuntimeAgentExpectation, 0, len(agentRecords))
 	for _, record := range agentRecords {
+		identity, err := record.Config.ConcreteIdentity()
+		if err != nil {
+			return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf(
+				"derive dynamic flow agent identity %s: %w",
+				record.Config.ID,
+				err,
+			)
+		}
 		revision, err := lifecycleConfigRevision(record)
 		if err != nil {
 			return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("derive dynamic flow agent revision %s: %w", record.Config.ID, err)
 		}
 		expected.Agents = append(expected.Agents, runtimepipeline.DynamicFlowRuntimeAgentExpectation{
-			AgentID: record.Config.ID, ConfigRevision: revision,
+			Identity: identity, ConfigRevision: revision,
 		})
 	}
 	expected.CreationEvent, err = rebuildPendingDynamicFlowRuntimeCreationEventPlan(
@@ -266,12 +275,20 @@ func (am *AgentManager) ReconcileDynamicFlowRuntimeReadinessPlansForRun(
 		expected.WorkflowVersion = strings.TrimSpace(source.WorkflowVersion())
 		expected.Agents = make([]runtimepipeline.DynamicFlowRuntimeAgentExpectation, 0, len(records))
 		for _, record := range records {
+			identity, err := record.Config.ConcreteIdentity()
+			if err != nil {
+				return fmt.Errorf(
+					"derive dynamic flow agent identity %s: %w",
+					record.Config.ID,
+					err,
+				)
+			}
 			revision, err := lifecycleConfigRevision(record)
 			if err != nil {
 				return fmt.Errorf("derive dynamic flow agent revision %s: %w", record.Config.ID, err)
 			}
 			expected.Agents = append(expected.Agents, runtimepipeline.DynamicFlowRuntimeAgentExpectation{
-				AgentID: record.Config.ID, ConfigRevision: revision,
+				Identity: identity, ConfigRevision: revision,
 			})
 		}
 		expected.CreationEvent, err = rebuildPendingDynamicFlowRuntimeCreationEventPlan(
@@ -422,6 +439,56 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessPlan(
 	return am.reconcileDeclaredDynamicFlowRuntimeReadiness(dynamicFlowRuntimeReadinessAdmission{
 		ctx: ctx, key: key, plan: normalized, planCoordinate: planCoordinate, source: admittedSource,
 	})
+}
+
+func (am *AgentManager) launchDynamicFlowRuntimeAgentBacklogReplay(
+	ctx context.Context,
+	plan runtimepipeline.DynamicFlowRuntimeReadinessPlan,
+) error {
+	normalized, err := plan.Normalized()
+	if err != nil {
+		return err
+	}
+	replayWork, err := am.beginWork(
+		context.WithoutCancel(ctx),
+		"dynamic flow runtime agent backlog replay",
+	)
+	if err != nil {
+		return err
+	}
+	go func() {
+		defer func() {
+			if settleErr := replayWork.Done(); settleErr != nil && am.bus != nil {
+				_ = am.bus.LogRuntime(context.Background(), runtimepipeline.RuntimeLogEntry{
+					Level:     "error",
+					Message:   "Dynamic flow runtime agent backlog replay settlement failed",
+					Component: "flow_activation",
+					Action:    "runtime_backlog_settlement_failed",
+					Failure:   failureEnvelope(settleErr, "flow_activation", "settle_runtime_backlog_replay"),
+				})
+			}
+		}()
+		for _, expected := range normalized.Agents {
+			if _, replayErr := am.replayAgentBacklogIdentityDetailed(replayWork.Context(), expected.Identity); replayErr != nil {
+				if am.bus != nil {
+					_ = am.bus.LogRuntime(replayWork.Context(), runtimepipeline.RuntimeLogEntry{
+						Level:     "error",
+						Message:   "Dynamic flow runtime agent backlog replay failed after readiness",
+						Component: "flow_activation",
+						Action:    "runtime_backlog_failed",
+						AgentID:   expected.Identity.AgentID(),
+						Detail: map[string]any{
+							"flow_instance": expected.Identity.FlowInstance(),
+						},
+						Failure: failureEnvelope(replayErr, "flow_activation", "replay_runtime_backlog"),
+					})
+				}
+				am.signalDynamicFlowRuntimeReadiness()
+				return
+			}
+		}
+	}()
+	return nil
 }
 
 func (am *AgentManager) dynamicFlowRuntimeReadinessSource(
@@ -914,32 +981,47 @@ func (am *AgentManager) retireDynamicFlowProcessTopology(instancePath string) er
 		retireErrs = append(retireErrs, err)
 	}
 	for _, cfg := range am.ListAgentConfigs() {
-		if strings.Trim(strings.TrimSpace(cfg.FlowPath), "/") != instancePath {
+		identity, err := cfg.ConcreteIdentity()
+		if err != nil {
+			retireErrs = append(retireErrs, err)
 			continue
 		}
-		if err := am.TeardownAgent(cfg.ID); err != nil && !errors.Is(err, ErrAgentNotFound) {
-			retireErrs = append(retireErrs, fmt.Errorf("retire dynamic flow process agent %s: %w", cfg.ID, err))
+		if identity.FlowInstance() != instancePath {
+			continue
+		}
+		if err := am.teardownIdentity(am.runtimeContext(), identity, "teardown"); err != nil && !errors.Is(err, ErrAgentNotFound) {
+			retireErrs = append(retireErrs, fmt.Errorf("retire dynamic flow process agent %s: %w", identity.Description(), err))
 		}
 	}
 	return errors.Join(retireErrs...)
 }
 
-func (am *AgentManager) loadDynamicFlowPersistedAgents(ctx context.Context, instancePath string) (map[string]PersistedAgent, error) {
+func (am *AgentManager) loadDynamicFlowPersistedAgents(
+	ctx context.Context,
+	instancePath string,
+) (map[runtimeagentidentity.Identity]PersistedAgent, error) {
 	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
-	persistedByID := map[string]PersistedAgent{}
+	persistedByIdentity := map[runtimeagentidentity.Identity]PersistedAgent{}
 	if am.store == nil {
-		return persistedByID, nil
+		return persistedByIdentity, nil
 	}
 	persisted, err := am.store.LoadAgents(ctx)
 	if err != nil {
 		return nil, err
 	}
 	for _, rec := range persisted {
-		if strings.Trim(strings.TrimSpace(rec.Config.FlowPath), "/") == instancePath {
-			persistedByID[strings.TrimSpace(rec.Config.ID)] = rec
+		identity, err := rec.Config.ConcreteIdentity()
+		if err != nil {
+			return nil, err
+		}
+		if identity.FlowInstance() == instancePath {
+			if _, exists := persistedByIdentity[identity]; exists {
+				return nil, fmt.Errorf("duplicate persisted agent identity %s", identity.Description())
+			}
+			persistedByIdentity[identity] = rec
 		}
 	}
-	return persistedByID, nil
+	return persistedByIdentity, nil
 }
 
 func (am *AgentManager) reconcileDynamicFlowAgentSet(
@@ -947,55 +1029,72 @@ func (am *AgentManager) reconcileDynamicFlowAgentSet(
 	source semanticview.Source,
 	instancePath string,
 	expected []PersistedAgent,
-	persisted map[string]PersistedAgent,
+	persisted map[runtimeagentidentity.Identity]PersistedAgent,
 	topologyAuthority DynamicAgentTopologyMutation,
 ) error {
 	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
-	expectedIDs := make(map[string]struct{}, len(expected))
+	expectedIdentities := make(map[runtimeagentidentity.Identity]struct{}, len(expected))
 	for _, rec := range expected {
-		expectedIDs[strings.TrimSpace(rec.Config.ID)] = struct{}{}
+		identity, err := rec.Config.ConcreteIdentity()
+		if err != nil {
+			return err
+		}
+		expectedIdentities[identity] = struct{}{}
 	}
-	removedIDs := make(map[string]struct{})
-	for id := range persisted {
-		if _, ok := expectedIDs[id]; !ok {
-			removedIDs[id] = struct{}{}
+	removedIdentities := make(map[runtimeagentidentity.Identity]struct{})
+	for identity := range persisted {
+		if _, ok := expectedIdentities[identity]; !ok {
+			removedIdentities[identity] = struct{}{}
 		}
 	}
 	for _, cfg := range am.ListAgentConfigs() {
-		if strings.Trim(strings.TrimSpace(cfg.FlowPath), "/") != instancePath {
+		identity, err := cfg.ConcreteIdentity()
+		if err != nil {
+			return err
+		}
+		if identity.FlowInstance() != instancePath {
 			continue
 		}
-		if _, ok := expectedIDs[strings.TrimSpace(cfg.ID)]; !ok {
-			removedIDs[strings.TrimSpace(cfg.ID)] = struct{}{}
+		if _, ok := expectedIdentities[identity]; !ok {
+			removedIdentities[identity] = struct{}{}
 		}
 	}
-	orderedRemoved := make([]string, 0, len(removedIDs))
-	for id := range removedIDs {
-		orderedRemoved = append(orderedRemoved, id)
+	orderedRemoved := make([]runtimeagentidentity.Identity, 0, len(removedIdentities))
+	for identity := range removedIdentities {
+		orderedRemoved = append(orderedRemoved, identity)
 	}
-	sort.Strings(orderedRemoved)
-	for _, id := range orderedRemoved {
-		if _, live := am.GetAgentConfig(id); !live {
-			stored, found := persisted[id]
+	sort.Slice(orderedRemoved, func(i, j int) bool {
+		return runtimeagentidentity.Less(orderedRemoved[i], orderedRemoved[j])
+	})
+	for _, identity := range orderedRemoved {
+		if _, live := am.getAgentConfigIdentity(identity); !live {
+			stored, found := persisted[identity]
 			if !found {
-				return fmt.Errorf("removed dynamic flow agent %s has neither process nor durable lifecycle owner", id)
+				return fmt.Errorf(
+					"removed dynamic flow agent %s has neither process nor durable lifecycle owner",
+					identity.Description(),
+				)
 			}
 			if err := am.adoptPersistedAgentForLifecycle(ctx, source, stored); err != nil {
-				return fmt.Errorf("adopt removed dynamic flow agent %s: %w", id, err)
+				return fmt.Errorf("adopt removed dynamic flow agent %s: %w", identity.Description(), err)
 			}
 		}
 		removeAuthority := topologyAuthority
 		removeAuthority.desiredPresent = false
-		if err := am.teardownAgentWithTopology(ctx, id, "teardown", &removeAuthority); err != nil {
-			return fmt.Errorf("retire removed dynamic flow agent %s: %w", id, err)
+		if err := am.teardownIdentityWithTopology(ctx, identity, "teardown", &removeAuthority); err != nil {
+			return fmt.Errorf("retire removed dynamic flow agent %s: %w", identity.Description(), err)
 		}
-		delete(persisted, id)
+		delete(persisted, identity)
 	}
 	for _, rec := range expected {
+		identity, err := rec.Config.ConcreteIdentity()
+		if err != nil {
+			return err
+		}
 		presentAuthority := topologyAuthority
 		presentAuthority.desiredPresent = true
-		if err := am.reconcileDynamicFlowAgent(ctx, source, rec, persisted[strings.TrimSpace(rec.Config.ID)], &presentAuthority); err != nil {
-			return fmt.Errorf("reconcile dynamic flow agent %s: %w", rec.Config.ID, err)
+		if err := am.reconcileDynamicFlowAgent(ctx, source, rec, persisted[identity], &presentAuthority); err != nil {
+			return fmt.Errorf("reconcile dynamic flow agent %s: %w", identity.Description(), err)
 		}
 	}
 	return nil
@@ -1008,11 +1107,15 @@ func (am *AgentManager) reconcileDynamicFlowAgent(
 	persisted PersistedAgent,
 	topology *DynamicAgentTopologyMutation,
 ) error {
+	identity, err := rec.Config.ConcreteIdentity()
+	if err != nil {
+		return err
+	}
 	expectedRevision, err := lifecycleConfigRevision(rec)
 	if err != nil {
 		return err
 	}
-	existing, live := am.GetAgentConfig(rec.Config.ID)
+	existing, live := am.getAgentConfigIdentity(identity)
 	actualRevision := ""
 	if live {
 		actualRevision, err = lifecycleConfigRevision(PersistedAgent{Config: existing})
@@ -1020,26 +1123,30 @@ func (am *AgentManager) reconcileDynamicFlowAgent(
 			return err
 		}
 	}
-	persistedID := strings.TrimSpace(persisted.Config.ID)
+	persistedIdentity := runtimeagentidentity.Identity{}
 	persistedRevision := ""
-	if persistedID != "" {
+	if strings.TrimSpace(persisted.Config.ID) != "" {
+		persistedIdentity, err = persisted.Config.ConcreteIdentity()
+		if err != nil {
+			return err
+		}
 		persistedRevision, err = lifecycleConfigRevision(persisted)
 		if err != nil {
 			return err
 		}
-		if persistedID != strings.TrimSpace(rec.Config.ID) {
-			return fmt.Errorf("agent %s persisted identity changed", rec.Config.ID)
+		if persistedIdentity != identity {
+			return fmt.Errorf("agent %s persisted identity changed", identity.Description())
 		}
 	}
-	if live && persistedID == "" {
-		return fmt.Errorf("agent %s is process-ready without durable registration", rec.Config.ID)
+	if live && persistedIdentity.IsZero() {
+		return fmt.Errorf("agent %s is process-ready without durable registration", identity.Description())
 	}
 	if live && actualRevision != persistedRevision {
-		return fmt.Errorf("agent %s process and durable revisions disagree", rec.Config.ID)
+		return fmt.Errorf("agent %s process and durable revisions disagree", identity.Description())
 	}
-	if !live && persistedID != "" {
+	if !live && !persistedIdentity.IsZero() {
 		if err := am.adoptPersistedAgentForLifecycle(ctx, source, persisted); err != nil {
-			return fmt.Errorf("adopt persisted agent %s: %w", rec.Config.ID, err)
+			return fmt.Errorf("adopt persisted agent %s: %w", identity.Description(), err)
 		}
 		live = true
 		actualRevision = persistedRevision
@@ -1048,7 +1155,7 @@ func (am *AgentManager) reconcileDynamicFlowAgent(
 		if actualRevision == expectedRevision {
 			return nil
 		}
-		return am.reconfigureAgentExactWithTopology(ctx, source, rec.Config.ID, rec.Config, topology)
+		return am.reconfigureAgentIdentityExactWithTopology(ctx, source, identity, rec.Config, topology)
 	}
 	return am.spawnAgentInternalForSourceWithTopology(ctx, rec, true, source, topology)
 }
@@ -1067,13 +1174,17 @@ func dynamicFlowAgentTopologyAuthority(plan runtimepipeline.DynamicFlowRuntimeRe
 
 func (am *AgentManager) verifyDynamicFlowAgents(ctx context.Context, instancePath string, expected []PersistedAgent) error {
 	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
-	expectedByID := make(map[string]PersistedAgent, len(expected))
+	expectedByIdentity := make(map[runtimeagentidentity.Identity]PersistedAgent, len(expected))
 	for _, rec := range expected {
-		expectedByID[strings.TrimSpace(rec.Config.ID)] = rec
+		identity, err := rec.Config.ConcreteIdentity()
+		if err != nil {
+			return err
+		}
+		expectedByIdentity[identity] = rec
 	}
-	persistedByID := make(map[string]PersistedAgent, len(expected))
+	persistedByIdentity := make(map[runtimeagentidentity.Identity]PersistedAgent, len(expected))
 	if am.store == nil {
-		if len(expectedByID) != 0 {
+		if len(expectedByIdentity) != 0 {
 			return fmt.Errorf("declared agents require durable manager persistence")
 		}
 	} else {
@@ -1082,48 +1193,60 @@ func (am *AgentManager) verifyDynamicFlowAgents(ctx context.Context, instancePat
 			return err
 		}
 		for _, rec := range persisted {
-			if strings.Trim(strings.TrimSpace(rec.Config.FlowPath), "/") == instancePath {
-				persistedByID[strings.TrimSpace(rec.Config.ID)] = rec
+			identity, err := rec.Config.ConcreteIdentity()
+			if err != nil {
+				return err
+			}
+			if identity.FlowInstance() == instancePath {
+				persistedByIdentity[identity] = rec
 			}
 		}
 	}
-	liveByID := make(map[string]models.AgentConfig, len(expected))
+	liveByIdentity := make(map[runtimeagentidentity.Identity]models.AgentConfig, len(expected))
 	for _, cfg := range am.ListAgentConfigs() {
-		if strings.Trim(strings.TrimSpace(cfg.FlowPath), "/") == instancePath {
-			liveByID[strings.TrimSpace(cfg.ID)] = cfg
+		identity, err := cfg.ConcreteIdentity()
+		if err != nil {
+			return err
+		}
+		if identity.FlowInstance() == instancePath {
+			liveByIdentity[identity] = cfg
 		}
 	}
-	if len(persistedByID) != len(expectedByID) || len(liveByID) != len(expectedByID) {
+	if len(persistedByIdentity) != len(expectedByIdentity) || len(liveByIdentity) != len(expectedByIdentity) {
 		return fmt.Errorf(
 			"declared agent set mismatch: expected=%d persisted=%d process=%d",
-			len(expectedByID),
-			len(persistedByID),
-			len(liveByID),
+			len(expectedByIdentity),
+			len(persistedByIdentity),
+			len(liveByIdentity),
 		)
 	}
 	for _, rec := range expected {
+		identity, err := rec.Config.ConcreteIdentity()
+		if err != nil {
+			return err
+		}
 		expectedRevision, err := lifecycleConfigRevision(rec)
 		if err != nil {
 			return err
 		}
-		live, ok := liveByID[strings.TrimSpace(rec.Config.ID)]
+		live, ok := liveByIdentity[identity]
 		if !ok {
-			return fmt.Errorf("declared agent %s is not process-ready", rec.Config.ID)
+			return fmt.Errorf("declared agent %s is not process-ready", identity.Description())
 		}
 		liveRevision, err := lifecycleConfigRevision(PersistedAgent{Config: live})
 		if err != nil {
 			return err
 		}
-		stored, ok := persistedByID[strings.TrimSpace(rec.Config.ID)]
+		stored, ok := persistedByIdentity[identity]
 		if !ok {
-			return fmt.Errorf("declared agent %s is not durably registered", rec.Config.ID)
+			return fmt.Errorf("declared agent %s is not durably registered", identity.Description())
 		}
 		storedRevision, err := lifecycleConfigRevision(stored)
 		if err != nil {
 			return err
 		}
 		if liveRevision != expectedRevision || storedRevision != expectedRevision {
-			return fmt.Errorf("declared agent %s readiness revision mismatch", rec.Config.ID)
+			return fmt.Errorf("declared agent %s readiness revision mismatch", identity.Description())
 		}
 	}
 	return nil
@@ -1133,13 +1256,28 @@ func verifyDynamicFlowAgentExpectations(actual []PersistedAgent, expected []runt
 	if len(actual) != len(expected) {
 		return fmt.Errorf("declared agent count changed: expected=%d actual=%d", len(expected), len(actual))
 	}
-	for idx, rec := range actual {
+	actualByIdentity := make(map[runtimeagentidentity.Identity]PersistedAgent, len(actual))
+	for _, rec := range actual {
+		identity, err := rec.Config.ConcreteIdentity()
+		if err != nil {
+			return err
+		}
+		if _, exists := actualByIdentity[identity]; exists {
+			return fmt.Errorf("duplicate declared agent %s", identity.Description())
+		}
+		actualByIdentity[identity] = rec
+	}
+	for _, item := range expected {
+		rec, ok := actualByIdentity[item.Identity]
+		if !ok {
+			return fmt.Errorf("declared agent topology missing %s", item.Identity.Description())
+		}
 		revision, err := lifecycleConfigRevision(rec)
 		if err != nil {
 			return err
 		}
-		if strings.TrimSpace(rec.Config.ID) != expected[idx].AgentID || revision != expected[idx].ConfigRevision {
-			return fmt.Errorf("declared agent topology changed at %s", rec.Config.ID)
+		if revision != item.ConfigRevision {
+			return fmt.Errorf("declared agent topology changed at %s", item.Identity.Description())
 		}
 	}
 	return nil

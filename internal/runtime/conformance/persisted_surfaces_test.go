@@ -25,6 +25,8 @@ import (
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -97,7 +99,7 @@ func acquireLiveConversationSession(t *testing.T, ctx context.Context, db *sql.D
 		t.Fatalf("Acquire(%+v): %v", identity, err)
 	}
 	if err := registry.Release(ctx, lease); err != nil {
-		t.Fatalf("Release(%s,%s): %v", identity.AgentID, lease.SessionID, err)
+		t.Fatalf("Release(%s,%s): %v", identity.AgentID(), lease.SessionID, err)
 	}
 	return lease.SessionID
 }
@@ -181,7 +183,7 @@ func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *
 	lifecycleToken := seedConformanceRunningAgent(t, ctx, pg, "agent-1")
 	ctx = runtimeeffects.WithLifecycleToken(ctx, lifecycleToken)
 
-	identity := agentmemory.Identity{RunID: uuid.NewString(), AgentID: "agent-1", FlowInstance: "support/inst-1"}
+	identity := agentmemory.Identity{RunID: uuid.NewString(), Agent: lifecycleToken.Identity}
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: identity.RunID})
 	sessionID := acquireLiveConversationSession(t, ctx, db, identity)
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
@@ -266,7 +268,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 
 	for _, evt := range []events.Event{event1, event2} {
 		storetest.CommitSemanticEventWithRoutes(t, ctx, pg, evt,
-			[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-1"}},
+			[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-1", AgentIdentity: lifecycleToken.Identity}},
 			runtimepipelineobligation.ScopeSubscribed)
 	}
 
@@ -313,7 +315,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		base := runtimeeffects.WithLifecycleToken(testAuthorActivityContext(context.Background()), lifecycleToken)
 		base = worklifetime.WithOccurrence(base, workOwner)
 		base = managedConformanceExecutionContext(t, base, "reused-live-session")
-		base = agentmemory.WithExecution(base, agentmemory.Authored(true), agentmemory.Identity{RunID: runID, AgentID: "agent-1", FlowInstance: "support/inst-1"})
+		base = agentmemory.WithExecution(base, agentmemory.Authored(true), agentmemory.Identity{RunID: runID, Agent: lifecycleToken.Identity})
 		base = runtimecorrelation.WithRunID(base, runID)
 		base = runtimebus.WithInboundEvent(base, evt)
 		if claim, ok := claims[evt.ID()]; ok {
@@ -322,6 +324,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		return runtimeactors.WithActor(base, runtimeactors.AgentConfig{
 			ExecutionMode: "live",
 			ID:            "agent-1",
+			Identity:      lifecycleToken.Identity,
 			Type:          "stub",
 			Model:         "regular",
 			Memory:        agentmemory.Authored(true),
@@ -331,7 +334,11 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 
 	conversation := runtimellm.NewConversation("agent-1", "", "system", nil, agentmemory.Authored(true), 10, runtime)
 	conversation.SetToolExecutor(conformanceToolExecutor{})
-	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"}
+	route := events.DeliveryRoute{
+		SubscriberType: "agent",
+		SubscriberID:   "agent-1",
+		AgentIdentity:  lifecycleToken.Identity,
+	}
 	firstClaim, err := pg.ClaimAgentDelivery(ctx, event1, route)
 	if err != nil {
 		t.Fatalf("claim first delivery: %v", err)
@@ -410,14 +417,15 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		t.Fatalf("live session lineage count = %d, want 1", liveSessionCount)
 	}
 
-	facts, err := pg.ListAgentDeliveryLifecycleFacts(ctx, []string{"agent-1"})
+	agentIdentity := lifecycleToken.Identity
+	facts, err := pg.ListAgentDeliveryLifecycleFacts(ctx, []agentidentity.Identity{agentIdentity})
 	if err != nil {
 		t.Fatalf("ListAgentDeliveryLifecycleFacts: %v", err)
 	}
-	if got := facts["agent-1"].CurrentState; got != "active" {
+	if got := facts[agentIdentity].CurrentState; got != "active" {
 		t.Fatalf("lifecycle current_state = %q, want active", got)
 	}
-	if got := facts["agent-1"].BlockingLayer; got != "session_execution" {
+	if got := facts[agentIdentity].BlockingLayer; got != "session_execution" {
 		t.Fatalf("lifecycle blocking_layer = %q, want session_execution", got)
 	}
 }
@@ -443,7 +451,7 @@ func TestCLISessionFailureDoesNotRotateFromStderrProse(t *testing.T) {
 		"runtime", "", []byte(`{"turn":1}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, evt,
-		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-1"}},
+		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-1", AgentIdentity: lifecycleToken.Identity}},
 		runtimepipelineobligation.ScopeSubscribed)
 
 	dockerState := filepath.Join(t.TempDir(), "fake-docker-count")
@@ -511,7 +519,7 @@ printf '{"result":"ok"}'
 		base := runtimeeffects.WithLifecycleToken(testAuthorActivityContext(context.Background()), lifecycleToken)
 		base = worklifetime.WithOccurrence(base, workOwner)
 		base = managedConformanceExecutionContext(t, base, "cli-session-failure")
-		base = agentmemory.WithExecution(base, agentmemory.Authored(true), agentmemory.Identity{RunID: runID, AgentID: "agent-1", FlowInstance: "support/inst-1"})
+		base = agentmemory.WithExecution(base, agentmemory.Authored(true), agentmemory.Identity{RunID: runID, Agent: lifecycleToken.Identity})
 		base = runtimecorrelation.WithRunID(base, runID)
 		base = runtimebus.WithInboundEvent(base, evt)
 		if deliveryClaim.DeliveryID() != "" {
@@ -520,6 +528,7 @@ printf '{"result":"ok"}'
 		return runtimeactors.WithActor(base, runtimeactors.AgentConfig{
 			ExecutionMode: "live",
 			ID:            "agent-1",
+			Identity:      lifecycleToken.Identity,
 			Type:          "stub",
 			Memory:        agentmemory.Authored(true),
 			FlowPath:      "support/inst-1",
@@ -534,7 +543,11 @@ printf '{"result":"ok"}'
 	conversation := runtimellm.NewConversation("agent-1", "", "system", nil, agentmemory.Authored(true), 10, runtime)
 	conversation.Session = session
 	conversation.SetToolExecutor(conformanceToolExecutor{})
-	claimed, err := pg.ClaimAgentDelivery(ctx, evt, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"})
+	claimed, err := pg.ClaimAgentDelivery(ctx, evt, events.DeliveryRoute{
+		SubscriberType: "agent",
+		SubscriberID:   "agent-1",
+		AgentIdentity:  lifecycleToken.Identity,
+	})
 	if err != nil {
 		t.Fatalf("claim delivery before provider launch: %v", err)
 	}
@@ -603,7 +616,7 @@ func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testi
 	err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
 		SessionID: uuid.NewString(),
 		AgentID:   "agent-1",
-		Identity:  agentmemory.Identity{RunID: runID, AgentID: "agent-1", FlowInstance: "support/inst-1"},
+		Identity:  agentmemory.Identity{RunID: runID, Agent: conformanceAgentIdentity(t, "agent-1")},
 		Memory:    agentmemory.Authored(true),
 		Messages:  []runtimellm.Message{{Role: "assistant", Content: "should fail"}},
 		Summary:   "should fail",
@@ -938,6 +951,7 @@ type conformanceManagerReplayStore struct {
 func (*conformanceManagerReplayStore) CommitAgentLifecycleTransition(_ context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	return runtimemanager.AgentLifecycleTransitionResult{
 		OperationID: req.OperationID, TransitionID: req.OperationID, AgentID: req.AgentID,
+		Identity:      req.Identity,
 		PreviousEpoch: req.ExpectedEpoch, RuntimeEpoch: req.TargetEpoch,
 		PreviousGeneration: req.ExpectedGeneration, Generation: req.TargetGeneration,
 		PreviousPhase: req.ExpectedPhase, Phase: req.TargetPhase,
@@ -1017,6 +1031,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 
 	if err := pg.UpsertSchedule(ctx, runtimepipeline.Schedule{
 		AgentID:   "runtime",
+		OwnerKind: runtimepipeline.ScheduleOwnerSystem,
 		EventType: "timer.check",
 		Mode:      "once",
 		At:        time.Now().Add(time.Minute),
@@ -1196,6 +1211,7 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 		active: []runtimepipeline.Schedule{
 			{
 				AgentID:   "runtime",
+				OwnerKind: runtimepipeline.ScheduleOwnerSystem,
 				EventType: "timer.replay",
 				Mode:      "once",
 				At:        time.Now().Add(time.Minute),
@@ -1203,6 +1219,7 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 			},
 			{
 				AgentID:   "runtime",
+				OwnerKind: runtimepipeline.ScheduleOwnerSystem,
 				EventType: "timer.skip",
 				Mode:      "once",
 				At:        time.Now().Add(2 * time.Minute),
@@ -1210,6 +1227,7 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 			},
 			{
 				AgentID:   "runtime",
+				OwnerKind: runtimepipeline.ScheduleOwnerSystem,
 				EventType: "timer.drop",
 				Mode:      "once",
 				At:        time.Now().Add(3 * time.Minute),
@@ -1365,7 +1383,7 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	pg.SetSessionLockTTL(30 * time.Second)
 	registry := runtimesessions.Registry(pg)
 	leaseCtx := runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
-	identity := agentmemory.Identity{RunID: uuid.NewString(), AgentID: "agent-1", FlowInstance: "support/inst-1"}
+	identity := agentmemory.Identity{RunID: uuid.NewString(), Agent: conformanceAgentIdentity(t, "agent-1")}
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: identity.RunID})
 	lease, err := registry.Acquire(leaseCtx, identity, "conformance")
 	if err != nil {
@@ -1484,10 +1502,15 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 	module := loadConformanceRuntimeWorkflowModule(t)
 	managerStore := &conformanceManagerReplayStore{
 		agents: []runtimemanager.PersistedAgent{{
-			Config:    runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-a"},
+			Config: runtimeactors.AgentConfig{
+				ExecutionMode: "live",
+				ID:            "agent-a",
+				Identity:      agentidentitytest.RootDeclared(t, "agent-a", "conformance-manager-replay"),
+			},
 			StartedAt: time.Now().UTC(),
 		}},
 	}
+	managerReplayIdentity := managerStore.agents[0].Config.Identity
 	runID := uuid.NewString()
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	eventIDs := map[string]string{
@@ -1504,7 +1527,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 	} {
 		storetest.CommitSemanticEventWithRoutes(t, ctx, pg,
 			eventtest.PersistedProjection(eventIDs[eventType], events.EventType(eventType), "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Now().Add(time.Duration(index-4)*time.Minute).UTC()),
-			[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-a"}},
+			[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-a", AgentIdentity: managerReplayIdentity}},
 			runtimepipelineobligation.ScopeSubscribed,
 		)
 		acknowledgeConformancePipelineEvent(t, ctx, pg.PipelineObligations(), eventIDs[eventType])
@@ -1639,6 +1662,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	}
 	replayRecipient := "agent-replay"
 	replayDeliveries := runtimebustest.Subscribe(t, bus, replayRecipient)
+	replayIdentity := runtimebustest.Identity(t, replayRecipient, "")
 
 	replayRunID := uuid.NewString()
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: replayRunID})
@@ -1651,7 +1675,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 		events.EventType("system.recover.replay"),
 		"runtime", "", []byte(`{"ok":true}`), 0, replayRunID,
 		replayParentID, events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
-		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: replayRecipient}},
+		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: replayRecipient, AgentIdentity: replayIdentity}},
 		runtimepipelineobligation.ScopeSubscribed)
 	acknowledgeConformancePipelineEvent(t, ctx, pg.PipelineObligations(), replayParentID)
 
@@ -1995,11 +2019,14 @@ func requireTableColumns(t *testing.T, ctx context.Context, db *sql.DB, tableNam
 
 func seedConformanceAgent(t *testing.T, ctx context.Context, pg *store.PostgresStore, agentID string) {
 	t.Helper()
+	identity := conformanceAgentIdentity(t, agentID)
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:            agentID,
+			Identity:      identity,
 			Role:          "tester",
 			FlowID:        "global",
+			FlowPath:      identity.FlowInstance(),
 			Type:          "stub",
 			Model:         "regular",
 			ExecutionMode: "live",
@@ -2021,6 +2048,7 @@ func seedConformanceRunningAgent(t *testing.T, ctx context.Context, pg *store.Po
 		OperationKind:    "start",
 		RequestHash:      "conformance-start-" + agentID,
 		AgentID:          agentID,
+		Identity:         conformanceAgentIdentity(t, agentID),
 		Trigger:          "conformance_test",
 		ExpectedPhase:    runtimemanager.AgentLifecycleRegistered,
 		TargetEpoch:      1,
@@ -2036,7 +2064,21 @@ func seedConformanceRunningAgent(t *testing.T, ctx context.Context, pg *store.Po
 	return runtimeeffects.LifecycleToken{
 		RuntimeEpoch: result.RuntimeEpoch,
 		AgentID:      result.AgentID,
+		Identity:     result.Identity,
 		Generation:   result.Generation,
+	}
+}
+
+func conformanceAgentIdentity(t testing.TB, agentID string) agentidentity.Identity {
+	t.Helper()
+	return agentidentitytest.Declared(t, agentID, "conformance-test", "support", "inst-1", "support/inst-1")
+}
+
+func conformanceAgentMemoryIdentity(t testing.TB, runID, agentID string) agentmemory.Identity {
+	t.Helper()
+	return agentmemory.Identity{
+		RunID: strings.TrimSpace(runID),
+		Agent: conformanceAgentIdentity(t, agentID),
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/eventrecord/sqlite"
@@ -49,8 +50,11 @@ func (s *SQLiteRuntimeStore) ListEventDeliveryRoutes(ctx context.Context, eventI
 	return events.NormalizeDeliveryRoutes(out), nil
 }
 
-func (s *SQLiteRuntimeStore) ListPendingAgentDeliveryFacts(ctx context.Context, agentIDs []string, since time.Time) (map[string]PendingAgentDeliveryFacts, error) {
-	normalized := normalizePendingAgentIDs(agentIDs)
+func (s *SQLiteRuntimeStore) ListPendingAgentDeliveryFacts(ctx context.Context, identities []agentidentity.Identity, since time.Time) (map[agentidentity.Identity]PendingAgentDeliveryFacts, error) {
+	normalized, err := normalizePendingAgentIdentities(identities)
+	if err != nil {
+		return nil, err
+	}
 	aggregates, err := sqliteDeliveryAdapter.AgentPendingAggregates(ctx, s.DB, normalized, since)
 	if err != nil {
 		return nil, err
@@ -63,20 +67,20 @@ func (s *SQLiteRuntimeStore) ListPendingAgentDeliveryDetails(ctx context.Context
 	if err != nil || empty {
 		return PendingAgentDeliveryPage{PendingDeliveries: []PendingAgentDeliveryDetail{}}, err
 	}
-	aggregates, err := sqliteDeliveryAdapter.AgentPendingAggregates(ctx, s.DB, []string{opts.AgentID}, opts.Since)
+	aggregates, err := sqliteDeliveryAdapter.AgentPendingAggregates(ctx, s.DB, []agentidentity.Identity{opts.AgentIdentity}, opts.Since)
 	if err != nil {
 		return PendingAgentDeliveryPage{}, err
 	}
 	page, err := sqliteDeliveryAdapter.AgentPendingReferencePage(ctx, s.DB, runtimedelivery.AgentPendingPageQuery{
-		AgentID: opts.AgentID,
-		Since:   opts.Since,
-		Limit:   opts.Limit,
-		After:   cursor,
+		AgentIdentity: opts.AgentIdentity,
+		Since:         opts.Since,
+		Limit:         opts.Limit,
+		After:         cursor,
 	})
 	if err != nil {
 		return PendingAgentDeliveryPage{}, err
 	}
-	return pendingAgentDeliveryPageFromProjection(ctx, opts.AgentID, aggregates, page, s.now(), func(ctx context.Context, eventID string) (eventrecord.Record, bool, error) {
+	return pendingAgentDeliveryPageFromProjection(ctx, opts.AgentIdentity, aggregates, page, s.now(), func(ctx context.Context, eventID string) (eventrecord.Record, bool, error) {
 		return eventrecordsqlite.Load(ctx, s.DB, eventID)
 	})
 }

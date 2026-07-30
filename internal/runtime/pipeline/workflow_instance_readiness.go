@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -19,11 +20,11 @@ import (
 	"github.com/google/uuid"
 )
 
-const dynamicFlowRuntimeReadinessVersion = 2
+const dynamicFlowRuntimeReadinessVersion = 3
 
 type DynamicFlowRuntimeAgentExpectation struct {
-	AgentID        string `json:"agent_id"`
-	ConfigRevision string `json:"config_revision"`
+	Identity       runtimeagentidentity.Identity `json:"identity"`
+	ConfigRevision string                        `json:"config_revision"`
 }
 
 type DynamicFlowRuntimeCreationEventPlan struct {
@@ -188,20 +189,34 @@ func (p DynamicFlowRuntimeReadinessPlan) Normalized() (DynamicFlowRuntimeReadine
 	}
 	agents := append([]DynamicFlowRuntimeAgentExpectation(nil), p.Agents...)
 	for idx := range agents {
-		agents[idx].AgentID = strings.TrimSpace(agents[idx].AgentID)
+		agents[idx].Identity = agents[idx].Identity.Normalize()
 		agents[idx].ConfigRevision = strings.TrimSpace(agents[idx].ConfigRevision)
-		if agents[idx].AgentID == "" || agents[idx].ConfigRevision == "" {
+		if err := agents[idx].Identity.Validate(); err != nil {
+			return DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf(
+				"dynamic flow runtime readiness agent identity: %w",
+				err,
+			)
+		}
+		if agents[idx].ConfigRevision == "" {
 			return DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("dynamic flow runtime readiness agent identity and config revision are required")
 		}
 		decodedRevision, err := hex.DecodeString(agents[idx].ConfigRevision)
 		if err != nil || len(decodedRevision) != 32 {
-			return DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("dynamic flow runtime readiness agent %s has invalid config revision", agents[idx].AgentID)
+			return DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf(
+				"dynamic flow runtime readiness agent %s has invalid config revision",
+				agents[idx].Identity.Description(),
+			)
 		}
 	}
-	sort.Slice(agents, func(i, j int) bool { return agents[i].AgentID < agents[j].AgentID })
+	sort.Slice(agents, func(i, j int) bool {
+		return runtimeagentidentity.Less(agents[i].Identity, agents[j].Identity)
+	})
 	for idx := 1; idx < len(agents); idx++ {
-		if agents[idx-1].AgentID == agents[idx].AgentID {
-			return DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("dynamic flow runtime readiness has duplicate agent %s", agents[idx].AgentID)
+		if agents[idx-1].Identity == agents[idx].Identity {
+			return DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf(
+				"dynamic flow runtime readiness has duplicate agent %s",
+				agents[idx].Identity.Description(),
+			)
 		}
 	}
 	p.Agents = agents

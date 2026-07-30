@@ -239,10 +239,10 @@ func TestOperatorRuntimeContextManagerRoutesEventReplayByOriginalRunBundle(t *te
 	fixture := newOperatorRuntimeContextFixture(t)
 	handler := fixture.handler(t)
 	ctx := testAuthorActivityContext(context.Background())
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, fixture.pg, "agent-a")
-	chPrimary := runtimebustest.Subscribe(t, fixture.busA, "agent-a")
+	seedActiveOperatorReplayAgent(t, ctx, fixture.pg, "agent-a")
+	chPrimary := subscribeOperatorReplayAgent(t, fixture.busA, "agent-a")
 	defer runtimebustest.Unsubscribe(fixture.busA, "agent-a")
-	chSelected := runtimebustest.Subscribe(t, fixture.busB, "agent-a")
+	chSelected := subscribeOperatorReplayAgent(t, fixture.busB, "agent-a")
 	defer runtimebustest.Unsubscribe(fixture.busB, "agent-a")
 	original := seedReplayableOperatorEvent(t, ctx, fixture.pg, "triage.requested", []string{"agent-a"}, runtimedelivery.StatusDelivered)
 	if _, err := storetest.ReviseRunSource(testAuthorActivityContext(context.Background()), fixture.pg, storerunlifecycle.SourceRevisionRequest{
@@ -631,16 +631,17 @@ func (f operatorRuntimeContextFixture) handler(t *testing.T) *Handler {
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Now:              func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
-			Ready:            func() bool { return true },
-			Database:         fakePinger{},
-			Runs:             f.pg,
-			Observability:    f.pg,
-			Idempotency:      f.pg,
-			Events:           f.busA,
-			Source:           f.sourceA,
-			RunBundleContext: f.pg,
-			RuntimeContexts:  f.manager,
+			Now:                func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
+			Ready:              func() bool { return true },
+			Database:           fakePinger{},
+			Runs:               f.pg,
+			Observability:      f.pg,
+			AgentConversations: f.pg,
+			Idempotency:        f.pg,
+			Events:             f.busA,
+			Source:             f.sourceA,
+			RunBundleContext:   f.pg,
+			RuntimeContexts:    f.manager,
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "review",
 				WorkflowVersion: "1.0.0",

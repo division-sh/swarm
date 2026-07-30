@@ -589,12 +589,14 @@ func TestRunContinueProcessesOnlyTargetRunDecisionRoutesOnSQLiteAndPostgres(t *t
 				fixture.ctx,
 				fixture.store,
 				target,
-				[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: fixture.agentID}},
+				[]events.DeliveryRoute{{
+					SubscriberType: "agent", SubscriberID: fixture.agentID, AgentIdentity: fixture.identity,
+				}},
 				runtimepipelineobligation.ScopeSubscribed,
 			)
 			fixture.insertDecisionObligationFor(t, target)
-			deliveries := runtimebustest.Subscribe(t, fixture.bus, fixture.agentID, target.Type())
-			defer runtimebustest.Unsubscribe(fixture.bus, fixture.agentID)
+			deliveries := fixture.subscribe(t, target.Type())
+			defer runtimebustest.UnsubscribeIdentity(fixture.bus, fixture.identity)
 
 			foreignRunID := uuid.NewString()
 			foreignAt := target.CreatedAt().Add(time.Microsecond)
@@ -689,12 +691,14 @@ func TestPeriodicGlobalScanReentersDecisionRoutesUnderSustainedRecoveryBacklogOn
 				fixture.ctx,
 				fixture.store,
 				target,
-				[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: fixture.agentID}},
+				[]events.DeliveryRoute{{
+					SubscriberType: "agent", SubscriberID: fixture.agentID, AgentIdentity: fixture.identity,
+				}},
 				runtimepipelineobligation.ScopeSubscribed,
 			)
 			fixture.insertDecisionObligationFor(t, target)
-			deliveries := runtimebustest.Subscribe(t, fixture.bus, fixture.agentID, target.Type())
-			defer runtimebustest.Unsubscribe(fixture.bus, fixture.agentID)
+			deliveries := fixture.subscribe(t, target.Type())
+			defer runtimebustest.UnsubscribeIdentity(fixture.bus, fixture.identity)
 
 			completed := false
 			// Each write sorts after the cursor but before the original phase tail.

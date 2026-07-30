@@ -11,6 +11,7 @@ import (
 	swruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -42,22 +43,29 @@ type EntityReadStore interface {
 	AggregateOperatorEntities(context.Context, store.OperatorEntityAggregateOptions) (store.OperatorEntityAggregateResult, error)
 }
 
+type AgentIdentityResolver interface {
+	ResolveOperatorAgentIdentity(context.Context, string, string) (agentidentity.Identity, error)
+}
+
 type AgentConversationReadStore interface {
+	AgentIdentityResolver
 	ListOperatorAgents(context.Context, store.OperatorAgentListOptions) (store.OperatorAgentListResult, error)
-	LoadOperatorAgent(context.Context, string) (store.OperatorAgentDetail, error)
-	LoadOperatorAgentDiagnosis(context.Context, string, store.OperatorAgentDiagnosisOptions) (store.OperatorAgentDiagnosis, error)
-	LoadOperatorAgentDeliveryDiagnostics(context.Context, string, store.OperatorAgentDeliveryDiagnosticsOptions) (store.OperatorAgentDeliveryDiagnostics, error)
+	LoadOperatorAgent(context.Context, agentidentity.Identity) (store.OperatorAgentDetail, error)
+	LoadOperatorAgentDiagnosis(context.Context, agentidentity.Identity, store.OperatorAgentDiagnosisOptions) (store.OperatorAgentDiagnosis, error)
+	LoadOperatorAgentDeliveryDiagnostics(context.Context, agentidentity.Identity, store.OperatorAgentDeliveryDiagnosticsOptions) (store.OperatorAgentDeliveryDiagnostics, error)
 	ListOperatorConversations(context.Context, store.OperatorConversationListOptions) (store.OperatorConversationListResult, error)
 	ListOperatorConversationTurns(context.Context, store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error)
 	LoadOperatorPublicConversationTurn(context.Context, string, string) (store.OperatorPublicConversationTurnDetail, error)
 }
 
 type AgentDeliveryLifecycleReadStore interface {
-	LoadOperatorAgentDeliveryLifecycle(context.Context, string, store.OperatorAgentDeliveryLifecycleOptions) (store.OperatorAgentDeliveryLifecycleList, error)
+	AgentIdentityResolver
+	LoadOperatorAgentDeliveryLifecycle(context.Context, agentidentity.Identity, store.OperatorAgentDeliveryLifecycleOptions) (store.OperatorAgentDeliveryLifecycleList, error)
 }
 
 type AgentUsageReadStore interface {
-	LoadOperatorAgentUsage(context.Context, string, store.OperatorAgentUsageOptions) (store.OperatorAgentUsage, error)
+	AgentIdentityResolver
+	LoadOperatorAgentUsage(context.Context, agentidentity.Identity, store.OperatorAgentUsageOptions) (store.OperatorAgentUsage, error)
 }
 
 type BundleCatalogReadStore interface {
@@ -463,11 +471,15 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 		if err != nil {
 			return nil, err
 		}
+		identity, err := resolveOperatorAgentIdentityParam(ctx, reads, req.Params, agentID)
+		if err != nil {
+			return nil, err
+		}
 		usageOpts, err := operatorAgentUsageOptionsFromParams(req.Params)
 		if err != nil {
 			return nil, err
 		}
-		result, err := reads.LoadOperatorAgentUsage(ctx, agentID, usageOpts)
+		result, err := reads.LoadOperatorAgentUsage(ctx, identity, usageOpts)
 		if errors.Is(err, store.ErrAgentNotFound) {
 			return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
 		}
@@ -485,6 +497,10 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 			return nil, err
 		}
 		agentID, err := requiredStringParam(req.Params, "agent_id")
+		if err != nil {
+			return nil, err
+		}
+		identity, err := resolveOperatorAgentIdentityParam(ctx, reads, req.Params, agentID)
 		if err != nil {
 			return nil, err
 		}
@@ -512,7 +528,7 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 		if err != nil {
 			return nil, err
 		}
-		result, err := reads.LoadOperatorAgentDeliveryLifecycle(ctx, agentID, store.OperatorAgentDeliveryLifecycleOptions{
+		result, err := reads.LoadOperatorAgentDeliveryLifecycle(ctx, identity, store.OperatorAgentDeliveryLifecycleOptions{
 			RunID:    runID,
 			Statuses: statuses,
 			Limit:    limit,
@@ -564,7 +580,11 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				if err != nil {
 					return nil, err
 				}
-				result, err := reads.LoadOperatorAgent(ctx, agentID)
+				identity, err := resolveOperatorAgentIdentityParam(ctx, reads, req.Params, agentID)
+				if err != nil {
+					return nil, err
+				}
+				result, err := reads.LoadOperatorAgent(ctx, identity)
 				if errors.Is(err, store.ErrAgentNotFound) {
 					return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
 				}
@@ -582,6 +602,10 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				if err != nil {
 					return nil, err
 				}
+				identity, err := resolveOperatorAgentIdentityParam(ctx, reads, req.Params, agentID)
+				if err != nil {
+					return nil, err
+				}
 				queueLimit, err := boundedIntegerParam(req.Params, "queue_limit", 1, store.MaxAgentDiagnosisQueueLimit)
 				if err != nil {
 					return nil, err
@@ -590,7 +614,7 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				if err != nil {
 					return nil, err
 				}
-				result, err := reads.LoadOperatorAgentDiagnosis(ctx, agentID, store.OperatorAgentDiagnosisOptions{
+				result, err := reads.LoadOperatorAgentDiagnosis(ctx, identity, store.OperatorAgentDiagnosisOptions{
 					QueueLimit:  queueLimit,
 					QueueCursor: queueCursor,
 				})
@@ -617,6 +641,10 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				if err != nil {
 					return nil, err
 				}
+				identity, err := resolveOperatorAgentIdentityParam(ctx, reads, req.Params, agentID)
+				if err != nil {
+					return nil, err
+				}
 				failureLimit, err := boundedIntegerParam(req.Params, "failure_limit", 1, store.MaxAgentDeliveryDiagnosticsLimit)
 				if err != nil {
 					return nil, err
@@ -633,7 +661,7 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				if err != nil {
 					return nil, err
 				}
-				result, err := reads.LoadOperatorAgentDeliveryDiagnostics(ctx, agentID, store.OperatorAgentDeliveryDiagnosticsOptions{
+				result, err := reads.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, store.OperatorAgentDeliveryDiagnosticsOptions{
 					FailureLimit:     failureLimit,
 					FailureCursor:    failureCursor,
 					DeadLetterLimit:  deadLetterLimit,
@@ -666,6 +694,14 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				listOpts, err := operatorConversationListOptionsFromParams(req.Params)
 				if err != nil {
 					return nil, err
+				}
+				if listOpts.AgentID != "" {
+					identity, err := resolveOperatorAgentIdentityParam(ctx, reads, req.Params, listOpts.AgentID)
+					if err != nil {
+						return nil, err
+					}
+					listOpts.AgentID = identity.AgentID()
+					listOpts.FlowInstance = identity.FlowInstance()
 				}
 				result, err := reads.ListOperatorConversations(ctx, listOpts)
 				if errors.Is(err, store.ErrInvalidConversationCursor) {
@@ -747,6 +783,26 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 		return nil
 	}
 	return handlers
+}
+
+func resolveOperatorAgentIdentityParam(ctx context.Context, resolver AgentIdentityResolver, params map[string]any, agentID string) (agentidentity.Identity, error) {
+	flowInstance, _, err := optionalStringParam(params, "flow_instance")
+	if err != nil {
+		return agentidentity.Identity{}, err
+	}
+	identity, err := resolver.ResolveOperatorAgentIdentity(ctx, agentID, flowInstance)
+	if errors.Is(err, store.ErrAgentNotFound) {
+		return agentidentity.Identity{}, NewApplicationError(AgentNotFoundCode, false, map[string]any{
+			"agent_id": agentID, "flow_instance": flowInstance,
+		})
+	}
+	if store.IsAgentTargetAmbiguous(err) {
+		return agentidentity.Identity{}, NewInvalidParamsError(map[string]any{
+			"field":  "flow_instance",
+			"reason": err.Error(),
+		})
+	}
+	return identity, err
 }
 
 func validateAgentDiagnosisResult(item store.OperatorAgentDiagnosis) error {
@@ -1360,6 +1416,12 @@ func operatorConversationListOptionsFromParams(params map[string]any) (store.Ope
 	var err error
 	if out.AgentID, _, err = optionalStringParam(params, "agent_id"); err != nil {
 		return store.OperatorConversationListOptions{}, err
+	}
+	if out.FlowInstance, _, err = optionalStringParam(params, "flow_instance"); err != nil {
+		return store.OperatorConversationListOptions{}, err
+	}
+	if out.FlowInstance != "" && out.AgentID == "" {
+		return store.OperatorConversationListOptions{}, NewInvalidParamsError(map[string]any{"field": "flow_instance", "reason": "requires agent_id"})
 	}
 	if out.RunID, _, err = optionalStringParam(params, "run_id"); err != nil {
 		return store.OperatorConversationListOptions{}, err

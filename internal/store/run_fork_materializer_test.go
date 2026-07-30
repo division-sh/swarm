@@ -925,7 +925,12 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	}
 	sourceEvent = sourceAdmitted.Event()
 
-	sourceDelivery := seedDeliveryStateFixture(t, ctx, pg, sourceEvent, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "safe-agent"}, runtimedelivery.StateQueued, nil)
+	safeAgentIdentity := runtimebustest.Identity(t, "safe-agent", "")
+	sourceDelivery := seedDeliveryStateFixture(t, ctx, pg, sourceEvent, events.DeliveryRoute{
+		SubscriberType: "agent",
+		SubscriberID:   safeAgentIdentity.AgentID(),
+		AgentIdentity:  safeAgentIdentity,
+	}, runtimedelivery.StateQueued, nil)
 	sourceDeliveryID := sourceDelivery.DeliveryID
 	captureRunForkTestRevision(t, db, sourceRunID)
 
@@ -1535,12 +1540,16 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 		{
 			name: "fork session",
 			seed: func(ctx context.Context, db *sql.DB, forkRunID string, at time.Time) error {
+				fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "agent-a", "fork-state"))
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_sessions (
-						session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status, created_at, updated_at
+						session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+						agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+						memory_enabled, memory_source, status, created_at, updated_at
 					)
-					VALUES ($1::uuid, $2::uuid, 'agent-a', 'fork-state', TRUE, 'authored', 'active', $3, $3)
-				`, uuid.NewString(), forkRunID, at)
+					VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', 'active', $10, $10)
+				`, uuid.NewString(), forkRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+					fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, at)
 				return err
 			},
 			wantCode:  "fork_sessions_already_exist",
@@ -1549,12 +1558,16 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 		{
 			name: "fork conversation audit",
 			seed: func(ctx context.Context, db *sql.DB, forkRunID string, at time.Time) error {
+				fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "agent-task", "fork-state"))
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_conversation_audits (
-						session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, runtime_state, status, created_at, updated_at
+						session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+						agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+						memory_enabled, memory_source, runtime_state, status, created_at, updated_at
 					)
-					VALUES ($1::uuid, $2::uuid, 'agent-task', 'fork-state', FALSE, 'authored', '{}'::jsonb, 'active', $3, $3)
-				`, uuid.NewString(), forkRunID, at)
+					VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, FALSE, 'authored', '{}'::jsonb, 'active', $10, $10)
+				`, uuid.NewString(), forkRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+					fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, at)
 				return err
 			},
 			wantCode:  "fork_conversation_audits_already_exist",
@@ -1565,13 +1578,24 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 			seed: func(ctx context.Context, db *sql.DB, forkRunID string, at time.Time) error {
 				turnID := uuid.NewString()
 				sessionID := uuid.NewString()
-				capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(t, admitTestPostgresStore(t, db), forkRunID, "agent-a", sessionID, turnID, "session", "global")
+				identity := testAgentIdentity(t, "agent-a", "fork-state")
+				fields := testAgentIdentityStorageFields(t, identity)
+				capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(
+					t, admitTestPostgresStore(t, db), forkRunID, identity,
+					sessionID, turnID, "session", "global",
+				)
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_turns (
-						turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, capability_surface_id, execution_mode, created_at
+						turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
+						agent_route_presence, flow_scope_key, flow_instance_id,
+						session_id, flow_instance, memory_enabled, memory_source,
+						capability_surface_id, execution_mode, created_at
 					)
-					VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'fork-state', FALSE, 'platform_default', $4::uuid, 'live', $5)
-				`, turnID, forkRunID, sessionID, capabilitySurfaceID, at)
+					VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8,
+						$9::uuid, $10, FALSE, 'platform_default', $11::uuid, 'live', $12)
+				`, turnID, forkRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+					fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, sessionID,
+					fields.FlowInstancePath, capabilitySurfaceID, at)
 				return err
 			},
 			wantCode:  "fork_turns_already_exist",
@@ -1593,14 +1617,7 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 			if err != nil {
 				t.Fatalf("MaterializeRunFork: %v", err)
 			}
-			if _, err := db.ExecContext(ctx, `
-				INSERT INTO agents (
-					agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, created_at
-				)
-				VALUES ('agent-a', 'fork-state', 'worker', 'regular', 'mock', TRUE, 'authored', $1)
-			`, at); err != nil {
-				t.Fatalf("seed agent: %v", err)
-			}
+			seedTestAgentRow(t, ctx, db, true, testAgentIdentity(t, "agent-a", "fork-state"), "active")
 			if err := tc.seed(ctx, db, materialized.ForkRunID, at.Add(time.Second)); err != nil {
 				t.Fatalf("seed %s: %v", tc.name, err)
 			}

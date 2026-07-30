@@ -1172,7 +1172,8 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 			fmt.Sprintf("fork activation blocked: fork_selected_contract_agent_delivery_incomplete: delivery %s for %s/%s is %s", snapshot.DeliveryID, snapshot.SubscriberClass, snapshot.SubscriberID, snapshot.Status),
 		)
 	}
-	selectedAgents := []string{}
+	selectedAgentIDs := []string{}
+	selectedAgentFlowInstances := []string{}
 	for _, snapshot := range deliverySnapshots {
 		var selected bool
 		if err := tx.QueryRowContext(ctx, `
@@ -1186,15 +1187,23 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 			return fmt.Errorf("check selected-contract delivery lineage: %w", err)
 		}
 		if selected {
-			selectedAgents = append(selectedAgents, snapshot.SubscriberID)
+			identity := snapshot.Route.AgentIdentity.Normalize()
+			if err := identity.Validate(); err != nil {
+				return fmt.Errorf("check selected-contract delivery agent identity: %w", err)
+			}
+			if identity.AgentID() != strings.TrimSpace(snapshot.SubscriberID) {
+				return fmt.Errorf("check selected-contract delivery agent identity: subscriber %q conflicts with %s", snapshot.SubscriberID, identity.Description())
+			}
+			selectedAgentIDs = append(selectedAgentIDs, identity.AgentID())
+			selectedAgentFlowInstances = append(selectedAgentFlowInstances, identity.FlowInstance())
 		}
 	}
-	selectedAgents = uniqueNonEmptyStrings(selectedAgents)
 
 	var strayEvents int
 	if err := tx.QueryRowContext(ctx, `
 		WITH RECURSIVE selected_agents AS (
-			SELECT unnest($4::text[]) AS agent_id
+			SELECT agent_id, flow_instance
+			FROM unnest($4::text[], $5::text[]) AS selected(agent_id, flow_instance)
 		),
 		selected_tree AS (
 			SELECT e.event_id
@@ -1207,7 +1216,9 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 			UNION
 			SELECT e.event_id
 			FROM events e
-			INNER JOIN selected_agents a ON a.agent_id = e.produced_by
+			INNER JOIN selected_agents a
+				ON a.agent_id = e.produced_by
+			   AND a.flow_instance = COALESCE(e.source_route->>'flow_instance', '')
 			WHERE e.run_id = $1::uuid
 			  AND e.produced_by_type = 'agent'
 			UNION
@@ -1226,7 +1237,7 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 		  AND NOT EXISTS (
 			SELECT 1 FROM selected_tree tree WHERE tree.event_id = e.event_id
 		  )
-	`, forkRunID, pq.Array(allowedEvents), pq.Array(runForkSelectedContractForkLocalRuntimePlatformEventNames()), pq.Array(selectedAgents)).Scan(&strayEvents); err != nil {
+	`, forkRunID, pq.Array(allowedEvents), pq.Array(runForkSelectedContractForkLocalRuntimePlatformEventNames()), pq.Array(selectedAgentIDs), pq.Array(selectedAgentFlowInstances)).Scan(&strayEvents); err != nil {
 		return fmt.Errorf("check selected-contract fork event lineage: %w", err)
 	}
 	if strayEvents > 0 {

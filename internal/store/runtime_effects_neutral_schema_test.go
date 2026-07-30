@@ -160,18 +160,34 @@ func newNeutralEffectParityFixture(t *testing.T, store neutralEffectParityStore,
 	now := time.Now().UTC()
 	agentID := "neutral-effect-parity-agent"
 	runID := managedNormalEffectStoreTestRunID(agentID)
+	identity := testAgentIdentity(t, agentID, "neutral")
+	seedTestAgentRow(t, ctx, db, !sqlite, identity, "active")
 	if sqlite {
-		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,flow_instance,role,model,llm_backend,memory_enabled,memory_source,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at) VALUES (?,'neutral','worker','regular','mock',0,'platform_default','active',7,3,'running',?)`, agentID, now); err != nil {
-			t.Fatalf("seed neutral effect agent: %v", err)
+		fields := testAgentIdentityStorageFields(t, identity)
+		if _, err := db.ExecContext(ctx, `
+			UPDATE agents
+			SET lifecycle_runtime_epoch = 7, lifecycle_generation = 3, lifecycle_phase = 'running'
+			WHERE agent_id = ? AND agent_name_owner = ? AND agent_name_source = ?
+			  AND agent_route_presence = ? AND flow_scope_key = ? AND flow_instance_id = ? AND flow_instance = ?
+		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
+			t.Fatalf("activate neutral effect agent: %v", err)
 		}
 		requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	} else {
-		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,flow_instance,role,model,llm_backend,memory_enabled,memory_source,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at) VALUES ($1,'neutral','worker','regular','mock',FALSE,'platform_default','active',7,3,'running',$2)`, agentID, now); err != nil {
-			t.Fatalf("seed neutral effect agent: %v", err)
+		fields := testAgentIdentityStorageFields(t, identity)
+		if _, err := db.ExecContext(ctx, `
+			UPDATE agents
+			SET lifecycle_runtime_epoch = 7, lifecycle_generation = 3, lifecycle_phase = 'running'
+			WHERE agent_id = $1 AND agent_name_owner = $2 AND agent_name_source = $3
+			  AND agent_route_presence = $4 AND flow_scope_key = $5 AND flow_instance_id = $6 AND flow_instance = $7
+		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
+			t.Fatalf("activate neutral effect agent: %v", err)
 		}
 		requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	}
-	token := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, AgentID: agentID, Generation: 3}
+	token := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, Identity: identity, AgentID: agentID, Generation: 3}
 	authority := runtimeeffects.NormalAgentAuthority(token, fmt.Sprintf("agent:%s:%d:%d", agentID, token.RuntimeEpoch, token.Generation), now.Add(5*time.Minute))
 	ctx = runtimeeffects.WithController(runtimeeffects.WithLifecycleToken(ctx, token), runtimeeffects.NewController(store))
 	ctx = managedNormalEffectStoreTestContext(t, ctx, authority)

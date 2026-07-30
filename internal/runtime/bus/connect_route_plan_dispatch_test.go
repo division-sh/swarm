@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
@@ -220,8 +222,16 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 					}
 					if rootReceiver {
 						for _, localEvent := range []string{"work.accepted", "work.audited"} {
+							identity := agentidentity.Identity{}
+							if subscriberType == "agent" {
+								identity = connectRoutePlanTestDeclaredAgentIdentity(t, source, "", "receiver", "")
+							}
 							routeTable.rootInputRoutes[localEvent] = appendUniqueRootInputSubscriber(routeTable.rootInputRoutes[localEvent], Subscriber{
-								ID: "receiver", Type: subscriberType, MatchPattern: localEvent, RouteSource: "root_input_project",
+								ID:            "receiver",
+								Type:          subscriberType,
+								MatchPattern:  localEvent,
+								RouteSource:   "root_input_project",
+								AgentIdentity: identity,
 							})
 						}
 						routeTable.rebuildLocked()
@@ -230,23 +240,33 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 					if err != nil {
 						t.Fatalf("NewEventBusWithOptions: %v", err)
 					}
-					if rootReceiver && subscriberType == "agent" {
-						if ch := subscribeTestAgentAdmission(t, eb, testAgentSubscriptionAdmission(t, "receiver", "work.accepted", "work.audited")); ch == nil {
-							t.Fatal("install typed root-agent subscription")
-						}
-					}
+					producerEntityID := eventtest.UUID("producer-entity")
+					rootEntityID := eventtest.UUID("root-entity")
 					eventType := events.EventType("producer/work.ready")
-					sourceRoute := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("producer-entity")}
+					sourceRoute := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: producerEntityID}
 					if producerMode == "template" {
 						eventType = "producer/inst-1/work.ready"
 						sourceRoute.FlowInstance = "producer/inst-1"
 					}
 					envelope := events.EventEnvelope{Source: sourceRoute}
 					if rootReceiver {
-						envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{EntityID: eventtest.UUID("root-entity")})
+						envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{EntityID: rootEntityID})
 					}
 					eventID := uuid.NewString()
 					evt := eventtest.RunCreatingRootIngress(eventID, eventType, "", "", []byte(`{}`), 0, "", "", envelope, time.Now().UTC())
+					if subscriberType == "agent" {
+						flowPath := "consumer"
+						entityID := evt.EntityID()
+						if rootReceiver {
+							flowPath = ""
+							entityID = rootEntityID
+						}
+						identity := connectRoutePlanTestDeclaredAgentIdentity(t, source, map[bool]string{false: "consumer", true: ""}[rootReceiver], "receiver", flowPath)
+						admission := testAgentSubscriptionAdmissionForFlow(t, "receiver", flowPath, "work.accepted", "work.audited")
+						if ch := subscribeTestAgentAdmissionWithIdentity(t, eb, admission, identity, entityID); ch == nil {
+							t.Fatal("install typed root-agent subscription")
+						}
+					}
 
 					plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 					if err != nil {
@@ -308,6 +328,14 @@ func TestConnectRoutePlanReceiverPinCollisionGuardPreservesLegalFanoutAndDuplica
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("producer-entity")}}, time.Now().UTC())
+	identity := connectRoutePlanTestDeclaredAgentIdentity(t, source, "consumer", "legal-agent", "consumer")
+	subscribeTestAgentAdmissionWithIdentity(
+		t,
+		eb,
+		testAgentSubscriptionAdmissionForFlow(t, "legal-agent", "consumer", "work.accepted"),
+		identity,
+		evt.EntityID(),
+	)
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
@@ -383,13 +411,16 @@ func TestEventBusPublish_ConnectRoutePlanAddressCollisionRejectsRuntimeResolvedN
 			}
 			var agentEvents <-chan *LocalDelivery
 			if tc.subscriberType == "agent" {
+				identity := connectRoutePlanTestDeclaredAgentIdentity(t, source, "consumer", "receiver", "consumer/one")
+				admission := testAgentSubscriptionAdmissionForFlow(t, "receiver", "consumer/one", events.EventType("work.accepted"))
 				if tc.distinctEvents {
-					agentEvents = subscribeTestAgentAdmission(t, eb, testAgentSubscriptionAdmission(t, "receiver-one", "work.accepted", "work.audited"))
-				} else {
-					agentEvents = subscribeTestAgentAdmission(t, eb, testAgentSubscriptionAdmission(t, "receiver-one", "work.accepted"))
+					admission = testAgentSubscriptionAdmissionForFlow(t, "receiver", "consumer/one", "work.accepted", "work.audited")
 				}
+				agentEvents = subscribeTestAgentAdmissionWithIdentity(t, eb, admission, identity, eventtest.UUID("ent-1"))
 			} else if tc.mixed {
-				agentEvents = subscribeTestAgentAdmission(t, eb, testAgentSubscriptionAdmission(t, "legal-agent-one", "work.accepted"))
+				identity := connectRoutePlanTestDeclaredAgentIdentity(t, source, "consumer", "legal-agent", "consumer/one")
+				admission := testAgentSubscriptionAdmissionForFlow(t, "legal-agent", "consumer/one", "work.accepted")
+				agentEvents = subscribeTestAgentAdmissionWithIdentity(t, eb, admission, identity, eventtest.UUID("ent-1"))
 			}
 			eventID := uuid.NewString()
 			evt := eventtest.RunCreatingRootIngress(eventID, "producer/work.ready", "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
@@ -505,6 +536,11 @@ func connectReceiverPinCollisionSource(producerMode string, rootReceiver bool, s
 	bundle.Semantics.FlowInputEventPins[""] = inputs
 	bundle.Nodes = consumer.nodes
 	bundle.Agents = consumer.agents
+	for logicalID := range consumer.agents {
+		bundle.URIRegistry.Agents["root/"+logicalID] = runtimecontracts.ContractURIRef{
+			Kind: "agent", LocalID: logicalID, Full: "test://root/" + logicalID,
+		}
+	}
 	bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
 	for _, node := range consumer.nodes {
 		bundle.Semantics.NodeHandlers[node.ID] = node.EventHandlers
@@ -557,7 +593,7 @@ func connectReceiverPinAddressCollisionSource(subscriberType string, distinctEve
 	}
 	if subscriberType == "agent" {
 		consumer.agents = map[string]runtimecontracts.AgentRegistryEntry{
-			"receiver": {ID: "receiver-{instance_id}", Subscriptions: subscriptions},
+			"receiver": {ID: "receiver", Subscriptions: subscriptions},
 		}
 	} else {
 		handlers := map[string]runtimecontracts.SystemNodeEventHandler{"work.accepted": {}}
@@ -569,7 +605,7 @@ func connectReceiverPinAddressCollisionSource(subscriberType string, distinctEve
 		}
 		if mixed {
 			consumer.agents = map[string]runtimecontracts.AgentRegistryEntry{
-				"legal-agent": {ID: "legal-agent-{instance_id}", Subscriptions: []string{"work.accepted"}},
+				"legal-agent": {ID: "legal-agent", Subscriptions: []string{"work.accepted"}},
 			}
 		}
 	}
@@ -823,7 +859,8 @@ func TestEventBusConnectRouteDeliversToLiveAgentCarrier(t *testing.T) {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	admission := testAgentSubscriptionAdmissionForFlow(t, "consumer-agent", "consumer", events.EventType("deploy.completed")).CarrierOnly()
-	ch := subscribeTestAgentAdmission(t, eb, admission)
+	identity := connectRoutePlanTestDeclaredAgentIdentity(t, source, "consumer", "consumer-agent", "consumer")
+	ch := subscribeTestAgentAdmissionWithIdentity(t, eb, admission, identity, "")
 	if ch == nil {
 		t.Fatal("typed carrier-only agent admission returned no channel")
 	}
@@ -854,6 +891,54 @@ func TestEventBusConnectRouteDeliversToLiveAgentCarrier(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("canonical connect did not wake live agent carrier")
 	}
+}
+
+func connectRoutePlanTestDeclaredAgentIdentity(
+	t testing.TB,
+	source semanticview.Source,
+	flowID string,
+	logicalID string,
+	flowPath string,
+) agentidentity.Identity {
+	t.Helper()
+	owner, ok := semanticview.AgentDeclarationOwner(source, flowID, logicalID)
+	if !ok {
+		t.Fatalf("resolve declaration owner for %s/%s", flowID, logicalID)
+	}
+	name, err := agentidentity.DeclaredName(logicalID, owner)
+	if err != nil {
+		t.Fatalf("build declared agent name: %v", err)
+	}
+	route := agentidentity.RootRoute()
+	if strings.TrimSpace(flowPath) != "" {
+		route, err = runtimeflowidentity.StoredRoute("", "", flowPath).AgentIdentityRoute()
+		if err != nil {
+			t.Fatalf("build declared agent route: %v", err)
+		}
+	}
+	identity, err := agentidentity.New(name, route)
+	if err != nil {
+		t.Fatalf("build declared agent identity: %v", err)
+	}
+	return identity
+}
+
+func connectRoutePlanLifecycleAgentRoute(
+	t *testing.T,
+	source semanticview.Source,
+	secondPin canonicalrouting.LegacyInstanceSecondPin,
+) (agentidentity.Identity, semanticview.FlowOwnedAgentSubscriptionAdmission, string) {
+	t.Helper()
+	instanceID := templateInstanceLifecycleInstanceID("consumer", []runtimecontracts.TemplateInstanceKeyValue{{
+		Field: "vertical_id", Value: "v-1",
+	}})
+	instance := runtimeflowidentity.Derive(source, "consumer", instanceID)
+	identity := connectRoutePlanTestDeclaredAgentIdentity(t, source, "consumer", "consumer-agent", instance.InstancePath)
+	subscriptions := []events.EventType{"deploy.done"}
+	if secondPin == canonicalrouting.LegacyInstanceSecondPinDistinctEvent {
+		subscriptions = append(subscriptions, "deploy.audited")
+	}
+	return identity, testAgentSubscriptionAdmissionForFlow(t, "consumer-agent", instance.InstancePath, subscriptions...), instance.EntityID
 }
 
 func TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget(t *testing.T) {
@@ -2242,6 +2327,10 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleCollisionFailsBeforeActivation
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			store.bus = eb
+			if tc.consumer == canonicalrouting.LegacyInstanceAgentConsumer {
+				identity, admission, entityID := connectRoutePlanLifecycleAgentRoute(t, source, tc.secondPin)
+				subscribeTestAgentAdmissionWithIdentity(t, eb, admission, identity, entityID)
+			}
 			evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
 				events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -2274,6 +2363,78 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleCollisionFailsBeforeActivation
 				t.Fatalf("materialized route owners = %d, want none", materialized)
 			}
 		})
+	}
+}
+
+func TestEventBusPublish_ConnectRoutePlanPersistsCreatedAgentBeforeLiveCarrier(t *testing.T) {
+	source := connectRoutePlanInstanceKeyMultiInputSourceWithPolicy(
+		t,
+		"create",
+		"reuse",
+		canonicalrouting.LegacyInstanceNoSecondPin,
+		canonicalrouting.LegacyInstanceNodeAndAgentConsumer,
+	)
+	store := &connectRoutePlanLifecycleStore{
+		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+			targetRouteMemoryStore: newTargetRouteMemoryStore(),
+		},
+	}
+	interceptor := &connectRoutePlanNodeInterceptor{}
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
+		ContractBundle:            source,
+		TemplateInstanceActivator: store.Activate,
+		Interceptors:              []EventInterceptor{interceptor},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	store.bus = eb
+	identity, _, _ := connectRoutePlanLifecycleAgentRoute(t, source, canonicalrouting.LegacyInstanceNoSecondPin)
+	evt := eventtest.RunCreatingRootIngress(
+		uuid.NewString(),
+		"producer/deploy.done",
+		"",
+		"",
+		json.RawMessage(`{"vertical_id":"v-1"}`),
+		0,
+		"",
+		"",
+		events.EventEnvelope{},
+		time.Now().UTC(),
+	)
+
+	preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != 2 {
+		t.Fatalf("preflight = failure:%q routes:%#v, want node plus pending agent route", preflight.TargetFailure, preflight.DeliveryRoutes)
+	}
+	if slices.Contains(preflight.Recipients, identity.AgentID()) {
+		t.Fatalf("live recipients = %#v, created agent must remain pending until its lifecycle route is published", preflight.Recipients)
+	}
+	var agentRoute events.DeliveryRoute
+	for _, route := range preflight.DeliveryRoutes {
+		if route.SubscriberType == routePlanSubscriberAgent {
+			agentRoute = route
+			break
+		}
+	}
+	if agentRoute.AgentIdentity != identity {
+		t.Fatalf("created agent delivery identity = %#v, want canonical declaration and route %#v", agentRoute.AgentIdentity, identity)
+	}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if len(store.activations) != 1 || len(store.flowInstances) != 1 {
+		t.Fatalf("activations/descriptors = %d/%d, want one admitted lifecycle instance", len(store.activations), len(store.flowInstances))
+	}
+	if got := interceptor.Count(); got != 1 {
+		t.Fatalf("node handler interceptions = %d, want creation carrier execution", got)
+	}
+	if routes := store.routes[evt.ID()]; !deliveryRoutesContain(routes, agentRoute) || len(routes) != 2 {
+		t.Fatalf("persisted routes = %#v, want pending agent route %#v plus node route", routes, agentRoute)
 	}
 }
 
@@ -2311,6 +2472,11 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleAdmissionPreservesDuplicateEdg
 			store.bus = eb
 			evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "producer/deploy.done", "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
+			var agentEvents <-chan *LocalDelivery
+			if tc.wantAgent {
+				identity, admission, entityID := connectRoutePlanLifecycleAgentRoute(t, source, tc.secondPin)
+				agentEvents = subscribeTestAgentAdmissionWithIdentity(t, eb, admission, identity, entityID)
+			}
 			preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 			if err != nil {
 				t.Fatalf("CheckPublishRecipientPlan: %v", err)
@@ -2318,19 +2484,20 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleAdmissionPreservesDuplicateEdg
 			if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != tc.wantRoutes {
 				t.Fatalf("preflight = failure:%q routes:%#v, want %d legal routes", preflight.TargetFailure, preflight.DeliveryRoutes, tc.wantRoutes)
 			}
-			var agentEvents <-chan *LocalDelivery
 			if tc.wantAgent {
-				var agentID string
+				var agentRoute events.DeliveryRoute
 				for _, route := range preflight.DeliveryRoutes {
 					if route.SubscriberType == "agent" {
-						agentID = route.SubscriberID
+						agentRoute = route
 						break
 					}
 				}
-				if agentID == "" {
+				if agentRoute.SubscriberID == "" {
 					t.Fatalf("preflight routes = %#v, want agent subscriber", preflight.DeliveryRoutes)
 				}
-				agentEvents = subscribeTestAgentAdmission(t, eb, testAgentSubscriptionAdmission(t, agentID, "deploy.done"))
+				if agentRoute.AgentIdentity.FlowInstance() == "" {
+					t.Fatalf("preflight agent route = %#v, want exact concrete identity", agentRoute)
+				}
 			}
 			if err := eb.Publish(context.Background(), evt); err != nil {
 				t.Fatalf("Publish: %v", err)
@@ -3756,6 +3923,7 @@ func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []run
 	flowInputPins := make(map[string][]runtimecontracts.FlowInputEventPin, len(flows))
 	flowOutputPins := make(map[string][]runtimecontracts.FlowOutputEventPin, len(flows))
 	nodeHandlers := map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
+	agentRefs := map[string]runtimecontracts.ContractURIRef{}
 	workflowName := ""
 	rootEntities := runtimecontracts.EntityContractsDocument{}
 	for _, flow := range flows {
@@ -3792,6 +3960,15 @@ func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []run
 				nodeHandlers[node.ID] = node.EventHandlers
 			}
 		}
+		for logicalID := range flow.agents {
+			agentRefs[flow.id+"/"+logicalID] = runtimecontracts.ContractURIRef{
+				Kind:    "agent",
+				FlowID:  flow.id,
+				LocalID: logicalID,
+				Path:    flow.id,
+				Full:    "test://" + flow.id + "/" + logicalID,
+			}
+		}
 		if len(flow.entityFields) > 0 && workflowName == "" {
 			workflowName = flow.id
 			rootEntities["test_entity"] = runtimecontracts.EntityContract{Fields: flow.entityFields}
@@ -3800,6 +3977,9 @@ func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []run
 	root := runtimecontracts.FlowContractView{Children: children}
 	return &runtimecontracts.WorkflowContractBundle{
 		RootEntities: rootEntities,
+		URIRegistry: runtimecontracts.ContractURIRegistry{
+			Agents: agentRefs,
+		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: byID,

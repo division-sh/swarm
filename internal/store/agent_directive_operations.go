@@ -142,7 +142,6 @@ func validateDirectiveReservation(req runtimeagentcontrol.ReserveDirectiveOperat
 		"operation_id":       op.OperationID,
 		"actor_token_id":     op.ActorTokenID,
 		"request_hash":       op.RequestHash,
-		"agent_id":           op.AgentID,
 		"directive":          op.Directive,
 		"resolved_run_id":    op.ResolvedRunID,
 		"run_id_resolution":  op.RunIDResolution,
@@ -152,6 +151,9 @@ func validateDirectiveReservation(req runtimeagentcontrol.ReserveDirectiveOperat
 		if strings.TrimSpace(value) == "" {
 			return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("%s is required", name)
 		}
+	}
+	if err := op.AgentIdentity.Validate(); err != nil {
+		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("agent identity is required: %w", err)
 	}
 	for name, value := range map[string]string{"operation_id": op.OperationID, "resolved_run_id": op.ResolvedRunID, "directive_event_id": op.DirectiveEventID} {
 		if _, err := uuid.Parse(value); err != nil {
@@ -202,13 +204,26 @@ func directiveOperationLockKey(op runtimeagentcontrol.DirectiveOperation) string
 }
 
 func insertPostgresDirectiveOperation(ctx context.Context, tx *sql.Tx, op runtimeagentcontrol.DirectiveOperation, now time.Time) error {
-	_, err := tx.ExecContext(ctx, `
+	fields, err := agentIdentityFields(op.AgentIdentity)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO agent_directive_operations (
 			operation_id, method, actor_token_id, idempotency_key, request_hash,
-			agent_id, directive_text, requested_run_id, resolved_run_id, run_id_resolution,
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance,
+			directive_text, requested_run_id, resolved_run_id, run_id_resolution,
 			source, operator_id, directive_event_id, state, created_at, updated_at
-		) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, NULLIF($8, '')::uuid, $9::uuid, $10, $11, $12, $13::uuid, $14, $15, $15)
-	`, op.OperationID, op.Method, op.ActorTokenID, nullableString(op.IdempotencyKey), op.RequestHash, op.AgentID, op.Directive, op.RequestedRunID, op.ResolvedRunID, op.RunIDResolution, op.Source, nullableString(op.OperatorID), op.DirectiveEventID, string(op.State), now.UTC())
+		) VALUES (
+			$1::uuid, $2, $3, $4, $5,
+			$6, $7, $8, $9, $10, $11, $12,
+			$13, NULLIF($14, '')::uuid, $15::uuid, $16,
+			$17, $18, $19::uuid, $20, $21, $21
+		)
+	`, op.OperationID, op.Method, op.ActorTokenID, nullableString(op.IdempotencyKey), op.RequestHash,
+		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+		op.Directive, op.RequestedRunID, op.ResolvedRunID, op.RunIDResolution, op.Source, nullableString(op.OperatorID), op.DirectiveEventID, string(op.State), now.UTC())
 	if err != nil {
 		return fmt.Errorf("insert directive operation: %w", err)
 	}
@@ -216,13 +231,21 @@ func insertPostgresDirectiveOperation(ctx context.Context, tx *sql.Tx, op runtim
 }
 
 func insertSQLiteDirectiveOperationTx(ctx context.Context, tx *sql.Tx, op runtimeagentcontrol.DirectiveOperation, now time.Time) error {
-	_, err := tx.ExecContext(ctx, `
+	fields, err := agentIdentityFields(op.AgentIdentity)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO agent_directive_operations (
 			operation_id, method, actor_token_id, idempotency_key, request_hash,
-			agent_id, directive_text, requested_run_id, resolved_run_id, run_id_resolution,
+			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance,
+			directive_text, requested_run_id, resolved_run_id, run_id_resolution,
 			source, operator_id, directive_event_id, state, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, op.OperationID, op.Method, op.ActorTokenID, sqliteNullString(op.IdempotencyKey), op.RequestHash, op.AgentID, op.Directive, sqliteNullUUID(op.RequestedRunID), op.ResolvedRunID, op.RunIDResolution, op.Source, sqliteNullString(op.OperatorID), op.DirectiveEventID, string(op.State), now.UTC(), now.UTC())
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, op.OperationID, op.Method, op.ActorTokenID, sqliteNullString(op.IdempotencyKey), op.RequestHash,
+		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+		op.Directive, sqliteNullUUID(op.RequestedRunID), op.ResolvedRunID, op.RunIDResolution, op.Source, sqliteNullString(op.OperatorID), op.DirectiveEventID, string(op.State), now.UTC(), now.UTC())
 	if err != nil {
 		return fmt.Errorf("insert sqlite directive operation: %w", err)
 	}
@@ -632,9 +655,9 @@ func recordDirectiveAuthorActivity(ctx context.Context, op runtimeagentcontrol.D
 		Kind: runtimeauthoractivity.KindDirectiveLifecycle, Transition: transition,
 		SourceOwner: "agent_directive_operations", SourceIdentity: op.OperationID + ":" + string(op.State),
 		DedupKey: "directive:" + op.OperationID + ":" + string(op.State), OccurredAt: occurredAt.UTC(),
-		RunID: op.ResolvedRunID, AgentID: op.AgentID, Failure: failure,
+		RunID: op.ResolvedRunID, AgentID: op.AgentID(), Failure: failure,
 		Projection: runtimeauthoractivity.Projection{
-			SubjectType: "agent", SubjectID: op.AgentID, Method: op.Method, Source: op.Source,
+			SubjectType: "agent", SubjectID: op.AgentID(), Method: op.Method, Source: op.Source,
 		},
 	})
 }
@@ -881,9 +904,9 @@ func requireActiveSQLiteDirectiveOperation(ctx context.Context, tx *sql.Tx, oper
 	return op, nil
 }
 
-const postgresDirectiveOperationSelect = `SELECT operation_id::text, method, actor_token_id, COALESCE(idempotency_key, ''), request_hash, agent_id, directive_text, COALESCE(requested_run_id::text, ''), resolved_run_id::text, run_id_resolution, source, COALESCE(operator_id, ''), directive_event_id::text, state, COALESCE(execution_owner_id, ''), execution_lease_expires_at, response, failure, execution_admitted_at, executed_at, completed_at, created_at, updated_at, expires_at FROM agent_directive_operations`
+const postgresDirectiveOperationSelect = `SELECT operation_id::text, method, actor_token_id, COALESCE(idempotency_key, ''), request_hash, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, directive_text, COALESCE(requested_run_id::text, ''), resolved_run_id::text, run_id_resolution, source, COALESCE(operator_id, ''), directive_event_id::text, state, COALESCE(execution_owner_id, ''), execution_lease_expires_at, response, failure, execution_admitted_at, executed_at, completed_at, created_at, updated_at, expires_at FROM agent_directive_operations`
 
-const sqliteDirectiveOperationSelect = `SELECT operation_id, method, actor_token_id, COALESCE(idempotency_key, ''), request_hash, agent_id, directive_text, COALESCE(requested_run_id, ''), resolved_run_id, run_id_resolution, source, COALESCE(operator_id, ''), directive_event_id, state, COALESCE(execution_owner_id, ''), execution_lease_expires_at, response, failure, execution_admitted_at, executed_at, completed_at, created_at, updated_at, expires_at FROM agent_directive_operations`
+const sqliteDirectiveOperationSelect = `SELECT operation_id, method, actor_token_id, COALESCE(idempotency_key, ''), request_hash, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, directive_text, COALESCE(requested_run_id, ''), resolved_run_id, run_id_resolution, source, COALESCE(operator_id, ''), directive_event_id, state, COALESCE(execution_owner_id, ''), execution_lease_expires_at, response, failure, execution_admitted_at, executed_at, completed_at, created_at, updated_at, expires_at FROM agent_directive_operations`
 
 type directiveOperationRow interface {
 	Scan(...any) error
@@ -892,13 +915,26 @@ type directiveOperationRow interface {
 func scanDirectiveOperation(row directiveOperationRow) (runtimeagentcontrol.DirectiveOperation, bool, error) {
 	var op runtimeagentcontrol.DirectiveOperation
 	var state string
+	var agentID, nameOwner, nameSource, routePresence, flowScopeKey, flowInstanceID, flowInstance string
 	var leaseRaw, responseRaw, failureRaw, admittedRaw, executedRaw, completedRaw, createdRaw, updatedRaw, expiresRaw any
-	err := row.Scan(&op.OperationID, &op.Method, &op.ActorTokenID, &op.IdempotencyKey, &op.RequestHash, &op.AgentID, &op.Directive, &op.RequestedRunID, &op.ResolvedRunID, &op.RunIDResolution, &op.Source, &op.OperatorID, &op.DirectiveEventID, &state, &op.ExecutionOwnerID, &leaseRaw, &responseRaw, &failureRaw, &admittedRaw, &executedRaw, &completedRaw, &createdRaw, &updatedRaw, &expiresRaw)
+	err := row.Scan(
+		&op.OperationID, &op.Method, &op.ActorTokenID, &op.IdempotencyKey, &op.RequestHash,
+		&agentID, &nameOwner, &nameSource, &routePresence, &flowScopeKey, &flowInstanceID, &flowInstance,
+		&op.Directive, &op.RequestedRunID, &op.ResolvedRunID, &op.RunIDResolution, &op.Source, &op.OperatorID,
+		&op.DirectiveEventID, &state, &op.ExecutionOwnerID, &leaseRaw, &responseRaw, &failureRaw,
+		&admittedRaw, &executedRaw, &completedRaw, &createdRaw, &updatedRaw, &expiresRaw,
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimeagentcontrol.DirectiveOperation{}, false, nil
 	}
 	if err != nil {
 		return runtimeagentcontrol.DirectiveOperation{}, false, fmt.Errorf("scan directive operation: %w", err)
+	}
+	op.AgentIdentity, err = agentIdentityFromColumns(
+		agentID, nameOwner, nameSource, routePresence, flowScopeKey, flowInstanceID, flowInstance,
+	)
+	if err != nil {
+		return runtimeagentcontrol.DirectiveOperation{}, false, fmt.Errorf("scan directive operation agent identity: %w", err)
 	}
 	op.State = runtimeagentcontrol.DirectiveOperationState(strings.TrimSpace(state))
 	op.Response = jsonRawMessageValue(responseRaw)

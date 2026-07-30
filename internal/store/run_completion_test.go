@@ -157,7 +157,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileDeliveryActiv
 	if err := acknowledgePipelineEventFixture(ctx, pg, deliveryEvent.ID()); err != nil {
 		t.Fatalf("seed delivery-event pipeline receipt: %v", err)
 	}
-	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "agent-1"}
+	route := testAgentDeliveryRoute(t, "agent-1", "fixture/agent-1")
 	claimed, err := pg.ClaimAgentDelivery(ctx, deliveryEvent, route)
 	if err != nil {
 		t.Fatalf("claim active delivery: %v", err)
@@ -228,10 +228,10 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileTimerActiveTh
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
 			timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-			fire_at, owner_agent, task_type, status, created_at
+			fire_at, owner_agent, owner_kind, task_type, status, created_at
 		) VALUES (
 			$1::uuid, $2::uuid, 'wait', $3::uuid, '', 'example.timeout', '{}'::jsonb,
-			now() + interval '1 minute', 'timer-agent', 'timer', 'active', now()
+			now() + interval '1 minute', 'timer-agent', 'system', 'timer', 'active', now()
 		)
 	`, timerID, fixture.RunID, fixture.EntityID); err != nil {
 		t.Fatalf("seed active timer: %v", err)
@@ -259,30 +259,23 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileSessionLeaseA
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
 	sessionID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (
-			agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source,
-			config, subscriptions, emit_events, tools, permissions, runtime_descriptor,
-			status, turn_count, last_active_at, created_at
-		) VALUES (
-			'agent-1', 'completion', 'worker', 'regular', 'mock', TRUE, 'authored',
-			'{}'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, '{}'::jsonb, '{}'::jsonb,
-			'active', 0, now(), now()
-		)
-	`); err != nil {
-		t.Fatalf("seed agent: %v", err)
-	}
+	identity := testAgentIdentity(t, "agent-1", "completion")
+	fields := testAgentIdentityStorageFields(t, identity)
+	seedTestAgentRow(t, ctx, db, true, identity, "active")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source,
 			conversation, turn_count, runtime_state,
 			lease_holder, lease_expires_at, status, created_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'agent-1', 'completion', TRUE, 'authored',
+			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
 			'[]'::jsonb, 0, '{}'::jsonb,
 			'worker-1', now() + interval '1 minute', 'active', now(), now()
 		)
-	`, sessionID, fixture.RunID); err != nil {
+	`, sessionID, fixture.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
 		t.Fatalf("seed active session lease: %v", err)
 	}
 	if err := executeRunCompletionCandidateForEvent(ctx, pg, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {

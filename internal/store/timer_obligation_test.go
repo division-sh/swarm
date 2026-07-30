@@ -189,16 +189,16 @@ func insertTimerObligationProofRowTx(
 	query := `
 		INSERT INTO timers (
 			timer_id, run_id, timer_name, fire_event, fire_at, recurring,
-			owner_agent, task_type, status, created_at
-		) VALUES (?, NULLIF(?, ''), ?, 'timer.proof', ?, ?, 'timer-proof', ?, 'active', ?)
+			owner_agent, owner_kind, task_type, status, created_at
+		) VALUES (?, NULLIF(?, ''), ?, 'timer.proof', ?, ?, 'timer-proof', 'system', ?, 'active', ?)
 	`
 	args := []any{timerID, runID, "proof-" + timerID, fireAt, family == "scheduled_task" || family == "global_recurring", family, fireAt.Add(-time.Hour)}
 	if _, ok := selected.(*PostgresStore); ok {
 		query = `
 			INSERT INTO timers (
 				timer_id, run_id, timer_name, fire_event, fire_at, recurring,
-				owner_agent, task_type, status, created_at
-			) VALUES ($1::uuid, NULLIF($2, '')::uuid, $3, 'timer.proof', $4, $5, 'timer-proof', $6, 'active', $7)
+				owner_agent, owner_kind, task_type, status, created_at
+			) VALUES ($1::uuid, NULLIF($2, '')::uuid, $3, 'timer.proof', $4, $5, 'timer-proof', 'system', $6, 'active', $7)
 		`
 	}
 	if _, err := exec.ExecContext(ctx, query, args...); err != nil {

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/google/uuid"
 )
 
@@ -633,7 +634,7 @@ func (m *ManagerWorkOccurrence) NewRoute(ctx context.Context, identity RouteIden
 	if err := probe.Done(); err != nil {
 		return nil, err
 	}
-	identity.AgentID = strings.TrimSpace(identity.AgentID)
+	identity.Agent = identity.Agent.Normalize()
 	return &RouteOccurrence{occurrence: m.manager.occurrence.newChild(nil), identity: identity, owner: m}, nil
 }
 
@@ -901,13 +902,16 @@ func (s *StandingOccurrence) Identity() StandingIdentity {
 
 type RouteIdentity struct {
 	RuntimeEpoch uint64
-	AgentID      string
+	Agent        agentidentity.Identity
 	Generation   uint64
 }
 
 func (i RouteIdentity) validate() error {
-	if i.RuntimeEpoch == 0 || strings.TrimSpace(i.AgentID) == "" || i.Generation == 0 {
-		return errors.New("route occurrence requires runtime_epoch, agent_id, and generation")
+	if i.RuntimeEpoch == 0 || i.Generation == 0 {
+		return errors.New("route occurrence requires runtime_epoch and generation")
+	}
+	if err := i.Agent.Validate(); err != nil {
+		return fmt.Errorf("route occurrence agent identity: %w", err)
 	}
 	return nil
 }
@@ -928,7 +932,7 @@ func (r *RuntimeOccurrence) NewRoute(ctx context.Context, identity RouteIdentity
 	if err := r.occurrence.gate.admits(); err != nil {
 		return nil, fmt.Errorf("admit route occurrence: %w", err)
 	}
-	identity.AgentID = strings.TrimSpace(identity.AgentID)
+	identity.Agent = identity.Agent.Normalize()
 	return &RouteOccurrence{occurrence: r.occurrence.newChild(nil), identity: identity, owner: r}, nil
 }
 
@@ -942,7 +946,7 @@ func (s *StandingOccurrence) NewRoute(ctx context.Context, identity RouteIdentit
 	if err := s.occurrence.gate.admits(); err != nil {
 		return nil, fmt.Errorf("admit standing route occurrence: %w", err)
 	}
-	identity.AgentID = strings.TrimSpace(identity.AgentID)
+	identity.Agent = identity.Agent.Normalize()
 	return &RouteOccurrence{occurrence: s.occurrence.newChild(nil), identity: identity, owner: s}, nil
 }
 
@@ -1080,6 +1084,6 @@ func (s *SelectedForkOccurrence) NewRoute(ctx context.Context, identity RouteIde
 	if err != nil {
 		return nil, fmt.Errorf("admit selected-fork route occurrence: %w", err)
 	}
-	identity.AgentID = strings.TrimSpace(identity.AgentID)
+	identity.Agent = identity.Agent.Normalize()
 	return &RouteOccurrence{occurrence: s.occurrence.newChild(parentLease), identity: identity, owner: s}, nil
 }

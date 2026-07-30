@@ -5,6 +5,10 @@ portfolio.account.register.requested:
   portfolio_id: text
   account_id: text
   required: [portfolio_id, account_id]
+portfolio.accounts.register.requested:
+  portfolio_id: text
+  account_ids: "[text]"
+  required: [portfolio_id, account_ids]
 portfolio.membership.seeded:
   portfolio_id: text
   account_ids: "[text]"

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -14,7 +15,10 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
-var ErrAuthoritativeRecipientManifestUnavailable = errors.New("authoritative delivery recipient manifest is unavailable for non-persistent event stores")
+var (
+	ErrAuthoritativeRecipientManifestUnavailable = errors.New("authoritative delivery recipient manifest is unavailable for non-persistent event stores")
+	ErrExactDirectRecipientUnavailable           = errors.New("exact direct delivery recipient is unavailable")
+)
 
 type EventStore interface {
 	CommitPublishOwner
@@ -133,25 +137,23 @@ type FlowInstanceRouteRollbackPersistence interface {
 }
 
 type ActiveAgentDescriptor struct {
-	AgentID      string
-	EntityID     string
-	FlowInstance string
+	Identity agentidentity.Identity
+	EntityID string
 }
 
 func (d ActiveAgentDescriptor) Normalized() ActiveAgentDescriptor {
 	return ActiveAgentDescriptor{
-		AgentID:      strings.TrimSpace(d.AgentID),
-		EntityID:     strings.TrimSpace(d.EntityID),
-		FlowInstance: strings.TrimSpace(d.FlowInstance),
+		Identity: d.Identity.Normalize(),
+		EntityID: strings.TrimSpace(d.EntityID),
 	}
 }
 
 func (d ActiveAgentDescriptor) TargetDescriptor() ActiveTargetDescriptor {
 	d = d.Normalized()
 	return ActiveTargetDescriptor{
-		ID:           d.AgentID,
+		ID:           d.Identity.AgentID(),
 		EntityID:     d.EntityID,
-		FlowInstance: d.FlowInstance,
+		FlowInstance: d.Identity.FlowInstance(),
 	}.Normalized()
 }
 

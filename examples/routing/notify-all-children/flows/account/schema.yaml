@@ -1,7 +1,8 @@
 name: account
 mode: template
 initial_state: active
-states: [active]
+states: [active, completed]
+terminal_states: [completed]
 instance:
   by: account_id
 pins:

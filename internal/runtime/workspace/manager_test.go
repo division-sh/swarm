@@ -12,6 +12,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -145,25 +146,34 @@ func TestResolveWorkspace_PerAgentMountsStandardPaths(t *testing.T) {
 		}
 	})
 	ctx := runtimecorrelation.WithRunID(context.Background(), "11111111-1111-1111-1111-111111111111")
-	target, err := manager.ResolveWorkspace(ctx, models.AgentConfig{
+	actor := models.AgentConfig{
 		ExecutionMode:  "live",
 		ID:             "dedicated-agent",
+		Identity:       runtimeagentidentitytest.RootDeclared(t, "dedicated-agent", "test/agents.yaml"),
 		WorkspaceClass: "dedicated",
-	})
+	}
+	target, err := manager.ResolveWorkspace(ctx, actor)
 	if err != nil {
 		t.Fatalf("ResolveWorkspace: %v", err)
 	}
-	if target == nil || target.Container != "swarm-agent-dedicated-agent" {
-		t.Fatalf("target = %#v, want swarm-agent-dedicated-agent", target)
+	fingerprint, err := actor.Identity.Fingerprint()
+	if err != nil {
+		t.Fatalf("Fingerprint: %v", err)
+	}
+	if target == nil || target.Container != "swarm-agent-"+fingerprint {
+		t.Fatalf("target = %#v, want exact-identity agent container", target)
 	}
 	joined := strings.Join(created, " ")
 	for _, expected := range []string{
 		dataDir + ":/data:ro",
 		contractsDir + ":/opt/swarm/contracts:ro",
-		"workspaces_agent_dedicated-agent:/workspace",
+		"workspaces_agent_" + fingerprint + ":/workspace",
 		"--label dev.swarm.container.kind=agent",
 		"--label dev.swarm.reset.eligible=true",
 		"--label dev.swarm.agent_id=dedicated-agent",
+		"--label dev.swarm.agent_name_owner=test/agents.yaml",
+		"--label dev.swarm.agent_name_source=declared",
+		"--label dev.swarm.agent_route_presence=root",
 		"--label dev.swarm.run_id=11111111-1111-1111-1111-111111111111",
 	} {
 		if !strings.Contains(joined, expected) {
@@ -212,22 +222,28 @@ func TestResolveWorkspace_BundleScopeDisambiguatesContainersVolumesAndLabels(t *
 		}
 	})
 	ctx := runtimecorrelation.WithRunID(context.Background(), "11111111-1111-1111-1111-111111111111")
-	target, err := manager.ResolveWorkspace(ctx, models.AgentConfig{
+	actor := models.AgentConfig{
 		ExecutionMode:  "live",
 		ID:             "dedicated-agent",
+		Identity:       runtimeagentidentitytest.RootDeclared(t, "dedicated-agent", "test/agents.yaml"),
 		WorkspaceClass: "dedicated",
-	})
+	}
+	target, err := manager.ResolveWorkspace(ctx, actor)
 	if err != nil {
 		t.Fatalf("ResolveWorkspace: %v", err)
 	}
-	if target == nil || target.Container != "swarm-bundle-aaaaaaaaaaaa-agent-dedicated-agent" {
+	fingerprint, err := actor.Identity.Fingerprint()
+	if err != nil {
+		t.Fatalf("Fingerprint: %v", err)
+	}
+	if target == nil || target.Container != "swarm-bundle-aaaaaaaaaaaa-agent-"+fingerprint {
 		t.Fatalf("target = %#v, want bundle-scoped agent container", target)
 	}
 	joined := flattenDockerCalls(creates)
 	for _, expected := range []string{
-		"workspaces_swarm_bundle_aaaaaaaaaaaa_agent_dedicated_agent:/workspace",
+		"workspaces_" + volumeScopeKey("swarm-bundle-aaaaaaaaaaaa-agent_"+fingerprint) + ":/workspace",
 		"--label dev.swarm.bundle_hash=" + bundleHash,
-		"--label dev.swarm.container.name=swarm-bundle-aaaaaaaaaaaa-agent-dedicated-agent",
+		"--label dev.swarm.container.name=swarm-bundle-aaaaaaaaaaaa-agent-" + fingerprint,
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("bundle-scoped agent workspace create args missing %q:\n%s", expected, joined)
@@ -292,6 +308,7 @@ func TestResolveWorkspace_PerFlowInstanceSharesByFlowPath(t *testing.T) {
 	target, err := manager.ResolveWorkspace(ctx, models.AgentConfig{
 		ExecutionMode:  "live",
 		ID:             "shared-work-lead",
+		Identity:       runtimeagentidentitytest.Declared(t, "shared-work-lead", "test/agents.yaml", "shared", "work-001", "shared/work-001"),
 		WorkspaceClass: "shared_flow",
 		FlowPath:       "shared/work-001",
 	})
@@ -386,6 +403,7 @@ func TestResolveWorkspace_UsesInjectedSemanticSourceForRoleLookup(t *testing.T) 
 	target, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "worker-1",
+		Identity:      runtimeagentidentitytest.Declared(t, "worker-1", "test/agents.yaml", "ops", "instance-1", "ops/instance-1"),
 		Role:          "worker",
 		FlowPath:      "ops/instance-1",
 	})
@@ -548,14 +566,20 @@ func TestManagedResetContainerInventoryConsumesTypedLabels(t *testing.T) {
 			return "swarm-agent-agent-a\nswarm-system\nswarm-malformed\nswarm-stale-name\n", nil
 		case len(args) >= 4 && args[0] == "inspect" && args[len(args)-1] == "swarm-agent-agent-a":
 			return managedContainerInspectJSON(map[string]string{
-				"dev.swarm.owner":           "runtime",
-				"dev.swarm.container.kind":  "agent",
-				"dev.swarm.reset.eligible":  "true",
-				"dev.swarm.creation_source": "workspace.ResolveWorkspace",
-				"dev.swarm.container.name":  "swarm-agent-agent-a",
-				"dev.swarm.workspace.scope": "per-agent",
-				"dev.swarm.run_id":          "33333333-3333-3333-3333-333333333333",
-				"dev.swarm.agent_id":        "agent-a",
+				"dev.swarm.owner":                    "runtime",
+				"dev.swarm.container.kind":           "agent",
+				"dev.swarm.reset.eligible":           "true",
+				"dev.swarm.creation_source":          "workspace.ResolveWorkspace",
+				"dev.swarm.container.name":           "swarm-agent-agent-a",
+				"dev.swarm.workspace.scope":          "per-agent",
+				"dev.swarm.run_id":                   "33333333-3333-3333-3333-333333333333",
+				"dev.swarm.agent_id":                 "agent-a",
+				"dev.swarm.agent_name_owner":         "test/agents.yaml",
+				"dev.swarm.agent_name_source":        "declared",
+				"dev.swarm.agent_route_presence":     "present",
+				"dev.swarm.agent_flow_scope_key":     "flow",
+				"dev.swarm.agent_flow_instance_id":   "a",
+				"dev.swarm.agent_flow_instance_path": "flow/a",
 			}, true), nil
 		case len(args) >= 4 && args[0] == "inspect" && args[len(args)-1] == "swarm-system":
 			return managedContainerInspectJSON(map[string]string{
@@ -575,14 +599,20 @@ func TestManagedResetContainerInventoryConsumesTypedLabels(t *testing.T) {
 			}, true), nil
 		case len(args) >= 4 && args[0] == "inspect" && args[len(args)-1] == "swarm-stale-name":
 			return managedContainerInspectJSON(map[string]string{
-				"dev.swarm.owner":           "runtime",
-				"dev.swarm.container.kind":  "agent",
-				"dev.swarm.reset.eligible":  "true",
-				"dev.swarm.creation_source": "workspace.ResolveWorkspace",
-				"dev.swarm.container.name":  "old-valid-container-name",
-				"dev.swarm.workspace.scope": "per-agent",
-				"dev.swarm.run_id":          "44444444-4444-4444-4444-444444444444",
-				"dev.swarm.agent_id":        "agent-stale",
+				"dev.swarm.owner":                    "runtime",
+				"dev.swarm.container.kind":           "agent",
+				"dev.swarm.reset.eligible":           "true",
+				"dev.swarm.creation_source":          "workspace.ResolveWorkspace",
+				"dev.swarm.container.name":           "old-valid-container-name",
+				"dev.swarm.workspace.scope":          "per-agent",
+				"dev.swarm.run_id":                   "44444444-4444-4444-4444-444444444444",
+				"dev.swarm.agent_id":                 "agent-stale",
+				"dev.swarm.agent_name_owner":         "test/agents.yaml",
+				"dev.swarm.agent_name_source":        "declared",
+				"dev.swarm.agent_route_presence":     "present",
+				"dev.swarm.agent_flow_scope_key":     "flow",
+				"dev.swarm.agent_flow_instance_id":   "stale",
+				"dev.swarm.agent_flow_instance_path": "flow/stale",
 			}, true), nil
 		default:
 			return "", nil
@@ -597,7 +627,7 @@ func TestManagedResetContainerInventoryConsumesTypedLabels(t *testing.T) {
 		t.Fatalf("refs = %#v, want one reset-eligible managed container", refs)
 	}
 	ref := refs[0]
-	if ref.Name != "swarm-agent-agent-a" || ref.Kind != "agent" || !ref.ResetEligible || ref.AgentID != "agent-a" || ref.RunID == "" {
+	if ref.Name != "swarm-agent-agent-a" || ref.Kind != "agent" || !ref.ResetEligible || ref.AgentIdentity.AgentID() != "agent-a" || ref.RunID == "" {
 		t.Fatalf("ref = %#v, want agent identity with run lineage", ref)
 	}
 }
@@ -635,13 +665,19 @@ func TestCleanupDevEntityContainersStopsOnlyIdentityProvenEntityContainers(t *te
 			}, true), nil
 		case len(args) >= 4 && args[0] == "inspect" && args[2] == "{{json .}}" && args[len(args)-1] == "swarm-agent-agent-a":
 			return managedContainerInspectJSON(map[string]string{
-				"dev.swarm.owner":           "runtime",
-				"dev.swarm.container.kind":  "agent",
-				"dev.swarm.reset.eligible":  "true",
-				"dev.swarm.creation_source": "workspace.ResolveWorkspace",
-				"dev.swarm.container.name":  "swarm-agent-agent-a",
-				"dev.swarm.workspace.scope": "per-agent",
-				"dev.swarm.agent_id":        "agent-a",
+				"dev.swarm.owner":                    "runtime",
+				"dev.swarm.container.kind":           "agent",
+				"dev.swarm.reset.eligible":           "true",
+				"dev.swarm.creation_source":          "workspace.ResolveWorkspace",
+				"dev.swarm.container.name":           "swarm-agent-agent-a",
+				"dev.swarm.workspace.scope":          "per-agent",
+				"dev.swarm.agent_id":                 "agent-a",
+				"dev.swarm.agent_name_owner":         "test/agents.yaml",
+				"dev.swarm.agent_name_source":        "declared",
+				"dev.swarm.agent_route_presence":     "present",
+				"dev.swarm.agent_flow_scope_key":     "flow",
+				"dev.swarm.agent_flow_instance_id":   "a",
+				"dev.swarm.agent_flow_instance_path": "flow/a",
 			}, true), nil
 		case len(args) >= 4 && args[0] == "inspect" && args[2] == "{{json .}}" && args[len(args)-1] == "swarm-flow-flow-a":
 			return managedContainerInspectJSON(map[string]string{

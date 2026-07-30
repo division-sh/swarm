@@ -222,7 +222,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		defer func() { _ = r.sessions.Release(ctx, lease) }()
 		stopLeaseHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, func(heartbeatErr error) {
 			logPublisherRuntime(ctx, r.events, "warn", "session_lease_heartbeat_failed", "Refreshing the CLI session lease heartbeat failed", s.AgentID, s.ID, entityID, map[string]any{
-				"run_id": resolved.Identity.RunID, "flow_instance": resolved.Identity.FlowInstance,
+				"run_id": resolved.Identity.RunID, "flow_instance": resolved.Identity.FlowInstance(),
 			}, heartbeatErr)
 		})
 		defer stopLeaseHeartbeat()
@@ -236,7 +236,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		}
 	}
 	if err := requireInboundDeliveryActiveForSession(ctx, r.events, s, "error", "Marking the reused agent delivery in progress failed", map[string]any{
-		"memory_enabled": resolved.Enabled(), "run_id": resolved.Identity.RunID, "flow_instance": resolved.Identity.FlowInstance,
+		"memory_enabled": resolved.Enabled(), "run_id": resolved.Identity.RunID, "flow_instance": resolved.Identity.FlowInstance(),
 	}, entityID); err != nil {
 		return nil, fmt.Errorf("mark inbound delivery active for reused cli session: %w", err)
 	}
@@ -282,7 +282,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		"permission_mode_args":    permissionModeArgs(),
 		"prompt":                  prompt,
 		"run_id":                  resolved.Identity.RunID,
-		"flow_instance":           resolved.Identity.FlowInstance,
+		"flow_instance":           resolved.Identity.FlowInstance(),
 		"system_prompt":           strings.TrimSpace(s.SystemPrompt),
 		"tools":                   s.Tools,
 		"turn_count":              s.TurnCount,

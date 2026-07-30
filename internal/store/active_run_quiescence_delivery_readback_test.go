@@ -15,7 +15,7 @@ import (
 type activeRunDeliveryQuiescenceReadStore interface {
 	authorActivityReceiptStore
 	ApplyActiveRunQuiescence(context.Context, runtimerunquiescence.Request) (runtimerunquiescence.Result, error)
-	ActiveRunDeliveryQuiesced(context.Context, string, string, string) (string, bool, error)
+	ActiveRunDeliveryQuiesced(context.Context, string, events.DeliveryRoute) (string, bool, error)
 }
 
 var _ activeRunDeliveryQuiescenceReadStore = (*PostgresStore)(nil)
@@ -35,9 +35,11 @@ func TestActiveRunDeliveryQuiescenceReadbackParity(t *testing.T) {
 				eventID, events.EventType("quiescence.requested"), "gateway", "", nil, 0,
 				runID, events.EventEnvelope{}, now,
 			)
+			identity := testAgentIdentity(t, "agent-a", "quiescence/instance-a")
 			route := events.DeliveryRoute{
 				SubscriberType: string(runtimedelivery.SubscriberAgent),
 				SubscriberID:   "agent-a",
+				AgentIdentity:  identity,
 			}
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
 				t.Fatalf("commit active-run delivery: %v", err)
@@ -65,11 +67,13 @@ func TestActiveRunDeliveryQuiescenceReadbackParity(t *testing.T) {
 				t.Fatalf("quiesced deliveries = %#v, want one changed delivery", result.Deliveries)
 			}
 
-			reason, quiesced, err := selected.ActiveRunDeliveryQuiesced(ctx, eventID, string(runtimedelivery.SubscriberAgent), "agent-a")
+			reason, quiesced, err := selected.ActiveRunDeliveryQuiesced(ctx, eventID, route)
 			if err != nil || !quiesced || reason != runtimerunquiescence.ServeAbandonReasonCode {
 				t.Fatalf("active-run delivery quiescence = reason:%q quiesced:%v err:%v", reason, quiesced, err)
 			}
-			if reason, quiesced, err := selected.ActiveRunDeliveryQuiesced(ctx, eventID, string(runtimedelivery.SubscriberAgent), "agent-b"); err != nil || quiesced || reason != "" {
+			unrelated := route
+			unrelated.AgentIdentity = testAgentIdentity(t, "agent-a", "quiescence/instance-b")
+			if reason, quiesced, err := selected.ActiveRunDeliveryQuiesced(ctx, eventID, unrelated); err != nil || quiesced || reason != "" {
 				t.Fatalf("unrelated delivery quiescence = reason:%q quiesced:%v err:%v", reason, quiesced, err)
 			}
 		})

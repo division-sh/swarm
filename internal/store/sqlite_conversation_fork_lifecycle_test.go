@@ -212,22 +212,40 @@ func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base 
 	requireRunFixtureForTest(t, ctx, s, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: source.runID, BundleHash: source.bundleHash, StartedAt: base.Add(-3 * time.Minute),
 	})
+	identity := testAgentIdentity(t, source.agentID, conversationForkSourceFlowInstance)
+	fields, err := identity.StorageFields()
+	if err != nil {
+		t.Fatalf("conversation fork source identity: %v", err)
+	}
+	seedTestAgentRow(t, ctx, s.DB, false, identity, "active")
 	statements := []struct {
 		query string
 		args  []any
 	}{
-		{`INSERT INTO agents (agent_id, flow_instance, role, model, memory_enabled, memory_source, runtime_descriptor) VALUES (?, ?, 'researcher', 'cheap', 1, 'authored', '{"type":"researcher","execution_mode":"live"}')`, []any{source.agentID, conversationForkSourceFlowInstance}},
-		{`INSERT INTO agent_sessions (session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, status, created_at, updated_at) VALUES (?, ?, ?, ?, 1, 'authored', 'active', ?, ?)`, []any{source.sessionID, source.runID, source.agentID, conversationForkSourceFlowInstance, base.Add(-3 * time.Minute), base.Add(-3 * time.Minute)}},
+		{`INSERT INTO agent_sessions (session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', 'active', ?, ?)`,
+			[]any{source.sessionID, source.runID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, base.Add(-3 * time.Minute), base.Add(-3 * time.Minute)}},
 	}
 	for _, statement := range statements {
 		if _, err := s.DB.ExecContext(ctx, statement.query, statement.args...); err != nil {
 			t.Fatalf("seed SQLite conversation fork source: %v\nquery: %s", err, statement.query)
 		}
 	}
-	capability1 := seedManagedAgentTurnCapabilitySurface(t, s, source.runID, source.agentID, source.sessionID, source.turn1ID, "session", "global")
-	capability2 := seedManagedAgentTurnCapabilitySurface(t, s, source.runID, source.agentID, source.sessionID, source.turn2ID, "session", "global")
-	query := `INSERT INTO agent_turns (turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, trigger_event_id, trigger_event_type, capability_surface_id, parse_ok, execution_mode, created_at) VALUES (?, ?, ?, ?, ?, 1, 'authored', ?, 'task.ready', ?, true, 'live', ?), (?, ?, ?, ?, ?, 1, 'authored', ?, 'task.done', ?, true, 'live', ?)`
-	args := []any{source.turn1ID, source.runID, source.agentID, source.sessionID, conversationForkSourceFlowInstance, source.event1ID, capability1, source.turn1At, source.turn2ID, source.runID, source.agentID, source.sessionID, conversationForkSourceFlowInstance, source.event2ID, capability2, source.turn2At}
+	capability1 := seedManagedAgentTurnCapabilitySurface(t, s, source.runID, identity, source.sessionID, source.turn1ID, "session", "global")
+	capability2 := seedManagedAgentTurnCapabilitySurface(t, s, source.runID, identity, source.sessionID, source.turn2ID, "session", "global")
+	query := `INSERT INTO agent_turns (
+		turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+		flow_scope_key, flow_instance_id, session_id, flow_instance, memory_enabled, memory_source,
+		trigger_event_id, trigger_event_type, capability_surface_id, parse_ok, execution_mode, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', ?, 'task.ready', ?, true, 'live', ?),
+		(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', ?, 'task.done', ?, true, 'live', ?)`
+	args := []any{
+		source.turn1ID, source.runID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, source.sessionID, fields.FlowInstancePath,
+		source.event1ID, capability1, source.turn1At,
+		source.turn2ID, source.runID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, source.sessionID, fields.FlowInstancePath,
+		source.event2ID, capability2, source.turn2At,
+	}
 	if _, err := s.DB.ExecContext(ctx, query, args...); err != nil {
 		t.Fatalf("seed SQLite conversation fork source: %v\nquery: %s", err, query)
 	}

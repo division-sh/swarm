@@ -13,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -66,12 +67,12 @@ type flowInstanceTerminalMutationOwner interface {
 }
 
 type terminalFlowInstanceSideEffectPlan struct {
-	EntityID   string
-	FlowPath   string
-	AgentIDs   []string
-	Route      runtimeflowidentity.Route
-	RunID      string
-	FinalState string
+	EntityID        string
+	FlowPath        string
+	AgentIdentities []runtimeagentidentity.Identity
+	Route           runtimeflowidentity.Route
+	RunID           string
+	FinalState      string
 }
 
 func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
@@ -207,10 +208,19 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		if err := am.reconcileDynamicFlowRuntimeReadinessPlan(postCommitCtx, readinessPlan, req.ContractBundle); err != nil {
 			am.logFlowInstanceActivationSideEffectFailure(req, "runtime_readiness_failed", "finalize_runtime_readiness", err)
 			am.signalDynamicFlowRuntimeReadiness()
+			return
+		}
+		if err := am.launchDynamicFlowRuntimeAgentBacklogReplay(postCommitCtx, readinessPlan); err != nil {
+			am.logFlowInstanceActivationSideEffectFailure(req, "runtime_backlog_failed", "replay_runtime_backlog", err)
+			am.signalDynamicFlowRuntimeReadiness()
 		}
 	})
 	if !finalizeAfterCommit {
 		if err := am.reconcileDynamicFlowRuntimeReadinessPlan(ctx, readinessPlan, req.ContractBundle); err != nil {
+			am.signalDynamicFlowRuntimeReadiness()
+			return err
+		}
+		if err := am.launchDynamicFlowRuntimeAgentBacklogReplay(ctx, readinessPlan); err != nil {
 			am.signalDynamicFlowRuntimeReadiness()
 			return err
 		}
@@ -262,6 +272,11 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 			if err := am.reconcileDynamicFlowRuntimeReadinessPlan(postCommitCtx, readinessPlan, req.ContractBundle); err != nil {
 				am.logFlowInstanceActivationSideEffectFailure(req, "runtime_readiness_failed", "finalize_runtime_readiness", err)
 				am.signalDynamicFlowRuntimeReadiness()
+				return
+			}
+			if err := am.launchDynamicFlowRuntimeAgentBacklogReplay(postCommitCtx, readinessPlan); err != nil {
+				am.logFlowInstanceActivationSideEffectFailure(req, "runtime_backlog_failed", "replay_runtime_backlog", err)
+				am.signalDynamicFlowRuntimeReadiness()
 			}
 		}) {
 			return false, fmt.Errorf("dynamic flow runtime readiness %s requires post-commit finalization owner", instance.InstancePath)
@@ -269,6 +284,10 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 		return false, nil
 	}
 	if err := am.reconcileDynamicFlowRuntimeReadinessPlan(ctx, readinessPlan, req.ContractBundle); err != nil {
+		am.signalDynamicFlowRuntimeReadiness()
+		return false, err
+	}
+	if err := am.launchDynamicFlowRuntimeAgentBacklogReplay(ctx, readinessPlan); err != nil {
 		am.signalDynamicFlowRuntimeReadiness()
 		return false, err
 	}
@@ -397,12 +416,20 @@ func (am *AgentManager) buildDynamicFlowRuntimeReadinessPlan(
 		Agents:          make([]runtimepipeline.DynamicFlowRuntimeAgentExpectation, 0, len(agentRecords)),
 	}
 	for _, rec := range agentRecords {
+		identity, err := rec.Config.ConcreteIdentity()
+		if err != nil {
+			return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf(
+				"derive dynamic flow agent identity %s: %w",
+				rec.Config.ID,
+				err,
+			)
+		}
 		revision, err := lifecycleConfigRevision(rec)
 		if err != nil {
 			return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("derive dynamic flow agent revision %s: %w", rec.Config.ID, err)
 		}
 		plan.Agents = append(plan.Agents, runtimepipeline.DynamicFlowRuntimeAgentExpectation{
-			AgentID: rec.Config.ID, ConfigRevision: revision,
+			Identity: identity, ConfigRevision: revision,
 		})
 	}
 	creationEvent, err := buildDynamicFlowRuntimeCreationEventPlan(
@@ -756,14 +783,23 @@ func (am *AgentManager) deactivateFlowInstanceModelInMutation(
 		return fmt.Errorf("derive canonical route identity for flow path %s", canonicalFlowPath)
 	}
 	configs := am.lifecycle.executionConfigs()
-	agentIDs := make([]string, 0, len(configs))
+	agentIdentities := make([]runtimeagentidentity.Identity, 0, len(configs))
 	for _, cfg := range configs {
 		if cfg.CanonicalFlowPath() != canonicalFlowPath {
 			continue
 		}
-		agentIDs = append(agentIDs, strings.TrimSpace(cfg.ID))
+		identity, err := cfg.ConcreteIdentity()
+		if err != nil {
+			return fmt.Errorf("terminal flow instance agent %q identity: %w", cfg.ID, err)
+		}
+		agentIdentities = append(agentIdentities, identity)
 	}
-	sort.Strings(agentIDs)
+	sort.Slice(agentIdentities, func(i, j int) bool {
+		if agentIdentities[i].AgentID() != agentIdentities[j].AgentID() {
+			return agentIdentities[i].AgentID() < agentIdentities[j].AgentID()
+		}
+		return agentIdentities[i].FlowInstance() < agentIdentities[j].FlowInstance()
+	})
 	remover, ok := am.bus.(flowInstanceRouteContextRemover)
 	if !ok || remover == nil {
 		return fmt.Errorf("event bus does not support derived flow-instance route removal for %s", canonicalFlowPath)
@@ -777,12 +813,12 @@ func (am *AgentManager) deactivateFlowInstanceModelInMutation(
 		return fmt.Errorf("stage exact terminal flow-instance route topology %s: %w", canonicalFlowPath, err)
 	}
 	plan := terminalFlowInstanceSideEffectPlan{
-		EntityID:   entityID,
-		FlowPath:   canonicalFlowPath,
-		AgentIDs:   agentIDs,
-		Route:      canonicalRoute,
-		RunID:      runID,
-		FinalState: req.FinalState,
+		EntityID:        entityID,
+		FlowPath:        canonicalFlowPath,
+		AgentIdentities: agentIdentities,
+		Route:           canonicalRoute,
+		RunID:           runID,
+		FinalState:      req.FinalState,
 	}
 	if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
 		if err := am.applyTerminalFlowInstanceSideEffects(actionCtx, plan); err != nil {
@@ -796,9 +832,14 @@ func (am *AgentManager) deactivateFlowInstanceModelInMutation(
 
 func (am *AgentManager) applyTerminalFlowInstanceSideEffects(ctx context.Context, plan terminalFlowInstanceSideEffectPlan) error {
 	var agentErrs []error
-	for _, agentID := range plan.AgentIDs {
-		if err := am.TeardownAgent(agentID); err != nil && !errors.Is(err, ErrAgentNotFound) {
-			agentErrs = append(agentErrs, fmt.Errorf("teardown flow instance agent %s: %w", agentID, err))
+	for _, identity := range plan.AgentIdentities {
+		if err := am.teardownIdentity(ctx, identity, "flow_instance_terminal"); err != nil && !errors.Is(err, ErrAgentNotFound) {
+			agentErrs = append(agentErrs, fmt.Errorf(
+				"teardown flow instance agent %s at %s: %w",
+				identity.AgentID(),
+				identity.FlowInstance(),
+				err,
+			))
 		}
 	}
 	if len(agentErrs) > 0 {
@@ -818,10 +859,10 @@ func (am *AgentManager) logTerminalFlowInstanceSideEffectFailure(plan terminalFl
 		Action:    "terminal_flow_instance_side_effects_failed",
 		EntityID:  plan.EntityID,
 		Detail: map[string]any{
-			"flow_path":   plan.FlowPath,
-			"agent_ids":   append([]string(nil), plan.AgentIDs...),
-			"route":       plan.Route.InstancePath,
-			"final_state": plan.FinalState,
+			"flow_path":        plan.FlowPath,
+			"agent_identities": append([]runtimeagentidentity.Identity(nil), plan.AgentIdentities...),
+			"route":            plan.Route.InstancePath,
+			"final_state":      plan.FinalState,
 		},
 		Failure: failureEnvelope(err, "flow_activation", "terminal_side_effects"),
 	})
@@ -842,6 +883,22 @@ func buildFlowAgentConfig(
 	agentID := strings.TrimSpace(renderFlowTemplate(strings.TrimSpace(entry.ID), vars))
 	if agentID == "" {
 		return models.AgentConfig{}, fmt.Errorf("flow agent %s resolved empty id", key)
+	}
+	declarationOwner, ok := semanticview.AgentDeclarationOwner(source, templateID, key)
+	if !ok {
+		return models.AgentConfig{}, fmt.Errorf("flow agent %s missing scoped declaration owner", key)
+	}
+	name, err := runtimeagentidentity.DeclaredName(agentID, declarationOwner)
+	if err != nil {
+		return models.AgentConfig{}, fmt.Errorf("flow agent %s declaration identity: %w", key, err)
+	}
+	route, err := runtimeflowidentity.StoredRoute("", "", flowPath).AgentIdentityRoute()
+	if err != nil {
+		return models.AgentConfig{}, fmt.Errorf("flow agent %s route identity: %w", key, err)
+	}
+	identity, err := runtimeagentidentity.New(name, route)
+	if err != nil {
+		return models.AgentConfig{}, fmt.Errorf("flow agent %s concrete identity: %w", key, err)
 	}
 	subscriptions := make([]string, 0, len(entry.Subscriptions))
 	subscriptions = append(subscriptions, entry.Subscriptions...)
@@ -876,6 +933,7 @@ func buildFlowAgentConfig(
 
 	cfg := models.AgentConfig{
 		ID:              agentID,
+		Identity:        identity,
 		Type:            strings.TrimSpace(entry.Type),
 		Role:            strings.TrimSpace(entry.Role),
 		FlowID:          templateID,
@@ -1023,6 +1081,25 @@ func buildStaticFlowAgentConfig(
 	if agentID == "" {
 		return models.AgentConfig{}, fmt.Errorf("static flow agent %s resolved empty id", logicalID)
 	}
+	declarationOwner, ok := semanticview.AgentDeclarationOwner(source, flowID, logicalID)
+	if !ok {
+		return models.AgentConfig{}, fmt.Errorf("static flow agent %s missing scoped declaration owner", logicalID)
+	}
+	name, err := runtimeagentidentity.DeclaredName(agentID, declarationOwner)
+	if err != nil {
+		return models.AgentConfig{}, fmt.Errorf("static flow agent %s declaration identity: %w", logicalID, err)
+	}
+	route := runtimeagentidentity.RootRoute()
+	if flowPath != "" {
+		route, err = runtimeflowidentity.StoredRoute("", "", flowPath).AgentIdentityRoute()
+		if err != nil {
+			return models.AgentConfig{}, fmt.Errorf("static flow agent %s route identity: %w", logicalID, err)
+		}
+	}
+	identity, err := runtimeagentidentity.New(name, route)
+	if err != nil {
+		return models.AgentConfig{}, fmt.Errorf("static flow agent %s concrete identity: %w", logicalID, err)
+	}
 	subscriptions := make([]string, 0, len(entry.Subscriptions))
 	subscriptions = append(subscriptions, entry.Subscriptions...)
 	rendered := make([]string, 0, len(subscriptions))
@@ -1065,6 +1142,7 @@ func buildStaticFlowAgentConfig(
 	}
 	cfg := models.AgentConfig{
 		ID:              agentID,
+		Identity:        identity,
 		Type:            strings.TrimSpace(entry.Type),
 		Role:            role,
 		FlowID:          flowID,

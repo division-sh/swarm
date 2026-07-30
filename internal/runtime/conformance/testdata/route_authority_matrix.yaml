@@ -598,7 +598,7 @@ rows:
       - {kind: spec_ref, path: platform-spec.yaml, ref: typed_recipients}
       - {kind: spec_ref, path: platform-spec.yaml, ref: subscriber_type}
     proof_refs:
-      - {kind: go_test, name: TestEventBusAgentDispatchIgnoresSameIDNodeRouteTargets}
+      - {kind: go_test, name: TestEventBusAgentDispatchDoesNotCrossSameIDNodeRouteTargets}
       - {kind: go_test, name: TestSQLObservabilityReader_ListEvents_FiltersTypedSubscriberIdentity}
       - {kind: go_test, name: TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows}
     notes: >

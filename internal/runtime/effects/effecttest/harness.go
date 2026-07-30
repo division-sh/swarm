@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -29,8 +30,20 @@ type Harness struct {
 }
 
 func New() *Harness {
+	name, err := agentidentity.RuntimeName("effect-test-agent", "effect-test-harness")
+	if err != nil {
+		panic(err)
+	}
+	route, err := agentidentity.PresentRoute("effect-test", "instance", "effect-test/instance")
+	if err != nil {
+		panic(err)
+	}
+	identity, err := agentidentity.New(name, route)
+	if err != nil {
+		panic(err)
+	}
 	return &Harness{
-		Token:      runtimeeffects.LifecycleToken{RuntimeEpoch: 17, AgentID: "effect-test-agent", Generation: 4},
+		Token:      runtimeeffects.LifecycleToken{Identity: identity, RuntimeEpoch: 17, AgentID: "effect-test-agent", Generation: 4},
 		Heartbeats: map[string]int{}, Attempts: map[string]runtimeeffects.Attempt{}, States: map[string]runtimeeffects.State{}, Completions: map[string]runtimeeffects.CompletionSettlement{},
 	}
 }
@@ -46,7 +59,8 @@ func (h *Harness) Context(identity string) context.Context {
 	ctx = managedexecution.WithAdmission(ctx, admission)
 	target := runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: h.Token.AgentID,
-		SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "effect-test",
+		AgentIdentity: h.Token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
+		FlowInstance: h.Token.Identity.FlowInstance(),
 	}
 	ctx = runtimeeffects.WithUsageTarget(ctx, target)
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
@@ -69,8 +83,9 @@ func (h *Harness) CompletionContext(identity string) context.Context {
 	target := runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: "11111111-1111-4111-8111-111111111111",
 		RunID: "33333333-3333-4333-8333-333333333333", AgentID: h.Token.AgentID,
-		SessionID: "22222222-2222-4222-8222-222222222222", FlowInstance: "effect-test",
-		Memory: agentmemory.PlatformDefault(),
+		AgentIdentity: h.Token.Identity, SessionID: "22222222-2222-4222-8222-222222222222",
+		FlowInstance: h.Token.Identity.FlowInstance(),
+		Memory:       agentmemory.PlatformDefault(),
 	}
 	ctx = runtimeeffects.WithUsageTarget(ctx, target)
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{

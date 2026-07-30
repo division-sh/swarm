@@ -91,7 +91,7 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 	var allowedTools []string
 	var listedSurface managedcapabilities.Surface
 	effects := effecttest.New()
-	effects.Token.AgentID = "market-research-agent"
+	setEffectHarnessAgent(t, effects, "market-research-agent", "market/inst-1")
 	runtime := NewClaudeCLIRuntimeWithOptions(
 		cfg,
 		sessions.NewInMemoryRegistry(0),

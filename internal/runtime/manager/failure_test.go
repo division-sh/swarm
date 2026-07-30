@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
@@ -188,6 +189,7 @@ func TestRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRecovery(
 			if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: runtimeactors.AgentConfig{
 				ExecutionMode: "live",
 				ID:            agent.ID(),
+				Identity:      managerAgentIdentity(agent.ID()),
 				Subscriptions: []string{"test.intervention"},
 			}}, false); err != nil {
 				t.Fatalf("spawn intervention agent: %v", err)
@@ -260,6 +262,7 @@ func TestRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRecovery(
 			if err := recoveryManager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: runtimeactors.AgentConfig{
 				ExecutionMode: "live",
 				ID:            agent.ID(),
+				Identity:      managerAgentIdentity(agent.ID()),
 				Subscriptions: []string{"test.intervention"},
 			}}, false); err != nil {
 				t.Fatalf("spawn recovery agent: %v", err)
@@ -267,7 +270,7 @@ func TestRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRecovery(
 			if err := recoveryManager.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 				t.Fatalf("run recovery manager: %v", err)
 			}
-			if err := recoveryManager.ReplayAgentBacklog(testAuthorActivityContext(context.Background()), agent.ID()); err != nil {
+			if _, err := recoveryManager.ReplayBacklog(testAuthorActivityContext(context.Background()), runtimeagentcontrol.ReplayBacklogRequest{AgentID: agent.ID()}); err != nil {
 				t.Fatalf("replay intervention backlog: %v", err)
 			}
 			if got := calls.Load(); got != 1 {
@@ -326,6 +329,7 @@ func TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim(t 
 			if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: runtimeactors.AgentConfig{
 				ExecutionMode: "live",
 				ID:            agent.ID(),
+				Identity:      managerAgentIdentity(agent.ID()),
 				Subscriptions: []string{"test.intervention.settlement"},
 			}}, false); err != nil {
 				t.Fatalf("spawn intervention settlement agent: %v", err)
@@ -393,6 +397,7 @@ func TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim(t 
 			if err := recoveryManager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: runtimeactors.AgentConfig{
 				ExecutionMode: "live",
 				ID:            agent.ID(),
+				Identity:      managerAgentIdentity(agent.ID()),
 				Subscriptions: []string{"test.intervention.settlement"},
 			}}, false); err != nil {
 				t.Fatalf("spawn intervention recovery agent: %v", err)
@@ -453,6 +458,7 @@ func TestRunningManagerStandingRetryReclaimsFailedDeliveryAutomatically(t *testi
 	if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            agent.ID(),
+		Identity:      managerAgentIdentity(agent.ID()),
 		Subscriptions: []string{"test.standing.retry"},
 	}}, false); err != nil {
 		t.Fatalf("spawn standing retry agent: %v", err)
@@ -515,13 +521,13 @@ func TestProcessEventOutcomeUncertainTerminalDeliverySuppressesReplay(t *testing
 	agent := &countingFailureAgent{failureReturningAgent: failureReturningAgent{id: "agent-a", err: err}}
 	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-uncertain"), events.EventType("work.requested"), "", "", nil, 0, eventtest.UUID("uncertain-run"), "", events.EventEnvelope{}, time.Time{})
 	deliveryStore.seedAgentDeliveries(t, agent.ID(), []events.Event{evt})
-	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: agent.ID()}
+	route := managerAgentDeliveryRoute(agent.ID())
 	ctx := runtimedelivery.WithRoute(testAuthorActivityContext(context.Background()), route)
 	first := am.processEventDetailed(ctx, agent, evt)
 	if first.err == nil || agent.calls != 1 {
 		t.Fatalf("first result err=%v calls=%d, want one terminal failure", first.err, agent.calls)
 	}
-	backlog, err := deliveryStore.ClaimAgentBacklog(testAuthorActivityContext(context.Background()), agent.ID(), 10)
+	backlog, err := deliveryStore.ClaimAgentBacklog(testAuthorActivityContext(context.Background()), managerAgentDeliveryRoute(agent.ID()).AgentIdentity, 10)
 	if err != nil {
 		t.Fatalf("claim terminal delivery backlog: %v", err)
 	}
@@ -572,7 +578,7 @@ func TestProcessEventSelectedForkTerminalizesRetryableFailureBeforeRuntimeRetire
 	if snapshot.Status != runtimedelivery.StatusDeadLetter || snapshot.ReasonCode != "terminal_failure" || snapshot.RetryCount != 0 {
 		t.Fatalf("selected-fork delivery = status:%s reason:%s retries:%d, want terminal dead letter without retry", snapshot.Status, snapshot.ReasonCode, snapshot.RetryCount)
 	}
-	backlog, err := deliveryStore.ClaimAgentBacklog(testAuthorActivityContext(context.Background()), agent.ID(), 1)
+	backlog, err := deliveryStore.ClaimAgentBacklog(testAuthorActivityContext(context.Background()), managerAgentDeliveryRoute(agent.ID()).AgentIdentity, 1)
 	if err != nil {
 		t.Fatalf("claim normal-manager backlog after selected failure: %v", err)
 	}

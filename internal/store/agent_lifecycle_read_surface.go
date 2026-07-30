@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
@@ -14,41 +15,44 @@ type AgentDeliveryLifecycleFacts struct {
 }
 
 type agentLifecycleDeliveryRecord struct {
-	AgentID         string
+	AgentIdentity   agentidentity.Identity
 	Status          string
 	ActiveSessionID string
 	CreatedAt       time.Time
 	DeliveredAt     sql.NullTime
 }
 
-func (s *PostgresStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]AgentDeliveryLifecycleFacts, error) {
+func (s *PostgresStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]AgentDeliveryLifecycleFacts, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
-	normalized := normalizePendingAgentIDs(agentIDs)
+	normalized, err := normalizePendingAgentIdentities(identities)
+	if err != nil {
+		return nil, err
+	}
 	if len(normalized) == 0 {
-		return map[string]AgentDeliveryLifecycleFacts{}, nil
+		return map[agentidentity.Identity]AgentDeliveryLifecycleFacts{}, nil
 	}
 	records, err := s.listAgentLifecycleRecordsSpec(ctx, normalized)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]AgentDeliveryLifecycleFacts, len(normalized))
-	for _, agentID := range normalized {
-		out[agentID] = AgentDeliveryLifecycleFacts{}
+	out := make(map[agentidentity.Identity]AgentDeliveryLifecycleFacts, len(normalized))
+	for _, identity := range normalized {
+		out[identity] = AgentDeliveryLifecycleFacts{}
 	}
-	grouped := make(map[string][]agentLifecycleDeliveryRecord, len(normalized))
+	grouped := make(map[agentidentity.Identity][]agentLifecycleDeliveryRecord, len(normalized))
 	for _, record := range records {
-		grouped[record.AgentID] = append(grouped[record.AgentID], record)
+		grouped[record.AgentIdentity] = append(grouped[record.AgentIdentity], record)
 	}
-	for _, agentID := range normalized {
-		out[agentID] = canonicalAgentDeliveryLifecycleFactsFromRecords(grouped[agentID])
+	for _, identity := range normalized {
+		out[identity] = canonicalAgentDeliveryLifecycleFactsFromRecords(grouped[identity])
 	}
 	return out, nil
 }
 
-func (s *PostgresStore) listAgentLifecycleRecordsSpec(ctx context.Context, agentIDs []string) ([]agentLifecycleDeliveryRecord, error) {
-	snapshots, err := postgresDeliveryAdapter.CurrentAgentSnapshots(ctx, s.DB, agentIDs)
+func (s *PostgresStore) listAgentLifecycleRecordsSpec(ctx context.Context, identities []agentidentity.Identity) ([]agentLifecycleDeliveryRecord, error) {
+	snapshots, err := postgresDeliveryAdapter.CurrentAgentSnapshots(ctx, s.DB, identities)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +63,7 @@ func agentLifecycleRecordsFromSnapshots(snapshots []runtimedelivery.Snapshot) []
 	out := make([]agentLifecycleDeliveryRecord, 0, len(snapshots))
 	for _, snapshot := range snapshots {
 		record := agentLifecycleDeliveryRecord{
-			AgentID: snapshot.SubscriberID, Status: string(snapshot.Status),
+			AgentIdentity: snapshot.Route.AgentIdentity, Status: string(snapshot.Status),
 			ActiveSessionID: snapshot.ActiveSessionID, CreatedAt: snapshot.CreatedAt,
 		}
 		if !snapshot.SettledAt.IsZero() {

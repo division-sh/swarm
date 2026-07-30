@@ -55,7 +55,10 @@ func (eb *EventBus) replayRecipientsForCommittedEvent(
 	}
 	switch scope {
 	case runtimepipelineobligation.ScopeDirect:
-		return persisted, nil, deliveryRoutesFromTargetMap(persisted, "agent", eb.deliveryTargetsForEvent(ctx, evt.ID())), nil
+		if len(persisted) > 0 {
+			return nil, nil, nil, fmt.Errorf("replay event %s has persisted agent recipients without exact identity-bearing delivery routes", evt.ID())
+		}
+		return nil, nil, nil, nil
 	case runtimepipelineobligation.ScopeSubscribed:
 		internal, err := eb.currentInternalRecipientsForCommittedEvent(ctx, evt)
 		if err != nil {
@@ -63,8 +66,8 @@ func (eb *EventBus) replayRecipientsForCommittedEvent(
 		}
 		live := uniqueStrings(append(append([]string(nil), persisted...), internal...))
 		routes := append([]events.DeliveryRoute(nil), persistedRoutes...)
-		if len(routes) == 0 {
-			routes = deliveryRoutesFromTargetMap(persisted, "agent", eb.deliveryTargetsForEvent(ctx, evt.ID()))
+		if len(persisted) > 0 && !deliveryRoutesCoverAgentRecipients(routes, persisted) {
+			return nil, nil, nil, fmt.Errorf("replay event %s has persisted agent recipients without exact identity-bearing delivery routes", evt.ID())
 		}
 		for _, recipient := range internal {
 			if hasDeliveryRouteRecipient(routes, "node", recipient) {

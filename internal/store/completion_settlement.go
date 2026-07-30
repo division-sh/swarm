@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -240,6 +241,10 @@ func insertCompletionTargetPostgres(ctx context.Context, tx *sql.Tx, attempt run
 	if err := validateManagedAgentTurnSurface(surface, t.AgentID, t.SessionID, t.RunID); err != nil {
 		return err
 	}
+	fields, err := agentIdentityFields(t.Identity.Agent)
+	if err != nil {
+		return err
+	}
 	failure, err := completionFailureJSON(t.Failure)
 	if err != nil {
 		return err
@@ -247,7 +252,8 @@ func insertCompletionTargetPostgres(ctx context.Context, tx *sql.Tx, attempt run
 	u := settlement.Usage
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
+			turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
 			emitted_events,
 			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count,
@@ -255,11 +261,12 @@ func insertCompletionTargetPostgres(ctx context.Context, tx *sql.Tx, attempt run
 			cache_read_input_tokens, cache_creation_input_tokens, cache_creation_5m_input_tokens,
 			cache_creation_1h_input_tokens, provider_reported_cost_usd, failure, created_at
 		) VALUES (
-			$1::uuid,$2::uuid,$3,$4::uuid,NULLIF($5,''),$6,$7,NULLIF($8,'')::uuid,
-			NULLIF($9,'')::uuid,NULLIF($10,''),NULLIF($11,''),$12::uuid,$13::jsonb,$14::jsonb,
-			$15::jsonb,$16::jsonb,$17::jsonb,$18,$19,$20,$21::uuid,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32::jsonb,$33
+			$1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9::uuid,$10,$11,$12,NULLIF($13,'')::uuid,
+			NULLIF($14,'')::uuid,NULLIF($15,''),NULLIF($16,''),$17::uuid,$18::jsonb,$19::jsonb,
+			$20::jsonb,$21::jsonb,$22::jsonb,$23,$24,$25,$26::uuid,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37::jsonb,$38
 		)
-	`, t.TurnID, t.RunID, t.AgentID, t.SessionID, t.FlowInstance, t.Memory.Enabled, string(t.Memory.Source), t.EntityID,
+	`, t.TurnID, t.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, t.SessionID, fields.FlowInstancePath, t.Memory.Enabled, string(t.Memory.Source), t.EntityID,
 		t.TriggerEventID, t.TriggerEventType, t.TaskID, t.CapabilitySurfaceID, completionJSON(t.ToolCalls, `[]`),
 		completionJSON(t.EmittedEvents, `[]`),
 		completionNullableJSON(t.RequestPayload), completionNullableJSON(t.ResponsePayload), completionJSON(t.TurnBlocks, `[]`), t.ParseOK, t.LatencyMS, t.RetryCount,
@@ -289,6 +296,10 @@ func insertCompletionTargetSQLite(ctx context.Context, tx *sql.Tx, attempt runti
 	if err := validateManagedAgentTurnSurface(surface, t.AgentID, t.SessionID, t.RunID); err != nil {
 		return err
 	}
+	fields, err := agentIdentityFields(t.Identity.Agent)
+	if err != nil {
+		return err
+	}
 	failure, err := completionFailureJSON(t.Failure)
 	if err != nil {
 		return err
@@ -296,15 +307,17 @@ func insertCompletionTargetSQLite(ctx context.Context, tx *sql.Tx, attempt runti
 	u := settlement.Usage
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
+			turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
 			emitted_events,
 			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count,
 			completion_attempt_id, execution_mode, resolved_model, usage_exactness, input_tokens, output_tokens,
 			cache_read_input_tokens, cache_creation_input_tokens, cache_creation_5m_input_tokens,
 			cache_creation_1h_input_tokens, provider_reported_cost_usd, failure, created_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-	`, t.TurnID, sqliteNullString(t.RunID), t.AgentID, t.SessionID, sqliteNullString(t.FlowInstance), t.Memory.Enabled, string(t.Memory.Source), sqliteNullString(t.EntityID),
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	`, t.TurnID, sqliteNullString(t.RunID), fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, t.SessionID, fields.FlowInstancePath, t.Memory.Enabled, string(t.Memory.Source), sqliteNullString(t.EntityID),
 		sqliteNullString(t.TriggerEventID), sqliteNullString(t.TriggerEventType), sqliteNullString(t.TaskID), t.CapabilitySurfaceID, completionJSON(t.ToolCalls, `[]`),
 		completionJSON(t.EmittedEvents, `[]`),
 		completionNullableJSON(t.RequestPayload), completionNullableJSON(t.ResponsePayload), completionJSON(t.TurnBlocks, `[]`), t.ParseOK, t.LatencyMS, t.RetryCount,
@@ -318,7 +331,7 @@ func insertCompletionTargetSQLite(ctx context.Context, tx *sql.Tx, attempt runti
 
 func completionTurnRecord(t *runtimeeffects.CompletionAgentTurn) runtimellm.AgentTurnRecord {
 	return runtimellm.AgentTurnRecord{
-		RunID: t.RunID, AgentID: t.AgentID, SessionID: t.SessionID, Memory: t.Memory,
+		RunID: t.RunID, AgentID: t.AgentID, Identity: t.Identity, SessionID: t.SessionID, Memory: t.Memory,
 		FlowInstance: t.FlowInstance, EntityID: t.EntityID,
 	}
 }
@@ -332,16 +345,24 @@ func prepareCompletionTurnMemoryPostgres(ctx context.Context, tx *sql.Tx, t *run
 	if !plan.Enabled {
 		return ensurePostgresStatelessAuditTx(ctx, tx, rec, plan, identity)
 	}
+	fields, err := agentIdentityFields(identity.Agent)
+	if err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx, `
 		UPDATE agent_sessions SET updated_at=now()
-		WHERE session_id=$1::uuid AND run_id=$2::uuid AND agent_id=$3 AND flow_instance=$4
+		WHERE session_id=$1::uuid AND run_id=$2::uuid AND agent_id=$3
+		  AND agent_name_owner=$4 AND agent_name_source=$5
+		  AND agent_route_presence=$6 AND flow_scope_key=$7
+		  AND flow_instance_id=$8 AND flow_instance=$9
 		  AND memory_enabled=TRUE AND status='active'
-	`, t.SessionID, identity.RunID, identity.AgentID, identity.FlowInstance)
+	`, t.SessionID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath)
 	if err != nil {
 		return fmt.Errorf("touch completion live memory row: %w", err)
 	}
 	if rows, _ := result.RowsAffected(); rows != 1 {
-		return fmt.Errorf("no exact active memory row found for completion run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID, identity.FlowInstance, t.SessionID)
+		return fmt.Errorf("no exact active memory row found for completion run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID(), identity.FlowInstance(), t.SessionID)
 	}
 	return nil
 }
@@ -355,16 +376,24 @@ func prepareCompletionTurnMemorySQLite(ctx context.Context, tx *sql.Tx, t *runti
 	if !plan.Enabled {
 		return ensureSQLiteStatelessAuditTx(ctx, tx, rec, plan, identity, now)
 	}
+	fields, err := agentIdentityFields(identity.Agent)
+	if err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx, `
 		UPDATE agent_sessions SET updated_at=?
-		WHERE session_id=? AND run_id=? AND agent_id=? AND flow_instance=?
+		WHERE session_id=? AND run_id=? AND agent_id=?
+		  AND agent_name_owner=? AND agent_name_source=?
+		  AND agent_route_presence=? AND flow_scope_key=?
+		  AND flow_instance_id=? AND flow_instance=?
 		  AND memory_enabled=1 AND status='active'
-	`, now, t.SessionID, identity.RunID, identity.AgentID, identity.FlowInstance)
+	`, now, t.SessionID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath)
 	if err != nil {
 		return fmt.Errorf("touch sqlite completion live memory row: %w", err)
 	}
 	if rows, _ := result.RowsAffected(); rows != 1 {
-		return fmt.Errorf("no exact active sqlite memory row found for completion run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID, identity.FlowInstance, t.SessionID)
+		return fmt.Errorf("no exact active sqlite memory row found for completion run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID(), identity.FlowInstance(), t.SessionID)
 	}
 	return nil
 }
@@ -459,6 +488,14 @@ func completionSpendValuesSQLite(ctx context.Context, tx *sql.Tx, attempt runtim
 
 func insertCompletionSpendRow(ctx context.Context, tx *sql.Tx, postgres bool, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement, cost float64, accounting, basis string) error {
 	s := settlement.Spend
+	var identityFields runtimeagentidentity.StorageFields
+	if !s.AgentIdentity.IsZero() {
+		var err error
+		identityFields, err = s.AgentIdentity.Normalize().StorageFields()
+		if err != nil {
+			return fmt.Errorf("completion spend agent identity: %w", err)
+		}
+	}
 	var input, output int64
 	if settlement.Usage.InputTokens != nil {
 		input = *settlement.Usage.InputTokens
@@ -466,12 +503,12 @@ func insertCompletionSpendRow(ctx context.Context, tx *sql.Tx, postgres bool, at
 	if settlement.Usage.OutputTokens != nil {
 		output = *settlement.Usage.OutputTokens
 	}
-	query := `INSERT INTO spend_ledger (ledger_id,external_effect_attempt_id,execution_mode,entity_id,flow_instance,agent_id,model,model_alias,backend_profile,provider,transport,resolved_model,input_tokens,output_tokens,cost_usd,invocation_type,usage_accounting,accounting_basis,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-	args := []any{uuid.NewString(), attempt.AttemptID, attempt.Authority.ExecutionMode, sqliteNullString(s.EntityID), s.FlowInstance, s.AgentID, s.Model, defaultCompletionIdentity(s.ModelAlias), s.BackendProfile, s.Provider, s.Transport, s.ResolvedModel, input, output, cost, s.InvocationType, accounting, sqliteNullString(basis), settlement.Now.UTC()}
+	query := `INSERT INTO spend_ledger (ledger_id,external_effect_attempt_id,execution_mode,entity_id,flow_instance,agent_id,agent_name_owner,agent_name_source,agent_route_presence,agent_flow_scope_key,agent_flow_instance_id,model,model_alias,backend_profile,provider,transport,resolved_model,input_tokens,output_tokens,cost_usd,invocation_type,usage_accounting,accounting_basis,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+	args := []any{uuid.NewString(), attempt.AttemptID, attempt.Authority.ExecutionMode, sqliteNullString(s.EntityID), s.FlowInstance, s.AgentID, sqliteNullString(identityFields.NameOwner), sqliteNullString(identityFields.NameSource), sqliteNullString(identityFields.RoutePresence), sqliteNullString(identityFields.FlowScopeKey), sqliteNullString(identityFields.FlowInstanceID), s.Model, defaultCompletionIdentity(s.ModelAlias), s.BackendProfile, s.Provider, s.Transport, s.ResolvedModel, input, output, cost, s.InvocationType, accounting, sqliteNullString(basis), settlement.Now.UTC()}
 	if postgres {
-		query = `INSERT INTO spend_ledger (ledger_id,external_effect_attempt_id,execution_mode,entity_id,flow_instance,agent_id,model,model_alias,backend_profile,provider,transport,resolved_model,input_tokens,output_tokens,cost_usd,invocation_type,usage_accounting,accounting_basis,created_at) VALUES ($1::uuid,$2::uuid,$3,NULLIF($4,'')::uuid,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NULLIF($18,''),$19)`
+		query = `INSERT INTO spend_ledger (ledger_id,external_effect_attempt_id,execution_mode,entity_id,flow_instance,agent_id,agent_name_owner,agent_name_source,agent_route_presence,agent_flow_scope_key,agent_flow_instance_id,model,model_alias,backend_profile,provider,transport,resolved_model,input_tokens,output_tokens,cost_usd,invocation_type,usage_accounting,accounting_basis,created_at) VALUES ($1::uuid,$2::uuid,$3,NULLIF($4,'')::uuid,$5,$6,NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),NULLIF($11,''),$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,NULLIF($23,''),$24)`
 		args[3] = strings.TrimSpace(s.EntityID)
-		args[17] = basis
+		args[22] = basis
 	}
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("insert completion spend: %w", err)

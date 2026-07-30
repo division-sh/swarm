@@ -8,43 +8,68 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store"
 )
 
 type fakeAgentConversationReadStore struct {
-	listAgentsResult                    store.OperatorAgentListResult
-	listAgentsErr                       error
-	agentResult                         store.OperatorAgentDetail
-	agentErr                            error
-	agentDiagnosisResult                store.OperatorAgentDiagnosis
-	agentDiagnosisErr                   error
-	agentUsageResult                    store.OperatorAgentUsage
-	agentUsageErr                       error
-	agentDeliveryLifecycleResult        store.OperatorAgentDeliveryLifecycleList
-	agentDeliveryLifecycleErr           error
-	agentDeliveryDiagnosticsResult      store.OperatorAgentDeliveryDiagnostics
-	agentDeliveryDiagnosticsErr         error
-	listConversationsResult             store.OperatorConversationListResult
-	listConversationsErr                error
-	conversationTurnsResult             store.OperatorConversationTurnListResult
-	conversationTurnsErr                error
-	conversationTurnResult              store.OperatorPublicConversationTurnDetail
-	conversationTurnErr                 error
-	lastAgentList                       store.OperatorAgentListOptions
-	lastConversationList                store.OperatorConversationListOptions
-	lastAgentID                         string
-	lastAgentDiagnosisID                string
-	lastAgentDiagnosisOptions           store.OperatorAgentDiagnosisOptions
-	lastAgentUsageID                    string
-	lastAgentUsageOptions               store.OperatorAgentUsageOptions
-	lastAgentDeliveryLifecycleID        string
-	lastAgentDeliveryLifecycleOptions   store.OperatorAgentDeliveryLifecycleOptions
-	lastAgentDeliveryDiagnosticsID      string
-	lastAgentDeliveryDiagnosticsOptions store.OperatorAgentDeliveryDiagnosticsOptions
-	lastConversationTurns               store.OperatorConversationTurnListOptions
-	lastConversationTurnSessionID       string
-	lastConversationTurnID              string
+	listAgentsResult                     store.OperatorAgentListResult
+	listAgentsErr                        error
+	agentResult                          store.OperatorAgentDetail
+	agentErr                             error
+	agentDiagnosisResult                 store.OperatorAgentDiagnosis
+	agentDiagnosisErr                    error
+	agentUsageResult                     store.OperatorAgentUsage
+	agentUsageErr                        error
+	agentDeliveryLifecycleResult         store.OperatorAgentDeliveryLifecycleList
+	agentDeliveryLifecycleErr            error
+	agentDeliveryDiagnosticsResult       store.OperatorAgentDeliveryDiagnostics
+	agentDeliveryDiagnosticsErr          error
+	listConversationsResult              store.OperatorConversationListResult
+	listConversationsErr                 error
+	conversationTurnsResult              store.OperatorConversationTurnListResult
+	conversationTurnsErr                 error
+	conversationTurnResult               store.OperatorPublicConversationTurnDetail
+	conversationTurnErr                  error
+	lastAgentList                        store.OperatorAgentListOptions
+	lastConversationList                 store.OperatorConversationListOptions
+	lastResolveAgentID                   string
+	lastResolveFlowInstance              string
+	resolveIdentity                      agentidentity.Identity
+	resolveErr                           error
+	lastAgentIdentity                    agentidentity.Identity
+	lastAgentDiagnosisIdentity           agentidentity.Identity
+	lastAgentDiagnosisOptions            store.OperatorAgentDiagnosisOptions
+	lastAgentUsageIdentity               agentidentity.Identity
+	lastAgentUsageOptions                store.OperatorAgentUsageOptions
+	lastAgentDeliveryLifecycleIdentity   agentidentity.Identity
+	lastAgentDeliveryLifecycleOptions    store.OperatorAgentDeliveryLifecycleOptions
+	lastAgentDeliveryDiagnosticsIdentity agentidentity.Identity
+	lastAgentDeliveryDiagnosticsOptions  store.OperatorAgentDeliveryDiagnosticsOptions
+	lastConversationTurns                store.OperatorConversationTurnListOptions
+	lastConversationTurnSessionID        string
+	lastConversationTurnID               string
+}
+
+func (s *fakeAgentConversationReadStore) ResolveOperatorAgentIdentity(_ context.Context, agentID, flowInstance string) (agentidentity.Identity, error) {
+	s.lastResolveAgentID = agentID
+	s.lastResolveFlowInstance = flowInstance
+	if s.resolveErr != nil {
+		return agentidentity.Identity{}, s.resolveErr
+	}
+	if !s.resolveIdentity.IsZero() {
+		return s.resolveIdentity, nil
+	}
+	name, err := agentidentity.DeclaredName(agentID, "test-bundle")
+	if err != nil {
+		return agentidentity.Identity{}, err
+	}
+	route, err := agentidentity.PresentRoute("research", "inst-1", "research/inst-1")
+	if err != nil {
+		return agentidentity.Identity{}, err
+	}
+	return agentidentity.New(name, route)
 }
 
 func (s *fakeAgentConversationReadStore) ListOperatorAgents(_ context.Context, opts store.OperatorAgentListOptions) (store.OperatorAgentListResult, error) {
@@ -52,31 +77,31 @@ func (s *fakeAgentConversationReadStore) ListOperatorAgents(_ context.Context, o
 	return s.listAgentsResult, s.listAgentsErr
 }
 
-func (s *fakeAgentConversationReadStore) LoadOperatorAgent(_ context.Context, agentID string) (store.OperatorAgentDetail, error) {
-	s.lastAgentID = agentID
+func (s *fakeAgentConversationReadStore) LoadOperatorAgent(_ context.Context, identity agentidentity.Identity) (store.OperatorAgentDetail, error) {
+	s.lastAgentIdentity = identity
 	return s.agentResult, s.agentErr
 }
 
-func (s *fakeAgentConversationReadStore) LoadOperatorAgentDiagnosis(_ context.Context, agentID string, opts store.OperatorAgentDiagnosisOptions) (store.OperatorAgentDiagnosis, error) {
-	s.lastAgentDiagnosisID = agentID
+func (s *fakeAgentConversationReadStore) LoadOperatorAgentDiagnosis(_ context.Context, identity agentidentity.Identity, opts store.OperatorAgentDiagnosisOptions) (store.OperatorAgentDiagnosis, error) {
+	s.lastAgentDiagnosisIdentity = identity
 	s.lastAgentDiagnosisOptions = opts
 	return s.agentDiagnosisResult, s.agentDiagnosisErr
 }
 
-func (s *fakeAgentConversationReadStore) LoadOperatorAgentUsage(_ context.Context, agentID string, opts store.OperatorAgentUsageOptions) (store.OperatorAgentUsage, error) {
-	s.lastAgentUsageID = agentID
+func (s *fakeAgentConversationReadStore) LoadOperatorAgentUsage(_ context.Context, identity agentidentity.Identity, opts store.OperatorAgentUsageOptions) (store.OperatorAgentUsage, error) {
+	s.lastAgentUsageIdentity = identity
 	s.lastAgentUsageOptions = opts
 	return s.agentUsageResult, s.agentUsageErr
 }
 
-func (s *fakeAgentConversationReadStore) LoadOperatorAgentDeliveryLifecycle(_ context.Context, agentID string, opts store.OperatorAgentDeliveryLifecycleOptions) (store.OperatorAgentDeliveryLifecycleList, error) {
-	s.lastAgentDeliveryLifecycleID = agentID
+func (s *fakeAgentConversationReadStore) LoadOperatorAgentDeliveryLifecycle(_ context.Context, identity agentidentity.Identity, opts store.OperatorAgentDeliveryLifecycleOptions) (store.OperatorAgentDeliveryLifecycleList, error) {
+	s.lastAgentDeliveryLifecycleIdentity = identity
 	s.lastAgentDeliveryLifecycleOptions = opts
 	return s.agentDeliveryLifecycleResult, s.agentDeliveryLifecycleErr
 }
 
-func (s *fakeAgentConversationReadStore) LoadOperatorAgentDeliveryDiagnostics(_ context.Context, agentID string, opts store.OperatorAgentDeliveryDiagnosticsOptions) (store.OperatorAgentDeliveryDiagnostics, error) {
-	s.lastAgentDeliveryDiagnosticsID = agentID
+func (s *fakeAgentConversationReadStore) LoadOperatorAgentDeliveryDiagnostics(_ context.Context, identity agentidentity.Identity, opts store.OperatorAgentDeliveryDiagnosticsOptions) (store.OperatorAgentDeliveryDiagnostics, error) {
+	s.lastAgentDeliveryDiagnosticsIdentity = identity
 	s.lastAgentDeliveryDiagnosticsOptions = opts
 	return s.agentDeliveryDiagnosticsResult, s.agentDeliveryDiagnosticsErr
 }
@@ -316,12 +341,15 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	}
 	assertUnsupportedAgentMetricStubsAbsent(t, asMap(t, agents[0]))
 
-	getAgent := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent","method":"agent.get","params":{"agent_id":"agent-1"}}`)
+	getAgent := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent","method":"agent.get","params":{"agent_id":"agent-1","flow_instance":"research/inst-1"}}`)
 	if getAgent.Error != nil {
 		t.Fatalf("agent.get error = %#v", getAgent.Error)
 	}
-	if reads.lastAgentID != "agent-1" {
-		t.Fatalf("agent.get id = %q", reads.lastAgentID)
+	if reads.lastResolveAgentID != "agent-1" || reads.lastResolveFlowInstance != "research/inst-1" {
+		t.Fatalf("agent.get selector = %q/%q", reads.lastResolveAgentID, reads.lastResolveFlowInstance)
+	}
+	if reads.lastAgentIdentity.AgentID() != "agent-1" || reads.lastAgentIdentity.FlowInstance() != "research/inst-1" {
+		t.Fatalf("agent.get identity = %#v", reads.lastAgentIdentity)
 	}
 	agentResult := asMap(t, getAgent.Result)
 	agent := asMap(t, agentResult["agent"])
@@ -336,8 +364,8 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	if diagnoseAgent.Error != nil {
 		t.Fatalf("agent.diagnose error = %#v", diagnoseAgent.Error)
 	}
-	if reads.lastAgentDiagnosisID != "agent-1" {
-		t.Fatalf("agent.diagnose id = %q", reads.lastAgentDiagnosisID)
+	if reads.lastAgentDiagnosisIdentity.AgentID() != "agent-1" {
+		t.Fatalf("agent.diagnose identity = %#v", reads.lastAgentDiagnosisIdentity)
 	}
 	if reads.lastAgentDiagnosisOptions.QueueLimit != 1 || reads.lastAgentDiagnosisOptions.QueueCursor != "cursor-1" {
 		t.Fatalf("agent.diagnose options = %#v", reads.lastAgentDiagnosisOptions)
@@ -394,8 +422,8 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	if usageResp.Error != nil {
 		t.Fatalf("agent.usage error = %#v", usageResp.Error)
 	}
-	if reads.lastAgentUsageID != "agent-1" {
-		t.Fatalf("agent.usage id = %q", reads.lastAgentUsageID)
+	if reads.lastAgentUsageIdentity.AgentID() != "agent-1" {
+		t.Fatalf("agent.usage identity = %#v", reads.lastAgentUsageIdentity)
 	}
 	if reads.lastAgentUsageOptions.Since == nil || reads.lastAgentUsageOptions.Until == nil {
 		t.Fatalf("agent.usage options missing window = %#v", reads.lastAgentUsageOptions)
@@ -427,8 +455,8 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	if deliveryLifecycle.Error != nil {
 		t.Fatalf("agent.delivery_lifecycle error = %#v", deliveryLifecycle.Error)
 	}
-	if reads.lastAgentDeliveryLifecycleID != "agent-1" {
-		t.Fatalf("agent.delivery_lifecycle id = %q", reads.lastAgentDeliveryLifecycleID)
+	if reads.lastAgentDeliveryLifecycleIdentity.AgentID() != "agent-1" {
+		t.Fatalf("agent.delivery_lifecycle identity = %#v", reads.lastAgentDeliveryLifecycleIdentity)
 	}
 	if reads.lastAgentDeliveryLifecycleOptions.RunID != "11111111-1111-1111-1111-111111111111" || reads.lastAgentDeliveryLifecycleOptions.Limit != 1 || reads.lastAgentDeliveryLifecycleOptions.Cursor != "lifecycle-cursor-1" {
 		t.Fatalf("agent.delivery_lifecycle options = %#v", reads.lastAgentDeliveryLifecycleOptions)
@@ -458,8 +486,8 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	if deliveryDiagnostics.Error != nil {
 		t.Fatalf("agent.delivery_diagnostics error = %#v", deliveryDiagnostics.Error)
 	}
-	if reads.lastAgentDeliveryDiagnosticsID != "agent-1" {
-		t.Fatalf("agent.delivery_diagnostics id = %q", reads.lastAgentDeliveryDiagnosticsID)
+	if reads.lastAgentDeliveryDiagnosticsIdentity.AgentID() != "agent-1" {
+		t.Fatalf("agent.delivery_diagnostics identity = %#v", reads.lastAgentDeliveryDiagnosticsIdentity)
 	}
 	if reads.lastAgentDeliveryDiagnosticsOptions.FailureLimit != 1 || reads.lastAgentDeliveryDiagnosticsOptions.FailureCursor != "failure-cursor-1" ||
 		reads.lastAgentDeliveryDiagnosticsOptions.DeadLetterLimit != 1 || reads.lastAgentDeliveryDiagnosticsOptions.DeadLetterCursor != "dead-letter-cursor-1" {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -55,18 +56,11 @@ func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.S
 	sc.NormalizeRunID()
 	flowInstance := sc.EffectiveFlowInstance()
 	sc.FlowInstance = flowInstance
-
-	return s.upsertScheduleSpec(ctx, sc)
-}
-
-func (s *PostgresStore) CancelSchedule(ctx context.Context, agentID, eventType string) error {
-	if err := s.requireCurrentSchema(); err != nil {
+	if err := sc.NormalizeOwner(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(agentID) == "" || strings.TrimSpace(eventType) == "" {
-		return fmt.Errorf("agent_id and event_type are required")
-	}
-	return s.cancelScheduleSpec(ctx, runtimecorrelation.RunIDFromContext(ctx), agentID, eventType)
+
+	return s.upsertScheduleSpec(ctx, sc)
 }
 
 func (s *PostgresStore) CancelScheduleExact(ctx context.Context, sc runtimepipeline.Schedule) error {
@@ -82,6 +76,9 @@ func (s *PostgresStore) CancelScheduleExact(ctx context.Context, sc runtimepipel
 	sc.NormalizeRunID()
 	flowInstance := sc.EffectiveFlowInstance()
 	sc.FlowInstance = flowInstance
+	if err := sc.NormalizeOwner(); err != nil {
+		return err
+	}
 	return s.cancelScheduleExactSpec(ctx, sc)
 }
 
@@ -90,18 +87,6 @@ func (s *PostgresStore) LoadActiveSchedules(ctx context.Context) ([]runtimepipel
 		return nil, err
 	}
 	return s.loadActiveSchedulesSpec(ctx)
-}
-
-func (s *PostgresStore) MarkScheduleFired(ctx context.Context, sc runtimepipeline.Schedule) error {
-	if err := s.requireCurrentSchema(); err != nil {
-		return err
-	}
-	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
-		return nil
-	}
-	sc = scheduleWithContextRunID(ctx, sc)
-	sc.NormalizeRunID()
-	return s.markScheduleFiredSpec(ctx, sc)
 }
 
 func (s *PostgresStore) MarkScheduleFiredExact(ctx context.Context, sc runtimepipeline.Schedule) error {
@@ -117,7 +102,20 @@ func (s *PostgresStore) MarkScheduleFiredExact(ctx context.Context, sc runtimepi
 	sc.NormalizeRunID()
 	flowInstance := sc.EffectiveFlowInstance()
 	sc.FlowInstance = flowInstance
+	if err := sc.NormalizeOwner(); err != nil {
+		return err
+	}
 	return s.markScheduleFiredExactSpec(ctx, sc)
+}
+
+func scheduleAgentIdentityFields(sc runtimepipeline.Schedule) (agentidentity.StorageFields, error) {
+	if err := sc.NormalizeOwner(); err != nil {
+		return agentidentity.StorageFields{}, err
+	}
+	if sc.OwnerKind == runtimepipeline.ScheduleOwnerSystem {
+		return agentidentity.StorageFields{}, nil
+	}
+	return sc.AgentIdentity.StorageFields()
 }
 
 func persistedSchedulePayload(sc runtimepipeline.Schedule) []byte {
@@ -169,19 +167,30 @@ func (s *PostgresStore) upsertScheduleSpec(ctx context.Context, sc runtimepipeli
 			}
 		}
 
+		identityFields, err := scheduleAgentIdentityFields(sc)
+		if err != nil {
+			return err
+		}
 		payload := persistedSchedulePayload(sc)
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 			UPDATE timers
 			SET status = 'cancelled'
 		WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
 		  AND owner_agent = $2
+		  AND owner_kind = $7
+		  AND agent_name_owner IS NOT DISTINCT FROM NULLIF($8, '')
+		  AND agent_name_source IS NOT DISTINCT FROM NULLIF($9, '')
+		  AND agent_route_presence IS NOT DISTINCT FROM NULLIF($10, '')
+		  AND agent_flow_scope_key IS NOT DISTINCT FROM NULLIF($11, '')
+		  AND agent_flow_instance_id IS NOT DISTINCT FROM NULLIF($12, '')
 		  AND fire_event = $3
 		  AND entity_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
 			  AND flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
 			  AND %s = $6
 			  AND task_type IN ('timer', 'scheduled_task', 'deadline', 'global_recurring')
 			  AND status = 'active'
-		`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID)); err != nil {
+		`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID),
+			sc.OwnerKind, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence, identityFields.FlowScopeKey, identityFields.FlowInstanceID); err != nil {
 			return fmt.Errorf("deactivate previous timer: %w", err)
 		}
 
@@ -205,14 +214,20 @@ func (s *PostgresStore) upsertScheduleSpec(ctx context.Context, sc runtimepipeli
 			INSERT INTO timers (
 			run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
 			fire_at, recurring, recurrence_cron, recurrence_interval,
-			owner_node, owner_agent, reply_context_id, task_type, status
+			owner_node, owner_agent, owner_kind, agent_name_owner, agent_name_source,
+			agent_route_presence, agent_flow_scope_key, agent_flow_instance_id,
+			reply_context_id, task_type, status
 		)
 		VALUES (
 			NULLIF($1,'')::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,''), $5, $6::jsonb,
 			$7, $8, NULLIF($9,''), NULL,
-			NULL, $10, NULLIF($11, ''), $12, 'active'
+			NULL, $10, $11, NULLIF($12, ''), NULLIF($13, ''),
+			NULLIF($14, ''), NULLIF($15, ''), NULLIF($16, ''),
+			NULLIF($17, ''), $18, 'active'
 		)
-		`, sc.RunID, timerName, sc.EntityID, sc.FlowInstance, sc.EventType, string(payload), fireAt, recurring, sc.Cron, sc.AgentID, sc.Context.ReplyContextID(), taskType)
+		`, sc.RunID, timerName, sc.EntityID, sc.FlowInstance, sc.EventType, string(payload), fireAt, recurring, sc.Cron, sc.AgentID,
+			sc.OwnerKind, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence, identityFields.FlowScopeKey,
+			identityFields.FlowInstanceID, sc.Context.ReplyContextID(), taskType)
 		if err != nil {
 			return fmt.Errorf("insert timer: %w", err)
 		}
@@ -225,35 +240,31 @@ func (s *PostgresStore) upsertScheduleSpec(ctx context.Context, sc runtimepipeli
 	})
 }
 
-func (s *PostgresStore) cancelScheduleSpec(ctx context.Context, runID, agentID, eventType string) error {
-	return s.runScheduleMutation(ctx, runID, "cancel timer", func(tx *sql.Tx) (bool, error) {
-		result, err := tx.ExecContext(ctx, `
-			UPDATE timers
-			SET status = 'cancelled'
-			WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
-			  AND owner_agent = $2
-			  AND fire_event = $3
-			  AND task_type IN ('timer', 'scheduled_task', 'deadline', 'global_recurring')
-			  AND status = 'active'
-		`, runID, agentID, eventType)
-		return scheduleMutationChanged(result, err)
-	})
-}
-
 func (s *PostgresStore) cancelScheduleExactSpec(ctx context.Context, sc runtimepipeline.Schedule) error {
 	return s.runScheduleMutation(ctx, sc.RunID, "cancel exact timer", func(tx *sql.Tx) (bool, error) {
+		identityFields, err := scheduleAgentIdentityFields(sc)
+		if err != nil {
+			return false, err
+		}
 		result, err := tx.ExecContext(ctx, fmt.Sprintf(`
 			UPDATE timers
 			SET status = 'cancelled'
 		WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
 		  AND owner_agent = $2
+		  AND owner_kind = $7
+		  AND agent_name_owner IS NOT DISTINCT FROM NULLIF($8, '')
+		  AND agent_name_source IS NOT DISTINCT FROM NULLIF($9, '')
+		  AND agent_route_presence IS NOT DISTINCT FROM NULLIF($10, '')
+		  AND agent_flow_scope_key IS NOT DISTINCT FROM NULLIF($11, '')
+		  AND agent_flow_instance_id IS NOT DISTINCT FROM NULLIF($12, '')
 		  AND fire_event = $3
 		  AND entity_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
 			  AND flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
 			  AND %s = $6
 			  AND task_type IN ('timer', 'scheduled_task', 'deadline', 'global_recurring')
 			  AND status = 'active'
-		`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID))
+		`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID),
+			sc.OwnerKind, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence, identityFields.FlowScopeKey, identityFields.FlowInstanceID)
 		return scheduleMutationChanged(result, err)
 	})
 }
@@ -263,6 +274,12 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 		SELECT
 			COALESCE(t.run_id::text, ''),
 			t.owner_agent,
+			t.owner_kind,
+			COALESCE(t.agent_name_owner, ''),
+			COALESCE(t.agent_name_source, ''),
+			COALESCE(t.agent_route_presence, ''),
+			COALESCE(t.agent_flow_scope_key, ''),
+			COALESCE(t.agent_flow_instance_id, ''),
 			t.fire_event,
 			t.recurring,
 			COALESCE(t.recurrence_cron, ''),
@@ -295,10 +312,21 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 			fireAt             time.Time
 			payload            []byte
 			replyContextID     string
+			nameOwner          string
+			nameSource         string
+			routePresence      string
+			flowScopeKey       string
+			flowInstanceID     string
 		)
 		if err := rows.Scan(
 			&sc.RunID,
 			&sc.AgentID,
+			&sc.OwnerKind,
+			&nameOwner,
+			&nameSource,
+			&routePresence,
+			&flowScopeKey,
+			&flowInstanceID,
 			&sc.EventType,
 			&recurring,
 			&recurrenceCron,
@@ -320,6 +348,23 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 		if replyContextID != "" {
 			sc.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}}
 		}
+		if sc.OwnerKind == runtimepipeline.ScheduleOwnerAgent {
+			sc.AgentIdentity, err = agentidentity.FromStorageFields(agentidentity.StorageFields{
+				AgentID:          sc.AgentID,
+				NameOwner:        nameOwner,
+				NameSource:       nameSource,
+				RoutePresence:    routePresence,
+				FlowScopeKey:     flowScopeKey,
+				FlowInstanceID:   flowInstanceID,
+				FlowInstancePath: sc.FlowInstance,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("load schedule agent identity: %w", err)
+			}
+		}
+		if err := sc.NormalizeOwner(); err != nil {
+			return nil, fmt.Errorf("load schedule owner: %w", err)
+		}
 		out = append(out, sc)
 	}
 	if err := rows.Err(); err != nil {
@@ -328,37 +373,32 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 	return out, nil
 }
 
-func (s *PostgresStore) markScheduleFiredSpec(ctx context.Context, sc runtimepipeline.Schedule) error {
-	return s.runScheduleMutation(ctx, sc.RunID, "mark timer fired", func(tx *sql.Tx) (bool, error) {
-		result, err := tx.ExecContext(ctx, `
-			UPDATE timers
-			SET status = CASE WHEN recurring THEN 'active' ELSE 'fired' END,
-			    fired_at = now()
-			WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
-			  AND owner_agent = $2
-			  AND fire_event = $3
-			  AND task_type IN ('timer', 'scheduled_task', 'deadline', 'global_recurring')
-			  AND status = 'active'
-		`, sc.RunID, sc.AgentID, sc.EventType)
-		return scheduleMutationChanged(result, err)
-	})
-}
-
 func (s *PostgresStore) markScheduleFiredExactSpec(ctx context.Context, sc runtimepipeline.Schedule) error {
 	return s.runScheduleMutation(ctx, sc.RunID, "mark exact timer fired", func(tx *sql.Tx) (bool, error) {
+		identityFields, err := scheduleAgentIdentityFields(sc)
+		if err != nil {
+			return false, err
+		}
 		result, err := tx.ExecContext(ctx, fmt.Sprintf(`
 			UPDATE timers
 			SET status = CASE WHEN recurring THEN 'active' ELSE 'fired' END,
 			    fired_at = now()
 		WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
 		  AND owner_agent = $2
+		  AND owner_kind = $7
+		  AND agent_name_owner IS NOT DISTINCT FROM NULLIF($8, '')
+		  AND agent_name_source IS NOT DISTINCT FROM NULLIF($9, '')
+		  AND agent_route_presence IS NOT DISTINCT FROM NULLIF($10, '')
+		  AND agent_flow_scope_key IS NOT DISTINCT FROM NULLIF($11, '')
+		  AND agent_flow_instance_id IS NOT DISTINCT FROM NULLIF($12, '')
 		  AND fire_event = $3
 		  AND entity_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
 			  AND flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
 			  AND %s = $6
 			  AND task_type IN ('timer', 'scheduled_task', 'deadline', 'global_recurring')
 			  AND status = 'active'
-		`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID))
+		`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID),
+			sc.OwnerKind, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence, identityFields.FlowScopeKey, identityFields.FlowInstanceID)
 		return scheduleMutationChanged(result, err)
 	})
 }

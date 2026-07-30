@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
@@ -22,13 +23,14 @@ func TestAgentManagerDefaultsLLMBackendFromCanonicalProfile(t *testing.T) {
 		Config: models.AgentConfig{
 			ExecutionMode: "live",
 			ID:            "agent-1",
+			Identity:      runtimeagentidentitytest.RootRuntime(t, "agent-1", "manager-llm-backend-test"),
 			Role:          "reviewer",
 			Model:         "regular",
 		},
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
-	cfg, ok := am.GetAgentConfig("agent-1")
+	cfg, ok := testAgentConfig(t, am, "agent-1", "")
 	if !ok {
 		t.Fatal("spawned agent config is absent")
 	}
@@ -88,7 +90,20 @@ func TestResolveAgentModelMockRetainsAndRequiresCapturedArtifact(t *testing.T) {
 
 func TestAuthoredMockAlternativeStaticAndInstantiatedAgentsSpawnPersistRecoverLive(t *testing.T) {
 	artifact := capturedMockAlternative()
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		URIRegistry: runtimecontracts.ContractURIRegistry{
+			Agents: map[string]runtimecontracts.ContractURIRef{
+				"static-support/static-worker": {
+					Kind: "agent", FlowID: "static-support", LocalID: "static-worker",
+					Full: "test://static-support/static-worker",
+				},
+				"template-support/worker": {
+					Kind: "agent", FlowID: "template-support", LocalID: "worker",
+					Full: "test://template-support/worker",
+				},
+			},
+		},
+	})
 	staticCfg, err := buildStaticFlowAgentConfig(source, "static-support", "static-support", "static-worker", runtimecontracts.AgentRegistryEntry{
 		ID: "static-worker", Role: "worker", Model: "regular", MemoryPlan: agentmemory.PlatformDefault(), Mock: artifact,
 	}, nil)
@@ -96,7 +111,7 @@ func TestAuthoredMockAlternativeStaticAndInstantiatedAgentsSpawnPersistRecoverLi
 		t.Fatalf("buildStaticFlowAgentConfig: %v", err)
 	}
 	instantiatedCfg, err := buildFlowAgentConfig(source, "template-support", "inst-1", "entity-1", "template-support/inst-1", "worker", runtimecontracts.AgentRegistryEntry{
-		ID: "template-worker-{instance_id}", Role: "worker", Model: "regular", MemoryPlan: agentmemory.PlatformDefault(), Mock: artifact,
+		ID: "template-worker", Role: "worker", Model: "regular", MemoryPlan: agentmemory.PlatformDefault(), Mock: artifact,
 	}, map[string]string{"instance_id": "inst-1"}, nil, nil)
 	if err != nil {
 		t.Fatalf("buildFlowAgentConfig: %v", err)

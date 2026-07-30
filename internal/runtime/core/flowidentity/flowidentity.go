@@ -5,6 +5,7 @@ import (
 	"path"
 	"strings"
 
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -86,6 +87,14 @@ type Route struct {
 	ScopeKey     string
 	InstanceID   string
 	InstancePath string
+}
+
+func (r Route) AgentIdentityRoute() (runtimeagentidentity.Route, error) {
+	r = StoredRoute(r.ScopeKey, r.InstanceID, r.InstancePath)
+	if !r.Valid() {
+		return runtimeagentidentity.Route{}, fmt.Errorf("flow route is incomplete")
+	}
+	return runtimeagentidentity.PresentRoute(r.ScopeKey, r.InstanceID, r.InstancePath)
 }
 
 func ScopeKey(source semanticview.Source, flowID string) string {

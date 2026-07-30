@@ -205,6 +205,7 @@ func TestExecutorHostFileToolsUseHostManagerSupportedSurfaceWithoutDocker(t *tes
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "host-file-agent",
+		Identity:      toolTestRootAgentIdentity(t, "host-file-agent"),
 		NativeTools:   models.NativeToolConfig{FileIO: true, Bash: true},
 	}
 	target, err := manager.ResolveWorkspace(ctx, actor)
@@ -313,6 +314,7 @@ func TestExecutorHostNativeBashUsesExplicitHostManagerTarget(t *testing.T) {
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "host-bash-agent",
+		Identity:      toolTestRootAgentIdentity(t, "host-bash-agent"),
 		NativeTools:   models.NativeToolConfig{Bash: true},
 	}
 	target, err := manager.ResolveWorkspace(ctx, actor)

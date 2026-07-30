@@ -5,3 +5,4 @@ account.notify.requested:
   account_id: text
   command: text
   required: [account_id, command]
+account.notification.completed: {}

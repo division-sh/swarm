@@ -23,18 +23,26 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	base := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	identity := sqliteAgentUsageIdentity(t, agentID)
+	identityFields, err := identity.StorageFields()
+	if err != nil {
+		t.Fatalf("operator read identity fields: %v", err)
+	}
 
 	seedSQLiteAgentUsageAgent(t, ctx, sqliteStore, agentID)
 	storetest.RequireSQLiteRun(t, ctx, sqliteStore.DB, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base.Add(-time.Hour)})
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
 			conversation, turn_count, runtime_state, status, created_at, updated_at
 		) VALUES (
-			?, ?, ?, 'flow/operator-read', 1, 'authored',
+			?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored',
 			'[{"role":"assistant","content":"ready"}]', 1, '{}', 'active', ?, ?
 		)
-	`, sessionID, runID, agentID, base.Add(-5*time.Minute), base); err != nil {
+	`, sessionID, runID, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource,
+		identityFields.RoutePresence, identityFields.FlowScopeKey, identityFields.FlowInstanceID,
+		identityFields.FlowInstancePath, base.Add(-5*time.Minute), base); err != nil {
 		t.Fatalf("seed sqlite session: %v", err)
 	}
 	storetest.InsertExistingRunRootEventRecord(
@@ -45,17 +53,20 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	capabilitySurfaceID := seedSQLiteOperatorReadCapabilitySurface(t, ctx, sqliteStore, runID, turnID, sessionID, agentID, "session")
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
+			turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
 			emitted_events,
 			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, failure, execution_mode, created_at
 		) VALUES (
-			?, ?, ?, ?, 'flow/operator-read', 1, 'authored', NULL,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', NULL,
 			?, 'operator.read', 'task-operator-read', ?, '[]',
 			'[]',
 			'{}', '{}', '[]', 1, 10, 0, NULL, 'live', ?
 		)
-	`, turnID, runID, agentID, sessionID, eventID, capabilitySurfaceID, base); err != nil {
+	`, turnID, runID, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource,
+		identityFields.RoutePresence, identityFields.FlowScopeKey, identityFields.FlowInstanceID,
+		sessionID, identityFields.FlowInstancePath, eventID, capabilitySurfaceID, base); err != nil {
 		t.Fatalf("seed sqlite turn: %v", err)
 	}
 

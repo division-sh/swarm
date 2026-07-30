@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -189,7 +190,12 @@ func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testin
 			storetest.CommitSemanticEvent(t, ctx, sqliteStore, evt)
 			continue
 		}
-		route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: fixture.agentID}
+		identity := agentidentitytest.Runtime(t, fixture.agentID, "observability-surface-test", "trace", fixture.agentID, "trace/"+fixture.agentID)
+		route := events.DeliveryRoute{
+			SubscriberType: string(runtimedelivery.SubscriberAgent),
+			SubscriberID:   fixture.agentID,
+			AgentIdentity:  identity,
+		}
 		storetest.CommitSemanticEventWithRoutes(t, ctx, sqliteStore, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 		claimed, err := sqliteStore.ClaimAgentDelivery(ctx, evt, route)
 		if err != nil {
@@ -305,15 +311,16 @@ func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store obs
 	event := eventtest.PersistedProjection(eventID,
 		events.EventType("trace.visible"),
 		"agent-1", "", json.RawMessage(`{"trace":true}`), 0, runID, "", events.EventEnvelope{}, now)
-	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"}
+	identity := agentidentitytest.Runtime(t, "agent-1", "observability-surface-test", "trace", "agent-1", "trace/agent-1")
+	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1", AgentIdentity: identity}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, store, event,
-		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-1"}},
+		[]events.DeliveryRoute{route},
 		runtimepipelineobligation.ScopeSubscribed)
 	claimed, err := store.ClaimAgentDelivery(ctx, event, route)
 	if err != nil {
 		t.Fatalf("ClaimAgentDelivery: %v", err)
 	}
-	sessionID := seedOperatorReplayDeliverySession(t, ctx, db, sqlite, runID, "agent-1")
+	sessionID := seedOperatorReplayDeliverySession(t, ctx, db, sqlite, runID, identity)
 	if _, err := store.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 		t.Fatalf("BindAgentSession: %v", err)
 	}

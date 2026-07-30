@@ -124,6 +124,7 @@ var (
 	compatSQLTextCastPattern = regexp.MustCompile(`(?i)cast\(([^()]+)\s+as\s+text\)`)
 	compatSQLNumberPattern   = regexp.MustCompile(`'(-?[0-9]+)'`)
 	compatSQLAtomicParens    = regexp.MustCompile(`\(([a-z_][a-z0-9_.]*|-?[0-9]+)\)`)
+	compatSQLReferenceSpace  = regexp.MustCompile(`\b(references\s+[a-z_][a-z0-9_.]*)\s+\(`)
 )
 
 func expectedSchemaShape(plans []SchemaTableDDL, dialect SchemaDialect) (schemaShape, error) {
@@ -302,6 +303,7 @@ func normalizeReference(value string) string {
 
 func normalizeConstraint(value string) string {
 	v := normalizeExpression(value)
+	v = compatSQLReferenceSpace.ReplaceAllString(v, "$1(")
 	v = compatSQLCastPattern.ReplaceAllString(v, "")
 	v = compatSQLTextCastPattern.ReplaceAllString(v, "$1")
 	v = compatSQLNumberPattern.ReplaceAllString(v, "$1")

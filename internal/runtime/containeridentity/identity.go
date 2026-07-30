@@ -4,20 +4,28 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 )
 
 const (
-	LabelOwner          = "dev.swarm.owner"
-	LabelKind           = "dev.swarm.container.kind"
-	LabelResetEligible  = "dev.swarm.reset.eligible"
-	LabelCreationSource = "dev.swarm.creation_source"
-	LabelContainerName  = "dev.swarm.container.name"
-	LabelWorkspaceScope = "dev.swarm.workspace.scope"
-	LabelBundleHash     = "dev.swarm.bundle_hash"
-	LabelRunID          = "dev.swarm.run_id"
-	LabelEntityID       = "dev.swarm.entity_id"
-	LabelAgentID        = "dev.swarm.agent_id"
-	LabelFlowInstance   = "dev.swarm.flow_instance"
+	LabelOwner                 = "dev.swarm.owner"
+	LabelKind                  = "dev.swarm.container.kind"
+	LabelResetEligible         = "dev.swarm.reset.eligible"
+	LabelCreationSource        = "dev.swarm.creation_source"
+	LabelContainerName         = "dev.swarm.container.name"
+	LabelWorkspaceScope        = "dev.swarm.workspace.scope"
+	LabelBundleHash            = "dev.swarm.bundle_hash"
+	LabelRunID                 = "dev.swarm.run_id"
+	LabelEntityID              = "dev.swarm.entity_id"
+	LabelAgentID               = "dev.swarm.agent_id"
+	LabelAgentNameOwner        = "dev.swarm.agent_name_owner"
+	LabelAgentNameSource       = "dev.swarm.agent_name_source"
+	LabelAgentRoutePresence    = "dev.swarm.agent_route_presence"
+	LabelAgentFlowScopeKey     = "dev.swarm.agent_flow_scope_key"
+	LabelAgentFlowInstanceID   = "dev.swarm.agent_flow_instance_id"
+	LabelAgentFlowInstancePath = "dev.swarm.agent_flow_instance_path"
+	LabelFlowInstance          = "dev.swarm.flow_instance"
 
 	OwnerRuntime = "runtime"
 
@@ -38,7 +46,7 @@ type Identity struct {
 	BundleHash     string
 	RunID          string
 	EntityID       string
-	AgentID        string
+	AgentIdentity  runtimeagentidentity.Identity
 	FlowInstance   string
 }
 
@@ -51,7 +59,7 @@ func (i Identity) Normalized() Identity {
 	i.BundleHash = strings.TrimSpace(i.BundleHash)
 	i.RunID = strings.TrimSpace(i.RunID)
 	i.EntityID = strings.TrimSpace(i.EntityID)
-	i.AgentID = strings.TrimSpace(i.AgentID)
+	i.AgentIdentity = i.AgentIdentity.Normalize()
 	i.FlowInstance = strings.Trim(strings.TrimSpace(i.FlowInstance), "/")
 	return i
 }
@@ -69,7 +77,18 @@ func (i Identity) Labels() map[string]string {
 	addOptionalLabel(labels, LabelBundleHash, i.BundleHash)
 	addOptionalLabel(labels, LabelRunID, i.RunID)
 	addOptionalLabel(labels, LabelEntityID, i.EntityID)
-	addOptionalLabel(labels, LabelAgentID, i.AgentID)
+	if !i.AgentIdentity.IsZero() {
+		fields, err := i.AgentIdentity.StorageFields()
+		if err == nil {
+			labels[LabelAgentID] = fields.AgentID
+			labels[LabelAgentNameOwner] = fields.NameOwner
+			labels[LabelAgentNameSource] = fields.NameSource
+			labels[LabelAgentRoutePresence] = fields.RoutePresence
+			addOptionalLabel(labels, LabelAgentFlowScopeKey, fields.FlowScopeKey)
+			addOptionalLabel(labels, LabelAgentFlowInstanceID, fields.FlowInstanceID)
+			addOptionalLabel(labels, LabelAgentFlowInstancePath, fields.FlowInstancePath)
+		}
+	}
 	addOptionalLabel(labels, LabelFlowInstance, i.FlowInstance)
 	for key, value := range labels {
 		if strings.TrimSpace(value) == "" {
@@ -99,13 +118,16 @@ func (i Identity) Validate() error {
 			return fmt.Errorf("entity container identity requires entity_id")
 		}
 	case KindAgent:
-		if i.AgentID == "" {
-			return fmt.Errorf("agent container identity requires agent_id")
+		if err := i.AgentIdentity.Validate(); err != nil {
+			return fmt.Errorf("agent container identity requires complete concrete identity: %w", err)
 		}
 	case KindFlow:
 		if i.FlowInstance == "" {
 			return fmt.Errorf("flow container identity requires flow_instance")
 		}
+	}
+	if i.Kind != KindAgent && !i.AgentIdentity.IsZero() {
+		return fmt.Errorf("container kind %q must not carry agent identity", i.Kind)
 	}
 	return nil
 }
@@ -146,13 +168,44 @@ func FromLabels(labels map[string]string) (Identity, bool, error) {
 		BundleHash:     labels[LabelBundleHash],
 		RunID:          labels[LabelRunID],
 		EntityID:       labels[LabelEntityID],
-		AgentID:        labels[LabelAgentID],
 		FlowInstance:   labels[LabelFlowInstance],
 	}.Normalized()
+	if hasAnyAgentIdentityLabel(labels) {
+		agentIdentity, err := runtimeagentidentity.FromStorageFields(runtimeagentidentity.StorageFields{
+			AgentID:          labels[LabelAgentID],
+			NameOwner:        labels[LabelAgentNameOwner],
+			NameSource:       labels[LabelAgentNameSource],
+			RoutePresence:    labels[LabelAgentRoutePresence],
+			FlowScopeKey:     labels[LabelAgentFlowScopeKey],
+			FlowInstanceID:   labels[LabelAgentFlowInstanceID],
+			FlowInstancePath: labels[LabelAgentFlowInstancePath],
+		})
+		if err != nil {
+			return Identity{}, true, fmt.Errorf("container agent identity labels are invalid: %w", err)
+		}
+		identity.AgentIdentity = agentIdentity
+	}
 	if err := identity.Validate(); err != nil {
 		return Identity{}, true, err
 	}
 	return identity, true, nil
+}
+
+func hasAnyAgentIdentityLabel(labels map[string]string) bool {
+	for _, key := range []string{
+		LabelAgentID,
+		LabelAgentNameOwner,
+		LabelAgentNameSource,
+		LabelAgentRoutePresence,
+		LabelAgentFlowScopeKey,
+		LabelAgentFlowInstanceID,
+		LabelAgentFlowInstancePath,
+	} {
+		if strings.TrimSpace(labels[key]) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func DockerCreateLabelArgs(labels map[string]string) []string {

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 )
 
 func TestCompositeInventoryReaderCapturesManagedContainersAtPlanTime(t *testing.T) {
@@ -20,7 +22,7 @@ func TestCompositeInventoryReaderCapturesManagedContainersAtPlanTime(t *testing.
 			Action:        ContainerActionStop,
 			ResetEligible: true,
 			RunID:         "run-1",
-			AgentID:       "agent-a",
+			AgentIdentity: testManagedAgentIdentity(),
 		}}, nil
 	})
 
@@ -184,8 +186,24 @@ func managedInspection(name, kind string, resetEligible, running bool) ManagedCo
 			WorkspaceScope: kind,
 			RunID:          "11111111-1111-1111-1111-111111111111",
 			EntityID:       "entity-a",
-			AgentID:        "agent-a",
+			AgentIdentity:  testManagedAgentIdentity(),
 			FlowInstance:   "flow/a",
+		},
+	}
+}
+
+func testManagedAgentIdentity() runtimeagentidentity.Identity {
+	return runtimeagentidentity.Identity{
+		Name: runtimeagentidentity.Name{
+			AgentID: "agent-a",
+			Owner:   "test/agents.yaml",
+			Source:  runtimeagentidentity.NameSourceDeclared,
+		},
+		Route: runtimeagentidentity.Route{
+			Presence:     runtimeagentidentity.RoutePresent,
+			ScopeKey:     "flow",
+			InstanceID:   "a",
+			InstancePath: "flow/a",
 		},
 	}
 }

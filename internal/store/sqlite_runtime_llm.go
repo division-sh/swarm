@@ -45,6 +45,10 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 		latencyMS = 0
 	}
 	now := s.now()
+	fields, err := agentIdentityFields(identity.Agent)
+	if err != nil {
+		return err
+	}
 	return s.runAuthorActivityMutation(ctx, "sqlite append agent turn", func(txctx context.Context, tx *sql.Tx) error {
 		if err := requireSQLiteRunActive(txctx, tx, identity.RunID); err != nil {
 			return err
@@ -52,14 +56,17 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 		if plan.Enabled {
 			res, err := tx.ExecContext(txctx, `
 				UPDATE agent_sessions SET updated_at=?
-				WHERE session_id=? AND run_id=? AND agent_id=? AND flow_instance=?
+				WHERE session_id=? AND run_id=? AND agent_id=? AND agent_name_owner=?
+				  AND agent_name_source=? AND agent_route_presence=? AND flow_scope_key=?
+				  AND flow_instance_id=? AND flow_instance=?
 				  AND memory_enabled=1 AND status='active'
-			`, now, strings.TrimSpace(rec.SessionID), identity.RunID, identity.AgentID, identity.FlowInstance)
+			`, now, strings.TrimSpace(rec.SessionID), identity.RunID, fields.AgentID, fields.NameOwner,
+				fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath)
 			if err != nil {
 				return fmt.Errorf("touch exact sqlite live memory row: %w", err)
 			}
 			if rows, _ := res.RowsAffected(); rows != 1 {
-				return fmt.Errorf("no exact active memory row found for run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID, identity.FlowInstance, rec.SessionID)
+				return fmt.Errorf("no exact active memory row found for run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID(), identity.FlowInstance(), rec.SessionID)
 			}
 		} else if err := ensureSQLiteStatelessAuditTx(txctx, tx, rec, plan, identity, now); err != nil {
 			return err
@@ -68,18 +75,20 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 		if err != nil {
 			return err
 		}
-		if err := validateManagedAgentTurnSurface(surface, identity.AgentID, rec.SessionID, identity.RunID); err != nil {
+		if err := validateManagedAgentTurnSurface(surface, identity.AgentID(), rec.SessionID, identity.RunID); err != nil {
 			return err
 		}
 		turnID := surface.Authority.ID
 		_, err = tx.ExecContext(txctx, `
 			INSERT INTO agent_turns (
-				turn_id, run_id, agent_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
+				turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
 				trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
 				emitted_events,
 				request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, execution_mode, failure, created_at
-			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-		`, turnID, identity.RunID, identity.AgentID, strings.TrimSpace(rec.SessionID), sqliteNullString(identity.FlowInstance),
+			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		`, turnID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+			fields.FlowScopeKey, fields.FlowInstanceID, strings.TrimSpace(rec.SessionID), fields.FlowInstancePath,
 			plan.Enabled, string(plan.Source), sqliteNullUUID(rec.EntityID), sqliteNullUUID(rec.TriggerEventID), sqliteNullString(rec.TriggerEventType),
 			sqliteNullString(rec.TaskID), surface.ID, normalizeJSONArray(rec.ToolCalls), normalizeJSONArray(rec.EmittedEvents),
 			sqliteNullString(normalizeJSONPayload(rec.RequestPayload)), sqliteNullString(normalizeJSONPayload(rec.ResponseRaw)), normalizeJSONArray(rec.TurnBlocks),
@@ -89,7 +98,7 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 		}
 		return recordAuthorActivityTurn(txctx, authorActivityTurn{
 			TurnID: turnID, RunID: rec.RunID, AgentID: rec.AgentID, SessionID: rec.SessionID, EntityID: rec.EntityID,
-			FlowID: identity.FlowInstance, TriggerEventType: rec.TriggerEventType, Blocks: rec.TurnBlocks,
+			FlowID: identity.FlowInstance(), TriggerEventType: rec.TriggerEventType, Blocks: rec.TurnBlocks,
 			ParseOK: rec.ParseOK, DurationMS: latencyMS, RetryCount: rec.RetryCount, UsageExactness: "unavailable",
 			ExecutionMode: string(executionMode), Failure: rec.Failure, OccurredAt: now,
 		})
@@ -97,16 +106,25 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 }
 
 func ensureSQLiteStatelessAuditTx(ctx context.Context, tx *sql.Tx, rec runtimellm.AgentTurnRecord, plan agentmemory.Plan, identity agentmemory.Identity, now time.Time) error {
-	_, err := tx.ExecContext(ctx, `
+	fields, err := agentIdentityFields(identity.Agent)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source, entity_id,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source, entity_id,
 			conversation, turn_count, runtime_state, status, created_at, updated_at
-		) VALUES (?,?,?,?,0,?,?, '[]',1,'{}','active',?,?)
+		) VALUES (?,?,?,?,?,?,?,?,?,0,?,?, '[]',1,'{}','active',?,?)
 		ON CONFLICT(session_id) DO UPDATE SET
-			run_id=excluded.run_id, agent_id=excluded.agent_id, flow_instance=excluded.flow_instance,
+			run_id=excluded.run_id, agent_id=excluded.agent_id,
+			agent_name_owner=excluded.agent_name_owner, agent_name_source=excluded.agent_name_source,
+			agent_route_presence=excluded.agent_route_presence, flow_scope_key=excluded.flow_scope_key,
+			flow_instance_id=excluded.flow_instance_id, flow_instance=excluded.flow_instance,
 			memory_enabled=0, memory_source=excluded.memory_source, entity_id=excluded.entity_id,
 			turn_count=agent_conversation_audits.turn_count + 1, status='active', updated_at=excluded.updated_at
-	`, strings.TrimSpace(rec.SessionID), identity.RunID, identity.AgentID, sqliteNullString(identity.FlowInstance),
+	`, strings.TrimSpace(rec.SessionID), identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
 		string(plan.Source), sqliteNullUUID(rec.EntityID), now, now)
 	if err != nil {
 		return fmt.Errorf("ensure sqlite stateless conversation audit row: %w", err)
@@ -123,24 +141,31 @@ func (s *SQLiteRuntimeStore) UpsertConversation(ctx context.Context, rec runtime
 	if err != nil {
 		return err
 	}
+	fields, err := agentIdentityFields(identity.Agent)
+	if err != nil {
+		return err
+	}
 	return s.runAuthorActivityMutation(ctx, "sqlite upsert exact conversation", func(txctx context.Context, tx *sql.Tx) error {
 		if err := requireSQLiteRunActive(txctx, tx, identity.RunID); err != nil {
 			return err
 		}
-		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity.AgentID, "upsert_conversation", false); err != nil {
+		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity.Agent, "upsert_conversation", false); err != nil {
 			return err
 		}
 		res, err := tx.ExecContext(txctx, `
 			UPDATE agent_sessions SET conversation=?,turn_count=?,runtime_state=json_patch(COALESCE(runtime_state,'{}'),?),updated_at=?
-			WHERE session_id=? AND run_id=? AND agent_id=? AND flow_instance=?
+			WHERE session_id=? AND run_id=? AND agent_id=? AND agent_name_owner=?
+			  AND agent_name_source=? AND agent_route_presence=? AND flow_scope_key=?
+			  AND flow_instance_id=? AND flow_instance=?
 			  AND memory_enabled=? AND memory_source=? AND status='active'
 		`, string(messages), rec.TurnCount, state, s.now(), strings.TrimSpace(rec.SessionID), identity.RunID,
-			identity.AgentID, identity.FlowInstance, plan.Enabled, string(plan.Source))
+			fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
+			fields.FlowInstanceID, fields.FlowInstancePath, plan.Enabled, string(plan.Source))
 		if err != nil {
 			return fmt.Errorf("update exact sqlite live conversation: %w", err)
 		}
 		if rows, _ := res.RowsAffected(); rows != 1 {
-			return fmt.Errorf("no exact active memory row found for run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID, identity.FlowInstance, rec.SessionID)
+			return fmt.Errorf("no exact active memory row found for run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID(), identity.FlowInstance(), rec.SessionID)
 		}
 		return nil
 	})
@@ -151,17 +176,24 @@ func (s *SQLiteRuntimeStore) LoadActiveConversation(ctx context.Context, identit
 	if err := identity.Validate(); err != nil {
 		return runtimellm.ConversationRecord{}, false, err
 	}
+	fields, err := agentIdentityFields(identity.Agent)
+	if err != nil {
+		return runtimellm.ConversationRecord{}, false, err
+	}
 	var sessionID, status string
 	var conversation, runtimeState any
 	var turnCount int
-	err := s.DB.QueryRowContext(ctx, `
+	err = s.DB.QueryRowContext(ctx, `
 		SELECT s.session_id,s.status,COALESCE(s.conversation,'[]'),COALESCE(s.runtime_state,'{}'),s.turn_count
 		FROM agent_sessions s
 		JOIN runs run ON run.run_id = s.run_id
-		WHERE s.run_id=? AND s.agent_id=? AND s.flow_instance=?
+		WHERE s.run_id=? AND s.agent_id=? AND s.agent_name_owner=?
+		  AND s.agent_name_source=? AND s.agent_route_presence=? AND s.flow_scope_key=?
+		  AND s.flow_instance_id=? AND s.flow_instance=?
 		  AND s.memory_enabled=1 AND s.status='active'
 		  AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
-	`, identity.RunID, identity.AgentID, identity.FlowInstance).Scan(&sessionID, &status, &conversation, &runtimeState, &turnCount)
+	`, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&sessionID, &status, &conversation, &runtimeState, &turnCount)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimellm.ConversationRecord{}, false, nil
 	}
@@ -177,11 +209,15 @@ func (s *SQLiteRuntimeStore) UpdateLiveSessionWatchdog(ctx context.Context, upda
 	if err := identity.Validate(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(update.AgentID) != identity.AgentID || strings.TrimSpace(update.SessionID) == "" {
+	if strings.TrimSpace(update.AgentID) != identity.AgentID() || strings.TrimSpace(update.SessionID) == "" {
 		return fmt.Errorf("watchdog agent_id/session_id must match an exact memory identity")
 	}
 	if update.Watchdog == nil {
 		return fmt.Errorf("watchdog is required")
+	}
+	fields, err := agentIdentityFields(identity.Agent)
+	if err != nil {
+		return err
 	}
 	patch, err := marshalConversationRuntimeStatePatch(nil, update.Watchdog)
 	if err != nil {
@@ -191,14 +227,17 @@ func (s *SQLiteRuntimeStore) UpdateLiveSessionWatchdog(ctx context.Context, upda
 		if err := requireSQLiteRunActive(txctx, tx, identity.RunID); err != nil {
 			return err
 		}
-		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity.AgentID, "update_watchdog", false); err != nil {
+		if _, err := requireSQLiteLiveSessionAuthority(txctx, tx, identity.Agent, "update_watchdog", false); err != nil {
 			return err
 		}
 		res, err := tx.ExecContext(txctx, `
 			UPDATE agent_sessions SET runtime_state=json_patch(COALESCE(runtime_state,'{}'),?),updated_at=?
-			WHERE session_id=? AND run_id=? AND agent_id=? AND flow_instance=?
+			WHERE session_id=? AND run_id=? AND agent_id=? AND agent_name_owner=?
+			  AND agent_name_source=? AND agent_route_presence=? AND flow_scope_key=?
+			  AND flow_instance_id=? AND flow_instance=?
 			  AND memory_enabled=1 AND status='active'
-		`, patch, s.now(), update.SessionID, identity.RunID, identity.AgentID, identity.FlowInstance)
+		`, patch, s.now(), update.SessionID, identity.RunID, fields.AgentID, fields.NameOwner,
+			fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath)
 		if err != nil {
 			return fmt.Errorf("update exact sqlite memory watchdog: %w", err)
 		}

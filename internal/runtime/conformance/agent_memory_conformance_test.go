@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
@@ -14,9 +16,8 @@ func TestAgentMemoryConformance_ExactIdentityOwnsReuseAndIsolation(t *testing.T)
 
 	registry := runtimesessions.NewInMemoryRegistry(0)
 	base := agentmemory.Identity{
-		RunID:        "11111111-1111-1111-1111-111111111111",
-		AgentID:      "support-agent",
-		FlowInstance: "support/chat-a",
+		RunID: "11111111-1111-1111-1111-111111111111",
+		Agent: agentidentitytest.Declared(t, "support-agent", "conformance-test", "support", "chat-a", "support/chat-a"),
 	}
 
 	first := acquireAndReleaseMemory(t, registry, base, "first")
@@ -31,7 +32,7 @@ func TestAgentMemoryConformance_ExactIdentityOwnsReuseAndIsolation(t *testing.T)
 	}
 
 	differentFlow := base
-	differentFlow.FlowInstance = "support/chat-b"
+	differentFlow.Agent = agentidentitytest.Declared(t, "support-agent", "conformance-test", "support", "chat-b", "support/chat-b")
 	if got := acquireAndReleaseMemory(t, registry, differentFlow, "different-flow"); got == first {
 		t.Fatalf("different flow instance reused session %q", got)
 	}
@@ -41,9 +42,8 @@ func TestAgentMemoryConformance_IdentityIsCompleteBeforeAcquire(t *testing.T) {
 	t.Parallel()
 
 	base := agentmemory.Identity{
-		RunID:        "11111111-1111-1111-1111-111111111111",
-		AgentID:      "support-agent",
-		FlowInstance: "support/chat-a",
+		RunID: "11111111-1111-1111-1111-111111111111",
+		Agent: agentidentitytest.Declared(t, "support-agent", "conformance-test", "support", "chat-a", "support/chat-a"),
 	}
 	tests := []struct {
 		name string
@@ -51,8 +51,8 @@ func TestAgentMemoryConformance_IdentityIsCompleteBeforeAcquire(t *testing.T) {
 		want string
 	}{
 		{name: "run", edit: func(id *agentmemory.Identity) { id.RunID = "" }, want: "run_id is required"},
-		{name: "agent", edit: func(id *agentmemory.Identity) { id.AgentID = "" }, want: "agent_id is required"},
-		{name: "flow", edit: func(id *agentmemory.Identity) { id.FlowInstance = "" }, want: "flow_instance is required"},
+		{name: "agent", edit: func(id *agentmemory.Identity) { id.Agent.Name.AgentID = "" }, want: "agent_id is required"},
+		{name: "flow", edit: func(id *agentmemory.Identity) { id.Agent.Route = agentidentity.RootRoute() }, want: "flow_instance is required"},
 	}
 
 	for _, tc := range tests {

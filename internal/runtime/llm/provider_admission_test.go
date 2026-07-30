@@ -262,13 +262,13 @@ func TestAnthropicProviderAdmissionNeverRedispatchesAmbiguousFailure(t *testing.
 	}
 	runtime := NewAnthropicAPIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
 	harness := effecttest.New()
-	harness.Token.AgentID = "agent-1"
+	setEffectHarnessAgent(t, harness, "agent-1", "test/stateless")
 	runtime.completionController = runtimeeffects.NewCompletionController(harness, harness)
 	runtime.apiURL = server.URL
 	runtime.apiKey = "test-key"
 
 	ctx := runtimeactors.WithActor(harness.CompletionContext("anthropic-admission-no-redispatch"), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-1", Model: llmselection.ModelAliasRegular, FlowPath: "test/stateless"})
-	ctx = withTestStatelessMemory(ctx)
+	ctx = withTestStatelessMemory(t, ctx, "agent-1", "test/stateless")
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)

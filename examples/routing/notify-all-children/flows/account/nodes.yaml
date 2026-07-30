@@ -4,6 +4,7 @@ account-node:
   subscribes_to:
     - account.registered
     - account.notify.requested
+    - account.notification.completed
   event_handlers:
     account.registered:
       data_accumulation:
@@ -15,3 +16,5 @@ account-node:
         writes:
           - source_field: command
             target_field: last_command
+    account.notification.completed:
+      advances_to: completed

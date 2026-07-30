@@ -16,12 +16,13 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 )
@@ -44,8 +45,21 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 
 	h := newRuntimeHarness(t, fixtureRoot, true)
 	// Source execution is paused at T; register recipient evidence through runtime APIs before publishing.
-	h.rt.Bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: "test-agent"})
-	_ = runtimebustest.Subscribe(t, h.rt.Bus, "test-agent", events.EventType("task.ready"))
+	declarationOwner, ok := semanticview.AgentDeclarationOwner(semanticview.Wrap(h.bundle), "", "test-agent")
+	if !ok {
+		t.Fatal("resolve test-agent declaration owner")
+	}
+	name, err := agentidentity.DeclaredName("test-agent", declarationOwner)
+	if err != nil {
+		t.Fatalf("build test-agent declaration name: %v", err)
+	}
+	identity, err := agentidentity.New(name, agentidentity.RootRoute())
+	if err != nil {
+		t.Fatalf("build test-agent identity: %v", err)
+	}
+	h.rt.Bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{
+		Identity: identity,
+	})
 	h.seedInitialState(runtimepipeline.FlowInstanceEntityID(catalogRuntimeRunID))
 	pauseCatalogRun(t, h)
 	sourceEventID := publishCatalogTrigger(t, h, expected.triggerSequence()[0], 10*time.Second)
@@ -107,8 +121,8 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 		result.AgentRuntimeMaterialization.Owner != store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner ||
 		!result.AgentRuntimeMaterialization.MaterializationRequired ||
 		!result.AgentRuntimeMaterialization.MaterializationSupported ||
-		!containsTier12String(result.AgentRuntimeMaterialization.AgentRecipients, "test-agent") ||
-		!containsTier12String(result.AgentRuntimeMaterialization.ConfiguredAgentIDs, "test-agent") {
+		!containsTier12AgentID(result.AgentRuntimeMaterialization.AgentRecipients, "test-agent") ||
+		!containsTier12AgentID(result.AgentRuntimeMaterialization.ConfiguredAgentIdentities, "test-agent") {
 		t.Fatalf("agent runtime materialization = %#v", result.AgentRuntimeMaterialization)
 	}
 	if result.ForkLocalRuntimeContainer == nil ||
@@ -618,6 +632,15 @@ func assertNoForkArtifacts(t testing.TB, db *sql.DB, forkRunID string) {
 func containsTier12String(values []string, want string) bool {
 	for _, value := range values {
 		if strings.TrimSpace(value) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsTier12AgentID(values []agentidentity.Identity, want string) bool {
+	for _, value := range values {
+		if value.AgentID() == want {
 			return true
 		}
 	}

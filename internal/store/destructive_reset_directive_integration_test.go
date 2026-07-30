@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -62,9 +63,17 @@ func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.
 	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, func(runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
 	}, runtimemanager.AgentManagerOptions{WorkOwner: storeTestWorkOwner(t)}, pg))
-	if err := manager.RegisterEphemeralAgentForExecution(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Role: "test"},
-	}); err != nil {
+	identity := agentidentitytest.RootRuntime(t, agent.id, "destructive-reset-integration")
+	rec := runtimemanager.PersistedAgent{
+		Config:    runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Identity: identity, Role: "test", Model: "regular"},
+		Status:    "active",
+		HiredBy:   "destructive-reset-test",
+		StartedAt: time.Now().UTC(),
+	}
+	if err := pg.UpsertAgent(ctx, rec); err != nil {
+		t.Fatalf("UpsertAgent: %v", err)
+	}
+	if err := manager.RegisterEphemeralAgentForExecution(ctx, rec); err != nil {
 		t.Fatalf("RegisterEphemeralAgentForExecution: %v", err)
 	}
 	request := runtimeagentcontrol.SendDirectiveRequest{
@@ -85,6 +94,8 @@ func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.
 	}()
 	select {
 	case <-agent.started:
+	case err := <-errCh:
+		t.Fatalf("SendDirective failed before BoardStep: %v", err)
 	case <-time.After(time.Second):
 		t.Fatal("BoardStep did not start")
 	}

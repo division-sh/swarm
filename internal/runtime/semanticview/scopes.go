@@ -15,6 +15,7 @@ type ProjectScope struct {
 	Nodes        map[string]runtimecontracts.SystemNodeContract
 	Events       map[string]runtimecontracts.EventCatalogEntry
 	Agents       map[string]runtimecontracts.AgentRegistryEntry
+	AgentURIs    map[string]string
 	Tools        map[string]runtimecontracts.ToolSchemaEntry
 	Policy       runtimecontracts.PolicyDocument
 }
@@ -33,6 +34,7 @@ type FlowScope struct {
 	Nodes         map[string]runtimecontracts.SystemNodeContract
 	Events        map[string]runtimecontracts.EventCatalogEntry
 	Agents        map[string]runtimecontracts.AgentRegistryEntry
+	AgentURIs     map[string]string
 	Tools         map[string]runtimecontracts.ToolSchemaEntry
 	Policy        runtimecontracts.PolicyDocument
 }
@@ -96,7 +98,19 @@ func flowScopeFromView(view runtimecontracts.FlowContractView) FlowScope {
 		Nodes:         view.Nodes,
 		Events:        view.Events,
 		Agents:        runtimecontracts.EffectiveAgentRegistryEntries(view.Agents),
+		AgentURIs:     cloneStringMap(view.AgentURIs),
 		Tools:         toolEntryMapSnapshot(view.Tools),
 		Policy:        view.Policy,
 	}
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }

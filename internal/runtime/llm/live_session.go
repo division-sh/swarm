@@ -23,7 +23,7 @@ func acquireLiveSessionAndConversation(ctx context.Context, registry sessions.Re
 		return nil, ConversationRecord{}, err
 	}
 	return lease, ConversationRecord{
-		SessionID: lease.SessionID, AgentID: identity.AgentID, Identity: identity, Memory: agentmemory.Authored(true),
+		SessionID: lease.SessionID, AgentID: identity.AgentID(), Identity: identity, Memory: agentmemory.Authored(true),
 		RetryReason: lease.RetryReason, RetriesFromSessionID: lease.RetriesFromSessionID,
 		Status: "active",
 	}, nil

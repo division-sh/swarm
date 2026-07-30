@@ -17,6 +17,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -753,6 +754,7 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 	scheduleStore := &recordingRuntimeScheduleStore{
 		active: []runtimepipeline.Schedule{{
 			AgentID:   "runtime",
+			OwnerKind: runtimepipeline.ScheduleOwnerSystem,
 			EventType: "timer.check",
 			Mode:      "once",
 			At:        time.Now().Add(time.Minute),
@@ -888,6 +890,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 	scheduleStore := &recordingRuntimeScheduleStore{
 		active: []runtimepipeline.Schedule{{
 			AgentID:   "runtime",
+			OwnerKind: runtimepipeline.ScheduleOwnerSystem,
 			EventType: "timer.check",
 			Mode:      "once",
 			At:        time.Now().Add(time.Minute),
@@ -1035,6 +1038,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *te
 		active: []runtimepipeline.Schedule{
 			{
 				AgentID:   "runtime",
+				OwnerKind: runtimepipeline.ScheduleOwnerSystem,
 				EventType: "timer.replay",
 				Mode:      "once",
 				At:        time.Now().Add(time.Minute),
@@ -1042,6 +1046,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *te
 			},
 			{
 				AgentID:   "runtime",
+				OwnerKind: runtimepipeline.ScheduleOwnerSystem,
 				EventType: "timer.skip",
 				Mode:      "once",
 				At:        time.Now().Add(2 * time.Minute),
@@ -1049,6 +1054,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *te
 			},
 			{
 				AgentID:   "runtime",
+				OwnerKind: runtimepipeline.ScheduleOwnerSystem,
 				EventType: "timer.drop",
 				Mode:      "once",
 				At:        time.Now().Add(3 * time.Minute),
@@ -1164,9 +1170,10 @@ func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *te
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	agentIdentity := agentidentitytest.RootRuntime(t, "agent-a", "runtime-test/recovery-diagnostics")
 	managerStore := &startupManagerReplayRuntimeStore{
 		agents: []runtimemanager.PersistedAgent{{
-			Config:    runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-a"},
+			Config:    runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-a", Identity: agentIdentity},
 			StartedAt: time.Now().UTC(),
 		}},
 	}
@@ -1180,7 +1187,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *te
 	} {
 		deliveryStore.seedAgentDelivery(t, ctx,
 			eventtest.PersistedProjection(eventtest.UUID("runtime-recovery-manager-"+eventType), events.EventType(eventType), "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Now().Add(time.Duration(index-4)*time.Minute).UTC()),
-			"agent-a",
+			agentIdentity,
 		)
 	}
 
@@ -1453,6 +1460,7 @@ func TestRuntimeStart_InspectionFailurePreservesDecisionErrorAcrossTimerSkipAndD
 		active: []runtimepipeline.Schedule{
 			{
 				AgentID:   "runtime",
+				OwnerKind: runtimepipeline.ScheduleOwnerSystem,
 				EventType: "timer.skip",
 				Mode:      "once",
 				At:        time.Now().Add(2 * time.Minute),
@@ -1460,6 +1468,7 @@ func TestRuntimeStart_InspectionFailurePreservesDecisionErrorAcrossTimerSkipAndD
 			},
 			{
 				AgentID:   "runtime",
+				OwnerKind: runtimepipeline.ScheduleOwnerSystem,
 				EventType: "timer.drop",
 				Mode:      "once",
 				At:        time.Now().Add(3 * time.Minute),

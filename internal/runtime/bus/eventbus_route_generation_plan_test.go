@@ -8,7 +8,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
@@ -42,8 +41,8 @@ func TestEventBusSubscribedPublishDoesNotCrossAgentRouteGenerations(t *testing.T
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			const agentID = "route-generation-agent"
-			oldToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 11, AgentID: agentID, Generation: 1}
-			newToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 11, AgentID: agentID, Generation: 2}
+			oldToken := testAgentLifecycleToken(t, agentID, "", 11, 1)
+			newToken := testAgentLifecycleToken(t, agentID, "", 11, 2)
 			oldCh := eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.route_generation")))
 			evt := routeGenerationTestEvent(eventtest.UUID("route-generation-publish"), "test.route_generation")
 
@@ -88,8 +87,8 @@ func TestEventBusPublishInMutationDoesNotCrossAgentRouteGenerations(t *testing.T
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	const agentID = "route-generation-mutation-agent"
-	oldToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 12, AgentID: agentID, Generation: 1}
-	newToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 12, AgentID: agentID, Generation: 2}
+	oldToken := testAgentLifecycleToken(t, agentID, "", 12, 1)
+	newToken := testAgentLifecycleToken(t, agentID, "", 12, 2)
 	oldCh := eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.route_generation_mutation")))
 	evt := routeGenerationTestEvent(eventtest.UUID("route-generation-mutation"), "test.route_generation_mutation")
 
@@ -118,8 +117,8 @@ func TestEventBusPublishAcknowledgedDoesNotCrossAgentRouteGenerations(t *testing
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	const agentID = "route-generation-ack-agent"
-	oldToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 13, AgentID: agentID, Generation: 1}
-	newToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 13, AgentID: agentID, Generation: 2}
+	oldToken := testAgentLifecycleToken(t, agentID, "", 13, 1)
+	newToken := testAgentLifecycleToken(t, agentID, "", 13, 2)
 	oldCh := eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.route_generation_ack")))
 	evt := routeGenerationTestEvent(eventtest.UUID("route-generation-ack"), "test.route_generation_ack")
 
@@ -145,8 +144,9 @@ func TestEventBusIdentityRoutePlanResolvesCurrentAgentGenerationAtDispatch(t *te
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	const agentID = "identity-route-generation-agent"
-	oldToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 14, AgentID: agentID, Generation: 1}
-	newToken := runtimeeffects.LifecycleToken{RuntimeEpoch: 14, AgentID: agentID, Generation: 2}
+	oldToken := testAgentLifecycleToken(t, agentID, "", 14, 1)
+	newToken := testAgentLifecycleToken(t, agentID, "", 14, 2)
+	eb.RegisterRuntimeActiveAgentDescriptor(ActiveAgentDescriptor{Identity: oldToken.Identity})
 	oldCh := eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.identity_route")))
 	evt := routeGenerationTestEvent("identity-route-generation", "test.identity_route")
 	plan, err := eb.planDirectRoutePlan(context.Background(), evt, []string{agentID})
@@ -177,14 +177,14 @@ func TestEventBusIdentityRouteAuthorityDominatesDuplicateExactSubscription(t *te
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	const agentID = "duplicate-route-authority-agent"
-	token := runtimeeffects.LifecycleToken{RuntimeEpoch: 15, AgentID: agentID, Generation: 1}
+	token := testAgentLifecycleToken(t, agentID, "", 15, 1)
 	eb.ReplaceAgentRoute(token, testAgentSubscriptionAdmission(t, token.AgentID, events.EventType("test.duplicate_route")))
 	eb.mu.RLock()
-	route := eb.agentRouteHandles[agentID]
+	route := eb.agentRouteHandles[token.Identity]
 	eb.mu.RUnlock()
 	candidates := normalizeDeliveryRecipientCandidates([]deliveryRecipientCandidate{
-		{ID: agentID, PersistAsDelivery: true, LiveAuthority: liveRecipientAuthorityIdentity},
-		{ID: agentID, PersistAsDelivery: true, LiveAuthority: liveRecipientAuthorityAgentRoute, AgentRoute: route},
+		{ID: agentID, AgentIdentity: token.Identity, PersistAsDelivery: true, LiveAuthority: liveRecipientAuthorityIdentity},
+		{ID: agentID, AgentIdentity: token.Identity, PersistAsDelivery: true, LiveAuthority: liveRecipientAuthorityAgentRoute, AgentRoute: route},
 	})
 	if len(candidates) != 1 {
 		t.Fatalf("normalized candidates = %#v, want one", candidates)
@@ -193,8 +193,8 @@ func TestEventBusIdentityRouteAuthorityDominatesDuplicateExactSubscription(t *te
 		t.Fatalf("duplicate authority = %#v, want identity without an exact route handle", candidates[0])
 	}
 	planRecipients := normalizeRoutePlanLiveRecipients([]RoutePlanLiveRecipient{
-		{RecipientID: agentID, SubscriberType: routePlanSubscriberAgent, PersistAsDelivery: true, liveAuthority: liveRecipientAuthorityIdentity},
-		{RecipientID: agentID, SubscriberType: routePlanSubscriberAgent, PersistAsDelivery: true, liveAuthority: liveRecipientAuthorityAgentRoute, agentRoute: route},
+		{RecipientID: agentID, AgentIdentity: token.Identity, SubscriberType: routePlanSubscriberAgent, PersistAsDelivery: true, liveAuthority: liveRecipientAuthorityIdentity},
+		{RecipientID: agentID, AgentIdentity: token.Identity, SubscriberType: routePlanSubscriberAgent, PersistAsDelivery: true, liveAuthority: liveRecipientAuthorityAgentRoute, agentRoute: route},
 	})
 	if len(planRecipients) != 1 || planRecipients[0].liveAuthority != liveRecipientAuthorityIdentity || planRecipients[0].agentRoute != nil {
 		t.Fatalf("normalized route-plan recipients = %#v, want identity authority to dominate", planRecipients)

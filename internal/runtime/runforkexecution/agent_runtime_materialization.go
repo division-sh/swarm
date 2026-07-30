@@ -18,6 +18,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -58,15 +59,15 @@ type SelectedContractAgentRuntimeOptions struct {
 }
 
 type SelectedContractAgentRuntimeMaterialization struct {
-	Owner                    string   `json:"owner"`
-	RecipientPlanningOwner   string   `json:"recipient_planning_owner"`
-	ExecutionOwner           string   `json:"execution_owner"`
-	AgentRecipients          []string `json:"agent_recipients,omitempty"`
-	ConfiguredAgentIDs       []string `json:"configured_agent_ids,omitempty"`
-	MissingAgentRecipients   []string `json:"missing_agent_recipients,omitempty"`
-	MaterializationRequired  bool     `json:"materialization_required"`
-	MaterializationSupported bool     `json:"materialization_supported"`
-	EphemeralForkLocal       bool     `json:"ephemeral_fork_local"`
+	Owner                     string                   `json:"owner"`
+	RecipientPlanningOwner    string                   `json:"recipient_planning_owner"`
+	ExecutionOwner            string                   `json:"execution_owner"`
+	AgentRecipients           []agentidentity.Identity `json:"agent_recipients,omitempty"`
+	ConfiguredAgentIdentities []agentidentity.Identity `json:"configured_agent_identities,omitempty"`
+	MissingAgentRecipients    []agentidentity.Identity `json:"missing_agent_recipients,omitempty"`
+	MaterializationRequired   bool                     `json:"materialization_required"`
+	MaterializationSupported  bool                     `json:"materialization_supported"`
+	EphemeralForkLocal        bool                     `json:"ephemeral_fork_local"`
 }
 
 type selectedContractAgentRuntimePlan struct {
@@ -105,7 +106,10 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 	if strings.TrimSpace(planning.Owner) != store.RunForkSelectedContractRecipientPlanningOwner {
 		return selectedContractAgentRuntimePlan{}, fmt.Errorf("selected-contract agent runtime materialization requires %s; got %q", store.RunForkSelectedContractRecipientPlanningOwner, planning.Owner)
 	}
-	agents := selectedContractPlannedAgentRecipients(planning)
+	agents, err := selectedContractPlannedAgentRecipients(planning)
+	if err != nil {
+		return selectedContractAgentRuntimePlan{}, err
+	}
 	proof := SelectedContractAgentRuntimeMaterialization{
 		Owner:                    store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner,
 		RecipientPlanningOwner:   planning.Owner,
@@ -122,36 +126,36 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 	if err != nil {
 		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, err
 	}
-	recordsByID := map[string]runtimemanager.PersistedAgent{}
-	configured := make([]string, 0, len(records))
+	recordsByIdentity := map[agentidentity.Identity]runtimemanager.PersistedAgent{}
+	configured := make([]agentidentity.Identity, 0, len(records))
 	for _, rec := range records {
-		id := strings.TrimSpace(rec.Config.ID)
-		if id == "" {
-			continue
+		identity, identityErr := rec.Config.ConcreteIdentity()
+		if identityErr != nil {
+			return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, fmt.Errorf("selected-contract static agent identity: %w", identityErr)
 		}
-		if _, exists := recordsByID[id]; exists {
+		if _, exists := recordsByIdentity[identity]; exists {
 			continue
 		}
 		rec.Status = "ephemeral"
 		rec.HiredBy = "selected-contract-fork-agent-runtime"
-		recordsByID[id] = rec
-		configured = append(configured, id)
+		recordsByIdentity[identity] = rec
+		configured = append(configured, identity)
 	}
-	sort.Strings(configured)
-	proof.ConfiguredAgentIDs = configured
+	sortAgentIdentities(configured)
+	proof.ConfiguredAgentIdentities = configured
 
 	selected := make([]runtimemanager.PersistedAgent, 0, len(agents))
-	missing := []string{}
-	for _, id := range agents {
-		rec, ok := recordsByID[id]
+	missing := []agentidentity.Identity{}
+	for _, identity := range agents {
+		rec, ok := recordsByIdentity[identity]
 		if !ok {
-			missing = append(missing, id)
+			missing = append(missing, identity)
 			continue
 		}
 		selected = append(selected, rec)
 	}
 	if len(missing) > 0 {
-		sort.Strings(missing)
+		sortAgentIdentities(missing)
 		proof.MissingAgentRecipients = missing
 		return selectedContractAgentRuntimePlan{Proof: proof, Records: selected, Options: options}, selectedContractAgentRuntimeUnsupportedError(missing, "missing selected-source static contract-agent materialization record")
 	}
@@ -174,15 +178,29 @@ func selectedContractStaticAgentRecords(source semanticview.Source) ([]runtimema
 	return append(staticRecords, requiredRecords...), nil
 }
 
-func selectedContractAgentRuntimeUnsupportedError(agents []string, reason string) error {
-	agents = append([]string(nil), agents...)
-	sort.Strings(agents)
+func selectedContractAgentRuntimeUnsupportedError(agents []agentidentity.Identity, reason string) error {
+	agents = append([]agentidentity.Identity(nil), agents...)
+	sortAgentIdentities(agents)
 	return fmt.Errorf("%s: %s requires selected-fork handler materialization for authoritative agent recipients before fork mutation; %s for %s",
 		store.RunForkBlockerSelectedContractAgentHandlerMaterializationUnsupported,
 		store.RunForkSelectedContractAuthoritativeAgentDeliveryMaterializationOwner,
 		strings.TrimSpace(reason),
-		strings.Join(agents, ","),
+		strings.Join(agentIdentityDescriptions(agents), ","),
 	)
+}
+
+func sortAgentIdentities(identities []agentidentity.Identity) {
+	sort.Slice(identities, func(i, j int) bool {
+		return agentidentity.Less(identities[i], identities[j])
+	})
+}
+
+func agentIdentityDescriptions(identities []agentidentity.Identity) []string {
+	out := make([]string, 0, len(identities))
+	for _, identity := range identities {
+		out = append(out, identity.Description())
+	}
+	return out
 }
 
 func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedContractForkEventsRequest, bus *runtimebus.EventBus, workflowStore *runtimepipeline.WorkflowInstanceStore) (*selectedContractAgentRuntime, managedexecution.Admission, error) {
@@ -231,10 +249,13 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 		if err := manager.RegisterEphemeralAgentForExecution(ctx, rec); err != nil && !errors.Is(err, runtimemanager.ErrAgentAlreadyExists) {
 			return nil, managedexecution.Admission{}, fmt.Errorf("%s materialize agent %s: %w", store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner, strings.TrimSpace(rec.Config.ID), err)
 		}
+		identity, err := rec.Config.ConcreteIdentity()
+		if err != nil {
+			return nil, managedexecution.Admission{}, fmt.Errorf("%s concrete agent identity: %w", store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner, err)
+		}
 		bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{
-			AgentID:      rec.Config.ID,
-			EntityID:     rec.Config.EffectiveEntityID(),
-			FlowInstance: rec.Config.CanonicalFlowPath(),
+			Identity: identity,
+			EntityID: rec.Config.EffectiveEntityID(),
 		})
 	}
 	if builder.preflight != nil {
@@ -367,7 +388,8 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		if managerRef == nil {
 			return runtimeactors.AgentConfig{}, false
 		}
-		return managerRef.GetAgentConfig(agentID)
+		cfg, err := managerRef.ResolveAgentConfig(agentID, "")
+		return cfg, err == nil
 	})
 	if err != nil {
 		return selectedContractAgentRuntimeFactory{}, fmt.Errorf("start selected-fork tool gateway: %w", err)

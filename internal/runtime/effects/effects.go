@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -40,13 +41,18 @@ const (
 )
 
 type LifecycleToken struct {
-	RuntimeEpoch int64  `json:"runtime_epoch"`
-	AgentID      string `json:"agent_id"`
-	Generation   uint64 `json:"generation"`
+	RuntimeEpoch int64                         `json:"runtime_epoch"`
+	Identity     runtimeagentidentity.Identity `json:"identity"`
+	AgentID      string                        `json:"agent_id"`
+	Generation   uint64                        `json:"generation"`
 }
 
 func (t LifecycleToken) Valid() bool {
-	return t.RuntimeEpoch > 0 && strings.TrimSpace(t.AgentID) != "" && t.Generation > 0
+	identity := t.Identity.Normalize()
+	return t.RuntimeEpoch > 0 &&
+		identity.Validate() == nil &&
+		identity.AgentID() == strings.TrimSpace(t.AgentID) &&
+		t.Generation > 0
 }
 
 type lifecycleTokenKey struct{}

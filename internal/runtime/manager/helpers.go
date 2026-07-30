@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/google/uuid"
 )
 
@@ -274,15 +275,19 @@ func stringifyPromptTemplateValue(value any) string {
 	}
 }
 
-func DeterministicOutputEventID(inbound events.Event, agentID string, index int, out events.Event) string {
+func DeterministicOutputEventID(inbound events.Event, identity runtimeagentidentity.Identity, index int, out events.Event) (string, error) {
+	fingerprint, err := identity.Fingerprint()
+	if err != nil {
+		return "", fmt.Errorf("deterministic output event identity is invalid: %w", err)
+	}
 	seed := strings.Join([]string{
 		strings.TrimSpace(inbound.ID()),
-		strings.TrimSpace(agentID),
+		fingerprint,
 		fmt.Sprintf("%d", index),
 		strings.TrimSpace(string(out.Type())),
 		strings.TrimSpace(out.EntityID()),
 	}, "|")
-	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(seed)).String()
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(seed)).String(), nil
 }
 
 func nativeToolConfigFromMap(values map[string]bool) runtimeactors.NativeToolConfig {

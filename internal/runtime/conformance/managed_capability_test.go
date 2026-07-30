@@ -30,6 +30,10 @@ func managedConformanceExecutionContext(t testing.TB, ctx context.Context, autho
 
 func managedConformanceTurnRecord(t testing.TB, rec runtimellm.AgentTurnRecord) runtimellm.AgentTurnRecord {
 	t.Helper()
+	if rec.Identity.Agent.IsZero() {
+		rec.Identity = conformanceAgentMemoryIdentity(t, rec.RunID, rec.AgentID)
+		rec.FlowInstance = rec.Identity.FlowInstance()
+	}
 	runtimeMode := "task"
 	if rec.Memory.Enabled {
 		runtimeMode = "session"

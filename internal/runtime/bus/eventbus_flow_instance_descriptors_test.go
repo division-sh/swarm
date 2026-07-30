@@ -28,11 +28,9 @@ func TestEventBusPinRoutingDescriptorsIncludeActiveDynamicFlowInstances(t *testi
 	const flowInstance = "component-scaffold/aaaaaaaa-1111-4111-8111-aaaaaaaa1111"
 	const workflowVersion = "v-test"
 	eb, err := newScopedTestEventBus(&activeFlowInstanceDescriptorStore{
-		agents: []runtimebus.ActiveAgentDescriptor{{
-			AgentID:      "service-owner",
-			EntityID:     "service-ent",
-			FlowInstance: "service-owner/root",
-		}},
+		agents: []runtimebus.ActiveAgentDescriptor{
+			testActiveAgentDescriptor(t, "service-owner", "service-ent", "service-owner/root"),
+		},
 		flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{{
 			FlowInstance: flowInstance,
 			FlowTemplate: "component-scaffold",

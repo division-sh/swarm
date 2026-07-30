@@ -3,9 +3,9 @@ package runforkexecution
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -18,7 +18,7 @@ type SelectedContractAgentDeliveryMaterialization struct {
 	Owner                    string                            `json:"owner"`
 	RecipientPlanningOwner   string                            `json:"recipient_planning_owner"`
 	ExecutionOwner           string                            `json:"execution_owner"`
-	AgentRecipients          []string                          `json:"agent_recipients,omitempty"`
+	AgentRecipients          []agentidentity.Identity          `json:"agent_recipients,omitempty"`
 	MaterializationRequired  bool                              `json:"materialization_required"`
 	MaterializationSupported bool                              `json:"materialization_supported"`
 	UnsupportedBlockers      []store.RunForkUnsupportedBlocker `json:"unsupported_blockers,omitempty"`
@@ -30,7 +30,10 @@ func RequireSelectedContractAgentDeliveryMaterialization(ctx context.Context, re
 	if strings.TrimSpace(planning.Owner) != store.RunForkSelectedContractRecipientPlanningOwner {
 		return SelectedContractAgentDeliveryMaterialization{}, fmt.Errorf("selected-contract authoritative agent delivery materialization requires %s; got %q", store.RunForkSelectedContractRecipientPlanningOwner, planning.Owner)
 	}
-	agents := selectedContractPlannedAgentRecipients(planning)
+	agents, err := selectedContractPlannedAgentRecipients(planning)
+	if err != nil {
+		return SelectedContractAgentDeliveryMaterialization{}, err
+	}
 	result := SelectedContractAgentDeliveryMaterialization{
 		Owner:                    store.RunForkSelectedContractAuthoritativeAgentDeliveryMaterializationOwner,
 		RecipientPlanningOwner:   planning.Owner,
@@ -48,56 +51,53 @@ func RequireSelectedContractAgentDeliveryMaterialization(ctx context.Context, re
 	}
 	blocker := store.RunForkUnsupportedBlocker{
 		Code:    store.RunForkBlockerSelectedContractAgentHandlerMaterializationUnsupported,
-		Message: fmt.Sprintf("%s requires selected-fork handler materialization for authoritative agent recipients before fork mutation; missing selected-fork handler materializer for %s", store.RunForkSelectedContractAuthoritativeAgentDeliveryMaterializationOwner, strings.Join(agents, ",")),
+		Message: fmt.Sprintf("%s requires selected-fork handler materialization for authoritative agent recipients before fork mutation; missing selected-fork handler materializer for %s", store.RunForkSelectedContractAuthoritativeAgentDeliveryMaterializationOwner, strings.Join(agentIdentityDescriptions(agents), ",")),
 	}
 	result.UnsupportedBlockers = []store.RunForkUnsupportedBlocker{blocker}
 	return result, fmt.Errorf("%s: %s", blocker.Code, blocker.Message)
 }
 
-func selectedContractAgentRuntimeCoversRecipients(runtime SelectedContractAgentRuntimeMaterialization, agents []string) bool {
+func selectedContractAgentRuntimeCoversRecipients(runtime SelectedContractAgentRuntimeMaterialization, agents []agentidentity.Identity) bool {
 	if strings.TrimSpace(runtime.Owner) != store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner ||
 		!runtime.MaterializationSupported {
 		return false
 	}
-	seen := map[string]struct{}{}
-	for _, id := range runtime.ConfiguredAgentIDs {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			seen[id] = struct{}{}
-		}
+	seen := map[agentidentity.Identity]struct{}{}
+	for _, identity := range runtime.ConfiguredAgentIdentities {
+		seen[identity.Normalize()] = struct{}{}
 	}
-	for _, id := range runtime.AgentRecipients {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			seen[id] = struct{}{}
-		}
+	for _, identity := range runtime.AgentRecipients {
+		seen[identity.Normalize()] = struct{}{}
 	}
-	for _, agent := range agents {
-		if _, ok := seen[strings.TrimSpace(agent)]; !ok {
+	for _, identity := range agents {
+		if _, ok := seen[identity.Normalize()]; !ok {
 			return false
 		}
 	}
 	return true
 }
 
-func selectedContractPlannedAgentRecipients(planning store.RunForkSelectedContractRecipientPlanning) []string {
-	seen := map[string]struct{}{}
+func selectedContractPlannedAgentRecipients(planning store.RunForkSelectedContractRecipientPlanning) ([]agentidentity.Identity, error) {
+	seen := map[agentidentity.Identity]struct{}{}
 	for _, event := range planning.RecipientPlanEvents {
 		for _, recipient := range event.Recipients {
 			if strings.TrimSpace(recipient.SubscriberType) != "agent" {
 				continue
 			}
-			id := strings.TrimSpace(recipient.SubscriberID)
-			if id == "" {
-				continue
+			identity := recipient.AgentIdentity.Normalize()
+			if err := identity.Validate(); err != nil {
+				return nil, fmt.Errorf("selected-contract agent recipient %q requires exact concrete identity: %w", strings.TrimSpace(recipient.SubscriberID), err)
 			}
-			seen[id] = struct{}{}
+			if identity.AgentID() != strings.TrimSpace(recipient.SubscriberID) {
+				return nil, fmt.Errorf("selected-contract agent recipient %q conflicts with concrete identity %s", strings.TrimSpace(recipient.SubscriberID), identity.Description())
+			}
+			seen[identity] = struct{}{}
 		}
 	}
-	out := make([]string, 0, len(seen))
-	for id := range seen {
-		out = append(out, id)
+	out := make([]agentidentity.Identity, 0, len(seen))
+	for identity := range seen {
+		out = append(out, identity)
 	}
-	sort.Strings(out)
-	return out
+	sortAgentIdentities(out)
+	return out, nil
 }

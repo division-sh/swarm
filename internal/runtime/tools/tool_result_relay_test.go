@@ -223,6 +223,7 @@ func newHostRelayExecutor(t *testing.T) (*Executor, models.AgentConfig, *workspa
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "market-research-agent",
+		Identity:      toolTestRootAgentIdentity(t, "market-research-agent"),
 		NativeTools:   models.NativeToolConfig{FileIO: true, Bash: true},
 	}
 	target, err := manager.ResolveWorkspace(ctx, actor)

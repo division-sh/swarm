@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
@@ -36,23 +35,25 @@ func captureRunForkTestRevision(t *testing.T, db *sql.DB, runID string, families
 func seedRunForkSessionProjection(t *testing.T, db *sql.DB, runID, agentID, sessionID, status string, at time.Time) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, flow_instance, role, model, llm_backend, memory_enabled, memory_source, status, created_at)
-		VALUES ($1, $2, 'worker', 'standard', 'mock', TRUE, 'authored', 'active', $3)
-	`, agentID, runForkRevisionFlowInstance, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed run-fork session agent: %v", err)
+	identity := testAgentIdentity(t, agentID, runForkRevisionFlowInstance)
+	fields, err := identity.StorageFields()
+	if err != nil {
+		t.Fatal(err)
 	}
+	seedTestAgentRow(t, ctx, db, true, identity, "active")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, flow_instance, memory_enabled, memory_source,
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
 			conversation, turn_count, runtime_state, status, termination_reason, terminated_at, created_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, $3, $4, TRUE, 'authored', '[]'::jsonb, 0,
-			'{}'::jsonb, $5,
-			CASE WHEN $5::text = 'terminated' THEN 'normal' ELSE NULL END,
-			CASE WHEN $5::text = 'terminated' THEN $6::timestamptz ELSE NULL::timestamptz END, $6, $6
+			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', '[]'::jsonb, 0,
+			'{}'::jsonb, $10,
+			CASE WHEN $10::text = 'terminated' THEN 'normal' ELSE NULL END,
+			CASE WHEN $10::text = 'terminated' THEN $11::timestamptz ELSE NULL::timestamptz END, $11, $11
 		)
-	`, sessionID, runID, agentID, runForkRevisionFlowInstance, status, at.Add(-time.Second)); err != nil {
+	`, sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, status, at.Add(-time.Second)); err != nil {
 		t.Fatalf("seed run-fork session projection: %v", err)
 	}
 }
@@ -91,7 +92,7 @@ func mutateRunForkSessionExcludedColumns(t *testing.T, db *sql.DB, runID, sessio
 func exerciseRunForkSessionExcludedWriters(t *testing.T, store *PostgresStore, runID, agentID, sessionID string) {
 	t.Helper()
 	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
-	identity := agentmemory.Identity{RunID: runID, AgentID: agentID, FlowInstance: runForkRevisionFlowInstance}
+	identity := testAgentMemoryIdentity(t, runID, agentID, runForkRevisionFlowInstance)
 	lease, _, err := store.AcquireLiveSession(ctx, identity, "revision-writer")
 	if err != nil {
 		t.Fatalf("acquire session lease: %v", err)

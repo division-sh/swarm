@@ -4,6 +4,7 @@ portfolio-coordinator:
   subscribes_to:
     - portfolio.opened
     - portfolio.account.register.requested
+    - portfolio.accounts.register.requested
     - portfolio.membership.seeded
     - portfolio.notify.requested
   event_handlers:
@@ -21,6 +22,22 @@ portfolio-coordinator:
         event: account.registered
         fields:
           account_id: payload.account_id
+    portfolio.accounts.register.requested:
+      select_entity:
+        by:
+          portfolio_id: payload.portfolio_id
+      data_accumulation:
+        writes:
+          - source_field: account_ids
+            target_field: account_ids
+      fan_out:
+        items_from: payload.account_ids
+        as: account_id
+        max_items: 100
+        emit:
+          event: account.registered
+          fields:
+            account_id: account_id
     portfolio.membership.seeded:
       select_entity:
         by:
