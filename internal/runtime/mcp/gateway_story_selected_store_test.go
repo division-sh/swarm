@@ -186,7 +186,7 @@ func gatewayStoryCapabilitySurface(t *testing.T, gateway *runtimemcp.Gateway, ac
 		Kind: managedcapabilities.BindingMCPTool, ExactName: "mcp__runtime-tools__send_story", RequiredEvidenceKind: "mcp_listed",
 	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorID: actor.ID, RuntimeMode: "task", Provider: "test", Transport: "cli", ProviderContract: "gateway-story-test",
+		ActorIdentity: actor.Identity, RuntimeMode: "task", Provider: "test", Transport: "cli", ProviderContract: "gateway-story-test",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityProviderTurn, ID: turnID, ExecutionKind: managedcapabilities.ExecutionNormalAgent,
 			ExecutionAuthorityID: actor.ID, RunID: runID, SessionID: sessionID, TurnOrdinal: 1,

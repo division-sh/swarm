@@ -39,7 +39,7 @@ func managedConformanceTurnRecord(t testing.TB, rec runtimellm.AgentTurnRecord) 
 		runtimeMode = "session"
 	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorID: rec.AgentID, RuntimeMode: runtimeMode, Provider: "conformance", Transport: "api", ProviderContract: "conformance-provider-contract",
+		ActorIdentity: rec.Identity.Agent, RuntimeMode: runtimeMode, Provider: "conformance", Transport: "api", ProviderContract: "conformance-provider-contract",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityProviderTurn, ID: uuid.NewString(), ExecutionKind: managedcapabilities.ExecutionNormalAgent,
 			ExecutionAuthorityID: "conformance-persistence", RunID: rec.RunID, SessionID: rec.SessionID, TurnOrdinal: 1,

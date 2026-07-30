@@ -73,7 +73,9 @@ func (t UsageTarget) Valid() bool {
 }
 
 func ProviderTurnTargetMatchesCapabilitySurface(target UsageTarget, surface managedcapabilities.Surface) bool {
-	return target.Kind == UsageTargetAgentTurn && target.Valid() &&
+	sameActor, err := agentidentity.Equal(target.AgentIdentity, surface.ActorIdentity)
+	return err == nil && sameActor &&
+		target.Kind == UsageTargetAgentTurn && target.Valid() &&
 		surface.Authority.Kind == managedcapabilities.AuthorityProviderTurn &&
 		surface.Authority.ID == target.ID && surface.ActorID == target.AgentID &&
 		surface.Authority.SessionID == target.SessionID && surface.Authority.RunID == target.RunID

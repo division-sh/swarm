@@ -274,7 +274,8 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery agent-turn identity for attempt %s is incomplete", recovered.AttemptID)
 		}
 		surface, err := decodeManagedCapabilitySurface([]byte(recovered.CapabilitySurface))
-		if err != nil || surface.ID != recovered.CapabilitySurfaceID || surface.Authority.ID != target.ID {
+		if err != nil || surface.ID != recovered.CapabilitySurfaceID ||
+			!runtimeeffects.ProviderTurnTargetMatchesCapabilitySurface(target, surface) {
 			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery capability surface for attempt %s is invalid or mismatched: %w", recovered.AttemptID, err)
 		}
 		settlement.AgentTurn = &runtimeeffects.CompletionAgentTurn{

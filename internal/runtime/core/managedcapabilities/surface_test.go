@@ -4,13 +4,81 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 )
+
+func managedCapabilityTestIdentity(agentID string) agentidentity.Identity {
+	return agentidentity.Identity{
+		Name:  agentidentity.Name{AgentID: agentID, Owner: "managed-capability-test", Source: agentidentity.NameSourceDeclared},
+		Route: agentidentity.RootRoute(),
+	}
+}
+
+func managedCapabilityTestRoutedIdentity(agentID, instanceID string) agentidentity.Identity {
+	return agentidentity.Identity{
+		Name: agentidentity.Name{AgentID: agentID, Owner: "managed-capability-test", Source: agentidentity.NameSourceDeclared},
+		Route: agentidentity.Route{
+			Presence: agentidentity.RoutePresent, ScopeKey: "review", InstanceID: instanceID,
+			InstancePath: "review/" + instanceID,
+		},
+	}
+}
+
+func TestSurfaceIdentitySeparatesSameSlugConcreteActors(t *testing.T) {
+	plan := Plan{
+		ActorIdentity: managedCapabilityTestRoutedIdentity("worker", "inst-a"),
+		RuntimeMode:   "task", Provider: "test", Transport: "api", ProviderContract: "test.v1",
+		Authority: Authority{
+			Kind: AuthorityProviderTurn, ID: "00000000-0000-0000-0000-000000000011",
+			ExecutionKind: ExecutionNormalAgent, ExecutionAuthorityID: "runtime-owner",
+			SessionID: "00000000-0000-0000-0000-000000000012", TurnOrdinal: 1,
+		},
+		CreatedAt: time.Unix(1, 0).UTC(),
+	}
+	first, err := New(plan)
+	if err != nil {
+		t.Fatalf("build first sibling surface: %v", err)
+	}
+	if first.ActorID != "worker" || !first.MatchesActor(plan.ActorIdentity) {
+		t.Fatalf("first surface actor = %q %#v", first.ActorID, first.ActorIdentity)
+	}
+
+	secondPlan := plan
+	secondPlan.ActorIdentity = managedCapabilityTestRoutedIdentity("worker", "inst-b")
+	second, err := New(secondPlan)
+	if err != nil {
+		t.Fatalf("build second sibling surface: %v", err)
+	}
+	if first.ID == second.ID || first.MatchesActor(second.ActorIdentity) {
+		t.Fatalf("same-slug sibling surfaces were not separated: first=%s second=%s", first.ID, second.ID)
+	}
+	firstPlan, err := first.PlanFingerprint()
+	if err != nil {
+		t.Fatalf("fingerprint first sibling surface: %v", err)
+	}
+	secondPlanFingerprint, err := second.PlanFingerprint()
+	if err != nil {
+		t.Fatalf("fingerprint second sibling surface: %v", err)
+	}
+	if firstPlan == secondPlanFingerprint {
+		t.Fatal("same-slug sibling surfaces shared one capability plan fingerprint")
+	}
+
+	forged := first.Clone()
+	forged.ActorID = "other-worker"
+	if err := forged.refreshIntegrityHash(); err != nil {
+		t.Fatalf("refresh forged surface integrity: %v", err)
+	}
+	if err := forged.Validate(); err == nil {
+		t.Fatal("surface accepted actor_id that was not the typed identity projection")
+	}
+}
 
 func TestSurfaceAcceptsCanonicalProviderTransports(t *testing.T) {
 	for _, transport := range []string{"api", "cli", "in_process"} {
 		plan := Plan{
-			ActorID: "worker", RuntimeMode: "task", Provider: "test", Transport: transport,
+			ActorIdentity: managedCapabilityTestIdentity("worker"), RuntimeMode: "task", Provider: "test", Transport: transport,
 			ProviderContract: "test.v1", CreatedAt: time.Unix(1, 0).UTC(),
 			Authority: Authority{
 				Kind: AuthorityProviderTurn, ID: "00000000-0000-0000-0000-000000000001",
@@ -26,7 +94,7 @@ func TestSurfaceAcceptsCanonicalProviderTransports(t *testing.T) {
 
 func TestSurfaceRequiresConfirmedDeliveryEvidenceAndNarrowsMonotonically(t *testing.T) {
 	plan := Plan{
-		ActorID: "worker", RuntimeMode: "task", Provider: "anthropic", Transport: "api",
+		ActorIdentity: managedCapabilityTestIdentity("worker"), RuntimeMode: "task", Provider: "anthropic", Transport: "api",
 		ProviderContract: "messages.v1", CreatedAt: time.Unix(1, 0).UTC(),
 		Authority: Authority{
 			Kind: AuthorityProviderTurn, ID: "00000000-0000-0000-0000-000000000101",
@@ -106,7 +174,7 @@ func TestSurfaceRequiresConfirmedDeliveryEvidenceAndNarrowsMonotonically(t *test
 
 func TestSurfaceRejectsMalformedTypedDeliveryFacts(t *testing.T) {
 	plan := Plan{
-		ActorID: "worker", RuntimeMode: "task", Provider: "anthropic", Transport: "api",
+		ActorIdentity: managedCapabilityTestIdentity("worker"), RuntimeMode: "task", Provider: "anthropic", Transport: "api",
 		ProviderContract: "messages.v1", CreatedAt: time.Unix(1, 0).UTC(),
 		Authority: Authority{
 			Kind: AuthorityProviderTurn, ID: "00000000-0000-0000-0000-000000000201",
@@ -123,7 +191,7 @@ func TestSurfaceRejectsMalformedTypedDeliveryFacts(t *testing.T) {
 	}
 
 	if _, err := New(Plan{
-		ActorID: plan.ActorID, RuntimeMode: plan.RuntimeMode, Provider: plan.Provider, Transport: plan.Transport,
+		ActorIdentity: plan.ActorIdentity, RuntimeMode: plan.RuntimeMode, Provider: plan.Provider, Transport: plan.Transport,
 		ProviderContract: plan.ProviderContract, CreatedAt: plan.CreatedAt, Authority: plan.Authority,
 		Tools: []PlannedTool{{
 			Name: "event.publish", DefinitionHash: "definition-hash",
@@ -163,7 +231,7 @@ func TestAuthorityRejectsMalformedSelectedForkCoordinates(t *testing.T) {
 
 func TestPlanFingerprintSeparatesAttemptAuthorityFromCallablePlan(t *testing.T) {
 	plan := Plan{
-		ActorID: "worker", RuntimeMode: "session", Provider: "anthropic", Transport: "api",
+		ActorIdentity: managedCapabilityTestIdentity("worker"), RuntimeMode: "session", Provider: "anthropic", Transport: "api",
 		ProviderContract: "messages.v1", CreatedAt: time.Unix(1, 0).UTC(),
 		Authority: Authority{
 			Kind: AuthorityProviderTurn, ID: "00000000-0000-0000-0000-000000000401",

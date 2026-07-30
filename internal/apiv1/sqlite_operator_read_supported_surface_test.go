@@ -98,10 +98,11 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	}
 }
 
-func seedSQLiteOperatorReadCapabilitySurface(t testing.TB, ctx context.Context, sqliteStore *storepkg.SQLiteRuntimeStore, runID, turnID, sessionID, agentID, runtimeMode string) string {
+func seedSQLiteOperatorReadCapabilitySurface(t *testing.T, ctx context.Context, sqliteStore *storepkg.SQLiteRuntimeStore, runID, turnID, sessionID, agentID, runtimeMode string) string {
 	t.Helper()
+	actorIdentity := sqliteAgentUsageIdentity(t, agentID)
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorID: agentID, RuntimeMode: runtimeMode, Provider: "test", Transport: "api", ProviderContract: "sqlite-operator-read-test",
+		ActorIdentity: actorIdentity, RuntimeMode: runtimeMode, Provider: "test", Transport: "api", ProviderContract: "sqlite-operator-read-test",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityProviderTurn, ID: turnID,
 			ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: "sqlite-operator-read-runtime",

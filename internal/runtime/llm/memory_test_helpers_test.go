@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -41,8 +42,35 @@ func testMemoryIdentity(agentID, flowInstance string) agentmemory.Identity {
 	}
 }
 
+func testAgentIdentity(agentID, flowInstance string) agentidentity.Identity {
+	if strings.Trim(strings.TrimSpace(flowInstance), "/") != "" {
+		return testMemoryIdentity(agentID, flowInstance).Agent
+	}
+	return agentidentity.Identity{
+		Name:  agentidentity.Name{AgentID: agentID, Owner: "llm-test-fixture", Source: agentidentity.NameSourceRuntimeCreated},
+		Route: agentidentity.RootRoute(),
+	}
+}
+
+func withTestActorIdentity(ctx context.Context, agentID, flowInstance string) context.Context {
+	return withTestActorConcreteIdentity(ctx, testAgentIdentity(agentID, flowInstance))
+}
+
+func withTestActorConcreteIdentity(ctx context.Context, identity agentidentity.Identity) context.Context {
+	actor, ok := actors.ActorFromContext(ctx)
+	if !ok {
+		actor = actors.AgentConfig{}
+	}
+	actor.ID = identity.AgentID()
+	actor.Identity = identity
+	actor.FlowPath = actor.Identity.FlowInstance()
+	return actors.WithActor(ctx, actor)
+}
+
 func withTestMemory(ctx context.Context, agentID, flowInstance string) context.Context {
-	return agentmemory.WithExecution(ctx, testMemory(), testMemoryIdentity(agentID, flowInstance))
+	identity := testMemoryIdentity(agentID, flowInstance)
+	ctx = withTestActorConcreteIdentity(ctx, identity.Agent)
+	return agentmemory.WithExecution(ctx, testMemory(), identity)
 }
 
 func withTestStatelessMemory(t testing.TB, ctx context.Context, agentID, flowInstance string) context.Context {
@@ -52,6 +80,7 @@ func withTestStatelessMemory(t testing.TB, ctx context.Context, agentID, flowIns
 	if strings.Trim(strings.TrimSpace(flowInstance), "/") != "" {
 		identity = testMemoryIdentity(agentID, flowInstance).Agent
 	}
+	ctx = withTestActorConcreteIdentity(ctx, identity)
 	return agentmemory.WithExecution(ctx, agentmemory.Authored(false), agentmemory.Identity{
 		RunID: testMemoryRunID,
 		Agent: identity,

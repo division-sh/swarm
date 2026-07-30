@@ -194,22 +194,28 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 		if surface, ok := capabilitySurfaceForResponse(resp); ok {
 			ctx = managedcapabilities.WithContext(ctx, surface)
 			if managedAgentExecutionContext(ctx) {
-				if surface.Authority.Kind != managedcapabilities.AuthorityProviderTurn || c.Session == nil || surface.Authority.SessionID != strings.TrimSpace(c.Session.ID) {
+				if err := surface.Validate(); err != nil || surface.Authority.Kind != managedcapabilities.AuthorityProviderTurn ||
+					c.Session == nil || surface.Authority.SessionID != strings.TrimSpace(c.Session.ID) {
 					return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_turn_identity_mismatch", "llm-conversation", "authorize_tool_round", map[string]any{"surface_id": surface.ID})
 				}
-				actor, _ := models.ActorFromContext(ctx)
-				flowInstance := strings.TrimSpace(actor.CanonicalFlowPath())
-				if c.Session.Memory.Enabled {
-					flowInstance = strings.TrimSpace(c.Session.MemoryIdentity.FlowInstance())
+				actor, hasActor := models.ActorFromContext(ctx)
+				actorIdentity, actorIdentityErr := actor.ConcreteIdentity()
+				if !hasActor || actorIdentityErr != nil || !surface.MatchesActor(actorIdentity) ||
+					!surface.MatchesActor(c.Session.MemoryIdentity.Agent) {
+					return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_turn_identity_mismatch", "llm-conversation", "authorize_tool_round", map[string]any{"surface_id": surface.ID})
 				}
+				if token, hasToken := runtimeeffects.LifecycleTokenFromContext(ctx); hasToken && !surface.MatchesActor(token.Identity) {
+					return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_turn_identity_mismatch", "llm-conversation", "authorize_tool_round", map[string]any{"surface_id": surface.ID})
+				}
+				flowInstance := surface.ActorIdentity.FlowInstance()
 				ctx = runtimeeffects.WithUsageTarget(ctx, runtimeeffects.UsageTarget{
 					Kind: runtimeeffects.UsageTargetAgentTurn, ID: surface.Authority.ID, RunID: surface.Authority.RunID,
-					AgentID: surface.ActorID, AgentIdentity: c.Session.MemoryIdentity.Agent,
+					AgentID: surface.ActorID, AgentIdentity: surface.ActorIdentity,
 					SessionID: surface.Authority.SessionID, Memory: c.Session.Memory,
 					FlowInstance: flowInstance, EntityID: strings.TrimSpace(actor.EffectiveEntityID()),
 				})
 				authority, hasAuthority := runtimeeffects.AuthorityFromContext(ctx)
-				if !hasAuthority || authority.Target.ID != surface.Authority.ID {
+				if !hasAuthority || !runtimeeffects.ProviderTurnTargetMatchesCapabilitySurface(authority.Target, surface) {
 					return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_effect_target_missing", "llm-conversation", "authorize_tool_round", map[string]any{"surface_id": surface.ID})
 				}
 			}

@@ -155,7 +155,7 @@ func TestBeginCompletionRejectsCapabilitySurfaceFromDifferentRun(t *testing.T) {
 		FlowInstance: token.Identity.FlowInstance(),
 	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorID: target.AgentID, RuntimeMode: "task", Provider: "test", Transport: "api", ProviderContract: "test-contract",
+		ActorIdentity: target.AgentIdentity, RuntimeMode: "task", Provider: "test", Transport: "api", ProviderContract: "test-contract",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityProviderTurn, ID: target.ID, ExecutionKind: managedcapabilities.ExecutionNormalAgent,
 			ExecutionAuthorityID: admission.ExecutionAuthorityID, RunID: uuid.NewString(), SessionID: target.SessionID, TurnOrdinal: 1,
@@ -274,6 +274,48 @@ func TestBeginNormalEffectRejectsCrossContextCapabilitySurfacesBeforeAuthorizati
 				t.Fatalf("hostile effect authorizations=%d launches=%d dispatches=%d, want zero", len(probe.authorizations), probe.launches, dispatches)
 			}
 		})
+	}
+}
+
+func TestManagedEffectRejectsSameSlugSiblingCapabilityPrincipalBeforeAuthorization(t *testing.T) {
+	probe := &effectStoreProbe{}
+	token := effectLifecycleToken(t, 7, "agent-a", 3)
+	siblingIdentity := agentidentitytest.Runtime(
+		t, token.AgentID, "effects-test", "effects-test", "sibling", "effects-test/sibling",
+	)
+	admission, err := managedexecution.New(
+		managedexecution.KindNormalRuntime,
+		"test-execution-authority",
+		1,
+		"",
+		"test-actors",
+		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("build managed execution admission: %v", err)
+	}
+	target := UsageTarget{
+		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: uuid.NewString(), AgentID: token.AgentID,
+		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
+		FlowInstance: token.Identity.FlowInstance(),
+	}
+	siblingTarget := target
+	siblingTarget.AgentIdentity = siblingIdentity
+	siblingTarget.FlowInstance = siblingIdentity.FlowInstance()
+
+	ctx := WithLifecycleToken(context.Background(), token)
+	ctx = WithController(ctx, NewController(probe))
+	ctx = WithLogicalOperationIdentity(ctx, "same-slug-sibling-capability")
+	ctx = managedexecution.WithAdmission(ctx, admission)
+	ctx = WithUsageTarget(ctx, target)
+	ctx = managedcapabilities.WithContext(ctx, normalManagedEffectSurface(t, admission, siblingTarget, token.AgentID))
+
+	if _, err := Begin(ctx, "authored_http_tool", []byte("request"), nil); err == nil {
+		t.Fatal("same-slug sibling capability principal authorized an effect")
+	}
+	if len(probe.authorizations) != 0 {
+		t.Fatalf("same-slug sibling reached store authorization %d times", len(probe.authorizations))
 	}
 }
 
@@ -417,8 +459,12 @@ func managedEffectTestContext(t testing.TB, ctx context.Context, agentID string)
 
 func normalManagedEffectSurface(t testing.TB, admission managedexecution.Admission, target UsageTarget, actorID string) managedcapabilities.Surface {
 	t.Helper()
+	actorIdentity := target.AgentIdentity
+	if actorID != target.AgentIdentity.AgentID() {
+		actorIdentity = agentidentitytest.Runtime(t, actorID, "effects-test", "effects-test", "instance", "effects-test/instance")
+	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorID: actorID, RuntimeMode: "task", Provider: "test", Transport: "api", ProviderContract: "test-contract",
+		ActorIdentity: actorIdentity, RuntimeMode: "task", Provider: "test", Transport: "api", ProviderContract: "test-contract",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityProviderTurn, ID: target.ID, ExecutionKind: managedcapabilities.ExecutionNormalAgent,
 			ExecutionAuthorityID: admission.ExecutionAuthorityID, RunID: target.RunID, SessionID: target.SessionID, TurnOrdinal: 1,
@@ -433,8 +479,12 @@ func normalManagedEffectSurface(t testing.TB, admission managedexecution.Admissi
 
 func selectedManagedEffectSurface(t testing.TB, admission managedexecution.Admission, target UsageTarget, actorID string) managedcapabilities.Surface {
 	t.Helper()
+	actorIdentity := target.AgentIdentity
+	if actorID != target.AgentIdentity.AgentID() {
+		actorIdentity = agentidentitytest.Runtime(t, actorID, "effects-test", "effects-test", "instance", "effects-test/instance")
+	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorID: actorID, RuntimeMode: "task", Provider: "test", Transport: "api", ProviderContract: "test-contract",
+		ActorIdentity: actorIdentity, RuntimeMode: "task", Provider: "test", Transport: "api", ProviderContract: "test-contract",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityProviderTurn, ID: target.ID,
 			ExecutionKind:        managedcapabilities.ExecutionSelectedContractFork,
@@ -450,7 +500,8 @@ func selectedManagedEffectSurface(t testing.TB, admission managedexecution.Admis
 
 func TestCanonicalOperationIdentitySurvivesLifecycleGenerationChange(t *testing.T) {
 	ctx := WithLogicalOperationIdentity(context.Background(), "event-123")
-	first, err := canonicalOperationID(ctx, testAuthority(effectLifecycleToken(t, 7, "agent-a", 3)), "authored_http_tool", map[string]string{"tool": "lookup"})
+	firstToken := effectLifecycleToken(t, 7, "agent-a", 3)
+	first, err := canonicalOperationID(ctx, testAuthority(firstToken), "authored_http_tool", map[string]string{"tool": "lookup"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,6 +511,17 @@ func TestCanonicalOperationIdentitySurvivesLifecycleGenerationChange(t *testing.
 	}
 	if first != second {
 		t.Fatalf("operation identity changed across lifecycle generation: %s != %s", first, second)
+	}
+	siblingToken := firstToken
+	siblingToken.Identity = agentidentitytest.Runtime(
+		t, firstToken.AgentID, "effects-test", "effects-test", "sibling", "effects-test/sibling",
+	)
+	sibling, err := canonicalOperationID(ctx, testAuthority(siblingToken), "authored_http_tool", map[string]string{"tool": "lookup"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == sibling {
+		t.Fatalf("same-slug sibling identities shared operation identity %s", first)
 	}
 }
 

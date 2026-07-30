@@ -75,7 +75,7 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 		if err != nil {
 			return err
 		}
-		if err := validateManagedAgentTurnSurface(surface, identity.AgentID(), rec.SessionID, identity.RunID); err != nil {
+		if err := validateManagedAgentTurnSurface(surface, identity.Agent, rec.SessionID, identity.RunID); err != nil {
 			return err
 		}
 		turnID := surface.Authority.ID

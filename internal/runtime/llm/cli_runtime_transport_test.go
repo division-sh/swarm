@@ -86,6 +86,7 @@ func TestShouldUseMCPBridge_CanDisable(t *testing.T) {
 
 func TestClaudeToolArgumentsProjectExactManagedSurface(t *testing.T) {
 	actor := models.AgentConfig{ID: "analysis-agent", NativeTools: models.NativeToolConfig{FileIO: true, Bash: true, WebSearch: true}}
+	actor.Identity = testAgentIdentity(actor.ID, "")
 	tools := []ToolDefinition{{Name: "query_metrics"}, {Name: "emit_category_assessed"}}
 	ctx, surface := testManagedCLISurfaceContext(t, actor, tools)
 	projection, err := projectClaudeInvocationTools(ctx, actor, tools)
@@ -138,6 +139,7 @@ func TestClaudeInvocationToolProjectionCoversEveryNativeFamily(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			actor := models.AgentConfig{ID: "native-agent", NativeTools: test.native}
+			actor.Identity = testAgentIdentity(actor.ID, "")
 			tools := []ToolDefinition{{Name: "emit_done"}}
 			ctx, _ := testManagedCLISurfaceContext(t, actor, tools)
 			projection, err := projectClaudeInvocationTools(ctx, actor, tools)
@@ -250,6 +252,7 @@ func testConversationForkAuthority() runtimeeffects.Authority {
 
 func TestManagedCapabilitySurfaceDoesNotInjectRetiredLegacyEntityTools(t *testing.T) {
 	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator"}
+	actor.Identity = testAgentIdentity(actor.ID, "")
 	tools := []ToolDefinition{
 		{Name: "read_validation_case"},
 		{Name: "read_validation_case_business_brief"},
@@ -295,6 +298,10 @@ func testManagedCLISurfaceContext(t *testing.T, actor models.AgentConfig, tools 
 	t.Helper()
 	if strings.TrimSpace(actor.ID) == "" {
 		actor.ID = "test-agent"
+	}
+	if actor.Identity.IsZero() {
+		actor.Identity = testAgentIdentity(actor.ID, actor.FlowPath)
+		actor.FlowPath = actor.Identity.FlowInstance()
 	}
 	caps := make([]toolcapabilities.Capability, 0, len(tools))
 	for _, tool := range tools {

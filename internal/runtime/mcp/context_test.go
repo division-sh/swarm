@@ -67,7 +67,7 @@ func managedClaudeProviderTurnTestContext(t testing.TB, executionKind managedcap
 	}
 	authority.Target = target
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorID: actorID, RuntimeMode: "task", Provider: "claude", Transport: "cli", ProviderContract: "claude-cli-test",
+		ActorIdentity: identity, RuntimeMode: "task", Provider: "claude", Transport: "cli", ProviderContract: "claude-cli-test",
 		Authority: managedcapabilities.Authority{
 			Kind: managedcapabilities.AuthorityProviderTurn, ID: target.ID, ExecutionKind: executionKind,
 			ExecutionAuthorityID: admission.ExecutionAuthorityID, RunID: target.RunID, SessionID: target.SessionID, TurnOrdinal: 1,
@@ -129,7 +129,9 @@ func TestTurnContextRegistry_ResetIsScopedToRegistry(t *testing.T) {
 func TestTurnContextRegistryPreservesManagedEffectAuthority(t *testing.T) {
 	harness := effecttest.New()
 	registry := NewTurnContextRegistry(models.ActorFromContext)
-	ctx := models.WithActor(harness.CompletionContext("gateway-turn"), models.AgentConfig{ID: harness.Token.AgentID})
+	ctx := models.WithActor(harness.CompletionContext("gateway-turn"), models.AgentConfig{
+		ID: harness.Token.AgentID, Identity: harness.Token.Identity, FlowPath: harness.Token.Identity.FlowInstance(),
+	})
 	token := registry.RegisterTurnContext(ctx)
 	turn, ok := registry.ResolveTurnContext(token)
 	if !ok {
@@ -156,6 +158,28 @@ func TestTurnContextRegistryPreservesManagedEffectAuthority(t *testing.T) {
 	}
 	if identity, ok := runtimeeffects.LogicalOperationIdentityFromContext(base); !ok || identity != "gateway-turn" {
 		t.Fatalf("restored logical identity = %q ok=%v", identity, ok)
+	}
+}
+
+func TestTurnContextRegistryRejectsSameSlugSiblingCapabilityPrincipal(t *testing.T) {
+	ctx, surface, _ := managedClaudeProviderTurnTestContext(t, managedcapabilities.ExecutionNormalAgent)
+	registry := NewTurnContextRegistry(models.ActorFromContext)
+	siblingIdentity := agentidentitytest.Runtime(
+		t,
+		surface.ActorID,
+		"mcp-managed-turn-test",
+		"claude",
+		"sibling",
+		"claude/sibling",
+	)
+	hostile := models.WithActor(ctx, models.AgentConfig{
+		ID: surface.ActorID, Identity: siblingIdentity, FlowPath: siblingIdentity.FlowInstance(),
+	})
+	if token := registry.RegisterTurnContextWithCapabilitySurface(hostile, time.Minute, surface); token != "" {
+		t.Fatalf("same-slug sibling capability principal registered as %q", token)
+	}
+	if token := registry.RegisterTurnContextWithCapabilitySurface(ctx, time.Minute, surface); token == "" {
+		t.Fatal("exact capability principal did not register")
 	}
 }
 
@@ -204,7 +228,9 @@ func TestTurnContextRegistryPreservesSiblingLogicalIdentityAndIgnoresMCPTranspor
 	registry := NewTurnContextRegistry(models.ActorFromContext)
 	register := func(identity string) TurnContext {
 		ctx := runtimeeffects.WithLogicalOperationIdentity(harness.CompletionContext("inbound-event"), identity)
-		ctx = models.WithActor(ctx, models.AgentConfig{ID: harness.Token.AgentID})
+		ctx = models.WithActor(ctx, models.AgentConfig{
+			ID: harness.Token.AgentID, Identity: harness.Token.Identity, FlowPath: harness.Token.Identity.FlowInstance(),
+		})
 		token := registry.RegisterTurnContext(ctx)
 		turn, ok := registry.ResolveTurnContext(token)
 		if !ok {

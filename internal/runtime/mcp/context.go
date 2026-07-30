@@ -91,7 +91,11 @@ func (r *TurnContextRegistry) RegisterTurnContextWithCapabilitySurface(ctx conte
 		return ""
 	}
 	actor, ok := r.actorResolver(ctx)
-	if !ok || strings.TrimSpace(actor.ID) == "" || strings.TrimSpace(actor.ID) != surface.ActorID {
+	if !ok {
+		return ""
+	}
+	actorIdentity, err := actor.ConcreteIdentity()
+	if err != nil || !surface.MatchesActor(actorIdentity) {
 		return ""
 	}
 	effectAuthority, hasEffectAuthority := runtimeeffects.AuthorityFromContext(ctx)

@@ -1,12 +1,14 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"testing"
 	"time"
 
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -26,6 +28,125 @@ func TestLifecycleAndExternalEffectAuthoritySQLite(t *testing.T) {
 func TestLifecycleAndExternalEffectAuthorityPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	proveLifecycleAndExternalEffectAuthority(t, admitTestPostgresStore(t, db), db, false)
+}
+
+func TestSameSlugSiblingExternalEffectAuthoritySQLite(t *testing.T) {
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	proveSameSlugSiblingExternalEffectAuthority(t, store, store.DB, true)
+}
+
+func TestSameSlugSiblingExternalEffectAuthorityPostgres(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	proveSameSlugSiblingExternalEffectAuthority(t, admitTestPostgresStore(t, db), db, false)
+}
+
+func proveSameSlugSiblingExternalEffectAuthority(t *testing.T, store lifecycleEffectStore, db *sql.DB, sqlite bool) {
+	t.Helper()
+	ctx := testAuthorActivityContext()
+	now := time.Date(2026, 7, 10, 19, 0, 0, 0, time.UTC)
+	identities := []struct {
+		identity runtimeagentidentity.Identity
+		spawnID  string
+		startID  string
+	}{
+		{
+			identity: testAgentIdentity(t, "sibling-worker", "review/inst-a"),
+			spawnID:  "00000000-0000-0000-0000-000000002001",
+			startID:  "00000000-0000-0000-0000-000000002002",
+		},
+		{
+			identity: testAgentIdentity(t, "sibling-worker", "review/inst-b"),
+			spawnID:  "00000000-0000-0000-0000-000000002003",
+			startID:  "00000000-0000-0000-0000-000000002004",
+		},
+	}
+	tokens := make([]runtimeeffects.LifecycleToken, 0, len(identities))
+	for index, fixture := range identities {
+		rec := runtimemanager.PersistedAgent{
+			Config: runtimeactors.AgentConfig{
+				ID: "sibling-worker", Identity: fixture.identity, Type: "sonnet", Role: "worker",
+				FlowID: "review", FlowPath: fixture.identity.FlowInstance(), Model: "regular",
+				ExecutionMode: runtimeeffects.ExecutionModeLive,
+				Config:        []byte(`{"system_prompt":"x"}`),
+			},
+			Status: "active", HiredBy: "test", StartedAt: now,
+		}
+		spawned, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+			OperationID: fixture.spawnID, OperationKind: "spawn", RequestHash: "sibling-spawn",
+			Identity: fixture.identity, AgentID: rec.Config.ID, Trigger: "spawn", TargetEpoch: 21,
+			TargetGeneration: 1, TargetPhase: runtimemanager.AgentLifecycleRegistered,
+			ConfigRevision: "revision-1", RunMode: runtimemanager.AgentRunModeStopped, Agent: &rec,
+			Now: now.Add(time.Duration(index) * time.Second),
+		})
+		if err != nil {
+			t.Fatalf("spawn sibling %s: %v", fixture.identity.FlowInstance(), err)
+		}
+		started, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+			OperationID: fixture.startID, OperationKind: "start", RequestHash: "sibling-start",
+			Identity: fixture.identity, AgentID: rec.Config.ID, Trigger: "start",
+			ExpectedEpoch: spawned.RuntimeEpoch, ExpectedGeneration: spawned.Generation, ExpectedPhase: spawned.Phase,
+			TargetEpoch: 21, TargetGeneration: 2, TargetPhase: runtimemanager.AgentLifecycleRunning,
+			ConfigRevision: "revision-1", RunMode: runtimemanager.AgentRunModeStandard,
+			Now: now.Add(time.Duration(index+2) * time.Second),
+		})
+		if err != nil {
+			t.Fatalf("start sibling %s: %v", fixture.identity.FlowInstance(), err)
+		}
+		tokens = append(tokens, runtimeeffects.LifecycleToken{
+			RuntimeEpoch: started.RuntimeEpoch, Identity: fixture.identity,
+			AgentID: started.AgentID, Generation: started.Generation,
+		})
+	}
+
+	runID := managedNormalEffectStoreTestRunID("sibling-worker")
+	if sqlite {
+		requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	} else {
+		requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	}
+	controller := runtimeeffects.NewController(store)
+	handles := make([]*runtimeeffects.Handle, 0, len(tokens))
+	contexts := make([]context.Context, 0, len(tokens))
+	for _, token := range tokens {
+		effectCtx := runtimeeffects.WithController(runtimeeffects.WithLifecycleToken(ctx, token), controller)
+		effectCtx = runtimeeffects.WithLogicalOperationIdentity(effectCtx, "same-logical-operation")
+		authority := runtimeeffects.NormalAgentAuthority(token, "sibling-effect-owner", now.Add(time.Minute))
+		effectCtx = managedNormalEffectStoreTestContext(t, effectCtx, authority)
+		handle, err := runtimeeffects.Begin(effectCtx, "authored_http_tool", []byte("same-request"), nil)
+		if err != nil {
+			t.Fatalf("authorize sibling %s: %v", token.Identity.FlowInstance(), err)
+		}
+		if err := handle.MarkLaunched(effectCtx); err != nil {
+			t.Fatalf("launch sibling %s: %v", token.Identity.FlowInstance(), err)
+		}
+		if err := handle.Succeed(effectCtx, map[string]any{"identity": token.Identity.FlowInstance()}); err != nil {
+			t.Fatalf("settle sibling %s: %v", token.Identity.FlowInstance(), err)
+		}
+		handles = append(handles, handle)
+		contexts = append(contexts, effectCtx)
+	}
+	if handles[0].Attempt().OperationID == handles[1].Attempt().OperationID {
+		t.Fatalf("same-slug siblings shared operation %s", handles[0].Attempt().OperationID)
+	}
+	if _, err := runtimeeffects.Begin(contexts[0], "authored_http_tool", []byte("same-request"), nil); err == nil {
+		t.Fatal("exact replay of settled sibling operation was admitted for redispatch")
+	}
+	for index, handle := range handles {
+		placeholder := "?"
+		if !sqlite {
+			placeholder = "$1"
+		}
+		var flowInstance string
+		if err := db.QueryRow(
+			"SELECT flow_instance FROM runtime_external_effect_operations WHERE operation_id="+placeholder,
+			handle.Attempt().OperationID,
+		).Scan(&flowInstance); err != nil {
+			t.Fatalf("load sibling operation identity: %v", err)
+		}
+		if flowInstance != identities[index].identity.FlowInstance() {
+			t.Fatalf("persisted sibling route = %q, want %q", flowInstance, identities[index].identity.FlowInstance())
+		}
+	}
 }
 
 func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffectStore, db *sql.DB, sqlite bool) {

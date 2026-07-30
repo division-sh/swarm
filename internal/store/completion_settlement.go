@@ -238,7 +238,7 @@ func insertCompletionTargetPostgres(ctx context.Context, tx *sql.Tx, attempt run
 	if surface.ID != strings.TrimSpace(t.CapabilitySurfaceID) || surface.Authority.ID != strings.TrimSpace(t.TurnID) {
 		return fmt.Errorf("completion turn capability surface identity mismatch")
 	}
-	if err := validateManagedAgentTurnSurface(surface, t.AgentID, t.SessionID, t.RunID); err != nil {
+	if err := validateManagedAgentTurnSurface(surface, t.Identity.Agent, t.SessionID, t.RunID); err != nil {
 		return err
 	}
 	fields, err := agentIdentityFields(t.Identity.Agent)
@@ -293,7 +293,7 @@ func insertCompletionTargetSQLite(ctx context.Context, tx *sql.Tx, attempt runti
 	if surface.ID != strings.TrimSpace(t.CapabilitySurfaceID) || surface.Authority.ID != strings.TrimSpace(t.TurnID) {
 		return fmt.Errorf("sqlite completion turn capability surface identity mismatch")
 	}
-	if err := validateManagedAgentTurnSurface(surface, t.AgentID, t.SessionID, t.RunID); err != nil {
+	if err := validateManagedAgentTurnSurface(surface, t.Identity.Agent, t.SessionID, t.RunID); err != nil {
 		return err
 	}
 	fields, err := agentIdentityFields(t.Identity.Agent)

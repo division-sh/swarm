@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -59,16 +60,25 @@ func (r *scriptedLLMRuntime) SetAgentFixture(agentID string, step scriptedAgentF
 	r.mu.Unlock()
 }
 
-func (r *scriptedLLMRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []llm.ToolDefinition) (*llm.Session, error) {
+func (r *scriptedLLMRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []llm.ToolDefinition) (*llm.Session, error) {
 	if r == nil {
 		return nil, fmt.Errorf("scripted llm runtime is nil")
 	}
-	return &llm.Session{
+	session := &llm.Session{
 		ID:           uuid.NewString(),
 		AgentID:      strings.TrimSpace(agentID),
 		SystemPrompt: systemPrompt,
 		Tools:        append([]llm.ToolDefinition(nil), tools...),
-	}, nil
+	}
+	if execution, ok := agentmemory.FromContext(ctx); ok {
+		plan, err := execution.Plan.Normalize()
+		if err != nil {
+			return nil, err
+		}
+		session.Memory = plan
+		session.MemoryIdentity = execution.Identity.Normalize()
+	}
+	return session, nil
 }
 
 func (*scriptedLLMRuntime) ProviderContract() llm.ProviderContract {
