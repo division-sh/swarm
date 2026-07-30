@@ -327,7 +327,6 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		"AddFlowInstanceRouteContext":            operationMutation,
 		"AdmitBundleSourceFact":                  operationPureRead,
 		"BeginPipelineParentTransition":          operationMutation,
-		"CheckDirectRecipients":                  operationPureRead,
 		"CheckDirectRoutes":                      operationPureRead,
 		"CheckPublishRecipientPlan":              operationPureRead,
 		"DispatchPreparedPublish":                operationMutation,
