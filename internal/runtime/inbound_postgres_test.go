@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -24,10 +25,13 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
@@ -57,6 +61,7 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
+	installInboundStandingRecoveryOwner(t, bus, runID, provider)
 	controller := runtimeingress.NewController(pg, bus, runtimeingress.Options{})
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
 	bus.SetRuntimeIngressDispatchGate(controller)
@@ -160,6 +165,7 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
+	installInboundStandingRecoveryOwner(t, bus, runID, provider)
 	controller := runtimeingress.NewController(pg, bus, runtimeingress.Options{})
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
 	bus.SetRuntimeIngressDispatchGate(controller)
@@ -263,6 +269,7 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
+	installInboundStandingRecoveryOwner(t, bus, runID, provider)
 	controller := runtimeingress.NewController(pg, bus, runtimeingress.Options{})
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
 	bus.SetRuntimeIngressDispatchGate(controller)
@@ -1089,7 +1096,10 @@ func seedPostgresInboundGatewayRuntime(
 	agentID string,
 ) {
 	t.Helper()
-	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{
+		Origin: boundedInboundStandingOrigin(t, provider),
+		RunID:  runID,
+	})
 	configBytes, err := json.Marshal(map[string]any{
 		"secrets": map[string]any{
 			"webhook_signing": map[string]string{
@@ -1155,7 +1165,11 @@ func seedSQLiteInboundGatewayRuntime(
 ) {
 	t.Helper()
 	now := time.Now().UTC()
-	storetest.RequireSQLiteRun(t, ctx, sqliteStore.DB, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now})
+	storetest.RequireSQLiteRun(t, ctx, sqliteStore.DB, storetest.RunFixture{
+		Origin:    boundedInboundStandingOrigin(t, provider),
+		RunID:     runID,
+		StartedAt: now,
+	})
 	configBytes, err := json.Marshal(map[string]any{
 		"secrets": map[string]any{
 			"webhook_signing": map[string]string{
@@ -1201,6 +1215,76 @@ func seedSQLiteInboundGatewayRuntime(
 		t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 	}
 	ensureBoundedStandingTarget(t, ctx, sqliteStore, runID, entityID, provider)
+}
+
+func boundedInboundStandingOrigin(t *testing.T, provider string) runtimerunlifecycle.RunOrigin {
+	t.Helper()
+	serviceID := runtimeflowidentity.StandingServiceID(
+		"test.provider."+strings.ToLower(strings.TrimSpace(provider)),
+		"bounded-inbound",
+	)
+	origin, err := runtimerunlifecycle.StandingGenerationRunOrigin(serviceID, 1)
+	if err != nil {
+		t.Fatalf("construct bounded inbound standing origin: %v", err)
+	}
+	return origin
+}
+
+type inboundStandingRecoveryOwner struct {
+	occurrence *worklifetime.StandingOccurrence
+}
+
+func (o inboundStandingRecoveryOwner) BeginStandingRunRecovery(
+	ctx context.Context,
+	runID string,
+	origin runtimerunlifecycle.RunOrigin,
+) (*worklifetime.Lease, error) {
+	identity := o.occurrence.Identity()
+	if identity.RunID != runID ||
+		identity.ServiceID != origin.ServiceID() ||
+		identity.Generation != uint64(origin.Generation()) {
+		return nil, errors.New("inbound standing recovery requested the wrong occurrence")
+	}
+	return o.occurrence.Begin(ctx)
+}
+
+func installInboundStandingRecoveryOwner(
+	t *testing.T,
+	bus *runtimebus.EventBus,
+	runID string,
+	provider string,
+) {
+	t.Helper()
+	origin := boundedInboundStandingOrigin(t, provider)
+	process := worklifetime.NewProcess()
+	runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+		RuntimeInstanceID: runID,
+		BundleHash:        authorActivityTestBundleSourceFact.BundleHash(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	standing, err := runtimeOwner.NewStanding(context.Background(), worklifetime.StandingIdentity{
+		ServiceID:  origin.ServiceID(),
+		RunID:      runID,
+		Generation: uint64(origin.Generation()),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bus.SetStandingRunWorkOwner(inboundStandingRecoveryOwner{occurrence: standing})
+	t.Cleanup(func() {
+		if err := standing.RetireAndWait(context.Background()); err != nil {
+			t.Errorf("retire inbound standing occurrence: %v", err)
+		}
+		if _, err := runtimeOwner.RetireAndWait(context.Background()); err != nil {
+			t.Errorf("retire inbound runtime occurrence: %v", err)
+		}
+		process.Retire()
+		if _, err := process.Join(context.Background()); err != nil {
+			t.Errorf("join inbound process occurrence: %v", err)
+		}
+	})
 }
 
 func loadPostgresInboundProviderEventID(t *testing.T, ctx context.Context, db *sql.DB, runID string, entityID string, eventName string, providerEventID string) string {

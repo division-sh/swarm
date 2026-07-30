@@ -404,12 +404,6 @@ func (eb *EventBus) bindClaimedRunWork(
 	if runID == "" {
 		return ctx, nil, nil
 	}
-	eb.mu.RLock()
-	owner := eb.standingRunWorkOwner
-	eb.mu.RUnlock()
-	if owner == nil {
-		return ctx, nil, nil
-	}
 	reader, ok := eb.store.(RunOriginReader)
 	if !ok || reader == nil {
 		return ctx, nil, errors.New("persisted pipeline recovery requires typed run origin readback")
@@ -420,6 +414,12 @@ func (eb *EventBus) bindClaimedRunWork(
 	}
 	if origin.Kind() != runtimerunlifecycle.OriginStandingGeneration {
 		return ctx, nil, nil
+	}
+	eb.mu.RLock()
+	owner := eb.standingRunWorkOwner
+	eb.mu.RUnlock()
+	if owner == nil {
+		return ctx, nil, fmt.Errorf("%w: standing-generation pipeline recovery owner is not installed", ErrRunDispatchBlocked)
 	}
 	lease, err := owner.BeginStandingRunRecovery(ctx, runID, origin)
 	if err != nil {

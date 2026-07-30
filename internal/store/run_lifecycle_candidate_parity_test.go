@@ -200,6 +200,21 @@ func TestRunLifecycleCandidateTimestampPrecisionParity(t *testing.T) {
 			if unchanged.Revision != first.Revision || !unchanged.DueAt.Equal(wantDueAt) {
 				t.Fatalf("exact candidate duplicate churned = %#v", unchanged)
 			}
+			mismatchedDue := unchanged
+			mismatchedDue.DueAt = mismatchedDue.DueAt.Add(time.Microsecond)
+			mismatchedResult, err := fixture.store.ExecuteCompletionCandidate(
+				ctx, mismatchedDue, runtimerunlifecycle.TerminalCatalog{},
+			)
+			if err != nil {
+				t.Fatalf("execute same-revision candidate with mismatched due coordinate: %v", err)
+			}
+			if mismatchedResult.Outcome != runtimerunlifecycle.OutcomeExactNoop {
+				t.Fatalf("mismatched due coordinate outcome = %s, want exact_noop", mismatchedResult.Outcome)
+			}
+			afterMismatch := loadRunLifecycleCandidate(t, fixture, ctx, runID)
+			if afterMismatch.Revision != first.Revision || !afterMismatch.DueAt.Equal(wantDueAt) {
+				t.Fatalf("mismatched due callback mutated candidate = %#v, want %#v", afterMismatch, first)
+			}
 			noncanonicalRequest := runtimerunlifecycle.CandidateRequest{
 				RunID: runID, Timing: runtimerunlifecycle.CandidateAt, DueAt: rawDueAt,
 			}

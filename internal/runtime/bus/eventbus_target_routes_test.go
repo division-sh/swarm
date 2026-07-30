@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
@@ -50,6 +51,10 @@ func newTargetRouteMemoryStore() *targetRouteMemoryStore {
 		scopes: map[string]runtimepipelineobligation.CommittedScope{},
 		active: map[string]bool{},
 	}
+}
+
+func (*targetRouteMemoryStore) LoadRunOrigin(context.Context, string) (runtimerunlifecycle.RunOrigin, error) {
+	return runtimerunlifecycle.ScenarioSetupRunOrigin(), nil
 }
 
 func (s *targetRouteMemoryStore) CommitPublish(ctx context.Context, plan CommitPublishPlan) (PreparedPublish, error) {
