@@ -118,6 +118,122 @@ func TestRunLifecycleTimestampAdmissionParity(t *testing.T) {
 	}
 }
 
+func TestRunLifecycleCandidateTimestampPrecisionParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			fixture := openRunLifecycleCandidateParityFixture(t, backend)
+			ctx := testAuthorActivityBundleSourceContext()
+			if store, ok := fixture.store.(*SQLiteRuntimeStore); ok {
+				store.nowFn = func() time.Time {
+					return time.Date(2026, 7, 29, 12, 0, 0, 987654321, time.UTC)
+				}
+			}
+
+			immediateRunID := uuid.NewString()
+			ensureRunLifecycleCandidateParityRun(
+				t, fixture, ctx, immediateRunID,
+				time.Date(2026, 7, 29, 10, 0, 0, 0, time.UTC),
+			)
+			immediate := requestRunLifecycleCandidateParity(t, fixture, ctx, immediateRunID)
+			if immediate.Candidate.DueAt.Nanosecond()%1000 != 0 {
+				t.Fatalf("immediate due_at is noncanonical: %s", immediate.Candidate.DueAt)
+			}
+			listedImmediate := loadRunLifecycleCandidate(t, fixture, ctx, immediateRunID)
+			if listedImmediate.Revision != immediate.Candidate.Revision ||
+				!listedImmediate.DueAt.Equal(immediate.Candidate.DueAt) {
+				t.Fatalf("listed immediate candidate = %#v, want %#v", listedImmediate, immediate.Candidate)
+			}
+			duplicateImmediate := requestRunLifecycleCandidateParity(t, fixture, ctx, immediateRunID)
+			if duplicateImmediate.Disposition != runtimerunlifecycle.CandidateAlreadyCurrent ||
+				duplicateImmediate.Candidate.Revision != immediate.Candidate.Revision ||
+				!duplicateImmediate.Candidate.DueAt.Equal(immediate.Candidate.DueAt) {
+				t.Fatalf("duplicate immediate candidate = %#v, want %#v", duplicateImmediate, immediate)
+			}
+			immediateResult, err := fixture.store.ExecuteCompletionCandidate(
+				ctx,
+				duplicateImmediate.Candidate,
+				runtimerunlifecycle.NewTerminalCatalog(
+					nil,
+					map[string][]string{semanticRunFixtureFlow: {"completed"}},
+				),
+			)
+			if err != nil {
+				t.Fatalf("execute immediate candidate: %v", err)
+			}
+			if immediateResult.Outcome != runtimerunlifecycle.OutcomeAwaitMutation {
+				t.Fatalf("immediate candidate outcome = %s", immediateResult.Outcome)
+			}
+
+			runID := uuid.NewString()
+			ensureRunLifecycleCandidateParityRun(
+				t, fixture, ctx, runID,
+				time.Date(2026, 7, 29, 10, 0, 0, 0, time.UTC),
+			)
+
+			rawDueAt := time.Date(2030, 1, 1, 12, 0, 0, 123456789, time.UTC)
+			wantDueAt := runtimerunlifecycle.CanonicalTimestamp(rawDueAt)
+			first := forceRunLifecycleCandidateParity(t, fixture, ctx, runID, rawDueAt)
+			if !first.DueAt.Equal(wantDueAt) || first.DueAt.Nanosecond()%1000 != 0 {
+				t.Fatalf("persisted due_at = %s, want canonical %s", first.DueAt, wantDueAt)
+			}
+			listed := loadRunLifecycleCandidate(t, fixture, ctx, runID)
+			if listed.Revision != first.Revision || !listed.DueAt.Equal(wantDueAt) {
+				t.Fatalf("listed candidate = %#v, want %#v", listed, first)
+			}
+
+			var duplicate runtimerunlifecycle.CandidateRequestDisposition
+			if err := fixture.store.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
+				var err error
+				duplicate, err = fixture.store.RequestCompletionCandidate(
+					txctx,
+					runtimerunlifecycle.CandidateAtTime(runID, rawDueAt),
+				)
+				return err
+			}); err != nil {
+				t.Fatalf("request exact candidate duplicate: %v", err)
+			}
+			if duplicate != runtimerunlifecycle.CandidateAlreadyCurrent {
+				t.Fatalf("exact candidate duplicate disposition = %s", duplicate)
+			}
+			unchanged := loadRunLifecycleCandidate(t, fixture, ctx, runID)
+			if unchanged.Revision != first.Revision || !unchanged.DueAt.Equal(wantDueAt) {
+				t.Fatalf("exact candidate duplicate churned = %#v", unchanged)
+			}
+			noncanonicalRequest := runtimerunlifecycle.CandidateRequest{
+				RunID: runID, Timing: runtimerunlifecycle.CandidateAt, DueAt: rawDueAt,
+			}
+			if err := fixture.store.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
+				_, err := fixture.store.RequestCompletionCandidate(txctx, noncanonicalRequest)
+				return err
+			}); err == nil {
+				t.Fatal("noncanonical scheduled candidate request was accepted")
+			}
+			afterRejected := loadRunLifecycleCandidate(t, fixture, ctx, runID)
+			if afterRejected.Revision != first.Revision || !afterRejected.DueAt.Equal(wantDueAt) {
+				t.Fatalf("rejected noncanonical request churned candidate = %#v", afterRejected)
+			}
+
+			rearm, err := fixture.store.ExecuteCompletionCandidate(
+				ctx, unchanged, runtimerunlifecycle.TerminalCatalog{},
+			)
+			if err != nil {
+				t.Fatalf("execute future candidate: %v", err)
+			}
+			if rearm.Outcome != runtimerunlifecycle.OutcomeRearmAt ||
+				!rearm.Candidate.DueAt.Equal(wantDueAt) {
+				t.Fatalf("future candidate result = %#v", rearm)
+			}
+
+			noncanonical := unchanged
+			noncanonical.DueAt = noncanonical.DueAt.Add(time.Nanosecond)
+			if err := noncanonical.Validate(); err == nil {
+				t.Fatal("noncanonical candidate timestamp passed input validation")
+			}
+		})
+	}
+}
+
 func TestRunLifecycleCompletionRetriesBeforeRunStartParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend

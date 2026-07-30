@@ -75,6 +75,45 @@ func TestRunLifecycleOwnershipBoundaryGuard(t *testing.T) {
 	}
 }
 
+func TestRunLifecycleCompletionReadsOnlyOwnerSummaries(t *testing.T) {
+	root := repoRootForRuntimeWriterGuard(t)
+	adjacentOwnerFacts := []string{
+		"agent_sessions",
+		"decision_cards",
+		"human_task_continuations",
+		"proposed_effect_continuations",
+		"stage_gates",
+		"runtime_external_effect_operations",
+		"runtime_external_effect_attempts",
+		"runtime_effect_budget_reservations",
+		"entity_state",
+		"flow_instances",
+	}
+	var violations []string
+	for _, name := range []string{
+		"run_lifecycle_candidates.go",
+		"run_lifecycle_obligations.go",
+		"sqlite_run_completion.go",
+	} {
+		path := filepath.Join(root, "internal/store", name)
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		source := string(raw)
+		for _, fact := range adjacentOwnerFacts {
+			if strings.Contains(source, fact) {
+				relative, _ := filepath.Rel(root, path)
+				violations = append(violations, filepath.ToSlash(relative)+": interprets "+fact)
+			}
+		}
+	}
+	sort.Strings(violations)
+	if len(violations) != 0 {
+		t.Fatalf("run lifecycle completion bypasses canonical owner summaries:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
 func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 	root := repoRootForRuntimeWriterGuard(t)
 	runWrite := regexp.MustCompile(`(?is)\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+runs\b`)

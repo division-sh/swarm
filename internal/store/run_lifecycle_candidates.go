@@ -325,12 +325,13 @@ func requestPostgresCompletionCandidateTx(
 	if lifecycleState == runtimerunlifecycle.StatePaused {
 		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateDeferredPaused}, nil
 	}
-	requestedDue := selectedNow.UTC()
+	selectedNow = runtimerunlifecycle.CanonicalTimestamp(selectedNow)
+	requestedDue := selectedNow
 	if dueAt != nil {
-		requestedDue = dueAt.UTC()
+		requestedDue = runtimerunlifecycle.CanonicalTimestamp(*dueAt)
 	}
-	currentDueAt := currentDue.Time.UTC()
-	currentIsImmediate := currentDue.Valid && !currentDueAt.After(selectedNow.UTC())
+	currentDueAt := runtimerunlifecycle.CanonicalTimestamp(currentDue.Time)
+	currentIsImmediate := currentDue.Valid && !currentDueAt.After(selectedNow)
 	sameCoordinate := currentDue.Valid && currentDueAt.Equal(requestedDue)
 	if !forceRevision && (sameCoordinate || currentIsImmediate) {
 		result := runtimerunlifecycle.CandidateRequestResult{
@@ -358,7 +359,7 @@ func requestPostgresCompletionCandidateTx(
 	); err != nil {
 		return runtimerunlifecycle.CandidateRequestResult{}, fmt.Errorf("request completion candidate: %w", err)
 	}
-	candidate.DueAt = candidate.DueAt.UTC()
+	candidate.DueAt = runtimerunlifecycle.CanonicalTimestamp(candidate.DueAt)
 	result := runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateRequested, Candidate: candidate}
 	return result, result.Validate()
 }
@@ -401,18 +402,19 @@ func requestSQLiteCompletionCandidateTx(
 	if lifecycleState == runtimerunlifecycle.StatePaused {
 		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateDeferredPaused}, nil
 	}
-	requestedDue := selectedNow.UTC()
+	selectedNow = runtimerunlifecycle.CanonicalTimestamp(selectedNow)
+	requestedDue := selectedNow
 	if dueAt != nil {
-		requestedDue = dueAt.UTC()
+		requestedDue = runtimerunlifecycle.CanonicalTimestamp(*dueAt)
 	}
 	if parsed, ok, err := sqliteTimeValue(currentDue); err != nil {
 		return runtimerunlifecycle.CandidateRequestResult{}, err
-	} else if !forceRevision && ok && (parsed.UTC().Equal(requestedDue) || !parsed.UTC().After(selectedNow.UTC())) {
+	} else if !forceRevision && ok && (runtimerunlifecycle.CanonicalTimestamp(parsed).Equal(requestedDue) || !runtimerunlifecycle.CanonicalTimestamp(parsed).After(selectedNow)) {
 		result := runtimerunlifecycle.CandidateRequestResult{
 			Disposition: runtimerunlifecycle.CandidateAlreadyCurrent,
 			Candidate: runtimerunlifecycle.Candidate{
 				RunID: runID, BundleHash: strings.TrimSpace(bundleHash),
-				Revision: currentRev, DueAt: parsed.UTC(),
+				Revision: currentRev, DueAt: runtimerunlifecycle.CanonicalTimestamp(parsed),
 			},
 		}
 		return result, result.Validate()
@@ -537,7 +539,7 @@ func (s *PostgresStore) ListCompletionCandidates(
 		if err := rows.Scan(&candidate.RunID, &candidate.BundleHash, &candidate.Revision, &candidate.DueAt); err != nil {
 			return runtimerunlifecycle.CandidatePage{}, fmt.Errorf("scan completion candidate: %w", err)
 		}
-		candidate.DueAt = candidate.DueAt.UTC()
+		candidate.DueAt = runtimerunlifecycle.CanonicalTimestamp(candidate.DueAt)
 		if err := candidate.Validate(); err != nil {
 			return runtimerunlifecycle.CandidatePage{}, err
 		}
@@ -593,7 +595,7 @@ func (s *SQLiteRuntimeStore) ListCompletionCandidates(
 		if err != nil || !ok {
 			return runtimerunlifecycle.CandidatePage{}, fmt.Errorf("decode sqlite completion candidate due_at: %w", err)
 		}
-		candidate.DueAt = parsed.UTC()
+		candidate.DueAt = runtimerunlifecycle.CanonicalTimestamp(parsed)
 		if err := candidate.Validate(); err != nil {
 			return runtimerunlifecycle.CandidatePage{}, err
 		}
@@ -671,8 +673,9 @@ func (s *PostgresStore) executeCompletionCandidateTx(
 		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeExactNoop}, nil
 	}
 	current := candidate
-	current.DueAt = currentDue.Time.UTC()
-	if current.DueAt.After(selectedNow.UTC()) {
+	selectedNow = runtimerunlifecycle.CanonicalTimestamp(selectedNow)
+	current.DueAt = runtimerunlifecycle.CanonicalTimestamp(currentDue.Time)
+	if current.DueAt.After(selectedNow) {
 		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeRearmAt, Candidate: current}, nil
 	}
 	lifecycleState, err := runtimerunlifecycle.ParseState(state)
@@ -725,7 +728,7 @@ func (s *PostgresStore) executeCompletionCandidateTx(
 		if catalog.Empty() {
 			return runtimerunlifecycle.CompletionResult{}, errors.New("normal run completion requires terminal catalog")
 		}
-		summaries, err := loadPostgresRunCompletionOwnerSummaries(ctx, tx, candidate.RunID, selectedNow.UTC(), catalog)
+		summaries, err := loadPostgresRunCompletionOwnerSummaries(ctx, tx, candidate.RunID, selectedNow, catalog)
 		if err != nil {
 			return runtimerunlifecycle.CompletionResult{}, err
 		}
@@ -733,7 +736,7 @@ func (s *PostgresStore) executeCompletionCandidateTx(
 			return s.finishBlockedPostgresCandidate(ctx, tx, candidate, optionalWake(summaries.Sessions.NextExpiry))
 		}
 	}
-	if _, _, err := s.completeRunTx(ctx, tx, candidate.RunID, selectedNow.UTC()); err != nil {
+	if _, _, err := s.completeRunTx(ctx, tx, candidate.RunID, selectedNow); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeTerminallyEligible}, nil
@@ -791,9 +794,9 @@ func (s *SQLiteRuntimeStore) executeCompletionCandidateTx(
 	if strings.TrimSpace(bundleHash) != candidate.BundleHash || !duePresent || currentRev != candidate.Revision {
 		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeExactNoop}, nil
 	}
-	selectedNow := s.now()
+	selectedNow := runtimerunlifecycle.CanonicalTimestamp(s.now())
 	current := candidate
-	current.DueAt = dueAt.UTC()
+	current.DueAt = runtimerunlifecycle.CanonicalTimestamp(dueAt)
 	if current.DueAt.After(selectedNow) {
 		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeRearmAt, Candidate: current}, nil
 	}
