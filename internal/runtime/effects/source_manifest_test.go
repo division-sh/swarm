@@ -46,6 +46,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/contracts/connect_delivery_one_codemod.go:writeConnectDeliveryOneRewrite:filesystem_write:4":        ownerOperatorInfra,
 	"internal/runtime/contracts/connect_delivery_one_codemod.go:writeConnectDeliveryOneRewrite:filesystem_write:5":        ownerOperatorInfra,
 	"internal/runtime/context_manager.go:Done:http_do:1":                                                                  ownerRuntimeDependency,
+	"internal/runtime/bus/eventbus.go:acquire:http_do:1":                                                                  ownerRuntimeDependency,
 	"internal/runtime/bus/eventbus.go:Done:http_do:1":                                                                     ownerRuntimeDependency,
 	"internal/runtime/core/worklifetime/event_delivery.go:Complete:http_do:1":                                             ownerRuntimeDependency,
 	"internal/runtime/deliverylifecycle/heartbeat.go:Finish:http_do:1":                                                    ownerRuntimeDependency,
