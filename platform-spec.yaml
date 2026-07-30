@@ -13633,7 +13633,7 @@ platform_tables:
             terminally_eligible: Successful completion and candidate absorption committed atomically.
             await_mutation: A typed non-time blocker remains; the current candidate is cleared and its owner must request a candidate on the next real eligibility-changing transition.
             rearm_at: The same operation commits a newer exact revision at the earliest selected-store-owned future blocker coordinate before the current execution chain settles.
-            exact_noop: The run is missing, terminal, scoped differently, or no longer carries the exact revision.
+            exact_noop: The run is missing, terminal, scoped differently, or no longer carries the exact revision and due coordinate.
             retry_current: A typed execution/storage failure, including selected-store time that has not yet reached the immutable run start coordinate, retains the current durable revision and retries only while the owning generation remains live.
           eligibility_origins: >
             Fresh ordinary non-standalone run creation declares no candidate because that transaction cannot establish
@@ -31228,7 +31228,9 @@ process_local_work_lifetime_authority:
       Persisted pipeline recovery reads the run's immutable typed origin before execution. Work for a
       standing_generation run is admitted only to the exact loaded {service_id, run_id, generation} occurrence and
       retains that occurrence through durable claim settlement or release; missing, stale, conflicting, fenced, or
-      retired ownership fails closed. Suspend and reset acquire one typed pipeline-recovery transition before fencing
+      retired ownership fails closed. A standing-generation claim observed before its runtime context installs that
+      exact occurrence owner is released and remains blocked for a later scan; it never executes as ownerless work.
+      Suspend and reset acquire one typed pipeline-recovery transition before fencing
       the occurrence. That transition first drains any recovery scan that could already have registered a selected-store
       claim, excludes later scans, and remains held through parent terminalization and occurrence restore or retirement.
       Parent terminalization therefore never races the claim-before-origin-read interval and does not poll, infer an

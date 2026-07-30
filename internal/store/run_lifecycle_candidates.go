@@ -672,9 +672,13 @@ func (s *PostgresStore) executeCompletionCandidateTx(
 	if strings.TrimSpace(bundleHash) != candidate.BundleHash || !currentDue.Valid || currentRev != candidate.Revision {
 		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeExactNoop}, nil
 	}
+	storedDue := runtimerunlifecycle.CanonicalTimestamp(currentDue.Time)
+	if !storedDue.Equal(candidate.DueAt) {
+		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeExactNoop}, nil
+	}
 	current := candidate
 	selectedNow = runtimerunlifecycle.CanonicalTimestamp(selectedNow)
-	current.DueAt = runtimerunlifecycle.CanonicalTimestamp(currentDue.Time)
+	current.DueAt = storedDue
 	if current.DueAt.After(selectedNow) {
 		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeRearmAt, Candidate: current}, nil
 	}
@@ -794,9 +798,13 @@ func (s *SQLiteRuntimeStore) executeCompletionCandidateTx(
 	if strings.TrimSpace(bundleHash) != candidate.BundleHash || !duePresent || currentRev != candidate.Revision {
 		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeExactNoop}, nil
 	}
+	storedDue := runtimerunlifecycle.CanonicalTimestamp(dueAt)
+	if !storedDue.Equal(candidate.DueAt) {
+		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeExactNoop}, nil
+	}
 	selectedNow := runtimerunlifecycle.CanonicalTimestamp(s.now())
 	current := candidate
-	current.DueAt = runtimerunlifecycle.CanonicalTimestamp(dueAt)
+	current.DueAt = storedDue
 	if current.DueAt.After(selectedNow) {
 		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeRearmAt, Candidate: current}, nil
 	}

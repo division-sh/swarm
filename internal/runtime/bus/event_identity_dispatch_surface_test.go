@@ -15,6 +15,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -22,6 +23,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -122,6 +124,21 @@ func TestCompleteEventSnapshotDispatchesThroughManagerBacklogOnSQLiteAndPostgres
 
 func newCompleteEventDispatchFixture(t *testing.T, backend string, decisionObligation bool) completeEventDispatchFixture {
 	t.Helper()
+	return newCompleteEventDispatchFixtureWithOrigin(
+		t,
+		backend,
+		decisionObligation,
+		runlifecyclefixture.ScenarioSetupOrigin(),
+	)
+}
+
+func newCompleteEventDispatchFixtureWithOrigin(
+	t *testing.T,
+	backend string,
+	decisionObligation bool,
+	origin runtimerunlifecycle.RunOrigin,
+) completeEventDispatchFixture {
+	t.Helper()
 	var selected completeEventDispatchStore
 	var db *sql.DB
 	switch backend {
@@ -143,7 +160,38 @@ func newCompleteEventDispatchFixture(t *testing.T, backend string, decisionOblig
 	ctx := testAuthorActivityContext(context.Background())
 	createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	runID, eventID := uuid.NewString(), uuid.NewString()
-	seedCompleteEventDispatchRun(t, ctx, db, backend, runID, createdAt)
+	if origin.Kind() == runtimerunlifecycle.OriginStandingGeneration {
+		runID = runtimeflowidentity.StandingGenerationRunID(origin.ServiceID(), origin.Generation())
+		runner, ok := selected.(runtimepipeline.RuntimeMutationRunner)
+		if !ok {
+			t.Fatalf("%s selected store does not expose the runtime mutation owner", backend)
+		}
+		var workflow *runtimepipeline.WorkflowInstanceStore
+		if backend == "sqlite" {
+			workflow = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
+		} else {
+			workflow = runtimepipeline.NewWorkflowInstanceStore(db)
+			workflow.ConfigureRuntimeMutationRunner(runner)
+		}
+		workflow.ConfigureDeliveryLifecycleStore(selected)
+		workflow.ConfigurePipelineObligationStore(selected.PipelineObligations())
+		reconciled, err := workflow.ReconcileStandingService(ctx, runtimepipeline.StandingServiceCandidate{
+			ServiceID:  origin.ServiceID(),
+			PackageKey: "standing-recovery-proof",
+			FlowID:     backend,
+			InstanceID: uuid.NewString(),
+			EntityID:   uuid.NewString(),
+			Source:     authorActivityTestBundleSourceFact,
+		})
+		if err != nil {
+			t.Fatalf("reconcile standing recovery fixture: %v", err)
+		}
+		if reconciled.RunID != runID || reconciled.Generation != origin.Generation() {
+			t.Fatalf("standing recovery fixture = %#v, want run %s generation %d", reconciled, runID, origin.Generation())
+		}
+	} else {
+		seedCompleteEventDispatchRunWithOrigin(t, ctx, db, backend, runID, createdAt, origin)
+	}
 	sourceRoute := events.RouteIdentity{
 		FlowID: "source-flow", FlowInstance: "source-flow/one", EntityID: uuid.NewString(),
 	}
@@ -173,10 +221,30 @@ func newCompleteEventDispatchFixture(t *testing.T, backend string, decisionOblig
 
 func seedCompleteEventDispatchRun(t testing.TB, ctx context.Context, db *sql.DB, backend, runID string, startedAt time.Time) {
 	t.Helper()
+	seedCompleteEventDispatchRunWithOrigin(
+		t,
+		ctx,
+		db,
+		backend,
+		runID,
+		startedAt,
+		runlifecyclefixture.ScenarioSetupOrigin(),
+	)
+}
+
+func seedCompleteEventDispatchRunWithOrigin(
+	t testing.TB,
+	ctx context.Context,
+	db *sql.DB,
+	backend, runID string,
+	startedAt time.Time,
+	origin runtimerunlifecycle.RunOrigin,
+) {
+	t.Helper()
 	if backend == "postgres" {
-		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: startedAt})
+		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: origin, RunID: runID, StartedAt: startedAt})
 	} else {
-		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: startedAt})
+		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: origin, RunID: runID, StartedAt: startedAt})
 	}
 }
 
