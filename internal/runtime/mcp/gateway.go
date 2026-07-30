@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -606,7 +605,7 @@ func (g *Gateway) mcpToolsForRequest(r *http.Request) ([]ToolDef, error) {
 		if len(turn.ForkSandboxAllowed) == 0 {
 			return nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.forkchat_sandbox", nil, map[string]any{"reason": "sandbox_policy_missing"})
 		}
-		return g.mcpToolsForActorInContext(ctx, turn.Actor, turn.ForkSandboxAllowed, true), nil
+		return g.mcpToolsForActorInContext(ctx, turn.Actor, turn.ForkSandboxAllowed, true)
 	}
 	tools, evidence, mismatches, err := g.mcpToolsForCapabilitySurface(ctx, turn)
 	if len(mismatches) > 0 {
@@ -638,10 +637,16 @@ func (g *Gateway) mcpToolsForCapabilitySurface(ctx context.Context, turn TurnCon
 	if err := turn.CapabilitySurface.Validate(); err != nil || turn.CapabilitySurface.ActorID != strings.TrimSpace(turn.Actor.ID) {
 		return nil, nil, nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_surface", err, map[string]any{"reason": "surface_invalid_or_mismatched"})
 	}
-	catalog := g.toolCatalogInContext(ctx, turn.Actor, true)
-	var names []string
-	var evidence []managedcapabilities.DeliveryEvidence
-	delivered := make(map[string]ToolDef, len(turn.CapabilitySurface.Tools))
+	definitions, err := g.toolDefinitionsInContext(ctx, turn.Actor, true)
+	if err != nil {
+		return nil, nil, nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.catalog", err, map[string]any{"reason": "executor_catalog_invalid"})
+	}
+	type plannedMCPTool struct {
+		tool    managedcapabilities.Tool
+		binding managedcapabilities.DeliveryBinding
+	}
+	planned := make(map[string]plannedMCPTool, len(turn.CapabilitySurface.Tools))
+	plannedNames := make([]string, 0, len(turn.CapabilitySurface.Tools))
 	for _, tool := range turn.CapabilitySurface.Tools {
 		if !tool.Capability.Visible || !tool.Capability.Callable {
 			continue
@@ -650,27 +655,37 @@ func (g *Gateway) mcpToolsForCapabilitySurface(ctx context.Context, turn TurnCon
 			if binding.Kind != managedcapabilities.BindingMCPTool {
 				continue
 			}
-			definition, ok := catalog[tool.Name]
-			if !ok {
-				mismatch := managedcapabilities.DeliveryMismatch{BindingKind: binding.Kind, ExactName: binding.ExactName, Kind: "missing_mcp_definition", Detail: "planned definition is absent from the live MCP catalog"}
-				return nil, nil, []managedcapabilities.DeliveryMismatch{mismatch}, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_surface", nil, map[string]any{"reason": "planned_definition_missing", "tool": tool.Name})
-			}
-			deliveredDefinition := mcpToolDefinition(tool.Name, definition)
-			if actual := llm.ToolDefinitionIdentity(llmToolDefinitionForMCP(deliveredDefinition)); actual != tool.DefinitionHash {
-				mismatch := managedcapabilities.DeliveryMismatch{BindingKind: binding.Kind, ExactName: binding.ExactName, Kind: "mcp_definition_identity_mismatch", Detail: "live MCP description or schema differs from the planned definition"}
-				return nil, nil, []managedcapabilities.DeliveryMismatch{mismatch}, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_surface", nil, map[string]any{"reason": "definition_identity_mismatch", "tool": tool.Name})
-			}
-			delivered[tool.Name] = deliveredDefinition
-			names = append(names, tool.Name)
-			if !tool.EffectiveVisible || !tool.EffectiveCallable {
-				evidence = append(evidence, managedcapabilities.DeliveryEvidence{BindingKind: binding.Kind, ExactName: binding.ExactName, Kind: "mcp_listed", Status: managedcapabilities.EvidenceConfirmed, Detail: "exact turn-context tools/list response"})
-			}
+			planned[tool.Name] = plannedMCPTool{tool: tool, binding: binding}
+			plannedNames = append(plannedNames, tool.Name)
 		}
 	}
-	sort.Strings(names)
-	out := make([]ToolDef, 0, len(names))
-	for _, name := range names {
-		out = append(out, delivered[name])
+
+	var evidence []managedcapabilities.DeliveryEvidence
+	deliveredNames := make(map[string]struct{}, len(planned))
+	out := make([]ToolDef, 0, len(planned))
+	for _, definition := range definitions {
+		entry, ok := planned[definition.Name]
+		if !ok {
+			continue
+		}
+		deliveredDefinition := mcpToolDefinition(definition.Name, definition)
+		if actual := llm.ToolDefinitionIdentity(llmToolDefinitionForMCP(deliveredDefinition)); actual != entry.tool.DefinitionHash {
+			mismatch := managedcapabilities.DeliveryMismatch{BindingKind: entry.binding.Kind, ExactName: entry.binding.ExactName, Kind: "mcp_definition_identity_mismatch", Detail: "live MCP description or schema differs from the planned definition"}
+			return nil, nil, []managedcapabilities.DeliveryMismatch{mismatch}, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_surface", nil, map[string]any{"reason": "definition_identity_mismatch", "tool": definition.Name})
+		}
+		out = append(out, deliveredDefinition)
+		deliveredNames[definition.Name] = struct{}{}
+		if !entry.tool.EffectiveVisible || !entry.tool.EffectiveCallable {
+			evidence = append(evidence, managedcapabilities.DeliveryEvidence{BindingKind: entry.binding.Kind, ExactName: entry.binding.ExactName, Kind: "mcp_listed", Status: managedcapabilities.EvidenceConfirmed, Detail: "exact turn-context tools/list response"})
+		}
+	}
+	for _, name := range plannedNames {
+		if _, ok := deliveredNames[name]; ok {
+			continue
+		}
+		entry := planned[name]
+		mismatch := managedcapabilities.DeliveryMismatch{BindingKind: entry.binding.Kind, ExactName: entry.binding.ExactName, Kind: "missing_mcp_definition", Detail: "planned definition is absent from the live MCP catalog"}
+		return nil, nil, []managedcapabilities.DeliveryMismatch{mismatch}, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_surface", nil, map[string]any{"reason": "planned_definition_missing", "tool": name})
 	}
 	return out, evidence, nil, nil
 }
@@ -695,42 +710,33 @@ func (g *Gateway) MCPToolsForActor(actor models.AgentConfig) []ToolDef {
 	if strings.TrimSpace(actor.ID) == "" {
 		return nil
 	}
-	return g.mcpToolsForActor(actor, nil, true)
-}
-
-func (g *Gateway) mcpToolsForActor(actor models.AgentConfig, allowed map[string]struct{}, actorOK bool) []ToolDef {
-	return g.mcpToolsForActorInContext(context.Background(), actor, allowed, actorOK)
-}
-
-func (g *Gateway) mcpToolsForActorInContext(ctx context.Context, actor models.AgentConfig, allowed map[string]struct{}, actorOK bool) []ToolDef {
-	catalog := g.toolCatalogInContext(ctx, actor, actorOK)
-	set, hasSet := g.requestToolCapabilitiesInContext(ctx, actor, actorOK, catalog, allowed)
-
-	names := make([]string, 0, len(catalog))
-	if hasSet {
-		for name, cap := range set.ByName {
-			if !cap.Visible {
-				continue
-			}
-			if _, ok := catalog[name]; !ok {
-				continue
-			}
-			names = append(names, name)
-		}
-	} else {
-		for name := range catalog {
-			if len(allowed) > 0 {
-				if _, ok := allowed[name]; !ok {
-					continue
-				}
-			}
-			names = append(names, name)
-		}
+	tools, err := g.mcpToolsForActorInContext(context.Background(), actor, nil, true)
+	if err != nil {
+		return nil
 	}
-	sort.Strings(names)
-	out := make([]ToolDef, 0, len(names))
-	for _, name := range names {
-		def := catalog[name]
+	return tools
+}
+
+func (g *Gateway) mcpToolsForActorInContext(ctx context.Context, actor models.AgentConfig, allowed map[string]struct{}, actorOK bool) ([]ToolDef, error) {
+	definitions, err := g.toolDefinitionsInContext(ctx, actor, actorOK)
+	if err != nil {
+		return nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.catalog", err, map[string]any{"reason": "executor_catalog_invalid"})
+	}
+	set, hasSet := g.requestToolCapabilitiesInContext(ctx, actor, actorOK, definitions, allowed)
+
+	out := make([]ToolDef, 0, len(definitions))
+	for _, def := range definitions {
+		name := def.Name
+		if hasSet {
+			capability, ok := set.Capability(name)
+			if !ok || !capability.Visible {
+				continue
+			}
+		} else if len(allowed) > 0 {
+			if _, ok := allowed[name]; !ok {
+				continue
+			}
+		}
 		desc := "Runtime tool"
 		schema := any(map[string]any{
 			"type":                 "object",
@@ -745,55 +751,47 @@ func (g *Gateway) mcpToolsForActorInContext(ctx context.Context, actor models.Ag
 		}
 		out = append(out, ToolDef{Name: name, Description: desc, InputSchema: schema})
 	}
-	return out
+	return out, nil
 }
 
-func (g *Gateway) toolCatalog(actor models.AgentConfig, actorOK bool) map[string]llm.ToolDefinition {
-	return g.toolCatalogInContext(context.Background(), actor, actorOK)
-}
-
-func (g *Gateway) toolCatalogInContext(ctx context.Context, actor models.AgentConfig, actorOK bool) map[string]llm.ToolDefinition {
-	catalog := map[string]llm.ToolDefinition{}
-	if !actorOK {
-		return catalog
+func (g *Gateway) toolDefinitionsInContext(ctx context.Context, actor models.AgentConfig, actorOK bool) ([]llm.ToolDefinition, error) {
+	if !actorOK || g.executor == nil {
+		return nil, nil
 	}
-	if g.executor != nil {
-		defs := g.executor.ToolDefinitionsForActor(actor)
-		if contextAware, ok := g.executor.(runtimeGatewayContextAwareExecutor); ok {
-			defs = contextAware.ToolDefinitionsForActorInContext(ctx, actor)
-		}
-		for _, def := range defs {
-			name := normalizeGatewayToolName(def.Name)
-			if name != "" {
-				def.Name = name
-				catalog[name] = def
-			}
-		}
+	definitions := g.executor.ToolDefinitionsForActor(actor)
+	if contextAware, ok := g.executor.(runtimeGatewayContextAwareExecutor); ok {
+		definitions = contextAware.ToolDefinitionsForActorInContext(ctx, actor)
 	}
-	return catalog
+	seen := make(map[string]struct{}, len(definitions))
+	for _, definition := range definitions {
+		name := strings.TrimSpace(definition.Name)
+		canonical := normalizeGatewayToolName(name)
+		if canonical == "" {
+			return nil, fmt.Errorf("executor catalog contains an empty tool name")
+		}
+		if _, duplicate := seen[canonical]; duplicate {
+			return nil, fmt.Errorf("executor catalog contains duplicate canonical tool name %q", canonical)
+		}
+		if canonical != name {
+			return nil, fmt.Errorf("executor catalog contains non-canonical tool name %q", definition.Name)
+		}
+		seen[canonical] = struct{}{}
+	}
+	return definitions, nil
 }
 
-func (g *Gateway) requestToolCapabilities(actor models.AgentConfig, actorOK bool, catalog map[string]llm.ToolDefinition, requestAllowed map[string]struct{}) (toolcapabilities.Set, bool) {
-	return g.requestToolCapabilitiesInContext(context.Background(), actor, actorOK, catalog, requestAllowed)
-}
-
-func (g *Gateway) requestToolCapabilitiesInContext(ctx context.Context, actor models.AgentConfig, actorOK bool, catalog map[string]llm.ToolDefinition, requestAllowed map[string]struct{}) (toolcapabilities.Set, bool) {
+func (g *Gateway) requestToolCapabilitiesInContext(ctx context.Context, actor models.AgentConfig, actorOK bool, definitions []llm.ToolDefinition, requestAllowed map[string]struct{}) (toolcapabilities.Set, bool) {
 	if g.executor == nil || !actorOK {
 		return toolcapabilities.Set{}, false
 	}
+	names := make([]string, 0, len(definitions))
+	for _, definition := range definitions {
+		names = append(names, definition.Name)
+	}
 	if contextAware, ok := g.executor.(runtimeGatewayContextAwareExecutor); ok {
-		return contextAware.ToolCapabilitiesForActorInContext(ctx, actor, g.catalogNames(catalog), requestAllowed), true
+		return contextAware.ToolCapabilitiesForActorInContext(ctx, actor, names, requestAllowed), true
 	}
-	return g.executor.ToolCapabilitiesForActor(actor, g.catalogNames(catalog), requestAllowed), true
-}
-
-func (g *Gateway) catalogNames(catalog map[string]llm.ToolDefinition) []string {
-	names := make([]string, 0, len(catalog))
-	for name := range catalog {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+	return g.executor.ToolCapabilitiesForActor(actor, names, requestAllowed), true
 }
 
 func (g *Gateway) authorize(r *http.Request) error {

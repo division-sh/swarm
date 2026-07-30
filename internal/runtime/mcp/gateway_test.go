@@ -1096,6 +1096,97 @@ func TestGatewayMCPToolsForRequest_UsesActorScopedToolDefinitions(t *testing.T) 
 	}
 }
 
+func TestGatewayMCPToolsForRequest_PreservesExecutorOrderAndRejectsCanonicalDuplicates(t *testing.T) {
+	actor := models.AgentConfig{ID: "analysis-agent", Role: "analysis"}
+	orderedDefinitions := []llm.ToolDefinition{
+		{Name: "zeta_tool", Description: "first"},
+		{Name: "alpha_tool", Description: "second"},
+	}
+	for _, testCase := range []struct {
+		name string
+		turn TurnContext
+	}{
+		{
+			name: "managed",
+			turn: TurnContext{
+				Actor:             actor,
+				CapabilitySurface: testCapabilitySurfaceForDefinitions(t, actor, orderedDefinitions...),
+			},
+		},
+		{
+			name: "forkchat",
+			turn: TurnContext{
+				Actor: actor,
+				ForkSandboxAllowed: map[string]struct{}{
+					"zeta_tool":  {},
+					"alpha_tool": {},
+				},
+			},
+		},
+	} {
+		t.Run(testCase.name+" preserves order", func(t *testing.T) {
+			registry := newTestTurnContextRegistry()
+			putTestTurnContext(t, registry, "ctx-order", testCase.turn)
+			gateway := NewGateway(actorScopedToolExecutorStub{actorDefs: orderedDefinitions}, "", GatewayHooks{
+				ResolveTurnContext: registry.ResolveTurnContext,
+			})
+
+			tools := mustMCPToolsForRequest(t, gateway, withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", nil), "ctx-order"))
+			names := make([]string, 0, len(tools))
+			for _, tool := range tools {
+				names = append(names, tool.Name)
+			}
+			if want := []string{"zeta_tool", "alpha_tool"}; !slices.Equal(names, want) {
+				t.Fatalf("projected tools = %#v, want executor order and cardinality %#v", names, want)
+			}
+		})
+	}
+
+	duplicateDefinitions := []llm.ToolDefinition{
+		{Name: "read_file", Description: "canonical"},
+		{Name: "Read", Description: "provider alias"},
+	}
+	for _, testCase := range []struct {
+		name string
+		turn TurnContext
+	}{
+		{
+			name: "managed",
+			turn: TurnContext{
+				Actor:             actor,
+				CapabilitySurface: testCapabilitySurfaceForDefinitions(t, actor, duplicateDefinitions[0]),
+			},
+		},
+		{
+			name: "forkchat",
+			turn: TurnContext{
+				Actor:              actor,
+				ForkSandboxAllowed: map[string]struct{}{"read_file": {}},
+			},
+		},
+	} {
+		t.Run(testCase.name+" rejects duplicate canonical names", func(t *testing.T) {
+			registry := newTestTurnContextRegistry()
+			putTestTurnContext(t, registry, "ctx-duplicate", testCase.turn)
+			gateway := NewGateway(actorScopedToolExecutorStub{actorDefs: duplicateDefinitions}, "", GatewayHooks{
+				ResolveTurnContext: registry.ResolveTurnContext,
+			})
+
+			tools, err := gateway.mcpToolsForRequest(withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", nil), "ctx-duplicate"))
+			if err == nil || len(tools) != 0 {
+				t.Fatalf("duplicate canonical catalog returned tools=%#v err=%v, want fail closed", tools, err)
+			}
+			protocolErr, ok := err.(*ProtocolError)
+			if !ok || protocolErr.Payload.Operation != "mcp.tools.list.catalog" || protocolErr.Payload.Detail["reason"] != "executor_catalog_invalid" {
+				t.Fatalf("duplicate canonical catalog error = %#v", err)
+			}
+			if cause := protocolErr.Unwrap(); cause == nil || !strings.Contains(cause.Error(), `duplicate canonical tool name "read_file"`) {
+				t.Fatalf("duplicate canonical catalog cause = %v", cause)
+			}
+		})
+	}
+}
+
 func TestGatewayMCPToolsForRequest_ExposesFlowDataOnlyFromActorScopedCatalog(t *testing.T) {
 	registry := newTestTurnContextRegistry()
 	putTestTurnContext(t, registry, "ctx-flow-data", TurnContext{

@@ -1510,6 +1510,9 @@ for payload in [
         if payload.get("id") is not None:
             responses.append(json.loads(raw))
 listed = responses[-1]["result"]["tools"]
+listed_names = [tool.get("name") for tool in listed]
+if listed_names != ["emit_task_completed"]:
+    raise SystemExit(f"selected-fork MCP tools/list names = {listed_names!r}, want exact executor projection")
 emit = next((tool for tool in listed if tool["name"] == "emit_task_completed"), None)
 expected_schema = {
     "type": "object",
