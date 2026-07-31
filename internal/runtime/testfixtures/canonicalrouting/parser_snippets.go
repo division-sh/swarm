@@ -9,6 +9,7 @@ const (
 	UnsupportedResolutionField  UnsupportedResolutionSnippet = "resolution"
 	UnsupportedInstanceKeyField UnsupportedResolutionSnippet = "instance-key"
 	UnsupportedResolutionCarry  UnsupportedResolutionSnippet = "carry"
+	RetiredInstanceKeyCarry     UnsupportedResolutionSnippet = "retired-instance-key-carry"
 )
 
 // EventMetadataSnippet identifies one closed event-metadata parser shape.
@@ -172,8 +173,26 @@ pins:
         event: work.requested
         carries:
           work_id:
-            from: instance.key.work_id
+            from: payload.work_id
             unsupported: true
+`
+	case RetiredInstanceKeyCarry:
+		source = `
+name: retired-instance-key-source
+mode: template
+instance:
+  by: work_id
+pins:
+  inputs:
+    events:
+      - name: work_requested
+        event: work.requested
+        resolution:
+          mode: create
+        carries:
+          work_id:
+            from: instance.key.work_id
+            type: uuid
 `
 	default:
 		t.Fatalf("unsupported resolution parser snippet %q", id)

@@ -164,6 +164,16 @@ func NewRetiredResolutionInstanceKeyDiagnostic() *LoaderDiagnostic {
 	)
 }
 
+func NewRetiredInstanceKeyCarrySourceDiagnostic() *LoaderDiagnostic {
+	return NewExpectedShapeDiagnostic(
+		"contract_loader.retired_instance_key_carry_source",
+		"schema.yaml.pins.inputs.events.carries.*.from",
+		"instance.key.* carry sources are retired; carries.<instance.by>.from is the sole input identity source owner.",
+		"For create mode use generated.uuid, event.id, or one payload.<field>; selecting modes require one payload.<field>. Run 'swarm migrate-resolution-instance-key --contracts <bundle-root>' for deterministic legacy declarations.",
+		nil,
+	)
+}
+
 func NewExpectedShapeDiagnostic(code, yamlPath, problem, remediation string, cause error) *LoaderDiagnostic {
 	return &LoaderDiagnostic{
 		Code:        strings.TrimSpace(code),

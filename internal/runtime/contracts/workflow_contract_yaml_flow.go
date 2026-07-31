@@ -483,6 +483,10 @@ func (c *FlowInputPinCarry) UnmarshalYAML(node *yaml.Node) error {
 			if err := value.Decode(&out.From); err != nil {
 				return fmt.Errorf("carry.from: %w", err)
 			}
+			from := strings.TrimSpace(out.From)
+			if from == "instance.key" || strings.HasPrefix(from, "instance.key.") {
+				return NewRetiredInstanceKeyCarrySourceDiagnostic()
+			}
 		case "type":
 			if err := value.Decode(&out.Type); err != nil {
 				return fmt.Errorf("carry.type: %w", err)

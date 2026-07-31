@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -959,6 +960,31 @@ func TestFlowSchemaDocumentDecode_RejectsUnsupportedInputPinResolutionFields(t *
 				t.Fatalf("yaml.Unmarshal error = %v, want typed field rejection", err)
 			}
 		})
+	}
+}
+
+func TestFlowSchemaDocumentDecodeRejectsRetiredInstanceKeyCarrySource(t *testing.T) {
+	var doc FlowSchemaDocument
+	err := canonicalrouting.UnsupportedInputPinResolutionSnippet(t, canonicalrouting.RetiredInstanceKeyCarry).Decode(&doc)
+	if err == nil {
+		t.Fatal("yaml.Unmarshal succeeded, want strict retired carry-source rejection")
+	}
+	var diagnostic *LoaderDiagnostic
+	if !errors.As(err, &diagnostic) {
+		t.Fatalf("yaml.Unmarshal error = %T %v, want LoaderDiagnostic", err, err)
+	}
+	if !strings.Contains(diagnostic.Problem, "instance.key.* carry sources are retired") {
+		t.Fatalf("diagnostic problem = %q, want retired source teaching error", diagnostic.Problem)
+	}
+	for _, want := range []string{
+		"generated.uuid",
+		"event.id",
+		"payload.<field>",
+		"migrate-resolution-instance-key",
+	} {
+		if !strings.Contains(diagnostic.Remediation, want) {
+			t.Fatalf("diagnostic remediation = %q, want teaching detail %q", diagnostic.Remediation, want)
+		}
 	}
 }
 

@@ -24,11 +24,15 @@ type resolutionInstanceKeyRewrite struct {
 }
 
 // RewriteRetiredResolutionInstanceKeys removes deterministic legacy
-// resolution.instance_key declarations after validating every schema first.
-func RewriteRetiredResolutionInstanceKeys(contractsRoot string) (RetiredResolutionInstanceKeyRewriteResult, error) {
+// resolution.instance_key declarations only after the complete rewritten
+// candidate passes the caller's production validation boundary.
+func RewriteRetiredResolutionInstanceKeys(contractsRoot string, validateCandidate func(candidateRoot string) error) (RetiredResolutionInstanceKeyRewriteResult, error) {
 	contractsRoot = strings.TrimSpace(contractsRoot)
 	if contractsRoot == "" {
 		return RetiredResolutionInstanceKeyRewriteResult{}, fmt.Errorf("contracts root is required")
+	}
+	if validateCandidate == nil {
+		return RetiredResolutionInstanceKeyRewriteResult{}, fmt.Errorf("production candidate validator is required")
 	}
 	var schemaFiles []string
 	if err := filepath.WalkDir(contractsRoot, func(path string, entry fs.DirEntry, walkErr error) error {
@@ -58,10 +62,70 @@ func RewriteRetiredResolutionInstanceKeys(contractsRoot string) (RetiredResoluti
 		result.Declarations += declarations
 		rewrites = append(rewrites, rewrite)
 	}
+	if len(rewrites) == 0 {
+		return result, nil
+	}
+	candidateParent, candidateRoot, err := copyResolutionInstanceKeyCandidateTree(contractsRoot)
+	if err != nil {
+		return RetiredResolutionInstanceKeyRewriteResult{}, err
+	}
+	defer os.RemoveAll(candidateParent)
+	candidateRewrites := make([]resolutionInstanceKeyRewrite, 0, len(rewrites))
+	for _, rewrite := range rewrites {
+		relative, err := filepath.Rel(contractsRoot, rewrite.path)
+		if err != nil {
+			return RetiredResolutionInstanceKeyRewriteResult{}, fmt.Errorf("locate candidate rewrite %s: %w", rewrite.path, err)
+		}
+		rewrite.path = filepath.Join(candidateRoot, relative)
+		candidateRewrites = append(candidateRewrites, rewrite)
+	}
+	if err := writeResolutionInstanceKeyRewrites(candidateRewrites); err != nil {
+		return RetiredResolutionInstanceKeyRewriteResult{}, fmt.Errorf("prepare rewritten candidate: %w", err)
+	}
+	if err := validateCandidate(candidateRoot); err != nil {
+		return RetiredResolutionInstanceKeyRewriteResult{}, fmt.Errorf("rewritten candidate failed production validation: %w", err)
+	}
 	if err := writeResolutionInstanceKeyRewrites(rewrites); err != nil {
 		return RetiredResolutionInstanceKeyRewriteResult{}, err
 	}
 	return result, nil
+}
+
+func copyResolutionInstanceKeyCandidateTree(sourceRoot string) (string, string, error) {
+	parent, err := os.MkdirTemp("", "swarm-resolution-instance-key-candidate-*")
+	if err != nil {
+		return "", "", fmt.Errorf("create candidate workspace: %w", err)
+	}
+	candidateRoot := filepath.Join(parent, "contracts")
+	if err := filepath.WalkDir(sourceRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(sourceRoot, path)
+		if err != nil {
+			return err
+		}
+		destination := filepath.Join(candidateRoot, relative)
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return os.MkdirAll(destination, info.Mode().Perm())
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("candidate tree contains unsupported non-regular path %s", path)
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(destination, raw, info.Mode().Perm())
+	}); err != nil {
+		os.RemoveAll(parent)
+		return "", "", fmt.Errorf("copy complete candidate tree: %w", err)
+	}
+	return parent, candidateRoot, nil
 }
 
 func prepareResolutionInstanceKeyRewrite(path string) (resolutionInstanceKeyRewrite, int, bool, error) {
@@ -115,6 +179,9 @@ func prepareResolutionInstanceKeyRewrite(path string) (resolutionInstanceKeyRewr
 }
 
 func rewriteResolutionInstanceKeyEvent(event, instance *yaml.Node) (bool, error) {
+	if event != nil && event.Kind == yaml.ScalarNode {
+		return false, nil
+	}
 	if event == nil || event.Kind != yaml.MappingNode {
 		return false, fmt.Errorf("input event pin must be a mapping")
 	}

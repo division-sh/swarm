@@ -1,8 +1,11 @@
 package cliapp
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/spf13/cobra"
@@ -43,7 +46,20 @@ func runMigrateResolutionInstanceKeyCommand(out, errOut io.Writer, repo string, 
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
-	result, err := runtimecontracts.RewriteRetiredResolutionInstanceKeys(contractsRoot)
+	result, err := runtimecontracts.RewriteRetiredResolutionInstanceKeys(contractsRoot, func(candidateRoot string) error {
+		opts := defaultVerifyCommandOptions()
+		opts.contractsPath = candidateRoot
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		if code := runVerifyCommandWithOutput(context.Background(), repo, opts, &stdout, &stderr); code != 0 {
+			detail := strings.TrimSpace(strings.Join([]string{stderr.String(), stdout.String()}, "\n"))
+			if detail == "" {
+				detail = fmt.Sprintf("swarm verify exited with code %d", code)
+			}
+			return fmt.Errorf("swarm verify rejected candidate: %s", detail)
+		}
+		return nil
+	})
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}

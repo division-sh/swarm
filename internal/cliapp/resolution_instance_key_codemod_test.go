@@ -92,15 +92,90 @@ func TestMigrateResolutionInstanceKeyCommandLeavesWholeTreeByteExactOnBlocker(t 
 			if code == 0 || !strings.Contains(errOut.String(), tc.want) {
 				t.Fatalf("migrate code/stderr = %d/%q, want failure containing %q", code, errOut.String(), tc.want)
 			}
-			after := snapshotResolutionMigrationTree(t, root)
-			if len(after) != len(before) {
-				t.Fatalf("blocked migration changed file count: before=%d after=%d", len(before), len(after))
+			assertResolutionMigrationTreeUnchanged(t, root, before)
+		})
+	}
+}
+
+func TestMigrateResolutionInstanceKeyCommandAllowsScalarInputEventRows(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		migrate bool
+	}{
+		{name: "mixed tree", migrate: true},
+		{name: "no-op tree", migrate: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := canonicalrouting.RepoRoot(t)
+			root := copyResolutionMigrationArtifact(t, repo, canonicalrouting.TemplateSelectExisting)
+			if tc.migrate {
+				canonicalrouting.ApplyRetiredResolutionInstanceKeyMutation(t, root, canonicalrouting.TemplateSelectExisting)
 			}
-			for path, raw := range before {
-				if !bytes.Equal(after[path], raw) {
-					t.Fatalf("blocked migration changed %s\nbefore:\n%s\nafter:\n%s", path, raw, after[path])
+			writeScalarInputEventSchema(t, root)
+
+			var out bytes.Buffer
+			var errOut bytes.Buffer
+			code := executeRootCommand(context.Background(), repo, []string{
+				"migrate-resolution-instance-key", "--contracts", root,
+			}, &out, &errOut)
+			if code != 0 {
+				t.Fatalf("migrate code = %d, stdout/stderr = %q/%q", code, out.String(), errOut.String())
+			}
+			if tc.migrate {
+				if !strings.Contains(out.String(), "migrated 2 resolution.instance_key declarations") {
+					t.Fatalf("stdout = %q, want mixed-tree migration", out.String())
 				}
+				assertNoRetiredResolutionInstanceKey(t, root)
+				return
 			}
+			if !strings.Contains(out.String(), "no resolution.instance_key declarations found") {
+				t.Fatalf("stdout = %q, want no-op result", out.String())
+			}
+		})
+	}
+}
+
+func TestMigrateResolutionInstanceKeyCommandRejectsInvalidCandidateAndPreservesOriginalTree(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		corrupt func(testing.TB, string)
+	}{
+		{
+			name: "unrelated package blocker",
+			corrupt: func(t testing.TB, root string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(root, "package.yaml"), []byte("name: [\n"), 0o644); err != nil {
+					t.Fatalf("write invalid package: %v", err)
+				}
+			},
+		},
+		{
+			name: "unrelated flow blocker",
+			corrupt: func(t testing.TB, root string) {
+				t.Helper()
+				path := filepath.Join(root, "flows", "producer", "nodes.yaml")
+				if err := os.WriteFile(path, []byte("producer-node: [\n"), 0o644); err != nil {
+					t.Fatalf("write invalid unrelated flow: %v", err)
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := canonicalrouting.RepoRoot(t)
+			root := copyResolutionMigrationArtifact(t, repo, canonicalrouting.TemplateSelectExisting)
+			canonicalrouting.ApplyRetiredResolutionInstanceKeyMutation(t, root, canonicalrouting.TemplateSelectExisting)
+			tc.corrupt(t, root)
+			before := snapshotResolutionMigrationTree(t, root)
+
+			var out bytes.Buffer
+			var errOut bytes.Buffer
+			code := executeRootCommand(context.Background(), repo, []string{
+				"migrate-resolution-instance-key", "--contracts", root,
+			}, &out, &errOut)
+			if code == 0 || !strings.Contains(errOut.String(), "rewritten candidate failed production validation") {
+				t.Fatalf("migrate code/stderr = %d/%q, want production candidate rejection", code, errOut.String())
+			}
+			assertResolutionMigrationTreeUnchanged(t, root, before)
 		})
 	}
 }
@@ -159,6 +234,37 @@ func snapshotResolutionMigrationTree(t testing.TB, root string) map[string][]byt
 		t.Fatalf("snapshot migration tree: %v", err)
 	}
 	return snapshot
+}
+
+func assertResolutionMigrationTreeUnchanged(t testing.TB, root string, before map[string][]byte) {
+	t.Helper()
+	after := snapshotResolutionMigrationTree(t, root)
+	if len(after) != len(before) {
+		t.Fatalf("blocked migration changed file count: before=%d after=%d", len(before), len(after))
+	}
+	for path, raw := range before {
+		if !bytes.Equal(after[path], raw) {
+			t.Fatalf("blocked migration changed %s\nbefore:\n%s\nafter:\n%s", path, raw, after[path])
+		}
+	}
+}
+
+func writeScalarInputEventSchema(t testing.TB, root string) {
+	t.Helper()
+	path := filepath.Join(root, "parser-only", "schema.yaml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create parser-only schema directory: %v", err)
+	}
+	const raw = `name: parser-only-scalar-input
+mode: static
+pins:
+  inputs:
+    events:
+      - pipeline.started
+`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("write parser-only scalar schema: %v", err)
+	}
 }
 
 func assertNoRetiredResolutionInstanceKey(t testing.TB, root string) {

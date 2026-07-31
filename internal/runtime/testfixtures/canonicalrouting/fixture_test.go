@@ -128,6 +128,36 @@ func TestCanonicalRoutingExampleInventoryAndTeachingContract(t *testing.T) {
 	ProveSource(t, canonicalRoutingTeachingContractSource(t))
 }
 
+func TestCanonicalRoutingDocumentationRejectsRetiredInstanceIdentitySyntax(t *testing.T) {
+	root := filepath.Join(RepoRoot(t), "examples", "routing")
+	forbidden := []string{
+		"resolution.instance_key",
+		"instance.key.",
+		"mint: uuid",
+		"mint: event_id",
+	}
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || strings.ToLower(filepath.Ext(path)) != ".md" {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, retired := range forbidden {
+			if strings.Contains(string(raw), retired) {
+				t.Fatalf("%s retains retired instance identity syntax %q", path, retired)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func canonicalRoutingTeachingContractSource(t *testing.T) SourceToken {
 	t.Helper()
 	return ExecuteSource(t,

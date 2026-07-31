@@ -637,6 +637,9 @@ func InstanceKeyMaterialForConnectRoutePlan(plan ConnectRoutePlan, matchValues m
 	}
 	values := make(map[string]any, len(instanceKey.Fields))
 	if instanceKey.Source.Kind != "" {
+		if len(instanceKey.Mappings) != 0 {
+			return ConnectRoutePlanInstanceKeyMaterial{}, ConnectFailureInstanceResolutionInvalid
+		}
 		if instanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourcePayload || len(instanceKey.Fields) != 1 {
 			return ConnectRoutePlanInstanceKeyMaterial{}, ConnectFailureInstanceResolutionInvalid
 		}
@@ -646,24 +649,24 @@ func InstanceKeyMaterialForConnectRoutePlan(plan ConnectRoutePlan, matchValues m
 			return ConnectRoutePlanInstanceKeyMaterial{}, ConnectFailureAddressValueMissing
 		}
 		values[instanceKey.Fields[0]] = value
-	}
-	mappings := connectInstanceKeyMaterializationMappings(instanceKey)
-	for _, mapping := range mappings {
-		source := strings.TrimSpace(mapping.Source)
-		target := strings.TrimSpace(mapping.Target)
-		if source == "" || target == "" {
-			return ConnectRoutePlanInstanceKeyMaterial{}, ConnectFailureReceiverAddressRuleMissing
+	} else {
+		for _, mapping := range connectInstanceKeyMaterializationMappings(instanceKey) {
+			source := strings.TrimSpace(mapping.Source)
+			target := strings.TrimSpace(mapping.Target)
+			if source == "" || target == "" {
+				return ConnectRoutePlanInstanceKeyMaterial{}, ConnectFailureReceiverAddressRuleMissing
+			}
+			value := ""
+			if mapping.Explicit {
+				value = firstMatchValue(matchValues, "payload."+source)
+			} else {
+				value = firstMatchValue(matchValues, source, "payload."+source)
+			}
+			if value == "" {
+				return ConnectRoutePlanInstanceKeyMaterial{}, ConnectFailureAddressValueMissing
+			}
+			values[target] = value
 		}
-		value := ""
-		if mapping.Explicit {
-			value = firstMatchValue(matchValues, "payload."+source)
-		} else {
-			value = firstMatchValue(matchValues, source, "payload."+source)
-		}
-		if value == "" {
-			return ConnectRoutePlanInstanceKeyMaterial{}, ConnectFailureAddressValueMissing
-		}
-		values[target] = value
 	}
 	keys, err := (runtimecontracts.TemplateInstanceContract{
 		FlowID: plan.Receiver.FlowID,
