@@ -148,10 +148,12 @@ func (m *captureManagerStub) ReconfigureAgentTarget(
 	if err != nil {
 		return err
 	}
-	m.agents[agentID] = current
 	if onCommitted != nil {
-		return onCommitted(current)
+		if err := onCommitted(current); err != nil {
+			return err
+		}
 	}
+	m.agents[agentID] = current
 	return nil
 }
 

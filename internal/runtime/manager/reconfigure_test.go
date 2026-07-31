@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -37,6 +38,112 @@ func acquireReconfigureMemory(t *testing.T, am *AgentManager, registry *sessions
 		t.Fatalf("Acquire memory: %v", err)
 	}
 	return lease
+}
+
+func TestReconfigureAgent_AuthorityHandoffPrecedesSuccessorProjection(t *testing.T) {
+	bus := newProjectionTestBus()
+	am := newProjectionTestManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
+		return reconfigureTestAgent{id: cfg.ID}, nil
+	})
+	const flowPath = "review/inst-1"
+	oldParent := models.AgentConfig{ExecutionMode: "live", ID: "old-parent", FlowPath: flowPath}
+	newParent := models.AgentConfig{ExecutionMode: "live", ID: "new-parent", FlowPath: flowPath}
+	target := models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "worker",
+		FlowPath:      flowPath,
+		ParentAgent:   oldParent.ID,
+	}
+	for _, cfg := range []models.AgentConfig{oldParent, newParent, target} {
+		if err := am.SpawnAgent(cfg); err != nil {
+			t.Fatalf("SpawnAgent(%s): %v", cfg.ID, err)
+		}
+	}
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
+	am.Run(managedExecutionTestContext(t, runCtx))
+	oldRoute, ok := bus.current(target.ID)
+	if !ok {
+		t.Fatal("target route is absent before reconfigure")
+	}
+
+	callbackCalled := false
+	err := am.ReconfigureAgentTarget(target.ID, flowPath, models.AgentConfig{
+		ParentAgent: newParent.ID,
+	}, func(candidate models.AgentConfig) error {
+		callbackCalled = true
+		if candidate.ParentAgent != newParent.ID {
+			t.Fatalf("candidate parent = %q, want %q", candidate.ParentAgent, newParent.ID)
+		}
+		visible, err := am.ResolveAgentConfig(target.ID, flowPath)
+		if err != nil {
+			t.Fatalf("ResolveAgentConfig during authority handoff: %v", err)
+		}
+		if visible.ParentAgent != oldParent.ID {
+			t.Fatalf("visible parent during authority handoff = %q, want prior %q", visible.ParentAgent, oldParent.ID)
+		}
+		visibleRoute, ok := bus.current(target.ID)
+		if !ok || visibleRoute.token != oldRoute.token {
+			t.Fatalf("visible route during authority handoff = %+v, want prior %+v", visibleRoute.token, oldRoute.token)
+		}
+		if history := bus.routeHistory(target.ID); len(history) != 1 {
+			t.Fatalf("route history during authority handoff = %d, want only prior route", len(history))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("ReconfigureAgentTarget: %v", err)
+	}
+	if !callbackCalled {
+		t.Fatal("authority handoff callback was not called")
+	}
+	visible, err := am.ResolveAgentConfig(target.ID, flowPath)
+	if err != nil {
+		t.Fatalf("ResolveAgentConfig after reconfigure: %v", err)
+	}
+	if visible.ParentAgent != newParent.ID {
+		t.Fatalf("visible parent after reconfigure = %q, want %q", visible.ParentAgent, newParent.ID)
+	}
+	newRoute, ok := bus.current(target.ID)
+	if !ok || newRoute.token == oldRoute.token {
+		t.Fatalf("visible route after reconfigure = %+v, want successor after %+v", newRoute.token, oldRoute.token)
+	}
+}
+
+func TestReconfigureAgent_AuthorityHandoffFailureLeavesProjectionUnchanged(t *testing.T) {
+	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
+		return reconfigureTestAgent{id: cfg.ID}, nil
+	}, AgentManagerOptions{})
+	cfg := models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "worker",
+		FlowPath:      "review/inst-1",
+		Tools:         []string{"tool-old"},
+	}
+	if err := am.SpawnAgent(cfg); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	beforeGeneration := lifecycleGenerationForTest(t, am, cfg.ID)
+	handoffErr := errors.New("injected authority handoff failure")
+
+	err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{
+		Tools: []string{"tool-new"},
+	}, func(models.AgentConfig) error {
+		return handoffErr
+	})
+	if !errors.Is(err, handoffErr) {
+		t.Fatalf("ReconfigureAgentTarget error = %v, want %v", err, handoffErr)
+	}
+	visible, err := am.ResolveAgentConfig(cfg.ID, cfg.FlowPath)
+	if err != nil {
+		t.Fatalf("ResolveAgentConfig after rejected handoff: %v", err)
+	}
+	if !reflect.DeepEqual(visible.Tools, cfg.Tools) {
+		t.Fatalf("visible tools after rejected handoff = %v, want %v", visible.Tools, cfg.Tools)
+	}
+	if got := lifecycleGenerationForTest(t, am, cfg.ID); got != beforeGeneration {
+		t.Fatalf("generation after rejected handoff = %d, want %d", got, beforeGeneration)
+	}
 }
 
 func TestReconfigureAgent_SameCurrentPreservesExecutionIdentityWithoutFactoryInvocation(t *testing.T) {
