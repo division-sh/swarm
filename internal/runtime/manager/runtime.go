@@ -44,7 +44,6 @@ const (
 	directiveOperationTTL             = 24 * time.Hour
 	directiveHeartbeatRenewalTimeout  = 5 * time.Second
 	directiveHeartbeatShutdownTimeout = 5 * time.Second
-	defaultAgentRetrySweepInterval    = 30 * time.Second
 )
 
 type directiveHeartbeatConfig struct {
@@ -799,7 +798,7 @@ func (am *AgentManager) Run(ctx context.Context) error {
 		}
 	}
 
-	retryLease, err := am.beginStandingWork(runCtx, "manager retry loop")
+	retryLease, err := am.beginStandingWork(runCtx, "manager readiness reconciliation")
 	if err != nil {
 		transition := am.lifecycle.requestShutdownTransition()
 		grace, _ := ResolveShutdownGrace(DefaultShutdownOptions().Grace)
@@ -817,7 +816,7 @@ func (am *AgentManager) Run(ctx context.Context) error {
 	go func() {
 		defer close(retryDone)
 		defer func() { _ = retryLease.Done() }()
-		am.retryLoop(retryLease.Context())
+		am.readinessReconciliationLoop(retryLease.Context())
 	}()
 	return nil
 }
@@ -891,7 +890,7 @@ func (am *AgentManager) Recover(ctx context.Context) error {
 	if _, err := am.HydrateForStartup(ctx); err != nil {
 		return err
 	}
-	_, err := am.ReplayAfterStartupAdmission(ctx, false)
+	_, err := am.RecoverAfterStartupAdmission(ctx)
 	return err
 }
 
@@ -899,7 +898,7 @@ func (am *AgentManager) RecoverWithStartupReplayDiagnostics(ctx context.Context)
 	if _, err := am.HydrateForStartup(ctx); err != nil {
 		return StartupReplaySummary{}, err
 	}
-	return am.ReplayAfterStartupAdmission(ctx, true)
+	return am.RecoverAfterStartupAdmission(ctx)
 }
 
 func (am *AgentManager) ReconcileDirectiveOperations(ctx context.Context) error {
@@ -999,7 +998,7 @@ func (am *AgentManager) HydrateForStartup(ctx context.Context) (StartupReplaySum
 	return summary, nil
 }
 
-func (am *AgentManager) ReplayAfterStartupAdmission(ctx context.Context, startupReplayDiagnostics bool) (StartupReplaySummary, error) {
+func (am *AgentManager) RecoverAfterStartupAdmission(ctx context.Context) (StartupReplaySummary, error) {
 	if _, err := managedexecution.Require(ctx); err != nil {
 		return StartupReplaySummary{}, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "managed_execution_admission_missing", "agent-manager", "startup_replay", nil, err)
 	}
@@ -1010,12 +1009,7 @@ func (am *AgentManager) ReplayAfterStartupAdmission(ctx context.Context, startup
 	if err := runtimepipeline.NewRecoveryManagerWith(am.bus).Recover(ctx); err != nil {
 		return summary, fmt.Errorf("recover pipeline receipts: %w", err)
 	}
-	if startupReplayDiagnostics {
-		ctx = withStartupManagerReplayDiagnostics(ctx)
-	}
-	replaySummary, err := am.replayPendingEventsDetailed(ctx)
-	summary.merge(replaySummary)
-	return summary, err
+	return summary, nil
 }
 
 type RecoverableStateSnapshot struct {
@@ -1180,203 +1174,25 @@ func (am *AgentManager) restoredFlowInstanceRouteMaterializationRequest(ctx cont
 	}, nil
 }
 
-func (am *AgentManager) retryLoop(ctx context.Context) {
+func (am *AgentManager) readinessReconciliationLoop(ctx context.Context) {
 	if am.store == nil && am.workflowInstances == nil {
 		return
 	}
-	interval := am.retrySweepInterval
-	if interval <= 0 {
-		interval = defaultAgentRetrySweepInterval
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-am.dynamicFlowReadinessSignal:
-			am.runAutomaticRecoveryPass(ctx)
-		case <-ticker.C:
-			am.runAutomaticRecoveryPass(ctx)
-		}
-	}
-}
-
-func (am *AgentManager) runAutomaticRecoveryPass(ctx context.Context) {
-	if err := am.reconcilePendingDynamicFlowRuntimeReadiness(ctx); err != nil && am.bus != nil {
-		_ = am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
-			Level:     "error",
-			Component: "agent-manager",
-			Action:    "dynamic_flow_runtime_readiness_retry_failed",
-			Failure:   failureEnvelope(err, "agent-manager", "dynamic_flow_runtime_readiness_retry"),
-		})
-	}
-	if am.store == nil {
-		return
-	}
-	if err := am.replayPendingEvents(ctx); err != nil && am.bus != nil {
-		_ = am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
-			Level:     "error",
-			Component: "agent-manager",
-			Action:    "retry_replay_failed",
-			Failure:   failureEnvelope(err, "agent-manager", "retry_replay"),
-		})
-	}
-}
-
-func (am *AgentManager) replayPendingEvents(ctx context.Context) error {
-	_, err := am.replayPendingEventsDetailed(ctx)
-	return err
-}
-
-func (am *AgentManager) replayPendingEventsDetailed(ctx context.Context) (StartupReplaySummary, error) {
-	summary := StartupReplaySummary{}
-	if am.store == nil {
-		return summary, nil
-	}
-	if am.isAuthBreakerTripped() {
-		return summary, nil
-	}
-
-	for _, identity := range am.lifecycle.executionIdentities() {
-		if am.shutdownAdmissionClosed() {
-			return summary, nil
-		}
-		if am.isAuthBreakerTripped() {
-			return summary, nil
-		}
-		backlogSummary, err := am.replayAgentBacklogIdentityDetailed(ctx, identity)
-		summary.merge(backlogSummary)
-		if err != nil {
-			if errors.Is(err, errRuntimeShuttingDown) {
-				return summary, nil
-			}
-			if !startupManagerReplayDiagnosticsEnabled(ctx) && am.bus != nil {
-				am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+			if err := am.reconcilePendingDynamicFlowRuntimeReadiness(ctx); err != nil && am.bus != nil {
+				_ = am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 					Level:     "error",
 					Component: "agent-manager",
-					Action:    "pending_replay_failed",
-					AgentID:   identity.AgentID(),
-					Failure:   failureEnvelope(err, "agent-manager", "replay_pending"),
+					Action:    "dynamic_flow_runtime_readiness_retry_failed",
+					Failure:   failureEnvelope(err, "agent-manager", "dynamic_flow_runtime_readiness_retry"),
 				})
 			}
 		}
 	}
-	return summary, nil
-}
-
-func (am *AgentManager) ReplayBacklog(ctx context.Context, req runtimeagentcontrol.ReplayBacklogRequest) (runtimeagentcontrol.ReplayBacklogResult, error) {
-	if am.shutdownAdmissionClosed() {
-		return runtimeagentcontrol.ReplayBacklogResult{}, errRuntimeShuttingDown
-	}
-	var err error
-	ctx, err = am.bindRuntimeOperationContext(ctx)
-	if err != nil {
-		return runtimeagentcontrol.ReplayBacklogResult{}, err
-	}
-	identity, err := am.lifecycle.resolveAgentTarget(req.AgentID, req.FlowInstance, false)
-	if err != nil {
-		return runtimeagentcontrol.ReplayBacklogResult{}, err
-	}
-	summary, err := am.replayAgentBacklogIdentityDetailed(ctx, identity)
-	if err != nil {
-		return runtimeagentcontrol.ReplayBacklogResult{}, err
-	}
-	return runtimeagentcontrol.ReplayBacklogResult{
-		AgentID:       strings.TrimSpace(req.AgentID),
-		FlowInstance:  identity.FlowInstance(),
-		ReplayedCount: summary.ReplayedCount,
-	}, nil
-}
-
-func (am *AgentManager) replayAgentBacklogIdentityDetailed(ctx context.Context, identity runtimeagentidentity.Identity) (StartupReplaySummary, error) {
-	summary := StartupReplaySummary{}
-	agentID := identity.AgentID()
-	if am.shutdownAdmissionClosed() {
-		return summary, agentControlNotRunning(agentID, runtimeagentcontrol.StatusTerminated)
-	}
-	if am.store == nil {
-		return summary, fmt.Errorf("manager store unavailable")
-	}
-	if am.isAuthBreakerTripped() {
-		return summary, nil
-	}
-	lease, err := am.lifecycle.acquireExecutionIdentity(ctx, identity, "replay_backlog", false)
-	if err != nil {
-		return summary, err
-	}
-	defer lease.Release()
-	agent := lease.Agent
-	for {
-		releaseLane, laneErr := am.acquireClaimedAttemptLane(lease.Context, identity)
-		if laneErr != nil {
-			return summary, laneErr
-		}
-		pending, err := am.pendingDeliveriesForAgent(lease.Context, lease.Token.Identity, 1)
-		if err != nil {
-			releaseLane()
-			if startupManagerReplayDiagnosticsEnabled(ctx) {
-				failure := failureEnvelope(err, "agent-manager", "load_pending_backlog")
-				record := startupManagerReplayRecord{
-					AgentID:    agentID,
-					Outcome:    startupManagerReplayOutcomeDropped,
-					ReasonCode: startupManagerReplayReasonBacklogLoadFailed,
-					Failure:    failure,
-				}
-				summary.observe(record)
-				logStartupManagerReplayAftermath(ctx, am.bus, record)
-				return summary, nil
-			}
-			return summary, err
-		}
-		if len(pending) == 0 {
-			releaseLane()
-			break
-		}
-		execution := pending[0]
-		evt := execution.Event
-		if am.isAuthBreakerTripped() {
-			releaseLane()
-			return summary, nil
-		}
-		eventCtx := lease.Context
-		if _, ok := worklifetime.OccurrenceFromContext(eventCtx); !ok {
-			eventCtx = worklifetime.WithOccurrence(eventCtx, am.workOwner)
-		}
-		eventCtx = runtimedelivery.WithRoute(eventCtx, execution.Snapshot.Route)
-		eventCtx = runtimedelivery.WithClaim(eventCtx, execution.Claim)
-		result := func() eventProcessResult {
-			defer releaseLane()
-			return am.processEventDetailedOwned(eventCtx, agent, evt)
-		}()
-		summary.observe(result.record)
-		if startupManagerReplayDiagnosticsEnabled(ctx) {
-			logStartupManagerReplayAftermath(ctx, am.bus, result.record)
-		}
-		if result.err != nil {
-			if !startupManagerReplayDiagnosticsEnabled(ctx) && am.bus != nil {
-				evtCtx := runtimecorrelation.WithInboundEvent(ctx, evt)
-				evtCtx = runtimecorrelation.WithRunID(evtCtx, strings.TrimSpace(evt.RunID()))
-				am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
-					Level:     "error",
-					Component: "agent-manager",
-					Action:    "pending_replay_event_failed",
-					EventID:   strings.TrimSpace(evt.ID()),
-					EventType: strings.TrimSpace(string(evt.Type())),
-					AgentID:   agentID,
-					EntityID:  strings.TrimSpace(evt.EntityID()),
-					Failure:   failureEnvelope(result.err, "agent-manager", "replay_pending_event"),
-				})
-			}
-			if failure, ok := runtimefailures.As(result.err); ok && failure.Failure.Class == runtimefailures.ClassAuthenticationNeeded {
-				return summary, nil
-			}
-		}
-		if lease.Context.Err() != nil {
-			return summary, nil
-		}
-	}
-	return summary, nil
 }
 
 func agentControlNotFound(agentID string) error {
@@ -1412,17 +1228,6 @@ func legacyAgentControlError(err error) error {
 		}
 	}
 	return err
-}
-
-func (am *AgentManager) pendingDeliveriesForAgent(ctx context.Context, identity runtimeagentidentity.Identity, limit int) ([]runtimedelivery.AgentExecution, error) {
-	if am.deliveryStore == nil {
-		return nil, fmt.Errorf("delivery lifecycle owner unavailable")
-	}
-	deliveries, err := am.deliveryStore.ClaimAgentBacklog(ctx, identity, limit)
-	if err != nil {
-		return nil, fmt.Errorf("claim pending deliveries for %s: %w", identity.Description(), err)
-	}
-	return deliveries, nil
 }
 
 func (am *AgentManager) ResetRuntimeState() error {
@@ -1898,8 +1703,28 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 							return
 						}
 						evt := delivery.Event()
-						stop := func() bool {
-							defer func() { _ = delivery.Complete() }()
+						stop := func() (stop bool) {
+							carrier, carrierErr := worklifetime.NewEventDeliveryCarrierGuard(delivery)
+							if carrierErr != nil {
+								return true
+							}
+							reportCarrierFailure := func(err error) {
+								if am.bus != nil {
+									am.bus.LogRuntime(loopCtx, runtimepipeline.RuntimeLogEntry{
+										Level: "error", Component: "agent-manager", Action: "delivery_carrier_transfer_failed",
+										EventID: strings.TrimSpace(evt.ID()), EventType: strings.TrimSpace(string(evt.Type())), AgentID: agent.ID(),
+										Failure: failureEnvelope(err, "agent-manager", "settle_delivery_carrier"),
+									})
+									return
+								}
+								diaglog.ProcessLog(diaglog.LevelError, "agent-manager", "delivery carrier transfer failed",
+									"agent_id", agent.ID(), "event_id", evt.ID(), "error", err.Error())
+							}
+							defer func() {
+								if _, completionErr := carrier.Complete(reportCarrierFailure); completionErr != nil {
+									stop = true
+								}
+							}()
 							if am.shutdownAdmissionClosed() {
 								return true
 							}
@@ -1951,7 +1776,17 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 								return true
 							}
 							defer releaseLane()
-							claimed, claimErr := am.deliveryStore.ClaimAgentDelivery(evtCtx, evt, route)
+							authorityProvider, ok := am.bus.(interface {
+								DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error)
+							})
+							if !ok {
+								return true
+							}
+							authority, authorityErr := authorityProvider.DeliveryAuthority()
+							if authorityErr != nil {
+								return true
+							}
+							claimResult, claimErr := am.deliveryStore.ClaimDelivery(evtCtx, authority, evt, route)
 							if claimErr != nil {
 								if am.bus != nil {
 									am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
@@ -1959,6 +1794,50 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 										EventID: strings.TrimSpace(evt.ID()), EventType: strings.TrimSpace(string(evt.Type())), AgentID: agent.ID(),
 										Failure: failureEnvelope(claimErr, "agent-manager", "claim_delivery"),
 									})
+								}
+								return false
+							}
+							switch claimResult.Disposition {
+							case runtimedelivery.ClaimDeferred, runtimedelivery.ClaimBusy:
+								return false
+							case runtimedelivery.ClaimTerminal:
+								if _, completionErr := carrier.Complete(reportCarrierFailure); completionErr != nil {
+									return true
+								}
+								releaser, ok := am.bus.(interface {
+									ReleaseDeliveryContinuation(string) error
+								})
+								if !ok || releaser.ReleaseDeliveryContinuation(claimResult.Snapshot.DeliveryID) != nil {
+									return true
+								}
+								return false
+							case runtimedelivery.ClaimWrongAuthority, runtimedelivery.ClaimAbsent, runtimedelivery.ClaimInvariantInvalid:
+								if am.bus != nil {
+									am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
+										Level: "error", Component: "agent-manager", Action: "delivery_claim_invalid",
+										EventID: strings.TrimSpace(evt.ID()), EventType: strings.TrimSpace(string(evt.Type())), AgentID: agent.ID(),
+										Failure: failureEnvelope(claimResult.Invariant, "agent-manager", "claim_delivery"),
+									})
+								}
+								return true
+							case runtimedelivery.ClaimAcquired:
+							default:
+								return true
+							}
+							claimed, acquired := claimResult.Acquired()
+							if !acquired {
+								return true
+							}
+							resolution, consumeErr := carrier.Consume(reportCarrierFailure)
+							if consumeErr != nil {
+								return true
+							}
+							if resolution == worklifetime.DeliveryContinuationTerminal {
+								releaser, ok := am.bus.(interface {
+									ReleaseDeliveryContinuation(string) error
+								})
+								if !ok || releaser.ReleaseDeliveryContinuation(claimed.Claim.DeliveryID()) != nil {
+									return true
 								}
 								return false
 							}

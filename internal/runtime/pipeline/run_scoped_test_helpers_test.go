@@ -95,6 +95,9 @@ func testPipelineCoordinatorRunContext(t *testing.T, pc *PipelineCoordinator) co
 		t.Fatal("test pipeline coordinator run context requires coordinator")
 	}
 	configureWorkflowLifecycleForTest(t, pc)
+	if pc.workflowStore != nil && pc.workflowStore.db != nil {
+		configurePipelineTestDeliveryOwner(t, pc)
+	}
 	if pc.db != nil {
 		return testPipelineRunContext(t, pc.db)
 	}

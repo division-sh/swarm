@@ -230,6 +230,9 @@ func (m *inboundBatchOverlayMutation) FinalizePreparedPublish(_ context.Context,
 	if len(m.active) == 0 || m.active[len(m.active)-1] != finalization.Request().Event.ID() {
 		return errors.New("prepared event finalization does not match active inbound event")
 	}
+	if err := finalization.Request().DeliveryReceipt.Record(nil); err != nil {
+		return err
+	}
 	m.active = m.active[:len(m.active)-1]
 	return nil
 }

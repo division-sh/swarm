@@ -1759,13 +1759,6 @@ func TestServedParityHarnessRunControlLifecycle(t *testing.T) {
 	servedparity.RunScenarioGroup(t, scenarios, runServedRunControlBackendProof)
 }
 
-func TestServedParityHarnessLiveAgentReplayBacklogLifecycle(t *testing.T) {
-	scenarios := []servedparity.Scenario{
-		servedparity.MustScenario(servedparity.ScenarioAgentReplayBacklogLiveAgentLifecycle),
-	}
-	servedparity.RunScenarioGroup(t, scenarios, runServedLiveAgentReplayBacklogBackendProof)
-}
-
 func TestServedParityHarnessAgentRestartLifecycle(t *testing.T) {
 	scenario := servedparity.MustScenario(servedparity.ScenarioAgentRestartLifecycle)
 	servedparity.Run(t, scenario, runServedAgentRestartBackendProof)
@@ -2082,12 +2075,6 @@ func runServedLiveAgentEventReplayBackendProof(t *testing.T, backend servedparit
 	t.Helper()
 	rt := startServedLiveAgentProofRuntime(t, backend)
 	runServedLiveAgentEventReplayLifecycleProof(t, rt)
-}
-
-func runServedLiveAgentReplayBacklogBackendProof(t *testing.T, backend servedparity.Backend) {
-	t.Helper()
-	rt := startServedLiveAgentProofRuntime(t, backend)
-	runServedLiveAgentReplayBacklogLifecycleProof(t, rt)
 }
 
 func runServedAgentRestartBackendProof(t *testing.T, backend servedparity.Backend) {
@@ -3853,11 +3840,6 @@ type servedAgentReplayProofResult struct {
 	NewDeliveries      []servedReplayProofDelivery `json:"new_deliveries"`
 }
 
-type servedAgentReplayBacklogProofResult struct {
-	OK            bool `json:"ok"`
-	ReplayedCount int  `json:"replayed_count"`
-}
-
 type servedAgentRestartProofResult struct {
 	OK bool `json:"ok"`
 }
@@ -4001,33 +3983,6 @@ func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlP
 		t.Fatalf("%s item.processed events after idempotent agent.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
 	}
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioAgentReplayLiveAgentLifecycle))
-}
-
-func runServedLiveAgentReplayBacklogLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
-	t.Helper()
-	backlogRunID, backlogEventID := seedServedLiveAgentPendingBacklogDelivery(t, rt)
-	backlogKey := "issue-1910-" + rt.Backend + "-" + backlogRunID + "-agent-replay-backlog"
-	var backlog servedAgentReplayBacklogProofResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "agent.replay_backlog", map[string]any{
-		"agent_id":        "load-agent",
-		"idempotency_key": backlogKey,
-	}, &backlog)
-	if !backlog.OK || backlog.ReplayedCount != 1 {
-		t.Fatalf("%s agent.replay_backlog result = %#v, want one replayed event", rt.Backend, backlog)
-	}
-	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, backlogRunID, backlogEventID, "agent", "load-agent", "delivered", 1)
-	waitServedDeliveryOutcomeCount(t, rt.DB, rt.Backend, backlogEventID, "agent", "load-agent", "delivered", 1)
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.replay_backlog", backlogKey, 1)
-	var backlogAgain servedAgentReplayBacklogProofResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "agent.replay_backlog", map[string]any{
-		"agent_id":        "load-agent",
-		"idempotency_key": backlogKey,
-	}, &backlogAgain)
-	if backlogAgain.ReplayedCount != backlog.ReplayedCount {
-		t.Fatalf("%s agent.replay_backlog idempotent result = %#v, want replayed_count=%d", rt.Backend, backlogAgain, backlog.ReplayedCount)
-	}
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.replay_backlog", backlogKey, 1)
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, backlogRunID, servedparity.MustScenario(servedparity.ScenarioAgentReplayBacklogLiveAgentLifecycle))
 }
 
 type servedAgentDirectiveProofResult struct {
@@ -4489,50 +4444,6 @@ func requireServedLiveAgentReplayDeliveryPair(t *testing.T, backend string, orig
 	if replayed.SubscriberID != "load-agent" || replayed.DeliveryID == "" || replayed.SourceDeliveryID != original.DeliveryID {
 		t.Fatalf("%s replay delivery = %#v, want source delivery %s", backend, replayed, original.DeliveryID)
 	}
-}
-
-func seedServedLiveAgentPendingBacklogDelivery(t *testing.T, rt servedControlProofRuntime) (string, string) {
-	t.Helper()
-	db := rt.DB
-	backend := rt.Backend
-	ctx := context.Background()
-	runID := uuid.NewString()
-	eventID := uuid.NewString()
-	now := time.Now().UTC()
-	var selectedStore any
-	switch backend {
-	case "postgres":
-		storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: serveRuntimeTestBundleHash})
-		if rt.Postgres == nil {
-			t.Fatal("served postgres store owner is required for live-agent backlog seed")
-		}
-		selectedStore = rt.Postgres
-	case "sqlite":
-		storetest.RequireSQLiteRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: serveRuntimeTestBundleHash})
-		if rt.SQLite == nil {
-			t.Fatal("served sqlite store owner is required for live-agent backlog seed")
-		}
-		selectedStore = rt.SQLite
-	default:
-		t.Fatalf("unknown proof backend %q", backend)
-	}
-	event := eventtest.PersistedProjection(eventID, "thing.agent_hold", "test", "", json.RawMessage(`{"note":"backlog"}`), 0, runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
-	storetest.CommitSemanticEventWithInitialFacts(t, ctx, selectedStore, event,
-		[]events.DeliveryRoute{{
-			SubscriberType: "agent",
-			SubscriberID:   "load-agent",
-			AgentIdentity: agentidentitytest.RootDeclared(
-				t,
-				"load-agent",
-				"served-event-publish-followup://load-agent",
-			),
-		}},
-		runtimepipelineobligation.ScopeSubscribed,
-		storetest.AcknowledgedPipelineDisposition())
-	if got := servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, "platform", "pipeline", "success"); got != 1 {
-		t.Fatalf("%s seeded live-agent backlog pipeline receipt count for event=%s = %d, want 1\n%s", backend, eventID, got, servedEventPublishDebugSummary(t, db, backend, runID))
-	}
-	return runID, eventID
 }
 
 func requireServedOKJSONRPC(t *testing.T, endpoint, method string, params map[string]any) {
@@ -7613,7 +7524,7 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 	}
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, sqliteStore, event, []events.DeliveryRoute{route})
 	claimCtx := serveDeliveryLifecycleFixtureContext()
-	claimed, err := sqliteStore.ClaimAgentDelivery(claimCtx, event, route)
+	claimed, err := storetest.ClaimDelivery(claimCtx, sqliteStore, event, route)
 	if err != nil {
 		_ = sqliteStore.Close()
 		t.Fatalf("claim sqlite active delivery: %v", err)
@@ -7739,7 +7650,7 @@ func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context
 	}
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, runtimePG, event, []events.DeliveryRoute{route})
 	claimCtx := serveDeliveryLifecycleFixtureContext()
-	claimed, err := runtimePG.ClaimAgentDelivery(claimCtx, event, route)
+	claimed, err := storetest.ClaimDelivery(claimCtx, runtimePG, event, route)
 	if err != nil {
 		t.Fatalf("claim delivery %s: %v", source, err)
 	}
@@ -8978,7 +8889,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	}
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, runtimePG, event, []events.DeliveryRoute{route})
 	claimCtx := serveDeliveryLifecycleFixtureContext()
-	claimed, err := runtimePG.ClaimAgentDelivery(claimCtx, event, route)
+	claimed, err := storetest.ClaimDelivery(claimCtx, runtimePG, event, route)
 	if err != nil {
 		t.Fatalf("claim active delivery: %v", err)
 	}

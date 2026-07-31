@@ -103,6 +103,9 @@ func (s *targetRouteMemoryStore) FinalizePreparedPublish(_ context.Context, fina
 	if !s.active[evt.ID()] {
 		return errors.New("prepared event finalization does not match the active event")
 	}
+	if err := req.DeliveryReceipt.Record(nil); err != nil {
+		return err
+	}
 	s.routes[evt.ID()] = events.NormalizeDeliveryRoutes(req.DeliveryRoutes)
 	s.scopes[evt.ID()] = req.ReplayScope
 	if req.Disposition != nil {
@@ -285,14 +288,14 @@ func (s *targetRouteMemoryStore) MarkDecisionProcessed(context.Context, runtimep
 	return runtimepipelineobligation.ErrIneligible
 }
 
-func (s *targetRouteMemoryStore) Settle(_ context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) error {
+func (s *targetRouteMemoryStore) Settle(_ context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) (runtimepipelineobligation.SettlementOutcome, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.verifyPipelineClaim(claim); err != nil {
-		return err
+		return runtimepipelineobligation.SettlementOutcome{}, err
 	}
 	if err := disposition.ValidateFor(claim.Purpose()); err != nil {
-		return err
+		return runtimepipelineobligation.SettlementOutcome{}, err
 	}
 	if s.receipts == nil {
 		s.receipts = map[string]string{}
@@ -307,7 +310,7 @@ func (s *targetRouteMemoryStore) Settle(_ context.Context, claim runtimepipeline
 	s.receipts[claim.EventID()] = status
 	s.receiptErrs[claim.EventID()] = disposition.Failure()
 	delete(s.claims, claim.EventID())
-	return nil
+	return runtimepipelineobligation.CommittedSettlement(disposition.Successful()), nil
 }
 
 func (s *targetRouteMemoryStore) Release(_ context.Context, claim runtimepipelineobligation.Claim) error {
@@ -2136,7 +2139,7 @@ func (rejectingDeliveryRouteStore) FinalizePreparedPublish(_ context.Context, fi
 	if len(req.DeliveryRoutes) > 0 {
 		return errors.New("typed delivery route persistence is unavailable")
 	}
-	return nil
+	return req.DeliveryReceipt.Record(nil)
 }
 
 func (rejectingDeliveryRouteStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {

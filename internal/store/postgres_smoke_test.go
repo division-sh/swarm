@@ -129,7 +129,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	if err := commitSemanticEventFixtureWithRoutes(ctx, pg, evt, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("append event with exact delivery: %v", err)
 	}
-	claimed, err := pg.ClaimAgentDelivery(ctx, evt, route)
+	claimed, err := claimDeliveryFixture(ctx, pg, evt, route)
 	if err != nil {
 		t.Fatalf("claim delivery: %v", err)
 	}

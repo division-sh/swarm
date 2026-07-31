@@ -211,7 +211,7 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionFailsClosedWhileDeliveryAc
 	}
 	assertSQLiteRunCompletionStatus(t, store.DB, fixture.RunID, "running", false)
 
-	claimed, err := store.ClaimNodeDelivery(ctx, event, route)
+	claimed, err := claimDeliveryFixture(ctx, store, event, route)
 	if err != nil {
 		t.Fatalf("claim sqlite active delivery: %v", err)
 	}

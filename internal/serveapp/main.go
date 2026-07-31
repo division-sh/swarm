@@ -345,14 +345,16 @@ type serveRuntimeBundle struct {
 }
 
 type serveRuntimeBundleContext struct {
-	loaded            serveRuntimeBundle
-	stateStoreSummary string
-	bundleSourceFact  runtimecorrelation.BundleSourceFact
-	bootIdentity      runtimecontracts.BundleIdentity
-	workspaceBackend  cliapp.WorkspaceBackendSelection
-	workspaces        cliapp.ServeWorkspaceLifecycle
-	validation        runtime.WorkflowContractValidationResult
-	runtime           *runtime.Runtime
+	loaded                     serveRuntimeBundle
+	stateStoreSummary          string
+	bundleSourceFact           runtimecorrelation.BundleSourceFact
+	bootIdentity               runtimecontracts.BundleIdentity
+	workspaceBackend           cliapp.WorkspaceBackendSelection
+	workspaces                 cliapp.ServeWorkspaceLifecycle
+	validation                 runtime.WorkflowContractValidationResult
+	runtime                    *runtime.Runtime
+	startupStandingTargets     []runtime.StandingTarget
+	startupStandingActivations []runtime.StandingActivation
 }
 
 type serveRuntimeBundleContextRequest struct {
@@ -1069,9 +1071,19 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(5, "runtime_context", err)
 		return 1
 	}
-	if err := reconcileServeStandingServices(ctx, runtimeContexts); err != nil {
+	standingReconciliations, err := reconcileServeStandingServices(ctx, runtimeContexts)
+	if err != nil {
 		presenter.fail(5, "runtime_context", err)
 		return 1
+	}
+	for i := range runtimeContexts {
+		targets, activations, err := reconcileServeRuntimeStandingTargets(runtimeContexts[i].runtime, standingReconciliations)
+		if err != nil {
+			presenter.fail(5, "runtime_context", err)
+			return 1
+		}
+		runtimeContexts[i].startupStandingTargets = targets
+		runtimeContexts[i].startupStandingActivations = activations
 	}
 	if opts.AbandonActiveRuns {
 		if stores.RunQuiescenceStore == nil {
@@ -1350,7 +1362,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	return 0
 }
 
-func reconcileServeStandingServices(ctx context.Context, contexts []serveRuntimeBundleContext) error {
+func reconcileServeStandingServices(ctx context.Context, contexts []serveRuntimeBundleContext) (map[string]runtimepipeline.StandingServiceReconciliation, error) {
 	var owner *runtimepipeline.WorkflowInstanceStore
 	var candidates []runtimepipeline.StandingServiceCandidate
 	for _, contextDef := range contexts {
@@ -1360,19 +1372,72 @@ func reconcileServeStandingServices(ctx context.Context, contexts []serveRuntime
 		if owner == nil {
 			owner = contextDef.runtime.Stores.PipelineStore
 		} else if owner != contextDef.runtime.Stores.PipelineStore {
-			return fmt.Errorf("standing service reconciliation requires one selected-store owner")
+			return nil, fmt.Errorf("standing service reconciliation requires one selected-store owner")
 		}
 		planned, err := contextDef.runtime.PlanStandingServiceCandidates()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		candidates = append(candidates, planned...)
 	}
 	if owner == nil {
-		return nil
+		return nil, nil
 	}
-	_, err := owner.ReconcileStandingServiceSet(ctx, candidates)
-	return err
+	results, err := owner.ReconcileStandingServiceSet(ctx, candidates)
+	if err != nil {
+		return nil, err
+	}
+	byServiceID := make(map[string]runtimepipeline.StandingServiceReconciliation, len(results))
+	for _, result := range results {
+		if _, exists := byServiceID[result.ServiceID]; exists {
+			return nil, fmt.Errorf("standing service %s reconciled more than once", result.ServiceID)
+		}
+		byServiceID[result.ServiceID] = result
+	}
+	return byServiceID, nil
+}
+
+func reconcileServeRuntimeStandingTargets(
+	rt *runtime.Runtime,
+	reconciliations map[string]runtimepipeline.StandingServiceReconciliation,
+) ([]runtime.StandingTarget, []runtime.StandingActivation, error) {
+	if rt == nil {
+		return nil, nil, nil
+	}
+	targets, err := rt.PlanStandingTargets()
+	if err != nil {
+		return nil, nil, err
+	}
+	activations := make([]runtime.StandingActivation, 0)
+	seenServices := make(map[string]struct{}, len(targets))
+	for i := range targets {
+		reconciliation, ok := reconciliations[targets[i].ServiceID]
+		if !ok {
+			return nil, nil, fmt.Errorf("standing service %s has no startup reconciliation", targets[i].ServiceID)
+		}
+		targets[i].RunID = reconciliation.RunID
+		targets[i].Generation = reconciliation.Generation
+		targets[i].PublicationSequence = reconciliation.PublicationSequence
+		if _, seen := seenServices[reconciliation.ServiceID]; seen {
+			continue
+		}
+		seenServices[reconciliation.ServiceID] = struct{}{}
+		activations = append(activations, runtime.StandingActivation{
+			BundleHash:          targets[i].BundleHash,
+			ServiceID:           reconciliation.ServiceID,
+			PackageKey:          reconciliation.PackageKey,
+			FlowID:              reconciliation.FlowID,
+			RunID:               reconciliation.RunID,
+			Generation:          reconciliation.Generation,
+			PublicationSequence: reconciliation.PublicationSequence,
+			InstanceID:          reconciliation.InstanceID,
+			FlowInstance:        targets[i].FlowInstance,
+			EntityID:            reconciliation.EntityID,
+			EffectiveState:      reconciliation.EffectiveState,
+			Created:             reconciliation.Transition == "created",
+		})
+	}
+	return targets, activations, nil
 }
 
 type serveStandingServiceController struct {
@@ -1883,6 +1948,22 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 		if contextDef.runtime == nil {
 			continue
 		}
+		startupStandingOwner, err := newServeStartupStandingRecoveryOwner(
+			contextDef.runtime.WorkOccurrence(),
+			contextDef.startupStandingTargets,
+			contextDef.startupStandingActivations,
+		)
+		if err != nil {
+			rollback()
+			return err
+		}
+		if startupStandingOwner != nil {
+			if contextDef.runtime.Bus == nil {
+				rollback()
+				return errors.New("standing startup recovery requires event bus")
+			}
+			contextDef.runtime.Bus.SetStandingRunWorkOwner(startupStandingOwner)
+		}
 		if err := contextDef.runtime.Start(ctx); err != nil {
 			rollback()
 			return err
@@ -1922,10 +2003,72 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 				hash:    contextDef.bundleSourceFact.BundleHash(),
 				runtime: contextDef.runtime,
 			})
+		} else if len(targets) > 0 {
+			rollback()
+			return errors.New("standing targets require runtime context manager")
 		}
 	}
 	return nil
 }
+
+type serveStartupStandingRecoveryOwner struct {
+	workOwner *worklifetime.RuntimeOccurrence
+	byRunID   map[string]runtime.StandingTarget
+}
+
+func newServeStartupStandingRecoveryOwner(
+	workOwner *worklifetime.RuntimeOccurrence,
+	targets []runtime.StandingTarget,
+	activations []runtime.StandingActivation,
+) (*serveStartupStandingRecoveryOwner, error) {
+	active := make(map[string]struct{}, len(activations))
+	for _, activation := range activations {
+		if activation.EffectiveState == "active" {
+			active[activation.ServiceID] = struct{}{}
+		}
+	}
+	byRunID := make(map[string]runtime.StandingTarget, len(targets))
+	for _, target := range targets {
+		if _, ok := active[target.ServiceID]; !ok {
+			continue
+		}
+		if existing, ok := byRunID[target.RunID]; ok {
+			if existing.ServiceID != target.ServiceID || existing.Generation != target.Generation {
+				return nil, fmt.Errorf("standing startup run %s has conflicting exact owners", target.RunID)
+			}
+			continue
+		}
+		byRunID[target.RunID] = target
+	}
+	if len(byRunID) == 0 {
+		return nil, nil
+	}
+	if workOwner == nil {
+		return nil, errors.New("standing startup recovery requires runtime work owner")
+	}
+	return &serveStartupStandingRecoveryOwner{workOwner: workOwner, byRunID: byRunID}, nil
+}
+
+func (o *serveStartupStandingRecoveryOwner) BeginStandingRunRecovery(
+	ctx context.Context,
+	runID string,
+	origin runtimerunlifecycle.RunOrigin,
+) (*worklifetime.Lease, error) {
+	if o == nil || o.workOwner == nil {
+		return nil, errors.New("standing startup recovery owner is required")
+	}
+	target, ok := o.byRunID[strings.TrimSpace(runID)]
+	if !ok {
+		return nil, fmt.Errorf("standing startup recovery run %s has no prepared owner", runID)
+	}
+	if origin.Kind() != runtimerunlifecycle.OriginStandingGeneration ||
+		origin.ServiceID() != target.ServiceID ||
+		origin.Generation() != target.Generation {
+		return nil, fmt.Errorf("standing startup recovery run %s conflicts with prepared owner", runID)
+	}
+	return o.workOwner.BeginStanding(ctx)
+}
+
 func closeAdditionalServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager, opts cliapp.ServeOptions, deadlines ...time.Time) error {
 	var shutdownErr error
 	for _, contextDef := range contexts {

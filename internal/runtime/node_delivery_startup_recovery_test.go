@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,11 +15,14 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	swarmruntime "github.com/division-sh/swarm/internal/runtime"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -42,6 +46,67 @@ type nodeDeliveryRecoveryStore interface {
 type renewalTrackingDeliveryStore struct {
 	runtimedelivery.Store
 	renewals atomic.Int64
+}
+
+type startupRecoveryActivationProbe struct {
+	runtimedelivery.Store
+	activations atomic.Int64
+}
+
+func (p *startupRecoveryActivationProbe) ActivateDeliveryAuthority(
+	ctx context.Context,
+	authority runtimedelivery.ExecutionAuthority,
+) error {
+	p.activations.Add(1)
+	return p.Store.ActivateDeliveryAuthority(ctx, authority)
+}
+
+type committedCleanupPipelineOwner struct {
+	runtimepipelineobligation.Store
+	err error
+}
+
+func (o committedCleanupPipelineOwner) Settle(
+	ctx context.Context,
+	claim runtimepipelineobligation.Claim,
+	disposition runtimepipelineobligation.Disposition,
+) (runtimepipelineobligation.SettlementOutcome, error) {
+	outcome, err := o.Store.Settle(ctx, claim, disposition)
+	if err == nil && outcome.Committed() {
+		return outcome, o.err
+	}
+	return outcome, err
+}
+
+type settlingDeliveryContinuationDispatcher struct {
+	store       runtimedelivery.Store
+	authority   runtimedelivery.ExecutionAuthority
+	coordinator *runtimedeliverycontinuation.Coordinator
+	dispatches  atomic.Int64
+}
+
+func (d *settlingDeliveryContinuationDispatcher) DispatchDeliveryContinuation(
+	ctx context.Context,
+	event events.Event,
+	route events.DeliveryRoute,
+) error {
+	result, err := d.store.ClaimDelivery(ctx, d.authority, event, route)
+	if err != nil {
+		return err
+	}
+	claimed, ok := result.Acquired()
+	if !ok {
+		return fmt.Errorf("continuation dispatch disposition = %s", result.Disposition)
+	}
+	snapshot, err := d.store.SettleSuccess(ctx, claimed.Claim, nil, 0)
+	if err != nil {
+		return err
+	}
+	if err := d.coordinator.Release(snapshot.DeliveryID); err != nil {
+		return err
+	}
+	d.dispatches.Add(1)
+	return nil
 }
 
 type startupRecoveryOrderStore interface {
@@ -76,6 +141,11 @@ func (a startupRecoveryOrderAgent) OnEvent(_ context.Context, event events.Event
 }
 
 func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity(t *testing.T) {
+	persistedSource, err := runtimecorrelation.NewPersistedBundleSourceFact(authorActivityTestBundleSourceFact.BundleHash())
+	if err != nil {
+		t.Fatalf("construct persisted startup bundle source: %v", err)
+	}
+	persistedBundleHash, persistedBundleSource := persistedSource.StorageValues()
 	for _, backend := range []struct {
 		name  string
 		setup func(*testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore, *runtimepipeline.WorkflowInstanceStore)
@@ -85,8 +155,14 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			setup: func(t *testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore, *runtimepipeline.WorkflowInstanceStore) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				ctx := seedRuntimeTestRun(t, db)
 				selected := storetest.AdmitPostgresRuntimeStore(t, db)
+				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
+				ctx = runtimecorrelation.WithBundleSourceFact(ctx, persistedSource)
+				seedStartupRecoveryPersistedBundle(t, ctx, db, "postgres", persistedSource.BundleHash())
+				storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{
+					Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
+					BundleHash: persistedBundleHash, BundleSource: persistedBundleSource,
+				})
 				workflowStore := configureRuntimeTestWorkflowStore(t, runtimepipeline.NewWorkflowInstanceStore(db), selected)
 				return ctx, db, db, selected, workflowStore
 			},
@@ -96,7 +172,12 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			setup: func(t *testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore, *runtimepipeline.WorkflowInstanceStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
-				storetest.RequireSQLiteRun(t, ctx, selected.DB, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
+				ctx = runtimecorrelation.WithBundleSourceFact(ctx, persistedSource)
+				seedStartupRecoveryPersistedBundle(t, ctx, selected.DB, "sqlite", persistedSource.BundleHash())
+				storetest.RequireSQLiteRun(t, ctx, selected.DB, storetest.RunFixture{
+					Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
+					BundleHash: persistedBundleHash, BundleSource: persistedBundleSource,
+				})
 				workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(selected.DB, selected)
 				workflowStore.ConfigureRunLifecycle(selected)
 				return ctx, nil, selected.DB, selected, workflowStore
@@ -104,7 +185,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 		},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			ctx, runtimeSQLDB, queryDB, selected, workflowStore := backend.setup(t)
+			ctx, runtimeSQLDB, _, selected, workflowStore := backend.setup(t)
 			repoRoot := filepath.Clean(filepath.Join("..", ".."))
 			fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", "test-boot-success")
 			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
@@ -115,6 +196,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			if err != nil {
 				t.Fatalf("load startup-order workflow contract: %v", err)
 			}
+			bundle.Semantics.NodeHandlers["complete-task"]["task.requested"] = runtimecontracts.SystemNodeEventHandler{}
 			source := semanticview.Wrap(bundle)
 			module := newRuntimeTestWorkflowModule(t, source)
 
@@ -125,9 +207,10 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			}
 
 			eventID := eventtest.UUID("startup-order-node-event-" + backend.name)
+			entityID := eventtest.UUID("startup-order-node-entity-" + backend.name)
 			event := eventtest.ExistingRunRootIngress(
 				eventID, "task.requested", "test", "", []byte(`{}`), 0,
-				templateInstanceDeliveryRunID, events.EventEnvelope{}, time.Now().UTC(),
+				templateInstanceDeliveryRunID, events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC(),
 			)
 			nodeRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "complete-task"}
 			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{nodeRoute}, runtimepipelineobligation.ScopeSubscribed)
@@ -150,7 +233,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				},
 				Options: swarmruntime.RuntimeOptions{
 					SelfCheck: false, WorkflowModule: module, LLMRuntime: startupRecoveryOrderLLM{},
-					RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleSourceFact: authorActivityTestBundleSourceFact,
+					RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleSourceFact: persistedSource,
 					ProcessWorkOwner: processOwner,
 					TestWorkflowNodeHandlerStartHook: func(context.Context, string, events.Event) error {
 						if !hydrated.Load() {
@@ -189,19 +272,404 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			if err := runtime.Start(ctx); err != nil {
 				t.Fatalf("Start: %v", err)
 			}
-			assertRecoveredNodeDelivery(t, ctx, selected, eventID, nodeRoute, 1)
-			eventIDQuery := `SELECT event_id::text FROM events WHERE event_name = 'task.completed' ORDER BY created_at DESC LIMIT 1`
-			if backend.name == "sqlite" {
-				eventIDQuery = `SELECT event_id FROM events WHERE event_name = 'task.completed' ORDER BY created_at DESC LIMIT 1`
-			}
-			var completedEventID string
-			if err := queryDB.QueryRowContext(ctx, eventIDQuery).Scan(&completedEventID); err != nil {
-				t.Fatalf("load event emitted by recovered workflow node: %v", err)
-			}
-			if completedEventID == "" || !hydrated.Load() {
-				t.Fatalf("startup order proof = completed event %q hydrated %t, want emitted event after agent hydration", completedEventID, hydrated.Load())
+			waitForRecoveredNodeDelivery(t, ctx, selected, eventID, nodeRoute, 1)
+			if !hydrated.Load() {
+				t.Fatal("startup order proof delivered the workflow node before persisted agent hydration")
 			}
 		})
+	}
+}
+
+func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t *testing.T) {
+	currentSource, err := runtimecorrelation.NewPersistedBundleSourceFact(authorActivityTestBundleSourceFact.BundleHash())
+	if err != nil {
+		t.Fatalf("construct current startup source: %v", err)
+	}
+	foreignSource, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+	if err != nil {
+		t.Fatalf("construct foreign startup source: %v", err)
+	}
+	modes := []struct {
+		name                             string
+		recoveryOnStartup                bool
+		disablePersistentStartupRecovery bool
+	}{
+		{name: "config_disabled"},
+		{name: "internal_persistent_recovery_disabled", recoveryOnStartup: true, disablePersistentStartupRecovery: true},
+	}
+	cases := []struct {
+		name       string
+		route      events.DeliveryRoute
+		state      string
+		foreign    bool
+		wantDenied bool
+	}{
+		{name: "pending_agent", route: startupRecoveryAgentRoute(t, "startup-agent"), state: "pending", wantDenied: true},
+		{name: "pending_node", route: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "complete-task"}, state: "pending", wantDenied: true},
+		{name: "future_failed", route: startupRecoveryAgentRoute(t, "startup-agent"), state: "future_failed", wantDenied: true},
+		{name: "busy_in_progress", route: startupRecoveryAgentRoute(t, "startup-agent"), state: "busy", wantDenied: true},
+		{name: "reclaimable_in_progress", route: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "complete-task"}, state: "reclaimable", wantDenied: true},
+		{name: "foreign_bundle_excluded", route: startupRecoveryAgentRoute(t, "foreign-agent"), state: "pending", foreign: true},
+		{name: "empty_control"},
+	}
+
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, mode := range modes {
+			for _, test := range cases {
+				t.Run(backend+"/"+mode.name+"/"+test.name, func(t *testing.T) {
+					var (
+						runtimeSQLDB *sql.DB
+						db           *sql.DB
+						selected     startupRecoveryOrderStore
+					)
+					if backend == "postgres" {
+						_, postgresDB, cleanup := testutil.StartPostgres(t)
+						t.Cleanup(cleanup)
+						runtimeSQLDB = postgresDB
+						db = postgresDB
+						selected = storetest.AdmitPostgresRuntimeStore(t, postgresDB)
+					} else {
+						sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+						db = sqliteStore.DB
+						selected = sqliteStore
+					}
+
+					currentRunID := eventtest.UUID("recovery-disabled-current-" + backend + "-" + mode.name + "-" + test.name)
+					currentCtx := startupRecoverySourceContext(currentSource, currentRunID)
+					seedStartupRecoverySourceRun(t, currentCtx, db, backend, currentSource, currentRunID)
+
+					var (
+						deliveryID  string
+						deliveryCtx context.Context
+						before      runtimedelivery.Snapshot
+					)
+					if test.state != "" {
+						eventSource := currentSource
+						eventRunID := currentRunID
+						eventCtx := currentCtx
+						if test.foreign {
+							eventSource = foreignSource
+							eventRunID = eventtest.UUID("recovery-disabled-foreign-" + backend + "-" + mode.name)
+							eventCtx = startupRecoverySourceContext(eventSource, eventRunID)
+							seedStartupRecoverySourceRun(t, eventCtx, db, backend, eventSource, eventRunID)
+						}
+						deliveryCtx = eventCtx
+						event := eventtest.ExistingRunRootIngress(
+							eventtest.UUID("recovery-disabled-event-"+backend+"-"+mode.name+"-"+test.name),
+							"task.requested", "test", "", []byte(`{}`), 0, eventRunID,
+							events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("recovery-disabled-entity-"+backend+"-"+mode.name+"-"+test.name)),
+							time.Now().UTC(),
+						)
+						storetest.CommitSemanticEventWithInitialFacts(
+							t, eventCtx, selected, event, []events.DeliveryRoute{test.route},
+							runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),
+						)
+						deliveryID, err = runtimedelivery.DeliveryID(event.ID(), test.route)
+						if err != nil {
+							t.Fatalf("derive startup delivery id: %v", err)
+						}
+						switch test.state {
+						case "pending":
+						case "future_failed":
+							claimed, claimErr := storetest.ClaimDelivery(eventCtx, selected, event, test.route)
+							if claimErr != nil {
+								t.Fatalf("claim future-failed startup delivery: %v", claimErr)
+							}
+							failure := runtimefailures.FromError(errors.New("retry after startup"), "startup-recovery-test", "schedule_retry")
+							if _, settleErr := selected.SettleFailure(eventCtx, claimed.Claim, runtimedelivery.Settlement{
+								Disposition: runtimedelivery.FailureRetry,
+								Failure:     &failure.Failure,
+								RetryBase:   time.Hour,
+							}); settleErr != nil {
+								t.Fatalf("settle future-failed startup delivery: %v", settleErr)
+							}
+						case "busy":
+							if _, claimErr := storetest.ClaimDelivery(eventCtx, selected, event, test.route); claimErr != nil {
+								t.Fatalf("claim busy startup delivery: %v", claimErr)
+							}
+						case "reclaimable":
+							if _, claimErr := storetest.ClaimDelivery(eventCtx, selected, event, test.route); claimErr != nil {
+								t.Fatalf("claim reclaimable startup delivery: %v", claimErr)
+							}
+							expireNodeDeliveryClaim(t, eventCtx, db, backend == "postgres", deliveryID)
+						default:
+							t.Fatalf("unknown startup delivery state %q", test.state)
+						}
+						before, err = selected.Snapshot(eventCtx, deliveryID)
+						if err != nil {
+							t.Fatalf("load prepared startup delivery: %v", err)
+						}
+					}
+
+					workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+					if backend == "sqlite" {
+						workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, selected)
+					}
+					configureRuntimeTestWorkflowStore(t, workflowStore, selected)
+					module := loadStartupRecoveryWorkflowModule(t)
+					processOwner := worklifetime.NewProcess()
+					activationProbe := &startupRecoveryActivationProbe{Store: selected}
+					handlerStarts := atomic.Int64{}
+					runtime, runtimeErr := swarmruntime.NewRuntime(currentCtx, swarmruntime.RuntimeDeps{
+						Config: &config.Config{
+							Runtime: config.RuntimeConfig{RecoveryOnStartup: mode.recoveryOnStartup},
+							LLM:     config.LLMConfig{Backend: "anthropic"},
+						},
+						Stores: swarmruntime.Stores{
+							SQLDB: runtimeSQLDB, EventStore: selected, RunLifecycleCandidates: selected,
+							PipelineStore: workflowStore, ManagerStore: selected, DeliveryStore: activationProbe,
+							PipelineObligations: selected.PipelineObligations(),
+						},
+						Options: swarmruntime.RuntimeOptions{
+							SelfCheck: false, WorkflowModule: module, LLMRuntime: startupRecoveryOrderLLM{},
+							RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleSourceFact: currentSource,
+							ProcessWorkOwner:                 processOwner,
+							DisablePersistentStartupRecovery: mode.disablePersistentStartupRecovery,
+							TestWorkflowNodeHandlerStartHook: func(context.Context, string, events.Event) error {
+								handlerStarts.Add(1)
+								return nil
+							},
+						},
+					})
+					if runtimeErr != nil {
+						t.Fatalf("NewRuntime: %v", runtimeErr)
+					}
+					startErr := runtime.Start(currentCtx)
+					if test.wantDenied {
+						if startErr == nil {
+							t.Fatal("Runtime.Start succeeded with recovery disabled and executable delivery work")
+						}
+						if got := activationProbe.activations.Load(); got != 0 {
+							t.Fatalf("delivery authority activations = %d, want denial before activation", got)
+						}
+					} else {
+						if startErr != nil {
+							t.Fatalf("Runtime.Start control failed: %v", startErr)
+						}
+						if got := activationProbe.activations.Load(); got != 1 {
+							t.Fatalf("delivery authority activations = %d, want one for admitted startup", got)
+						}
+					}
+					if got := handlerStarts.Load(); got != 0 {
+						t.Fatalf("workflow handler starts = %d, want none before recovery admission", got)
+					}
+					if deliveryID != "" {
+						after, snapshotErr := selected.Snapshot(deliveryCtx, deliveryID)
+						if snapshotErr != nil {
+							t.Fatalf("load delivery after startup decision: %v", snapshotErr)
+						}
+						if !reflect.DeepEqual(after, before) {
+							t.Fatalf("startup decision mutated delivery\nbefore: %#v\nafter:  %#v", before, after)
+						}
+					}
+					if shutdownErr := runtime.Shutdown(); shutdownErr != nil {
+						t.Fatalf("shutdown startup-decision runtime: %v", shutdownErr)
+					}
+					joinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					if _, joinErr := processOwner.Join(joinCtx); joinErr != nil {
+						t.Fatalf("join startup-decision process owner: %v", joinErr)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *testing.T) {
+	source, err := runtimecorrelation.NewPersistedBundleSourceFact(authorActivityTestBundleSourceFact.BundleHash())
+	if err != nil {
+		t.Fatalf("construct pipeline handoff source: %v", err)
+	}
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var (
+				db       *sql.DB
+				selected startupRecoveryOrderStore
+			)
+			if backend == "postgres" {
+				_, postgresDB, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				db = postgresDB
+				selected = storetest.AdmitPostgresRuntimeStore(t, postgresDB)
+			} else {
+				sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+				db = sqliteStore.DB
+				selected = sqliteStore
+			}
+			runID := eventtest.UUID("pipeline-handoff-cleanup-run-" + backend)
+			ctx := startupRecoverySourceContext(source, runID)
+			seedStartupRecoverySourceRun(t, ctx, db, backend, source, runID)
+			event := eventtest.ExistingRunRootIngress(
+				eventtest.UUID("pipeline-handoff-cleanup-event-"+backend),
+				"task.requested", "test", "", []byte(`{}`), 0, runID,
+				events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("pipeline-handoff-cleanup-entity-"+backend)),
+				time.Now().UTC(),
+			)
+			route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "complete-task"}
+			storetest.CommitSemanticEventWithInitialFacts(
+				t, ctx, selected, event, []events.DeliveryRoute{route},
+				runtimepipelineobligation.ScopeSubscribed, nil,
+			)
+			deliveryID, err := runtimedelivery.DeliveryID(event.ID(), route)
+			if err != nil {
+				t.Fatalf("derive pipeline handoff delivery id: %v", err)
+			}
+			snapshot, err := selected.Snapshot(ctx, deliveryID)
+			if err != nil {
+				t.Fatalf("load pipeline handoff delivery: %v", err)
+			}
+
+			injectedErr := errors.New("injected committed pipeline cleanup failure")
+			pipelineOwner := committedCleanupPipelineOwner{
+				Store: selected.PipelineObligations(),
+				err:   injectedErr,
+			}
+			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
+				PipelineObligations: pipelineOwner,
+				BundleSourceFact:    source,
+				DeliveryAuthority:   snapshot.Authority,
+			})
+			if err != nil {
+				t.Fatalf("construct pipeline handoff event bus: %v", err)
+			}
+			dispatcher := &settlingDeliveryContinuationDispatcher{
+				store: selected, authority: snapshot.Authority,
+			}
+			coordinator, err := runtimedeliverycontinuation.New(
+				selected,
+				snapshot.Authority,
+				runtimeTestEventBusWorkOwner(t, bus),
+				dispatcher,
+				func(_ context.Context, reportErr error) { t.Errorf("pipeline handoff continuation: %v", reportErr) },
+			)
+			if err != nil {
+				t.Fatalf("construct pipeline handoff coordinator: %v", err)
+			}
+			dispatcher.coordinator = coordinator
+			if err := bus.SetDeliveryContinuationOwner(coordinator); err != nil {
+				t.Fatalf("install pipeline handoff coordinator: %v", err)
+			}
+			if err := coordinator.Start(ctx); err != nil {
+				t.Fatalf("start pipeline handoff coordinator: %v", err)
+			}
+			t.Cleanup(func() {
+				retireCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := coordinator.Retire(retireCtx); err != nil {
+					t.Errorf("retire pipeline handoff coordinator: %v", err)
+				}
+			})
+			if got := dispatcher.dispatches.Load(); got != 0 {
+				t.Fatalf("hidden pre-settlement delivery dispatches = %d, want 0", got)
+			}
+
+			result, sweepErr := bus.SweepPipelineObligations(ctx, 1)
+			if !errors.Is(sweepErr, injectedErr) {
+				t.Fatalf("pipeline sweep error = %v, want committed cleanup evidence", sweepErr)
+			}
+			if result.Settled != 0 {
+				t.Fatalf("pipeline sweep reported settled = %d despite auxiliary cleanup error", result.Settled)
+			}
+			deadline := time.Now().Add(2 * time.Second)
+			for dispatcher.dispatches.Load() == 0 && time.Now().Before(deadline) {
+				time.Sleep(time.Millisecond)
+			}
+			if got := dispatcher.dispatches.Load(); got != 1 {
+				t.Fatalf("post-commit delivery dispatches = %d, want 1 without unrelated wake", got)
+			}
+			delivered, err := selected.Snapshot(ctx, deliveryID)
+			if err != nil {
+				t.Fatalf("load settled pipeline handoff delivery: %v", err)
+			}
+			if delivered.Status != runtimedelivery.StatusDelivered {
+				t.Fatalf("post-commit delivery status = %s, want delivered", delivered.Status)
+			}
+			coordinator.Signal()
+			select {
+			case <-time.After(25 * time.Millisecond):
+			}
+			if got := dispatcher.dispatches.Load(); got != 1 {
+				t.Fatalf("post-terminal coordinator wake dispatched %d times, want exactly once", got)
+			}
+		})
+	}
+}
+
+func startupRecoveryAgentRoute(t *testing.T, agentID string) events.DeliveryRoute {
+	t.Helper()
+	name, err := runtimeagentidentity.DeclaredName(agentID, "global")
+	if err != nil {
+		t.Fatalf("construct startup recovery agent name: %v", err)
+	}
+	identity, err := runtimeagentidentity.New(name, runtimeagentidentity.RootRoute())
+	if err != nil {
+		t.Fatalf("construct startup recovery agent identity: %v", err)
+	}
+	return events.DeliveryRoute{SubscriberType: "agent", SubscriberID: agentID, AgentIdentity: identity}
+}
+
+func startupRecoverySourceContext(source runtimecorrelation.BundleSourceFact, runID string) context.Context {
+	ctx := runtimecorrelation.WithBundleSourceFact(context.Background(), source)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
+		authorActivityTestRuntimeInstanceID,
+		source.BundleHash(),
+	))
+	return runtimecorrelation.WithRunID(ctx, runID)
+}
+
+func seedStartupRecoverySourceRun(
+	t *testing.T,
+	ctx context.Context,
+	db *sql.DB,
+	backend string,
+	source runtimecorrelation.BundleSourceFact,
+	runID string,
+) {
+	t.Helper()
+	bundleHash, bundleSource := source.StorageValues()
+	seedStartupRecoveryPersistedBundle(t, ctx, db, backend, bundleHash)
+	fixture := storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
+		BundleHash: bundleHash, BundleSource: bundleSource,
+	}
+	if backend == "postgres" {
+		storetest.RequirePostgresRun(t, ctx, db, fixture)
+		return
+	}
+	storetest.RequireSQLiteRun(t, ctx, db, fixture)
+}
+
+func loadStartupRecoveryWorkflowModule(t *testing.T) runtimepipeline.WorkflowModule {
+	t.Helper()
+	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", "test-boot-success")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		fixtureRoot,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load startup recovery workflow contract: %v", err)
+	}
+	bundle.Semantics.NodeHandlers["complete-task"]["task.requested"] = runtimecontracts.SystemNodeEventHandler{}
+	return newRuntimeTestWorkflowModule(t, semanticview.Wrap(bundle))
+}
+
+func seedStartupRecoveryPersistedBundle(t *testing.T, ctx context.Context, db *sql.DB, backend, bundleHash string) {
+	t.Helper()
+	query := `
+		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
+		VALUES ($1, 'name: startup-recovery-test', '{}'::jsonb)
+		ON CONFLICT (bundle_hash) DO NOTHING`
+	if backend == "sqlite" {
+		query = `
+			INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
+			VALUES (?, 'name: startup-recovery-test', '{}')
+			ON CONFLICT (bundle_hash) DO NOTHING`
+	}
+	if _, err := db.ExecContext(ctx, query, bundleHash); err != nil {
+		t.Fatalf("seed persisted startup bundle: %v", err)
 	}
 }
 
@@ -210,7 +678,59 @@ func (s *renewalTrackingDeliveryStore) RenewClaim(ctx context.Context, claim run
 	return s.Store.RenewClaim(ctx, claim)
 }
 
-func TestPipelineCoordinatorRecoverNodeDeliveriesUsesCanonicalSelectedStoreOwner(t *testing.T) {
+func startNodeDeliveryContinuation(
+	t *testing.T,
+	ctx context.Context,
+	eventBus *runtimebus.EventBus,
+	selected runtimedelivery.Store,
+	workOwner worklifetime.Occurrence,
+	eventID string,
+	route events.DeliveryRoute,
+) *runtimedeliverycontinuation.Coordinator {
+	t.Helper()
+	deliveryID, err := runtimedelivery.DeliveryID(eventID, route)
+	if err != nil {
+		t.Fatalf("derive node recovery delivery identity: %v", err)
+	}
+	snapshot, err := selected.Snapshot(ctx, deliveryID)
+	if err != nil {
+		t.Fatalf("load node recovery delivery authority: %v", err)
+	}
+	if err := selected.ActivateDeliveryAuthority(ctx, snapshot.Authority); err != nil {
+		t.Fatalf("activate node recovery delivery authority: %v", err)
+	}
+	if err := eventBus.SetDeliveryAuthority(snapshot.Authority); err != nil {
+		t.Fatalf("configure node recovery delivery authority: %v", err)
+	}
+	coordinator, err := runtimedeliverycontinuation.New(
+		selected,
+		snapshot.Authority,
+		workOwner,
+		eventBus,
+		func(_ context.Context, reportErr error) {
+			t.Errorf("node delivery continuation failed: %v", reportErr)
+		},
+	)
+	if err != nil {
+		t.Fatalf("construct node delivery continuation coordinator: %v", err)
+	}
+	if err := eventBus.SetDeliveryContinuationOwner(coordinator); err != nil {
+		t.Fatalf("configure node delivery continuation owner: %v", err)
+	}
+	if err := coordinator.Start(ctx); err != nil {
+		t.Fatalf("start node delivery continuation coordinator: %v", err)
+	}
+	t.Cleanup(func() {
+		retireCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := coordinator.Retire(retireCtx); err != nil {
+			t.Errorf("retire node delivery continuation coordinator: %v", err)
+		}
+	})
+	return coordinator
+}
+
+func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSelectedStore(t *testing.T) {
 	for _, backend := range []struct {
 		name  string
 		setup func(*testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore)
@@ -238,7 +758,16 @@ func TestPipelineCoordinatorRecoverNodeDeliveriesUsesCanonicalSelectedStoreOwner
 			ctx, db, selected := backend.setup(t)
 			bundle := loadRuntimeTempBundle(t, artifactActionResultDeliveryFixtureFiles())
 			source := semanticview.Wrap(bundle)
-			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
+			var pc *runtimepipeline.PipelineCoordinator
+			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
+				ContractBundle: source,
+				InterceptorProvider: func() []runtimebus.EventInterceptor {
+					if pc == nil {
+						return nil
+					}
+					return []runtimebus.EventInterceptor{pc}
+				},
+			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -251,8 +780,9 @@ func TestPipelineCoordinatorRecoverNodeDeliveriesUsesCanonicalSelectedStoreOwner
 				t.Fatalf("seed workflow instance: %v", err)
 			}
 			deliveryOwner := &renewalTrackingDeliveryStore{Store: selected}
-			pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-				WorkOwner:     runtimeTestEventBusWorkOwner(t, bus),
+			workOwner := runtimeTestEventBusWorkOwner(t, bus)
+			pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+				WorkOwner:     workOwner,
 				Module:        newRuntimeTestWorkflowModule(t, source),
 				WorkflowStore: workflowStore,
 				DeliveryStore: deliveryOwner,
@@ -272,18 +802,17 @@ func TestPipelineCoordinatorRecoverNodeDeliveriesUsesCanonicalSelectedStoreOwner
 				time.Now().UTC(),
 			)
 			route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "repo-scaffold-node", Target: target}
-			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
+			storetest.CommitSemanticEventWithInitialFacts(
+				t, ctx, selected, event, []events.DeliveryRoute{route},
+				runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),
+			)
 
-			if err := pc.RecoverNodeDeliveries(ctx); err != nil {
-				t.Fatalf("RecoverNodeDeliveries: %v", err)
-			}
+			continuations := startNodeDeliveryContinuation(t, ctx, bus, deliveryOwner, workOwner, eventID, route)
 			assertRecoveredNodeDelivery(t, ctx, selected, eventID, route, 1)
 			if got := deliveryOwner.renewals.Load(); got < 2 {
 				t.Fatalf("claim renewals = %d, want immediate and final handler renewal", got)
 			}
-			if err := pc.RecoverNodeDeliveries(ctx); err != nil {
-				t.Fatalf("repeat RecoverNodeDeliveries: %v", err)
-			}
+			continuations.Signal()
 			assertRecoveredNodeDelivery(t, ctx, selected, eventID, route, 1)
 		})
 	}
@@ -317,7 +846,16 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 			ctx, db, selected := backend.setup(t)
 			bundle := loadRuntimeTempBundle(t, artifactActionResultDeliveryFixtureFiles())
 			source := semanticview.Wrap(bundle)
-			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
+			var pc *runtimepipeline.PipelineCoordinator
+			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
+				ContractBundle: source,
+				InterceptorProvider: func() []runtimebus.EventInterceptor {
+					if pc == nil {
+						return nil
+					}
+					return []runtimebus.EventInterceptor{pc}
+				},
+			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -329,8 +867,9 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 			if err := workflowStore.Upsert(ctx, artifactActionResultWorkflowInstance()); err != nil {
 				t.Fatalf("seed healthy workflow instance: %v", err)
 			}
-			pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-				WorkOwner:     runtimeTestEventBusWorkOwner(t, bus),
+			workOwner := runtimeTestEventBusWorkOwner(t, bus)
+			pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+				WorkOwner:     workOwner,
 				Module:        newRuntimeTestWorkflowModule(t, source),
 				WorkflowStore: workflowStore,
 				DeliveryStore: selected,
@@ -357,7 +896,10 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				time.Now().UTC().Add(-time.Minute),
 			)
 			poisonRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "repo-scaffold-node", Target: poisonTarget}
-			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, poison, []events.DeliveryRoute{poisonRoute}, runtimepipelineobligation.ScopeSubscribed)
+			storetest.CommitSemanticEventWithInitialFacts(
+				t, ctx, selected, poison, []events.DeliveryRoute{poisonRoute},
+				runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),
+			)
 
 			healthyTarget := events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: "repo-scaffold/inst-1", EntityID: artifactActionResultEntityID}
 			healthy := eventtest.ExistingRunRootIngress(
@@ -368,16 +910,17 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				time.Now().UTC(),
 			)
 			healthyRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "repo-scaffold-node", Target: healthyTarget}
-			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, healthy, []events.DeliveryRoute{healthyRoute}, runtimepipelineobligation.ScopeSubscribed)
+			storetest.CommitSemanticEventWithInitialFacts(
+				t, ctx, selected, healthy, []events.DeliveryRoute{healthyRoute},
+				runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),
+			)
 
-			if err := pc.RecoverNodeDeliveries(ctx); err != nil {
-				t.Fatalf("RecoverNodeDeliveries after terminal handler failure: %v", err)
-			}
-			poisonObligation, err := runtimedelivery.NewObligation(poison.ID(), poison.RunID(), poisonRoute)
+			startNodeDeliveryContinuation(t, ctx, bus, selected, workOwner, poison.ID(), poisonRoute)
+			poisonDeliveryID, err := runtimedelivery.DeliveryID(poison.ID(), poisonRoute)
 			if err != nil {
-				t.Fatalf("derive poison delivery obligation: %v", err)
+				t.Fatalf("derive poison delivery identity: %v", err)
 			}
-			poisonSnapshot, err := selected.Snapshot(ctx, poisonObligation.DeliveryID())
+			poisonSnapshot, err := selected.Snapshot(ctx, poisonDeliveryID)
 			if err != nil {
 				t.Fatalf("load poison delivery snapshot: %v", err)
 			}
@@ -445,7 +988,16 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 			ctx, db, selected := backend.setup(t)
 			bundle := loadRuntimeTempBundle(t, artifactActionResultDeliveryFixtureFiles())
 			source := semanticview.Wrap(bundle)
-			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
+			var pc *runtimepipeline.PipelineCoordinator
+			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
+				ContractBundle: source,
+				InterceptorProvider: func() []runtimebus.EventInterceptor {
+					if pc == nil {
+						return nil
+					}
+					return []runtimebus.EventInterceptor{pc}
+				},
+			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -459,8 +1011,9 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 			}
 			handlerStarted := make(chan struct{}, 4)
 			deliveryOwner := &renewalTrackingDeliveryStore{Store: selected}
-			pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-				WorkOwner:     runtimeTestEventBusWorkOwner(t, bus),
+			workOwner := runtimeTestEventBusWorkOwner(t, bus)
+			pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+				WorkOwner:     workOwner,
 				Module:        newRuntimeTestWorkflowModule(t, source),
 				WorkflowStore: workflowStore,
 				DeliveryStore: deliveryOwner,
@@ -472,7 +1025,6 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 					return nil
 				},
 			})
-			pc.SetTestMaintenanceInterval(5 * time.Millisecond)
 
 			eventID := "99999999-9999-4999-8999-999999999982"
 			target := events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: "repo-scaffold/inst-1", EntityID: artifactActionResultEntityID}
@@ -488,8 +1040,11 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 				time.Now().UTC(),
 			)
 			route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "repo-scaffold-node", Target: target}
-			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
-			claimed, err := selected.ClaimNodeDelivery(ctx, event, route)
+			storetest.CommitSemanticEventWithInitialFacts(
+				t, ctx, selected, event, []events.DeliveryRoute{route},
+				runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),
+			)
+			claimed, err := storetest.ClaimDelivery(ctx, selected, event, route)
 			if err != nil {
 				t.Fatalf("claim node delivery before retry: %v", err)
 			}
@@ -515,31 +1070,18 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 				events.EnvelopeForTargetRoute(events.EnvelopeForEntityID(events.EventEnvelope{}, artifactActionResultEntityID), target),
 				time.Now().UTC(),
 			)
-			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, expiringEvent, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
-			expiringClaim, err := selected.ClaimNodeDelivery(ctx, expiringEvent, route)
+			storetest.CommitSemanticEventWithInitialFacts(
+				t, ctx, selected, expiringEvent, []events.DeliveryRoute{route},
+				runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),
+			)
+			expiringClaim, err := storetest.ClaimDelivery(ctx, selected, expiringEvent, route)
 			if err != nil {
 				t.Fatalf("claim node delivery before lease expiry: %v", err)
 			}
-			if err := pc.RecoverNodeDeliveries(ctx); err != nil {
-				t.Fatalf("startup recovery before eligibility: %v", err)
-			}
-
-			maintenanceCtx, cancelMaintenance := context.WithCancel(ctx)
-			maintenanceDone := make(chan struct{})
-			go func() {
-				defer close(maintenanceDone)
-				pc.RunMaintenance(maintenanceCtx)
-			}()
-			defer func() {
-				cancelMaintenance()
-				select {
-				case <-maintenanceDone:
-				case <-time.After(time.Second):
-					t.Errorf("standing recovery did not stop after cancellation")
-				}
-			}()
-			makeNodeDeliveryImmediatelyEligible(t, maintenanceCtx, db, backend.name == "postgres", retrying.DeliveryID)
-			expireNodeDeliveryClaim(t, maintenanceCtx, db, backend.name == "postgres", expiringClaim.Snapshot.DeliveryID)
+			continuations := startNodeDeliveryContinuation(t, ctx, bus, deliveryOwner, workOwner, eventID, route)
+			makeNodeDeliveryImmediatelyEligible(t, ctx, db, backend.name == "postgres", retrying.DeliveryID)
+			expireNodeDeliveryClaim(t, ctx, db, backend.name == "postgres", expiringClaim.Snapshot.DeliveryID)
+			continuations.Signal()
 			for recovered := 0; recovered < 2; recovered++ {
 				select {
 				case <-handlerStarted:
@@ -549,7 +1091,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 			}
 			waitForRecoveredNodeDelivery(t, ctx, selected, eventID, route, 2)
 			waitForRecoveredNodeDelivery(t, ctx, selected, expiringEventID, route, 1)
-			assertExpiredNodeDeliveryAttemptHistory(t, maintenanceCtx, db, backend.name == "postgres", expiringClaim.Snapshot.DeliveryID)
+			assertExpiredNodeDeliveryAttemptHistory(t, ctx, db, backend.name == "postgres", expiringClaim.Snapshot.DeliveryID)
 			if got := deliveryOwner.renewals.Load(); got < 4 {
 				t.Fatalf("standing recovery claim renewals = %d, want immediate and final renewal for two handlers", got)
 			}
@@ -658,7 +1200,7 @@ func waitForRecoveredNodeDelivery(t *testing.T, ctx context.Context, selected ru
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("standing recovery status = %q, want delivered", snapshot.Status)
+			t.Fatalf("standing recovery status = %q failure=%+v, want delivered", snapshot.Status, snapshot.Failure)
 		}
 		<-ticker.C
 	}

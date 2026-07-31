@@ -134,13 +134,13 @@ func (o *sourceMutationProbeOwner) MarkDecisionProcessed(ctx context.Context, _ 
 	return nil
 }
 
-func (o *sourceMutationProbeOwner) Settle(ctx context.Context, claim runtimepipelineobligation.Claim, _ runtimepipelineobligation.Disposition) error {
+func (o *sourceMutationProbeOwner) Settle(ctx context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) (runtimepipelineobligation.SettlementOutcome, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.settle++
 	o.settleFact, _ = runtimecorrelation.BundleSourceFactFromContext(ctx)
 	delete(o.claims, claim.EventID())
-	return nil
+	return runtimepipelineobligation.CommittedSettlement(disposition.Successful()), nil
 }
 
 func (o *sourceMutationProbeOwner) Release(ctx context.Context, claim runtimepipelineobligation.Claim) error {
@@ -295,9 +295,9 @@ func (t *sourceMutationProbeTransaction) BeginPreparedPublish(context.Context, P
 	return EventAppendInserted, nil
 }
 
-func (t *sourceMutationProbeTransaction) FinalizePreparedPublish(context.Context, PreparedPublishFinalization) error {
+func (t *sourceMutationProbeTransaction) FinalizePreparedPublish(_ context.Context, finalization PreparedPublishFinalization) error {
 	t.finalize++
-	return nil
+	return finalization.Request().DeliveryReceipt.Record(nil)
 }
 
 func sourceMutationFact(t testing.TB, marker string) runtimecorrelation.BundleSourceFact {
@@ -344,11 +344,24 @@ func newSourceMutationProbeBusWithStore(
 		RuntimeInstanceID:   uuid.NewString(),
 		PipelineObligations: owner,
 		WorkOwner:           runtimeOwner,
+		DeliveryAuthority:   mustSourceMutationDeliveryAuthority(t, fact),
 	})
 	if err != nil {
 		t.Fatalf("create event bus: %v", err)
 	}
+	if err := bus.SetDeliveryContinuationOwner(permissiveTestDeliveryOwner{}); err != nil {
+		t.Fatalf("install delivery continuation owner: %v", err)
+	}
 	return bus
+}
+
+func mustSourceMutationDeliveryAuthority(t testing.TB, fact runtimecorrelation.BundleSourceFact) runtimedelivery.ExecutionAuthority {
+	t.Helper()
+	authority, err := runtimedelivery.NewNormalExecutionAuthority(fact, uuid.NewString(), 1)
+	if err != nil {
+		t.Fatalf("construct delivery authority: %v", err)
+	}
+	return authority
 }
 
 func newFencedSourceMutationOccurrence(t testing.TB) worklifetime.Occurrence {
@@ -715,6 +728,7 @@ func TestPostCommitAndDeferredDispatchRetainPendingWorkOnSourceRejection(t *test
 				runtimeengine.EmitIntent{Event: event},
 				EventAppendInserted,
 				claim,
+				nil,
 			)
 			before := owner.counts()
 			ctx := runtimecorrelation.WithBundleSourceFact(context.Background(), foreign)
@@ -954,6 +968,7 @@ func TestRetainedPendingAndScanCapabilitiesRejectSourceSwitchAndPreserveOwnershi
 			runtimeengine.EmitIntent{Event: event},
 			EventAppendInserted,
 			claim,
+			nil,
 		)
 		if err := bus.ResetInMemoryState(); err != nil {
 			t.Fatalf("ResetInMemoryState: %v", err)

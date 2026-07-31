@@ -40,7 +40,7 @@ type eventPublishDelivery struct {
 	Failure        *runtimefailures.Envelope        `json:"failure,omitempty"`
 	Attempt        int                              `json:"attempt"`
 	RetryCount     int                              `json:"retry_count"`
-	RetryEligible  bool                             `json:"retry_eligible"`
+	RetryScheduled bool                             `json:"retry_scheduled"`
 	Terminal       bool                             `json:"terminal"`
 	CreatedAt      *time.Time                       `json:"created_at,omitempty"`
 	StartedAt      *time.Time                       `json:"started_at,omitempty"`
@@ -825,7 +825,7 @@ func eventPublishDeliveryFromStore(delivery store.OperatorEventDelivery) eventPu
 		Failure:        runtimefailures.CloneEnvelope(delivery.Failure),
 		Attempt:        attempt,
 		RetryCount:     delivery.RetryCount,
-		RetryEligible:  delivery.RetryEligible,
+		RetryScheduled: delivery.RetryScheduled,
 		Terminal:       delivery.Terminal,
 		CreatedAt:      cloneTimePtr(delivery.CreatedAt),
 		StartedAt:      cloneTimePtr(delivery.StartedAt),

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
@@ -59,7 +60,11 @@ func commitPostgresDeliveryFixture(t testing.TB, ctx context.Context, db *sql.DB
 	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
 	store := postgresDeliveryFixtureStore(db)
 	if err := store.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		_, err := postgresDeliveryAdapter.CommitInitial(txctx, tx, event.ID(), event.RunID(), []events.DeliveryRoute{route})
+		authority, err := deliveryFixtureAuthorityForRun(txctx, tx, runtimedelivery.DialectPostgres, event.RunID())
+		if err != nil {
+			return err
+		}
+		_, err = postgresDeliveryAdapter.CommitInitial(txctx, tx, event.ID(), event.RunID(), []events.DeliveryRoute{route}, authority)
 		return err
 	}); err != nil {
 		t.Fatalf("commit delivery fixture %s/%s: %v", eventID, route.SubscriberID, err)
@@ -71,30 +76,14 @@ func claimPostgresDeliveryFixture(t testing.TB, ctx context.Context, db *sql.DB,
 	t.Helper()
 	route = canonicalDeliveryFixtureRoute(t, route)
 	store := postgresDeliveryFixtureStore(db)
-	var (
-		claimed runtimedelivery.ClaimedObligation
-		err     error
-	)
-	switch route.Normalized().SubscriberType {
-	case string(runtimedelivery.SubscriberAgent):
-		claimed, err = store.ClaimAgentDelivery(ctx, event, route)
-	case string(runtimedelivery.SubscriberNode):
-		claimed, err = store.ClaimNodeDelivery(ctx, event, route)
-	default:
-		t.Fatalf("claim delivery fixture route class %q is unsupported", route.SubscriberType)
-	}
+	claimed, err := claimDeliveryFixture(ctx, store, event, route)
 	if err != nil {
 		t.Fatalf("claim delivery fixture %s/%s: %v", event.ID(), route.SubscriberID, err)
 	}
 	return claimed
 }
 
-type deliveryFixtureStore interface {
-	ClaimAgentDelivery(context.Context, events.Event, events.DeliveryRoute) (runtimedelivery.ClaimedObligation, error)
-	ClaimNodeDelivery(context.Context, events.Event, events.DeliveryRoute) (runtimedelivery.ClaimedObligation, error)
-	SettleSuccess(context.Context, runtimedelivery.Claim, []string, time.Duration) (runtimedelivery.Snapshot, error)
-	SettleFailure(context.Context, runtimedelivery.Claim, runtimedelivery.Settlement) (runtimedelivery.Snapshot, error)
-}
+type deliveryFixtureStore interface{ runtimedelivery.Store }
 
 func seedAgentDeliveryStateFixture(
 	t testing.TB,
@@ -125,18 +114,7 @@ func seedDeliveryStateFixture(
 	if state == runtimedelivery.StateQueued {
 		return loadDeliverySnapshotFixture(t, ctx, store, event.ID(), route)
 	}
-	var (
-		claimed runtimedelivery.ClaimedObligation
-		err     error
-	)
-	switch route.Normalized().SubscriberType {
-	case string(runtimedelivery.SubscriberAgent):
-		claimed, err = store.ClaimAgentDelivery(ctx, event, route)
-	case string(runtimedelivery.SubscriberNode):
-		claimed, err = store.ClaimNodeDelivery(ctx, event, route)
-	default:
-		t.Fatalf("delivery fixture route class %q is unsupported", route.SubscriberType)
-	}
+	claimed, err := claimDeliveryFixture(ctx, store, event, route)
 	if err != nil {
 		t.Fatalf("claim delivery fixture %s/%s: %v", event.ID(), route.SubscriberID, err)
 	}
@@ -183,6 +161,10 @@ func seedDeliveryStateFixture(
 
 func canonicalDeliveryFixtureRoute(t testing.TB, route events.DeliveryRoute) events.DeliveryRoute {
 	t.Helper()
+	return canonicalDeliveryFixtureRouteValue(route)
+}
+
+func canonicalDeliveryFixtureRouteValue(route events.DeliveryRoute) events.DeliveryRoute {
 	route = route.Normalized()
 	if route.SubscriberType == string(runtimedelivery.SubscriberAgent) && route.AgentIdentity.IsZero() {
 		route.AgentIdentity = mustTestAgentIdentity(route.SubscriberID, "fixture/"+route.SubscriberID)
@@ -195,20 +177,68 @@ func commitAgentDeliveryObligationFixture(ctx context.Context, store deliveryFix
 }
 
 func commitDeliveryObligationFixture(ctx context.Context, store deliveryFixtureStore, event events.Event, route events.DeliveryRoute) error {
+	route = canonicalDeliveryFixtureRouteValue(route)
 	switch selected := store.(type) {
 	case *PostgresStore:
 		return selected.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			_, err := postgresDeliveryAdapter.CommitInitial(txctx, tx, event.ID(), event.RunID(), []events.DeliveryRoute{route})
+			authority, err := deliveryFixtureAuthorityForRun(txctx, tx, runtimedelivery.DialectPostgres, event.RunID())
+			if err != nil {
+				return err
+			}
+			_, err = postgresDeliveryAdapter.CommitInitial(txctx, tx, event.ID(), event.RunID(), []events.DeliveryRoute{route}, authority)
 			return err
 		})
 	case *SQLiteRuntimeStore:
 		return selected.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			_, err := sqliteDeliveryAdapter.CommitInitial(txctx, tx, event.ID(), event.RunID(), []events.DeliveryRoute{route})
+			authority, err := deliveryFixtureAuthorityForRun(txctx, tx, runtimedelivery.DialectSQLite, event.RunID())
+			if err != nil {
+				return err
+			}
+			_, err = sqliteDeliveryAdapter.CommitInitial(txctx, tx, event.ID(), event.RunID(), []events.DeliveryRoute{route}, authority)
 			return err
 		})
 	default:
 		return fmt.Errorf("delivery fixture store %T is unsupported", store)
 	}
+}
+
+func deliveryFixtureAuthorityForRun(ctx context.Context, queryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, dialect runtimedelivery.Dialect, runID string) (runtimedelivery.ExecutionAuthority, error) {
+	query := `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=$1::uuid`
+	if dialect == runtimedelivery.DialectSQLite {
+		query = `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=?`
+	}
+	var bundleHash, bundleSource string
+	if err := queryer.QueryRowContext(ctx, query, runID).Scan(&bundleHash, &bundleSource); err != nil {
+		return runtimedelivery.ExecutionAuthority{}, fmt.Errorf("load delivery fixture run authority: %w", err)
+	}
+	source, err := runtimecorrelation.DecodeBundleSourceFact(bundleHash, bundleSource)
+	if err != nil {
+		return runtimedelivery.ExecutionAuthority{}, err
+	}
+	return runtimedelivery.NewNormalExecutionAuthority(source, "delivery-fixture:"+runID, 1)
+}
+
+func claimDeliveryFixture(ctx context.Context, store deliveryFixtureStore, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimedObligation, error) {
+	route = canonicalDeliveryFixtureRouteValue(route)
+	deliveryID, err := runtimedelivery.DeliveryID(event.ID(), route)
+	if err != nil {
+		return runtimedelivery.ClaimedObligation{}, err
+	}
+	snapshot, err := store.Snapshot(ctx, deliveryID)
+	if err != nil {
+		return runtimedelivery.ClaimedObligation{}, err
+	}
+	result, err := store.ClaimDelivery(ctx, snapshot.Authority, event, route)
+	if err != nil {
+		return runtimedelivery.ClaimedObligation{}, err
+	}
+	claimed, ok := result.Acquired()
+	if !ok {
+		return runtimedelivery.ClaimedObligation{}, fmt.Errorf("delivery %s was not acquired: %s", deliveryID, result.Disposition)
+	}
+	return claimed, nil
 }
 
 func loadAgentDeliverySnapshotFixture(t testing.TB, ctx context.Context, store deliveryFixtureStore, eventID string, route events.DeliveryRoute) runtimedelivery.Snapshot {

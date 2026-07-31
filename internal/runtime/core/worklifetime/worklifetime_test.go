@@ -538,3 +538,130 @@ func TestBufferedRouteDeliveryBlocksRuntimeUntilExactlyOnceCompletion(t *testing
 		t.Fatalf("process join: %v", err)
 	}
 }
+
+type scriptedDeliveryContinuation struct {
+	attempts   int
+	resolution DeliveryContinuationResolution
+	err        error
+}
+
+func (*scriptedDeliveryContinuation) DeliveryID() string { return "delivery-1" }
+func (c *scriptedDeliveryContinuation) Resolve(context.Context, DeliveryContinuationIntent) (DeliveryContinuationResolution, error) {
+	c.attempts++
+	return c.resolution, c.err
+}
+
+func TestEventDeliveryCompletionReportsResolutionFailureWithoutPolling(t *testing.T) {
+	process := NewProcess()
+	runtime, err := process.NewRuntime(context.Background(), RuntimeIdentity{RuntimeInstanceID: "runtime-1", BundleHash: "bundle-1"})
+	if err != nil {
+		t.Fatalf("new runtime occurrence: %v", err)
+	}
+	event := eventtest.PersistedProjectionForProducer(
+		uuid.NewString(), events.EventType("message.received"), eventtest.Producer(events.EventProducerPlatform, "test"), "",
+		[]byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(),
+	)
+	delivery, err := runtime.NewRoutedEventDelivery(context.Background(), event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "worker"})
+	if err != nil {
+		t.Fatalf("new routed delivery: %v", err)
+	}
+	continuation := &scriptedDeliveryContinuation{err: errors.New("injected continuation resolution failure")}
+	if err := delivery.AttachContinuation(continuation); err != nil {
+		t.Fatalf("attach continuation: %v", err)
+	}
+	if err := delivery.Complete(); err == nil {
+		t.Fatal("completion hid continuation resolution failure")
+	}
+	if continuation.attempts != 1 {
+		t.Fatalf("continuation resolution attempts = %d, want exactly 1", continuation.attempts)
+	}
+	waitCtx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := runtime.Wait(waitCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("runtime wait after failed continuation return = %v, want deadline", err)
+	}
+	continuation.err = nil
+	continuation.resolution = DeliveryContinuationReturned
+	if err := delivery.Complete(); err != nil {
+		t.Fatalf("explicit owner repair delivery completion: %v", err)
+	}
+	if err := runtime.Wait(context.Background()); err != nil {
+		t.Fatalf("runtime wait after successful continuation return: %v", err)
+	}
+	if _, err := runtime.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("runtime retirement: %v", err)
+	}
+	if _, err := process.Join(context.Background()); err != nil {
+		t.Fatalf("process join: %v", err)
+	}
+}
+
+func TestEventDeliveryCarrierGuardReturnsTypedResolutionExactlyOnce(t *testing.T) {
+	process := NewProcess()
+	runtime, err := process.NewRuntime(context.Background(), RuntimeIdentity{RuntimeInstanceID: "runtime-1", BundleHash: "bundle-1"})
+	if err != nil {
+		t.Fatalf("new runtime occurrence: %v", err)
+	}
+	event := eventtest.PersistedProjectionForProducer(
+		uuid.NewString(), events.EventType("message.received"), eventtest.Producer(events.EventProducerPlatform, "test"), "",
+		[]byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(),
+	)
+	delivery, err := runtime.NewRoutedEventDelivery(context.Background(), event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "worker"})
+	if err != nil {
+		t.Fatalf("new routed delivery: %v", err)
+	}
+	continuation := &scriptedDeliveryContinuation{resolution: DeliveryContinuationReturned}
+	if err := delivery.AttachContinuation(continuation); err != nil {
+		t.Fatalf("attach continuation: %v", err)
+	}
+	guard, err := NewEventDeliveryCarrierGuard(delivery)
+	if err != nil {
+		t.Fatalf("construct carrier guard: %v", err)
+	}
+	resolution, err := guard.Complete(nil)
+	if err != nil {
+		t.Fatalf("complete guarded delivery: %v", err)
+	}
+	if resolution != DeliveryContinuationReturned || continuation.attempts != 1 {
+		t.Fatalf("continuation resolution/attempts = %d/%d, want returned/1", resolution, continuation.attempts)
+	}
+	if err := runtime.Wait(context.Background()); err != nil {
+		t.Fatalf("runtime wait after guarded completion: %v", err)
+	}
+	if _, err := runtime.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("runtime retirement: %v", err)
+	}
+	if _, err := process.Join(context.Background()); err != nil {
+		t.Fatalf("process join: %v", err)
+	}
+}
+
+func TestDeliveryContinuationGuardReturnsTerminalFenceWithoutPolling(t *testing.T) {
+	continuation := &scriptedDeliveryContinuation{resolution: DeliveryContinuationTerminal}
+	guard, err := NewDeliveryContinuationGuard(context.Background(), continuation)
+	if err != nil {
+		t.Fatalf("construct continuation guard: %v", err)
+	}
+	resolution, err := guard.Consume(nil)
+	if err != nil {
+		t.Fatalf("resolve terminal carrier: %v", err)
+	}
+	if resolution != DeliveryContinuationTerminal || continuation.attempts != 1 {
+		t.Fatalf("terminal resolution/attempts = %d/%d, want terminal/1", resolution, continuation.attempts)
+	}
+}
+
+func TestDeliveryContinuationGuardReportsInvariantFailureOnce(t *testing.T) {
+	continuation := &scriptedDeliveryContinuation{err: errors.New("injected invariant failure")}
+	guard, err := NewDeliveryContinuationGuard(context.Background(), continuation)
+	if err != nil {
+		t.Fatalf("construct continuation guard: %v", err)
+	}
+	reported := 0
+	if _, err := guard.Consume(func(error) { reported++ }); err == nil {
+		t.Fatal("guard hid continuation invariant failure")
+	}
+	if continuation.attempts != 1 || reported != 1 {
+		t.Fatalf("continuation attempts/reports = %d/%d, want 1/1", continuation.attempts, reported)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -116,15 +117,36 @@ type workflowInstancePersistedControl struct {
 }
 
 type WorkflowInstanceStore struct {
-	db              *sql.DB
-	dialect         workflowStoreDialect
-	runtimeMutation RuntimeMutationRunner
-	deliveryStore   runtimedelivery.Store
-	pipelineStore   runtimepipelineobligation.Store
-	decisionCards   decisioncard.Store
-	gateEvents      workflowGateMutationPublisher
-	lifecycleOwner  workflowInstanceLifecycleOwner
-	runLifecycle    runtimerunlifecycle.OperationOwner
+	db               *sql.DB
+	dialect          workflowStoreDialect
+	runtimeMutation  RuntimeMutationRunner
+	deliveryStore    runtimedelivery.Store
+	pipelineStore    runtimepipelineobligation.Store
+	decisionCards    decisioncard.Store
+	gateEvents       workflowGateMutationPublisher
+	lifecycleOwner   workflowInstanceLifecycleOwner
+	runLifecycle     runtimerunlifecycle.OperationOwner
+	deliverySignalMu sync.RWMutex
+	deliverySignals  map[runtimedelivery.ExecutionAuthority]func()
+}
+
+type DeliveryContinuationSignalRegistration struct {
+	owner     *WorkflowInstanceStore
+	authority runtimedelivery.ExecutionAuthority
+	released  bool
+}
+
+func (r *DeliveryContinuationSignalRegistration) Release() {
+	if r == nil || r.owner == nil {
+		return
+	}
+	r.owner.deliverySignalMu.Lock()
+	defer r.owner.deliverySignalMu.Unlock()
+	if r.released {
+		return
+	}
+	r.released = true
+	delete(r.owner.deliverySignals, r.authority)
 }
 
 type standingGenerationRebindContextKey struct{}
@@ -205,6 +227,64 @@ func (s *WorkflowInstanceStore) ConfigureDeliveryLifecycleStore(store runtimedel
 	if s != nil {
 		s.deliveryStore = store
 	}
+}
+
+// RegisterDeliveryContinuationSignal installs the exact runtime-generation
+// notification used after standing-run terminalization commits.
+func (s *WorkflowInstanceStore) RegisterDeliveryContinuationSignal(authority runtimedelivery.ExecutionAuthority, signal func()) (*DeliveryContinuationSignalRegistration, error) {
+	if s == nil || signal == nil {
+		return nil, errors.New("delivery continuation signal owner is required")
+	}
+	if err := authority.Validate(); err != nil || authority.Kind() != runtimedelivery.ExecutionAuthorityNormalRuntime {
+		return nil, errors.New("normal delivery continuation signal authority is required")
+	}
+	s.deliverySignalMu.Lock()
+	defer s.deliverySignalMu.Unlock()
+	if s.deliverySignals == nil {
+		s.deliverySignals = make(map[runtimedelivery.ExecutionAuthority]func())
+	}
+	if _, exists := s.deliverySignals[authority]; exists {
+		return nil, errors.New("delivery continuation signal authority is already registered")
+	}
+	s.deliverySignals[authority] = signal
+	return &DeliveryContinuationSignalRegistration{owner: s, authority: authority}, nil
+}
+
+func (s *WorkflowInstanceStore) deliveryContinuationSignalOwners() []runtimedelivery.ExecutionAuthority {
+	if s == nil {
+		return nil
+	}
+	s.deliverySignalMu.RLock()
+	defer s.deliverySignalMu.RUnlock()
+	owners := make([]runtimedelivery.ExecutionAuthority, 0, len(s.deliverySignals))
+	for authority := range s.deliverySignals {
+		owners = append(owners, authority)
+	}
+	return owners
+}
+
+func (s *WorkflowInstanceStore) signalDeliveryContinuations() {
+	if s == nil {
+		return
+	}
+	authorities := s.deliveryContinuationSignalOwners()
+	for _, authority := range authorities {
+		s.deliverySignalMu.RLock()
+		signal := s.deliverySignals[authority]
+		s.deliverySignalMu.RUnlock()
+		if signal != nil {
+			signal()
+		}
+	}
+}
+
+func (s *WorkflowInstanceStore) queueDeliveryContinuationSignal(ctx context.Context) error {
+	if !queuePipelineTransactionPostCommitAction(ctx, func(context.Context) {
+		s.signalDeliveryContinuations()
+	}) {
+		return errors.New("delivery continuation signal requires transaction-owned post-commit authority")
+	}
+	return nil
 }
 
 func (s *WorkflowInstanceStore) ConfigurePipelineObligationStore(store runtimepipelineobligation.Store) {

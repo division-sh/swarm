@@ -11,8 +11,10 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -147,6 +149,17 @@ func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts 
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = conformanceTestRuntimeOccurrence(t, opts.BundleSourceFact.BundleHash())
 	}
+	if opts.DeliveryAuthority.Kind() == "" {
+		authority, authorityErr := runtimedelivery.NewNormalExecutionAuthority(
+			opts.BundleSourceFact,
+			opts.RuntimeInstanceID,
+			1,
+		)
+		if authorityErr != nil {
+			return nil, authorityErr
+		}
+		opts.DeliveryAuthority = authority
+	}
 	if opts.PipelineObligations == nil {
 		if provider, ok := eventStore.(interface {
 			PipelineObligations() runtimepipelineobligation.Store
@@ -163,10 +176,22 @@ func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts 
 		}
 		registerTestAuthorActivityCatalog(t, registrar, descriptors)
 	}
+	var bus *runtimebus.EventBus
+	var err error
 	if opts.PipelineObligations == nil {
-		return runtimebus.NewEphemeralEventBusWithOptions(eventStore, opts)
+		bus, err = runtimebus.NewEphemeralEventBusWithOptions(eventStore, opts)
+	} else {
+		bus, err = runtimebus.NewEventBusWithOptions(eventStore, opts)
 	}
-	return runtimebus.NewEventBusWithOptions(eventStore, opts)
+	if err != nil {
+		return nil, err
+	}
+	if err := bus.SetDeliveryContinuationOwner(
+		runtimebustest.NewDeliveryContinuationOwner(opts.PipelineObligations == nil),
+	); err != nil {
+		return nil, err
+	}
+	return bus, nil
 }
 
 func testAuthorActivityEventDescriptors(t *testing.T, opts runtimebus.EventBusOptions) []runtimeauthoractivity.EventDescriptor {

@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -37,6 +38,13 @@ func NewAdapter(dialect Dialect) (*Adapter, error) {
 	return &Adapter{dialect: dialect}, nil
 }
 
+func (a *Adapter) Dialect() Dialect {
+	if a == nil {
+		return ""
+	}
+	return a.dialect
+}
+
 type scanner interface {
 	Scan(...any) error
 }
@@ -55,7 +63,7 @@ type deliveryRecord struct {
 	bundleHash string
 }
 
-func (a *Adapter) CommitInitial(ctx context.Context, tx *sql.Tx, eventID, runID string, routes []events.DeliveryRoute) ([]DurableHandoffProof, error) {
+func (a *Adapter) CommitInitial(ctx context.Context, tx *sql.Tx, eventID, runID string, routes []events.DeliveryRoute, authority ExecutionAuthority) ([]DurableHandoffProof, error) {
 	if tx == nil {
 		return nil, fmt.Errorf("delivery initial commit transaction is required")
 	}
@@ -63,9 +71,15 @@ func (a *Adapter) CommitInitial(ctx context.Context, tx *sql.Tx, eventID, runID 
 		return nil, err
 	}
 	routes = events.NormalizeDeliveryRoutes(routes)
+	if len(routes) == 0 {
+		return nil, nil
+	}
+	if err := authority.Validate(); err != nil {
+		return nil, err
+	}
 	proofs := make([]DurableHandoffProof, 0, len(routes))
 	for _, route := range routes {
-		obligation, err := NewObligation(eventID, runID, route)
+		obligation, err := NewObligation(eventID, runID, route, authority)
 		if err != nil {
 			return nil, err
 		}
@@ -76,6 +90,53 @@ func (a *Adapter) CommitInitial(ctx context.Context, tx *sql.Tx, eventID, runID 
 		proofs = append(proofs, proof)
 	}
 	return proofs, nil
+}
+
+// ActivateNormalAuthority is the crash/replacement handoff for nonterminal
+// normal-runtime work in one exact bundle source. Startup ownership fences the
+// predecessor before this selected-store operation is invoked.
+func (a *Adapter) ActivateNormalAuthority(ctx context.Context, tx *sql.Tx, authority ExecutionAuthority) error {
+	if tx == nil {
+		return fmt.Errorf("delivery authority activation transaction is required")
+	}
+	if authority.Kind() != ExecutionAuthorityNormalRuntime {
+		return fmt.Errorf("delivery authority activation requires normal runtime authority")
+	}
+	if err := authority.Validate(); err != nil {
+		return err
+	}
+	bundleHash, bundleSource := authority.BundleSource().StorageValues()
+	query := `
+		UPDATE event_deliveries
+		SET execution_authority_id=$1,
+			execution_authority_generation=$2,
+			updated_at=GREATEST(updated_at, CURRENT_TIMESTAMP)
+		WHERE execution_authority_kind='normal_runtime'
+		  AND authority_bundle_hash=$3
+		  AND authority_bundle_source=$4
+		  AND (execution_authority_id<>$1 OR execution_authority_generation<>$2)
+		  AND status IN ('pending','failed','in_progress')`
+	args := []any{authority.ExecutionID(), authority.Generation(), bundleHash, bundleSource}
+	if a.dialect == DialectSQLite {
+		query = `
+			UPDATE event_deliveries
+			SET execution_authority_id=?,
+				execution_authority_generation=?,
+				updated_at=CASE
+					WHEN CURRENT_TIMESTAMP > updated_at THEN CURRENT_TIMESTAMP
+					ELSE updated_at
+				END
+			WHERE execution_authority_kind='normal_runtime'
+			  AND authority_bundle_hash=?
+			  AND authority_bundle_source=?
+			  AND (execution_authority_id<>? OR execution_authority_generation<>?)
+			  AND status IN ('pending','failed','in_progress')`
+		args = append(args, authority.ExecutionID(), authority.Generation())
+	}
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("activate normal delivery execution authority: %w", err)
+	}
+	return nil
 }
 
 func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligation Obligation) (DurableHandoffProof, error) {
@@ -91,26 +152,41 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 	if err != nil {
 		return DurableHandoffProof{}, err
 	}
+	bundleHash, bundleSource := obligation.Authority().BundleSource().StorageValues()
+	var selectedExecutionID, selectedForkRunID any
+	var selectedGeneration any
+	if obligation.Authority().Kind() == ExecutionAuthoritySelectedContractFork {
+		selectedExecutionID = obligation.Authority().ExecutionID()
+		selectedForkRunID = obligation.Authority().ForkRunID()
+		selectedGeneration = obligation.Authority().Generation()
+	}
 	query := `
 		INSERT INTO event_deliveries (
 			delivery_id, run_id, event_id, route_identity, subscriber_type, subscriber_id,
 			agent_name_owner, agent_name_source, agent_route_presence,
 			agent_flow_scope_key, agent_flow_instance_id, agent_flow_instance_path,
 			delivery_target_route, delivery_context, delivery_payload_projection,
+			execution_authority_kind, authority_bundle_hash, authority_bundle_source,
+			execution_authority_id, execution_authority_generation,
+			selected_execution_id, selected_fork_run_id, selected_execution_generation,
 			status, retry_count, max_retries, next_eligible_at, claim_version,
 			created_at, updated_at
 		) VALUES (
 			$1::uuid, NULLIF($2, '')::uuid, $3::uuid, $4, $5, $6,
 			$7, $8, $9, $10, $11, $12,
 			$13::jsonb, $14::jsonb, $15::jsonb,
-			'pending', 0, $16, $17, 0, $17, $17
+			$16, $17, $18, $19, $20,
+			NULLIF($21, '')::uuid, NULLIF($22, '')::uuid, $23,
+			'pending', 0, $24, $25, 0, $25, $25
 		) ON CONFLICT (event_id, route_identity) DO NOTHING`
 	args := []any{
 		obligation.DeliveryID(), obligation.RunID(), obligation.EventID(), obligation.RouteIdentity().String(),
 		string(obligation.SubscriberClass()), obligation.SubscriberID(),
 		agentFields.NameOwner, agentFields.NameSource, agentFields.RoutePresence,
 		agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath,
-		string(target), string(deliveryContext), string(projection), obligation.MaxRetries(), now,
+		string(target), string(deliveryContext), string(projection),
+		string(obligation.Authority().Kind()), bundleHash, bundleSource, obligation.Authority().ExecutionID(), obligation.Authority().Generation(),
+		selectedExecutionID, selectedForkRunID, selectedGeneration, obligation.MaxRetries(), now,
 	}
 	if a.dialect == DialectSQLite {
 		query = `
@@ -119,16 +195,28 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 				agent_name_owner, agent_name_source, agent_route_presence,
 				agent_flow_scope_key, agent_flow_instance_id, agent_flow_instance_path,
 				delivery_target_route, delivery_context, delivery_payload_projection,
+				execution_authority_kind, authority_bundle_hash, authority_bundle_source,
+				execution_authority_id, execution_authority_generation,
+				selected_execution_id, selected_fork_run_id, selected_execution_generation,
 				status, retry_count, max_retries, next_eligible_at, claim_version,
 				created_at, updated_at
-			) VALUES (?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, 0, ?, ?)
+			) VALUES (
+				?1, NULLIF(?2, ''), ?3, ?4, ?5, ?6,
+				?7, ?8, ?9, ?10, ?11, ?12,
+				?13, ?14, ?15,
+				?16, ?17, ?18, ?19, ?20,
+				NULLIF(?21, ''), NULLIF(?22, ''), ?23,
+				'pending', 0, ?24, ?25, 0, ?26, ?27
+			)
 			ON CONFLICT(event_id, route_identity) DO NOTHING`
 		args = []any{
 			obligation.DeliveryID(), obligation.RunID(), obligation.EventID(), obligation.RouteIdentity().String(),
 			string(obligation.SubscriberClass()), obligation.SubscriberID(),
 			agentFields.NameOwner, agentFields.NameSource, agentFields.RoutePresence,
 			agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath,
-			string(target), string(deliveryContext), string(projection), obligation.MaxRetries(), now, now, now,
+			string(target), string(deliveryContext), string(projection),
+			string(obligation.Authority().Kind()), bundleHash, bundleSource, obligation.Authority().ExecutionID(), obligation.Authority().Generation(),
+			selectedExecutionID, selectedForkRunID, selectedGeneration, obligation.MaxRetries(), now, now, now,
 		}
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
@@ -145,203 +233,393 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 	}
 	if record.DeliveryID != obligation.DeliveryID() || record.RunID != obligation.RunID() ||
 		record.SubscriberClass != obligation.SubscriberClass() || record.SubscriberID != obligation.SubscriberID() ||
-		record.MaxRetries != obligation.MaxRetries() || !events.SameDeliveryRouteIdentity(record.Route, obligation.Route()) {
+		record.MaxRetries != obligation.MaxRetries() || !events.SameDeliveryRouteIdentity(record.Route, obligation.Route()) ||
+		!record.Authority.Equal(obligation.Authority()) {
 		return DurableHandoffProof{}, fmt.Errorf("%w: delivery obligation duplicate does not exactly match admitted route", ErrConflict)
 	}
 	if inserted == 0 && (record.Status != StatusPending || record.RetryCount != 0 || record.ClaimVersion != 0) {
 		return DurableHandoffProof{}, fmt.Errorf("%w: delivery obligation replay conflicts with existing lifecycle", ErrConflict)
 	}
-	return DurableHandoffProof{deliveryID: obligation.DeliveryID(), eventID: obligation.EventID(), routeIdentity: obligation.RouteIdentity().String()}, nil
+	return DurableHandoffProof{
+		deliveryID: obligation.DeliveryID(), eventID: obligation.EventID(),
+		routeIdentity: obligation.RouteIdentity().String(), authority: obligation.Authority(),
+	}, nil
 }
 
-func (a *Adapter) ClaimExact(ctx context.Context, tx *sql.Tx, event events.Event, route events.DeliveryRoute, leaseTTL time.Duration) (ClaimedObligation, error) {
+func (a *Adapter) ClaimExactResult(ctx context.Context, tx *sql.Tx, authority ExecutionAuthority, event events.Event, route events.DeliveryRoute, leaseTTL time.Duration) (ClaimResult, error) {
 	if tx == nil {
-		return ClaimedObligation{}, fmt.Errorf("delivery claim transaction is required")
+		return ClaimResult{}, fmt.Errorf("delivery claim transaction is required")
+	}
+	if err := authority.Validate(); err != nil {
+		return ClaimResult{}, err
 	}
 	identity, err := route.Identity()
 	if err != nil {
-		return ClaimedObligation{}, err
+		return ClaimResult{}, err
 	}
 	record, err := a.loadByEventAndRoute(ctx, tx, event.ID(), identity, true)
-	if err != nil {
-		return ClaimedObligation{}, err
+	if errors.Is(err, ErrNotFound) {
+		return ClaimResult{Disposition: ClaimAbsent}, nil
 	}
+	if errors.Is(err, ErrConflict) {
+		return ClaimResult{Disposition: ClaimInvariantInvalid, Invariant: err}, nil
+	}
+	if err != nil {
+		return ClaimResult{}, err
+	}
+	result := ClaimResult{Snapshot: record.Snapshot}
 	if !events.SameDeliveryRouteIdentity(record.Route, route) {
-		return ClaimedObligation{}, fmt.Errorf("%w: delivery route does not exactly match durable obligation", ErrConflict)
+		result.Disposition = ClaimInvariantInvalid
+		result.Invariant = fmt.Errorf("%w: delivery route does not exactly match durable obligation", ErrConflict)
+		return result, nil
 	}
-	return a.claimLocked(ctx, tx, record, leaseTTL)
-}
-
-func (a *Adapter) ClaimPendingAgent(ctx context.Context, tx *sql.Tx, identity agentidentity.Identity, limit int, leaseTTL time.Duration) ([]ClaimedObligation, error) {
-	candidates, err := a.AgentClaimCandidates(ctx, tx, identity, limit)
+	if !record.Authority.Equal(authority) {
+		result.Disposition = ClaimWrongAuthority
+		return result, nil
+	}
+	now, err := a.databaseNow(ctx, tx)
 	if err != nil {
-		return nil, err
+		return ClaimResult{}, err
 	}
-	return a.ClaimCandidates(ctx, tx, candidates, leaseTTL)
-}
-
-func (a *Adapter) ClaimPendingNode(ctx context.Context, tx *sql.Tx, nodeID string, limit int, leaseTTL time.Duration) ([]ClaimedObligation, error) {
-	candidates, err := a.NodeClaimCandidates(ctx, tx, nodeID, limit)
+	previous := ClaimDisposition("")
+	switch record.Status {
+	case StatusPending:
+	case StatusFailed:
+		if record.RetryCount > record.MaxRetries {
+			result.Disposition = ClaimInvariantInvalid
+			result.Invariant = fmt.Errorf("%w: retry count exceeds policy", ErrConflict)
+			return result, nil
+		}
+		if record.NextEligibleAt.After(now) {
+			result.Disposition = ClaimDeferred
+			result.Snapshot = snapshotAt(record, now)
+			return result, nil
+		}
+	case StatusInProgress:
+		if record.ClaimExpiresAt.IsZero() {
+			result.Disposition = ClaimInvariantInvalid
+			result.Invariant = fmt.Errorf("%w: active delivery lease is missing", ErrConflict)
+			return result, nil
+		}
+		if record.ClaimExpiresAt.After(now) {
+			result.Disposition = ClaimBusy
+			result.Snapshot = snapshotAt(record, now)
+			return result, nil
+		}
+		previous = ClaimReclaimable
+	case StatusDelivered, StatusDeadLetter:
+		result.Disposition = ClaimTerminal
+		result.Snapshot = snapshotAt(record, now)
+		return result, nil
+	default:
+		result.Disposition = ClaimInvariantInvalid
+		result.Invariant = fmt.Errorf("%w: unknown delivery status", ErrConflict)
+		return result, nil
+	}
+	claimed, err := a.claimLocked(ctx, tx, record, leaseTTL)
 	if err != nil {
-		return nil, err
+		return ClaimResult{}, err
 	}
-	return a.ClaimCandidates(ctx, tx, candidates, leaseTTL)
+	return ClaimResult{
+		Disposition: ClaimAcquired,
+		Previous:    previous,
+		Snapshot:    claimed.Snapshot,
+		Claimed:     claimed,
+	}, nil
 }
 
-func (a *Adapter) AgentClaimCandidates(ctx context.Context, q queryer, identity agentidentity.Identity, limit int) ([]ClaimCandidate, error) {
-	identity = identity.Normalize()
-	fields, err := identity.StorageFields()
-	if err != nil {
-		return nil, fmt.Errorf("delivery agent claim identity: %w", err)
+func (a *Adapter) ScanContinuations(ctx context.Context, tx *sql.Tx, authority ExecutionAuthority, cursor ContinuationCursor, limit int) (ContinuationPage, error) {
+	if tx == nil {
+		return ContinuationPage{}, fmt.Errorf("delivery continuation scan transaction is required")
 	}
-	return a.claimCandidates(ctx, q, SubscriberAgent, fields.AgentID, fields, limit)
-}
-
-func (a *Adapter) NodeClaimCandidates(ctx context.Context, q queryer, nodeID string, limit int) ([]ClaimCandidate, error) {
-	return a.claimCandidates(ctx, q, SubscriberNode, nodeID, agentidentity.StorageFields{}, limit)
-}
-
-func (a *Adapter) claimCandidates(
-	ctx context.Context,
-	q queryer,
-	class SubscriberClass,
-	subscriberID string,
-	agentFields agentidentity.StorageFields,
-	limit int,
-) ([]ClaimCandidate, error) {
-	if q == nil {
-		return nil, fmt.Errorf("delivery claim candidate queryer is required")
-	}
-	if class != SubscriberAgent && class != SubscriberNode {
-		return nil, fmt.Errorf("delivery subscriber class %q cannot claim pending work", class)
-	}
-	subscriberID = strings.TrimSpace(subscriberID)
-	if subscriberID == "" {
-		return nil, fmt.Errorf("delivery subscriber id is required")
+	if err := authority.Validate(); err != nil {
+		return ContinuationPage{}, err
 	}
 	if limit <= 0 || limit > 500 {
-		return nil, fmt.Errorf("delivery claim limit must be between 1 and 500")
+		return ContinuationPage{}, fmt.Errorf("delivery continuation scan limit must be between 1 and 500")
 	}
-	now, err := a.databaseNow(ctx, q)
-	if err != nil {
-		return nil, err
+	cursorID := executionAuthorityCursorID(authority)
+	if cursor.started && cursor.authorityID != cursorID {
+		return ContinuationPage{}, fmt.Errorf("delivery continuation cursor authority mismatch")
 	}
+	bundleHash, bundleSource := authority.BundleSource().StorageValues()
 	query := `
-		SELECT d.delivery_id::text, d.run_id::text
+		SELECT d.delivery_id::text, d.created_at
 		FROM event_deliveries d
-		LEFT JOIN event_delivery_attempts current_attempt
-		  ON current_attempt.delivery_id = d.delivery_id
-		 AND current_attempt.claim_version = d.current_attempt_version
-		 AND current_attempt.open_marker = TRUE
-		WHERE d.subscriber_type = $1 AND d.subscriber_id = $2
-		  AND ($1 <> 'agent' OR (
-		    d.agent_name_owner = $3 AND d.agent_name_source = $4 AND d.agent_route_presence = $5
-		    AND d.agent_flow_scope_key = $6 AND d.agent_flow_instance_id = $7 AND d.agent_flow_instance_path = $8
-		  ))
-		  AND (
-			d.status = 'pending'
-			OR (d.status = 'failed' AND d.retry_count <= d.max_retries AND d.next_eligible_at <= $9)
-			OR (d.status = 'in_progress' AND current_attempt.lease_expires_at <= $9)
-		  )
-		ORDER BY CASE
-			WHEN d.status = 'in_progress' THEN current_attempt.lease_expires_at
-			ELSE d.next_eligible_at
-		END ASC, d.created_at ASC, d.delivery_id ASC
-		LIMIT $10`
+		WHERE d.execution_authority_kind=$1
+		  AND d.authority_bundle_hash=$2
+		  AND d.authority_bundle_source=$3
+		  AND d.execution_authority_id=$4
+		  AND d.execution_authority_generation=$5
+		  AND d.status IN ('pending','failed','in_progress')
+		  AND d.continuation_handoff_at IS NOT NULL
+		  AND ($6::timestamptz IS NULL OR d.created_at>$6 OR (d.created_at=$6 AND d.delivery_id>$7::uuid))
+		ORDER BY d.created_at, d.delivery_id
+		LIMIT $8`
 	args := []any{
-		string(class), subscriberID,
-		agentFields.NameOwner, agentFields.NameSource, agentFields.RoutePresence,
-		agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath,
-		now, limit,
+		string(authority.Kind()), bundleHash, bundleSource, authority.ExecutionID(), authority.Generation(),
+		nil, nil, limit + 1,
+	}
+	if cursor.started {
+		args[5] = cursor.createdAt
+		args[6] = cursor.deliveryID
 	}
 	if a.dialect == DialectSQLite {
 		query = `
-			SELECT d.delivery_id, d.run_id
+			SELECT d.delivery_id, d.created_at
 			FROM event_deliveries d
-			LEFT JOIN event_delivery_attempts current_attempt
-			  ON current_attempt.delivery_id = d.delivery_id
-			 AND current_attempt.claim_version = d.current_attempt_version
-			 AND current_attempt.open_marker = TRUE
-			WHERE d.subscriber_type = ? AND d.subscriber_id = ?
-			  AND (? <> 'agent' OR (
-			    d.agent_name_owner = ? AND d.agent_name_source = ? AND d.agent_route_presence = ?
-			    AND d.agent_flow_scope_key = ? AND d.agent_flow_instance_id = ? AND d.agent_flow_instance_path = ?
-			  ))
-			  AND (
-				d.status = 'pending'
-				OR (d.status = 'failed' AND d.retry_count <= d.max_retries AND d.next_eligible_at <= ?)
-				OR (d.status = 'in_progress' AND current_attempt.lease_expires_at <= ?)
-			  )
-			ORDER BY CASE
-				WHEN d.status = 'in_progress' THEN current_attempt.lease_expires_at
-				ELSE d.next_eligible_at
-			END ASC, d.created_at ASC, d.delivery_id ASC
+			WHERE d.execution_authority_kind=?
+			  AND d.authority_bundle_hash=?
+			  AND d.authority_bundle_source=?
+			  AND d.execution_authority_id=?
+			  AND d.execution_authority_generation=?
+			  AND d.status IN ('pending','failed','in_progress')
+			  AND d.continuation_handoff_at IS NOT NULL
+			  AND (? IS NULL OR d.created_at>? OR (d.created_at=? AND d.delivery_id>?))
+			ORDER BY d.created_at, d.delivery_id
 			LIMIT ?`
+		var cursorTime, cursorTime2, cursorTime3 any
+		var cursorDelivery any
+		if cursor.started {
+			cursorTime, cursorTime2, cursorTime3 = cursor.createdAt, cursor.createdAt, cursor.createdAt
+			cursorDelivery = cursor.deliveryID
+		}
 		args = []any{
-			string(class), subscriberID, string(class),
-			agentFields.NameOwner, agentFields.NameSource, agentFields.RoutePresence,
-			agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath,
-			now, now, limit,
+			string(authority.Kind()), bundleHash, bundleSource, authority.ExecutionID(), authority.Generation(),
+			cursorTime, cursorTime2, cursorTime3, cursorDelivery, limit + 1,
 		}
 	}
-	rows, err := q.QueryContext(ctx, query, args...)
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("select claimable %s deliveries: %w", class, err)
+		return ContinuationPage{}, fmt.Errorf("scan delivery continuations: %w", err)
 	}
-	candidates := make([]ClaimCandidate, 0, limit)
+	type reference struct {
+		id        string
+		createdAt time.Time
+	}
+	refs := make([]reference, 0, limit+1)
 	for rows.Next() {
-		candidate := ClaimCandidate{class: class, subscriberID: subscriberID}
-		if err := rows.Scan(&candidate.deliveryID, &candidate.runID); err != nil {
+		var id string
+		var createdRaw any
+		if err := rows.Scan(&id, &createdRaw); err != nil {
 			_ = rows.Close()
-			return nil, fmt.Errorf("scan claimable %s delivery: %w", class, err)
+			return ContinuationPage{}, fmt.Errorf("scan delivery continuation reference: %w", err)
 		}
-		candidates = append(candidates, candidate)
+		createdAt, present, err := parseNullableTime(createdRaw)
+		if err != nil || !present {
+			_ = rows.Close()
+			return ContinuationPage{}, fmt.Errorf("%w: delivery continuation created_at is invalid", ErrConflict)
+		}
+		refs = append(refs, reference{id: strings.TrimSpace(id), createdAt: createdAt})
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
-		return nil, fmt.Errorf("read claimable %s deliveries: %w", class, err)
+		return ContinuationPage{}, fmt.Errorf("read delivery continuation references: %w", err)
 	}
 	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("close claimable %s deliveries: %w", class, err)
+		return ContinuationPage{}, fmt.Errorf("close delivery continuation references: %w", err)
 	}
-	return candidates, nil
-}
-
-func (a *Adapter) ClaimCandidates(ctx context.Context, tx *sql.Tx, candidates []ClaimCandidate, leaseTTL time.Duration) ([]ClaimedObligation, error) {
-	if tx == nil {
-		return nil, fmt.Errorf("delivery claim transaction is required")
+	page := ContinuationPage{Exhausted: len(refs) <= limit}
+	if len(refs) > limit {
+		refs = refs[:limit]
 	}
-	out := make([]ClaimedObligation, 0, len(candidates))
-	for _, candidate := range candidates {
-		if candidate.deliveryID == "" || candidate.runID == "" || candidate.subscriberID == "" ||
-			(candidate.class != SubscriberAgent && candidate.class != SubscriberNode) {
-			return nil, fmt.Errorf("delivery claim candidate is invalid")
-		}
-		record, err := a.loadByID(ctx, tx, candidate.deliveryID, true)
-		if err != nil {
-			return nil, err
-		}
-		if record.RunID != candidate.runID || record.SubscriberClass != candidate.class || record.SubscriberID != candidate.subscriberID {
-			return nil, fmt.Errorf("%w: delivery claim candidate identity changed", ErrConflict)
-		}
-		claimed, err := a.claimLocked(ctx, tx, record, leaseTTL)
-		if errors.Is(err, ErrIneligible) {
+	now, err := a.databaseNow(ctx, tx)
+	if err != nil {
+		return ContinuationPage{}, err
+	}
+	page.Items = make([]ContinuationItem, 0, len(refs))
+	for _, ref := range refs {
+		item := ContinuationItem{DeliveryID: ref.id}
+		record, loadErr := a.loadByID(ctx, tx, ref.id, false)
+		if errors.Is(loadErr, ErrNotFound) {
+			item.Disposition = ClaimAbsent
+			page.Items = append(page.Items, item)
 			continue
 		}
-		if err != nil {
-			return nil, err
+		if errors.Is(loadErr, ErrConflict) {
+			item.Disposition = ClaimInvariantInvalid
+			item.Invariant = loadErr
+			page.Items = append(page.Items, item)
+			continue
 		}
-		out = append(out, claimed)
+		if loadErr != nil {
+			return ContinuationPage{}, loadErr
+		}
+		item.Snapshot = snapshotAt(record, now)
+		if !record.Authority.Equal(authority) {
+			item.Disposition = ClaimWrongAuthority
+		} else {
+			item.Disposition = continuationDisposition(record, now)
+			item.Wake = continuationWake(record, item.Disposition, now)
+		}
+		page.Items = append(page.Items, item)
 	}
-	return out, nil
+	if len(refs) > 0 {
+		last := refs[len(refs)-1]
+		page.Next = ContinuationCursor{
+			authorityID: cursorID, createdAt: last.createdAt,
+			deliveryID: last.id, started: true,
+		}
+	} else {
+		page.Next = cursor
+	}
+	return page, nil
+}
+
+func (a *Adapter) ObserveContinuation(
+	ctx context.Context,
+	q queryer,
+	authority ExecutionAuthority,
+	deliveryID string,
+) (ContinuationObservation, error) {
+	if err := authority.Validate(); err != nil {
+		return ContinuationObservation{}, err
+	}
+	deliveryID = strings.TrimSpace(deliveryID)
+	if deliveryID == "" {
+		return ContinuationObservation{}, errors.New("delivery continuation identity is required")
+	}
+	record, err := a.loadByID(ctx, q, deliveryID, false)
+	if errors.Is(err, ErrNotFound) {
+		return ContinuationObservation{DeliveryID: deliveryID, Disposition: ClaimAbsent}, nil
+	}
+	if errors.Is(err, ErrConflict) {
+		return ContinuationObservation{
+			DeliveryID: deliveryID, Disposition: ClaimInvariantInvalid, Invariant: err,
+		}, nil
+	}
+	if err != nil {
+		return ContinuationObservation{}, err
+	}
+	if !record.Authority.Equal(authority) {
+		return ContinuationObservation{DeliveryID: deliveryID, Disposition: ClaimWrongAuthority}, nil
+	}
+	now, err := a.databaseNow(ctx, q)
+	if err != nil {
+		return ContinuationObservation{}, err
+	}
+	disposition := continuationDisposition(record, now)
+	return ContinuationObservation{
+		DeliveryID:  deliveryID,
+		Disposition: disposition,
+		Wake:        continuationWake(record, disposition, now),
+	}, nil
+}
+
+func (a *Adapter) InspectRecovery(
+	ctx context.Context,
+	q queryer,
+	source runtimecorrelation.BundleSourceFact,
+) (RecoveryInventory, error) {
+	if err := source.Validate(); err != nil {
+		return RecoveryInventory{}, err
+	}
+	bundleHash, bundleSource := source.StorageValues()
+	query := `
+		SELECT
+			COUNT(*) FILTER (WHERE status='pending'),
+			COUNT(*) FILTER (WHERE status='failed'),
+			COUNT(*) FILTER (WHERE status='in_progress')
+		FROM event_deliveries
+		WHERE execution_authority_kind='normal_runtime'
+		  AND authority_bundle_hash=$1
+		  AND authority_bundle_source=$2
+		  AND status IN ('pending','failed','in_progress')`
+	args := []any{bundleHash, bundleSource}
+	if a.dialect == DialectSQLite {
+		query = `
+			SELECT
+				SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),
+				SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),
+				SUM(CASE WHEN status='in_progress' THEN 1 ELSE 0 END)
+			FROM event_deliveries
+			WHERE execution_authority_kind='normal_runtime'
+			  AND authority_bundle_hash=?
+			  AND authority_bundle_source=?
+			  AND status IN ('pending','failed','in_progress')`
+	}
+	var pending, failed, inProgress sql.NullInt64
+	if err := q.QueryRowContext(ctx, query, args...).Scan(&pending, &failed, &inProgress); err != nil {
+		return RecoveryInventory{}, fmt.Errorf("inspect delivery recovery inventory: %w", err)
+	}
+	return RecoveryInventory{
+		Pending: int(pending.Int64), Failed: int(failed.Int64), InProgress: int(inProgress.Int64),
+	}, nil
+}
+
+// CommitPipelineHandoff records the durable transition from event-level
+// processing to executable delivery continuation ownership.
+func (a *Adapter) CommitPipelineHandoff(ctx context.Context, tx *sql.Tx, eventID string) error {
+	if tx == nil {
+		return errors.New("delivery continuation handoff transaction is required")
+	}
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return errors.New("delivery continuation handoff event identity is required")
+	}
+	query := `
+		UPDATE event_deliveries
+		SET continuation_handoff_at = COALESCE(continuation_handoff_at, CURRENT_TIMESTAMP)
+		WHERE event_id = $1::uuid`
+	args := []any{eventID}
+	if a.dialect == DialectSQLite {
+		query = `
+			UPDATE event_deliveries
+			SET continuation_handoff_at = COALESCE(continuation_handoff_at, CURRENT_TIMESTAMP)
+			WHERE event_id = ?`
+	}
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("transfer delivery continuations after pipeline acknowledgement: %w", err)
+	}
+	return nil
+}
+
+func executionAuthorityCursorID(authority ExecutionAuthority) string {
+	bundleHash, bundleSource := authority.BundleSource().StorageValues()
+	return strings.Join([]string{
+		string(authority.Kind()), bundleHash, bundleSource, authority.ExecutionID(),
+		authority.ForkRunID(), fmt.Sprint(authority.Generation()),
+	}, "\x00")
+}
+
+func continuationDisposition(record deliveryRecord, now time.Time) ClaimDisposition {
+	switch record.Status {
+	case StatusPending:
+		return ClaimAcquired
+	case StatusFailed:
+		if record.NextEligibleAt.After(now) {
+			return ClaimDeferred
+		}
+		return ClaimAcquired
+	case StatusInProgress:
+		if record.ClaimExpiresAt.After(now) {
+			return ClaimBusy
+		}
+		return ClaimReclaimable
+	case StatusDelivered, StatusDeadLetter:
+		return ClaimTerminal
+	default:
+		return ClaimInvariantInvalid
+	}
+}
+
+func continuationWake(record deliveryRecord, disposition ClaimDisposition, now time.Time) ContinuationWake {
+	switch disposition {
+	case ClaimDeferred:
+		return newContinuationWake(record.NextEligibleAt.Sub(now))
+	case ClaimBusy:
+		return newContinuationWake(record.ClaimExpiresAt.Sub(now))
+	default:
+		return ContinuationWake{}
+	}
 }
 
 func (a *Adapter) SnapshotExact(ctx context.Context, q queryer, event events.Event, route events.DeliveryRoute) (Snapshot, error) {
-	obligation, err := NewObligation(event.ID(), event.RunID(), route)
+	deliveryID, err := DeliveryID(event.ID(), route)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return a.Snapshot(ctx, q, obligation.DeliveryID())
+	return a.Snapshot(ctx, q, deliveryID)
 }
 
 func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, record deliveryRecord, leaseTTL time.Duration) (ClaimedObligation, error) {
@@ -356,14 +634,14 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, record deliveryRe
 	case StatusPending:
 	case StatusFailed:
 		if record.RetryCount > record.MaxRetries || record.NextEligibleAt.After(now) {
-			return ClaimedObligation{}, ErrIneligible
+			return ClaimedObligation{}, fmt.Errorf("%w: deferred delivery reached claim mutation", ErrConflict)
 		}
 	case StatusInProgress:
 		if record.ClaimExpiresAt.IsZero() || record.ClaimExpiresAt.After(now) {
-			return ClaimedObligation{}, ErrIneligible
+			return ClaimedObligation{}, fmt.Errorf("%w: busy delivery reached claim mutation", ErrConflict)
 		}
 	default:
-		return ClaimedObligation{}, ErrIneligible
+		return ClaimedObligation{}, fmt.Errorf("%w: terminal delivery reached claim mutation", ErrConflict)
 	}
 	token := uuid.NewString()
 	version := record.ClaimVersion + 1
@@ -649,7 +927,7 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, claim Claim, settlemen
 	if err := a.recordTransition(ctx, updated, transition, effectiveFailure, now); err != nil {
 		return Snapshot{}, err
 	}
-	return updated.Snapshot, nil
+	return snapshotAt(updated, now), nil
 }
 
 func (a *Adapter) retryExhaustedFailure(ctx context.Context, tx *sql.Tx, record deliveryRecord, claim Claim, current *runtimefailures.Envelope) (*runtimefailures.Envelope, error) {
@@ -786,7 +1064,10 @@ func (a *Adapter) ProveHandoff(ctx context.Context, q queryer, eventID string, r
 	if !events.SameDeliveryRouteIdentity(record.Route, route) {
 		return DurableHandoffProof{}, fmt.Errorf("%w: durable handoff route mismatch", ErrConflict)
 	}
-	return DurableHandoffProof{deliveryID: record.DeliveryID, eventID: record.EventID, routeIdentity: record.RouteIdentity.String()}, nil
+	return DurableHandoffProof{
+		deliveryID: record.DeliveryID, eventID: record.EventID,
+		routeIdentity: record.RouteIdentity.String(), authority: record.Authority,
+	}, nil
 }
 
 func (a *Adapter) SummarizeRun(ctx context.Context, q queryer, runID string) (RunSummary, error) {
@@ -1490,8 +1771,7 @@ func (a *Adapter) snapshotsByIDQuery(ctx context.Context, q queryer, query strin
 
 func snapshotAt(record deliveryRecord, now time.Time) Snapshot {
 	snapshot := record.Snapshot
-	snapshot.RetryEligible = snapshot.Status == StatusPending ||
-		(snapshot.Status == StatusFailed && snapshot.RetryCount <= snapshot.MaxRetries && !snapshot.NextEligibleAt.After(now))
+	snapshot.RetryScheduled = snapshot.Status == StatusFailed
 	snapshot.ClaimReclaimable = snapshot.Status == StatusInProgress && !snapshot.ClaimExpiresAt.IsZero() && !snapshot.ClaimExpiresAt.After(now)
 	return snapshot
 }
@@ -1906,7 +2186,11 @@ func (a *Adapter) selectRecord() string {
 				d.agent_name_owner, d.agent_name_source, d.agent_route_presence,
 				d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path,
 				d.delivery_target_route, d.delivery_context,
-				d.delivery_payload_projection, d.status, d.retry_count, d.max_retries,
+				d.delivery_payload_projection, d.execution_authority_kind, d.authority_bundle_hash,
+				d.authority_bundle_source, d.execution_authority_id, d.execution_authority_generation,
+				COALESCE(d.selected_execution_id, ''), COALESCE(d.selected_fork_run_id, ''),
+				COALESCE(d.selected_execution_generation, 0),
+				d.status, d.retry_count, d.max_retries,
 				d.next_eligible_at, d.claim_version, COALESCE(current_attempt.claim_token, ''), current_attempt.lease_expires_at,
 				COALESCE(current_attempt.active_session_id, ''), COALESCE(d.reason_code, ''), d.failure,
 				d.started_at, d.settled_at, d.created_at, d.updated_at,
@@ -1924,7 +2208,11 @@ func (a *Adapter) selectRecord() string {
 			d.agent_name_owner, d.agent_name_source, d.agent_route_presence,
 			d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path,
 			d.delivery_target_route, d.delivery_context,
-			d.delivery_payload_projection, d.status, d.retry_count, d.max_retries,
+			d.delivery_payload_projection, d.execution_authority_kind, d.authority_bundle_hash,
+			d.authority_bundle_source, d.execution_authority_id, d.execution_authority_generation,
+			COALESCE(d.selected_execution_id::text, ''), COALESCE(d.selected_fork_run_id::text, ''),
+			COALESCE(d.selected_execution_generation, 0),
+			d.status, d.retry_count, d.max_retries,
 			d.next_eligible_at, d.claim_version, COALESCE(current_attempt.claim_token::text, ''), current_attempt.lease_expires_at,
 			COALESCE(current_attempt.active_session_id::text, ''), COALESCE(d.reason_code, ''), d.failure,
 			d.started_at, d.settled_at, d.created_at, d.updated_at,
@@ -1939,9 +2227,11 @@ func (a *Adapter) selectRecord() string {
 
 func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 	var record deliveryRecord
-	var routeIdentity, subscriberType, status string
+	var routeIdentity, subscriberType, status, authorityKind string
 	var agentNameOwner, agentNameSource, agentRoutePresence string
 	var agentFlowScopeKey, agentFlowInstanceID, agentFlowInstancePath string
+	var authorityBundleHash, authorityBundleSource, authorityExecutionID, selectedExecutionID, selectedForkRunID string
+	var authorityGeneration, selectedGeneration uint64
 	var targetRaw, contextRaw, projectionRaw, failureRaw []byte
 	var nextEligible, claimExpires, started, settled, created, updated any
 	err := row.Scan(
@@ -1950,6 +2240,8 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 		&agentNameOwner, &agentNameSource, &agentRoutePresence,
 		&agentFlowScopeKey, &agentFlowInstanceID, &agentFlowInstancePath,
 		&targetRaw, &contextRaw, &projectionRaw,
+		&authorityKind, &authorityBundleHash, &authorityBundleSource, &authorityExecutionID, &authorityGeneration,
+		&selectedExecutionID, &selectedForkRunID, &selectedGeneration,
 		&status, &record.RetryCount, &record.MaxRetries, &nextEligible, &record.ClaimVersion,
 		&record.claimToken, &claimExpires, &record.ActiveSessionID, &record.ReasonCode, &failureRaw,
 		&started, &settled, &created, &updated, &record.eventType, &record.entityID, &record.flowID, &record.bundleHash,
@@ -1962,17 +2254,33 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 	}
 	identity, err := events.ParseDeliveryRouteIdentity(routeIdentity)
 	if err != nil {
-		return deliveryRecord{}, err
+		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery route identity: %v", ErrConflict, err)
 	}
 	record.RouteIdentity = identity
 	class, err := ParseSubscriberClass(subscriberType)
 	if err != nil {
-		return deliveryRecord{}, err
+		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery subscriber class: %v", ErrConflict, err)
 	}
 	record.SubscriberClass = class
+	authorityExecutionIdentity := authorityExecutionID
+	authorityForkRunID := ""
+	if ExecutionAuthorityKind(authorityKind) == ExecutionAuthoritySelectedContractFork {
+		if selectedExecutionID != authorityExecutionID || selectedGeneration != authorityGeneration {
+			return deliveryRecord{}, fmt.Errorf("%w: selected delivery authority projection mismatch", ErrConflict)
+		}
+		authorityExecutionIdentity = selectedExecutionID
+		authorityForkRunID = selectedForkRunID
+	}
+	record.Authority, err = DecodeExecutionAuthority(
+		ExecutionAuthorityKind(authorityKind), authorityBundleHash, authorityBundleSource,
+		authorityExecutionIdentity, authorityForkRunID, authorityGeneration,
+	)
+	if err != nil {
+		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery execution authority: %v", ErrConflict, err)
+	}
 	record.Status, err = ParseStatus(status)
 	if err != nil {
-		return deliveryRecord{}, err
+		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery status: %v", ErrConflict, err)
 	}
 	record.Route, err = decodeRoute(
 		class,
@@ -1991,7 +2299,7 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 		projectionRaw,
 	)
 	if err != nil {
-		return deliveryRecord{}, err
+		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery route: %v", ErrConflict, err)
 	}
 	derived, err := record.Route.Identity()
 	if err != nil || derived != identity {
@@ -2001,25 +2309,25 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery retry policy mismatch", ErrConflict)
 	}
 	if record.Failure, err = decodeFailure(failureRaw); err != nil {
-		return deliveryRecord{}, err
+		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery failure: %v", ErrConflict, err)
 	}
 	if record.NextEligibleAt, _, err = parseNullableTime(nextEligible); err != nil {
-		return deliveryRecord{}, err
+		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery next eligibility: %v", ErrConflict, err)
 	}
 	if record.ClaimExpiresAt, _, err = parseNullableTime(claimExpires); err != nil {
-		return deliveryRecord{}, err
+		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery claim expiry: %v", ErrConflict, err)
 	}
 	if record.StartedAt, _, err = parseNullableTime(started); err != nil {
-		return deliveryRecord{}, err
+		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery start: %v", ErrConflict, err)
 	}
 	if record.SettledAt, _, err = parseNullableTime(settled); err != nil {
-		return deliveryRecord{}, err
+		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery settlement: %v", ErrConflict, err)
 	}
 	if record.CreatedAt, _, err = parseNullableTime(created); err != nil {
-		return deliveryRecord{}, err
+		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery creation: %v", ErrConflict, err)
 	}
 	if record.UpdatedAt, _, err = parseNullableTime(updated); err != nil {
-		return deliveryRecord{}, err
+		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery update: %v", ErrConflict, err)
 	}
 	if err := validateRecordShape(record); err != nil {
 		return deliveryRecord{}, err
@@ -2090,6 +2398,9 @@ func (a *Adapter) databaseNow(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }) (time.Time, error) {
 	query := `SELECT CURRENT_TIMESTAMP`
+	if a != nil && a.dialect == DialectPostgres {
+		query = `SELECT clock_timestamp()`
+	}
 	var raw any
 	if err := q.QueryRowContext(ctx, query).Scan(&raw); err != nil {
 		return time.Time{}, fmt.Errorf("read delivery database time: %w", err)
@@ -2098,7 +2409,7 @@ func (a *Adapter) databaseNow(ctx context.Context, q interface {
 	if err != nil || !ok {
 		return time.Time{}, fmt.Errorf("read delivery database time: %w", err)
 	}
-	return now, nil
+	return now.UTC().Truncate(time.Microsecond), nil
 }
 
 func encodeRoute(route events.DeliveryRoute) ([]byte, []byte, []byte, error) {

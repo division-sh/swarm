@@ -97,7 +97,7 @@ type eventDelivery struct {
 	ReasonCode     string                    `json:"reason_code,omitempty"`
 	Failure        *runtimefailures.Envelope `json:"failure,omitempty"`
 	RetryCount     *int                      `json:"retry_count"`
-	RetryEligible  *bool                     `json:"retry_eligible"`
+	RetryScheduled *bool                     `json:"retry_scheduled"`
 	Terminal       *bool                     `json:"terminal"`
 	CreatedAt      string                    `json:"created_at,omitempty"`
 	StartedAt      string                    `json:"started_at,omitempty"`
@@ -136,7 +136,7 @@ type eventReplayDelivery struct {
 	Failure          *runtimefailures.Envelope `json:"failure,omitempty"`
 	Attempt          int                       `json:"attempt"`
 	RetryCount       int                       `json:"retry_count"`
-	RetryEligible    bool                      `json:"retry_eligible"`
+	RetryScheduled   bool                      `json:"retry_scheduled"`
 	Terminal         bool                      `json:"terminal"`
 	CreatedAt        string                    `json:"created_at,omitempty"`
 	StartedAt        string                    `json:"started_at,omitempty"`
@@ -610,8 +610,8 @@ func validateEventDelivery(prefix string, delivery eventDelivery) error {
 	if *delivery.RetryCount < 0 {
 		return fmt.Errorf("malformed %s: retry_count must be >= 0", prefix)
 	}
-	if delivery.RetryEligible == nil {
-		return fmt.Errorf("malformed %s: retry_eligible is required", prefix)
+	if delivery.RetryScheduled == nil {
+		return fmt.Errorf("malformed %s: retry_scheduled is required", prefix)
 	}
 	if delivery.Terminal == nil {
 		return fmt.Errorf("malformed %s: terminal is required", prefix)
@@ -939,7 +939,7 @@ func writeEventDetailResult(out io.Writer, event eventFull) {
 				cliDetailField{Key: "reason_code", Value: eventObservationDash(delivery.ReasonCode)},
 				cliDetailField{Key: "failure", Value: eventObservationFailureSummary(delivery.Failure)},
 				cliDetailField{Key: "retry_count", Value: fmt.Sprintf("%d", *delivery.RetryCount)},
-				cliDetailField{Key: "retry_eligible", Value: fmt.Sprintf("%t", *delivery.RetryEligible)},
+				cliDetailField{Key: "retry_scheduled", Value: fmt.Sprintf("%t", *delivery.RetryScheduled)},
 				cliDetailField{Key: "terminal", Value: fmt.Sprintf("%t", *delivery.Terminal)},
 				cliDetailField{Key: "dead_letters", Value: fmt.Sprintf("%d", len(delivery.DeadLetters))},
 			)
@@ -1013,14 +1013,14 @@ func writeEventReplayResult(out io.Writer, result eventReplayResult) {
 		len(result.NewDeliveries),
 	)
 	for _, delivery := range result.OriginalDeliveries {
-		fmt.Fprintf(out, "original_delivery delivery_id=%s subscriber_id=%s status=%s session_id=%s attempt=%d retry_count=%d retry_eligible=%t terminal=%t reason_code=%s failure=%s dead_letters=%d\n",
+		fmt.Fprintf(out, "original_delivery delivery_id=%s subscriber_id=%s status=%s session_id=%s attempt=%d retry_count=%d retry_scheduled=%t terminal=%t reason_code=%s failure=%s dead_letters=%d\n",
 			delivery.DeliveryID,
 			delivery.SubscriberID,
 			formatCLIHumanCode(cliHumanCodeDeliveryStatus, delivery.Status),
 			eventObservationDash(delivery.SessionID),
 			delivery.Attempt,
 			delivery.RetryCount,
-			delivery.RetryEligible,
+			delivery.RetryScheduled,
 			delivery.Terminal,
 			eventObservationDash(delivery.ReasonCode),
 			eventObservationFailureSummary(delivery.Failure),
@@ -1028,14 +1028,14 @@ func writeEventReplayResult(out io.Writer, result eventReplayResult) {
 		)
 	}
 	for _, delivery := range result.NewDeliveries {
-		fmt.Fprintf(out, "new_delivery delivery_id=%s subscriber_id=%s status=%s session_id=%s attempt=%d retry_count=%d retry_eligible=%t terminal=%t reason_code=%s failure=%s dead_letters=%d source_delivery_id=%s\n",
+		fmt.Fprintf(out, "new_delivery delivery_id=%s subscriber_id=%s status=%s session_id=%s attempt=%d retry_count=%d retry_scheduled=%t terminal=%t reason_code=%s failure=%s dead_letters=%d source_delivery_id=%s\n",
 			delivery.DeliveryID,
 			delivery.SubscriberID,
 			formatCLIHumanCode(cliHumanCodeDeliveryStatus, delivery.Status),
 			eventObservationDash(delivery.SessionID),
 			delivery.Attempt,
 			delivery.RetryCount,
-			delivery.RetryEligible,
+			delivery.RetryScheduled,
 			delivery.Terminal,
 			eventObservationDash(delivery.ReasonCode),
 			eventObservationFailureSummary(delivery.Failure),

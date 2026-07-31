@@ -11,8 +11,10 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -88,6 +90,17 @@ func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.Ev
 		}
 		opts.WorkOwner = owner
 	}
+	if opts.DeliveryAuthority.Kind() == "" {
+		authority, authorityErr := runtimedelivery.NewNormalExecutionAuthority(
+			opts.BundleSourceFact,
+			opts.RuntimeInstanceID,
+			1,
+		)
+		if authorityErr != nil {
+			return nil, authorityErr
+		}
+		opts.DeliveryAuthority = authority
+	}
 	if registrar, ok := store.(authorActivityTestCatalogRegistrar); ok {
 		descriptors := authorActivityTestEventDescriptors(opts.ContractBundle)
 		lease, err := registrar.RegisterAuthorActivityEventCatalog(
@@ -98,10 +111,22 @@ func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.Ev
 		}
 		_ = lease // The store and its catalog are scoped to the test that owns them.
 	}
+	var bus *runtimebus.EventBus
+	var err error
 	if opts.PipelineObligations == nil {
-		return runtimebus.NewEphemeralEventBusWithOptions(store, opts)
+		bus, err = runtimebus.NewEphemeralEventBusWithOptions(store, opts)
+	} else {
+		bus, err = runtimebus.NewEventBusWithOptions(store, opts)
 	}
-	return runtimebus.NewEventBusWithOptions(store, opts)
+	if err != nil {
+		return nil, err
+	}
+	if err := bus.SetDeliveryContinuationOwner(
+		runtimebustest.NewDeliveryContinuationOwner(true),
+	); err != nil {
+		return nil, err
+	}
+	return bus, nil
 }
 
 func testAuthorActivityContext(ctx context.Context) context.Context {
@@ -122,7 +147,7 @@ func acknowledgePipelineTestEvent(t testing.TB, ctx context.Context, provider pi
 	if err != nil {
 		t.Fatalf("claim pipeline obligation for %s: %v", eventID, err)
 	}
-	if err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
+	if _, err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
 		t.Fatalf("acknowledge pipeline obligation for %s: %v", eventID, err)
 	}
 }

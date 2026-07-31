@@ -2,6 +2,9 @@ package builder
 
 import (
 	"context"
+	"errors"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -9,6 +12,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/google/uuid"
 )
 
@@ -61,13 +65,83 @@ func newTestOwnedEventBus(t testing.TB, store runtimebus.EventStore, opts runtim
 		}
 		opts.BundleSourceFact = fact
 	}
+	if opts.DeliveryAuthority.Kind() == "" {
+		authority, err := runtimedelivery.NewNormalExecutionAuthority(
+			opts.BundleSourceFact,
+			acquirer.owner.Identity().RuntimeInstanceID,
+			1,
+		)
+		if err != nil {
+			t.Fatalf("construct builder test delivery authority: %v", err)
+		}
+		opts.DeliveryAuthority = authority
+	}
 	bus, err := runtimebus.NewEphemeralEventBusWithOptions(store, opts)
 	if err != nil {
 		t.Fatalf("new owned builder event bus: %v", err)
 	}
+	if err := bus.SetDeliveryContinuationOwner(&builderTestDeliveryOwner{}); err != nil {
+		t.Fatalf("set builder test delivery continuation owner: %v", err)
+	}
 	rt := &runtimepkg.Runtime{Bus: bus}
 	acquirer.runtime = rt
 	return rt, acquirer
+}
+
+func recordBuilderTestDeliveryReceipt(request runtimebus.CommitPublishRequest) error {
+	if request.DeliveryReceipt == nil {
+		return errors.New("builder test delivery receipt is required")
+	}
+	return request.DeliveryReceipt.Record(nil)
+}
+
+type builderTestDeliveryOwner struct{}
+
+func (*builderTestDeliveryOwner) AcceptCommitted([]runtimedelivery.DurableHandoffProof) error {
+	return nil
+}
+
+func (*builderTestDeliveryOwner) Acquire(deliveryID string) (worklifetime.DeliveryContinuation, error) {
+	if strings.TrimSpace(deliveryID) == "" {
+		return nil, errors.New("builder test delivery id is required")
+	}
+	return &builderTestDeliveryContinuation{deliveryID: deliveryID}, nil
+}
+
+func (*builderTestDeliveryOwner) Retain(runtimedelivery.Snapshot) error { return nil }
+func (*builderTestDeliveryOwner) Release(string) error                  { return nil }
+func (*builderTestDeliveryOwner) OwnsPersistedRecovery() bool           { return false }
+func (*builderTestDeliveryOwner) Signal()                               {}
+
+type builderTestDeliveryContinuation struct {
+	mu         sync.Mutex
+	deliveryID string
+	settled    bool
+}
+
+func (c *builderTestDeliveryContinuation) DeliveryID() string { return c.deliveryID }
+
+func (c *builderTestDeliveryContinuation) Resolve(_ context.Context, intent worklifetime.DeliveryContinuationIntent) (worklifetime.DeliveryContinuationResolution, error) {
+	if intent != worklifetime.DeliveryContinuationReturn && intent != worklifetime.DeliveryContinuationConsume {
+		return 0, errors.New("builder test delivery continuation intent is invalid")
+	}
+	if err := c.settle(); err != nil {
+		return 0, err
+	}
+	if intent == worklifetime.DeliveryContinuationReturn {
+		return worklifetime.DeliveryContinuationReturned, nil
+	}
+	return worklifetime.DeliveryContinuationConsumed, nil
+}
+
+func (c *builderTestDeliveryContinuation) settle() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.settled {
+		return errors.New("builder test delivery continuation is already settled")
+	}
+	c.settled = true
+	return nil
 }
 
 func (a *testRuntimeAcquirer) AcquireCurrentRuntime(ctx context.Context) (RuntimeUse, error) {

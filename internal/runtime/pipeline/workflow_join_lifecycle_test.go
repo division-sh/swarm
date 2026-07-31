@@ -807,6 +807,7 @@ func TestWorkflowJoinFailurePersistsCanonicalDeliveryOutcomeAndRuntimeLog(t *tes
 		Module:        &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)},
 		WorkflowStore: store,
 	})
+	configurePipelineTestDeliveryOwner(t, pc)
 	path := "orders/" + uuid.NewString()
 	entityID := FlowInstanceEntityID(path)
 	if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{"a"}}})); err != nil {

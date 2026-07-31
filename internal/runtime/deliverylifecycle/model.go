@@ -9,14 +9,15 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
 
 var (
-	ErrConflict   = errors.New("delivery lifecycle conflict")
-	ErrNotFound   = errors.New("delivery obligation not found")
-	ErrIneligible = errors.New("delivery obligation is not eligible")
+	ErrConflict = errors.New("delivery lifecycle conflict")
+	ErrNotFound = errors.New("delivery obligation not found")
 )
 
 const (
@@ -131,6 +132,134 @@ func StateFromDelivery(status, activeSessionID string) (State, bool) {
 
 var obligationNamespace = uuid.MustParse("8f9a1200-f087-5adb-93d2-fd41bb3b6d9a")
 
+func DeliveryID(eventID string, route events.DeliveryRoute) (string, error) {
+	eventID = strings.TrimSpace(eventID)
+	if _, err := uuid.Parse(eventID); err != nil {
+		return "", fmt.Errorf("delivery obligation event id: %w", err)
+	}
+	identity, err := route.Normalized().Identity()
+	if err != nil {
+		return "", err
+	}
+	return uuid.NewSHA1(obligationNamespace, []byte(eventID+"\x00"+identity.String())).String(), nil
+}
+
+type ExecutionAuthorityKind string
+
+const (
+	ExecutionAuthorityNormalRuntime        ExecutionAuthorityKind = "normal_runtime"
+	ExecutionAuthoritySelectedContractFork ExecutionAuthorityKind = "selected_contract_fork"
+)
+
+// ExecutionAuthority is the immutable, closed authority under which an
+// executable delivery may continue. It is deliberately distinct from routing:
+// a subscriber and bundle identify work, but do not authorize its execution.
+type ExecutionAuthority struct {
+	kind         ExecutionAuthorityKind
+	bundleSource runtimecorrelation.BundleSourceFact
+	executionID  string
+	forkRunID    string
+	generation   uint64
+}
+
+func NewExecutionAuthority(source runtimecorrelation.BundleSourceFact, admission managedexecution.Admission) (ExecutionAuthority, error) {
+	if err := source.Validate(); err != nil {
+		return ExecutionAuthority{}, fmt.Errorf("delivery execution authority source: %w", err)
+	}
+	if err := admission.Validate(); err != nil {
+		return ExecutionAuthority{}, fmt.Errorf("delivery execution admission: %w", err)
+	}
+	bundleHash, _ := source.StorageValues()
+	if admission.BundleHash != bundleHash {
+		return ExecutionAuthority{}, fmt.Errorf("delivery execution admission bundle does not match source")
+	}
+	authority := ExecutionAuthority{
+		bundleSource: source,
+		executionID:  strings.TrimSpace(admission.ExecutionAuthorityID),
+		generation:   admission.Generation,
+	}
+	switch admission.Kind {
+	case managedexecution.KindNormalRuntime:
+		authority.kind = ExecutionAuthorityNormalRuntime
+	case managedexecution.KindSelectedContractFork:
+		authority.kind = ExecutionAuthoritySelectedContractFork
+		authority.forkRunID = strings.TrimSpace(admission.RunID)
+	default:
+		return ExecutionAuthority{}, fmt.Errorf("delivery execution admission kind %q is invalid", admission.Kind)
+	}
+	return authority, authority.Validate()
+}
+
+func NewNormalExecutionAuthority(source runtimecorrelation.BundleSourceFact, executionID string, generation uint64) (ExecutionAuthority, error) {
+	authority := ExecutionAuthority{
+		kind: ExecutionAuthorityNormalRuntime, bundleSource: source,
+		executionID: strings.TrimSpace(executionID), generation: generation,
+	}
+	return authority, authority.Validate()
+}
+
+func NewSelectedExecutionAuthority(source runtimecorrelation.BundleSourceFact, executionID, forkRunID string, generation uint64) (ExecutionAuthority, error) {
+	authority := ExecutionAuthority{
+		kind: ExecutionAuthoritySelectedContractFork, bundleSource: source,
+		executionID: strings.TrimSpace(executionID), forkRunID: strings.TrimSpace(forkRunID), generation: generation,
+	}
+	return authority, authority.Validate()
+}
+
+func DecodeExecutionAuthority(kind ExecutionAuthorityKind, bundleHash, bundleSource, executionID, forkRunID string, generation uint64) (ExecutionAuthority, error) {
+	source, err := runtimecorrelation.DecodeBundleSourceFact(bundleHash, bundleSource)
+	if err != nil {
+		return ExecutionAuthority{}, err
+	}
+	authority := ExecutionAuthority{
+		kind: kind, bundleSource: source, executionID: strings.TrimSpace(executionID),
+		forkRunID: strings.TrimSpace(forkRunID), generation: generation,
+	}
+	return authority, authority.Validate()
+}
+
+func (a ExecutionAuthority) Validate() error {
+	if err := a.bundleSource.Validate(); err != nil {
+		return fmt.Errorf("delivery execution authority source: %w", err)
+	}
+	if strings.TrimSpace(a.executionID) == "" || a.generation == 0 {
+		return fmt.Errorf("delivery execution authority identity is incomplete")
+	}
+	switch a.kind {
+	case ExecutionAuthorityNormalRuntime:
+		if a.forkRunID != "" {
+			return fmt.Errorf("normal delivery execution authority cannot carry fork run identity")
+		}
+	case ExecutionAuthoritySelectedContractFork:
+		if _, err := uuid.Parse(a.executionID); err != nil {
+			return fmt.Errorf("selected delivery execution id: %w", err)
+		}
+		if _, err := uuid.Parse(a.forkRunID); err != nil {
+			return fmt.Errorf("selected delivery fork run id: %w", err)
+		}
+	default:
+		return fmt.Errorf("delivery execution authority kind %q is invalid", a.kind)
+	}
+	return nil
+}
+
+func (a ExecutionAuthority) Kind() ExecutionAuthorityKind { return a.kind }
+func (a ExecutionAuthority) ExecutionID() string          { return a.executionID }
+func (a ExecutionAuthority) ForkRunID() string            { return a.forkRunID }
+func (a ExecutionAuthority) Generation() uint64           { return a.generation }
+func (a ExecutionAuthority) BundleSource() runtimecorrelation.BundleSourceFact {
+	return a.bundleSource
+}
+
+func (a ExecutionAuthority) Equal(other ExecutionAuthority) bool {
+	return a.Validate() == nil && other.Validate() == nil &&
+		a.kind == other.kind &&
+		a.executionID == other.executionID &&
+		a.forkRunID == other.forkRunID &&
+		a.generation == other.generation &&
+		a.bundleSource.Matches(other.bundleSource)
+}
+
 // Obligation is the only valid construction input for an executable delivery
 // row. Its identity is deterministic over the admitted event and exact route.
 type Obligation struct {
@@ -141,9 +270,10 @@ type Obligation struct {
 	route         events.DeliveryRoute
 	class         SubscriberClass
 	maxRetries    int
+	authority     ExecutionAuthority
 }
 
-func NewObligation(eventID, runID string, route events.DeliveryRoute) (Obligation, error) {
+func NewObligation(eventID, runID string, route events.DeliveryRoute, authority ExecutionAuthority) (Obligation, error) {
 	eventID = strings.TrimSpace(eventID)
 	runID = strings.TrimSpace(runID)
 	if _, err := uuid.Parse(eventID); err != nil {
@@ -151,6 +281,12 @@ func NewObligation(eventID, runID string, route events.DeliveryRoute) (Obligatio
 	}
 	if _, err := uuid.Parse(runID); err != nil {
 		return Obligation{}, fmt.Errorf("delivery obligation run id: %w", err)
+	}
+	if err := authority.Validate(); err != nil {
+		return Obligation{}, err
+	}
+	if authority.Kind() == ExecutionAuthoritySelectedContractFork && authority.ForkRunID() != runID {
+		return Obligation{}, fmt.Errorf("selected delivery authority fork run does not match obligation run")
 	}
 	route = route.Normalized()
 	class, err := ParseSubscriberClass(route.SubscriberType)
@@ -164,10 +300,13 @@ func NewObligation(eventID, runID string, route events.DeliveryRoute) (Obligatio
 	if err != nil {
 		return Obligation{}, err
 	}
-	deliveryID := uuid.NewSHA1(obligationNamespace, []byte(eventID+"\x00"+identity.String())).String()
+	deliveryID, err := DeliveryID(eventID, route)
+	if err != nil {
+		return Obligation{}, err
+	}
 	return Obligation{
 		deliveryID: deliveryID, eventID: eventID, runID: runID,
-		routeIdentity: identity, route: route, class: class, maxRetries: class.MaxRetries(),
+		routeIdentity: identity, route: route, class: class, maxRetries: class.MaxRetries(), authority: authority,
 	}, nil
 }
 
@@ -179,6 +318,7 @@ func (o Obligation) Route() events.DeliveryRoute                 { return o.rout
 func (o Obligation) SubscriberClass() SubscriberClass            { return o.class }
 func (o Obligation) SubscriberID() string                        { return o.route.SubscriberID }
 func (o Obligation) MaxRetries() int                             { return o.maxRetries }
+func (o Obligation) Authority() ExecutionAuthority               { return o.authority }
 
 type Snapshot struct {
 	DeliveryID       string
@@ -201,8 +341,9 @@ type Snapshot struct {
 	SettledAt        time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
-	RetryEligible    bool
+	RetryScheduled   bool
 	ClaimReclaimable bool
+	Authority        ExecutionAuthority
 }
 
 func (s Snapshot) Terminal() bool { return s.Status.Terminal() }
@@ -392,17 +533,94 @@ type ClaimedObligation struct {
 	Claim    Claim
 }
 
-// ClaimCandidate is an opaque, read-only reference to one currently eligible
-// delivery. Selected-store composition locks every referenced run before the
-// adapter may lock and claim the delivery row.
-type ClaimCandidate struct {
-	deliveryID   string
-	runID        string
-	class        SubscriberClass
-	subscriberID string
+type ClaimDisposition string
+
+const (
+	ClaimAcquired         ClaimDisposition = "acquired"
+	ClaimDeferred         ClaimDisposition = "deferred"
+	ClaimBusy             ClaimDisposition = "busy"
+	ClaimReclaimable      ClaimDisposition = "reclaimable"
+	ClaimTerminal         ClaimDisposition = "terminal"
+	ClaimWrongAuthority   ClaimDisposition = "wrong_authority"
+	ClaimAbsent           ClaimDisposition = "absent"
+	ClaimInvariantInvalid ClaimDisposition = "invariant_invalid"
+)
+
+type ClaimResult struct {
+	Disposition ClaimDisposition
+	Previous    ClaimDisposition
+	Snapshot    Snapshot
+	Claimed     ClaimedObligation
+	Invariant   error
 }
 
-func (c ClaimCandidate) RunID() string { return c.runID }
+func (r ClaimResult) Acquired() (ClaimedObligation, bool) {
+	return r.Claimed, r.Disposition == ClaimAcquired && r.Claimed.Claim.valid()
+}
+
+type ContinuationCursor struct {
+	authorityID string
+	createdAt   time.Time
+	deliveryID  string
+	started     bool
+}
+
+type ContinuationItem struct {
+	DeliveryID  string
+	Event       events.Event
+	Snapshot    Snapshot
+	Disposition ClaimDisposition
+	Wake        ContinuationWake
+	Invariant   error
+}
+
+type ContinuationPage struct {
+	Items     []ContinuationItem
+	Next      ContinuationCursor
+	Exhausted bool
+}
+
+// ContinuationWake is an opaque relative wake issued from one selected-store
+// observation. Process clocks may arm this delay but cannot reconstruct
+// eligibility from persisted timestamps.
+type ContinuationWake struct {
+	after   time.Duration
+	present bool
+}
+
+func newContinuationWake(after time.Duration) ContinuationWake {
+	if after < 0 {
+		after = 0
+	}
+	return ContinuationWake{after: after, present: true}
+}
+
+func (w ContinuationWake) After() (time.Duration, bool) {
+	return w.after, w.present
+}
+
+type ContinuationObservation struct {
+	DeliveryID  string
+	Disposition ClaimDisposition
+	Wake        ContinuationWake
+	Invariant   error
+}
+
+// RecoveryInventory is the exact normal-authority bundle scope inspected
+// before startup may activate or rewrite durable delivery authority.
+type RecoveryInventory struct {
+	Pending    int
+	Failed     int
+	InProgress int
+}
+
+func (i RecoveryInventory) Total() int {
+	return i.Pending + i.Failed + i.InProgress
+}
+
+func (i RecoveryInventory) HasWork() bool {
+	return i.Total() > 0
+}
 
 // DurableHandoffProof proves that one exact route-level obligation exists in
 // the selected store. It deliberately carries no lifecycle mutation power.
@@ -410,13 +628,24 @@ type DurableHandoffProof struct {
 	deliveryID    string
 	eventID       string
 	routeIdentity string
+	authority     ExecutionAuthority
 }
 
-func (p DurableHandoffProof) DeliveryID() string { return p.deliveryID }
+func (p DurableHandoffProof) DeliveryID() string            { return p.deliveryID }
+func (p DurableHandoffProof) EventID() string               { return p.eventID }
+func (p DurableHandoffProof) Authority() ExecutionAuthority { return p.authority }
 
-func (p DurableHandoffProof) valid() bool {
-	return p.deliveryID != "" && p.eventID != "" && p.routeIdentity != ""
+func (p DurableHandoffProof) Validate() error {
+	if p.deliveryID == "" || p.eventID == "" || p.routeIdentity == "" {
+		return fmt.Errorf("durable delivery handoff identity is incomplete")
+	}
+	if err := p.authority.Validate(); err != nil {
+		return err
+	}
+	return nil
 }
+
+func (p DurableHandoffProof) valid() bool { return p.Validate() == nil }
 
 type FailureDisposition string
 
@@ -493,10 +722,11 @@ type NodeExecution = AgentExecution
 // Raw rows, status strings, SQL transactions, and caller-selected retry limits
 // do not cross this boundary.
 type Store interface {
-	ClaimAgentDelivery(context.Context, events.Event, events.DeliveryRoute) (ClaimedObligation, error)
-	ClaimAgentBacklog(context.Context, agentidentity.Identity, int) ([]AgentExecution, error)
-	ClaimNodeDelivery(context.Context, events.Event, events.DeliveryRoute) (ClaimedObligation, error)
-	ClaimNodeBacklog(context.Context, string, int) ([]NodeExecution, error)
+	ActivateDeliveryAuthority(context.Context, ExecutionAuthority) error
+	InspectDeliveryRecovery(context.Context, runtimecorrelation.BundleSourceFact) (RecoveryInventory, error)
+	ClaimDelivery(context.Context, ExecutionAuthority, events.Event, events.DeliveryRoute) (ClaimResult, error)
+	ScanDeliveryContinuations(context.Context, ExecutionAuthority, ContinuationCursor, int) (ContinuationPage, error)
+	ObserveDeliveryContinuation(context.Context, ExecutionAuthority, string) (ContinuationObservation, error)
 	RenewClaim(context.Context, Claim) (Snapshot, error)
 	BindAgentSession(context.Context, Claim, string) (Snapshot, error)
 	SettleSuccess(context.Context, Claim, []string, time.Duration) (Snapshot, error)

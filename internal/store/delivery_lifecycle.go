@@ -3,12 +3,13 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -30,211 +31,194 @@ func mustDeliveryAdapter(dialect runtimedelivery.Dialect) *runtimedelivery.Adapt
 	return adapter
 }
 
-func (s *PostgresStore) commitInitialDeliveryObligationsTx(ctx context.Context, tx *sql.Tx, eventID, runID string, routes []events.DeliveryRoute) error {
+func (s *PostgresStore) commitInitialDeliveryObligationsTx(ctx context.Context, tx *sql.Tx, eventID, runID string, routes []events.DeliveryRoute, authority runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return nil, err
+	}
+	return postgresDeliveryAdapter.CommitInitial(ctx, tx, eventID, runID, routes, authority)
+}
+
+func (s *SQLiteRuntimeStore) commitInitialDeliveryObligationsTx(ctx context.Context, tx *sql.Tx, eventID, runID string, routes []events.DeliveryRoute, authority runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return nil, err
+	}
+	return sqliteDeliveryAdapter.CommitInitial(ctx, tx, eventID, runID, routes, authority)
+}
+
+func (s *PostgresStore) ActivateDeliveryAuthority(ctx context.Context, authority runtimedelivery.ExecutionAuthority) error {
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	_, err := postgresDeliveryAdapter.CommitInitial(ctx, tx, eventID, runID, routes)
-	return err
+	return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return postgresDeliveryAdapter.ActivateNormalAuthority(txctx, tx, authority)
+	})
 }
 
-func (s *SQLiteRuntimeStore) commitInitialDeliveryObligationsTx(ctx context.Context, tx *sql.Tx, eventID, runID string, routes []events.DeliveryRoute) error {
+func (s *SQLiteRuntimeStore) ActivateDeliveryAuthority(ctx context.Context, authority runtimedelivery.ExecutionAuthority) error {
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	_, err := sqliteDeliveryAdapter.CommitInitial(ctx, tx, eventID, runID, routes)
-	return err
+	return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return sqliteDeliveryAdapter.ActivateNormalAuthority(txctx, tx, authority)
+	})
 }
 
-func (s *PostgresStore) ClaimAgentDelivery(ctx context.Context, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimedObligation, error) {
-	if err := requireDeliveryRouteClass(route, runtimedelivery.SubscriberAgent); err != nil {
-		return runtimedelivery.ClaimedObligation{}, err
+func (s *PostgresStore) InspectDeliveryRecovery(
+	ctx context.Context,
+	source runtimecorrelation.BundleSourceFact,
+) (runtimedelivery.RecoveryInventory, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimedelivery.RecoveryInventory{}, err
 	}
-	var claimed runtimedelivery.ClaimedObligation
+	return postgresDeliveryAdapter.InspectRecovery(ctx, s.DB, source)
+}
+
+func (s *SQLiteRuntimeStore) InspectDeliveryRecovery(
+	ctx context.Context,
+	source runtimecorrelation.BundleSourceFact,
+) (runtimedelivery.RecoveryInventory, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimedelivery.RecoveryInventory{}, err
+	}
+	return sqliteDeliveryAdapter.InspectRecovery(ctx, s.DB, source)
+}
+
+func (s *PostgresStore) ClaimDelivery(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimResult, error) {
+	if _, err := runtimedelivery.ParseSubscriberClass(route.Normalized().SubscriberType); err != nil {
+		return runtimedelivery.ClaimResult{}, err
+	}
+	var result runtimedelivery.ClaimResult
 	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		snapshot, err := postgresDeliveryAdapter.SnapshotExact(txctx, tx, event, route)
-		if err != nil {
+		if err != nil && !errors.Is(err, runtimedelivery.ErrNotFound) && !errors.Is(err, runtimedelivery.ErrConflict) {
 			return err
 		}
-		if err := requirePostgresRunActive(txctx, tx, snapshot.RunID); err != nil {
-			return err
+		if err == nil {
+			if err := requirePostgresRunActive(txctx, tx, snapshot.RunID); err != nil {
+				return err
+			}
 		}
-		claimed, err = postgresDeliveryAdapter.ClaimExact(txctx, tx, event, route, runtimedelivery.DefaultLeaseTTL)
+		result, err = postgresDeliveryAdapter.ClaimExactResult(txctx, tx, authority, event, route, runtimedelivery.DefaultLeaseTTL)
 		return err
 	})
-	return claimed, err
+	return result, err
 }
 
-func (s *SQLiteRuntimeStore) ClaimAgentDelivery(ctx context.Context, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimedObligation, error) {
-	if err := requireDeliveryRouteClass(route, runtimedelivery.SubscriberAgent); err != nil {
-		return runtimedelivery.ClaimedObligation{}, err
+func (s *SQLiteRuntimeStore) ClaimDelivery(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimResult, error) {
+	if _, err := runtimedelivery.ParseSubscriberClass(route.Normalized().SubscriberType); err != nil {
+		return runtimedelivery.ClaimResult{}, err
 	}
-	var claimed runtimedelivery.ClaimedObligation
+	var result runtimedelivery.ClaimResult
 	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		snapshot, err := sqliteDeliveryAdapter.SnapshotExact(txctx, tx, event, route)
-		if err != nil {
+		if err != nil && !errors.Is(err, runtimedelivery.ErrNotFound) && !errors.Is(err, runtimedelivery.ErrConflict) {
 			return err
 		}
-		if err := requireSQLiteRunActive(txctx, tx, snapshot.RunID); err != nil {
-			return err
+		if err == nil {
+			if err := requireSQLiteRunActive(txctx, tx, snapshot.RunID); err != nil {
+				return err
+			}
 		}
-		claimed, err = sqliteDeliveryAdapter.ClaimExact(txctx, tx, event, route, runtimedelivery.DefaultLeaseTTL)
+		result, err = sqliteDeliveryAdapter.ClaimExactResult(txctx, tx, authority, event, route, runtimedelivery.DefaultLeaseTTL)
 		return err
 	})
-	return claimed, err
+	return result, err
 }
 
-func (s *PostgresStore) ClaimNodeDelivery(ctx context.Context, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimedObligation, error) {
-	if err := requireDeliveryRouteClass(route, runtimedelivery.SubscriberNode); err != nil {
-		return runtimedelivery.ClaimedObligation{}, err
-	}
-	var claimed runtimedelivery.ClaimedObligation
+func (s *PostgresStore) ScanDeliveryContinuations(ctx context.Context, authority runtimedelivery.ExecutionAuthority, cursor runtimedelivery.ContinuationCursor, limit int) (runtimedelivery.ContinuationPage, error) {
+	var page runtimedelivery.ContinuationPage
 	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		snapshot, err := postgresDeliveryAdapter.SnapshotExact(txctx, tx, event, route)
-		if err != nil {
-			return err
-		}
-		if err := requirePostgresRunActive(txctx, tx, snapshot.RunID); err != nil {
-			return err
-		}
-		claimed, err = postgresDeliveryAdapter.ClaimExact(txctx, tx, event, route, runtimedelivery.DefaultLeaseTTL)
-		return err
-	})
-	return claimed, err
-}
-
-func (s *SQLiteRuntimeStore) ClaimNodeDelivery(ctx context.Context, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimedObligation, error) {
-	if err := requireDeliveryRouteClass(route, runtimedelivery.SubscriberNode); err != nil {
-		return runtimedelivery.ClaimedObligation{}, err
-	}
-	var claimed runtimedelivery.ClaimedObligation
-	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		snapshot, err := sqliteDeliveryAdapter.SnapshotExact(txctx, tx, event, route)
-		if err != nil {
-			return err
-		}
-		if err := requireSQLiteRunActive(txctx, tx, snapshot.RunID); err != nil {
-			return err
-		}
-		claimed, err = sqliteDeliveryAdapter.ClaimExact(txctx, tx, event, route, runtimedelivery.DefaultLeaseTTL)
-		return err
-	})
-	return claimed, err
-}
-
-func requireDeliveryRouteClass(route events.DeliveryRoute, want runtimedelivery.SubscriberClass) error {
-	class, err := runtimedelivery.ParseSubscriberClass(route.SubscriberType)
-	if err != nil {
-		return err
-	}
-	if class != want {
-		return fmt.Errorf("delivery route class %q does not match operation class %q", class, want)
-	}
-	return nil
-}
-
-func (s *PostgresStore) ClaimAgentBacklog(ctx context.Context, identity agentidentity.Identity, limit int) ([]runtimedelivery.AgentExecution, error) {
-	claimed := []runtimedelivery.AgentExecution{}
-	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		candidates, err := postgresDeliveryAdapter.AgentClaimCandidates(txctx, tx, identity, limit)
-		if err != nil {
-			return err
-		}
-		if err := requireActiveDeliveryCandidateRuns(txctx, tx, candidates, true); err != nil {
-			return err
-		}
-		claims, err := postgresDeliveryAdapter.ClaimCandidates(txctx, tx, candidates, runtimedelivery.DefaultLeaseTTL)
-		if err != nil {
-			return err
-		}
-		claimed, err = hydratePostgresAgentExecutions(txctx, tx, claims)
-		return err
-	})
-	return claimed, err
-}
-
-func (s *SQLiteRuntimeStore) ClaimAgentBacklog(ctx context.Context, identity agentidentity.Identity, limit int) ([]runtimedelivery.AgentExecution, error) {
-	claimed := []runtimedelivery.AgentExecution{}
-	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		candidates, err := sqliteDeliveryAdapter.AgentClaimCandidates(txctx, tx, identity, limit)
-		if err != nil {
-			return err
-		}
-		if err := requireActiveDeliveryCandidateRuns(txctx, tx, candidates, false); err != nil {
-			return err
-		}
-		claims, err := sqliteDeliveryAdapter.ClaimCandidates(txctx, tx, candidates, runtimedelivery.DefaultLeaseTTL)
-		if err != nil {
-			return err
-		}
-		claimed, err = hydrateSQLiteAgentExecutions(txctx, tx, claims)
-		return err
-	})
-	return claimed, err
-}
-
-func (s *PostgresStore) ClaimNodeBacklog(ctx context.Context, nodeID string, limit int) ([]runtimedelivery.NodeExecution, error) {
-	claimed := []runtimedelivery.NodeExecution{}
-	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		candidates, err := postgresDeliveryAdapter.NodeClaimCandidates(txctx, tx, nodeID, limit)
-		if err != nil {
-			return err
-		}
-		if err := requireActiveDeliveryCandidateRuns(txctx, tx, candidates, true); err != nil {
-			return err
-		}
-		claims, err := postgresDeliveryAdapter.ClaimCandidates(txctx, tx, candidates, runtimedelivery.DefaultLeaseTTL)
-		if err != nil {
-			return err
-		}
-		claimed, err = hydratePostgresAgentExecutions(txctx, tx, claims)
-		return err
-	})
-	return claimed, err
-}
-
-func (s *SQLiteRuntimeStore) ClaimNodeBacklog(ctx context.Context, nodeID string, limit int) ([]runtimedelivery.NodeExecution, error) {
-	claimed := []runtimedelivery.NodeExecution{}
-	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		candidates, err := sqliteDeliveryAdapter.NodeClaimCandidates(txctx, tx, nodeID, limit)
-		if err != nil {
-			return err
-		}
-		if err := requireActiveDeliveryCandidateRuns(txctx, tx, candidates, false); err != nil {
-			return err
-		}
-		claims, err := sqliteDeliveryAdapter.ClaimCandidates(txctx, tx, candidates, runtimedelivery.DefaultLeaseTTL)
-		if err != nil {
-			return err
-		}
-		claimed, err = hydrateSQLiteAgentExecutions(txctx, tx, claims)
-		return err
-	})
-	return claimed, err
-}
-
-func requireActiveDeliveryCandidateRuns(ctx context.Context, tx *sql.Tx, candidates []runtimedelivery.ClaimCandidate, postgres bool) error {
-	runSet := make(map[string]struct{}, len(candidates))
-	for _, candidate := range candidates {
-		runSet[candidate.RunID()] = struct{}{}
-	}
-	runIDs := make([]string, 0, len(runSet))
-	for runID := range runSet {
-		runIDs = append(runIDs, runID)
-	}
-	sort.Strings(runIDs)
-	for _, runID := range runIDs {
 		var err error
-		if postgres {
-			err = requirePostgresRunActive(ctx, tx, runID)
-		} else {
-			err = requireSQLiteRunActive(ctx, tx, runID)
-		}
+		page, err = postgresDeliveryAdapter.ScanContinuations(txctx, tx, authority, cursor, limit)
 		if err != nil {
 			return err
 		}
-	}
-	return nil
+		for i := range page.Items {
+			if page.Items[i].Disposition == runtimedelivery.ClaimAbsent || page.Items[i].Disposition == runtimedelivery.ClaimInvariantInvalid {
+				continue
+			}
+			record, found, err := eventrecordpostgres.Load(txctx, tx, page.Items[i].Snapshot.EventID)
+			if err != nil {
+				return err
+			}
+			if !found {
+				page.Items[i].Disposition = runtimedelivery.ClaimInvariantInvalid
+				page.Items[i].Invariant = fmt.Errorf("delivery event %s is absent", page.Items[i].Snapshot.EventID)
+				continue
+			}
+			admitted, err := record.Decode()
+			if err != nil {
+				page.Items[i].Disposition = runtimedelivery.ClaimInvariantInvalid
+				page.Items[i].Invariant = err
+				continue
+			}
+			page.Items[i].Event = admitted.Event()
+		}
+		return nil
+	})
+	return page, err
+}
+
+func (s *SQLiteRuntimeStore) ScanDeliveryContinuations(ctx context.Context, authority runtimedelivery.ExecutionAuthority, cursor runtimedelivery.ContinuationCursor, limit int) (runtimedelivery.ContinuationPage, error) {
+	var page runtimedelivery.ContinuationPage
+	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		page, err = sqliteDeliveryAdapter.ScanContinuations(txctx, tx, authority, cursor, limit)
+		if err != nil {
+			return err
+		}
+		for i := range page.Items {
+			if page.Items[i].Disposition == runtimedelivery.ClaimAbsent || page.Items[i].Disposition == runtimedelivery.ClaimInvariantInvalid {
+				continue
+			}
+			record, found, err := eventrecordsqlite.Load(txctx, tx, page.Items[i].Snapshot.EventID)
+			if err != nil {
+				return err
+			}
+			if !found {
+				page.Items[i].Disposition = runtimedelivery.ClaimInvariantInvalid
+				page.Items[i].Invariant = fmt.Errorf("delivery event %s is absent", page.Items[i].Snapshot.EventID)
+				continue
+			}
+			admitted, err := record.Decode()
+			if err != nil {
+				page.Items[i].Disposition = runtimedelivery.ClaimInvariantInvalid
+				page.Items[i].Invariant = err
+				continue
+			}
+			page.Items[i].Event = admitted.Event()
+		}
+		return nil
+	})
+	return page, err
+}
+
+func (s *PostgresStore) ObserveDeliveryContinuation(
+	ctx context.Context,
+	authority runtimedelivery.ExecutionAuthority,
+	deliveryID string,
+) (runtimedelivery.ContinuationObservation, error) {
+	var observation runtimedelivery.ContinuationObservation
+	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		observation, err = postgresDeliveryAdapter.ObserveContinuation(txctx, tx, authority, deliveryID)
+		return err
+	})
+	return observation, err
+}
+
+func (s *SQLiteRuntimeStore) ObserveDeliveryContinuation(
+	ctx context.Context,
+	authority runtimedelivery.ExecutionAuthority,
+	deliveryID string,
+) (runtimedelivery.ContinuationObservation, error) {
+	var observation runtimedelivery.ContinuationObservation
+	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		observation, err = sqliteDeliveryAdapter.ObserveContinuation(txctx, tx, authority, deliveryID)
+		return err
+	})
+	return observation, err
 }
 
 func (s *PostgresStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.Snapshot, error) {
@@ -253,56 +237,6 @@ func (s *SQLiteRuntimeStore) RenewClaim(ctx context.Context, claim runtimedelive
 		}
 		return sqliteDeliveryAdapter.RenewClaim(txctx, tx, claim, runtimedelivery.DefaultLeaseTTL)
 	})
-}
-
-func hydratePostgresAgentExecutions(ctx context.Context, tx *sql.Tx, claims []runtimedelivery.ClaimedObligation) ([]runtimedelivery.AgentExecution, error) {
-	out := make([]runtimedelivery.AgentExecution, 0, len(claims))
-	for _, claimed := range claims {
-		record, found, err := eventrecordpostgres.Load(ctx, tx, claimed.Snapshot.EventID)
-		if err != nil || !found {
-			if err == nil {
-				err = eventrecord.Missing(claimed.Snapshot.EventID)
-			}
-			return nil, err
-		}
-		execution, err := deliveryExecutionFromRecord(record, claimed)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, execution)
-	}
-	return out, nil
-}
-
-func hydrateSQLiteAgentExecutions(ctx context.Context, tx *sql.Tx, claims []runtimedelivery.ClaimedObligation) ([]runtimedelivery.AgentExecution, error) {
-	out := make([]runtimedelivery.AgentExecution, 0, len(claims))
-	for _, claimed := range claims {
-		record, found, err := eventrecordsqlite.Load(ctx, tx, claimed.Snapshot.EventID)
-		if err != nil || !found {
-			if err == nil {
-				err = eventrecord.Missing(claimed.Snapshot.EventID)
-			}
-			return nil, err
-		}
-		execution, err := deliveryExecutionFromRecord(record, claimed)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, execution)
-	}
-	return out, nil
-}
-
-func deliveryExecutionFromRecord(record eventrecord.Record, claimed runtimedelivery.ClaimedObligation) (runtimedelivery.AgentExecution, error) {
-	admitted, err := record.Decode()
-	if err != nil {
-		return runtimedelivery.AgentExecution{}, err
-	}
-	delivery, err := events.NewDeliveryEvent(admitted.Event(), claimed.Snapshot.Route)
-	if err != nil {
-		return runtimedelivery.AgentExecution{}, fmt.Errorf("hydrate claimed delivery event: %w", err)
-	}
-	return runtimedelivery.AgentExecution{Event: delivery.Event(), Snapshot: claimed.Snapshot, Claim: claimed.Claim}, nil
 }
 
 func (s *PostgresStore) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (runtimedelivery.Snapshot, error) {

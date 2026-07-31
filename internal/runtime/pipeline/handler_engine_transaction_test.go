@@ -20,7 +20,9 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -51,6 +53,55 @@ type recordingPipelineBus struct {
 	directInMutation      []bool
 	outboxErr             error
 	runtimeLogErr         error
+	deliveryOwner         *pipelineTestDeliveryOwner
+	deliveryContinuations *pipelineTestContinuationOwner
+}
+
+func (b *recordingPipelineBus) configurePipelineTestDeliveryOwner(owner *pipelineTestDeliveryOwner) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.deliveryOwner = owner
+	b.deliveryContinuations = newPipelineTestContinuationOwner()
+}
+
+func (b *recordingPipelineBus) DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error) {
+	b.mu.Lock()
+	owner := b.deliveryOwner
+	b.mu.Unlock()
+	if owner == nil {
+		return runtimedelivery.ExecutionAuthority{}, errors.New("pipeline test delivery authority is not configured")
+	}
+	return owner.activeExecutionAuthority(context.Background())
+}
+
+func (b *recordingPipelineBus) AcquireDeliveryContinuation(deliveryID string) (worklifetime.DeliveryContinuation, error) {
+	b.mu.Lock()
+	owner := b.deliveryContinuations
+	b.mu.Unlock()
+	if owner == nil {
+		return nil, errors.New("pipeline test delivery continuation owner is not configured")
+	}
+	return owner.Acquire(deliveryID)
+}
+
+func (b *recordingPipelineBus) RetainDeliveryContinuation(snapshot runtimedelivery.Snapshot) error {
+	b.mu.Lock()
+	owner := b.deliveryContinuations
+	b.mu.Unlock()
+	if owner == nil {
+		return errors.New("pipeline test delivery continuation owner is not configured")
+	}
+	return owner.Retain(snapshot)
+}
+
+func (b *recordingPipelineBus) ReleaseDeliveryContinuation(deliveryID string) error {
+	b.mu.Lock()
+	owner := b.deliveryContinuations
+	b.mu.Unlock()
+	if owner == nil {
+		return errors.New("pipeline test delivery continuation owner is not configured")
+	}
+	return owner.Release(deliveryID)
 }
 
 type recordingPipelineDispatcher struct {

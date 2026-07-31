@@ -30,11 +30,6 @@ type agentDirectiveResult struct {
 	DirectiveEventType string `json:"directive_event_type"`
 }
 
-type agentReplayBacklogResult struct {
-	OK            bool `json:"ok"`
-	ReplayedCount int  `json:"replayed_count"`
-}
-
 func OperatorAgentControlHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 	if opts.AgentControl == nil || opts.Idempotency == nil {
 		return nil
@@ -49,9 +44,6 @@ func OperatorAgentControlHandlers(opts OperatorReadOptions) map[string]MethodHan
 		},
 		"agent.restart": func(ctx context.Context, req Request) (any, error) {
 			return executeAgentRestart(ctx, req, opts, now().UTC())
-		},
-		"agent.replay_backlog": func(ctx context.Context, req Request) (any, error) {
-			return executeAgentReplayBacklog(ctx, req, opts, now().UTC())
 		},
 	}
 }
@@ -159,54 +151,6 @@ func executeAgentRestart(ctx context.Context, req Request, opts OperatorReadOpti
 		return nil, agentControlError(req.Method, agentID, err)
 	}
 	var stored okResult
-	if err := json.Unmarshal(completion.Response, &stored); err != nil {
-		if replay {
-			return nil, fmt.Errorf("decode %s idempotency response: %w", req.Method, err)
-		}
-		return nil, fmt.Errorf("decode %s response: %w", req.Method, err)
-	}
-	return stored, nil
-}
-
-func executeAgentReplayBacklog(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
-	if multiRuntimeContextMode(opts) {
-		return nil, runtimeContextRequiredError(req.Method, "agent backlog replay is not supported in multi-context DB-loaded mode without an explicit runtime context")
-	}
-	agentID, err := requiredStringParam(req.Params, "agent_id")
-	if err != nil {
-		return nil, err
-	}
-	flowInstance, _, err := optionalStringParam(req.Params, "flow_instance")
-	if err != nil {
-		return nil, err
-	}
-	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
-	if err != nil {
-		return nil, err
-	}
-	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
-		Method:         req.Method,
-		ActorTokenID:   req.ActorTokenID,
-		IdempotencyKey: idempotencyKey,
-		RequestHash:    req.RequestHash,
-		ResourceID:     agentControlResourceID(agentID, flowInstance),
-		TTL:            agentControlIdempotencyTTL,
-		Now:            now,
-	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
-		result, err := opts.AgentControl.ReplayBacklog(ctx, runtimeagentcontrol.ReplayBacklogRequest{AgentID: agentID, FlowInstance: flowInstance})
-		if err != nil {
-			return store.APIIdempotencyCompletion{}, agentControlError(req.Method, agentID, err)
-		}
-		response, err := json.Marshal(agentReplayBacklogResult{OK: true, ReplayedCount: result.ReplayedCount})
-		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
-		}
-		return store.APIIdempotencyCompletion{ResourceID: result.AgentID, Response: response}, nil
-	})
-	if err != nil {
-		return nil, agentControlError(req.Method, agentID, err)
-	}
-	var stored agentReplayBacklogResult
 	if err := json.Unmarshal(completion.Response, &stored); err != nil {
 		if replay {
 			return nil, fmt.Errorf("decode %s idempotency response: %w", req.Method, err)

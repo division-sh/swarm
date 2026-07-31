@@ -238,6 +238,7 @@ func (s *WorkflowInstanceStore) ReconcileStandingServiceSet(ctx context.Context,
 	}
 
 	results := make([]StandingServiceReconciliation, 0, len(normalized))
+	signalQueued := false
 	err = s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		persisted, err := s.loadAllStandingServicesTx(txctx, tx)
 		if err != nil {
@@ -259,6 +260,12 @@ func (s *WorkflowInstanceStore) ReconcileStandingServiceSet(ctx context.Context,
 			result, err := s.orphanStandingServiceTx(txctx, tx, current)
 			if err != nil {
 				return err
+			}
+			if !signalQueued {
+				if err := s.queueDeliveryContinuationSignal(txctx); err != nil {
+					return err
+				}
+				signalQueued = true
 			}
 			results = append(results, result)
 		}
@@ -285,6 +292,7 @@ func (s *WorkflowInstanceStore) ReconcileStandingServiceReplacement(ctx context.
 
 	retained := make(map[string]struct{}, len(candidates))
 	results := make([]StandingServiceReconciliation, 0, len(previous)+len(candidates))
+	signalQueued := false
 	err = s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		for _, candidate := range candidates {
 			retained[candidate.ServiceID] = struct{}{}
@@ -311,6 +319,12 @@ func (s *WorkflowInstanceStore) ReconcileStandingServiceReplacement(ctx context.
 			result, err := s.orphanStandingServiceTx(txctx, tx, current)
 			if err != nil {
 				return err
+			}
+			if !signalQueued {
+				if err := s.queueDeliveryContinuationSignal(txctx); err != nil {
+					return err
+				}
+				signalQueued = true
 			}
 			results = append(results, result)
 		}
@@ -373,6 +387,9 @@ func (s *WorkflowInstanceStore) SuspendStandingService(ctx context.Context, oper
 		}
 		now := time.Now().UTC()
 		if err := s.quiesceStandingRunTx(txctx, tx, current.RunID, current.BundleHash, "standing_suspended", "cancelled", now); err != nil {
+			return err
+		}
+		if err := s.queueDeliveryContinuationSignal(txctx); err != nil {
 			return err
 		}
 		if err := s.setStandingRunPausedTx(txctx, tx, current.RunID, operation.Reason, operation.Actor, now); err != nil {
@@ -475,6 +492,9 @@ func (s *WorkflowInstanceStore) ResetStandingService(ctx context.Context, operat
 		}
 		if currentState.Active() {
 			if err := s.quiesceStandingRunTx(txctx, tx, current.RunID, current.BundleHash, "standing_reset", "cancelled", now); err != nil {
+				return err
+			}
+			if err := s.queueDeliveryContinuationSignal(txctx); err != nil {
 				return err
 			}
 			if err := s.setStandingRunCancelledTx(txctx, tx, current.RunID, "standing_reset", operation.Actor, now); err != nil {

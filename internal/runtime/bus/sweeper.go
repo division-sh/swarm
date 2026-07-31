@@ -321,17 +321,13 @@ func (eb *EventBus) processClaimedPipelineWork(
 			err = errors.Join(err, standingLease.Done())
 		}
 	}()
-	ctx, standingLease, err = eb.bindClaimedRunWork(ctx, work.Event)
-	if err != nil {
-		return false, false, nil, err
-	}
 	if work.Claim.Purpose() == runtimepipelineobligation.PurposeDecisionRoute && work.Acknowledged {
 		err = eb.settleClaimedDecisionRoute(ctx, work)
 		claimOpen = err != nil
 		return err == nil, false, nil, err
 	}
 	if disposition, preclassified := work.PreDispatchDisposition(); preclassified {
-		if err := eb.pipelineObligations.Settle(ctx, work.Claim, disposition); err != nil {
+		if err := eb.settlePipelineObligation(ctx, work.Claim, disposition); err != nil {
 			return false, false, nil, err
 		}
 		claimOpen = false
@@ -344,6 +340,10 @@ func (eb *EventBus) processClaimedPipelineWork(
 			nil,
 		)
 		return true, false, nil, nil
+	}
+	ctx, standingLease, err = eb.bindClaimedRunWork(ctx, work.Event)
+	if err != nil {
+		return false, false, nil, err
 	}
 	recipients, dispatchErr := eb.authoritativeRecipientsForEvent(ctx, work.Event.ID())
 	var outcome runtimepipelineobligation.ExecutionOutcome
@@ -362,7 +362,7 @@ func (eb *EventBus) processClaimedPipelineWork(
 				failure,
 			)
 		}
-		if err := eb.pipelineObligations.Settle(ctx, work.Claim, disposition); err != nil {
+		if err := eb.settlePipelineObligation(ctx, work.Claim, disposition); err != nil {
 			return false, false, nil, errors.Join(dispatchErr, err)
 		}
 		claimOpen = false
@@ -373,7 +373,7 @@ func (eb *EventBus) processClaimedPipelineWork(
 		return false, true, standingLease, nil
 	}
 	if disposition, ok := outcome.Disposition(); ok {
-		if err := eb.pipelineObligations.Settle(ctx, work.Claim, disposition); err != nil {
+		if err := eb.settlePipelineObligation(ctx, work.Claim, disposition); err != nil {
 			return false, false, nil, err
 		}
 		claimOpen = false
@@ -390,7 +390,7 @@ func (eb *EventBus) processClaimedPipelineWork(
 		claimOpen = err != nil
 		return err == nil, false, nil, err
 	}
-	if err := eb.pipelineObligations.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
+	if err := eb.settlePipelineObligation(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
 		return false, false, nil, err
 	}
 	claimOpen = false
@@ -502,7 +502,7 @@ func startupRecoveryPipelineLogEntry(
 }
 
 func (eb *EventBus) settleClaimedDecisionRoute(ctx context.Context, work runtimepipelineobligation.ClaimedWork) error {
-	return eb.pipelineObligations.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("decision_route_settled"))
+	return eb.settlePipelineObligation(ctx, work.Claim, runtimepipelineobligation.Acknowledged("decision_route_settled"))
 }
 
 func (eb *EventBus) ReleaseRuntimeIngressQueue(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error) {

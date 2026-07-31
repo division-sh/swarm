@@ -319,6 +319,7 @@ type PreparedPublish struct {
 	direct           bool
 	publicationClaim *pipelinePublicationClaim
 	dispatchContext  context.Context
+	deliveryReceipt  *DeliveryCommitReceipt
 }
 
 func beginPreparedPublish(ctx context.Context, transaction CommitPublishTransaction, event events.AdmittedEvent) (EventAppendOutcome, error) {
@@ -355,11 +356,14 @@ func (p PreparedPublish) RecipientIDs() []string {
 // Callers may pass it only to a closed named store operation; they cannot
 // reinterpret or replace the private plan used for later dispatch.
 func (p PreparedPublish) CommitRequest() CommitPublishRequest {
+	authority, _ := p.publicationClaim.bus.DeliveryAuthority()
 	request := CommitPublishRequest{
-		Event:          p.admitted,
-		DeliveryRoutes: p.plan.DeliveryRoutes(),
-		ReplayScope:    runtimepipelineobligation.ScopeSubscribed,
-		PipelineClaim:  p.publicationClaim.Claim(),
+		Event:             p.admitted,
+		DeliveryRoutes:    p.plan.DeliveryRoutes(),
+		DeliveryAuthority: authority,
+		DeliveryReceipt:   p.deliveryReceipt,
+		ReplayScope:       runtimepipelineobligation.ScopeSubscribed,
+		PipelineClaim:     p.publicationClaim.Claim(),
 	}
 	if failure := runtimepinrouting.TargetFailure(strings.TrimSpace(string(p.plan.TargetFailure))); failure != "" {
 		disposition := runtimepipelineobligation.DeadLetter(string(failure), targetDeliveryFailureEnvelope(failure))
@@ -368,6 +372,13 @@ func (p PreparedPublish) CommitRequest() CommitPublishRequest {
 		request.DeadLetter = &record
 	}
 	return request
+}
+
+func (p PreparedPublish) CommittedDeliveryHandoffs() ([]runtimedelivery.DurableHandoffProof, error) {
+	if p.exactDuplicate && p.deliveryReceipt == nil {
+		return nil, nil
+	}
+	return p.deliveryReceipt.Handoffs()
 }
 
 func (p PreparedPublish) WithCommitOutcome(outcome EventAppendOutcome) (PreparedPublish, error) {
@@ -460,6 +471,7 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 	prepared := PreparedPublish{
 		Event: evt, admitted: admitted, plan: plan,
 		publicationClaim: publicationClaim, dispatchContext: preparedCtx,
+		deliveryReceipt: newDeliveryCommitReceipt(),
 	}
 	if plan.TargetFailure != "" {
 		prepared.targetFailure = true
@@ -565,6 +577,7 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 		direct:           replayScope == runtimepipelineobligation.ScopeDirect,
 		publicationClaim: publicationClaim,
 		dispatchContext:  txctx,
+		deliveryReceipt:  newDeliveryCommitReceipt(),
 	}
 	appendOutcome, err := beginPreparedPublish(txctx, transaction, admitted)
 	if err != nil {
@@ -590,8 +603,18 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 		_, _, deadLetter := targetDeliveryFailureRecord(evt, inboundPlan, inboundPlan.TargetFailure)
 		initialDeadLetter = &deadLetter
 	}
+	routes := inboundPlan.DeliveryRoutes()
+	var authority runtimedelivery.ExecutionAuthority
+	if len(routes) > 0 && !eb.ephemeral {
+		var authorityErr error
+		authority, authorityErr = eb.DeliveryAuthority()
+		if authorityErr != nil {
+			return PreparedPublish{}, authorityErr
+		}
+	}
 	if err := finalizePreparedPublish(txctx, transaction, CommitPublishRequest{
-		Event: admitted, DeliveryRoutes: inboundPlan.DeliveryRoutes(), ReplayScope: replayScope,
+		Event: admitted, DeliveryRoutes: routes, DeliveryAuthority: authority,
+		DeliveryReceipt: prepared.deliveryReceipt, ReplayScope: replayScope,
 		PipelineClaim: publicationClaim.Claim(), Disposition: initialDisposition, DeadLetter: initialDeadLetter,
 	}); err != nil {
 		return PreparedPublish{}, fmt.Errorf("finalize event publish: %w", err)
@@ -758,6 +781,13 @@ func (eb *EventBus) dispatchPreparedPublishBody(ctx context.Context, prepared Pr
 	if prepared.exactDuplicate {
 		return nil
 	}
+	handoffs, err := prepared.CommittedDeliveryHandoffs()
+	if err != nil {
+		return fmt.Errorf("read committed delivery handoffs: %w", err)
+	}
+	if err := eb.AcceptCommittedDeliveryHandoffs(handoffs); err != nil {
+		return err
+	}
 	if prepared.targetFailure {
 		eb.logPublished(ctx, prepared.Event, 0)
 		return nil
@@ -768,6 +798,22 @@ func (eb *EventBus) dispatchPreparedPublishBody(ctx context.Context, prepared Pr
 		return nil
 	}
 	return eb.completeCommittedPublishDispatch(ctx, prepared.Event, prepared.plan, prepared.publicationClaim)
+}
+
+// AcceptCommittedDeliveryHandoffs transfers exact selected-store commit
+// results into the process-local generation owner before dispatch.
+func (eb *EventBus) AcceptCommittedDeliveryHandoffs(handoffs []runtimedelivery.DurableHandoffProof) error {
+	if len(handoffs) == 0 {
+		return nil
+	}
+	owner := eb.DeliveryContinuationOwner()
+	if owner == nil {
+		return errors.New("committed executable deliveries require an exact continuation owner")
+	}
+	if err := owner.AcceptCommitted(handoffs); err != nil {
+		return fmt.Errorf("transfer committed executable deliveries: %w", err)
+	}
+	return nil
 }
 
 func preparedPublishDispatchContext(prepared PreparedPublish) context.Context {
@@ -1640,10 +1686,14 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 // RecoverPersistedPipeline replays the complete pipeline for an event whose
 // terminal pipeline receipt was never written.
 func (eb *EventBus) RecoverPersistedPipeline(ctx context.Context, work runtimepipelineobligation.ClaimedWork, recipients []string) (runtimepipelineobligation.ExecutionOutcome, error) {
-	return eb.publishClaimedPipeline(ctx, work.Event, work.Scope, recipients)
+	dispatchRecipients := true
+	if owner := eb.DeliveryContinuationOwner(); owner != nil && owner.OwnsPersistedRecovery() {
+		dispatchRecipients = false
+	}
+	return eb.publishClaimedPipeline(ctx, work.Event, work.Scope, recipients, dispatchRecipients)
 }
 
-func (eb *EventBus) publishClaimedPipeline(ctx context.Context, evt events.Event, scope runtimepipelineobligation.CommittedScope, recipients []string) (runtimepipelineobligation.ExecutionOutcome, error) {
+func (eb *EventBus) publishClaimedPipeline(ctx context.Context, evt events.Event, scope runtimepipelineobligation.CommittedScope, recipients []string, dispatchRecipients bool) (runtimepipelineobligation.ExecutionOutcome, error) {
 	var err error
 	ctx, err = eb.admitBundleSourceFact(ctx)
 	if err != nil {
@@ -1680,10 +1730,10 @@ func (eb *EventBus) publishClaimedPipeline(ctx context.Context, evt events.Event
 		}
 		return runtimepipelineobligation.Continue(), ErrRunDispatchBlocked
 	}
-	return eb.publishPersistedRecipientsWithScope(ctx, evt, scope, recipients, true)
+	return eb.publishPersistedRecipientsWithScope(ctx, evt, scope, recipients, true, dispatchRecipients)
 }
 
-func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt events.Event, scope runtimepipelineobligation.CommittedScope, recipients []string, replayInterceptors bool) (runtimepipelineobligation.ExecutionOutcome, error) {
+func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt events.Event, scope runtimepipelineobligation.CommittedScope, recipients []string, replayInterceptors, dispatchRecipients bool) (runtimepipelineobligation.ExecutionOutcome, error) {
 	if _, err := runtimepipelineobligation.ParseCommittedScope(string(scope)); err != nil {
 		return runtimepipelineobligation.Continue(), err
 	}
@@ -1699,7 +1749,12 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 		ctx = runtimepipeline.WithPipelineTransitionCollector(ctx, &deferredTransitions)
 		ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommitActions)
 		var outcome runtimepipelineobligation.ExecutionOutcome
-		passthrough, deferred, outcome, err = eb.runInterceptorsForDeliveryRoutes(ctx, evt, deliveryRoutes)
+		if dispatchRecipients {
+			passthrough, deferred, outcome, err = eb.runInterceptorsForDeliveryRoutes(ctx, evt, deliveryRoutes)
+		} else {
+			eventInterceptors, _ := splitDeliveryRouteInterceptors(eb.interceptorsSnapshot())
+			passthrough, deferred, outcome, err = eb.runInterceptorSet(ctx, evt, eventInterceptors)
+		}
 		if err != nil {
 			return runtimepipelineobligation.Continue(), err
 		}
@@ -1709,7 +1764,7 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 		runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
 		runtimepipeline.FlushDeferredPipelineTransitions(ctx, deferredTransitions)
 	}
-	if passthrough && len(liveRecipients) > 0 {
+	if dispatchRecipients && passthrough && len(liveRecipients) > 0 {
 		if err := eb.deliverToRecipientsWithRoutes(ctx, evt, liveRecipients, deliveryRoutes); err != nil {
 			return runtimepipelineobligation.Continue(), err
 		}
@@ -1718,6 +1773,9 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 		if err := eb.publishDeferred(ctx, d); err != nil {
 			return runtimepipelineobligation.Continue(), err
 		}
+	}
+	if !dispatchRecipients {
+		return runtimepipelineobligation.Continue(), nil
 	}
 	if !passthrough || len(liveRecipients) == 0 {
 		return runtimepipelineobligation.Continue(), nil

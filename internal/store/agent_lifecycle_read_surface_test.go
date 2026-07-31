@@ -73,7 +73,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_CoversEveryCurrentStateLa
 			seedAgentLifecycleSession(t, ctx, db, runID, identity, tc.activeSession)
 		}
 		if tc.state != runtimedelivery.StateQueued {
-			claimed, err := pg.ClaimAgentDelivery(ctx, event, route)
+			claimed, err := claimDeliveryFixture(ctx, pg, event, route)
 			if err != nil {
 				t.Fatalf("claim delivery for %s: %v", tc.agentID, err)
 			}
@@ -141,7 +141,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalLiveLifecycl
 	deadLetterEvent := seedAgentLifecycleEvent(t, ctx, pg, oldDeadLetterEventID, runID, activeRoute, time.Now().UTC().Add(-time.Hour))
 	activeSessionID := uuid.NewString()
 	seedAgentLifecycleSession(t, ctx, db, runID, identity, activeSessionID)
-	deadLetterClaim, err := pg.ClaimAgentDelivery(ctx, deadLetterEvent, activeRoute)
+	deadLetterClaim, err := claimDeliveryFixture(ctx, pg, deadLetterEvent, activeRoute)
 	if err != nil {
 		t.Fatalf("claim old delivery: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalLiveLifecycl
 	if _, err := pg.SettleFailure(ctx, deadLetterClaim.Claim, runtimedelivery.Settlement{Disposition: runtimedelivery.FailureDeadLetter, ReasonCode: "old_exhausted", Failure: &deadLetterFailure}); err != nil {
 		t.Fatalf("settle old delivery: %v", err)
 	}
-	activeClaim, err := pg.ClaimAgentDelivery(ctx, activeEvent, activeRoute)
+	activeClaim, err := claimDeliveryFixture(ctx, pg, activeEvent, activeRoute)
 	if err != nil {
 		t.Fatalf("claim active delivery: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalTerminalLife
 	identity := testAgentIdentity(t, "agent-1", "lifecycle/agent-1")
 	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1", AgentIdentity: identity}
 	event := seedAgentLifecycleEvent(t, ctx, pg, eventID, runID, route, time.Now().UTC())
-	claimed, err := pg.ClaimAgentDelivery(ctx, event, route)
+	claimed, err := claimDeliveryFixture(ctx, pg, event, route)
 	if err != nil {
 		t.Fatalf("claim terminal delivery: %v", err)
 	}

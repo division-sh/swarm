@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
@@ -16,7 +17,7 @@ import (
 type eventCommitTxStore interface {
 	appendAdmittedEventTxOutcome(context.Context, *sql.Tx, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
 	requirePipelinePublicationClaimTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim) error
-	commitInitialDeliveryObligationsTx(context.Context, *sql.Tx, string, string, []events.DeliveryRoute) error
+	commitInitialDeliveryObligationsTx(context.Context, *sql.Tx, string, string, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error)
 	commitInitialPipelineScopeTx(context.Context, *sql.Tx, string, runtimepipelineobligation.CommittedScope) error
 	commitInitialPipelineDispositionTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) error
 	RecordDeadLetterTx(context.Context, *sql.Tx, runtimedeadletters.Record) error
@@ -91,7 +92,17 @@ func (c sqlPublishCommitter) commitInitialSideEffects(ctx context.Context, req r
 			return fmt.Errorf("executable event commit requires its current publication claim: %w", err)
 		}
 	}
-	if err := c.store.commitInitialDeliveryObligationsTx(ctx, c.tx, req.Event.ID(), req.Event.Event().RunID(), req.DeliveryRoutes); err != nil {
+	proofs, err := c.store.commitInitialDeliveryObligationsTx(
+		ctx, c.tx, req.Event.ID(), req.Event.Event().RunID(), req.DeliveryRoutes, req.DeliveryAuthority,
+	)
+	if err != nil {
+		return err
+	}
+	if req.DeliveryReceipt == nil {
+		if len(proofs) != 0 {
+			return fmt.Errorf("executable event commit requires a delivery handoff receipt")
+		}
+	} else if err := req.DeliveryReceipt.Record(proofs); err != nil {
 		return err
 	}
 	if err := c.store.commitInitialPipelineScopeTx(ctx, c.tx, req.Event.ID(), req.ReplayScope); err != nil {

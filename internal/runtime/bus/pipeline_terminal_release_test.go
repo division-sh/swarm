@@ -89,6 +89,85 @@ func (terminalReleasePausedGate) QueueableIngressPaused(context.Context) (bool, 
 	return true, nil
 }
 
+type signalingPipelineSettlementOwner struct {
+	runtimepipelineobligation.Store
+	err       error
+	committed bool
+	settled   int
+}
+
+func (o *signalingPipelineSettlementOwner) Settle(
+	_ context.Context,
+	_ runtimepipelineobligation.Claim,
+	disposition runtimepipelineobligation.Disposition,
+) (runtimepipelineobligation.SettlementOutcome, error) {
+	if o.err != nil {
+		if o.committed {
+			return runtimepipelineobligation.CommittedSettlement(disposition.Successful()), o.err
+		}
+		return runtimepipelineobligation.SettlementOutcome{}, o.err
+	}
+	o.settled++
+	return runtimepipelineobligation.CommittedSettlement(disposition.Successful()), nil
+}
+
+func TestSuccessfulPipelineSettlementSignalsDeliveryContinuationsAfterCommit(t *testing.T) {
+	issuer := runtimepipelineobligation.NewClaimIssuer()
+	claim, err := issuer.Issue(uuid.NewString(), runtimepipelineobligation.PurposeRecovery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipeline := &signalingPipelineSettlementOwner{}
+	continuations := &controlledTestDeliveryOwner{}
+	bus := &EventBus{
+		pipelineObligations:   pipeline,
+		deliveryContinuations: continuations,
+	}
+	if err := bus.settlePipelineObligation(
+		context.Background(),
+		claim,
+		runtimepipelineobligation.Acknowledged("pipeline_persisted"),
+	); err != nil {
+		t.Fatalf("settle pipeline obligation: %v", err)
+	}
+	continuations.mu.Lock()
+	signals := continuations.signals
+	continuations.mu.Unlock()
+	if pipeline.settled != 1 || signals != 1 {
+		t.Fatalf("settled/signals = %d/%d, want one durable settlement then one wake", pipeline.settled, signals)
+	}
+
+	pipeline.err = errors.New("injected settlement failure")
+	if err := bus.settlePipelineObligation(
+		context.Background(),
+		claim,
+		runtimepipelineobligation.Acknowledged("pipeline_persisted"),
+	); err == nil {
+		t.Fatal("failed pipeline settlement succeeded")
+	}
+	continuations.mu.Lock()
+	signals = continuations.signals
+	continuations.mu.Unlock()
+	if signals != 1 {
+		t.Fatalf("failed pipeline settlement signaled delivery continuation: %d", signals)
+	}
+
+	pipeline.committed = true
+	if err := bus.settlePipelineObligation(
+		context.Background(),
+		claim,
+		runtimepipelineobligation.Acknowledged("pipeline_persisted"),
+	); !errors.Is(err, pipeline.err) {
+		t.Fatalf("committed settlement cleanup error = %v, want %v", err, pipeline.err)
+	}
+	continuations.mu.Lock()
+	signals = continuations.signals
+	continuations.mu.Unlock()
+	if signals != 2 {
+		t.Fatalf("committed settlement cleanup failure signals = %d, want 2", signals)
+	}
+}
+
 func TestPipelinePublicationReleaseIsTerminalAndImmediatelyReclaimable(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -397,11 +476,15 @@ func TestInvalidPreparedDispatchTerminallyConsumesAttachedPublicationClaim(t *te
 }
 
 func TestEventBusResetPreservesPendingOperationUntilPriorRetirementSucceeds(t *testing.T) {
-	store := newExactHandoffProofStore(t, true)
+	store := newExactHandoffProofStore(t, false)
 	owner := newTerminalReleasePipelineOwner()
 	bus, err := newScopedTestEventBus(store, EventBusOptions{PipelineObligations: owner})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
+	}
+	continuations := &controlledTestDeliveryOwner{returnFailures: 1}
+	if err := bus.SetDeliveryContinuationOwner(continuations); err != nil {
+		t.Fatalf("install fail-once delivery continuation owner: %v", err)
 	}
 	token := testAgentLifecycleToken(t, "agent-a", "", 7, 1)
 	bus.ReplaceAgentRoute(token, testAgentSubscriptionAdmission(t, token.AgentID, events.EventType("test.work")))
@@ -420,6 +503,7 @@ func TestEventBusResetPreservesPendingOperationUntilPriorRetirementSucceeds(t *t
 		runtimeengine.EmitIntent{Event: event},
 		EventAppendInserted,
 		claim,
+		nil,
 	)
 
 	if err := bus.ResetInMemoryState(); err == nil {
@@ -466,6 +550,7 @@ func TestRecoveredPublicationRejectsForeignSourceBeforePendingRelease(t *testing
 		runtimeengine.EmitIntent{Event: event},
 		EventAppendInserted,
 		claim,
+		nil,
 	)
 	foreign, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	if err != nil {
@@ -524,6 +609,7 @@ func TestEventBusResetAttemptsEveryTerminalPendingReleaseAndAggregatesEvidence(t
 			runtimeengine.EmitIntent{Event: event},
 			EventAppendInserted,
 			claim,
+			nil,
 		)
 	}
 

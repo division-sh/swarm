@@ -103,7 +103,7 @@ type builderCommitCaptureStore struct {
 func (s *builderCommitCaptureStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
 	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, request runtimebus.CommitPublishRequest) error {
 		s.requests = append(s.requests, request)
-		return nil
+		return recordBuilderTestDeliveryReceipt(request)
 	})
 }
 

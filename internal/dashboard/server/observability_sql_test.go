@@ -83,18 +83,18 @@ func TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle(t *tes
 	}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, routes, runtimepipelineobligation.ScopeSubscribed)
 
-	progress, err := pg.ClaimAgentDelivery(ctx, event, routes[1])
+	progress, err := storetest.ClaimDelivery(ctx, pg, event, routes[1])
 	if err != nil {
 		t.Fatalf("claim in-progress delivery: %v", err)
 	}
-	delivered, err := pg.ClaimAgentDelivery(ctx, event, routes[2])
+	delivered, err := storetest.ClaimDelivery(ctx, pg, event, routes[2])
 	if err != nil {
 		t.Fatalf("claim delivered delivery: %v", err)
 	}
 	if _, err := pg.SettleSuccess(ctx, delivered.Claim, nil, time.Second); err != nil {
 		t.Fatalf("settle delivered delivery: %v", err)
 	}
-	failed, err := pg.ClaimAgentDelivery(ctx, event, routes[3])
+	failed, err := storetest.ClaimDelivery(ctx, pg, event, routes[3])
 	if err != nil {
 		t.Fatalf("claim failed delivery: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle(t *tes
 	}); err != nil {
 		t.Fatalf("settle retryable delivery: %v", err)
 	}
-	dead, err := pg.ClaimAgentDelivery(ctx, event, routes[4])
+	dead, err := storetest.ClaimDelivery(ctx, pg, event, routes[4])
 	if err != nil {
 		t.Fatalf("claim dead-letter delivery: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows(t *testing.T)
 		events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
 	route := dashboardObservabilityAgentRoute(t, "agent-a")
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
-	claimed, err := pg.ClaimAgentDelivery(ctx, event, route)
+	claimed, err := storetest.ClaimDelivery(ctx, pg, event, route)
 	if err != nil {
 		t.Fatalf("claim delivery: %v", err)
 	}

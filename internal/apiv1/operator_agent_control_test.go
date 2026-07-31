@@ -26,7 +26,6 @@ func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.
 	db := sqliteStore.DB
 	controller := &fakeAgentControlController{
 		directiveResponse: "accepted",
-		replayedCount:     7,
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
@@ -91,23 +90,8 @@ func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.
 		t.Fatalf("restart calls after replay = %d, want 1", controller.restartCalls)
 	}
 
-	replayBody := agentControlBody("agent.replay_backlog", "agent-1", "idem-replay")
-	replayed := rpcCall(t, handler, replayBody)
-	if replayed.Error != nil {
-		t.Fatalf("agent.replay_backlog error = %#v", replayed.Error)
-	}
-	if result := asMap(t, replayed.Result); result["ok"] != true || result["replayed_count"] != float64(7) {
-		t.Fatalf("agent.replay_backlog result = %#v", result)
-	}
-	replayAgain := rpcCall(t, handler, replayBody)
-	if replayAgain.Error != nil {
-		t.Fatalf("agent.replay_backlog idempotent replay error = %#v", replayAgain.Error)
-	}
-	if controller.replayCalls != 1 {
-		t.Fatalf("replay calls after idempotent replay = %d, want 1", controller.replayCalls)
-	}
-	if count := countAPIIdempotencyRows(t, db); count != 2 {
-		t.Fatalf("api_idempotency rows = %d, want 2 (directive projection belongs to its operation owner)", count)
+	if count := countAPIIdempotencyRows(t, db); count != 1 {
+		t.Fatalf("api_idempotency rows = %d, want 1 (directive projection belongs to its operation owner)", count)
 	}
 }
 
@@ -129,10 +113,6 @@ func TestOperatorAgentControlHandlersTypedResourceErrors(t *testing.T) {
 						Err:     runtimeagentcontrol.ErrAgentNotFound,
 						AgentID: "missing-agent",
 					},
-					"agent.replay_backlog": &runtimeagentcontrol.StateError{
-						Err:     runtimeagentcontrol.ErrAgentNotFound,
-						AgentID: "missing-agent",
-					},
 				},
 			},
 		}),
@@ -148,7 +128,7 @@ func TestOperatorAgentControlHandlersTypedResourceErrors(t *testing.T) {
 		t.Fatalf("not-running details = %#v, want terminated", details)
 	}
 
-	for _, method := range []string{"agent.restart", "agent.replay_backlog"} {
+	for _, method := range []string{"agent.restart"} {
 		resp := rpcCall(t, handler, agentControlBody(method, "missing-agent", ""))
 		if resp.Error == nil {
 			t.Fatalf("%s missing-agent error = nil", method)
@@ -401,17 +381,12 @@ func TestOperatorAgentControlHandlersRestrictAgentNotRunningToSendDirective(t *t
 						AgentID:       "agent-1",
 						CurrentStatus: runtimeagentcontrol.StatusTerminated,
 					},
-					"agent.replay_backlog": &runtimeagentcontrol.StateError{
-						Err:           runtimeagentcontrol.ErrAgentNotRunning,
-						AgentID:       "agent-1",
-						CurrentStatus: runtimeagentcontrol.StatusTerminated,
-					},
 				},
 			},
 		}),
 	})
 
-	for _, method := range []string{"agent.restart", "agent.replay_backlog"} {
+	for _, method := range []string{"agent.restart"} {
 		resp := rpcCall(t, handler, agentControlBody(method, "agent-1", ""))
 		if resp.Error == nil {
 			t.Fatalf("%s not-running error = nil", method)
@@ -442,11 +417,9 @@ func TestOperatorAgentControlHandlersRequireOwner(t *testing.T) {
 
 type fakeAgentControlController struct {
 	directiveResponse string
-	replayedCount     int
 	errs              map[string]error
 	directiveCalls    int
 	restartCalls      int
-	replayCalls       int
 	lastDirective     runtimeagentcontrol.SendDirectiveRequest
 	directiveResults  map[string]fakeDirectiveResult
 }
@@ -529,14 +502,6 @@ func (c *fakeAgentControlController) Restart(_ context.Context, req runtimeagent
 		return runtimeagentcontrol.RestartResult{}, err
 	}
 	return runtimeagentcontrol.RestartResult{AgentID: req.AgentID}, nil
-}
-
-func (c *fakeAgentControlController) ReplayBacklog(_ context.Context, req runtimeagentcontrol.ReplayBacklogRequest) (runtimeagentcontrol.ReplayBacklogResult, error) {
-	c.replayCalls++
-	if err := c.errs["agent.replay_backlog"]; err != nil {
-		return runtimeagentcontrol.ReplayBacklogResult{}, err
-	}
-	return runtimeagentcontrol.ReplayBacklogResult{AgentID: req.AgentID, ReplayedCount: c.replayedCount}, nil
 }
 
 func agentControlBody(method, agentID, idempotencyKey string) string {

@@ -10,8 +10,10 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
@@ -114,6 +116,17 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = runtimeTestOccurrence(t, runtimeTestBundleHash)
 	}
+	if opts.DeliveryAuthority.Kind() == "" {
+		authority, authorityErr := runtimedelivery.NewNormalExecutionAuthority(
+			opts.BundleSourceFact,
+			opts.RuntimeInstanceID,
+			1,
+		)
+		if authorityErr != nil {
+			return nil, authorityErr
+		}
+		opts.DeliveryAuthority = authority
+	}
 	if opts.PipelineObligations == nil {
 		if provider, ok := store.(interface {
 			PipelineObligations() runtimepipelineobligation.Store
@@ -129,6 +142,11 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 		bus, err = runtimebus.NewEventBusWithOptions(store, opts)
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := bus.SetDeliveryContinuationOwner(
+		runtimebustest.NewDeliveryContinuationOwner(opts.PipelineObligations == nil),
+	); err != nil {
 		return nil, err
 	}
 	runtimeTestEventBusOwners.Store(bus, opts.WorkOwner)
@@ -201,6 +219,13 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps) (
 	}
 	runtime, err := NewRuntime(ctx, deps)
 	if err == nil {
+		if runtime.Bus.DeliveryContinuationOwner() == nil {
+			if ownerErr := runtime.Bus.SetDeliveryContinuationOwner(
+				runtimebustest.NewDeliveryContinuationOwner(true),
+			); ownerErr != nil {
+				return nil, ownerErr
+			}
+		}
 		t.Cleanup(func() {
 			if shutdownErr := runtime.Shutdown(); shutdownErr != nil {
 				t.Errorf("shutdown runtime test fixture: %v", shutdownErr)

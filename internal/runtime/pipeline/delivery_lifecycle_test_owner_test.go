@@ -5,14 +5,93 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 )
+
+type pipelineTestContinuationOwner struct {
+	mu   sync.Mutex
+	held map[string]bool
+}
+
+func newPipelineTestContinuationOwner() *pipelineTestContinuationOwner {
+	return &pipelineTestContinuationOwner{held: make(map[string]bool)}
+}
+
+func (o *pipelineTestContinuationOwner) Acquire(deliveryID string) (worklifetime.DeliveryContinuation, error) {
+	deliveryID = strings.TrimSpace(deliveryID)
+	if deliveryID == "" {
+		return nil, fmt.Errorf("pipeline test delivery id is required")
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if held, exists := o.held[deliveryID]; exists && !held {
+		return nil, fmt.Errorf("pipeline test delivery %s is already carrier-owned", deliveryID)
+	}
+	o.held[deliveryID] = false
+	return &pipelineTestContinuation{owner: o, deliveryID: deliveryID}, nil
+}
+
+func (o *pipelineTestContinuationOwner) Retain(snapshot runtimedelivery.Snapshot) error {
+	deliveryID := strings.TrimSpace(snapshot.DeliveryID)
+	if deliveryID == "" {
+		return fmt.Errorf("pipeline test retained delivery id is required")
+	}
+	o.mu.Lock()
+	o.held[deliveryID] = true
+	o.mu.Unlock()
+	return nil
+}
+
+func (o *pipelineTestContinuationOwner) Release(deliveryID string) error {
+	deliveryID = strings.TrimSpace(deliveryID)
+	if deliveryID == "" {
+		return fmt.Errorf("pipeline test released delivery id is required")
+	}
+	o.mu.Lock()
+	delete(o.held, deliveryID)
+	o.mu.Unlock()
+	return nil
+}
+
+type pipelineTestContinuation struct {
+	mu         sync.Mutex
+	owner      *pipelineTestContinuationOwner
+	deliveryID string
+	settled    bool
+}
+
+func (c *pipelineTestContinuation) DeliveryID() string { return c.deliveryID }
+
+func (c *pipelineTestContinuation) Resolve(_ context.Context, intent worklifetime.DeliveryContinuationIntent) (worklifetime.DeliveryContinuationResolution, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.settled {
+		return 0, fmt.Errorf("pipeline test delivery continuation is already settled")
+	}
+	c.owner.mu.Lock()
+	if intent == worklifetime.DeliveryContinuationReturn {
+		c.owner.held[c.deliveryID] = true
+	} else if intent == worklifetime.DeliveryContinuationConsume {
+		c.owner.held[c.deliveryID] = false
+	} else {
+		c.owner.mu.Unlock()
+		return 0, fmt.Errorf("pipeline test delivery continuation intent is invalid")
+	}
+	c.owner.mu.Unlock()
+	c.settled = true
+	if intent == worklifetime.DeliveryContinuationReturn {
+		return worklifetime.DeliveryContinuationReturned, nil
+	}
+	return worklifetime.DeliveryContinuationConsumed, nil
+}
 
 type pipelineTestDeliveryOwner struct {
 	db      *sql.DB
@@ -70,9 +149,29 @@ func (s *pipelineTestDeliveryOwner) mutate(ctx context.Context, fn func(context.
 
 func (s *pipelineTestDeliveryOwner) commitInitial(ctx context.Context, event events.Event, route events.DeliveryRoute) error {
 	return s.mutate(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		_, err := s.adapter.CommitInitial(ctx, tx, event.ID(), event.RunID(), []events.DeliveryRoute{route})
+		authority, err := s.authorityForRun(ctx, tx, event.RunID())
+		if err != nil {
+			return err
+		}
+		_, err = s.adapter.CommitInitial(ctx, tx, event.ID(), event.RunID(), []events.DeliveryRoute{route}, authority)
 		return err
 	})
+}
+
+func (s *pipelineTestDeliveryOwner) authorityForRun(ctx context.Context, tx *sql.Tx, runID string) (runtimedelivery.ExecutionAuthority, error) {
+	query := `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=$1::uuid`
+	if s.dialect == runtimedelivery.DialectSQLite {
+		query = `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=?`
+	}
+	var bundleHash, bundleSource string
+	if err := tx.QueryRowContext(ctx, query, runID).Scan(&bundleHash, &bundleSource); err != nil {
+		return runtimedelivery.ExecutionAuthority{}, err
+	}
+	source, err := runtimecorrelation.DecodeBundleSourceFact(bundleHash, bundleSource)
+	if err != nil {
+		return runtimedelivery.ExecutionAuthority{}, err
+	}
+	return runtimedelivery.NewNormalExecutionAuthority(source, "pipeline-test-normal-runtime", 1)
 }
 
 func (s *pipelineTestDeliveryOwner) commitNode(ctx context.Context, event events.Event, nodeID string, target events.RouteIdentity) error {
@@ -116,31 +215,119 @@ func configurePipelineTestDeliveryOwner(t interface {
 		t.Fatalf("pipeline test delivery owner requires a configured workflow store")
 	}
 	if owner, ok := pc.workflowStore.DeliveryLifecycleStore().(*pipelineTestDeliveryOwner); ok {
+		if bus, ok := pc.bus.(interface {
+			configurePipelineTestDeliveryOwner(*pipelineTestDeliveryOwner)
+		}); ok {
+			bus.configurePipelineTestDeliveryOwner(owner)
+		}
 		return owner
 	}
 	owner := newPipelineTestDeliveryOwnerForDB(t, pc.workflowStore.db)
 	pc.workflowStore.ConfigureDeliveryLifecycleStore(owner)
+	if bus, ok := pc.bus.(interface {
+		configurePipelineTestDeliveryOwner(*pipelineTestDeliveryOwner)
+	}); ok {
+		bus.configurePipelineTestDeliveryOwner(owner)
+	}
 	return owner
 }
 
-func (s *pipelineTestDeliveryOwner) ClaimAgentDelivery(ctx context.Context, event events.Event, route events.DeliveryRoute) (out runtimedelivery.ClaimedObligation, err error) {
+func (s *pipelineTestDeliveryOwner) activeExecutionAuthority(ctx context.Context) (runtimedelivery.ExecutionAuthority, error) {
+	query := `
+		SELECT execution_authority_kind, authority_bundle_hash, authority_bundle_source,
+		       execution_authority_id, execution_authority_generation
+		FROM event_deliveries
+		ORDER BY created_at DESC, delivery_id DESC
+		LIMIT 1`
+	var (
+		kind       runtimedelivery.ExecutionAuthorityKind
+		bundleHash string
+		source     string
+		execution  string
+		generation uint64
+	)
+	if err := s.db.QueryRowContext(ctx, query).Scan(
+		&kind,
+		&bundleHash,
+		&source,
+		&execution,
+		&generation,
+	); err != nil {
+		return runtimedelivery.ExecutionAuthority{}, err
+	}
+	return runtimedelivery.DecodeExecutionAuthority(kind, bundleHash, source, execution, "", generation)
+}
+
+func (s *pipelineTestDeliveryOwner) makeRetryEligible(ctx context.Context, deliveryID string) error {
+	query := `
+		UPDATE event_deliveries
+		SET next_eligible_at=CURRENT_TIMESTAMP
+		WHERE delivery_id=$1::uuid AND status='failed'`
+	if s.dialect == runtimedelivery.DialectSQLite {
+		query = `
+			UPDATE event_deliveries
+			SET next_eligible_at=CURRENT_TIMESTAMP
+			WHERE delivery_id=? AND status='failed'`
+	}
+	result, err := s.db.ExecContext(ctx, query, strings.TrimSpace(deliveryID))
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return fmt.Errorf("pipeline test delivery %s was not retry-scheduled", deliveryID)
+	}
+	return nil
+}
+
+func (s *pipelineTestDeliveryOwner) ActivateDeliveryAuthority(ctx context.Context, authority runtimedelivery.ExecutionAuthority) (err error) {
 	err = s.mutate(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		out, err = s.adapter.ClaimExact(ctx, tx, event, route, runtimedelivery.DefaultLeaseTTL)
+		return s.adapter.ActivateNormalAuthority(ctx, tx, authority)
+	})
+	return err
+}
+
+func (s *pipelineTestDeliveryOwner) InspectDeliveryRecovery(
+	ctx context.Context,
+	source runtimecorrelation.BundleSourceFact,
+) (runtimedelivery.RecoveryInventory, error) {
+	return s.adapter.InspectRecovery(ctx, s.db, source)
+}
+
+func (s *pipelineTestDeliveryOwner) ClaimDelivery(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (out runtimedelivery.ClaimResult, err error) {
+	err = s.mutate(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		out, err = s.adapter.ClaimExactResult(ctx, tx, authority, event, route, runtimedelivery.DefaultLeaseTTL)
 		return err
 	})
 	return out, err
 }
 
-func (s *pipelineTestDeliveryOwner) ClaimNodeDelivery(ctx context.Context, event events.Event, route events.DeliveryRoute) (out runtimedelivery.ClaimedObligation, err error) {
-	return s.ClaimAgentDelivery(ctx, event, route)
+func (s *pipelineTestDeliveryOwner) ScanDeliveryContinuations(ctx context.Context, authority runtimedelivery.ExecutionAuthority, cursor runtimedelivery.ContinuationCursor, limit int) (out runtimedelivery.ContinuationPage, err error) {
+	err = s.mutate(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		out, err = s.adapter.ScanContinuations(ctx, tx, authority, cursor, limit)
+		return err
+	})
+	if err != nil {
+		return runtimedelivery.ContinuationPage{}, err
+	}
+	for index := range out.Items {
+		out.Items[index].Event, err = s.loadEvent(ctx, out.Items[index].Snapshot.EventID)
+		if err != nil {
+			return runtimedelivery.ContinuationPage{}, err
+		}
+	}
+	return out, nil
 }
 
-func (*pipelineTestDeliveryOwner) ClaimAgentBacklog(context.Context, agentidentity.Identity, int) ([]runtimedelivery.AgentExecution, error) {
-	return nil, fmt.Errorf("pipeline unit fixture does not hydrate agent backlog")
-}
-
-func (*pipelineTestDeliveryOwner) ClaimNodeBacklog(context.Context, string, int) ([]runtimedelivery.NodeExecution, error) {
-	return nil, fmt.Errorf("pipeline unit fixture does not hydrate node backlog")
+func (s *pipelineTestDeliveryOwner) ObserveDeliveryContinuation(
+	ctx context.Context,
+	authority runtimedelivery.ExecutionAuthority,
+	deliveryID string,
+) (runtimedelivery.ContinuationObservation, error) {
+	return s.adapter.ObserveContinuation(ctx, s.db, authority, deliveryID)
 }
 
 func (s *pipelineTestDeliveryOwner) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (out runtimedelivery.Snapshot, err error) {

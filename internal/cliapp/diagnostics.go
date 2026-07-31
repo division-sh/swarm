@@ -158,26 +158,26 @@ type diagnosticRunHeader struct {
 }
 
 type diagnosticRunTraceRow struct {
-	EventID               string                    `json:"event_id"`
-	EventName             string                    `json:"event_name"`
-	EventCreatedAt        string                    `json:"event_created_at"`
-	EntityID              string                    `json:"entity_id,omitempty"`
-	DeliveryID            string                    `json:"delivery_id,omitempty"`
-	DeliveryStatus        string                    `json:"delivery_status,omitempty"`
-	DeliveryReasonCode    string                    `json:"delivery_reason_code,omitempty"`
-	ReplyContextID        string                    `json:"reply_context_id,omitempty"`
-	DeliveryFailure       *runtimefailures.Envelope `json:"delivery_failure,omitempty"`
-	DeliveryRetryCount    int                       `json:"delivery_retry_count,omitempty"`
-	DeliveryRetryEligible bool                      `json:"delivery_retry_eligible,omitempty"`
-	DeliveryTerminal      bool                      `json:"delivery_terminal,omitempty"`
-	DeliveryCreatedAt     string                    `json:"delivery_created_at,omitempty"`
-	DeliveryStartedAt     string                    `json:"delivery_started_at,omitempty"`
-	DeliveryDeliveredAt   string                    `json:"delivery_delivered_at,omitempty"`
-	SubscriberType        string                    `json:"subscriber_type,omitempty"`
-	SubscriberID          string                    `json:"subscriber_id,omitempty"`
-	SessionID             string                    `json:"session_id,omitempty"`
-	TurnID                string                    `json:"turn_id,omitempty"`
-	TurnTriggerEventType  string                    `json:"turn_trigger_event_type,omitempty"`
+	EventID                string                    `json:"event_id"`
+	EventName              string                    `json:"event_name"`
+	EventCreatedAt         string                    `json:"event_created_at"`
+	EntityID               string                    `json:"entity_id,omitempty"`
+	DeliveryID             string                    `json:"delivery_id,omitempty"`
+	DeliveryStatus         string                    `json:"delivery_status,omitempty"`
+	DeliveryReasonCode     string                    `json:"delivery_reason_code,omitempty"`
+	ReplyContextID         string                    `json:"reply_context_id,omitempty"`
+	DeliveryFailure        *runtimefailures.Envelope `json:"delivery_failure,omitempty"`
+	DeliveryRetryCount     int                       `json:"delivery_retry_count,omitempty"`
+	DeliveryRetryScheduled bool                      `json:"delivery_retry_scheduled,omitempty"`
+	DeliveryTerminal       bool                      `json:"delivery_terminal,omitempty"`
+	DeliveryCreatedAt      string                    `json:"delivery_created_at,omitempty"`
+	DeliveryStartedAt      string                    `json:"delivery_started_at,omitempty"`
+	DeliveryDeliveredAt    string                    `json:"delivery_delivered_at,omitempty"`
+	SubscriberType         string                    `json:"subscriber_type,omitempty"`
+	SubscriberID           string                    `json:"subscriber_id,omitempty"`
+	SessionID              string                    `json:"session_id,omitempty"`
+	TurnID                 string                    `json:"turn_id,omitempty"`
+	TurnTriggerEventType   string                    `json:"turn_trigger_event_type,omitempty"`
 }
 
 type diagnosticRunFailureDelivery struct {
@@ -192,7 +192,7 @@ type diagnosticRunFailureDelivery struct {
 	ReasonCode     string                    `json:"reason_code,omitempty"`
 	Failure        *runtimefailures.Envelope `json:"failure,omitempty"`
 	RetryCount     int                       `json:"retry_count"`
-	RetryEligible  bool                      `json:"retry_eligible"`
+	RetryScheduled bool                      `json:"retry_scheduled"`
 	Terminal       bool                      `json:"terminal"`
 	CreatedAt      string                    `json:"created_at,omitempty"`
 	StartedAt      string                    `json:"started_at,omitempty"`

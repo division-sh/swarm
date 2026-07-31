@@ -15,9 +15,11 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtime "github.com/division-sh/swarm/internal/runtime"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -212,6 +214,25 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
+	}
+	if !start {
+		authority, authorityErr := runtimedelivery.NewNormalExecutionAuthority(
+			authorActivityTestBundleSourceFact,
+			authorActivityTestRuntimeInstanceID,
+			1,
+		)
+		if authorityErr != nil {
+			t.Fatalf("construct catalog test delivery authority: %v", authorityErr)
+		}
+		if authorityErr := pg.ActivateDeliveryAuthority(ctx, authority); authorityErr != nil {
+			t.Fatalf("activate catalog test delivery authority: %v", authorityErr)
+		}
+		if authorityErr := rt.Bus.SetDeliveryAuthority(authority); authorityErr != nil {
+			t.Fatalf("install catalog test delivery authority: %v", authorityErr)
+		}
+		if authorityErr := rt.Bus.SetDeliveryContinuationOwner(runtimebustest.NewDeliveryContinuationOwner(false)); authorityErr != nil {
+			t.Fatalf("install catalog test delivery continuation owner: %v", authorityErr)
+		}
 	}
 	if err := rt.PrepareAuthorActivityCatalog(); err != nil {
 		t.Fatalf("PrepareAuthorActivityCatalog: %v", err)

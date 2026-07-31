@@ -283,6 +283,7 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 				DeliveryStore: owner,
 				WorkOwner:     pipelineTestWorkOwner(t),
 			})
+			configurePipelineTestDeliveryOwner(t, pc)
 
 			entityID := uuid.NewString()
 			runID := runtimecorrelation.RunIDFromContext(ctx)
@@ -330,9 +331,9 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("load node delivery outcomes: %v", err)
 			}
-			if snapshot.Status != runtimedelivery.StatusDelivered || snapshot.RetryCount != 1 {
+			if snapshot.Status != runtimedelivery.StatusFailed || snapshot.RetryCount != 1 {
 				t.Fatalf(
-					"node delivery snapshot = status:%s retries:%d next:%s local-now:%s outcomes:%#v, want delivered/1",
+					"node delivery snapshot = status:%s retries:%d next:%s local-now:%s outcomes:%#v, want failed/1 after exact continuation transfer",
 					snapshot.Status,
 					snapshot.RetryCount,
 					snapshot.NextEligibleAt,
@@ -340,8 +341,48 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 					outcomes,
 				)
 			}
+			if len(outcomes) != 1 || outcomes[0].Outcome != "retry_scheduled" {
+				t.Fatalf("node delivery outcomes = %#v, want retry_scheduled after first attempt", outcomes)
+			}
+
+			handled, err = pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), evt)
+			if err != nil {
+				t.Fatalf("dispatch early retry wake: %v", err)
+			}
+			if !handled {
+				t.Fatal("dispatch early retry wake handled = false, want exact deferred disposition")
+			}
+			snapshot, err = owner.Snapshot(ctx, proof.DeliveryID())
+			if err != nil {
+				t.Fatalf("load early-wake delivery snapshot: %v", err)
+			}
+			if snapshot.Status != runtimedelivery.StatusFailed || snapshot.RetryCount != 1 {
+				t.Fatalf("early-wake delivery snapshot = status:%s retries:%d, want unchanged failed/1", snapshot.Status, snapshot.RetryCount)
+			}
+
+			if err := owner.makeRetryEligible(ctx, proof.DeliveryID()); err != nil {
+				t.Fatalf("make retry selected-store eligible: %v", err)
+			}
+			handled, err = pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), evt)
+			if err != nil {
+				t.Fatalf("dispatch selected-store-eligible retry: %v", err)
+			}
+			if !handled {
+				t.Fatal("dispatch selected-store-eligible retry handled = false, want delivered")
+			}
+			snapshot, err = owner.Snapshot(ctx, proof.DeliveryID())
+			if err != nil {
+				t.Fatalf("load delivered retry snapshot: %v", err)
+			}
+			outcomes, err = owner.Outcomes(ctx, proof.DeliveryID())
+			if err != nil {
+				t.Fatalf("load delivered retry outcomes: %v", err)
+			}
+			if snapshot.Status != runtimedelivery.StatusDelivered || snapshot.RetryCount != 1 {
+				t.Fatalf("delivered retry snapshot = status:%s retries:%d, want delivered/1", snapshot.Status, snapshot.RetryCount)
+			}
 			if len(outcomes) != 2 || outcomes[0].Outcome != "retry_scheduled" || outcomes[1].Outcome != string(runtimedelivery.StatusDelivered) {
-				t.Fatalf("node delivery outcomes = %#v, want retry_scheduled then delivered", outcomes)
+				t.Fatalf("delivered retry outcomes = %#v, want retry_scheduled then delivered", outcomes)
 			}
 		})
 	}
@@ -458,9 +499,21 @@ func seedDeliveryAuthorityTerminalNodeDelivery(t *testing.T, db *sql.DB, eventID
 	if err := owner.commitInitial(ctx, evt, route); err != nil {
 		t.Fatalf("commit terminal delivery authority: %v", err)
 	}
-	claimed, err := owner.ClaimNodeDelivery(ctx, evt, route)
+	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), route)
+	if err != nil {
+		t.Fatalf("derive terminal delivery authority id: %v", err)
+	}
+	snapshot, err := owner.Snapshot(ctx, deliveryID)
+	if err != nil {
+		t.Fatalf("read terminal delivery authority: %v", err)
+	}
+	result, err := owner.ClaimDelivery(ctx, snapshot.Authority, evt, route)
 	if err != nil {
 		t.Fatalf("claim terminal delivery authority: %v", err)
+	}
+	claimed, ok := result.Acquired()
+	if !ok {
+		t.Fatalf("claim terminal delivery authority disposition = %s", result.Disposition)
 	}
 	failure := runtimefailures.FromError(errors.New("terminal delivery fixture"), "pipeline-test", "settle").Failure
 	if _, err := owner.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{

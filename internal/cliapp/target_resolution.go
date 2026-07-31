@@ -615,7 +615,6 @@ func doctorTargetCommandClasses() []doctorTargetCommandClass {
 				"swarm event replay",
 				"swarm agent restart",
 				"swarm agent replay",
-				"swarm agent replay-backlog",
 				"swarm agent directive",
 				"swarm bundle register",
 				"swarm bundle delete",

@@ -178,7 +178,7 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 		t.Fatalf("active-delivery run status = %q, %v, want running", activeStatus, err)
 	}
 
-	claimed, err := pg.ClaimAgentDelivery(ctx, event, route)
+	claimed, err := claimDeliveryFixture(ctx, pg, event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"})
 	if err != nil {
 		t.Fatalf("claim delivery: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun(t *testing
 	if err != nil {
 		t.Fatalf("claim completed-run event: %v", err)
 	}
-	if err := pg.PipelineObligations().Settle(
+	if _, err := pg.PipelineObligations().Settle(
 		ctx,
 		work.Claim,
 		runtimepipelineobligation.Acknowledged("pipeline_persisted"),
@@ -3624,12 +3624,8 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	if err != nil || len(pending.PendingDeliveries) != 1 || pending.PendingDeliveries[0].EventID != evt.ID() {
 		t.Fatalf("ListPendingAgentDeliveryDetails err=%v page=%#v", err, pending)
 	}
-	route := events.DeliveryRoute{
-		SubscriberType: string(runtimedelivery.SubscriberAgent),
-		SubscriberID:   ceoID,
-		AgentIdentity:  deliveryIdentity,
-	}
-	claimed, err := pg.ClaimAgentDelivery(ctx, evt, route)
+	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: ceoID}
+	claimed, err := claimDeliveryFixture(ctx, pg, evt, route)
 	if err != nil {
 		t.Fatalf("ClaimAgentDelivery: %v", err)
 	}
@@ -3638,7 +3634,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		Failure:     testRetryableFailure(),
 		RetryBase:   time.Second,
 	})
-	if err != nil || retrying.Status != runtimedelivery.StatusFailed || retrying.RetryEligible {
+	if err != nil || retrying.Status != runtimedelivery.StatusFailed || !retrying.RetryScheduled {
 		t.Fatalf("SettleFailure retry snapshot=%#v err=%v", retrying, err)
 	}
 

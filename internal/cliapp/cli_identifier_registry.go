@@ -237,8 +237,6 @@ var cliIdentifierInputRegistry = []cliIdentifierInputRegistration{
 	{Command: "swarm agent restart", Selector: "flag:flow-instance", Family: cliIdentifierFamilyFlowInstance, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 	{Command: "swarm agent replay", Selector: "arg:agent-id", Family: cliIdentifierFamilyAgent, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 	{Command: "swarm agent replay", Selector: "flag:flow-instance", Family: cliIdentifierFamilyFlowInstance, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
-	{Command: "swarm agent replay-backlog", Selector: "arg:agent-id", Family: cliIdentifierFamilyAgent, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
-	{Command: "swarm agent replay-backlog", Selector: "flag:flow-instance", Family: cliIdentifierFamilyFlowInstance, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 	{Command: "swarm agent directive", Selector: "arg:agent-id", Family: cliIdentifierFamilyAgent, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 	{Command: "swarm agent directive", Selector: "flag:flow-instance", Family: cliIdentifierFamilyFlowInstance, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 	{Command: "swarm conversation list", Selector: "flag:agent-id", Family: cliIdentifierFamilyAgent, Mode: cliIdentifierModeFullOnly},

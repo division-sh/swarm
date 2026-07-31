@@ -438,6 +438,7 @@ func TestPostgresPipelineCompletionHandoffSurvivesPostCommitCleanupError(t *test
 			owner := selected.PipelineObligations()
 
 			var claim runtimepipelineobligation.Claim
+			var settlementOutcome runtimepipelineobligation.SettlementOutcome
 			switch operation {
 			case "mark_decision_processed":
 				insertProducerIdentityDecisionObligation(t, fixture, ctx, eventID, runID, time.Now().UTC().Add(-time.Minute))
@@ -491,13 +492,17 @@ func TestPostgresPipelineCompletionHandoffSurvivesPostCommitCleanupError(t *test
 			case "mark_decision_processed":
 				err = owner.MarkDecisionProcessed(runtimeCtx, claim)
 			case "settle":
-				err = owner.Settle(runtimeCtx, claim, runtimepipelineobligation.Acknowledged("processed"))
+				settlementOutcome, err = owner.Settle(runtimeCtx, claim, runtimepipelineobligation.Acknowledged("processed"))
 			}
 			session.mu.Lock()
 			session.testEndTxError = nil
 			session.mu.Unlock()
 			if !errors.Is(err, injectedErr) {
 				t.Fatalf("%s error = %v, want injected cleanup failure", operation, err)
+			}
+			if operation == "settle" && (!settlementOutcome.Committed() || !settlementOutcome.DeliveryHandoffCommitted()) {
+				t.Fatalf("settlement outcome after cleanup failure = committed:%v handoff:%v, want true/true",
+					settlementOutcome.Committed(), settlementOutcome.DeliveryHandoffCommitted())
 			}
 
 			candidate := awaitRunLifecycleCandidate(t, intercept.executed, operation+" live candidate handoff")

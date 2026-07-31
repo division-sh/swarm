@@ -1009,19 +1009,6 @@ func (c dashboardDynamicAgentControl) Restart(ctx context.Context, req runtimeag
 	return rt.Manager.Restart(use.WorkContext(), req)
 }
 
-func (c dashboardDynamicAgentControl) ReplayBacklog(ctx context.Context, req runtimeagentcontrol.ReplayBacklogRequest) (runtimeagentcontrol.ReplayBacklogResult, error) {
-	use, err := c.supervisor.acquireCurrentRuntime(ctx)
-	if err != nil {
-		return runtimeagentcontrol.ReplayBacklogResult{}, err
-	}
-	defer func() { _ = use.Done() }()
-	rt := use.Runtime()
-	if rt == nil || rt.Manager == nil {
-		return runtimeagentcontrol.ReplayBacklogResult{}, fmt.Errorf("runtime manager unavailable")
-	}
-	return rt.Manager.ReplayBacklog(use.WorkContext(), req)
-}
-
 func (c dashboardDynamicAgentControl) SendDirective(ctx context.Context, req runtimeagentcontrol.SendDirectiveRequest) (runtimeagentcontrol.SendDirectiveResult, error) {
 	use, err := c.supervisor.acquireCurrentRuntime(ctx)
 	if err != nil {

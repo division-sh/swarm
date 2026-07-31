@@ -49,7 +49,7 @@ type eventReplayDelivery struct {
 	Failure          *runtimefailures.Envelope        `json:"failure,omitempty"`
 	Attempt          int                              `json:"attempt"`
 	RetryCount       int                              `json:"retry_count"`
-	RetryEligible    bool                             `json:"retry_eligible"`
+	RetryScheduled   bool                             `json:"retry_scheduled"`
 	Terminal         bool                             `json:"terminal"`
 	CreatedAt        *time.Time                       `json:"created_at,omitempty"`
 	StartedAt        *time.Time                       `json:"started_at,omitempty"`
@@ -637,7 +637,7 @@ func eventReplayDeliveryFromStore(delivery store.OperatorEventDelivery, sourceDe
 		Failure:          runtimefailures.CloneEnvelope(published.Failure),
 		Attempt:          published.Attempt,
 		RetryCount:       published.RetryCount,
-		RetryEligible:    published.RetryEligible,
+		RetryScheduled:   published.RetryScheduled,
 		Terminal:         published.Terminal,
 		CreatedAt:        published.CreatedAt,
 		StartedAt:        published.StartedAt,
@@ -650,14 +650,14 @@ func eventReplayDeliveryFromStore(delivery store.OperatorEventDelivery, sourceDe
 
 func eventReplayDeliveryFailureEvidence(eventID string, delivery store.OperatorEventDelivery) map[string]any {
 	data := map[string]any{
-		"event_id":       strings.TrimSpace(eventID),
-		"delivery_id":    strings.TrimSpace(delivery.DeliveryID),
-		"subscriber_id":  strings.TrimSpace(delivery.SubscriberID),
-		"status":         strings.TrimSpace(delivery.Status),
-		"retry_count":    delivery.RetryCount,
-		"retry_eligible": delivery.RetryEligible,
-		"terminal":       delivery.Terminal,
-		"dead_letters":   append([]store.OperatorDeadLetterRecord(nil), delivery.DeadLetters...),
+		"event_id":        strings.TrimSpace(eventID),
+		"delivery_id":     strings.TrimSpace(delivery.DeliveryID),
+		"subscriber_id":   strings.TrimSpace(delivery.SubscriberID),
+		"status":          strings.TrimSpace(delivery.Status),
+		"retry_count":     delivery.RetryCount,
+		"retry_scheduled": delivery.RetryScheduled,
+		"terminal":        delivery.Terminal,
+		"dead_letters":    append([]store.OperatorDeadLetterRecord(nil), delivery.DeadLetters...),
 	}
 	if reason := strings.TrimSpace(delivery.ReasonCode); reason != "" {
 		data["reason_code"] = reason

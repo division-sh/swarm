@@ -10,12 +10,16 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store"
 )
+
+const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
 
 type externalStoreTestWorkFixture struct {
 	process *worklifetime.Process
@@ -31,7 +35,7 @@ func storeTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence {
 	}
 	fixture := &externalStoreTestWorkFixture{process: worklifetime.NewProcess()}
 	owner, err := fixture.process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
-		RuntimeInstanceID: "11111111-1111-1111-1111-111111111111",
+		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 		BundleHash:        "bundle-v1:sha256:" + strings.Repeat("a", 64),
 	})
 	if err != nil {
@@ -83,8 +87,22 @@ func newStoreTestEventBus(t *testing.T, selected runtimebus.EventStore, options 
 	if opts.BundleSourceFact.Validate() != nil {
 		opts.BundleSourceFact = mustExternalStoreTestBundleSourceFact()
 	}
+	if opts.RuntimeInstanceID == "" {
+		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
+	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = storeTestWorkOwner(t)
+	}
+	if opts.DeliveryAuthority.Kind() == "" {
+		authority, authorityErr := runtimedelivery.NewNormalExecutionAuthority(
+			opts.BundleSourceFact,
+			opts.RuntimeInstanceID,
+			1,
+		)
+		if authorityErr != nil {
+			return nil, authorityErr
+		}
+		opts.DeliveryAuthority = authority
 	}
 	if opts.PipelineObligations == nil {
 		if provider, ok := selected.(interface {
@@ -93,7 +111,16 @@ func newStoreTestEventBus(t *testing.T, selected runtimebus.EventStore, options 
 			opts.PipelineObligations = provider.PipelineObligations()
 		}
 	}
-	return runtimebus.NewEventBusWithOptions(selected, opts)
+	bus, err := runtimebus.NewEventBusWithOptions(selected, opts)
+	if err != nil {
+		return nil, err
+	}
+	if err := bus.SetDeliveryContinuationOwner(
+		runtimebustest.NewDeliveryContinuationOwner(false),
+	); err != nil {
+		return nil, err
+	}
+	return bus, nil
 }
 
 func mustExternalStoreTestBundleSourceFact() runtimecorrelation.BundleSourceFact {

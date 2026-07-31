@@ -857,8 +857,8 @@ func (unavailableFlowActivationPipelineObligations) MarkDecisionProcessed(contex
 	return errors.New("flow activation fixture has no pipeline obligations")
 }
 
-func (unavailableFlowActivationPipelineObligations) Settle(context.Context, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) error {
-	return errors.New("flow activation fixture has no pipeline obligations")
+func (unavailableFlowActivationPipelineObligations) Settle(context.Context, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) (runtimepipelineobligation.SettlementOutcome, error) {
+	return runtimepipelineobligation.SettlementOutcome{}, errors.New("flow activation fixture has no pipeline obligations")
 }
 
 func (unavailableFlowActivationPipelineObligations) Release(context.Context, runtimepipelineobligation.Claim) error {

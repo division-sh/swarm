@@ -220,17 +220,6 @@ mutating_api_parity_ledger:
       durable selected-store transition owner. It proves adjacent generation,
       one operation/fact/outbox outcome, same-key replay without another
       transition, post-restart delivery, and standard quiescence postconditions.
-  - method: agent.replay_backlog
-    classification: dual_backend_served_proof
-    backends: [default_sqlite, explicit_postgres]
-    scenario: agent_replay_backlog_live_agent_lifecycle
-    proof_refs:
-      - {kind: go_test, name: TestServedParityHarnessLiveAgentReplayBacklogLifecycle}
-    notes: >
-      Shared served harness proves real /v1/rpc agent.replay_backlog on default
-      SQLite and explicit Postgres by seeding a real pending load-agent delivery
-      and proving manager replay terminalizes it through live agent processing,
-      with idempotency replay and generic settlement.
   - method: runtime.pause
     classification: dual_backend_served_proof
     backends: [default_sqlite, explicit_postgres]

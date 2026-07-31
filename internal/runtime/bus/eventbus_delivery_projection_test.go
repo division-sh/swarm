@@ -12,6 +12,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/google/uuid"
 )
 
 func TestSyntheticCarryProjectionIsRouteScopedForMixedDeliveries(t *testing.T) {
@@ -93,7 +94,7 @@ func TestDeliveryRouteProjectionHasOneProductionOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	evt := eventtest.RunCreatingRootIngress("owner-event", events.EventType("validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	route := events.DeliveryRoute{
 		SubscriberType:    "node",
 		SubscriberID:      "validator",

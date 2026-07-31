@@ -2,8 +2,11 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"reflect"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,7 +16,9 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -34,10 +39,13 @@ type projectionTestBus struct {
 	removed       []runtimeeffects.LifecycleToken
 	store         runtimebus.EventStore
 	owner         worklifetime.Occurrence
+	authority     runtimedelivery.ExecutionAuthority
+	continuations runtimebus.DeliveryContinuationOwner
 	prepareErr    bool
 	publishErr    error
 	runtimeLogs   []runtimepipeline.RuntimeLogEntry
 	beforePublish func()
+	deliveryCtx   context.Context
 }
 
 type projectionTestRoutePreparation struct {
@@ -116,6 +124,35 @@ func (*projectionTestBus) Subscribe(string, ...events.EventType) <-chan events.E
 }
 func (*projectionTestBus) Unsubscribe(string)             { panic("generic agent Unsubscribe must not be used") }
 func (b *projectionTestBus) Store() runtimebus.EventStore { return b.store }
+func (b *projectionTestBus) SetDeliveryAuthority(authority runtimedelivery.ExecutionAuthority) error {
+	if err := authority.Validate(); err != nil {
+		return err
+	}
+	b.authority = authority
+	return nil
+}
+func (b *projectionTestBus) DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error) {
+	if err := b.authority.Validate(); err != nil {
+		return runtimedelivery.ExecutionAuthority{}, err
+	}
+	return b.authority, nil
+}
+func (b *projectionTestBus) SetDeliveryContinuationOwner(owner runtimebus.DeliveryContinuationOwner) error {
+	if owner == nil {
+		return context.Canceled
+	}
+	b.continuations = owner
+	return nil
+}
+func (b *projectionTestBus) AcquireDeliveryContinuation(deliveryID string) (worklifetime.DeliveryContinuation, error) {
+	return b.continuations.Acquire(deliveryID)
+}
+func (b *projectionTestBus) RetainDeliveryContinuation(snapshot runtimedelivery.Snapshot) error {
+	return b.continuations.Retain(snapshot)
+}
+func (b *projectionTestBus) ReleaseDeliveryContinuation(deliveryID string) error {
+	return b.continuations.Release(deliveryID)
+}
 func (*projectionTestBus) SweepPipelineObligations(context.Context, int) (runtimepipelineobligation.SweepResult, error) {
 	return runtimepipelineobligation.SweepResult{Exhausted: true}, nil
 }
@@ -166,18 +203,34 @@ func (b *projectionTestBus) RemoveAgentRoute(token runtimeeffects.LifecycleToken
 }
 func (b *projectionTestBus) send(agentID string, event events.Event) error {
 	b.mu.Lock()
-	route, ok := b.routes[agentID]
+	localRoute, ok := b.routes[agentID]
 	b.mu.Unlock()
 	if ok {
-		delivery, err := b.owner.NewRoutedEventDelivery(testAuthorActivityContext(context.Background()), event, events.DeliveryRoute{
+		deliveryRoute := events.DeliveryRoute{
 			SubscriberType: string(runtimedelivery.SubscriberAgent),
 			SubscriberID:   agentID,
-			AgentIdentity:  route.token.Identity,
-		})
+			AgentIdentity:  localRoute.token.Identity,
+		}
+		deliveryCtx := b.deliveryCtx
+		if deliveryCtx == nil {
+			deliveryCtx = context.Background()
+		}
+		delivery, err := b.owner.NewRoutedEventDelivery(testAuthorActivityContext(deliveryCtx), event, deliveryRoute)
 		if err != nil {
 			return err
 		}
-		route.channel <- delivery
+		deliveryID, err := runtimedelivery.DeliveryID(event.ID(), deliveryRoute)
+		if err != nil {
+			return err
+		}
+		continuation, err := b.continuations.Acquire(deliveryID)
+		if err != nil {
+			return err
+		}
+		if err := delivery.AttachContinuation(continuation); err != nil {
+			return err
+		}
+		localRoute.channel <- delivery
 	}
 	return nil
 }
@@ -704,65 +757,6 @@ func TestExecutionProjectionNaturalLoopExitRemovesExactRoute(t *testing.T) {
 	}
 }
 
-func TestExecutionProjectionBacklogLeaseFencesReplacement(t *testing.T) {
-	const agentID = "projection-backlog"
-	store := newStartupReplayTestStore(t, recoveryTestStore{}, map[string][]events.Event{
-		agentID: {projectionRuntimeEvent(eventtest.UUID("backlog-event"), "test.backlog")},
-	})
-	bus := &recoveryTestBus{}
-	eventStarted := make(chan runtimeeffects.LifecycleToken, 1)
-	eventRelease := make(chan struct{})
-	build := 0
-	factory := func(cfg models.AgentConfig) (Agent, error) {
-		build++
-		return &projectionBacklogAgent{
-			projectionTestAgent: projectionTestAgent{id: cfg.ID, build: build, subs: []events.EventType{"test.backlog"}, handled: make(chan int, 1)},
-			eventStarted:        eventStarted, eventRelease: eventRelease,
-		}, nil
-	}
-	am := newProjectionTestManager(t, bus, factory, store)
-	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: models.AgentConfig{
-		ExecutionMode: "live",
-		ID:            agentID,
-		Identity:      managerAgentIdentity(agentID),
-		Subscriptions: []string{"test.backlog"},
-	}}, false); err != nil {
-		t.Fatalf("spawnAgentInternal: %v", err)
-	}
-	predecessor, ok := testExecutionSnapshot(t, am, agentID, "")
-	if !ok {
-		t.Fatal("predecessor execution is absent")
-	}
-	replayDone := make(chan error, 1)
-	go func() {
-		_, err := am.ReplayBacklog(testAuthorActivityContext(context.Background()), runtimeagentcontrol.ReplayBacklogRequest{AgentID: agentID})
-		replayDone <- err
-	}()
-	if got := <-eventStarted; got != predecessor.Token {
-		t.Fatalf("backlog token = %+v, want exact predecessor %+v", got, predecessor.Token)
-	}
-	reconfigureDone := make(chan error, 1)
-	go func() {
-		reconfigureDone <- am.ReconfigureAgentTarget(agentID, "", models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.backlog"}}, nil)
-	}()
-	select {
-	case err := <-reconfigureDone:
-		t.Fatalf("replacement completed before predecessor backlog lease released: %v", err)
-	case <-time.After(20 * time.Millisecond):
-	}
-	close(eventRelease)
-	if err := <-replayDone; err != nil {
-		t.Fatalf("ReplayAgentBacklog: %v", err)
-	}
-	if err := <-reconfigureDone; err != nil {
-		t.Fatalf("ReconfigureAgent: %v", err)
-	}
-	successor, ok := testExecutionSnapshot(t, am, agentID, "")
-	if !ok || successor.Token == predecessor.Token {
-		t.Fatalf("successor = %+v ok=%v, want a new execution token", successor.Token, ok)
-	}
-}
-
 func TestExecutionProjectionRecoveryStartsPersistedRunningCell(t *testing.T) {
 	bus := newProjectionTestBus()
 	handled := make(chan int, 1)
@@ -858,4 +852,262 @@ func TestExecutionProjectionSpawnDuringRunActivatesRegisteredProjection(t *testi
 
 func projectionRuntimeEvent(id string, eventType events.EventType) events.Event {
 	return eventtest.RuntimeControl(eventtest.UUID(id), eventType, "test", "", []byte(`{}`), 0, eventtest.UUID("projection-run"), "", events.EventEnvelope{}, time.Now())
+}
+
+type projectionCarrierResolution struct {
+	intent     worklifetime.DeliveryContinuationIntent
+	resolution worklifetime.DeliveryContinuationResolution
+}
+
+type projectionResolutionOwner struct {
+	resolution worklifetime.DeliveryContinuationResolution
+	resolved   chan projectionCarrierResolution
+	released   chan struct{}
+	releases   atomic.Int32
+}
+
+func (*projectionResolutionOwner) AcceptCommitted([]runtimedelivery.DurableHandoffProof) error {
+	return nil
+}
+func (o *projectionResolutionOwner) Acquire(deliveryID string) (worklifetime.DeliveryContinuation, error) {
+	return &projectionResolutionContinuation{owner: o, deliveryID: deliveryID}, nil
+}
+func (*projectionResolutionOwner) Retain(runtimedelivery.Snapshot) error { return nil }
+func (o *projectionResolutionOwner) Release(string) error {
+	o.releases.Add(1)
+	select {
+	case o.released <- struct{}{}:
+	default:
+	}
+	return nil
+}
+func (*projectionResolutionOwner) OwnsPersistedRecovery() bool { return false }
+func (*projectionResolutionOwner) Signal()                     {}
+
+type projectionResolutionContinuation struct {
+	owner      *projectionResolutionOwner
+	deliveryID string
+	once       sync.Once
+}
+
+func (c *projectionResolutionContinuation) DeliveryID() string { return c.deliveryID }
+func (c *projectionResolutionContinuation) Resolve(_ context.Context, intent worklifetime.DeliveryContinuationIntent) (worklifetime.DeliveryContinuationResolution, error) {
+	resolution := c.owner.resolution
+	if resolution == 0 {
+		if intent == worklifetime.DeliveryContinuationReturn {
+			resolution = worklifetime.DeliveryContinuationReturned
+		} else {
+			resolution = worklifetime.DeliveryContinuationConsumed
+		}
+	}
+	c.once.Do(func() {
+		c.owner.resolved <- projectionCarrierResolution{intent: intent, resolution: resolution}
+	})
+	return resolution, nil
+}
+
+type projectionScriptedClaimStore struct {
+	runtimedelivery.Store
+	result   runtimedelivery.ClaimResult
+	err      error
+	delegate bool
+}
+
+func (s projectionScriptedClaimStore) ClaimDelivery(ctx context.Context, authority runtimedelivery.ExecutionAuthority, evt events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimResult, error) {
+	if s.delegate {
+		return s.Store.ClaimDelivery(ctx, authority, evt, route)
+	}
+	return s.result, s.err
+}
+
+func projectionDeliveryAuthorities(t *testing.T) map[string]runtimedelivery.ExecutionAuthority {
+	t.Helper()
+	source, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("e", 64))
+	if err != nil {
+		t.Fatalf("construct projection delivery source: %v", err)
+	}
+	normal, err := runtimedelivery.NewNormalExecutionAuthority(source, "manager-delivery-test", 1)
+	if err != nil {
+		t.Fatalf("construct normal projection authority: %v", err)
+	}
+	selected, err := runtimedelivery.NewSelectedExecutionAuthority(source, eventtest.UUID("projection-selected-execution"), eventtest.UUID("projection-selected-run"), 1)
+	if err != nil {
+		t.Fatalf("construct selected projection authority: %v", err)
+	}
+	return map[string]runtimedelivery.ExecutionAuthority{"normal": normal, "selected": selected}
+}
+
+func TestRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T) {
+	type branch struct {
+		name         string
+		result       func(string) runtimedelivery.ClaimResult
+		claimErr     error
+		delegate     bool
+		shutdown     bool
+		missingWork  bool
+		fenceWork    bool
+		cancelLane   bool
+		missingAuth  bool
+		terminalRace bool
+		wantIntent   worklifetime.DeliveryContinuationIntent
+		wantRelease  int32
+		wantHandled  bool
+	}
+	branches := []branch{
+		{name: "shutdown_admission", shutdown: true, wantIntent: worklifetime.DeliveryContinuationReturn},
+		{name: "begin_work_failure", fenceWork: true, wantIntent: worklifetime.DeliveryContinuationReturn},
+		{name: "missing_occurrence", missingWork: true, wantIntent: worklifetime.DeliveryContinuationReturn},
+		{name: "lane_failure", cancelLane: true, wantIntent: worklifetime.DeliveryContinuationReturn},
+		{name: "missing_authority", missingAuth: true, wantIntent: worklifetime.DeliveryContinuationReturn},
+		{name: "claim_error", claimErr: errors.New("injected claim error"), wantIntent: worklifetime.DeliveryContinuationReturn},
+		{name: "deferred", result: func(string) runtimedelivery.ClaimResult {
+			return runtimedelivery.ClaimResult{Disposition: runtimedelivery.ClaimDeferred}
+		}, wantIntent: worklifetime.DeliveryContinuationReturn},
+		{name: "busy", result: func(string) runtimedelivery.ClaimResult {
+			return runtimedelivery.ClaimResult{Disposition: runtimedelivery.ClaimBusy}
+		}, wantIntent: worklifetime.DeliveryContinuationReturn},
+		{name: "terminal", result: func(id string) runtimedelivery.ClaimResult {
+			return runtimedelivery.ClaimResult{Disposition: runtimedelivery.ClaimTerminal, Snapshot: runtimedelivery.Snapshot{DeliveryID: id}}
+		}, wantIntent: worklifetime.DeliveryContinuationReturn, wantRelease: 1},
+		{name: "wrong_authority", result: func(string) runtimedelivery.ClaimResult {
+			return runtimedelivery.ClaimResult{Disposition: runtimedelivery.ClaimWrongAuthority, Invariant: errors.New("wrong authority")}
+		}, wantIntent: worklifetime.DeliveryContinuationReturn},
+		{name: "absent", result: func(string) runtimedelivery.ClaimResult {
+			return runtimedelivery.ClaimResult{Disposition: runtimedelivery.ClaimAbsent, Invariant: errors.New("absent")}
+		}, wantIntent: worklifetime.DeliveryContinuationReturn},
+		{name: "invariant_invalid", result: func(string) runtimedelivery.ClaimResult {
+			return runtimedelivery.ClaimResult{Disposition: runtimedelivery.ClaimInvariantInvalid, Invariant: errors.New("invalid")}
+		}, wantIntent: worklifetime.DeliveryContinuationReturn},
+		{name: "unknown", result: func(string) runtimedelivery.ClaimResult {
+			return runtimedelivery.ClaimResult{Disposition: runtimedelivery.ClaimDisposition("unknown")}
+		}, wantIntent: worklifetime.DeliveryContinuationReturn},
+		{name: "acquired_without_claim", result: func(string) runtimedelivery.ClaimResult {
+			return runtimedelivery.ClaimResult{Disposition: runtimedelivery.ClaimAcquired}
+		}, wantIntent: worklifetime.DeliveryContinuationReturn},
+		{name: "acquired_terminal_race", delegate: true, terminalRace: true, wantIntent: worklifetime.DeliveryContinuationConsume, wantRelease: 1},
+		{name: "acquired_success", delegate: true, wantIntent: worklifetime.DeliveryContinuationConsume, wantRelease: 1, wantHandled: true},
+	}
+	for authorityName, authority := range projectionDeliveryAuthorities(t) {
+		for _, test := range branches {
+			t.Run(authorityName+"/"+test.name, func(t *testing.T) {
+				bus := newProjectionTestBus()
+				handled := make(chan int, 1)
+				am := newProjectionTestManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
+					return &projectionTestAgent{id: cfg.ID, subs: []events.EventType{"test.old"}, handled: handled}, nil
+				})
+				baseStore := am.deliveryStore
+				const agentID = "carrier-disposition-agent"
+				if err := am.SpawnAgent(models.AgentConfig{
+					ExecutionMode: "live", ID: agentID,
+					Identity: runtimeagentidentitytest.RootRuntime(t, agentID, "carrier-disposition-test"), Subscriptions: []string{"test.old"},
+				}); err != nil {
+					t.Fatalf("SpawnAgent: %v", err)
+				}
+				runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
+				defer cancelRun()
+				managedCtx := managedExecutionTestContext(t, runCtx)
+				if authority.Kind() == runtimedelivery.ExecutionAuthoritySelectedContractFork {
+					admission, err := managedexecution.New(
+						managedexecution.KindSelectedContractFork, authority.ExecutionID(), authority.Generation(), authority.ForkRunID(),
+						"carrier-disposition-actors", authority.BundleSource().BundleHash(), nil,
+					)
+					if err != nil {
+						t.Fatalf("construct selected managed execution: %v", err)
+					}
+					managedCtx = managedexecution.WithAdmission(runCtx, admission)
+				}
+				if err := am.Run(managedCtx); err != nil {
+					t.Fatalf("Run: %v", err)
+				}
+				runID := eventtest.UUID("projection-run")
+				if authority.Kind() == runtimedelivery.ExecutionAuthoritySelectedContractFork {
+					runID = authority.ForkRunID()
+				}
+				evt := eventtest.RuntimeControl(
+					eventtest.UUID("carrier-disposition-"+authorityName+"-"+test.name), "test.old", "test", "", []byte(`{}`), 0,
+					runID, "", events.EventEnvelope{}, time.Now(),
+				)
+				route := managerAgentDeliveryRoute(agentID)
+				deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), route)
+				if err != nil {
+					t.Fatalf("derive delivery identity: %v", err)
+				}
+				result := runtimedelivery.ClaimResult{}
+				if test.result != nil {
+					result = test.result(deliveryID)
+				}
+				am.deliveryStore = projectionScriptedClaimStore{Store: baseStore, result: result, err: test.claimErr, delegate: test.delegate}
+				owner := &projectionResolutionOwner{resolved: make(chan projectionCarrierResolution, 1), released: make(chan struct{}, 1)}
+				if test.terminalRace {
+					owner.resolution = worklifetime.DeliveryContinuationTerminal
+				}
+				bus.continuations = owner
+				bus.authority = authority
+				if test.shutdown {
+					am.runtimeShutdownAdmissionClosed = func() bool { return true }
+				}
+				workOwner := am.workOwner
+				if test.missingWork {
+					am.workOwner = nil
+					defer func() { am.workOwner = workOwner }()
+				}
+				if test.fenceWork {
+					if err := am.lifecycle.runOwner.Fence(); err != nil {
+						t.Fatalf("fence manager work owner: %v", err)
+					}
+				}
+				if test.cancelLane {
+					canceled, cancel := context.WithCancel(context.Background())
+					cancel()
+					bus.deliveryCtx = canceled
+				}
+				if test.missingAuth {
+					bus.authority = runtimedelivery.ExecutionAuthority{}
+				}
+				if err := bus.send(agentID, evt); err != nil {
+					t.Fatalf("send branch delivery: %v", err)
+				}
+				select {
+				case got := <-owner.resolved:
+					if got.intent != test.wantIntent {
+						t.Fatalf("carrier intent = %d, want %d", got.intent, test.wantIntent)
+					}
+					if test.terminalRace && got.resolution != worklifetime.DeliveryContinuationTerminal {
+						t.Fatalf("terminal-race resolution = %d, want terminal", got.resolution)
+					}
+				case <-time.After(2 * time.Second):
+					t.Fatal("running manager did not resolve delivery carrier")
+				}
+				if test.wantHandled {
+					select {
+					case <-handled:
+					case <-time.After(2 * time.Second):
+						t.Fatal("acquired delivery did not reach the handler")
+					}
+				} else {
+					select {
+					case <-handled:
+						t.Fatal("pre-attempt branch reached the handler")
+					default:
+					}
+				}
+				if test.wantRelease > 0 {
+					select {
+					case <-owner.released:
+					case <-time.After(2 * time.Second):
+						t.Fatal("running manager did not release terminal continuation")
+					}
+				}
+				if got := owner.releases.Load(); got != test.wantRelease {
+					t.Fatalf("continuation releases = %d, want %d", got, test.wantRelease)
+				}
+				if test.missingWork {
+					am.workOwner = workOwner
+				}
+				if err := am.ShutdownWithOptions(ShutdownOptions{Grace: 2 * time.Second}); err != nil {
+					t.Fatalf("bounded manager shutdown: %v", err)
+				}
+			})
+		}
+	}
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -55,6 +56,16 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, store *Pos
 	}
 	sourceEvents := map[string]events.Event{}
 	insertedEvents := map[string]string{}
+	bundleSource, err := runtimecorrelation.NewPersistedBundleSourceFact(lineage.ForkBundleHash)
+	if err != nil {
+		return result, fmt.Errorf("construct fork replay bundle source: %w", err)
+	}
+	deliveryAuthority, err := runtimedelivery.NewNormalExecutionAuthority(
+		bundleSource, RunForkDeliveryEventReplayOwner+":"+lineage.ForkRunID, 1,
+	)
+	if err != nil {
+		return result, fmt.Errorf("construct fork replay activation delivery authority: %w", err)
+	}
 	for _, item := range replayable {
 		sourceEventID := strings.TrimSpace(item.SourceEventID)
 		sourceDeliveryID := strings.TrimSpace(item.SourceDeliveryID)
@@ -96,7 +107,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, store *Pos
 		if sourceDelivery.EventID != sourceEventID || string(sourceDelivery.SubscriberClass) != item.SubscriberType || sourceDelivery.SubscriberID != item.SubscriberID {
 			return result, fmt.Errorf("source delivery %s does not exactly match authorized fork replay work", sourceDeliveryID)
 		}
-		obligation, err := runtimedelivery.NewObligation(forkEventID, lineage.ForkRunID, sourceDelivery.Route)
+		obligation, err := runtimedelivery.NewObligation(forkEventID, lineage.ForkRunID, sourceDelivery.Route, deliveryAuthority)
 		if err != nil {
 			return result, err
 		}
@@ -209,7 +220,7 @@ func projectRunForkReplayEvent(source events.Event, lineage runForkActivationLin
 }
 
 func insertRunForkReplayDelivery(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage, item RunForkHistoricalReplayExecutableWork, sourceEventID, forkEventID string, obligation runtimedelivery.Obligation, now time.Time) (bool, error) {
-	if _, err := postgresDeliveryAdapter.CommitInitial(ctx, tx, forkEventID, lineage.ForkRunID, []events.DeliveryRoute{obligation.Route()}); err != nil {
+	if _, err := postgresDeliveryAdapter.CommitInitial(ctx, tx, forkEventID, lineage.ForkRunID, []events.DeliveryRoute{obligation.Route()}, obligation.Authority()); err != nil {
 		return false, fmt.Errorf("insert fork replay delivery %s from source delivery %s: %w", obligation.DeliveryID(), item.SourceDeliveryID, err)
 	}
 	res, err := tx.ExecContext(ctx, `

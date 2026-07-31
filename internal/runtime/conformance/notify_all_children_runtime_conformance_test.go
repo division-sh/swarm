@@ -24,6 +24,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -1228,12 +1229,13 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				uuid.NewString(), replay.Type(), "workflow-runtime", "", replay.Payload(), replay.ChainDepth()+1,
 				runID, replay.ID(), replay.Envelope(), fixedEngineNow.Add(time.Second),
 			)
-			storetest.CommitSemanticEventWithRoutes(t, ctx, backend, recoveryEvent, routes, runtimepipelineobligation.ScopeSubscribed)
+			storetest.CommitSemanticEventWithInitialFacts(
+				t, ctx, backend, recoveryEvent, routes,
+				runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),
+			)
 			eventCountBefore := countNotifyAllChildrenItemEvents(t, ctx, backend, db, runID)
 			restarted := newNotifyAllChildrenRuntime(t, backend, db, source, func() time.Time { return fixedEngineNow })
-			if err := restarted.pipeline.RecoverNodeDeliveries(ctx); err != nil {
-				t.Fatalf("RecoverNodeDeliveries: %v", err)
-			}
+			startNotifyAllChildrenDeliveryContinuations(t, ctx, backend, restarted, recoveryEvent.ID(), routes[0])
 			waitNotifyAllChildrenBus(t, restarted.bus)
 			assertNotifyAllChildrenMetadata(t, ctx, backend, db, descriptors["acct-a"].FlowInstance, "last_command", "refresh")
 			if got := countNotifyAllChildrenItemEvents(t, ctx, backend, db, runID); got != eventCountBefore {
@@ -1278,6 +1280,56 @@ func assertNotifyAllChildrenExactRoutes(
 	if !nodeFound || !agentFound {
 		t.Fatalf("persisted routes = %#v, want account-node and exact account-worker", routes)
 	}
+}
+
+func startNotifyAllChildrenDeliveryContinuations(
+	t *testing.T,
+	ctx context.Context,
+	backend notifyAllChildrenStore,
+	runtime notifyAllChildrenRuntime,
+	eventID string,
+	route events.DeliveryRoute,
+) {
+	t.Helper()
+	deliveryID, err := runtimedelivery.DeliveryID(eventID, route)
+	if err != nil {
+		t.Fatalf("derive recovery delivery identity: %v", err)
+	}
+	snapshot, err := backend.Snapshot(ctx, deliveryID)
+	if err != nil {
+		t.Fatalf("load recovery delivery authority: %v", err)
+	}
+	if err := backend.ActivateDeliveryAuthority(ctx, snapshot.Authority); err != nil {
+		t.Fatalf("activate recovery delivery authority: %v", err)
+	}
+	if err := runtime.bus.SetDeliveryAuthority(snapshot.Authority); err != nil {
+		t.Fatalf("configure recovery delivery authority: %v", err)
+	}
+	coordinator, err := runtimedeliverycontinuation.New(
+		backend,
+		snapshot.Authority,
+		runtime.workOwner,
+		runtime.bus,
+		func(_ context.Context, reportErr error) {
+			t.Errorf("delivery continuation failed: %v", reportErr)
+		},
+	)
+	if err != nil {
+		t.Fatalf("construct delivery continuation coordinator: %v", err)
+	}
+	if err := runtime.bus.SetDeliveryContinuationOwner(coordinator); err != nil {
+		t.Fatalf("configure delivery continuation owner: %v", err)
+	}
+	if err := coordinator.Start(ctx); err != nil {
+		t.Fatalf("start delivery continuation coordinator: %v", err)
+	}
+	t.Cleanup(func() {
+		retireCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := coordinator.Retire(retireCtx); err != nil {
+			t.Errorf("retire delivery continuation coordinator: %v", err)
+		}
+	})
 }
 
 func newNotifyAllChildrenRuntime(

@@ -566,7 +566,7 @@ func TestRunContinueProcessesOnlyTargetRunDecisionRoutesOnSQLiteAndPostgres(t *t
 			if err != nil {
 				t.Fatalf("claim fixture seed obligation: %v", err)
 			}
-			if err := fixture.store.PipelineObligations().Settle(
+			if _, err := fixture.store.PipelineObligations().Settle(
 				fixture.ctx,
 				seedWork.Claim,
 				runtimepipelineobligation.Acknowledged("fixture_seeded"),
@@ -657,7 +657,7 @@ func TestPeriodicGlobalScanReentersDecisionRoutesUnderSustainedRecoveryBacklogOn
 			if err != nil {
 				t.Fatalf("claim fixture seed obligation: %v", err)
 			}
-			if err := fixture.store.PipelineObligations().Settle(
+			if _, err := fixture.store.PipelineObligations().Settle(
 				fixture.ctx,
 				seedWork.Claim,
 				runtimepipelineobligation.Acknowledged("fixture_seeded"),

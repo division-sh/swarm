@@ -13,6 +13,8 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -99,6 +101,24 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 			opts.PipelineObligations = provider.PipelineObligations()
 		}
 	}
+	deliveryStore, hasDeliveryStore := eventStore.(runtimedelivery.Store)
+	if hasDeliveryStore && opts.PipelineObligations != nil && opts.DeliveryAuthority.Kind() == "" {
+		authority, err := runtimedelivery.NewNormalExecutionAuthority(
+			opts.BundleSourceFact,
+			opts.RuntimeInstanceID,
+			1,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if err := deliveryStore.ActivateDeliveryAuthority(
+			testAuthorActivityContextForSource(context.Background(), opts.BundleSourceFact),
+			authority,
+		); err != nil {
+			return nil, err
+		}
+		opts.DeliveryAuthority = authority
+	}
 	if registrar, ok := eventStore.(authorActivityTestCatalogRegistrar); ok {
 		descriptors, err := authorActivityTestDescriptors(opts.ContractBundle)
 		if err != nil {
@@ -127,6 +147,33 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 			t.Errorf("retire API test EventBus queues: %v", err)
 		}
 	})
+	if hasDeliveryStore && opts.PipelineObligations != nil {
+		coordinator, err := runtimedeliverycontinuation.New(
+			deliveryStore,
+			opts.DeliveryAuthority,
+			opts.WorkOwner,
+			bus,
+			func(_ context.Context, reportErr error) {
+				t.Errorf("API test delivery continuation failed: %v", reportErr)
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
+		if err := bus.SetDeliveryContinuationOwner(coordinator); err != nil {
+			return nil, err
+		}
+		if err := coordinator.Start(testAuthorActivityContextForSource(context.Background(), opts.BundleSourceFact)); err != nil {
+			return nil, err
+		}
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := coordinator.Retire(ctx); err != nil {
+				t.Errorf("retire API test delivery continuation: %v", err)
+			}
+		})
+	}
 	return bus, nil
 }
 

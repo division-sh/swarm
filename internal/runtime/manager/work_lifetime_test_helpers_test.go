@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
@@ -74,6 +76,25 @@ func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory,
 	}
 	if opts.DeliveryStore == nil {
 		opts.DeliveryStore = newManagerDeliveryTestStore(t)
+	}
+	if authorityStore, ok := opts.DeliveryStore.(interface {
+		managerTestDeliveryAuthority() runtimedelivery.ExecutionAuthority
+	}); ok {
+		authority := authorityStore.managerTestDeliveryAuthority()
+		if setter, ok := bus.(interface {
+			SetDeliveryAuthority(runtimedelivery.ExecutionAuthority) error
+		}); ok {
+			if err := setter.SetDeliveryAuthority(authority); err != nil {
+				t.Fatalf("set manager test delivery authority: %v", err)
+			}
+		}
+		if setter, ok := bus.(interface {
+			SetDeliveryContinuationOwner(runtimebus.DeliveryContinuationOwner) error
+		}); ok {
+			if err := setter.SetDeliveryContinuationOwner(runtimebustest.NewDeliveryContinuationOwner(true)); err != nil {
+				t.Fatalf("set manager test delivery continuation owner: %v", err)
+			}
+		}
 	}
 	manager := NewAgentManagerWithOptions(bus, factory, opts, stores...)
 	t.Cleanup(func() {

@@ -883,7 +883,7 @@ func acknowledgeDecisionCardPipelineEvent(t *testing.T, ctx context.Context, own
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
+	if _, err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
 		t.Fatal(err)
 	}
 }

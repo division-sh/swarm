@@ -54,6 +54,20 @@ func TestRecoveryManagerPropagatesCanonicalOwnerFailure(t *testing.T) {
 	}
 }
 
+func TestRecoveryManagerStartupRequiresExplicitExhaustion(t *testing.T) {
+	owner := &recoveryOwnerProbe{results: []runtimepipelineobligation.SweepResult{
+		{Settled: 3, Examined: 3},
+		{Examined: 1, Blocked: true},
+	}}
+	err := runtimepipeline.NewRecoveryManagerWith(owner).RecoverToExhaustion(context.Background())
+	if err == nil || err.Error() != "pipeline recovery blocked before explicit exhaustion" {
+		t.Fatalf("RecoverToExhaustion error = %v, want blocked-before-exhaustion failure", err)
+	}
+	if owner.calls != 2 {
+		t.Fatalf("SweepPipelineObligations calls = %d, want exact partial then blocked passes", owner.calls)
+	}
+}
+
 func TestRecoveryManagerRequiresCanonicalOwner(t *testing.T) {
 	defer func() {
 		if recover() == nil {

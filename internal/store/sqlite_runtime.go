@@ -51,6 +51,7 @@ type SQLiteRuntimeStore struct {
 	sessionLockTTL          time.Duration
 	nowFn                   func() time.Time
 	runLifecycleSinks       runLifecycleCandidateSinkRegistry
+	testPipelineReleaseErr  func() error
 }
 
 var _ SchemaBootstrapper = (*SQLiteRuntimeStore)(nil)

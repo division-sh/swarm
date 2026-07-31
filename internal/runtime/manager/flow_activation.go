@@ -208,19 +208,10 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		if err := am.reconcileDynamicFlowRuntimeReadinessPlan(postCommitCtx, readinessPlan, req.ContractBundle); err != nil {
 			am.logFlowInstanceActivationSideEffectFailure(req, "runtime_readiness_failed", "finalize_runtime_readiness", err)
 			am.signalDynamicFlowRuntimeReadiness()
-			return
-		}
-		if err := am.launchDynamicFlowRuntimeAgentBacklogReplay(postCommitCtx, readinessPlan); err != nil {
-			am.logFlowInstanceActivationSideEffectFailure(req, "runtime_backlog_failed", "replay_runtime_backlog", err)
-			am.signalDynamicFlowRuntimeReadiness()
 		}
 	})
 	if !finalizeAfterCommit {
 		if err := am.reconcileDynamicFlowRuntimeReadinessPlan(ctx, readinessPlan, req.ContractBundle); err != nil {
-			am.signalDynamicFlowRuntimeReadiness()
-			return err
-		}
-		if err := am.launchDynamicFlowRuntimeAgentBacklogReplay(ctx, readinessPlan); err != nil {
 			am.signalDynamicFlowRuntimeReadiness()
 			return err
 		}
@@ -272,11 +263,6 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 			if err := am.reconcileDynamicFlowRuntimeReadinessPlan(postCommitCtx, readinessPlan, req.ContractBundle); err != nil {
 				am.logFlowInstanceActivationSideEffectFailure(req, "runtime_readiness_failed", "finalize_runtime_readiness", err)
 				am.signalDynamicFlowRuntimeReadiness()
-				return
-			}
-			if err := am.launchDynamicFlowRuntimeAgentBacklogReplay(postCommitCtx, readinessPlan); err != nil {
-				am.logFlowInstanceActivationSideEffectFailure(req, "runtime_backlog_failed", "replay_runtime_backlog", err)
-				am.signalDynamicFlowRuntimeReadiness()
 			}
 		}) {
 			return false, fmt.Errorf("dynamic flow runtime readiness %s requires post-commit finalization owner", instance.InstancePath)
@@ -284,10 +270,6 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 		return false, nil
 	}
 	if err := am.reconcileDynamicFlowRuntimeReadinessPlan(ctx, readinessPlan, req.ContractBundle); err != nil {
-		am.signalDynamicFlowRuntimeReadiness()
-		return false, err
-	}
-	if err := am.launchDynamicFlowRuntimeAgentBacklogReplay(ctx, readinessPlan); err != nil {
 		am.signalDynamicFlowRuntimeReadiness()
 		return false, err
 	}

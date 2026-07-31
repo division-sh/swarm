@@ -10,8 +10,10 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -124,6 +126,17 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 			}
 		})
 	}
+	if opts.DeliveryAuthority.Kind() == "" {
+		authority, authorityErr := runtimedelivery.NewNormalExecutionAuthority(
+			opts.BundleSourceFact,
+			opts.RuntimeInstanceID,
+			1,
+		)
+		if authorityErr != nil {
+			return nil, authorityErr
+		}
+		opts.DeliveryAuthority = authority
+	}
 	if opts.PipelineObligations == nil {
 		if provider, ok := store.(interface {
 			PipelineObligations() runtimepipelineobligation.Store
@@ -139,6 +152,11 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 		bus, err = runtimebus.NewEventBusWithOptions(store, opts)
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := bus.SetDeliveryContinuationOwner(
+		runtimebustest.NewDeliveryContinuationOwner(opts.PipelineObligations == nil),
+	); err != nil {
 		return nil, err
 	}
 	externalRuntimeTestEventBusOwners.Store(bus, opts.WorkOwner)

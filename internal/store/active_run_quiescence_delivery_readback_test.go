@@ -44,7 +44,7 @@ func TestActiveRunDeliveryQuiescenceReadbackParity(t *testing.T) {
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
 				t.Fatalf("commit active-run delivery: %v", err)
 			}
-			claimed, err := selected.ClaimAgentDelivery(ctx, event, route)
+			claimed, err := claimDeliveryFixture(ctx, selected, event, route)
 			if err != nil {
 				t.Fatalf("claim active-run delivery: %v", err)
 			}

@@ -825,155 +825,6 @@
       ]
     },
     {
-      "name": "agent.replay_backlog",
-      "description": "Replay the agent's pending event backlog. Used for recovery after restart or ingress pause.",
-      "params": [
-        {
-          "name": "agent_id",
-          "required": true,
-          "schema": {
-            "$ref": "#/components/schemas/OpaqueId"
-          }
-        },
-        {
-          "name": "flow_instance",
-          "required": false,
-          "description": "Exact concrete flow-instance target. A bare agent_id is accepted only when it resolves to one live agent.",
-          "schema": {
-            "type": "string"
-          }
-        },
-        {
-          "name": "idempotency_key",
-          "required": false,
-          "schema": {
-            "type": "string"
-          }
-        }
-      ],
-      "result": {
-        "name": "result",
-        "required": true,
-        "schema": {
-          "additionalProperties": false,
-          "properties": {
-            "ok": {
-              "const": true,
-              "type": "boolean"
-            },
-            "replayed_count": {
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "ok",
-            "replayed_count"
-          ],
-          "type": "object"
-        }
-      },
-      "errors": [
-        {
-          "code": -32004,
-          "message": "Application error: AGENT_NOT_FOUND",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "AGENT_NOT_FOUND",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "agent_id": {
-                    "$ref": "#/components/schemas/OpaqueId"
-                  }
-                },
-                "required": [
-                  "agent_id"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        },
-        {
-          "code": -32024,
-          "message": "Application error: IDEMPOTENCY_CONFLICT",
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "const": "IDEMPOTENCY_CONFLICT",
-                "type": "string"
-              },
-              "correlation_id": {
-                "type": "string"
-              },
-              "details": {
-                "additionalProperties": false,
-                "properties": {
-                  "conflicting_request_hash": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
-                  "original_request_hash": {
-                    "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
-                  "original_response_ref": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "method": {
-                        "type": "string"
-                      },
-                      "resource_id": {
-                        "$ref": "#/components/schemas/OpaqueId"
-                      }
-                    },
-                    "required": [
-                      "method",
-                      "resource_id"
-                    ],
-                    "type": "object"
-                  }
-                },
-                "required": [
-                  "original_request_hash",
-                  "conflicting_request_hash",
-                  "original_response_ref"
-                ],
-                "type": "object"
-              },
-              "retryable": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "code",
-              "details",
-              "retryable",
-              "correlation_id"
-            ],
-            "type": "object"
-          }
-        }
-      ]
-    },
-    {
       "name": "agent.restart",
       "description": "Restart an agent's session. Existing in-flight turn is killed; agent re-initializes.",
       "params": [
@@ -11454,7 +11305,7 @@
             "minimum": 0,
             "type": "integer"
           },
-          "retry_eligible": {
+          "retry_scheduled": {
             "type": "boolean"
           },
           "session_id": {
@@ -11482,7 +11333,7 @@
           "subscriber_id",
           "status",
           "retry_count",
-          "retry_eligible",
+          "retry_scheduled",
           "terminal"
         ],
         "type": "object"
@@ -11625,7 +11476,7 @@
             "minimum": 0,
             "type": "integer"
           },
-          "retry_eligible": {
+          "retry_scheduled": {
             "type": "boolean"
           },
           "session_id": {
@@ -11654,7 +11505,7 @@
           "status",
           "attempt",
           "retry_count",
-          "retry_eligible",
+          "retry_scheduled",
           "terminal"
         ],
         "type": "object"
@@ -11743,7 +11594,7 @@
             "minimum": 0,
             "type": "integer"
           },
-          "retry_eligible": {
+          "retry_scheduled": {
             "type": "boolean"
           },
           "session_id": {
@@ -11771,7 +11622,7 @@
           "status",
           "attempt",
           "retry_count",
-          "retry_eligible",
+          "retry_scheduled",
           "terminal"
         ],
         "type": "object"
@@ -12554,7 +12405,7 @@
             "minimum": 0,
             "type": "integer"
           },
-          "retry_eligible": {
+          "retry_scheduled": {
             "description": "True exactly when status is failed, the retry-visible failure state.",
             "type": "boolean"
           },
@@ -12586,7 +12437,7 @@
           "subscriber_id",
           "status",
           "retry_count",
-          "retry_eligible",
+          "retry_scheduled",
           "terminal"
         ],
         "type": "object"
@@ -12961,7 +12812,7 @@
             "minimum": 0,
             "type": "integer"
           },
-          "delivery_retry_eligible": {
+          "delivery_retry_scheduled": {
             "type": "boolean"
           },
           "delivery_started_at": {

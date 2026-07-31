@@ -239,7 +239,7 @@ func seedPreservationClaimedDelivery(t *testing.T, ctx context.Context, pg *Post
 	if err := commitSemanticEventFixtureWithRoutes(ctx, pg, event, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("commit preservation delivery %s: %v", eventName, err)
 	}
-	claimed, err := pg.ClaimAgentDelivery(ctx, event, route)
+	claimed, err := claimDeliveryFixture(ctx, pg, event, route)
 	if err != nil {
 		t.Fatalf("claim preservation delivery %s: %v", eventName, err)
 	}

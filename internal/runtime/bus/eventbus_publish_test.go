@@ -72,6 +72,9 @@ func (t *testCommitPublishTransaction) FinalizePreparedPublish(ctx context.Conte
 			return err
 		}
 	}
+	if err := req.DeliveryReceipt.Record(nil); err != nil {
+		return err
+	}
 	t.active = t.active[:len(t.active)-1]
 	return nil
 }
@@ -280,7 +283,7 @@ func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
 		}
 		return state, nil
 	}, func() error {
-		claimed, err := pg.ClaimAgentDelivery(ctx, evt, route)
+		claimed, err := storetest.ClaimDelivery(ctx, pg, evt, route)
 		if err != nil {
 			return err
 		}
@@ -332,7 +335,7 @@ func TestEventBusExactDuplicateIsOperationNoOpSQLite(t *testing.T) {
 		}
 		return state, nil
 	}, func() error {
-		claimed, err := sqliteStore.ClaimAgentDelivery(ctx, evt, route)
+		claimed, err := storetest.ClaimDelivery(ctx, sqliteStore, evt, route)
 		if err != nil {
 			return err
 		}
@@ -1207,11 +1210,11 @@ type failPipelineSettlementOnceStore struct {
 	err error
 }
 
-func (s *failPipelineSettlementOnceStore) Settle(ctx context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) error {
+func (s *failPipelineSettlementOnceStore) Settle(ctx context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) (runtimepipelineobligation.SettlementOutcome, error) {
 	if s.err != nil {
 		err := s.err
 		s.err = nil
-		return err
+		return runtimepipelineobligation.SettlementOutcome{}, err
 	}
 	return s.Store.Settle(ctx, claim, disposition)
 }
@@ -2907,7 +2910,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 	}
 
 	agentID := "agent-runtime-owned-platform"
-	seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
+	agentIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
 
 	testCases := []struct {
 		name      string
@@ -2951,8 +2954,14 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			subscription := runtimebustest.Subscribe(t, eb, agentID, tc.eventType)
-			defer runtimebustest.Unsubscribe(eb, agentID)
+			admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
+				AgentID: agentID, Subscriptions: []string{string(tc.eventType)},
+			})
+			if err != nil {
+				t.Fatalf("admit standalone agent subscription: %v", err)
+			}
+			subscription := runtimebustest.SubscribeIdentity(t, eb, agentIdentity, admission)
+			defer runtimebustest.UnsubscribeIdentity(eb, agentIdentity)
 
 			if err := eb.Publish(ctx, tc.event(tc.eventID, tc.eventType)); err != nil {
 				t.Fatalf("Publish(%s): %v", tc.eventType, err)
@@ -2973,9 +2982,9 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 			route := events.DeliveryRoute{
 				SubscriberType: string(runtimedelivery.SubscriberAgent),
 				SubscriberID:   agentID,
-				AgentIdentity:  runtimebustest.Identity(t, agentID, ""),
+				AgentIdentity:  agentIdentity,
 			}
-			claimed, err := pg.ClaimAgentDelivery(ctx, got, route)
+			claimed, err := storetest.ClaimDelivery(ctx, pg, got, route)
 			if err != nil {
 				t.Fatalf("ClaimAgentDelivery(%s): %v", tc.eventType, err)
 			}

@@ -284,7 +284,10 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 
 			bundle := proposedEffectProofBundle(server.URL)
 			source := semanticview.Wrap(bundle)
-			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source}, "support.reply_drafted")
+			bundleSource := mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle)
+			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
+				ContractBundle: source, BundleSourceFact: bundleSource,
+			}, "support.reply_drafted")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -313,7 +316,8 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 
 			runID, entityID := uuid.NewString(), uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
+			ctx := runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(t, context.Background()), bundleSource)
+			ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 			enteredAt := time.Now().UTC()
 			if err := selected.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
@@ -328,12 +332,18 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()),
 				events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}},
 			)
-			sourceRoute := seedProposedEffectProofDelivery(t, selected, sourceEvent, "support")
+			sourceRoute := seedProposedEffectProofDelivery(t, selected, bus, sourceEvent, "support")
 			sourceCtx := events.WithDeliveryContext(ctx, sourceEvent.DeliveryContext())
-			sourceCtx = runtimedelivery.WithRoute(sourceCtx, sourceRoute)
-			forward, _, _, err := coordinator.Intercept(sourceCtx, sourceEvent)
+			sourceDelivery, err := events.NewDeliveryEvent(sourceEvent, sourceRoute)
+			if err != nil {
+				t.Fatalf("construct proposal source delivery: %v", err)
+			}
+			forward, _, sourceOutcome, err := coordinator.InterceptDeliveryRoute(sourceCtx, sourceDelivery, sourceRoute)
 			if err != nil {
 				t.Fatalf("execute proposal source: %v", err)
+			}
+			if disposition, ok := sourceOutcome.Disposition(); ok {
+				t.Fatalf("execute proposal source disposition = %s/%s failure=%#v", disposition.Kind(), disposition.ReasonCode(), disposition.Failure())
 			}
 			if forward {
 				t.Fatalf("proposal source was not consumed by its workflow node: type=%s entity=%q nodes=%#v target=%#v", sourceEvent.Type(), sourceEvent.EntityID(), coordinator.WorkflowNodes(), sourceEvent.TargetRoute())
@@ -476,10 +486,13 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()),
 					events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}},
 				)
-				proposalRoute := seedProposedEffectProofDelivery(t, selected, proposal, "support")
+				proposalRoute := seedProposedEffectProofDelivery(t, selected, bus, proposal, "support")
 				proposalCtx := events.WithDeliveryContext(ctx, proposal.DeliveryContext())
-				proposalCtx = runtimedelivery.WithRoute(proposalCtx, proposalRoute)
-				consumed, _, _, routeErr := coordinator.Intercept(proposalCtx, proposal)
+				proposalDelivery, deliveryErr := events.NewDeliveryEvent(proposal, proposalRoute)
+				if deliveryErr != nil {
+					t.Fatalf("construct %s proposal delivery: %v", verdict, deliveryErr)
+				}
+				consumed, _, _, routeErr := coordinator.InterceptDeliveryRoute(proposalCtx, proposalDelivery, proposalRoute)
 				if routeErr != nil || consumed {
 					t.Fatalf("create %s proposal = forward:%v error:%v", verdict, consumed, routeErr)
 				}
@@ -699,7 +712,10 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			bundle.Semantics.NodeHandlers["support"]["support.reply_drafted"] = handler
 
 			source := semanticview.Wrap(bundle)
-			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source}, "support.reply_drafted")
+			bundleSource := mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle)
+			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
+				ContractBundle: source, BundleSourceFact: bundleSource,
+			}, "support.reply_drafted")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -715,13 +731,14 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			}
 			coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
 				Module: module, WorkflowStore: selected.workflowStore, DecisionCards: selected.cards,
-				BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle),
+				BundleSourceFact: bundleSource,
 			})
 			bus.SetInterceptors(coordinator)
 
 			runID, entityID := uuid.NewString(), uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
+			ctx := runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(t, context.Background()), bundleSource)
+			ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 			enteredAt := time.Now().UTC()
 			if err := selected.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
@@ -735,10 +752,18 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-rollback",
 				[]byte(`{"chat_id":"support-room","text":"must roll back"}`), 0, runID,
 				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
-			route := seedProposedEffectProofDelivery(t, selected, event, "support")
-			forward, _, _, err := coordinator.Intercept(runtimedelivery.WithRoute(ctx, route), event)
+			route := seedProposedEffectProofDelivery(t, selected, bus, event, "support")
+			delivery, deliveryErr := events.NewDeliveryEvent(event, route)
+			if deliveryErr != nil {
+				t.Fatalf("construct proposal failure delivery: %v", deliveryErr)
+			}
+			forward, _, failureOutcome, err := coordinator.InterceptDeliveryRoute(ctx, delivery, route)
 			if err != nil || forward {
 				t.Fatalf("proposal failure interception = forward:%v error:%v", forward, err)
+			}
+			disposition, disposed := failureOutcome.Disposition()
+			if !disposed || disposition.Kind() != runtimepipelineobligation.DispositionDeadLetter || disposition.Failure() == nil {
+				t.Fatalf("proposal failure disposition = %#v, present=%v; want typed dead letter", disposition, disposed)
 			}
 
 			instance, ok, err := selected.workflowStore.Load(ctx, entityID)
@@ -1427,11 +1452,27 @@ func assertProposedEffectOutcomeCount(t *testing.T, selected gateRecoveryStoreCa
 	}
 }
 
-func seedProposedEffectProofDelivery(t *testing.T, selected gateRecoveryStoreCase, evt events.Event, nodeID string) events.DeliveryRoute {
+func seedProposedEffectProofDelivery(t *testing.T, selected gateRecoveryStoreCase, bus *runtimebus.EventBus, evt events.Event, nodeID string) events.DeliveryRoute {
 	t.Helper()
 	ctx := testAuthorActivityContext(t, context.Background())
 	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: nodeID}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected.events, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
+	handoffStore, ok := selected.events.(interface {
+		ProveHandoff(context.Context, string, events.DeliveryRoute) (runtimedelivery.DurableHandoffProof, error)
+	})
+	if !ok {
+		t.Fatalf("proposed-effect selected store %T lacks exact delivery handoff proof", selected.events)
+	}
+	proof, err := handoffStore.ProveHandoff(ctx, evt.ID(), route)
+	if err != nil {
+		t.Fatalf("prove proposed-effect delivery handoff: %v", err)
+	}
+	if err := bus.SetDeliveryAuthority(proof.Authority()); err != nil {
+		t.Fatalf("bind proposed-effect delivery execution authority: %v", err)
+	}
+	if err := bus.AcceptCommittedDeliveryHandoffs([]runtimedelivery.DurableHandoffProof{proof}); err != nil {
+		t.Fatalf("transfer proposed-effect delivery handoff: %v", err)
+	}
 	return route
 }
 

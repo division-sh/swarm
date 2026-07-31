@@ -256,7 +256,7 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 	if len(report.FailedDeliveries) != 1 {
 		t.Fatalf("FailedDeliveries len = %d, want 1: %#v", len(report.FailedDeliveries), report.FailedDeliveries)
 	}
-	if got := report.FailedDeliveries[0]; got.SubscriberType != "agent" || got.RetryCount != 0 || got.RetryEligible || !got.Terminal || len(got.DeadLetters) != 1 {
+	if got := report.FailedDeliveries[0]; got.SubscriberType != "agent" || got.RetryCount != 0 || got.RetryScheduled || !got.Terminal || len(got.DeadLetters) != 1 {
 		t.Fatalf("FailedDeliveries[0] = %#v", got)
 	}
 	if report.FailedDeliveries[0].DeliveryID == successDeliveryID {
@@ -300,8 +300,8 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 	if err := commitSemanticEventFixtureWithAgents(ctx, pg, readyEvent, []string{"agent-done"}); err != nil {
 		t.Fatalf("seed ready delivery event: %v", err)
 	}
-	readyRoute := testAgentDeliveryRoute(t, "agent-done", "fixture/agent-done")
-	readyClaim, err := pg.ClaimAgentDelivery(ctx, readyEvent, readyRoute)
+	readyRoute := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "agent-done"}
+	readyClaim, err := claimDeliveryFixture(ctx, pg, readyEvent, readyRoute)
 	if err != nil {
 		t.Fatalf("claim ready delivery: %v", err)
 	}
@@ -419,7 +419,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	if err := commitDeliveryObligationFixture(ctx, pg, event, route); err != nil {
 		t.Fatalf("commit delivery: %v", err)
 	}
-	claimed, err := pg.ClaimAgentDelivery(ctx, event, route)
+	claimed, err := claimDeliveryFixture(ctx, pg, event, route)
 	if err != nil {
 		t.Fatalf("claim delivery: %v", err)
 	}
@@ -477,7 +477,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	if got.DeliveryID != deliveryID || got.DeliveryStatus != "failed" || got.SubscriberID != "agent-source" {
 		t.Fatalf("delivery trace = %#v", got)
 	}
-	if got.DeliveryReasonCode != "handler_error" || got.DeliveryFailure == nil || got.DeliveryFailure.Detail.Code != "trace_failure" || got.DeliveryRetryCount != 1 || !got.DeliveryRetryEligible || got.DeliveryTerminal {
+	if got.DeliveryReasonCode != "handler_error" || got.DeliveryFailure == nil || got.DeliveryFailure.Detail.Code != "trace_failure" || got.DeliveryRetryCount != 1 || !got.DeliveryRetryScheduled || got.DeliveryTerminal {
 		t.Fatalf("delivery failure trace evidence = %#v", got)
 	}
 	if got.ReplyContextID != replyContextID {
@@ -541,7 +541,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 	if err := commitDeliveryObligationFixture(ctx, pg, event, route); err != nil {
 		t.Fatalf("commit late delivery: %v", err)
 	}
-	claimed, err := pg.ClaimAgentDelivery(ctx, event, route)
+	claimed, err := claimDeliveryFixture(ctx, pg, event, route)
 	if err != nil {
 		t.Fatalf("claim late delivery: %v", err)
 	}

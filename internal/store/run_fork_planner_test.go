@@ -712,7 +712,7 @@ func TestRunForkPlanner_DoesNotReportPostForkCompletionAsCompletedAtFork(t *test
 	if err := commitDeliveryObligationFixture(ctx, pg, event, completedRoute); err != nil {
 		t.Fatalf("seed selected-revision completed route: %v", err)
 	}
-	completedClaim, err := pg.ClaimAgentDelivery(ctx, event, completedRoute)
+	completedClaim, err := claimDeliveryFixture(ctx, pg, event, completedRoute)
 	if err != nil {
 		t.Fatalf("claim selected-revision delivery: %v", err)
 	}
@@ -723,7 +723,7 @@ func TestRunForkPlanner_DoesNotReportPostForkCompletionAsCompletedAtFork(t *test
 	if _, err := pg.SettleSuccess(ctx, completedClaim.Claim, nil, 0); err != nil {
 		t.Fatalf("complete claimed delivery after selected revision: %v", err)
 	}
-	pendingClaim, err := pg.ClaimAgentDelivery(ctx, event, pendingRoute)
+	pendingClaim, err := claimDeliveryFixture(ctx, pg, event, pendingRoute)
 	if err != nil {
 		t.Fatalf("claim pending delivery after selected revision: %v", err)
 	}
@@ -776,7 +776,7 @@ func TestRunForkPlanner_SuppressesPostForkTerminalMetadata(t *testing.T) {
 	if err := commitDeliveryObligationFixture(ctx, pg, event, failedRoute); err != nil {
 		t.Fatalf("seed selected-revision failed route: %v", err)
 	}
-	failedClaim, err := pg.ClaimAgentDelivery(ctx, event, failedRoute)
+	failedClaim, err := claimDeliveryFixture(ctx, pg, event, failedRoute)
 	if err != nil {
 		t.Fatalf("claim selected-revision delivery: %v", err)
 	}
@@ -789,7 +789,7 @@ func TestRunForkPlanner_SuppressesPostForkTerminalMetadata(t *testing.T) {
 	if _, err := pg.SettleFailure(ctx, failedClaim.Claim, settlement); err != nil {
 		t.Fatalf("fail claimed delivery after selected revision: %v", err)
 	}
-	pendingClaim, err := pg.ClaimAgentDelivery(ctx, event, pendingRoute)
+	pendingClaim, err := claimDeliveryFixture(ctx, pg, event, pendingRoute)
 	if err != nil {
 		t.Fatalf("claim pending delivery after selected revision: %v", err)
 	}
