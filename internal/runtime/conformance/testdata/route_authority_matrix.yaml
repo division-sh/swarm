@@ -473,6 +473,7 @@ rows:
       - {kind: issue, issue: 1496}
       - {kind: go_test, name: TestEventBusPublishDirect_PersistsButDoesNotMarkDeliveredBeforeRealFanOut}
       - {kind: go_test, name: TestEventBusPublishDirect_RejectsAnyExplicitRecipientFilteredByMetadata}
+      - {kind: go_test, name: TestDeliveryPlanner_DirectSameSlugUsesTargetRouteBeforeAmbiguity}
       - {kind: go_test, name: TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest}
       - {kind: go_test, name: TestOperatorEventReplayPublishesDistinctReplayEventAuditAndIdempotency}
       - {kind: go_test, name: TestOperatorEventReplaySubsetAndFailClosedCases}

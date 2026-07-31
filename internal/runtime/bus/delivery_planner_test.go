@@ -324,6 +324,58 @@ func TestDeliveryRecipientPolicy_TargetedFlowInstanceMissingIsUnreachableTermina
 	}
 }
 
+func TestDeliveryPlanner_DirectSameSlugUsesTargetRouteBeforeAmbiguity(t *testing.T) {
+	descriptorA := testActiveAgentDescriptor(t, "requester", "requester-entity", "review/instance-a")
+	descriptorB := testActiveAgentDescriptor(t, "requester", "requester-entity", "review/instance-b")
+	planner := newDeliveryPlanner(
+		deliveryRouteResolver{},
+		deliveryRecipientPolicy{
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return testActiveAgentDescriptors(descriptorA, descriptorB), true, nil
+			},
+		},
+	)
+	target := events.RouteIdentity{EntityID: "requester-entity", FlowInstance: "review/instance-b"}
+	evt := eventtest.RunCreatingRootIngress(
+		"",
+		"human_task.approved",
+		"",
+		"",
+		nil,
+		0,
+		"",
+		"",
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, target),
+		time.Time{},
+	)
+
+	plan, err := planner.PlanDirect(context.Background(), evt, []string{"requester"})
+	if err != nil {
+		t.Fatalf("PlanDirect targeted requester: %v", err)
+	}
+	routes := plan.DeliveryRoutes()
+	if len(routes) != 1 || routes[0].AgentIdentity != descriptorB.Identity || routes[0].Target.Normalized() != target.Normalized() {
+		t.Fatalf("targeted direct routes = %#v, want only requester instance B", routes)
+	}
+
+	untargeted := eventtest.RunCreatingRootIngress(
+		"",
+		"human_task.approved",
+		"",
+		"",
+		nil,
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "requester-entity"),
+		time.Time{},
+	)
+	if _, err := planner.PlanDirect(context.Background(), untargeted, []string{"requester"}); err == nil ||
+		!strings.Contains(err.Error(), `direct recipient agent_id "requester" is ambiguous`) {
+		t.Fatalf("untargeted same-slug PlanDirect error = %v, want ambiguity rejection", err)
+	}
+}
+
 func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 	observerIdentity := agentidentitytest.RootRuntime(t, "observer", "delivery-planner-test")
 	planner := newDeliveryPlanner(

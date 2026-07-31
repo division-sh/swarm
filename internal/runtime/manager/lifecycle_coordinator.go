@@ -1566,6 +1566,18 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopology(
 	target AgentLifecyclePhase,
 	topology *DynamicAgentTopologyMutation,
 ) error {
+	return c.terminateIdentityWithTopologyCommitHooks(ctx, identity, trigger, target, topology, nil, nil)
+}
+
+func (c *agentLifecycleCoordinator) terminateIdentityWithTopologyCommitHooks(
+	ctx context.Context,
+	identity runtimeagentidentity.Identity,
+	trigger string,
+	target AgentLifecyclePhase,
+	topology *DynamicAgentTopologyMutation,
+	beforeCommit func(models.AgentConfig) error,
+	restoreBeforeCommit func(models.AgentConfig) error,
+) error {
 	identity = identity.Normalize()
 	if err := identity.Validate(); err != nil {
 		return err
@@ -1613,6 +1625,32 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopology(
 		c.mu.Unlock()
 		return err
 	}
+	var commitConfig models.AgentConfig
+	beforeCommitApplied := false
+	restoreCommitHook := func(transitionErr error) error {
+		if !beforeCommitApplied || restoreBeforeCommit == nil {
+			return transitionErr
+		}
+		return errors.Join(transitionErr, restoreBeforeCommit(commitConfig))
+	}
+	if beforeCommit != nil {
+		if execution == nil {
+			c.mu.Unlock()
+			return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_generation_not_running", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID})
+		}
+		commitConfig = snapshotExecution(execution).Config
+		c.mu.Unlock()
+		if err := beforeCommit(commitConfig); err != nil {
+			return err
+		}
+		beforeCommitApplied = true
+		c.mu.Lock()
+		cell = c.cells[identity]
+		if cell == nil || cell.epoch != epoch || cell.generation != generation || cell.phase != phase || cell.execution != execution {
+			c.mu.Unlock()
+			return restoreCommitHook(runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID}))
+		}
+	}
 	if c.store != nil {
 		result, err := c.store.CommitAgentLifecycleTransition(context.WithoutCancel(ctx), AgentLifecycleTransition{
 			OperationID: operationID, OperationKind: operationKind, RequestHash: requestHash, Identity: identity,
@@ -1623,7 +1661,7 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopology(
 		})
 		if err != nil {
 			c.mu.Unlock()
-			return err
+			return restoreCommitHook(err)
 		}
 		nextEpoch, nextGeneration = result.RuntimeEpoch, result.Generation
 	} else if c.sessions != nil {
@@ -1634,7 +1672,7 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopology(
 			TargetPhase: string(target), Plan: plan, Now: now,
 		}); err != nil {
 			c.mu.Unlock()
-			return err
+			return restoreCommitHook(err)
 		}
 	}
 	cell.epoch, cell.generation, cell.phase, cell.runMode = nextEpoch, nextGeneration, target, AgentRunModeStopped

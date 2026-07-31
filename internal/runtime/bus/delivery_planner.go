@@ -209,11 +209,11 @@ func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recip
 	if len(requested) == 0 {
 		return RoutePlan{}, errors.New("direct delivery recipients are required")
 	}
-	if err := p.rejectAmbiguousDirectRecipients(ctx, requested); err != nil {
-		return RoutePlan{}, err
-	}
 	manifest, err := p.recipientPolicy.Evaluate(ctx, evt, agentDeliveryRecipientCandidates(requested))
 	if err != nil {
+		return RoutePlan{}, err
+	}
+	if err := rejectAmbiguousDirectManifest(requested, manifest.LiveRecipients); err != nil {
 		return RoutePlan{}, err
 	}
 	routePlan = routePlanFromManifest(evt, manifest, routeIntentProducerDirectPolicy)
@@ -282,20 +282,20 @@ func (p deliveryPlanner) PlanExactDirect(ctx context.Context, evt events.Event, 
 	return routePlan.Normalized(), nil
 }
 
-func (p deliveryPlanner) rejectAmbiguousDirectRecipients(ctx context.Context, recipients []string) error {
-	if p.recipientPolicy.loadActiveAgentDescriptors == nil {
-		return nil
-	}
-	descriptors, ok, err := p.recipientPolicy.loadActiveAgentDescriptors(ctx)
-	if err != nil || !ok {
-		return err
-	}
+func rejectAmbiguousDirectManifest(recipients []string, liveRecipients []deliveryRecipientCandidate) error {
 	for _, recipient := range recipients {
 		matches := make([]agentidentity.Identity, 0, 2)
-		for identity := range descriptors {
-			if identity.MatchesAgentID(recipient) {
-				matches = append(matches, identity.Normalize())
+		seen := map[agentidentity.Identity]struct{}{}
+		for _, liveRecipient := range liveRecipients {
+			identity := liveRecipient.AgentIdentity.Normalize()
+			if liveRecipient.ID != recipient || identity.IsZero() {
+				continue
 			}
+			if _, ok := seen[identity]; ok {
+				continue
+			}
+			seen[identity] = struct{}{}
+			matches = append(matches, identity)
 		}
 		if len(matches) <= 1 {
 			continue

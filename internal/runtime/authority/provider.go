@@ -22,6 +22,7 @@ type Provider interface {
 type graphMutableProvider interface {
 	UpsertManagedAgent(identity, parent agentidentity.Identity) error
 	RemoveManagedAgent(identity agentidentity.Identity) error
+	ManagedAgentParent(identity agentidentity.Identity) (agentidentity.Identity, bool, error)
 }
 
 type noopProvider struct{}
@@ -91,4 +92,11 @@ func RemoveManagedAgent(provider Provider, identity agentidentity.Identity) erro
 		return mutable.RemoveManagedAgent(identity)
 	}
 	return nil
+}
+
+func ManagedAgentParent(provider Provider, identity agentidentity.Identity) (agentidentity.Identity, bool, error) {
+	if mutable, ok := ProviderOrNoop(provider).(graphMutableProvider); ok && mutable != nil {
+		return mutable.ManagedAgentParent(identity)
+	}
+	return agentidentity.Identity{}, false, nil
 }

@@ -1072,6 +1072,18 @@ func TestAgentIdentityModelPromotesConcreteRouteIdentity(t *testing.T) {
 	assertScalarContains(t, mappingValue(constraint, "enforcement_status"), "does not add duplicate-slug support")
 
 	management := mustMappingValue(t, identity, "management_authority")
+	fire := mappingValue(management, "fire")
+	for _, fragment := range []string{
+		"pre-read authorization only as fail-fast validation",
+		"revalidated after the target lifecycle operation is serialized",
+		"snapshots the exact current edge from the canonical mutable authority graph",
+		"declaration fallback is not reconstructed as a concrete edge",
+		"persistence failure restores that exact prior graph snapshot",
+		"queued fire authorized from a replaced or temporarily applied mapping cannot terminate",
+		"Post-persistence authority cleanup",
+	} {
+		assertScalarContains(t, fire, fragment)
+	}
 	reconfigure := mappingValue(management, "reconfigure")
 	for _, fragment := range []string{
 		"same canonical partial-patch merge used by AgentManager",
@@ -1090,11 +1102,27 @@ func TestAgentIdentityModelPromotesConcreteRouteIdentity(t *testing.T) {
 		"revalidated against the exact serialized predecessor",
 		"queued request authorized from a pre-read mapping cannot mutate",
 		"reject direct and indirect cycles atomically",
+		"exact pre-handoff graph snapshot",
+		"must not reconstruct declaration fallback",
 		"pre-read actor decision, candidate, or authority plan cannot authorize",
 		"no-parent candidate removes any managed-parent edge",
 		"Mutation-first validation",
 	} {
 		assertScalarContains(t, reconfigure, fragment)
+	}
+
+	eventSchema := mustMappingValue(t, mustMappingValue(t, root, "contract_formats"), "event_schema")
+	routing := mustMappingValue(t, eventSchema, "routing_derivation")
+	routePlanAuthority := mustMappingValue(t, routing, "route_plan_authority")
+	direct := mustMappingValue(t, routePlanAuthority, "direct_delivery_route_plan_consumption")
+	directRule := mappingValue(direct, "rule")
+	for _, fragment := range []string{
+		"after event entity and target-route filtering",
+		"persisted human-task requester route",
+		"multiple eligible concrete identities",
+		"filtering still fail closed",
+	} {
+		assertScalarContains(t, directRule, fragment)
 	}
 
 	migration := mustMappingValue(t, identity, "uuid_internal_migration_target")

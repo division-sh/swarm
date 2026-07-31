@@ -661,15 +661,28 @@ func (am *AgentManager) teardownIdentityWithTopology(
 	trigger string,
 	topology *DynamicAgentTopologyMutation,
 ) error {
+	return am.teardownIdentityWithTopologyCommitHooks(ctx, identity, trigger, topology, nil, nil)
+}
+
+func (am *AgentManager) teardownIdentityWithTopologyCommitHooks(
+	ctx context.Context,
+	identity runtimeagentidentity.Identity,
+	trigger string,
+	topology *DynamicAgentTopologyMutation,
+	beforeCommit func(models.AgentConfig) error,
+	restoreBeforeCommit func(models.AgentConfig) error,
+) error {
 	if err := identity.Validate(); err != nil {
 		return err
 	}
-	if err := am.lifecycle.terminateIdentityWithTopology(
+	if err := am.lifecycle.terminateIdentityWithTopologyCommitHooks(
 		ctx,
 		identity,
 		trigger,
 		AgentLifecycleTerminated,
 		topology,
+		beforeCommit,
+		restoreBeforeCommit,
 	); err != nil {
 		return err
 	}
@@ -677,12 +690,23 @@ func (am *AgentManager) teardownIdentityWithTopology(
 	return nil
 }
 
-func (am *AgentManager) TeardownAgentTarget(agentID, flowInstance string) error {
+func (am *AgentManager) TeardownAgentTarget(
+	agentID, flowInstance string,
+	beforeCommit func(models.AgentConfig) error,
+	restoreBeforeCommit func(models.AgentConfig) error,
+) error {
 	identity, err := am.lifecycle.resolveAgentTarget(agentID, flowInstance, false)
 	if err != nil {
 		return err
 	}
-	return am.teardownIdentity(am.runtimeContext(), identity, "teardown")
+	return am.teardownIdentityWithTopologyCommitHooks(
+		am.runtimeContext(),
+		identity,
+		"teardown",
+		nil,
+		beforeCommit,
+		restoreBeforeCommit,
+	)
 }
 
 func reconfigureSessionMutationPlan(current, updated models.AgentConfig) sessions.LifecycleMutationPlan {

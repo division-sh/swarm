@@ -313,7 +313,7 @@ func (e *Executor) execAgentHire(ctx context.Context, actor models.AgentConfig, 
 	}
 	if err := syncManagedAgentAuthority(e.authority, manager, actor, cfg); err != nil {
 		syncErr := fmt.Errorf("record hired agent authority: %w", err)
-		if teardownErr := manager.TeardownAgentTarget(cfg.ID, cfg.CanonicalFlowPath()); teardownErr != nil {
+		if teardownErr := manager.TeardownAgentTarget(cfg.ID, cfg.CanonicalFlowPath(), nil, nil); teardownErr != nil {
 			return nil, errors.Join(syncErr, fmt.Errorf("rollback hired agent after authority failure: %w", teardownErr))
 		}
 		return nil, syncErr
@@ -343,15 +343,42 @@ func (e *Executor) execAgentFire(actor models.AgentConfig, input any) (any, erro
 	if err := authorizeManage(e.authority, actor, targetCfg, manager); err != nil {
 		return nil, err
 	}
-	targetIdentity, err := targetCfg.ConcreteIdentity()
-	if err != nil {
-		return nil, fmt.Errorf("resolve concrete target agent %s identity: %w", in.AgentID, err)
-	}
-	if err := manager.TeardownAgentTarget(in.AgentID, in.FlowInstance); err != nil {
+	var priorAuthority managedAgentAuthorityPlan
+	authorityRemoved := false
+	if err := manager.TeardownAgentTarget(
+		in.AgentID,
+		in.FlowInstance,
+		func(current models.AgentConfig) error {
+			if err := authorizeManage(e.authority, actor, current, manager); err != nil {
+				return fmt.Errorf("revalidate serialized fire authority: %w", err)
+			}
+			child, err := current.ConcreteIdentity()
+			if err != nil {
+				return fmt.Errorf("resolve fired agent identity: %w", err)
+			}
+			plan, err := currentManagedAgentAuthorityPlan(e.authority, child)
+			if err != nil {
+				return fmt.Errorf("snapshot fired agent authority: %w", err)
+			}
+			if err := runtimeauthority.RemoveManagedAgent(e.authority, plan.child); err != nil {
+				return fmt.Errorf("remove fired agent authority: %w", err)
+			}
+			priorAuthority = plan
+			authorityRemoved = true
+			return nil
+		},
+		func(models.AgentConfig) error {
+			if !authorityRemoved {
+				return nil
+			}
+			if err := applyManagedAgentAuthority(e.authority, priorAuthority); err != nil {
+				return fmt.Errorf("restore fired agent authority: %w", err)
+			}
+			authorityRemoved = false
+			return nil
+		},
+	); err != nil {
 		return nil, err
-	}
-	if err := runtimeauthority.RemoveManagedAgent(e.authority, targetIdentity); err != nil {
-		return nil, fmt.Errorf("remove fired agent authority: %w", err)
 	}
 	return map[string]any{"status": "fired", "agent_id": in.AgentID}, nil
 }
@@ -392,16 +419,13 @@ func (e *Executor) execAgentReconfigure(ctx context.Context, actor models.AgentC
 	// serialized handoff must be compensated.
 	handoffAttempted := false
 	handoffApplied := false
+	var priorAuthority managedAgentAuthorityPlan
 	if err := manager.ReconfigureAgentTarget(in.AgentID, in.FlowInstance, in.Config, func(committed models.AgentConfig) error {
 		if handoffAttempted {
 			if !handoffApplied {
 				return nil
 			}
-			authorityPlan, err := managedAgentAuthorityPlanForCandidate(manager, actor, committed)
-			if err != nil {
-				return fmt.Errorf("restore prior agent authority: %w", err)
-			}
-			if err := applyManagedAgentAuthority(e.authority, authorityPlan); err != nil {
+			if err := applyManagedAgentAuthority(e.authority, priorAuthority); err != nil {
 				return fmt.Errorf("restore prior agent authority: %w", err)
 			}
 			handoffApplied = false
@@ -414,6 +438,14 @@ func (e *Executor) execAgentReconfigure(ctx context.Context, actor models.AgentC
 		}
 		if err := authorizeManage(e.authority, actor, current, manager); err != nil {
 			return fmt.Errorf("revalidate serialized reconfigure authority: %w", err)
+		}
+		currentIdentity, err := current.ConcreteIdentity()
+		if err != nil {
+			return fmt.Errorf("resolve serialized reconfigure target identity: %w", err)
+		}
+		priorAuthority, err = currentManagedAgentAuthorityPlan(e.authority, currentIdentity)
+		if err != nil {
+			return fmt.Errorf("snapshot prior agent authority: %w", err)
 		}
 		authorityPlan, err := managedAgentAuthorityPlanForCandidate(manager, actor, committed)
 		if err != nil {
@@ -441,6 +473,21 @@ func applyManagedAgentAuthority(provider runtimeauthority.Provider, plan managed
 		return runtimeauthority.RemoveManagedAgent(provider, plan.child)
 	}
 	return runtimeauthority.UpsertManagedAgent(provider, plan.child, plan.parent)
+}
+
+func currentManagedAgentAuthorityPlan(
+	provider runtimeauthority.Provider,
+	child agentidentity.Identity,
+) (managedAgentAuthorityPlan, error) {
+	child = child.Normalize()
+	if err := child.Validate(); err != nil {
+		return managedAgentAuthorityPlan{}, fmt.Errorf("managed agent identity: %w", err)
+	}
+	parent, found, err := runtimeauthority.ManagedAgentParent(provider, child)
+	if err != nil {
+		return managedAgentAuthorityPlan{}, err
+	}
+	return managedAgentAuthorityPlan{child: child, parent: parent, hasParent: found}, nil
 }
 
 func syncManagedAgentAuthority(provider runtimeauthority.Provider, manager Manager, actor, target models.AgentConfig) error {
