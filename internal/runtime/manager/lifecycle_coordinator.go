@@ -1191,7 +1191,16 @@ func (c *agentLifecycleCoordinator) acquireExecutionLocked(ctx context.Context, 
 	return lease, nil
 }
 
-func (c *agentLifecycleCoordinator) replaceLoopLocked(ctx context.Context, agentID, trigger, operationID string, rec *PersistedAgent, subordinate runtimesessions.LifecycleMutationPlan, topology *DynamicAgentTopologyMutation, lockedCell *agentLifecycleCell, preparedToken runtimeeffects.LifecycleToken) (context.Context, runtimeeffects.LifecycleToken, chan struct{}, error) {
+func (c *agentLifecycleCoordinator) replaceLoopLocked(
+	ctx context.Context,
+	agentID, trigger, operationID string,
+	rec *PersistedAgent,
+	subordinate runtimesessions.LifecycleMutationPlan,
+	topology *DynamicAgentTopologyMutation,
+	lockedCell *agentLifecycleCell,
+	preparedToken runtimeeffects.LifecycleToken,
+	beforeProjection func() error,
+) (context.Context, runtimeeffects.LifecycleToken, chan struct{}, error) {
 	plan, planHash, err := normalizedLifecycleSubordinate(subordinate)
 	if err != nil {
 		return nil, runtimeeffects.LifecycleToken{}, nil, err
@@ -1302,6 +1311,21 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(ctx context.Context, agent
 			result.ConfigRevision != revision || result.RunMode != targetMode {
 			c.mu.Unlock()
 			return nil, runtimeeffects.LifecycleToken{}, nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_replay_projection_conflict", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID, "operation_id": operationID})
+		}
+	}
+	if beforeProjection != nil {
+		// Persistence accepted the candidate, but the successor remains hidden until
+		// its external authority owner has committed the same identity facts.
+		c.mu.Unlock()
+		if err := beforeProjection(); err != nil {
+			return nil, runtimeeffects.LifecycleToken{}, nil, err
+		}
+		c.mu.Lock()
+		cell = c.cells[identity]
+		if cell == nil || cell != lockedCell ||
+			cell.epoch != previousEpoch || cell.generation != previousGeneration || cell.phase != previousPhase {
+			c.mu.Unlock()
+			return nil, runtimeeffects.LifecycleToken{}, nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID})
 		}
 	}
 	cell.epoch, cell.generation, cell.phase, cell.configRevision, cell.runMode = result.RuntimeEpoch, result.Generation, result.Phase, result.ConfigRevision, result.RunMode

@@ -42,7 +42,7 @@ func replaceCoordinatorLoop(
 		return nil, runtimeeffects.LifecycleToken{}, nil, err
 	}
 	defer cell.opMu.Unlock()
-	return coordinator.replaceLoopLocked(ctx, identity.AgentID(), trigger, operationID, replacement, subordinate, nil, cell, runtimeeffects.LifecycleToken{})
+	return coordinator.replaceLoopLocked(ctx, identity.AgentID(), trigger, operationID, replacement, subordinate, nil, cell, runtimeeffects.LifecycleToken{}, nil)
 }
 
 func beginCoordinatorRun(t *testing.T, coordinator *agentLifecycleCoordinator, ctx context.Context, mode AgentRunMode) context.Context {

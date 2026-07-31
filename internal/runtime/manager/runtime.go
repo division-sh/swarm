@@ -1753,7 +1753,24 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 		}
 		return cleanupErr
 	}
-	loopCtx, token, done, err := am.lifecycle.replaceLoopLocked(parent, strings.TrimSpace(agentID), trigger, operationID, rec, subordinate, topology, cell, proposedToken)
+	var beforeProjection func() error
+	if onCommitted != nil {
+		beforeProjection = func() error {
+			return onCommitted(candidate.Config)
+		}
+	}
+	loopCtx, token, done, err := am.lifecycle.replaceLoopLocked(
+		parent,
+		strings.TrimSpace(agentID),
+		trigger,
+		operationID,
+		rec,
+		subordinate,
+		topology,
+		cell,
+		proposedToken,
+		beforeProjection,
+	)
 	if err != nil {
 		return replaceExecutionResult{}, errors.Join(err, cleanupPrepared())
 	}
@@ -1819,11 +1836,6 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 		preparedRoute = nil
 		am.launchExecutionLoop(parent, successor, loopCtx, done, loopWorkLease)
 		loopWorkLease = nil
-	}
-	if onCommitted != nil {
-		if err := onCommitted(candidate.Config); err != nil {
-			return replaceExecutionResult{}, err
-		}
 	}
 	return replaceExecutionResult{config: candidate.Config, transitioned: true}, nil
 }
