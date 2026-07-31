@@ -1079,6 +1079,10 @@ func TestAgentIdentityModelPromotesConcreteRouteIdentity(t *testing.T) {
 		"Before manager mutation",
 		"must not be equal",
 		"management-authority state unchanged",
+		"exact complete candidate committed by AgentManager",
+		"before the reconfiguration lock is released",
+		"manager commit order",
+		"pre-read candidate or authority plan cannot authorize",
 		"no-parent candidate removes any managed-parent edge",
 		"Mutation-first validation",
 	} {

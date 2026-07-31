@@ -68,7 +68,7 @@ func TestReconfigureAgent_SameCurrentPreservesExecutionIdentityWithoutFactoryInv
 	}
 	beforeGeneration := lifecycleGenerationForTest(t, am, cfg.ID)
 
-	if err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-a"}}); err != nil {
+	if err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-a"}}, nil); err != nil {
 		t.Fatalf("ReconfigureAgent(same current): %v", err)
 	}
 
@@ -99,7 +99,7 @@ func TestReconfigureAgent_MemoryEnabledConfigChangeRotatesExactIdentity(t *testi
 	}
 	lease := acquireReconfigureMemory(t, am, registry, cfg)
 
-	if err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"agent_message"}}); err != nil {
+	if err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"agent_message"}}, nil); err != nil {
 		t.Fatalf("ReconfigureAgent: %v", err)
 	}
 	rec, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath))
@@ -122,7 +122,7 @@ func TestReconfigureAgent_ExplicitFalseTerminatesReusableMemory(t *testing.T) {
 	}
 	lease := acquireReconfigureMemory(t, am, registry, cfg)
 
-	if err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(false)}); err != nil {
+	if err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(false)}, nil); err != nil {
 		t.Fatalf("ReconfigureAgent(memory false): %v", err)
 	}
 	if _, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath)); ok {
@@ -147,14 +147,14 @@ func TestReconfigureAgent_ExplicitTrueStartsFreshAndOmissionRetains(t *testing.T
 	if err := am.SpawnAgent(cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	if err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(true)}); err != nil {
+	if err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(true)}, nil); err != nil {
 		t.Fatalf("ReconfigureAgent(memory true): %v", err)
 	}
 	if _, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath)); ok || len(registry.History(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath))) != 0 {
 		t.Fatal("enabling memory revived or synthesized prior state")
 	}
 	lease := acquireReconfigureMemory(t, am, registry, models.AgentConfig{ExecutionMode: "live", ID: cfg.ID, FlowPath: cfg.FlowPath})
-	if err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-a"}}); err != nil {
+	if err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-a"}}, nil); err != nil {
 		t.Fatalf("ReconfigureAgent(omitted memory): %v", err)
 	}
 	got, _ := testAgentConfig(t, am, cfg.ID, cfg.FlowPath)

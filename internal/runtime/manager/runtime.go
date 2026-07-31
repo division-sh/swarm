@@ -123,7 +123,7 @@ func (am *AgentManager) Restart(ctx context.Context, req runtimeagentcontrol.Res
 	if operationID == "" {
 		operationID = uuid.NewString()
 	}
-	if _, err := am.replaceExecutionIdentityConfigWithTopology(ctx, identity, "restart", operationID, nil, am.semanticSource, false, nil); err != nil {
+	if _, err := am.replaceExecutionIdentityConfigWithTopology(ctx, identity, "restart", operationID, nil, am.semanticSource, false, nil, nil); err != nil {
 		return runtimeagentcontrol.RestartResult{}, err
 	}
 	token, _ := am.lifecycle.tokenIdentity(identity)
@@ -792,7 +792,7 @@ func (am *AgentManager) Run(ctx context.Context) error {
 	}
 
 	for _, identity := range am.lifecycle.executionIdentities() {
-		if _, err := am.replaceExecutionIdentityConfigWithTopology(runCtx, identity, "start", "", nil, am.semanticSource, false, nil); err != nil {
+		if _, err := am.replaceExecutionIdentityConfigWithTopology(runCtx, identity, "start", "", nil, am.semanticSource, false, nil, nil); err != nil {
 			transition := am.lifecycle.requestShutdownTransition()
 			grace, _ := ResolveShutdownGrace(DefaultShutdownOptions().Grace)
 			return errors.Join(err, waitForRuntimeLifecycleTransition(transition, grace, "failed agent start shutdown drain"))
@@ -851,7 +851,7 @@ func (am *AgentManager) RunAuthoritativeDeliveryOnly(ctx context.Context) error 
 	}
 
 	for _, identity := range am.lifecycle.executionIdentities() {
-		if _, err := am.replaceExecutionIdentityConfigWithTopology(runCtx, identity, "start", "", nil, am.semanticSource, false, nil); err != nil {
+		if _, err := am.replaceExecutionIdentityConfigWithTopology(runCtx, identity, "start", "", nil, am.semanticSource, false, nil, nil); err != nil {
 			transition := am.lifecycle.requestShutdownTransition()
 			grace, _ := ResolveShutdownGrace(DefaultShutdownOptions().Grace)
 			return errors.Join(err, waitForRuntimeLifecycleTransition(transition, grace, "failed authoritative agent start shutdown drain"))
@@ -1594,12 +1594,13 @@ func (am *AgentManager) replaceExecutionIdentityConfigWithTopology(
 	source semanticview.Source,
 	exact bool,
 	topology *DynamicAgentTopologyMutation,
+	onCommitted func(runtimeactors.AgentConfig) error,
 ) (replaceExecutionResult, error) {
 	identity = identity.Normalize()
 	if err := identity.Validate(); err != nil {
 		return replaceExecutionResult{}, err
 	}
-	return am.replaceExecutionTargetConfigWithTopology(parent, identity, trigger, operationID, patch, source, exact, topology)
+	return am.replaceExecutionTargetConfigWithTopology(parent, identity, trigger, operationID, patch, source, exact, topology, onCommitted)
 }
 
 func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
@@ -1611,6 +1612,7 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 	source semanticview.Source,
 	exact bool,
 	topology *DynamicAgentTopologyMutation,
+	onCommitted func(runtimeactors.AgentConfig) error,
 ) (replaceExecutionResult, error) {
 	am.lifecycle.executionPublishMu.Lock()
 	defer am.lifecycle.executionPublishMu.Unlock()
@@ -1634,6 +1636,11 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 	currentLoopLive := execution.loopDone != nil && execution.routeToken.Valid()
 	am.lifecycle.mu.Unlock()
 	if trigger == "start" && currentPhase == AgentLifecycleRunning && currentLoopLive {
+		if onCommitted != nil {
+			if err := onCommitted(current.Config); err != nil {
+				return replaceExecutionResult{}, err
+			}
+		}
 		return replaceExecutionResult{config: current.Config}, nil
 	}
 
@@ -1682,6 +1689,11 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 			return replaceExecutionResult{}, err
 		}
 		if revision == currentRevision {
+			if onCommitted != nil {
+				if err := onCommitted(current.Config); err != nil {
+					return replaceExecutionResult{}, err
+				}
+			}
 			return replaceExecutionResult{config: current.Config}, nil
 		}
 		candidateAgent, err := am.buildAgent(updated)
@@ -1746,7 +1758,15 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 		return replaceExecutionResult{}, errors.Join(err, cleanupPrepared())
 	}
 	if token == current.Token && loopCtx == nil && done == nil {
-		return replaceExecutionResult{config: current.Config}, cleanupPrepared()
+		if err := cleanupPrepared(); err != nil {
+			return replaceExecutionResult{}, err
+		}
+		if onCommitted != nil {
+			if err := onCommitted(current.Config); err != nil {
+				return replaceExecutionResult{}, err
+			}
+		}
+		return replaceExecutionResult{config: current.Config}, nil
 	}
 	if loopCtx != nil && token != proposedToken {
 		transitionErr := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "prepared_execution_token_mismatch", "agent-lifecycle", trigger, map[string]any{"agent_id": strings.TrimSpace(agentID)})
@@ -1799,6 +1819,11 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 		preparedRoute = nil
 		am.launchExecutionLoop(parent, successor, loopCtx, done, loopWorkLease)
 		loopWorkLease = nil
+	}
+	if onCommitted != nil {
+		if err := onCommitted(candidate.Config); err != nil {
+			return replaceExecutionResult{}, err
+		}
 	}
 	return replaceExecutionResult{config: candidate.Config, transitioned: true}, nil
 }

@@ -419,7 +419,7 @@ func (am *AgentManager) spawnAgentInternalForSourceWithTopology(
 	runCtx, _, isRunning := am.lifecycle.runSnapshot()
 	_ = persist
 	if isRunning {
-		if _, err := am.replaceExecutionIdentityConfigWithTopology(runCtx, identity, "start", "", nil, am.semanticSource, false, nil); err != nil {
+		if _, err := am.replaceExecutionIdentityConfigWithTopology(runCtx, identity, "start", "", nil, am.semanticSource, false, nil, nil); err != nil {
 			return err
 		}
 	}
@@ -467,7 +467,7 @@ func (am *AgentManager) publishCommittedAgent(ctx context.Context, rec Persisted
 		if err != nil {
 			return err
 		}
-		if _, err := am.replaceExecutionIdentityConfigWithTopology(runCtx, identity, "start", "", nil, am.semanticSource, false, nil); err != nil {
+		if _, err := am.replaceExecutionIdentityConfigWithTopology(runCtx, identity, "start", "", nil, am.semanticSource, false, nil, nil); err != nil {
 			return err
 		}
 	}
@@ -585,7 +585,11 @@ func (am *AgentManager) applyContractPrompt(cfg models.AgentConfig) (models.Agen
 	return cfg, nil
 }
 
-func (am *AgentManager) ReconfigureAgentTarget(agentID, flowInstance string, cfg models.AgentConfig) error {
+func (am *AgentManager) ReconfigureAgentTarget(
+	agentID, flowInstance string,
+	cfg models.AgentConfig,
+	onCommitted func(models.AgentConfig) error,
+) error {
 	identity, err := am.lifecycle.resolveAgentTarget(agentID, flowInstance, false)
 	if err != nil {
 		return err
@@ -599,6 +603,7 @@ func (am *AgentManager) ReconfigureAgentTarget(agentID, flowInstance string, cfg
 		am.semanticSource,
 		false,
 		nil,
+		onCommitted,
 	)
 	if err != nil {
 		return err
@@ -628,6 +633,7 @@ func (am *AgentManager) reconfigureAgentIdentityExactWithTopology(
 		source,
 		true,
 		topology,
+		nil,
 	)
 	if err != nil {
 		return err

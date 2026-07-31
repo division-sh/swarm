@@ -404,7 +404,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 		<-start
 		generic := v1Agents[readerID].Config
 		generic.Role = "generic-reconfigure"
-		genericMutationErrs <- runtimeV2.manager.ReconfigureAgentTarget(readerID, descriptor.FlowInstance, generic)
+		genericMutationErrs <- runtimeV2.manager.ReconfigureAgentTarget(readerID, descriptor.FlowInstance, generic, nil)
 	}()
 	go func() {
 		defer mutations.Done()
@@ -480,7 +480,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	assertNotifyAllChildrenReadinessOwnershipFailure(
 		t,
 		"generic reconfigure",
-		runtimeV2.manager.ReconfigureAgentTarget(readerID, descriptor.FlowInstance, genericReconfigure),
+		runtimeV2.manager.ReconfigureAgentTarget(readerID, descriptor.FlowInstance, genericReconfigure, nil),
 	)
 	assertNotifyAllChildrenReadinessOwnershipFailure(
 		t,
@@ -506,7 +506,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	} else {
 		assertNotifyAllChildrenReadinessOwnershipFailure(t, "unauthorized stored-result replay", err)
 	}
-	if err := runtimeV1.manager.ReconfigureAgentTarget(readerID, descriptor.FlowInstance, reader.Config); err == nil {
+	if err := runtimeV1.manager.ReconfigureAgentTarget(readerID, descriptor.FlowInstance, reader.Config, nil); err == nil {
 		t.Fatal("stale predecessor manager republished canonical source-owned successor")
 	} else {
 		assertNotifyAllChildrenReadinessOwnershipFailure(t, "stale predecessor exact replay", err)
@@ -541,7 +541,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	}
 	staleMutation := v1Agents[readerID].Config
 	staleMutation.Role = "stale-predecessor-write"
-	if err := runtimeV1.manager.ReconfigureAgentTarget(readerID, descriptor.FlowInstance, staleMutation); err == nil {
+	if err := runtimeV1.manager.ReconfigureAgentTarget(readerID, descriptor.FlowInstance, staleMutation, nil); err == nil {
 		t.Fatal("stale predecessor generation mutated after successor convergence")
 	}
 	terminated, found, err := selected.LoadAgentLifecycleState(ctx, v1Agents[retiredID].Config.Identity)

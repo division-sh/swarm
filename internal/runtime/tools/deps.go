@@ -47,7 +47,7 @@ type Manager interface {
 	ResolveAgentConfig(agentID, flowInstance string) (models.AgentConfig, error)
 	SpawnAgentForEntity(entityID string, cfg models.AgentConfig) error
 	TeardownAgentTarget(agentID, flowInstance string) error
-	ReconfigureAgentTarget(agentID, flowInstance string, cfg models.AgentConfig) error
+	ReconfigureAgentTarget(agentID, flowInstance string, cfg models.AgentConfig, onCommitted func(models.AgentConfig) error) error
 }
 
 type ManagerProvider func() Manager
