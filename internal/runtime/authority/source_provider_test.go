@@ -212,6 +212,36 @@ func TestSourceProvider_ManagedAgentGraphUpdates(t *testing.T) {
 	}
 }
 
+func TestSourceProvider_ConcreteManagedParentOverridesDeclaredFallback(t *testing.T) {
+	provider, ok := NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"declared-manager": {ID: "declared-manager", Role: "declared-manager"},
+			"concrete-manager": {ID: "concrete-manager", Role: "concrete-manager"},
+			"worker":           {ID: "worker", Role: "worker", ManagerFallback: "declared-manager"},
+		},
+	})).(*sourceProvider)
+	if !ok {
+		t.Fatal("expected sourceProvider")
+	}
+	const flowPath = "review/inst-1"
+	declaredManager := testAgentConfig("declared-manager", "declared-manager", []string{"agent_reconfigure"}, "", flowPath, "")
+	concreteManager := testAgentConfig("concrete-manager", "concrete-manager", []string{"agent_reconfigure"}, "", flowPath, "")
+	worker := testAgentConfig("worker", "worker", nil, "", flowPath, "declared-manager")
+	declaredManager.Identity = agentidentitytest.Runtime(t, declaredManager.ID, "authority-test", "review", "inst-1", flowPath)
+	concreteManager.Identity = agentidentitytest.Runtime(t, concreteManager.ID, "authority-test", "review", "inst-1", flowPath)
+	worker.Identity = agentidentitytest.Runtime(t, worker.ID, "authority-test", "review", "inst-1", flowPath)
+
+	if err := provider.UpsertManagedAgent(worker.Identity, concreteManager.Identity); err != nil {
+		t.Fatalf("replace declared parent with concrete authority: %v", err)
+	}
+	if err := provider.AuthorizeManagement(concreteManager, worker); err != nil {
+		t.Fatalf("concrete replacement parent lacks authority: %v", err)
+	}
+	if err := provider.AuthorizeManagement(declaredManager, worker); err == nil {
+		t.Fatal("declared parent retained authority after concrete replacement")
+	}
+}
+
 func TestSourceProvider_ManagedAgentRemovalKeepsSameSlugSiblingAuthority(t *testing.T) {
 	provider, ok := NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})).(*sourceProvider)
 	if !ok {

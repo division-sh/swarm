@@ -278,8 +278,8 @@ func buildManagerFallbackGraph(source semanticview.Source) map[string]string {
 }
 
 func (p *sourceProvider) isManagedDescendant(actor, target models.AgentConfig) bool {
-	if p.isConcreteManagedDescendant(actor, target) {
-		return true
+	if authorized, authoritative := p.isConcreteManagedDescendant(actor, target); authoritative {
+		return authorized
 	}
 	actorIDs := uniqueGraphCandidates(strings.TrimSpace(actor.ID), canonicalRole(actor.Role))
 	targetIDs := uniqueGraphCandidates(strings.TrimSpace(target.ID), canonicalRole(target.Role))
@@ -319,34 +319,37 @@ func (p *sourceProvider) isManagedDescendant(actor, target models.AgentConfig) b
 	return false
 }
 
-func (p *sourceProvider) isConcreteManagedDescendant(actor, target models.AgentConfig) bool {
-	actorIdentity, err := actor.ConcreteIdentity()
-	if err != nil {
-		return false
-	}
+func (p *sourceProvider) isConcreteManagedDescendant(actor, target models.AgentConfig) (authorized, authoritative bool) {
 	targetIdentity, err := target.ConcreteIdentity()
 	if err != nil {
-		return false
+		return false, false
 	}
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
+	if _, ok := p.managedParents[targetIdentity]; !ok {
+		return false, false
+	}
+	actorIdentity, err := actor.ConcreteIdentity()
+	if err != nil {
+		return false, true
+	}
 	current := targetIdentity
 	visited := map[agentidentity.Identity]struct{}{current: {}}
 	for {
 		parent, ok := p.managedParents[current]
 		if !ok {
-			return false
+			return false, true
 		}
 		same, err := agentidentity.Equal(parent, actorIdentity)
 		if err != nil {
-			return false
+			return false, true
 		}
 		if same {
-			return true
+			return true, true
 		}
 		if _, seen := visited[parent]; seen {
-			return false
+			return false, true
 		}
 		visited[parent] = struct{}{}
 		current = parent

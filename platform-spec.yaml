@@ -15153,13 +15153,16 @@ agent_identity_model:
       including parent_agent_id precedence over manager_fallback. Before manager mutation, the candidate child and effective
       parent must be valid complete concrete identities on the same exact route and must not be equal. Unresolved, malformed,
       cross-route, and self-parent candidates fail with both manager configuration and management-authority state unchanged.
-      During the serialized manager mutation, lifecycle persistence first accepts the exact complete candidate. Before the
-      successor configuration projection, route, or execution loop becomes visible, the authority graph derives and applies
-      its typed child/parent plan from that candidate; a no-parent candidate removes any managed-parent edge. The handoff and
-      successor publication remain under the same reconfiguration serialization, so no caller can resolve the successor
-      while the prior authority mapping remains live. Concurrent reconfigurations therefore publish authority in manager
-      commit order. A pre-read candidate or authority plan cannot authorize a later manager commit. Mutation-first validation
-      and a second parent-merge interpreter are forbidden.
+      During the serialized manager mutation, the authority graph derives and applies its typed child/parent plan from the
+      exact complete candidate before lifecycle persistence and successor publication; a no-parent candidate removes any
+      managed-parent edge. If authority handoff, lifecycle persistence, or subordinate session persistence rejects the
+      transition, the prior exact typed authority plan is restored before the operation returns. Only after authority and
+      persistence both accept may the successor configuration projection, route, or execution loop become visible. The
+      handoff, persistence, and successor publication remain under the same reconfiguration serialization, so no caller can
+      resolve the successor while the prior authority mapping remains live. A concrete managed-parent mapping is authoritative:
+      declaration fallback cannot grant a superseded parent authority. Concurrent reconfigurations therefore publish
+      authority in manager commit order. A pre-read candidate or authority plan cannot authorize a later manager commit.
+      Mutation-first validation and a second parent-merge interpreter are forbidden.
   uuid_internal_migration_target:
     tracker: '#977'
     status: staged_parent_only_not_current_runtime_behavior
