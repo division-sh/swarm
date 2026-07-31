@@ -185,7 +185,9 @@ pins:
         carries:
           work_id:
             from: payload.work_id
-`, "dynamic.work.ready:\n  work_id: string\n", "{}\n", `dynamic-node:
+`, "dynamic.work.ready:\n  work_id: string\n", `dynamic_state:
+  work_id: string
+`, `dynamic-node:
   id: dynamic-node-{instance_id}
   execution_type: system_node
   subscribes_to: [dynamic.work.ready]
