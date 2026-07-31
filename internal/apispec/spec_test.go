@@ -1087,7 +1087,10 @@ func TestAgentIdentityModelPromotesConcreteRouteIdentity(t *testing.T) {
 		"concrete managed-parent mapping is authoritative",
 		"declaration fallback cannot grant a superseded parent authority",
 		"manager commit order",
-		"pre-read candidate or authority plan cannot authorize",
+		"revalidated against the exact serialized predecessor",
+		"queued request authorized from a pre-read mapping cannot mutate",
+		"reject direct and indirect cycles atomically",
+		"pre-read actor decision, candidate, or authority plan cannot authorize",
 		"no-parent candidate removes any managed-parent edge",
 		"Mutation-first validation",
 	} {

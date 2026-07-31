@@ -164,8 +164,30 @@ func (p *sourceProvider) UpsertManagedAgent(identity, parent agentidentity.Ident
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if err := p.validateManagedParentUpdateLocked(identity, parent); err != nil {
+		return err
+	}
 	p.managedParents[identity] = parent
 	return nil
+}
+
+func (p *sourceProvider) validateManagedParentUpdateLocked(identity, parent agentidentity.Identity) error {
+	current := parent
+	visited := map[agentidentity.Identity]struct{}{}
+	for {
+		if current == identity {
+			return fmt.Errorf("managed parent update would create a cycle")
+		}
+		if _, seen := visited[current]; seen {
+			return fmt.Errorf("managed parent graph already contains a cycle")
+		}
+		visited[current] = struct{}{}
+		next, ok := p.managedParents[current]
+		if !ok {
+			return nil
+		}
+		current = next
+	}
 }
 
 func (p *sourceProvider) RemoveManagedAgent(identity agentidentity.Identity) error {

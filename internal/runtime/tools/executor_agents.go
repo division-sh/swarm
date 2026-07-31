@@ -388,7 +388,33 @@ func (e *Executor) execAgentReconfigure(ctx context.Context, actor models.AgentC
 	if _, err := managedAgentAuthorityPlanForCandidate(manager, actor, updatedCfg); err != nil {
 		return nil, fmt.Errorf("validate reconfigured agent authority: %w", err)
 	}
+	// The manager invokes the hook again with the predecessor only when the
+	// serialized handoff must be compensated.
+	handoffAttempted := false
+	handoffApplied := false
 	if err := manager.ReconfigureAgentTarget(in.AgentID, in.FlowInstance, in.Config, func(committed models.AgentConfig) error {
+		if handoffAttempted {
+			if !handoffApplied {
+				return nil
+			}
+			authorityPlan, err := managedAgentAuthorityPlanForCandidate(manager, actor, committed)
+			if err != nil {
+				return fmt.Errorf("restore prior agent authority: %w", err)
+			}
+			if err := applyManagedAgentAuthority(e.authority, authorityPlan); err != nil {
+				return fmt.Errorf("restore prior agent authority: %w", err)
+			}
+			handoffApplied = false
+			return nil
+		}
+		handoffAttempted = true
+		current, err := manager.ResolveAgentConfig(in.AgentID, in.FlowInstance)
+		if err != nil {
+			return fmt.Errorf("resolve serialized reconfigure target %s: %w", in.AgentID, err)
+		}
+		if err := authorizeManage(e.authority, actor, current, manager); err != nil {
+			return fmt.Errorf("revalidate serialized reconfigure authority: %w", err)
+		}
 		authorityPlan, err := managedAgentAuthorityPlanForCandidate(manager, actor, committed)
 		if err != nil {
 			return fmt.Errorf("validate committed agent authority: %w", err)
@@ -396,6 +422,7 @@ func (e *Executor) execAgentReconfigure(ctx context.Context, actor models.AgentC
 		if err := applyManagedAgentAuthority(e.authority, authorityPlan); err != nil {
 			return fmt.Errorf("record committed agent authority: %w", err)
 		}
+		handoffApplied = true
 		return nil
 	}); err != nil {
 		return nil, err
