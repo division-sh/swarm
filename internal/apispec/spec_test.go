@@ -1071,6 +1071,20 @@ func TestAgentIdentityModelPromotesConcreteRouteIdentity(t *testing.T) {
 	assertScalarContains(t, mappingValue(constraint, "enforcement_status"), "fail closed before API readiness")
 	assertScalarContains(t, mappingValue(constraint, "enforcement_status"), "does not add duplicate-slug support")
 
+	management := mustMappingValue(t, identity, "management_authority")
+	reconfigure := mappingValue(management, "reconfigure")
+	for _, fragment := range []string{
+		"same canonical partial-patch merge used by AgentManager",
+		"parent_agent_id precedence over manager_fallback",
+		"Before manager mutation",
+		"must not be equal",
+		"management-authority state unchanged",
+		"no-parent candidate removes any managed-parent edge",
+		"Mutation-first validation",
+	} {
+		assertScalarContains(t, reconfigure, fragment)
+	}
+
 	migration := mustMappingValue(t, identity, "uuid_internal_migration_target")
 	assertScalarValue(t, mappingValue(migration, "tracker"), "#977")
 	assertScalarValue(t, mappingValue(migration, "status"), "staged_parent_only_not_current_runtime_behavior")

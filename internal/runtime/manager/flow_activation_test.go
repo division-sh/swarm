@@ -3539,6 +3539,11 @@ func TestDeactivateFlowInstanceQueuesTerminalSideEffectsUntilPostCommitWhenAvail
 	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
+	quiescenceCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := am.lifecycle.waitForWork(quiescenceCtx); err != nil {
+		t.Fatalf("wait for activation backlog replay: %v", err)
+	}
 	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
 	ctx := withFlowActivationPostCommit(flowActivationRunContext(), &postCommit)
 	ctx = runtimepipeline.WithPipelineSQLTxContext(ctx, &sql.Tx{})

@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -374,10 +375,7 @@ func (e *Executor) execAgentReconfigure(ctx context.Context, actor models.AgentC
 	if err := authorizeManage(e.authority, actor, targetCfg, manager); err != nil {
 		return nil, err
 	}
-	updatedCfg := mergeDelegablePrivilegeConfig(targetCfg, in.Config)
-	if strings.TrimSpace(string(in.Config.Memory.Source)) != "" {
-		updatedCfg.Memory = in.Config.Memory
-	}
+	updatedCfg := models.MergeAgentConfig(targetCfg, in.Config)
 	if updatedCfg.Memory.Enabled && updatedCfg.CanonicalFlowPath() == "" {
 		return nil, fmt.Errorf("memory: true requires a flow-instance owner")
 	}
@@ -387,44 +385,81 @@ func (e *Executor) execAgentReconfigure(ctx context.Context, actor models.AgentC
 	if err := e.ValidateNativeToolAdmission(ctx, updatedCfg); err != nil {
 		return nil, err
 	}
+	authorityPlan, err := managedAgentAuthorityPlanForCandidate(manager, actor, updatedCfg)
+	if err != nil {
+		return nil, fmt.Errorf("validate reconfigured agent authority: %w", err)
+	}
 	if err := manager.ReconfigureAgentTarget(in.AgentID, in.FlowInstance, in.Config); err != nil {
 		return nil, err
 	}
-	cfg, err := manager.ResolveAgentConfig(in.AgentID, in.FlowInstance)
-	if err != nil {
-		return nil, fmt.Errorf("resolve reconfigured agent %s: %w", in.AgentID, err)
-	}
-	if err := syncManagedAgentAuthority(e.authority, manager, actor, cfg); err != nil {
+	if err := applyManagedAgentAuthority(e.authority, authorityPlan); err != nil {
 		return nil, fmt.Errorf("record reconfigured agent authority: %w", err)
 	}
 	return map[string]any{"status": "reconfigured", "agent_id": in.AgentID}, nil
 }
 
+type managedAgentAuthorityPlan struct {
+	child     agentidentity.Identity
+	parent    agentidentity.Identity
+	hasParent bool
+}
+
+func applyManagedAgentAuthority(provider runtimeauthority.Provider, plan managedAgentAuthorityPlan) error {
+	if !plan.hasParent {
+		return runtimeauthority.RemoveManagedAgent(provider, plan.child)
+	}
+	return runtimeauthority.UpsertManagedAgent(provider, plan.child, plan.parent)
+}
+
 func syncManagedAgentAuthority(provider runtimeauthority.Provider, manager Manager, actor, target models.AgentConfig) error {
-	targetIdentity, err := target.ConcreteIdentity()
+	plan, err := managedAgentAuthorityPlanForCandidate(manager, actor, target)
 	if err != nil {
 		return err
 	}
+	return applyManagedAgentAuthority(provider, plan)
+}
+
+func managedAgentAuthorityPlanForCandidate(manager Manager, actor, target models.AgentConfig) (managedAgentAuthorityPlan, error) {
+	targetIdentity, err := target.ConcreteIdentity()
+	if err != nil {
+		return managedAgentAuthorityPlan{}, fmt.Errorf("resolve concrete managed agent %s identity: %w", target.ID, err)
+	}
+	plan := managedAgentAuthorityPlan{child: targetIdentity}
 	parentRef := strings.TrimSpace(target.ParentAgent)
 	if parentRef == "" {
 		parentRef = strings.TrimSpace(target.ManagerFallback)
 	}
 	if parentRef == "" {
-		return runtimeauthority.RemoveManagedAgent(provider, targetIdentity)
+		return plan, nil
+	}
+	if targetIdentity.MatchesAgentID(parentRef) {
+		return managedAgentAuthorityPlan{}, fmt.Errorf("managed agent identity cannot be its own parent")
 	}
 
 	parent := actor
 	if !managedParentReferenceMatches(parentRef, parent) || !sameConcreteFlowRoute(parent, target) {
 		parent, err = manager.ResolveAgentConfig(parentRef, target.CanonicalFlowPath())
 		if err != nil {
-			return fmt.Errorf("resolve managed parent %s: %w", parentRef, err)
+			return managedAgentAuthorityPlan{}, fmt.Errorf("resolve managed parent %s: %w", parentRef, err)
 		}
 	}
 	parentIdentity, err := parent.ConcreteIdentity()
 	if err != nil {
-		return fmt.Errorf("resolve concrete managed parent %s identity: %w", parentRef, err)
+		return managedAgentAuthorityPlan{}, fmt.Errorf("resolve concrete managed parent %s identity: %w", parentRef, err)
 	}
-	return runtimeauthority.UpsertManagedAgent(provider, targetIdentity, parentIdentity)
+	same, err := agentidentity.Equal(targetIdentity, parentIdentity)
+	if err != nil {
+		return managedAgentAuthorityPlan{}, fmt.Errorf("compare managed agent and parent identity: %w", err)
+	}
+	if same {
+		return managedAgentAuthorityPlan{}, fmt.Errorf("managed agent identity cannot be its own parent")
+	}
+	if parentIdentity.Route != targetIdentity.Route {
+		return managedAgentAuthorityPlan{}, fmt.Errorf("managed parent %s is not in target flow route %s", parentRef, target.CanonicalFlowPath())
+	}
+	plan.parent = parentIdentity
+	plan.hasParent = true
+	return plan, nil
 }
 
 func preflightManagedAgentParent(manager Manager, actor, target models.AgentConfig) error {
@@ -435,7 +470,9 @@ func preflightManagedAgentParent(manager Manager, actor, target models.AgentConf
 	if parentRef == "" {
 		return nil
 	}
-
+	if parentRef == strings.TrimSpace(target.ID) {
+		return fmt.Errorf("managed agent identity cannot be its own parent")
+	}
 	parent := actor
 	if !managedParentReferenceMatches(parentRef, parent) || parent.CanonicalFlowPath() != target.CanonicalFlowPath() {
 		var err error
@@ -444,10 +481,11 @@ func preflightManagedAgentParent(manager Manager, actor, target models.AgentConf
 			return fmt.Errorf("resolve managed parent %s: %w", parentRef, err)
 		}
 	}
-	if _, err := parent.ConcreteIdentity(); err != nil {
+	parentIdentity, err := parent.ConcreteIdentity()
+	if err != nil {
 		return fmt.Errorf("resolve concrete managed parent %s identity: %w", parentRef, err)
 	}
-	if parent.CanonicalFlowPath() != target.CanonicalFlowPath() {
+	if parentIdentity.FlowInstance() != target.CanonicalFlowPath() {
 		return fmt.Errorf("managed parent %s is not in target flow route %s", parentRef, target.CanonicalFlowPath())
 	}
 	return nil
