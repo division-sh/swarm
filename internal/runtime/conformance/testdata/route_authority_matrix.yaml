@@ -320,30 +320,31 @@ rows:
       - {kind: issue, issue: 1545}
       - {kind: issue, issue: 1546}
       - {kind: issue, issue: 1890}
-      - {kind: go_test, name: TestLowerCompositionConnectRoutePlansUsesTemplateInstanceKey}
+      - {kind: go_test, name: TestLowerCompositionConnectRoutePlansUsesCreateInputResolution}
+      - {kind: go_test, name: TestLowerCompositionConnectRoutePlansUsesSelectInputResolution}
+      - {kind: go_test, name: TestLowerCompositionConnectRoutePlansUsesSelectOrCreateInputResolution}
+      - {kind: go_test, name: TestLowerCompositionConnectRoutePlanDerivesRenamedPayloadSourceFromCarry}
+      - {kind: go_test, name: TestConnectRoutePlanProductionAPIHasNoRetiredIdentityOrPolicyFacts}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlansUsesFanInStreamSingularTarget}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlansAllowsFanInStreamEventIDDedup}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlansFailsClosedForInvalidFanInStream}
-      - {kind: go_test, name: TestLowerCompositionConnectRoutePlansPreservesAddressedTemplateRoute}
-      - {kind: go_test, name: TestMaterializeConnectRoutePlanFanoutForTemplateDescriptors}
-      - {kind: go_test, name: TestLowerCompositionConnectRoutePlansUsesRenamedInstanceKeyAdapter}
-      - {kind: go_test, name: TestLowerCompositionConnectRoutePlansFailsClosedForInvalidRenamedInstanceKeyAdapter}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlanDoesNotDependOnRawPinNamesOrProducerTargets}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscriber}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarget}
-      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsTargetSetFanout}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKeySourceGap}
-      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForUnsupportedBusinessFieldTarget}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceAndReplaysCommittedRoute}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAndReplaysCommittedRoute}
       - {kind: go_test, name: TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup}
       - {kind: go_test, name: TestFanInStreamConformance_EventIDDedupUsesEventIdentity}
     notes: >
       ConnectRoutePlan is a typed route-intent input, not an untracked string
-      fallback. #1545 records the selected route authority in ResolutionKind so
-      explicit addressed-input routing cannot be shadowed by addressless
-      instance-key materialization. #1495 owns additional typed producer
-      migration after this guardrail is in place.
+      fallback. Receiver-owned scalar instance identity, the same-named typed
+      carry source, and exhaustive resolution mode are the only dynamic instance
+      authority. Address, map, using, implicit mappings, and instance policies
+      are retired and cannot shadow or repair that plan. #1495 owns additional
+      typed producer migration after this guardrail is in place.
 
   - id: route_table_resolve_role_separation
     concept: RouteTable.Resolve usages must be classified by role instead of treated as generic route authority.
@@ -392,7 +393,7 @@ rows:
       revive a failed matched ConnectRoutePlan.
 
   - id: descriptor_evidence_not_authority
-    concept: Descriptor evidence may support approved runtime target materialization but is not route authority.
+    concept: Descriptor evidence may support scalar receiver-instance resolution but is not route authority.
     classification: add_to_matrix
     tier: required_pr_smoke
     proof_dimensions: [descriptor_evidence, negative_authority, split_tracker, required_pr_smoke]
@@ -400,7 +401,7 @@ rows:
       - active-agent descriptor lookup
       - active target descriptors
       - handler descriptor lookup
-      - unsupported, nested, or unindexed business-field descriptor targets
+      - arbitrary, nested, or unindexed business-field descriptor targets
     owner_refs:
       - {kind: spec_ref, path: platform-spec.yaml, ref: descriptor_evidence_boundary}
       - {kind: spec_ref, path: platform-spec.yaml, ref: supported_descriptor_targets}
@@ -412,25 +413,22 @@ rows:
       - {kind: issue, issue: 1494}
       - {kind: issue, issue: 1545}
       - {kind: go_test, name: TestConnectRoutePlanDescriptorsLoadOnlyForRuntimeResolution}
-      - {kind: go_test, name: TestLowerCompositionConnectRoutePlansPreservesAddressedTemplateRoute}
-      - {kind: go_test, name: TestMaterializeConnectRoutePlanFanoutForTemplateDescriptors}
+      - {kind: go_test, name: TestLowerCompositionConnectRoutePlansUsesSelectInputResolution}
+      - {kind: go_test, name: TestConnectRoutePlanProductionAPIHasNoRetiredIdentityOrPolicyFacts}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget}
-      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsTargetSetFanout}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceAndReplaysCommittedRoute}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGaps}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps}
-      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTarget}
-      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTargetSet}
-      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForBusinessFieldDescriptorGaps}
-      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForUnsupportedBusinessFieldTarget}
       - {kind: go_test, name: TestEventBusPinRoutingDescriptorsIncludeActiveDynamicFlowInstances}
       - {kind: go_test, name: TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates}
       - {kind: go_test, name: TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates}
+      - {kind: go_test, name: TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres}
     notes: >
-      Descriptor evidence remains limited to identity-style targets and
-      top-level receiver entity fields explicitly declared with indexed: true.
-      It is evidence for ConnectRoutePlan materialization, not topology
-      authority. Nested, arbitrary, undeclared, unindexed, config, and instance
-      business-field descriptor/index authority remains split to #1466 or later
-      gated children.
+      Descriptor evidence may match only the receiver's declared scalar instance
+      identity. It is evidence for ConnectRoutePlan materialization, not topology
+      or selection-policy authority. Arbitrary indexed business-field addressing
+      is retired; nested, undeclared, unindexed, config, and unrelated instance
+      fields cannot become routing authority.
 
   - id: event_delivery_plan_compatibility_removed
     concept: Legacy eventDeliveryPlan and CanonicalRoutePlan compatibility projection are invalid old authority paths removed behind RoutePlan.
