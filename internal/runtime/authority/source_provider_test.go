@@ -1,6 +1,7 @@
 package authority
 
 import (
+	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -239,6 +240,39 @@ func TestSourceProvider_ConcreteManagedParentOverridesDeclaredFallback(t *testin
 	}
 	if err := provider.AuthorizeManagement(declaredManager, worker); err == nil {
 		t.Fatal("declared parent retained authority after concrete replacement")
+	}
+}
+
+func TestSourceProvider_ManagedParentUpdateRejectsIndirectCycle(t *testing.T) {
+	provider, ok := NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})).(*sourceProvider)
+	if !ok {
+		t.Fatal("expected sourceProvider")
+	}
+	const flowPath = "review/inst-1"
+	root := testAgentConfig("root", "root", []string{"agent_reconfigure"}, "", flowPath, "")
+	first := testAgentConfig("first", "first", []string{"agent_reconfigure"}, "", flowPath, "root")
+	second := testAgentConfig("second", "second", []string{"agent_reconfigure"}, "", flowPath, "first")
+	root.Identity = agentidentitytest.Runtime(t, root.ID, "authority-test", "review", "inst-1", flowPath)
+	first.Identity = agentidentitytest.Runtime(t, first.ID, "authority-test", "review", "inst-1", flowPath)
+	second.Identity = agentidentitytest.Runtime(t, second.ID, "authority-test", "review", "inst-1", flowPath)
+
+	if err := provider.UpsertManagedAgent(first.Identity, root.Identity); err != nil {
+		t.Fatalf("seed first parent: %v", err)
+	}
+	if err := provider.UpsertManagedAgent(second.Identity, first.Identity); err != nil {
+		t.Fatalf("seed second parent: %v", err)
+	}
+	if err := provider.UpsertManagedAgent(first.Identity, second.Identity); err == nil || !strings.Contains(err.Error(), "create a cycle") {
+		t.Fatalf("cycle update error = %v, want cycle rejection", err)
+	}
+	if err := provider.AuthorizeManagement(root, first); err != nil {
+		t.Fatalf("rejected cycle changed first parent: %v", err)
+	}
+	if err := provider.AuthorizeManagement(first, second); err != nil {
+		t.Fatalf("rejected cycle changed second parent: %v", err)
+	}
+	if err := provider.AuthorizeManagement(second, first); err == nil {
+		t.Fatal("rejected cycle granted reverse management")
 	}
 }
 

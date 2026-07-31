@@ -15161,8 +15161,11 @@ agent_identity_model:
       handoff, persistence, and successor publication remain under the same reconfiguration serialization, so no caller can
       resolve the successor while the prior authority mapping remains live. A concrete managed-parent mapping is authoritative:
       declaration fallback cannot grant a superseded parent authority. Concurrent reconfigurations therefore publish
-      authority in manager commit order. A pre-read candidate or authority plan cannot authorize a later manager commit.
-      Mutation-first validation and a second parent-merge interpreter are forbidden.
+      authority in manager commit order. Actor management authority is revalidated against the exact serialized predecessor
+      immediately before authority handoff, so a queued request authorized from a pre-read mapping cannot mutate after that
+      mapping is replaced or restored. Concrete parent updates reject direct and indirect cycles atomically and leave the prior
+      graph unchanged. A pre-read actor decision, candidate, or authority plan cannot authorize a later manager commit.
+      Mutation-first validation, cyclic management authority, and a second parent-merge interpreter are forbidden.
   uuid_internal_migration_target:
     tracker: '#977'
     status: staged_parent_only_not_current_runtime_behavior

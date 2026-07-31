@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -154,6 +155,71 @@ func (m *captureManagerStub) ReconfigureAgentTarget(
 		}
 	}
 	m.agents[agentID] = current
+	return nil
+}
+
+type staleAuthorizationManagerStub struct {
+	stateMu      sync.Mutex
+	reconfigure  sync.Mutex
+	agents       map[string]models.AgentConfig
+	arrivals     chan struct{}
+	firstApplied chan struct{}
+	releaseFirst chan struct{}
+	first        bool
+}
+
+func (m *staleAuthorizationManagerStub) ResolveAgentConfig(agentID, flowInstance string) (models.AgentConfig, error) {
+	m.stateMu.Lock()
+	defer m.stateMu.Unlock()
+	cfg, ok := m.agents[agentID]
+	if !ok || (flowInstance != "" && cfg.CanonicalFlowPath() != flowInstance) {
+		return models.AgentConfig{}, fmt.Errorf("agent not found")
+	}
+	return cfg, nil
+}
+
+func (*staleAuthorizationManagerStub) SpawnAgentForEntity(string, models.AgentConfig) error {
+	return nil
+}
+
+func (*staleAuthorizationManagerStub) TeardownAgentTarget(string, string) error {
+	return nil
+}
+
+func (m *staleAuthorizationManagerStub) ReconfigureAgentTarget(
+	agentID, flowInstance string,
+	patch models.AgentConfig,
+	onCommitted func(models.AgentConfig) error,
+) error {
+	m.arrivals <- struct{}{}
+	m.reconfigure.Lock()
+	defer m.reconfigure.Unlock()
+
+	current, err := m.ResolveAgentConfig(agentID, flowInstance)
+	if err != nil {
+		return err
+	}
+	candidate := models.MergeAgentConfig(current, patch)
+	if !m.first {
+		m.first = true
+		if err := onCommitted(candidate); err != nil {
+			_ = onCommitted(current)
+			return err
+		}
+		close(m.firstApplied)
+		<-m.releaseFirst
+		if err := onCommitted(current); err != nil {
+			return err
+		}
+		return errors.New("injected persistence failure")
+	}
+	if err := onCommitted(candidate); err != nil {
+		_ = onCommitted(current)
+		return err
+	}
+	m.stateMu.Lock()
+	m.agents[agentID] = candidate
+	m.stateMu.Unlock()
 	return nil
 }
 
@@ -566,6 +632,57 @@ func TestExecAgentReconfigure_ParentCandidateAndAuthorityGraphAgree(t *testing.T
 	})
 }
 
+func TestExecAgentReconfigure_RejectsIndirectParentCycleAtCommit(t *testing.T) {
+	const route = "review/inst-1"
+	newAgent := func(id, role string) models.AgentConfig {
+		return models.AgentConfig{
+			ExecutionMode: "live",
+			ID:            id,
+			Identity:      agentidentitytest.Runtime(t, id, "runtime-tools-test", "review", "inst-1", route),
+			Role:          role,
+			Permissions:   []string{"agent_reconfigure"},
+			FlowPath:      route,
+		}
+	}
+	root := newAgent("root", "manager")
+	first := newAgent("first", "manager")
+	second := newAgent("second", "worker")
+	first.ParentAgent = root.ID
+	second.ParentAgent = first.ID
+
+	provider := runtimeauthority.NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+	if err := runtimeauthority.UpsertManagedAgent(provider, first.Identity, root.Identity); err != nil {
+		t.Fatalf("seed first parent: %v", err)
+	}
+	if err := runtimeauthority.UpsertManagedAgent(provider, second.Identity, first.Identity); err != nil {
+		t.Fatalf("seed second parent: %v", err)
+	}
+	manager := &captureManagerStub{agents: map[string]models.AgentConfig{
+		root.ID:   root,
+		first.ID:  first,
+		second.ID: second,
+	}}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
+
+	_, err := exec.ExecAgentReconfigureDirect(root, map[string]any{
+		"agent_id": first.ID,
+		"config":   map[string]any{"parent_agent_id": second.ID},
+	})
+	if err == nil || !strings.Contains(err.Error(), "managed parent update would create a cycle") {
+		t.Fatalf("cycle reconfigure error = %v, want cycle rejection", err)
+	}
+	stored := manager.agents[first.ID]
+	if stored.ParentAgent != root.ID {
+		t.Fatalf("cycle rejection changed target parent to %q", stored.ParentAgent)
+	}
+	if err := provider.AuthorizeManagement(root, stored); err != nil {
+		t.Fatalf("cycle rejection changed prior authority: %v", err)
+	}
+	if err := provider.AuthorizeManagement(second, stored); err == nil {
+		t.Fatal("cycle rejection granted reverse authority")
+	}
+}
+
 func TestExecAgentReconfigure_ConcurrentCommitsKeepAuthorityInManagerOrder(t *testing.T) {
 	const route = "review/inst-1"
 	newAgent := func(id, role string) models.AgentConfig {
@@ -601,7 +718,11 @@ func TestExecAgentReconfigure_ConcurrentCommitsKeepAuthorityInManagerOrder(t *te
 	}
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
 
-	errs := make(chan error, 2)
+	type reconfigureResult struct {
+		parentID string
+		err      error
+	}
+	results := make(chan reconfigureResult, 2)
 	for _, parent := range []models.AgentConfig{parentA, parentB} {
 		parent := parent
 		go func() {
@@ -609,7 +730,7 @@ func TestExecAgentReconfigure_ConcurrentCommitsKeepAuthorityInManagerOrder(t *te
 				"agent_id": target.ID, "flow_instance": route,
 				"config": map[string]any{"parent_agent_id": parent.ID},
 			})
-			errs <- err
+			results <- reconfigureResult{parentID: parent.ID, err: err}
 		}()
 	}
 	for range 2 {
@@ -620,17 +741,31 @@ func TestExecAgentReconfigure_ConcurrentCommitsKeepAuthorityInManagerOrder(t *te
 		}
 	}
 	close(start)
+	successfulParent := ""
+	denials := 0
 	for range 2 {
-		if err := <-errs; err != nil {
-			t.Fatalf("concurrent reconfigure: %v", err)
+		result := <-results
+		if result.err == nil {
+			if successfulParent != "" {
+				t.Fatalf("both stale-parent reconfigurations succeeded: %q and %q", successfulParent, result.parentID)
+			}
+			successfulParent = result.parentID
+			continue
 		}
+		if !strings.Contains(result.err.Error(), "revalidate serialized reconfigure authority") {
+			t.Fatalf("concurrent reconfigure error = %v, want serialized authority denial", result.err)
+		}
+		denials++
+	}
+	if successfulParent == "" || denials != 1 {
+		t.Fatalf("successful parent = %q denials = %d, want one commit and one stale-authority denial", successfulParent, denials)
 	}
 
 	stored := manager.agents[target.ID]
 	parents := map[string]models.AgentConfig{parentA.ID: parentA, parentB.ID: parentB}
 	finalParent, ok := parents[stored.ParentAgent]
-	if !ok {
-		t.Fatalf("committed parent = %q, want one of %q or %q", stored.ParentAgent, parentA.ID, parentB.ID)
+	if !ok || stored.ParentAgent != successfulParent {
+		t.Fatalf("committed parent = %q, successful request = %q", stored.ParentAgent, successfulParent)
 	}
 	if err := provider.AuthorizeManagement(finalParent, stored); err != nil {
 		t.Fatalf("last committed parent lacks authority: %v", err)
@@ -645,6 +780,82 @@ func TestExecAgentReconfigure_ConcurrentCommitsKeepAuthorityInManagerOrder(t *te
 	}
 	if err := provider.AuthorizeManagement(oldParent, stored); err == nil {
 		t.Fatal("original parent retained authority")
+	}
+}
+
+func TestExecAgentReconfigure_RevalidatesQueuedActorAtSerializedCommit(t *testing.T) {
+	const route = "review/inst-1"
+	newAgent := func(id, role string) models.AgentConfig {
+		return models.AgentConfig{
+			ExecutionMode: "live",
+			ID:            id,
+			Identity:      agentidentitytest.Runtime(t, id, "runtime-tools-test", "review", "inst-1", route),
+			Role:          role,
+			Permissions:   []string{"agent_reconfigure"},
+			FlowPath:      route,
+		}
+	}
+	oldParent := newAgent("old-parent", "manager")
+	newParent := newAgent("new-parent", "manager")
+	target := newAgent("worker", "worker")
+	target.ParentAgent = oldParent.ID
+
+	provider := runtimeauthority.NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+	if err := runtimeauthority.UpsertManagedAgent(provider, target.Identity, oldParent.Identity); err != nil {
+		t.Fatalf("seed authority: %v", err)
+	}
+	manager := &staleAuthorizationManagerStub{
+		agents: map[string]models.AgentConfig{
+			oldParent.ID: oldParent,
+			newParent.ID: newParent,
+			target.ID:    target,
+		},
+		arrivals:     make(chan struct{}, 2),
+		firstApplied: make(chan struct{}),
+		releaseFirst: make(chan struct{}),
+	}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
+
+	firstErr := make(chan error, 1)
+	go func() {
+		_, err := exec.ExecAgentReconfigureDirect(oldParent, map[string]any{
+			"agent_id": target.ID,
+			"config":   map[string]any{"parent_agent_id": newParent.ID},
+		})
+		firstErr <- err
+	}()
+	<-manager.arrivals
+	<-manager.firstApplied
+
+	secondErr := make(chan error, 1)
+	go func() {
+		_, err := exec.ExecAgentReconfigureDirect(newParent, map[string]any{
+			"agent_id": target.ID,
+			"config":   map[string]any{"model": "unauthorized-change"},
+		})
+		secondErr <- err
+	}()
+	<-manager.arrivals
+	close(manager.releaseFirst)
+
+	if err := <-firstErr; err == nil || !strings.Contains(err.Error(), "injected persistence failure") {
+		t.Fatalf("first reconfigure error = %v, want injected persistence failure", err)
+	}
+	if err := <-secondErr; err == nil || !strings.Contains(err.Error(), "revalidate serialized reconfigure authority") {
+		t.Fatalf("queued reconfigure error = %v, want serialized authority rejection", err)
+	}
+	stored, err := manager.ResolveAgentConfig(target.ID, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Model != "" || stored.ParentAgent != oldParent.ID {
+		t.Fatalf("queued unauthorized mutation changed target: %+v", stored)
+	}
+	if err := provider.AuthorizeManagement(oldParent, stored); err != nil {
+		t.Fatalf("predecessor parent authority was not restored: %v", err)
+	}
+	if err := provider.AuthorizeManagement(newParent, stored); err == nil {
+		t.Fatal("rolled-back candidate parent retained authority")
 	}
 }
 
