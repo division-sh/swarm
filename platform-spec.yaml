@@ -15153,9 +15153,11 @@ agent_identity_model:
       including parent_agent_id precedence over manager_fallback. Before manager mutation, the candidate child and effective
       parent must be valid complete concrete identities on the same exact route and must not be equal. Unresolved, malformed,
       cross-route, and self-parent candidates fail with both manager configuration and management-authority state unchanged.
-      After successful manager mutation, the authority graph applies the already validated typed child/parent plan; a
-      no-parent candidate removes any managed-parent edge. Mutation-first validation and a second parent-merge interpreter
-      are forbidden.
+      During the serialized manager mutation, the authority graph derives and applies its typed child/parent plan from the
+      exact complete candidate committed by AgentManager before the reconfiguration lock is released; a no-parent candidate
+      removes any managed-parent edge. Concurrent reconfigurations therefore publish authority in manager commit order.
+      A pre-read candidate or authority plan cannot authorize a later manager commit. Mutation-first validation and a second
+      parent-merge interpreter are forbidden.
   uuid_internal_migration_target:
     tracker: '#977'
     status: staged_parent_only_not_current_runtime_behavior

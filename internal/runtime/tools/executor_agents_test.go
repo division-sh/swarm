@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
@@ -39,7 +41,10 @@ func (m managerStub) ResolveAgentConfig(agentID, flowInstance string) (models.Ag
 
 func (managerStub) SpawnAgentForEntity(string, models.AgentConfig) error { return nil }
 func (managerStub) TeardownAgentTarget(string, string) error             { return nil }
-func (managerStub) ReconfigureAgentTarget(string, string, models.AgentConfig) error {
+func (managerStub) ReconfigureAgentTarget(_ string, _ string, cfg models.AgentConfig, onCommitted func(models.AgentConfig) error) error {
+	if onCommitted != nil {
+		return onCommitted(cfg)
+	}
 	return nil
 }
 
@@ -74,6 +79,9 @@ type captureManagerStub struct {
 	tornDownID        string
 	teardownCalled    bool
 	allowCrossRoute   bool
+	reconfigureMu     sync.Mutex
+	reconfigureArrive chan<- struct{}
+	reconfigureStart  <-chan struct{}
 }
 
 func (m *captureManagerStub) ResolveAgentConfig(agentID, flowInstance string) (models.AgentConfig, error) {
@@ -110,8 +118,22 @@ func (m *captureManagerStub) TeardownAgentTarget(agentID, flowInstance string) e
 	return nil
 }
 
-func (m *captureManagerStub) ReconfigureAgentTarget(agentID, flowInstance string, cfg models.AgentConfig) error {
-	if _, err := m.ResolveAgentConfig(agentID, flowInstance); err != nil {
+func (m *captureManagerStub) ReconfigureAgentTarget(
+	agentID, flowInstance string,
+	cfg models.AgentConfig,
+	onCommitted func(models.AgentConfig) error,
+) error {
+	if m.reconfigureArrive != nil {
+		m.reconfigureArrive <- struct{}{}
+	}
+	if m.reconfigureStart != nil {
+		<-m.reconfigureStart
+	}
+	m.reconfigureMu.Lock()
+	defer m.reconfigureMu.Unlock()
+
+	current, err := m.ResolveAgentConfig(agentID, flowInstance)
+	if err != nil {
 		return err
 	}
 	m.reconfiguredID = agentID
@@ -120,15 +142,16 @@ func (m *captureManagerStub) ReconfigureAgentTarget(agentID, flowInstance string
 	if m.agents == nil {
 		m.agents = map[string]models.AgentConfig{}
 	}
-	current := m.agents[agentID]
 	current = models.MergeAgentConfig(current, cfg)
 	current.ID = agentID
-	var err error
 	current, err = withRuntimeToolsTestIdentity(current)
 	if err != nil {
 		return err
 	}
 	m.agents[agentID] = current
+	if onCommitted != nil {
+		return onCommitted(current)
+	}
 	return nil
 }
 
@@ -198,7 +221,11 @@ func (m *concreteManagerStub) TeardownAgentTarget(agentID, flowInstance string) 
 	return nil
 }
 
-func (m *concreteManagerStub) ReconfigureAgentTarget(agentID, flowInstance string, cfg models.AgentConfig) error {
+func (m *concreteManagerStub) ReconfigureAgentTarget(
+	agentID, flowInstance string,
+	cfg models.AgentConfig,
+	onCommitted func(models.AgentConfig) error,
+) error {
 	current, err := m.ResolveAgentConfig(agentID, flowInstance)
 	if err != nil {
 		return err
@@ -207,7 +234,11 @@ func (m *concreteManagerStub) ReconfigureAgentTarget(agentID, flowInstance strin
 	if err != nil {
 		return err
 	}
-	m.agents[identity] = models.MergeAgentConfig(current, cfg)
+	committed := models.MergeAgentConfig(current, cfg)
+	m.agents[identity] = committed
+	if onCommitted != nil {
+		return onCommitted(committed)
+	}
 	return nil
 }
 
@@ -531,6 +562,88 @@ func TestExecAgentReconfigure_ParentCandidateAndAuthorityGraphAgree(t *testing.T
 			t.Fatal("no-parent candidate retained stale managed authority")
 		}
 	})
+}
+
+func TestExecAgentReconfigure_ConcurrentCommitsKeepAuthorityInManagerOrder(t *testing.T) {
+	const route = "review/inst-1"
+	newAgent := func(id, role string) models.AgentConfig {
+		return models.AgentConfig{
+			ExecutionMode: "live", ID: id,
+			Identity: agentidentitytest.Runtime(t, id, "runtime-tools-test", "review", "inst-1", route),
+			Role:     role, Permissions: []string{"agent_reconfigure"}, FlowPath: route,
+		}
+	}
+
+	oldParent := newAgent("old-parent", "manager")
+	parentA := newAgent("parent-a", "manager")
+	parentB := newAgent("parent-b", "manager")
+	target := newAgent("worker", "worker")
+	target.ParentAgent = oldParent.ID
+	target.ManagerFallback = oldParent.ID
+
+	provider := runtimeauthority.NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+	if err := runtimeauthority.UpsertManagedAgent(provider, target.Identity, oldParent.Identity); err != nil {
+		t.Fatalf("seed managed authority: %v", err)
+	}
+	arrivals := make(chan struct{}, 2)
+	start := make(chan struct{})
+	manager := &captureManagerStub{
+		agents: map[string]models.AgentConfig{
+			oldParent.ID: oldParent,
+			parentA.ID:   parentA,
+			parentB.ID:   parentB,
+			target.ID:    target,
+		},
+		reconfigureArrive: arrivals,
+		reconfigureStart:  start,
+	}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
+
+	errs := make(chan error, 2)
+	for _, parent := range []models.AgentConfig{parentA, parentB} {
+		parent := parent
+		go func() {
+			_, err := exec.ExecAgentReconfigureDirect(oldParent, map[string]any{
+				"agent_id": target.ID, "flow_instance": route,
+				"config": map[string]any{"parent_agent_id": parent.ID},
+			})
+			errs <- err
+		}()
+	}
+	for range 2 {
+		select {
+		case <-arrivals:
+		case <-time.After(5 * time.Second):
+			t.Fatal("concurrent reconfigure did not reach the manager after preflight")
+		}
+	}
+	close(start)
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent reconfigure: %v", err)
+		}
+	}
+
+	stored := manager.agents[target.ID]
+	parents := map[string]models.AgentConfig{parentA.ID: parentA, parentB.ID: parentB}
+	finalParent, ok := parents[stored.ParentAgent]
+	if !ok {
+		t.Fatalf("committed parent = %q, want one of %q or %q", stored.ParentAgent, parentA.ID, parentB.ID)
+	}
+	if err := provider.AuthorizeManagement(finalParent, stored); err != nil {
+		t.Fatalf("last committed parent lacks authority: %v", err)
+	}
+	for parentID, parent := range parents {
+		if parentID == stored.ParentAgent {
+			continue
+		}
+		if err := provider.AuthorizeManagement(parent, stored); err == nil {
+			t.Fatalf("superseded parent %q retained authority", parentID)
+		}
+	}
+	if err := provider.AuthorizeManagement(oldParent, stored); err == nil {
+		t.Fatal("original parent retained authority")
+	}
 }
 
 func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {

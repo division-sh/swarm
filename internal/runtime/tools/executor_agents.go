@@ -385,15 +385,20 @@ func (e *Executor) execAgentReconfigure(ctx context.Context, actor models.AgentC
 	if err := e.ValidateNativeToolAdmission(ctx, updatedCfg); err != nil {
 		return nil, err
 	}
-	authorityPlan, err := managedAgentAuthorityPlanForCandidate(manager, actor, updatedCfg)
-	if err != nil {
+	if _, err := managedAgentAuthorityPlanForCandidate(manager, actor, updatedCfg); err != nil {
 		return nil, fmt.Errorf("validate reconfigured agent authority: %w", err)
 	}
-	if err := manager.ReconfigureAgentTarget(in.AgentID, in.FlowInstance, in.Config); err != nil {
+	if err := manager.ReconfigureAgentTarget(in.AgentID, in.FlowInstance, in.Config, func(committed models.AgentConfig) error {
+		authorityPlan, err := managedAgentAuthorityPlanForCandidate(manager, actor, committed)
+		if err != nil {
+			return fmt.Errorf("validate committed agent authority: %w", err)
+		}
+		if err := applyManagedAgentAuthority(e.authority, authorityPlan); err != nil {
+			return fmt.Errorf("record committed agent authority: %w", err)
+		}
+		return nil
+	}); err != nil {
 		return nil, err
-	}
-	if err := applyManagedAgentAuthority(e.authority, authorityPlan); err != nil {
-		return nil, fmt.Errorf("record reconfigured agent authority: %w", err)
 	}
 	return map[string]any{"status": "reconfigured", "agent_id": in.AgentID}, nil
 }

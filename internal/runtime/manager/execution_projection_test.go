@@ -281,7 +281,7 @@ func TestExecutionProjectionReconfigureSerializesRestartSelection(t *testing.T) 
 
 	reconfigureDone := make(chan error, 1)
 	go func() {
-		reconfigureDone <- am.ReconfigureAgentTarget(agentID, "", models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.new"}})
+		reconfigureDone <- am.ReconfigureAgentTarget(agentID, "", models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.new"}}, nil)
 	}()
 	<-factory.secondStarted
 	restartDone := make(chan error, 1)
@@ -336,7 +336,7 @@ func TestExecutionProjectionReconfigureSerializesBothRunModes(t *testing.T) {
 			}
 			reconfigureDone := make(chan error, 1)
 			go func() {
-				reconfigureDone <- am.ReconfigureAgentTarget(agentID, "", models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.new"}})
+				reconfigureDone <- am.ReconfigureAgentTarget(agentID, "", models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.new"}}, nil)
 			}()
 			<-factory.secondStarted
 			runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
@@ -539,7 +539,7 @@ func TestExecutionProjectionDirectiveLeaseFencesReplacement(t *testing.T) {
 	}
 	reconfigureDone := make(chan error, 1)
 	go func() {
-		reconfigureDone <- am.ReconfigureAgentTarget(agentID, "", models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.new"}})
+		reconfigureDone <- am.ReconfigureAgentTarget(agentID, "", models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.new"}}, nil)
 	}()
 	select {
 	case <-runCtx.Done():
@@ -743,7 +743,7 @@ func TestExecutionProjectionBacklogLeaseFencesReplacement(t *testing.T) {
 	}
 	reconfigureDone := make(chan error, 1)
 	go func() {
-		reconfigureDone <- am.ReconfigureAgentTarget(agentID, "", models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.backlog"}})
+		reconfigureDone <- am.ReconfigureAgentTarget(agentID, "", models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.backlog"}}, nil)
 	}()
 	select {
 	case err := <-reconfigureDone:
