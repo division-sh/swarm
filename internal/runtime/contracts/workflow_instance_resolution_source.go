@@ -52,5 +52,5 @@ func topLevelPayloadSource(path string) bool {
 		return false
 	}
 	field := strings.TrimSpace(strings.TrimPrefix(path, "payload."))
-	return field != "" && !strings.Contains(field, ".")
+	return field != "" && !strings.Contains(field, ".") && path == "payload."+field
 }

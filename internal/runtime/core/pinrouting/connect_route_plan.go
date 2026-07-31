@@ -686,6 +686,9 @@ func EventSourcedInstanceKeyMaterialForConnectRoutePlan(plan ConnectRoutePlan, e
 	if instanceKey == nil || len(instanceKey.Fields) != 1 {
 		return ConnectRoutePlanInstanceKeyMaterial{}, ConnectFailureReceiverAddressRuleMissing
 	}
+	if len(instanceKey.Mappings) != 0 {
+		return ConnectRoutePlanInstanceKeyMaterial{}, ConnectFailureInstanceResolutionInvalid
+	}
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
 		return ConnectRoutePlanInstanceKeyMaterial{}, ConnectFailureAddressValueMissing
