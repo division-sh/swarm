@@ -703,9 +703,9 @@ func (s *failOncePipelineDispositionStore) Settle(
 	ctx context.Context,
 	claim runtimepipelineobligation.Claim,
 	disposition runtimepipelineobligation.Disposition,
-) error {
+) (runtimepipelineobligation.SettlementOutcome, error) {
 	if s.failures.CompareAndSwap(1, 0) {
-		return errors.New("injected workflow timer pipeline disposition failure")
+		return runtimepipelineobligation.SettlementOutcome{}, errors.New("injected workflow timer pipeline disposition failure")
 	}
 	return s.Store.Settle(ctx, claim, disposition)
 }

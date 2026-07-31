@@ -14,9 +14,11 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store"
@@ -57,14 +59,26 @@ func registerRunStatusEventCatalog(t *testing.T, registrar runStatusEventCatalog
 func newRunStatusEventBus(t *testing.T, pg *store.PostgresStore) (*runtimebus.EventBus, *worklifetime.RuntimeOccurrence) {
 	t.Helper()
 	workOwner := newSupervisorTestRuntimeOccurrence(t, runStatusTestBundleHash)
+	sourceFact := mustServeTestEphemeralBundleSourceFact(runStatusTestBundleHash)
+	authority, err := runtimedelivery.NewNormalExecutionAuthority(sourceFact, runStatusTestRuntimeInstanceID, 1)
+	if err != nil {
+		t.Fatalf("construct run status delivery authority: %v", err)
+	}
+	if err := pg.ActivateDeliveryAuthority(runStatusAuthorActivityContext(), authority); err != nil {
+		t.Fatalf("activate run status delivery authority: %v", err)
+	}
 	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
 		RuntimeInstanceID:   runStatusTestRuntimeInstanceID,
-		BundleSourceFact:    mustServeTestEphemeralBundleSourceFact(runStatusTestBundleHash),
+		BundleSourceFact:    sourceFact,
 		WorkOwner:           workOwner,
 		PipelineObligations: pg.PipelineObligations(),
+		DeliveryAuthority:   authority,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	if err := bus.SetDeliveryContinuationOwner(runtimebustest.NewDeliveryContinuationOwner(false)); err != nil {
+		t.Fatalf("install run status delivery continuation owner: %v", err)
 	}
 	return bus, workOwner
 }

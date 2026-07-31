@@ -197,7 +197,7 @@ func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testin
 			AgentIdentity:  identity,
 		}
 		storetest.CommitSemanticEventWithRoutes(t, ctx, sqliteStore, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
-		claimed, err := sqliteStore.ClaimAgentDelivery(ctx, evt, route)
+		claimed, err := storetest.ClaimDelivery(ctx, sqliteStore, evt, route)
 		if err != nil {
 			t.Fatalf("claim sqlite delivery %s: %v", fixture.id, err)
 		}
@@ -316,7 +316,7 @@ func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store obs
 	storetest.CommitSemanticEventWithRoutes(t, ctx, store, event,
 		[]events.DeliveryRoute{route},
 		runtimepipelineobligation.ScopeSubscribed)
-	claimed, err := store.ClaimAgentDelivery(ctx, event, route)
+	claimed, err := storetest.ClaimDelivery(ctx, store, event, route)
 	if err != nil {
 		t.Fatalf("ClaimAgentDelivery: %v", err)
 	}

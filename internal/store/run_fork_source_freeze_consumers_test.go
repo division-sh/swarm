@@ -116,7 +116,7 @@ func TestForkedSourceEventDeliveryAndReplayConsumersRefuseAndSelectorsExclude(t 
 				if err := commitSemanticEventFixtureWithAgents(ctx, fixture.postgres, event, []string{"freeze-agent"}); err != nil {
 					t.Fatal(err)
 				}
-				claimed, err := fixture.postgres.ClaimAgentDelivery(ctx, event, route)
+				claimed, err := claimDeliveryFixture(ctx, fixture.postgres, event, route)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -128,7 +128,7 @@ func TestForkedSourceEventDeliveryAndReplayConsumersRefuseAndSelectorsExclude(t 
 				if err := commitSemanticEventFixtureWithAgents(ctx, fixture.sqlite, event, []string{"freeze-agent"}); err != nil {
 					t.Fatal(err)
 				}
-				claimed, err := fixture.sqlite.ClaimAgentDelivery(ctx, event, route)
+				claimed, err := claimDeliveryFixture(ctx, fixture.sqlite, event, route)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -165,7 +165,11 @@ func assertForkedEventConsumerRefusals(t *testing.T, store any, event events.Eve
 	if !ok {
 		t.Fatalf("unsupported event store %T", store)
 	}
-	_, err := s.ClaimAgentDelivery(ctx, event, route)
+	snapshot, err := s.Snapshot(ctx, claim.DeliveryID())
+	if err != nil {
+		t.Fatalf("load frozen delivery authority: %v", err)
+	}
+	_, err = s.ClaimDelivery(ctx, snapshot.Authority, event, route)
 	requireForkedSourceRefusal(t, "delivery claim", err)
 	_, err = s.SettleSuccess(ctx, claim, nil, 0)
 	requireForkedSourceRefusal(t, "delivery settlement", err)

@@ -400,7 +400,7 @@ func appendProjectedTraceRow(out []RunDebugTraceRow, event RunDebugTraceRow, sna
 		}
 		row.DeliveryFailure = runtimefailures.CloneEnvelope(snapshot.Failure)
 		row.DeliveryRetryCount = snapshot.RetryCount
-		row.DeliveryRetryEligible = snapshot.RetryEligible
+		row.DeliveryRetryScheduled = snapshot.RetryScheduled
 		row.DeliveryTerminal = snapshot.Terminal()
 		row.ActiveSessionID = snapshot.ActiveSessionID
 		row.DeliveryCreatedAt = traceTimePtr(snapshot.CreatedAt)

@@ -12,6 +12,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/google/uuid"
@@ -19,11 +21,12 @@ import (
 )
 
 type managerDeliveryTestStore struct {
-	db      *sql.DB
-	adapter *runtimedelivery.Adapter
-	seedMu  sync.Mutex
-	mu      sync.RWMutex
-	events  map[string]events.Event
+	db        *sql.DB
+	adapter   *runtimedelivery.Adapter
+	authority runtimedelivery.ExecutionAuthority
+	seedMu    sync.Mutex
+	mu        sync.RWMutex
+	events    map[string]events.Event
 }
 
 func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
@@ -78,6 +81,15 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 			delivery_target_route TEXT NOT NULL,
 			delivery_context TEXT NOT NULL,
 			delivery_payload_projection TEXT NOT NULL,
+			execution_authority_kind TEXT NOT NULL,
+			authority_bundle_hash TEXT NOT NULL,
+			authority_bundle_source TEXT NOT NULL,
+			execution_authority_id TEXT NOT NULL,
+			execution_authority_generation INTEGER NOT NULL,
+			selected_execution_id TEXT,
+			selected_fork_run_id TEXT,
+			selected_execution_generation INTEGER,
+			continuation_handoff_at TIMESTAMP,
 			status TEXT NOT NULL,
 			retry_count INTEGER NOT NULL,
 			max_retries INTEGER NOT NULL,
@@ -165,7 +177,15 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 	if err != nil {
 		t.Fatalf("create manager delivery adapter: %v", err)
 	}
-	return &managerDeliveryTestStore{db: db, adapter: adapter, events: make(map[string]events.Event)}
+	source, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+	if err != nil {
+		t.Fatalf("create manager delivery source: %v", err)
+	}
+	authority, err := runtimedelivery.NewNormalExecutionAuthority(source, "manager-delivery-test", 1)
+	if err != nil {
+		t.Fatalf("create manager delivery authority: %v", err)
+	}
+	return &managerDeliveryTestStore{db: db, adapter: adapter, authority: authority, events: make(map[string]events.Event)}
 }
 
 func (s *managerDeliveryTestStore) seedAgentDeliveries(t *testing.T, agentID string, pending []events.Event) {
@@ -182,7 +202,7 @@ func (s *managerDeliveryTestStore) seedAgentDeliveries(t *testing.T, agentID str
 		if err != nil {
 			t.Fatalf("begin manager delivery seed: %v", err)
 		}
-		if _, err := s.adapter.CommitInitial(context.Background(), tx, evt.ID(), evt.RunID(), []events.DeliveryRoute{route}); err != nil {
+		if _, err := s.adapter.CommitInitial(context.Background(), tx, evt.ID(), evt.RunID(), []events.DeliveryRoute{route}, s.authority); err != nil {
 			_ = tx.Rollback()
 			t.Fatalf("seed manager delivery obligation %s: %v", evt.ID(), err)
 		}
@@ -195,7 +215,11 @@ func (s *managerDeliveryTestStore) seedAgentDeliveries(t *testing.T, agentID str
 	}
 }
 
-func (s *managerDeliveryTestStore) ensureDelivery(evt events.Event, route events.DeliveryRoute) error {
+func (s *managerDeliveryTestStore) ensureDelivery(
+	evt events.Event,
+	route events.DeliveryRoute,
+	authority runtimedelivery.ExecutionAuthority,
+) error {
 	s.seedMu.Lock()
 	defer s.seedMu.Unlock()
 	if _, err := uuid.Parse(evt.ID()); err != nil {
@@ -221,7 +245,7 @@ func (s *managerDeliveryTestStore) ensureDelivery(evt events.Event, route events
 	if err != nil {
 		return err
 	}
-	if _, err := s.adapter.CommitInitial(context.Background(), tx, evt.ID(), runID, []events.DeliveryRoute{route}); err != nil {
+	if _, err := s.adapter.CommitInitial(context.Background(), tx, evt.ID(), runID, []events.DeliveryRoute{route}, authority); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -259,65 +283,72 @@ func (s *managerDeliveryTestStore) mutate(ctx context.Context, fn func(context.C
 }
 
 func (s *managerDeliveryTestStore) claimExact(ctx context.Context, evt events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimedObligation, error) {
-	if err := s.ensureDelivery(evt, route); err != nil {
+	if err := s.ensureDelivery(evt, route, s.authority); err != nil {
 		return runtimedelivery.ClaimedObligation{}, err
 	}
-	var claimed runtimedelivery.ClaimedObligation
+	var result runtimedelivery.ClaimResult
 	err := s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
 		var err error
-		claimed, err = s.adapter.ClaimExact(story, tx, evt, route, runtimedelivery.DefaultLeaseTTL)
-		return err
-	})
-	return claimed, err
-}
-
-func (s *managerDeliveryTestStore) ClaimAgentDelivery(ctx context.Context, evt events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimedObligation, error) {
-	if route.SubscriberType != string(runtimedelivery.SubscriberAgent) {
-		return runtimedelivery.ClaimedObligation{}, fmt.Errorf("agent claim requires an agent route")
-	}
-	return s.claimExact(ctx, evt, route)
-}
-
-func (s *managerDeliveryTestStore) ClaimNodeDelivery(ctx context.Context, evt events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimedObligation, error) {
-	if route.SubscriberType != string(runtimedelivery.SubscriberNode) {
-		return runtimedelivery.ClaimedObligation{}, fmt.Errorf("node claim requires a node route")
-	}
-	return s.claimExact(ctx, evt, route)
-}
-
-func (s *managerDeliveryTestStore) claimBacklog(ctx context.Context, class runtimedelivery.SubscriberClass, identity runtimeagentidentity.Identity, subscriberID string, limit int) ([]runtimedelivery.AgentExecution, error) {
-	var claimed []runtimedelivery.ClaimedObligation
-	err := s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
-		var err error
-		if class == runtimedelivery.SubscriberAgent {
-			claimed, err = s.adapter.ClaimPendingAgent(story, tx, identity, limit, runtimedelivery.DefaultLeaseTTL)
-		} else {
-			claimed, err = s.adapter.ClaimPendingNode(story, tx, subscriberID, limit, runtimedelivery.DefaultLeaseTTL)
-		}
+		result, err = s.adapter.ClaimExactResult(story, tx, s.authority, evt, route, runtimedelivery.DefaultLeaseTTL)
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return runtimedelivery.ClaimedObligation{}, err
 	}
-	executions := make([]runtimedelivery.AgentExecution, 0, len(claimed))
+	claimed, ok := result.Acquired()
+	if !ok {
+		return runtimedelivery.ClaimedObligation{}, fmt.Errorf("manager test delivery disposition = %s", result.Disposition)
+	}
+	return claimed, nil
+}
+
+func (s *managerDeliveryTestStore) ActivateDeliveryAuthority(ctx context.Context, authority runtimedelivery.ExecutionAuthority) error {
+	s.authority = authority
+	return s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
+		return s.adapter.ActivateNormalAuthority(story, tx, authority)
+	})
+}
+
+func (s *managerDeliveryTestStore) InspectDeliveryRecovery(
+	ctx context.Context,
+	source runtimecorrelation.BundleSourceFact,
+) (runtimedelivery.RecoveryInventory, error) {
+	return s.adapter.InspectRecovery(ctx, s.db, source)
+}
+
+func (s *managerDeliveryTestStore) ClaimDelivery(ctx context.Context, authority runtimedelivery.ExecutionAuthority, evt events.Event, route events.DeliveryRoute) (result runtimedelivery.ClaimResult, err error) {
+	if err := s.ensureDelivery(evt, route, authority); err != nil {
+		return runtimedelivery.ClaimResult{}, err
+	}
+	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
+		result, err = s.adapter.ClaimExactResult(story, tx, authority, evt, route, runtimedelivery.DefaultLeaseTTL)
+		return err
+	})
+	return result, err
+}
+
+func (s *managerDeliveryTestStore) ScanDeliveryContinuations(ctx context.Context, authority runtimedelivery.ExecutionAuthority, cursor runtimedelivery.ContinuationCursor, limit int) (page runtimedelivery.ContinuationPage, err error) {
+	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
+		page, err = s.adapter.ScanContinuations(story, tx, authority, cursor, limit)
+		return err
+	})
+	if err != nil {
+		return runtimedelivery.ContinuationPage{}, err
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for _, obligation := range claimed {
-		evt, ok := s.events[obligation.Snapshot.EventID]
-		if !ok {
-			return nil, fmt.Errorf("manager delivery fixture event %s is missing", obligation.Snapshot.EventID)
-		}
-		executions = append(executions, runtimedelivery.AgentExecution{Event: evt, Snapshot: obligation.Snapshot, Claim: obligation.Claim})
+	for index := range page.Items {
+		page.Items[index].Event = s.events[page.Items[index].Snapshot.EventID]
 	}
-	return executions, nil
+	return page, nil
 }
 
-func (s *managerDeliveryTestStore) ClaimAgentBacklog(ctx context.Context, identity runtimeagentidentity.Identity, limit int) ([]runtimedelivery.AgentExecution, error) {
-	return s.claimBacklog(ctx, runtimedelivery.SubscriberAgent, identity, identity.AgentID(), limit)
-}
-
-func (s *managerDeliveryTestStore) ClaimNodeBacklog(ctx context.Context, nodeID string, limit int) ([]runtimedelivery.NodeExecution, error) {
-	return s.claimBacklog(ctx, runtimedelivery.SubscriberNode, runtimeagentidentity.Identity{}, nodeID, limit)
+func (s *managerDeliveryTestStore) ObserveDeliveryContinuation(
+	ctx context.Context,
+	authority runtimedelivery.ExecutionAuthority,
+	deliveryID string,
+) (runtimedelivery.ContinuationObservation, error) {
+	return s.adapter.ObserveContinuation(ctx, s.db, authority, deliveryID)
 }
 
 func (s *managerDeliveryTestStore) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (snapshot runtimedelivery.Snapshot, err error) {
@@ -379,7 +410,7 @@ func (s *managerDeliveryTestStore) TerminalizeRun(ctx context.Context, runID, re
 func (s *managerDeliveryTestStore) markDelivered(t *testing.T, evt events.Event, agentID string) {
 	t.Helper()
 	ctx := testAuthorActivityContext(context.Background())
-	claimed, err := s.ClaimAgentDelivery(ctx, evt, managerAgentDeliveryRoute(agentID))
+	claimed, err := s.claimExact(ctx, evt, events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: agentID})
 	if err != nil {
 		t.Fatalf("claim delivered manager fixture event %s: %v", evt.ID(), err)
 	}
@@ -393,8 +424,17 @@ func (s *managerDeliveryTestStore) markDelivered(t *testing.T, evt events.Event,
 
 func (s *managerDeliveryTestStore) markInProgress(t *testing.T, evt events.Event, agentID string) {
 	t.Helper()
-	if _, err := s.ClaimAgentDelivery(testAuthorActivityContext(context.Background()), evt, managerAgentDeliveryRoute(agentID)); err != nil {
+	result, err := s.ClaimDelivery(
+		testAuthorActivityContext(context.Background()),
+		s.authority,
+		evt,
+		managerAgentDeliveryRoute(agentID),
+	)
+	if err != nil {
 		t.Fatalf("claim in-progress manager fixture event %s: %v", evt.ID(), err)
+	}
+	if _, ok := result.Acquired(); !ok {
+		t.Fatalf("claim in-progress manager fixture event %s disposition = %s", evt.ID(), result.Disposition)
 	}
 }
 
@@ -424,10 +464,49 @@ func managerAgentDeliveryContext(ctx context.Context, agentID string) context.Co
 }
 
 func managerAgentClaimContext(ctx context.Context, claim runtimedelivery.Claim, agentID string) context.Context {
-	return runtimedelivery.WithRoute(runtimedelivery.WithClaim(ctx, claim), managerAgentDeliveryRoute(agentID))
+	return runtimedelivery.WithClaim(managerAgentDeliveryContext(ctx, agentID), claim)
 }
 
-func (s *managerDeliveryTestStore) makeRetryEligible(t *testing.T, evt events.Event, agentID string) {
+func managerClaimedDeliveryContext(
+	t *testing.T,
+	am *AgentManager,
+	ctx context.Context,
+	evt events.Event,
+	agentID string,
+) context.Context {
+	t.Helper()
+	ctx = managerAgentDeliveryContext(ctx, agentID)
+	store, ok := am.deliveryStore.(interface {
+		ClaimDelivery(context.Context, runtimedelivery.ExecutionAuthority, events.Event, events.DeliveryRoute) (runtimedelivery.ClaimResult, error)
+		managerTestDeliveryAuthority() runtimedelivery.ExecutionAuthority
+	})
+	if !ok {
+		t.Fatal("manager test delivery store does not expose typed claim authority")
+	}
+	authority := store.managerTestDeliveryAuthority()
+	if admission, admitted := managedexecution.FromContext(ctx); admitted {
+		var err error
+		authority, err = runtimedelivery.NewExecutionAuthority(authority.BundleSource(), admission)
+		if err != nil {
+			t.Fatalf("construct managed delivery authority: %v", err)
+		}
+	}
+	result, err := store.ClaimDelivery(ctx, authority, evt, managerAgentDeliveryRoute(agentID))
+	if err != nil {
+		t.Fatalf("claim manager test delivery: %v", err)
+	}
+	claimed, ok := result.Acquired()
+	if !ok {
+		t.Fatalf("manager test delivery claim disposition = %s", result.Disposition)
+	}
+	return runtimedelivery.WithClaim(ctx, claimed.Claim)
+}
+
+func (s *managerDeliveryTestStore) managerTestDeliveryAuthority() runtimedelivery.ExecutionAuthority {
+	return s.authority
+}
+
+func (s *managerDeliveryTestStore) makeDeliveryDueNow(t *testing.T, evt events.Event, agentID string) {
 	t.Helper()
 	identity, err := managerAgentDeliveryRoute(agentID).Identity()
 	if err != nil {

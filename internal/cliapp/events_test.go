@@ -122,7 +122,7 @@ func TestEventViewUsesEventGetV1RPC(t *testing.T) {
 		"reason_code=retry_exhausted",
 		"failure=platform.retry_exhausted/retry_exhausted",
 		"retry_count=2",
-		"retry_eligible=false",
+		"retry_scheduled=false",
 		"terminal=true",
 		"delivery_dead_letter.dead_letter_id=delivery-dead-1",
 		"dead_letter.dead_letter_id=dead-1",
@@ -577,18 +577,18 @@ func TestEventsMapFailureExitCodes(t *testing.T) {
 			wantStderr: "retry_count is required",
 		},
 		{
-			name: "malformed view delivery retry eligible exits three",
+			name: "malformed view delivery retry scheduled exits three",
 			args: []string{"event", "view", "event-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
 				event := validEventObservationEvent("event-1")
 				delivery := event["deliveries"].([]any)[0].(map[string]any)
-				delete(delivery, "retry_eligible")
+				delete(delivery, "retry_scheduled")
 				writeJSONRPCResult(t, w, req.ID, event)
 			},
 			wantCode:   3,
-			wantStderr: "retry_eligible is required",
+			wantStderr: "retry_scheduled is required",
 		},
 		{
 			name: "malformed view delivery terminal exits three",
@@ -837,7 +837,7 @@ func validEventObservationEvent(eventID string) map[string]any {
 				"reason_code":     "retry_exhausted",
 				"failure":         testRuntimeFailureClass(runtimefailures.ClassRetryExhausted, "retry_exhausted"),
 				"retry_count":     2,
-				"retry_eligible":  false,
+				"retry_scheduled": false,
 				"terminal":        true,
 				"created_at":      "2026-05-13T10:00:02Z",
 				"started_at":      "2026-05-13T10:00:03Z",

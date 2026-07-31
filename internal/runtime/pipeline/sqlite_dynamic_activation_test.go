@@ -151,6 +151,7 @@ func newSQLiteDynamicActivationCoordinator(t *testing.T, db *sql.DB, workflowSto
 			},
 		},
 	})
+	configurePipelineTestDeliveryOwner(t, pc)
 	return pc, bus
 }
 

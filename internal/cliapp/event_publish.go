@@ -60,7 +60,7 @@ type eventPublishDelivery struct {
 	Failure        *runtimefailures.Envelope `json:"failure,omitempty"`
 	Attempt        int                       `json:"attempt"`
 	RetryCount     int                       `json:"retry_count"`
-	RetryEligible  bool                      `json:"retry_eligible"`
+	RetryScheduled bool                      `json:"retry_scheduled"`
 	Terminal       bool                      `json:"terminal"`
 	CreatedAt      string                    `json:"created_at,omitempty"`
 	StartedAt      string                    `json:"started_at,omitempty"`
@@ -305,7 +305,7 @@ func writeEventPublishResult(out io.Writer, eventName string, result eventPublis
 		len(result.Deliveries),
 	)
 	for _, delivery := range result.Deliveries {
-		fmt.Fprintf(out, "delivery delivery_id=%s subscriber=%s/%s status=%s session_id=%s attempt=%d retry_count=%d retry_eligible=%t terminal=%t reason_code=%s failure=%s dead_letters=%d\n",
+		fmt.Fprintf(out, "delivery delivery_id=%s subscriber=%s/%s status=%s session_id=%s attempt=%d retry_count=%d retry_scheduled=%t terminal=%t reason_code=%s failure=%s dead_letters=%d\n",
 			delivery.DeliveryID,
 			delivery.SubscriberType,
 			delivery.SubscriberID,
@@ -313,7 +313,7 @@ func writeEventPublishResult(out io.Writer, eventName string, result eventPublis
 			eventObservationDash(delivery.SessionID),
 			delivery.Attempt,
 			delivery.RetryCount,
-			delivery.RetryEligible,
+			delivery.RetryScheduled,
 			delivery.Terminal,
 			eventObservationDash(delivery.ReasonCode),
 			eventObservationFailureSummary(delivery.Failure),

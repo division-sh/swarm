@@ -9,8 +9,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
@@ -99,8 +102,55 @@ func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimes
 	if err != nil {
 		return managedExecutionActivation{}, err
 	}
-	result := managedExecutionActivation{Admission: admission}
+	deliveryAuthority, err := runtimedelivery.NewExecutionAuthority(rt.Options.BundleSourceFact, admission)
+	if err != nil {
+		return managedExecutionActivation{}, err
+	}
 	ctx = managedexecution.WithAdmission(ctx, admission)
+	if rt.Bus == nil {
+		return managedExecutionActivation{}, fmt.Errorf("runtime delivery authority requires event bus")
+	}
+	if err := rt.Bus.SetDeliveryAuthority(deliveryAuthority); err != nil {
+		return managedExecutionActivation{}, err
+	}
+	var deliveryCoordinator *runtimedeliverycontinuation.Coordinator
+	if rt.Stores.DeliveryStore != nil {
+		if err := rt.Stores.DeliveryStore.ActivateDeliveryAuthority(ctx, deliveryAuthority); err != nil {
+			return managedExecutionActivation{}, fmt.Errorf("activate delivery execution authority: %w", err)
+		}
+		coordinator, err := runtimedeliverycontinuation.New(
+			rt.Stores.DeliveryStore,
+			deliveryAuthority,
+			rt.workOccurrence,
+			rt.Bus,
+			func(reportCtx context.Context, reportErr error) {
+				if reportErr == nil {
+					return
+				}
+				if rt.Logger != nil {
+					handleRuntimeLogPersistenceError("delivery-continuation", "continuation_failed", rt.Logger.Error(
+						reportCtx, "delivery-continuation", "continuation_failed", nil, reportErr,
+					))
+				}
+			},
+		)
+		if err != nil {
+			return managedExecutionActivation{}, err
+		}
+		if err := rt.Bus.SetDeliveryContinuationOwner(coordinator); err != nil {
+			return managedExecutionActivation{}, err
+		}
+		if rt.Stores.PipelineStore != nil && rt.Stores.PipelineStore.Enabled() {
+			registration, err := rt.Stores.PipelineStore.RegisterDeliveryContinuationSignal(deliveryAuthority, rt.Bus.SignalDeliveryContinuations)
+			if err != nil {
+				return managedExecutionActivation{}, fmt.Errorf("register delivery continuation signal owner: %w", err)
+			}
+			rt.deliverySignalRegistration = registration
+		}
+		rt.deliveryContinuations = coordinator
+		deliveryCoordinator = coordinator
+	}
+	result := managedExecutionActivation{Admission: admission}
 	rt.lifecycleMu.Lock()
 	rt.startupAdmission = admission
 	if rt.startCtx != nil {
@@ -108,11 +158,20 @@ func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimes
 		ctx = rt.startCtx
 	}
 	rt.lifecycleMu.Unlock()
-	if rt.Manager == nil {
-		return result, nil
-	}
 	if replay {
-		result.ReplaySummary, result.ReplayErr = rt.Manager.ReplayAfterStartupAdmission(ctx, true)
+		if rt.Stores.DeliveryStore != nil {
+			result.ReplayErr = runtimepipeline.NewRecoveryManagerWith(rt.Bus).RecoverToExhaustion(ctx)
+			if result.ReplayErr != nil {
+				return result, fmt.Errorf("recover pipeline obligations before delivery enumeration: %w", result.ReplayErr)
+			}
+		} else if rt.Manager != nil {
+			result.ReplaySummary, result.ReplayErr = rt.Manager.RecoverAfterStartupAdmission(ctx)
+		}
+	}
+	if deliveryCoordinator != nil {
+		if err := deliveryCoordinator.Start(ctx); err != nil {
+			return managedExecutionActivation{}, err
+		}
 	}
 	return result, nil
 }

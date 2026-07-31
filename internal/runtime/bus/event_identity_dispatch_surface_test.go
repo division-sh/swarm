@@ -11,7 +11,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -20,6 +19,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -109,7 +109,7 @@ func TestCompleteEventSnapshotDispatchesThroughManagerBacklogOnSQLiteAndPostgres
 			if err != nil {
 				t.Fatalf("claim pipeline obligation: %v", err)
 			}
-			if err := fixture.store.PipelineObligations().Settle(
+			if _, err := fixture.store.PipelineObligations().Settle(
 				fixture.ctx,
 				work.Claim,
 				runtimepipelineobligation.Acknowledged("pipeline_persisted"),
@@ -121,17 +121,88 @@ func TestCompleteEventSnapshotDispatchesThroughManagerBacklogOnSQLiteAndPostgres
 				t.Fatalf("%s schema admitted negative chain_depth", backend)
 			}
 			seen := make(chan events.Event, 1)
-			manager := fixture.newRecordingManager(t, seen)
+			manager, workOwner := fixture.newRecordingManager(t, seen)
 			managerCtx := fixture.managedContext(t)
 			if _, err := manager.HydrateForStartup(managerCtx); err != nil {
 				t.Fatalf("hydrate manager: %v", err)
 			}
-			if _, err := manager.ReplayBacklog(managerCtx, runtimeagentcontrol.ReplayBacklogRequest{
-				AgentID: fixture.agentID, FlowInstance: fixture.identity.FlowInstance(),
-			}); err != nil {
-				t.Fatalf("manager backlog replay: %v", err)
+			if err := manager.Run(managerCtx); err != nil {
+				t.Fatalf("run manager: %v", err)
 			}
+			t.Cleanup(func() {
+				if err := manager.Shutdown(); err != nil {
+					t.Errorf("shutdown complete-event manager: %v", err)
+				}
+			})
+			fixture.startDeliveryContinuations(t, managerCtx, workOwner)
 			assertCompleteEventDelivery(t, seen, fixture.event)
+		})
+	}
+}
+
+func TestNormalDeliveryContinuationAcceptCommittedIsAtomicOnSQLiteAndPostgres(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := newCompleteEventDispatchFixture(t, backend, false)
+			route := events.DeliveryRoute{
+				SubscriberType: string(runtimedelivery.SubscriberAgent),
+				SubscriberID:   fixture.agentID,
+				AgentIdentity:  fixture.identity,
+			}
+			proof, err := fixture.store.ProveHandoff(fixture.ctx, fixture.event.ID(), route)
+			if err != nil {
+				t.Fatalf("prove normal committed handoff: %v", err)
+			}
+			snapshot, err := fixture.store.Snapshot(fixture.ctx, proof.DeliveryID())
+			if err != nil {
+				t.Fatalf("load normal delivery authority: %v", err)
+			}
+			process := worklifetime.NewProcess()
+			owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+				RuntimeInstanceID: snapshot.Authority.ExecutionID(),
+				BundleHash:        "normal-accept-atomicity",
+			})
+			if err != nil {
+				t.Fatalf("create normal delivery work owner: %v", err)
+			}
+			t.Cleanup(func() {
+				if _, err := owner.RetireAndWait(context.Background()); err != nil {
+					t.Errorf("retire normal delivery work owner: %v", err)
+				}
+				process.Retire()
+				if _, err := process.Join(context.Background()); err != nil {
+					t.Errorf("join normal delivery process owner: %v", err)
+				}
+			})
+			coordinator, err := runtimedeliverycontinuation.New(
+				fixture.store,
+				snapshot.Authority,
+				owner,
+				fixture.bus,
+				nil,
+			)
+			if err != nil {
+				t.Fatalf("construct normal delivery coordinator: %v", err)
+			}
+			if err := coordinator.AcceptCommitted([]runtimedelivery.DurableHandoffProof{
+				proof,
+				runtimedelivery.DurableHandoffProof{},
+			}); err == nil {
+				t.Fatal("partially invalid normal handoff batch succeeded")
+			}
+			if _, err := coordinator.Acquire(proof.DeliveryID()); err == nil {
+				t.Fatal("normal handoff valid prefix transferred before whole-batch validation")
+			}
+			if err := coordinator.AcceptCommitted([]runtimedelivery.DurableHandoffProof{proof}); err != nil {
+				t.Fatalf("accept valid normal handoff: %v", err)
+			}
+			capability, err := coordinator.Acquire(proof.DeliveryID())
+			if err != nil {
+				t.Fatalf("acquire accepted normal continuation: %v", err)
+			}
+			if resolution, err := capability.Resolve(fixture.ctx, worklifetime.DeliveryContinuationReturn); err != nil || resolution != worklifetime.DeliveryContinuationReturned {
+				t.Fatalf("return accepted normal continuation: %v", err)
+			}
 		})
 	}
 }
@@ -445,7 +516,10 @@ func (f completeEventDispatchFixture) managedContext(t *testing.T) context.Conte
 	return managedexecution.WithAdmission(f.ctx, admission)
 }
 
-func (f completeEventDispatchFixture) newRecordingManager(t *testing.T, seen chan<- events.Event) *runtimemanager.AgentManager {
+func (f completeEventDispatchFixture) newRecordingManager(
+	t *testing.T,
+	seen chan<- events.Event,
+) (*runtimemanager.AgentManager, *worklifetime.RuntimeOccurrence) {
 	t.Helper()
 	process := worklifetime.NewProcess()
 	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
@@ -464,9 +538,62 @@ func (f completeEventDispatchFixture) newRecordingManager(t *testing.T, seen cha
 			t.Errorf("join complete-event process owner: %v", err)
 		}
 	})
-	return runtimemanager.NewAgentManagerWithOptions(f.bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+	manager := runtimemanager.NewAgentManagerWithOptions(f.bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return &completeEventRecordingAgent{id: cfg.ID, subscriptions: []events.EventType{f.event.Type()}, seen: seen}, nil
 	}, runtimemanager.AgentManagerOptions{DeliveryStore: f.store, WorkOwner: owner}, f.store)
+	return manager, owner
+}
+
+func (f completeEventDispatchFixture) startDeliveryContinuations(
+	t *testing.T,
+	ctx context.Context,
+	workOwner *worklifetime.RuntimeOccurrence,
+) {
+	t.Helper()
+	route := events.DeliveryRoute{
+		SubscriberType: string(runtimedelivery.SubscriberAgent),
+		SubscriberID:   f.agentID,
+		AgentIdentity:  f.identity,
+	}
+	deliveryID, err := runtimedelivery.DeliveryID(f.event.ID(), route)
+	if err != nil {
+		t.Fatalf("derive complete-event delivery identity: %v", err)
+	}
+	snapshot, err := f.store.Snapshot(ctx, deliveryID)
+	if err != nil {
+		t.Fatalf("load complete-event delivery authority: %v", err)
+	}
+	if err := f.store.ActivateDeliveryAuthority(ctx, snapshot.Authority); err != nil {
+		t.Fatalf("activate complete-event delivery authority: %v", err)
+	}
+	if err := f.bus.SetDeliveryAuthority(snapshot.Authority); err != nil {
+		t.Fatalf("configure complete-event delivery authority: %v", err)
+	}
+	coordinator, err := runtimedeliverycontinuation.New(
+		f.store,
+		snapshot.Authority,
+		workOwner,
+		f.bus,
+		func(_ context.Context, reportErr error) {
+			t.Errorf("complete-event delivery continuation failed: %v", reportErr)
+		},
+	)
+	if err != nil {
+		t.Fatalf("construct complete-event delivery coordinator: %v", err)
+	}
+	if err := f.bus.SetDeliveryContinuationOwner(coordinator); err != nil {
+		t.Fatalf("configure complete-event delivery coordinator: %v", err)
+	}
+	if err := coordinator.Start(ctx); err != nil {
+		t.Fatalf("start complete-event delivery coordinator: %v", err)
+	}
+	t.Cleanup(func() {
+		retireCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := coordinator.Retire(retireCtx); err != nil {
+			t.Errorf("retire complete-event delivery coordinator: %v", err)
+		}
+	})
 }
 
 type completeEventRecordingAgent struct {

@@ -423,6 +423,27 @@ type GlobalWorkPresence struct {
 	OldestEligibleEvent time.Time
 }
 
+// SettlementOutcome records durable truth independently from auxiliary
+// transaction/session cleanup errors. Only the selected-store owner can mint a
+// committed outcome.
+type SettlementOutcome struct {
+	committed                bool
+	deliveryHandoffCommitted bool
+}
+
+func CommittedSettlement(deliveryHandoffCommitted bool) SettlementOutcome {
+	return SettlementOutcome{
+		committed:                true,
+		deliveryHandoffCommitted: deliveryHandoffCommitted,
+	}
+}
+
+func (o SettlementOutcome) Committed() bool { return o.committed }
+
+func (o SettlementOutcome) DeliveryHandoffCommitted() bool {
+	return o.committed && o.deliveryHandoffCommitted
+}
+
 func (p GlobalWorkPresence) Any() bool {
 	return p.ProcessingEligible || p.DecisionRouteDue
 }
@@ -504,7 +525,7 @@ type Store interface {
 	ClaimBatch(context.Context, Scan, int) (ScanBatch, error)
 	CloseScan(context.Context, Scan) error
 	MarkDecisionProcessed(context.Context, Claim) error
-	Settle(context.Context, Claim, Disposition) error
+	Settle(context.Context, Claim, Disposition) (SettlementOutcome, error)
 	Release(context.Context, Claim) error
 	GlobalWorkPresence(context.Context) (GlobalWorkPresence, error)
 	SummarizeRun(context.Context, string) (RunSummary, error)

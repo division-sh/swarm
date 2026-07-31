@@ -59,11 +59,11 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 		t.Fatalf("deliveries len = %d, want 2", len(got.Deliveries))
 	}
 	agentDelivery := got.Deliveries[0]
-	if agentDelivery.SubscriberType != "agent" || agentDelivery.RetryCount != 0 || agentDelivery.RetryEligible || !agentDelivery.Terminal || len(agentDelivery.DeadLetters) != 1 {
+	if agentDelivery.SubscriberType != "agent" || agentDelivery.RetryCount != 0 || agentDelivery.RetryScheduled || !agentDelivery.Terminal || len(agentDelivery.DeadLetters) != 1 {
 		t.Fatalf("agent delivery evidence = %#v", agentDelivery)
 	}
 	nodeDelivery := got.Deliveries[1]
-	if nodeDelivery.SubscriberType != "node" || nodeDelivery.RetryCount != 1 || nodeDelivery.RetryEligible || nodeDelivery.Terminal || nodeDelivery.Failure == nil || nodeDelivery.Failure.Detail.Code != "node_failed" {
+	if nodeDelivery.SubscriberType != "node" || nodeDelivery.RetryCount != 1 || !nodeDelivery.RetryScheduled || nodeDelivery.Terminal || nodeDelivery.Failure == nil || nodeDelivery.Failure.Detail.Code != "node_failed" {
 		t.Fatalf("node delivery evidence = %#v", nodeDelivery)
 	}
 

@@ -28,6 +28,7 @@ type exactHandoffProofStore struct {
 	runtimedelivery.Store
 	db          *sql.DB
 	adapter     *runtimedelivery.Adapter
+	authority   runtimedelivery.ExecutionAuthority
 	mu          sync.Mutex
 	attempts    int
 	binds       int
@@ -129,6 +130,15 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 			delivery_target_route BLOB NOT NULL,
 			delivery_context BLOB NOT NULL,
 			delivery_payload_projection BLOB NOT NULL,
+			execution_authority_kind TEXT NOT NULL,
+			authority_bundle_hash TEXT NOT NULL,
+			authority_bundle_source TEXT NOT NULL,
+			execution_authority_id TEXT NOT NULL,
+			execution_authority_generation INTEGER NOT NULL,
+			selected_execution_id TEXT,
+			selected_fork_run_id TEXT,
+			selected_execution_generation INTEGER,
+			continuation_handoff_at TIMESTAMP,
 			status TEXT NOT NULL,
 			retry_count INTEGER NOT NULL,
 			max_retries INTEGER NOT NULL,
@@ -217,7 +227,15 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 	if err != nil {
 		t.Fatalf("create exact handoff adapter: %v", err)
 	}
-	return &exactHandoffProofStore{db: db, adapter: adapter, failOnce: failOnce}
+	source, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+	if err != nil {
+		t.Fatalf("create exact handoff source: %v", err)
+	}
+	authority, err := runtimedelivery.NewNormalExecutionAuthority(source, "exact-handoff-test", 1)
+	if err != nil {
+		t.Fatalf("create exact handoff authority: %v", err)
+	}
+	return &exactHandoffProofStore{db: db, adapter: adapter, authority: authority, failOnce: failOnce}
 }
 
 func (s *exactHandoffProofStore) seed(t *testing.T, eventID, runID string, route events.DeliveryRoute) {
@@ -231,7 +249,7 @@ func (s *exactHandoffProofStore) seed(t *testing.T, eventID, runID string, route
 	if err != nil {
 		t.Fatalf("begin exact handoff obligation: %v", err)
 	}
-	if _, err := s.adapter.CommitInitial(ctx, tx, eventID, runID, []events.DeliveryRoute{route}); err != nil {
+	if _, err := s.adapter.CommitInitial(ctx, tx, eventID, runID, []events.DeliveryRoute{route}, s.authority); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("commit exact handoff obligation: %v", err)
 	}
@@ -274,10 +292,15 @@ func (s *exactHandoffProofStore) claim(t *testing.T, eventID, runID string, rout
 		_ = tx.Rollback()
 		t.Fatalf("begin exact claim author activity: %v", err)
 	}
-	claimed, err := s.adapter.ClaimExact(ctx, tx, evt, route, runtimedelivery.DefaultLeaseTTL)
+	result, err := s.adapter.ClaimExactResult(ctx, tx, s.authority, evt, route, runtimedelivery.DefaultLeaseTTL)
 	if err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("claim exact delivery: %v", err)
+	}
+	claimed, ok := result.Acquired()
+	if !ok {
+		_ = tx.Rollback()
+		t.Fatalf("claim exact delivery disposition = %s", result.Disposition)
 	}
 	if err := runtimeauthoractivity.Finalize(ctx); err != nil {
 		_ = tx.Rollback()
@@ -298,6 +321,82 @@ func deliverToTestAgent(ctx context.Context, eb *EventBus, evt events.Event, ide
 	return eb.deliverToRecipientsWithRoutes(ctx, evt, []string{identity.AgentID()}, []events.DeliveryRoute{route})
 }
 
+func TestSelectedDeliveryTransfersAcceptCommittedIsAtomic(t *testing.T) {
+	store := newExactHandoffProofStore(t, false)
+	forkRunID := uuid.NewString()
+	authority, err := runtimedelivery.NewSelectedExecutionAuthority(
+		store.authority.BundleSource(),
+		uuid.NewString(),
+		forkRunID,
+		1,
+	)
+	if err != nil {
+		t.Fatalf("construct selected delivery authority: %v", err)
+	}
+	store.authority = authority
+	eventID := uuid.NewString()
+	route := events.DeliveryRoute{
+		SubscriberType: "agent",
+		SubscriberID:   "selected-agent",
+		AgentIdentity:  testAgentRouteIdentity(t, "selected-agent", ""),
+	}
+	store.seed(t, eventID, forkRunID, route)
+	proof, err := store.ProveHandoff(context.Background(), eventID, route)
+	if err != nil {
+		t.Fatalf("prove selected committed handoff: %v", err)
+	}
+	owner, err := newSelectedDeliveryTransfers(authority)
+	if err != nil {
+		t.Fatalf("construct selected delivery transfers: %v", err)
+	}
+
+	if err := owner.AcceptCommitted([]runtimedelivery.DurableHandoffProof{
+		proof,
+		runtimedelivery.DurableHandoffProof{},
+	}); err == nil {
+		t.Fatal("partially invalid selected handoff batch succeeded")
+	}
+	if _, err := owner.Acquire(proof.DeliveryID()); err == nil {
+		t.Fatal("selected handoff valid prefix transferred before whole-batch validation")
+	}
+	if err := owner.AcceptCommitted([]runtimedelivery.DurableHandoffProof{proof}); err != nil {
+		t.Fatalf("accept selected committed handoff: %v", err)
+	}
+	capability, err := owner.Acquire(proof.DeliveryID())
+	if err != nil {
+		t.Fatalf("acquire selected delivery carrier: %v", err)
+	}
+	if resolution, err := capability.Resolve(context.Background(), worklifetime.DeliveryContinuationReturn); err != nil || resolution != worklifetime.DeliveryContinuationReturned {
+		t.Fatalf("return selected delivery carrier: %v", err)
+	}
+	reacquired, err := owner.Acquire(proof.DeliveryID())
+	if err != nil {
+		t.Fatalf("reacquire returned selected delivery: %v", err)
+	}
+	if resolution, err := reacquired.Resolve(context.Background(), worklifetime.DeliveryContinuationConsume); err != nil || resolution != worklifetime.DeliveryContinuationConsumed {
+		t.Fatalf("consume selected delivery into attempt: %v", err)
+	}
+	if err := owner.Release(proof.DeliveryID()); err != nil {
+		t.Fatalf("release selected delivery attempt: %v", err)
+	}
+	if _, err := owner.Acquire(proof.DeliveryID()); err == nil {
+		t.Fatal("released selected delivery retained a process-local owner")
+	}
+	if err := owner.AcceptCommitted([]runtimedelivery.DurableHandoffProof{proof}); err != nil {
+		t.Fatalf("reaccept selected delivery for terminal race: %v", err)
+	}
+	terminalCarrier, err := owner.Acquire(proof.DeliveryID())
+	if err != nil {
+		t.Fatalf("acquire selected terminal-race carrier: %v", err)
+	}
+	if err := owner.Release(proof.DeliveryID()); err != nil {
+		t.Fatalf("terminalize selected carrier: %v", err)
+	}
+	if resolution, err := terminalCarrier.Resolve(context.Background(), worklifetime.DeliveryContinuationConsume); err != nil || resolution != worklifetime.DeliveryContinuationTerminal {
+		t.Fatalf("selected terminal-race resolution = %d, %v; want terminal", resolution, err)
+	}
+}
+
 func TestEventBusAgentRouteReplacementWaitsForExactDequeuedPredecessor(t *testing.T) {
 	eb, err := newScopedTestEventBus(nil)
 	if err != nil {
@@ -309,7 +408,8 @@ func TestEventBusAgentRouteReplacementWaitsForExactDequeuedPredecessor(t *testin
 	if oldCh == nil {
 		t.Fatal("predecessor route was not installed")
 	}
-	evt := eventtest.RuntimeControl("work-old", events.EventType("test.work"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
+	oldEventID := uuid.NewString()
+	evt := eventtest.RuntimeControl(oldEventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now())
 	if err := deliverToTestAgent(context.Background(), eb, evt, oldToken.Identity); err != nil {
 		t.Fatalf("deliver predecessor event: %v", err)
 	}
@@ -337,12 +437,13 @@ func TestEventBusAgentRouteReplacementWaitsForExactDequeuedPredecessor(t *testin
 		t.Fatal("replacement did not publish an exact fresh route")
 	}
 
-	newEvent := eventtest.RuntimeControl("work-new", events.EventType("test.work"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
+	newEventID := uuid.NewString()
+	newEvent := eventtest.RuntimeControl(newEventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now())
 	if err := deliverToTestAgent(context.Background(), eb, newEvent, newToken.Identity); err != nil {
 		t.Fatalf("deliver successor event: %v", err)
 	}
 	newDelivery := <-newCh
-	if newDelivery.ID() != "work-new" {
+	if newDelivery.ID() != newEventID {
 		t.Fatalf("successor event id = %q", newDelivery.ID())
 	}
 	if err := newDelivery.Complete(); err != nil {
@@ -357,7 +458,7 @@ func TestEventBusAgentRouteRemovalWaitsForDequeuedWork(t *testing.T) {
 	}
 	token := testAgentLifecycleToken(t, "agent-a", "", 7, 1)
 	ch := eb.ReplaceAgentRoute(token, testAgentSubscriptionAdmission(t, token.AgentID, events.EventType("test.work")))
-	evt := eventtest.RuntimeControl("work-1", events.EventType("test.work"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
+	evt := eventtest.RuntimeControl(uuid.NewString(), events.EventType("test.work"), "test", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now())
 	if err := deliverToTestAgent(context.Background(), eb, evt, token.Identity); err != nil {
 		t.Fatalf("deliver event: %v", err)
 	}
@@ -415,7 +516,11 @@ func TestEventBusSnapshottedAgentRouteSendLinearizesWithRemoval(t *testing.T) {
 		removed := make(chan struct{})
 		go func(recipient agentRecipient) {
 			<-start
-			sendResult <- recipient.send(context.Background(), evt, route)
+			result, err := recipient.send(context.Background(), evt, route, nil)
+			if err != nil {
+				t.Errorf("generation %d send: %v", generation, err)
+			}
+			sendResult <- result
 		}(recipients[0])
 		go func() {
 			<-start
@@ -443,8 +548,63 @@ func TestAgentRecipientWithoutExactLifecycleHandleFailsClosed(t *testing.T) {
 	recipient := agentRecipient{identity: testAgentRouteIdentity(t, "orphan", ""), kind: inMemorySubscriberAgent}
 	evt := eventtest.RuntimeControl("orphan-send", events.EventType("test.work"), "test", "", []byte(`{}`), 0,
 		"run-1", "", events.EventEnvelope{}, time.Now())
-	if result := recipient.send(context.Background(), evt, events.DeliveryRoute{}); result != agentRouteSendInactive {
+	result, err := recipient.send(context.Background(), evt, events.DeliveryRoute{}, nil)
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if result != agentRouteSendInactive {
 		t.Fatalf("send result = %v, want inactive without exact lifecycle handle", result)
+	}
+}
+
+func TestInternalSubscriptionInactiveSendReturnsExactContinuation(t *testing.T) {
+	evt := eventtest.RuntimeControl(
+		uuid.NewString(),
+		events.EventType("test.work"),
+		"test",
+		"",
+		[]byte(`{}`),
+		0,
+		uuid.NewString(),
+		"",
+		events.EventEnvelope{},
+		time.Now().UTC(),
+	)
+	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-a"}
+	for _, test := range []struct {
+		name   string
+		handle *internalSubscriptionHandle
+	}{
+		{name: "nil handle"},
+		{name: "missing bus", handle: &internalSubscriptionHandle{}},
+		{name: "inactive", handle: &internalSubscriptionHandle{bus: &EventBus{}, ch: make(chan *LocalDelivery, 1)}},
+		{name: "missing channel", handle: &internalSubscriptionHandle{bus: &EventBus{}, active: true}},
+		{name: "missing work owner", handle: &internalSubscriptionHandle{bus: &EventBus{}, active: true, ch: make(chan *LocalDelivery, 1)}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			owner := &controlledTestDeliveryOwner{}
+			continuation, err := owner.Acquire("delivery-" + strings.ReplaceAll(test.name, " ", "-"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := test.handle.send(context.Background(), evt, route, continuation)
+			if err != nil {
+				t.Fatalf("send: %v", err)
+			}
+			if result != agentRouteSendInactive {
+				t.Fatalf("send result = %v, want inactive", result)
+			}
+			owner.mu.Lock()
+			defer owner.mu.Unlock()
+			if owner.returnAttempts != 1 || len(owner.returnedIDs) != 1 ||
+				owner.returnedIDs[0] != continuation.DeliveryID() {
+				t.Fatalf(
+					"continuation returns = attempts:%d ids:%v, want one exact return",
+					owner.returnAttempts,
+					owner.returnedIDs,
+				)
+			}
+		})
 	}
 }
 
@@ -453,30 +613,36 @@ func TestEventBusAgentRouteBufferedRemovalFailsClosedWithoutDurableHandoff(t *te
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
+	continuations := &controlledTestDeliveryOwner{failAcquire: true}
+	if err := eb.SetDeliveryContinuationOwner(continuations); err != nil {
+		t.Fatalf("install rejecting delivery continuation owner: %v", err)
+	}
 	oldToken := testAgentLifecycleToken(t, "agent-a", "", 7, 1)
 	newToken := testAgentLifecycleToken(t, "agent-a", "", 7, 2)
 	eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.work")))
-	evt := eventtest.RuntimeControl("work-buffered", events.EventType("test.work"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
-	if err := deliverToTestAgent(context.Background(), eb, evt, oldToken.Identity); err != nil {
-		t.Fatalf("deliver event: %v", err)
+	evt := eventtest.RuntimeControl(uuid.NewString(), events.EventType("test.work"), "test", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now())
+	if err := deliverToTestAgent(context.Background(), eb, evt, oldToken.Identity); err == nil || !strings.Contains(err.Error(), "admission failure") {
+		t.Fatalf("delivery admission error = %v, want fail-closed continuation admission", err)
 	}
-	if got := eb.ReplaceAgentRoute(newToken, testAgentSubscriptionAdmission(t, newToken.AgentID, events.EventType("test.work"))); got != nil {
-		t.Fatal("successor route published after unproven buffered handoff")
+	if got := eb.ReplaceAgentRoute(newToken, testAgentSubscriptionAdmission(t, newToken.AgentID, events.EventType("test.work"))); got == nil {
+		t.Fatal("rejected delivery was enqueued and blocked route retirement")
 	}
 }
 
 func TestEventBusAgentRouteFailedHandoffRetainsCarrierForExactRetry(t *testing.T) {
-	store := newExactHandoffProofStore(t, true)
-	eb, err := newScopedTestEventBus(store)
+	eb, err := newScopedTestEventBus(nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
+	}
+	continuations := &controlledTestDeliveryOwner{returnFailures: 1}
+	if err := eb.SetDeliveryContinuationOwner(continuations); err != nil {
+		t.Fatalf("install fail-once delivery continuation owner: %v", err)
 	}
 	oldToken := testAgentLifecycleToken(t, "agent-a", "", 7, 1)
 	newToken := testAgentLifecycleToken(t, "agent-a", "", 7, 2)
 	eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.work")))
 	eventID, runID := uuid.NewString(), uuid.NewString()
 	evt := eventtest.RuntimeControl(eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now())
-	store.seed(t, eventID, runID, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: oldToken.AgentID, AgentIdentity: oldToken.Identity})
 	if err := deliverToTestAgent(context.Background(), eb, evt, oldToken.Identity); err != nil {
 		t.Fatalf("deliver event: %v", err)
 	}
@@ -486,15 +652,15 @@ func TestEventBusAgentRouteFailedHandoffRetainsCarrierForExactRetry(t *testing.T
 	if err := eb.WaitForQuiescence(context.Background()); err != nil {
 		t.Fatalf("retry retained handoff and join: %v", err)
 	}
-	store.mu.Lock()
-	attempts := store.attempts
-	store.mu.Unlock()
+	continuations.mu.Lock()
+	attempts := continuations.returnAttempts
+	continuations.mu.Unlock()
 	if attempts != 2 {
-		t.Fatalf("handoff proof attempts = %d, want exact fail-once retry", attempts)
+		t.Fatalf("continuation return attempts = %d, want exact fail-once retry", attempts)
 	}
 }
 
-func TestNoContextRouteCleanupCarriesImmutableBundleSourceToHandoff(t *testing.T) {
+func TestNoContextRouteCleanupReturnsExactDeliveryContinuation(t *testing.T) {
 	owned := sourceMutationFact(t, "9")
 	for _, tc := range []struct {
 		name           string
@@ -518,8 +684,11 @@ func TestNoContextRouteCleanupCarriesImmutableBundleSourceToHandoff(t *testing.T
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			store := newExactHandoffProofStore(t, false)
-			bus := newSourceMutationProbeBusWithStore(t, store, owned, newSourceMutationProbeOwner())
+			bus := newSourceMutationProbeBusWithStore(t, InMemoryEventStore{}, owned, newSourceMutationProbeOwner())
+			continuations := &controlledTestDeliveryOwner{}
+			if err := bus.SetDeliveryContinuationOwner(continuations); err != nil {
+				t.Fatalf("install recording delivery continuation owner: %v", err)
+			}
 			subscriberID := "cleanup-" + strings.ReplaceAll(tc.name, " ", "-")
 			token := testAgentLifecycleToken(t, subscriberID, "", 7, 1)
 			var subscription worklifetime.InternalSubscription
@@ -543,7 +712,6 @@ func TestNoContextRouteCleanupCarriesImmutableBundleSourceToHandoff(t *testing.T
 			if tc.subscriberType == "agent" {
 				route.AgentIdentity = token.Identity
 			}
-			store.seed(t, eventID, runID, route)
 			evt := eventtest.RuntimeControl(
 				eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0,
 				runID, "", events.EventEnvelope{}, time.Now().UTC(),
@@ -570,11 +738,16 @@ func TestNoContextRouteCleanupCarriesImmutableBundleSourceToHandoff(t *testing.T
 			if err := tc.cleanup(bus, subscriberID, token, subscription); err != nil {
 				t.Fatalf("cleanup retained route: %v", err)
 			}
-			store.mu.Lock()
-			attempts, handoffFact := store.attempts, store.handoffFact
-			store.mu.Unlock()
-			if attempts != 1 || !owned.Matches(handoffFact) {
-				t.Fatalf("handoff proof = attempts:%d source:%#v, want exact immutable source", attempts, handoffFact)
+			wantDeliveryID, err := runtimedelivery.DeliveryID(eventID, route)
+			if err != nil {
+				t.Fatalf("derive expected delivery id: %v", err)
+			}
+			continuations.mu.Lock()
+			attempts := continuations.returnAttempts
+			returned := append([]string(nil), continuations.returnedIDs...)
+			continuations.mu.Unlock()
+			if attempts != 1 || len(returned) != 1 || returned[0] != wantDeliveryID {
+				t.Fatalf("continuation returns = attempts:%d ids:%v, want exact %s", attempts, returned, wantDeliveryID)
 			}
 		})
 	}
@@ -630,8 +803,18 @@ func TestEventBusResetRetiresAndRestartsInternalSubscriptionGeneration(t *testin
 	if generation := <-ready; generation != 2 {
 		t.Fatalf("replacement generation = %d", generation)
 	}
-	evt := eventtest.RuntimeControl("after-reset", events.EventType("test.work"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
-	if err := eb.deliverToRecipientsWithRoutes(context.Background(), evt, []string{"reset-proof"}, nil); err != nil {
+	evt := eventtest.RuntimeControl(uuid.NewString(), events.EventType("test.work"), "test", "", []byte(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Now())
+	if err := eb.deliverLiveRecipientsWithRoutes(
+		context.Background(),
+		evt,
+		[]RoutePlanLiveRecipient{{
+			RecipientID:       "reset-proof",
+			SubscriberType:    routePlanSubscriberInternal,
+			PersistAsDelivery: false,
+			liveAuthority:     liveRecipientAuthorityIdentity,
+		}},
+		nil,
+	); err != nil {
 		t.Fatalf("deliver after reset: %v", err)
 	}
 	select {
@@ -755,7 +938,11 @@ func TestEventBusSnapshottedInternalSendLinearizesWithReset(t *testing.T) {
 		resetErr := make(chan error, 1)
 		go func(recipient agentRecipient) {
 			<-start
-			result <- recipient.send(context.Background(), evt, events.DeliveryRoute{})
+			sendResult, err := recipient.send(context.Background(), evt, events.DeliveryRoute{}, nil)
+			if err != nil {
+				t.Errorf("iteration %d send: %v", i, err)
+			}
+			result <- sendResult
 		}(recipients[0])
 		go func() {
 			<-start

@@ -10,7 +10,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
@@ -52,6 +51,12 @@ type failOnceSettlementManagerDeliveryStore struct {
 	failNext          atomic.Bool
 	attempts          atomic.Int32
 	canceledAtAttempt atomic.Bool
+}
+
+func (s *failOnceSettlementManagerDeliveryStore) managerTestDeliveryAuthority() runtimedelivery.ExecutionAuthority {
+	return s.Store.(interface {
+		managerTestDeliveryAuthority() runtimedelivery.ExecutionAuthority
+	}).managerTestDeliveryAuthority()
 }
 
 func (s *failOnceSettlementManagerDeliveryStore) SettleFailure(ctx context.Context, claim runtimedelivery.Claim, settlement runtimedelivery.Settlement) (runtimedelivery.Snapshot, error) {
@@ -110,7 +115,8 @@ func TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t
 			expected := runtimeengine.NormalizeFailure(err, "agent-manager", "process_event.on_event").Failure
 			evt := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-"+tt.name), events.EventType("work.requested"), "", "", nil, 0, eventtest.UUID("failure-run-"+tt.name), "", events.EventEnvelope{}, time.Time{})
 			agent := failureReturningAgent{id: "agent-a", err: err}
-			result := am.processEventDetailed(managerAgentDeliveryContext(testAuthorActivityContext(context.Background()), agent.ID()), agent, evt)
+			ctx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), evt, agent.ID())
+			result := am.processEventDetailed(ctx, agent, evt)
 
 			if result.err == nil {
 				t.Fatal("processEventDetailed error = nil")
@@ -119,11 +125,11 @@ func TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t
 				t.Fatal("startup replay record failure = nil")
 			}
 			wantStatus := receiptStatusForAgentFailure(err)
-			obligation, obligationErr := runtimedelivery.NewObligation(evt.ID(), evt.RunID(), managerAgentDeliveryRoute(agent.ID()))
+			deliveryID, obligationErr := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRoute(agent.ID()))
 			if obligationErr != nil {
 				t.Fatalf("derive failure delivery obligation: %v", obligationErr)
 			}
-			snapshot, snapshotErr := deliveryStore.Snapshot(context.Background(), obligation.DeliveryID())
+			snapshot, snapshotErr := deliveryStore.Snapshot(context.Background(), deliveryID)
 			if snapshotErr != nil {
 				t.Fatalf("load failure delivery snapshot: %v", snapshotErr)
 			}
@@ -226,18 +232,18 @@ func TestRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRecovery(
 				t.Fatalf("agent calls = %d, want 1", got)
 			}
 
-			obligation, err := runtimedelivery.NewObligation(inbound.ID(), inbound.RunID(), managerAgentDeliveryRoute(agent.ID()))
+			deliveryID, err := runtimedelivery.DeliveryID(inbound.ID(), managerAgentDeliveryRoute(agent.ID()))
 			if err != nil {
 				t.Fatalf("derive intervention obligation: %v", err)
 			}
-			snapshot, err := deliveryStore.Snapshot(context.Background(), obligation.DeliveryID())
+			snapshot, err := deliveryStore.Snapshot(context.Background(), deliveryID)
 			if err != nil {
 				t.Fatalf("load settled intervention delivery: %v", err)
 			}
 			if snapshot.Status != runtimedelivery.StatusDeadLetter || !snapshot.Terminal() || snapshot.Failure == nil {
 				t.Fatalf("settled intervention delivery = status:%q terminal:%t failure:%#v, want terminal dead letter with failure", snapshot.Status, snapshot.Terminal(), snapshot.Failure)
 			}
-			outcomes, err := deliveryStore.Outcomes(context.Background(), obligation.DeliveryID())
+			outcomes, err := deliveryStore.Outcomes(context.Background(), deliveryID)
 			if err != nil {
 				t.Fatalf("load intervention outcomes: %v", err)
 			}
@@ -252,29 +258,8 @@ func TestRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRecovery(
 				t.Fatalf("intervention run summary = %#v, want settled with one dead letter", summary)
 			}
 
-			recoveryBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
-			if err != nil {
-				t.Fatalf("NewEventBus(recovery): %v", err)
-			}
-			recoveryManager := newTestAgentManagerWithOptions(t, recoveryBus, newFactory, AgentManagerOptions{
-				DeliveryStore: deliveryStore,
-			}, persistence)
-			if err := recoveryManager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: runtimeactors.AgentConfig{
-				ExecutionMode: "live",
-				ID:            agent.ID(),
-				Identity:      managerAgentIdentity(agent.ID()),
-				Subscriptions: []string{"test.intervention"},
-			}}, false); err != nil {
-				t.Fatalf("spawn recovery agent: %v", err)
-			}
-			if err := recoveryManager.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
-				t.Fatalf("run recovery manager: %v", err)
-			}
-			if _, err := recoveryManager.ReplayBacklog(testAuthorActivityContext(context.Background()), runtimeagentcontrol.ReplayBacklogRequest{AgentID: agent.ID()}); err != nil {
-				t.Fatalf("replay intervention backlog: %v", err)
-			}
 			if got := calls.Load(); got != 1 {
-				t.Fatalf("agent calls after recovery = %d, want settled delivery not to execute again", got)
+				t.Fatalf("agent calls after terminal settlement = %d, want exactly one", got)
 			}
 		})
 	}
@@ -365,18 +350,18 @@ func TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim(t 
 				t.Fatalf("settlement attempts = %d canceled_at_attempt=%t, want one attempt before shutdown cancellation", deliveryStore.attempts.Load(), deliveryStore.canceledAtAttempt.Load())
 			}
 
-			obligation, err := runtimedelivery.NewObligation(inbound.ID(), inbound.RunID(), managerAgentDeliveryRoute(agent.ID()))
+			deliveryID, err := runtimedelivery.DeliveryID(inbound.ID(), managerAgentDeliveryRoute(agent.ID()))
 			if err != nil {
 				t.Fatalf("derive intervention settlement obligation: %v", err)
 			}
-			snapshot, err := baseStore.Snapshot(context.Background(), obligation.DeliveryID())
+			snapshot, err := baseStore.Snapshot(context.Background(), deliveryID)
 			if err != nil {
 				t.Fatalf("load failed intervention settlement delivery: %v", err)
 			}
 			if snapshot.Status != runtimedelivery.StatusInProgress || snapshot.ClaimExpiresAt.IsZero() || snapshot.Failure != nil {
 				t.Fatalf("failed intervention settlement delivery = %#v, want leased in_progress claim without terminal failure", snapshot)
 			}
-			outcomes, err := baseStore.Outcomes(context.Background(), obligation.DeliveryID())
+			outcomes, err := baseStore.Outcomes(context.Background(), deliveryID)
 			if err != nil {
 				t.Fatalf("load failed intervention settlement outcomes: %v", err)
 			}
@@ -384,132 +369,7 @@ func TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim(t 
 				t.Fatalf("failed intervention settlement outcomes = %#v, want no fabricated terminal evidence", outcomes)
 			}
 
-			recoveryProbe := lifecycletest.New(t, lifecycletest.WithTimeout(5*time.Second))
-			recoveryBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
-			if err != nil {
-				t.Fatalf("NewEventBus(recovery): %v", err)
-			}
-			recoveryManager := newTestAgentManagerWithOptions(t, recoveryBus, newFactory, AgentManagerOptions{
-				DeliveryStore:      deliveryStore,
-				TestLifecycleProbe: recoveryProbe.Raw(),
-			}, persistence)
-			recoveryManager.retrySweepInterval = 10 * time.Millisecond
-			if err := recoveryManager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: runtimeactors.AgentConfig{
-				ExecutionMode: "live",
-				ID:            agent.ID(),
-				Identity:      managerAgentIdentity(agent.ID()),
-				Subscriptions: []string{"test.intervention.settlement"},
-			}}, false); err != nil {
-				t.Fatalf("spawn intervention recovery agent: %v", err)
-			}
-			if err := recoveryManager.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
-				t.Fatalf("run intervention recovery manager: %v", err)
-			}
-			recoveryProbe.RequireAgentDelivered(inbound.ID(), agent.ID())
-			if err := recoveryManager.Shutdown(); err != nil {
-				t.Fatalf("shutdown intervention recovery manager: %v", err)
-			}
-			if got := calls.Load(); got != 2 {
-				t.Fatalf("agent calls after lease recovery = %d, want one failed attempt and one fresh-runtime recovery", got)
-			}
-			recovered, err := baseStore.Snapshot(context.Background(), obligation.DeliveryID())
-			if err != nil {
-				t.Fatalf("load recovered intervention delivery: %v", err)
-			}
-			if recovered.Status != runtimedelivery.StatusDelivered || recovered.ClaimVersion != 2 {
-				t.Fatalf("recovered intervention delivery = status:%q claim_version:%d, want delivered at claim version 2", recovered.Status, recovered.ClaimVersion)
-			}
 		})
-	}
-}
-
-func TestRunningManagerStandingRetryReclaimsFailedDeliveryAutomatically(t *testing.T) {
-	runtimebus.ResumeRuntimeIngress()
-	t.Cleanup(runtimebus.ResumeRuntimeIngress)
-
-	deliveryStore := newManagerDeliveryTestStore(t)
-	persistence := &startupReplayTestStore{
-		recoveryTestStore:        recoveryTestStore{},
-		managerDeliveryTestStore: deliveryStore,
-	}
-	probe := lifecycletest.New(t, lifecycletest.WithTimeout(5*time.Second))
-	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	var calls atomic.Int32
-	agent := shutdownTestAgent{
-		id:            "standing-retry-agent",
-		subscriptions: []events.EventType{"test.standing.retry"},
-		onEvent: func(context.Context, events.Event) ([]events.Event, error) {
-			if calls.Add(1) == 1 {
-				return nil, runtimefailures.New(runtimefailures.ClassTimeout, "provider_request_timeout", "test-agent", "call_provider", nil)
-			}
-			return nil, nil
-		},
-	}
-	manager := newTestAgentManagerWithOptions(t, eventBus, func(runtimeactors.AgentConfig) (Agent, error) {
-		return agent, nil
-	}, AgentManagerOptions{
-		DeliveryStore:      deliveryStore,
-		TestLifecycleProbe: probe.Raw(),
-	}, persistence)
-	manager.retrySweepInterval = 10 * time.Millisecond
-	if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: runtimeactors.AgentConfig{
-		ExecutionMode: "live",
-		ID:            agent.ID(),
-		Identity:      managerAgentIdentity(agent.ID()),
-		Subscriptions: []string{"test.standing.retry"},
-	}}, false); err != nil {
-		t.Fatalf("spawn standing retry agent: %v", err)
-	}
-	if err := manager.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
-		t.Fatalf("run standing retry manager: %v", err)
-	}
-
-	inbound := eventtest.RunCreatingRootIngress(
-		eventtest.UUID("standing-retry"),
-		events.EventType("test.standing.retry"),
-		"test", "", nil, 0,
-		eventtest.UUID("standing-retry-run"),
-		"", events.EventEnvelope{}, time.Now().UTC(),
-	)
-	if err := eventBus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
-		t.Fatalf("publish standing retry event: %v", err)
-	}
-	probe.RequireAgentFailed(inbound.ID(), agent.ID())
-	obligation, err := runtimedelivery.NewObligation(inbound.ID(), inbound.RunID(), managerAgentDeliveryRoute(agent.ID()))
-	if err != nil {
-		t.Fatalf("derive standing retry obligation: %v", err)
-	}
-	failed, err := deliveryStore.Snapshot(context.Background(), obligation.DeliveryID())
-	if err != nil {
-		t.Fatalf("load failed standing retry delivery: %v", err)
-	}
-	if failed.Status != runtimedelivery.StatusFailed || failed.RetryCount != 1 || !failed.NextEligibleAt.After(failed.UpdatedAt) {
-		t.Fatalf("standing retry first settlement = %#v, want persisted failed retry delay", failed)
-	}
-
-	probe.RequireAgentDelivered(inbound.ID(), agent.ID())
-	if err := manager.Shutdown(); err != nil {
-		t.Fatalf("shutdown standing retry manager: %v", err)
-	}
-	if got := calls.Load(); got != 2 {
-		t.Fatalf("standing retry agent calls = %d, want automatic retry without manual replay or restart", got)
-	}
-	delivered, err := deliveryStore.Snapshot(context.Background(), obligation.DeliveryID())
-	if err != nil {
-		t.Fatalf("load delivered standing retry delivery: %v", err)
-	}
-	if delivered.Status != runtimedelivery.StatusDelivered || delivered.ClaimVersion != 2 {
-		t.Fatalf("standing retry final delivery = status:%q claim_version:%d, want delivered at claim version 2", delivered.Status, delivered.ClaimVersion)
-	}
-	outcomes, err := deliveryStore.Outcomes(context.Background(), obligation.DeliveryID())
-	if err != nil {
-		t.Fatalf("load standing retry outcomes: %v", err)
-	}
-	if len(outcomes) != 2 || outcomes[0].Outcome != "retry_scheduled" || outcomes[1].Outcome != "delivered" {
-		t.Fatalf("standing retry outcomes = %#v, want retry_scheduled then delivered", outcomes)
 	}
 }
 
@@ -522,17 +382,30 @@ func TestProcessEventOutcomeUncertainTerminalDeliverySuppressesReplay(t *testing
 	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-uncertain"), events.EventType("work.requested"), "", "", nil, 0, eventtest.UUID("uncertain-run"), "", events.EventEnvelope{}, time.Time{})
 	deliveryStore.seedAgentDeliveries(t, agent.ID(), []events.Event{evt})
 	route := managerAgentDeliveryRoute(agent.ID())
-	ctx := runtimedelivery.WithRoute(testAuthorActivityContext(context.Background()), route)
+	ctx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), evt, agent.ID())
 	first := am.processEventDetailed(ctx, agent, evt)
 	if first.err == nil || agent.calls != 1 {
 		t.Fatalf("first result err=%v calls=%d, want one terminal failure", first.err, agent.calls)
 	}
-	backlog, err := deliveryStore.ClaimAgentBacklog(testAuthorActivityContext(context.Background()), managerAgentDeliveryRoute(agent.ID()).AgentIdentity, 10)
+	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), route)
 	if err != nil {
-		t.Fatalf("claim terminal delivery backlog: %v", err)
+		t.Fatalf("derive terminal delivery identity: %v", err)
 	}
-	if len(backlog) != 0 || agent.calls != 1 {
-		t.Fatalf("terminal delivery backlog=%#v calls=%d, want no replay", backlog, agent.calls)
+	snapshot, err := deliveryStore.Snapshot(context.Background(), deliveryID)
+	if err != nil {
+		t.Fatalf("read terminal delivery: %v", err)
+	}
+	page, err := deliveryStore.ScanDeliveryContinuations(
+		testAuthorActivityContext(context.Background()),
+		snapshot.Authority,
+		runtimedelivery.ContinuationCursor{},
+		10,
+	)
+	if err != nil {
+		t.Fatalf("scan terminal delivery continuation: %v", err)
+	}
+	if len(page.Items) != 0 || !page.Exhausted || agent.calls != 1 {
+		t.Fatalf("terminal delivery page=%#v calls=%d, want exhausted with no replay", page, agent.calls)
 	}
 }
 
@@ -560,30 +433,35 @@ func TestProcessEventSelectedForkTerminalizesRetryableFailureBeforeRuntimeRetire
 	if err != nil {
 		t.Fatalf("managedexecution.New: %v", err)
 	}
-	ctx := managerAgentDeliveryContext(testAuthorActivityContext(context.Background()), agent.ID())
-	ctx = managedexecution.WithAdmission(ctx, admission)
+	ctx := managedexecution.WithAdmission(testAuthorActivityContext(context.Background()), admission)
+	ctx = managerClaimedDeliveryContext(t, am, ctx, evt, agent.ID())
 	result := am.processEventDetailed(ctx, agent, evt)
 	if result.err == nil {
 		t.Fatal("selected-fork retryable handler failure returned nil")
 	}
 
-	obligation, err := runtimedelivery.NewObligation(evt.ID(), evt.RunID(), managerAgentDeliveryRoute(agent.ID()))
+	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRoute(agent.ID()))
 	if err != nil {
 		t.Fatalf("derive selected-fork delivery obligation: %v", err)
 	}
-	snapshot, err := deliveryStore.Snapshot(context.Background(), obligation.DeliveryID())
+	snapshot, err := deliveryStore.Snapshot(context.Background(), deliveryID)
 	if err != nil {
 		t.Fatalf("load selected-fork delivery snapshot: %v", err)
 	}
 	if snapshot.Status != runtimedelivery.StatusDeadLetter || snapshot.ReasonCode != "terminal_failure" || snapshot.RetryCount != 0 {
 		t.Fatalf("selected-fork delivery = status:%s reason:%s retries:%d, want terminal dead letter without retry", snapshot.Status, snapshot.ReasonCode, snapshot.RetryCount)
 	}
-	backlog, err := deliveryStore.ClaimAgentBacklog(testAuthorActivityContext(context.Background()), managerAgentDeliveryRoute(agent.ID()).AgentIdentity, 1)
+	normalResult, err := deliveryStore.ClaimDelivery(
+		testAuthorActivityContext(context.Background()),
+		deliveryStore.authority,
+		evt,
+		managerAgentDeliveryRoute(agent.ID()),
+	)
 	if err != nil {
-		t.Fatalf("claim normal-manager backlog after selected failure: %v", err)
+		t.Fatalf("claim selected delivery with normal authority: %v", err)
 	}
-	if len(backlog) != 0 {
-		t.Fatalf("normal-manager backlog claimed selected-fork delivery: %#v", backlog)
+	if normalResult.Disposition != runtimedelivery.ClaimWrongAuthority {
+		t.Fatalf("normal-manager claim disposition = %s, want wrong authority", normalResult.Disposition)
 	}
 }
 

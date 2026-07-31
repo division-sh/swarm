@@ -17,9 +17,9 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -192,29 +192,29 @@ func (s *startupRecoveryPipelineOwner) MarkDecisionProcessed(_ context.Context, 
 	return s.verify(claim)
 }
 
-func (s *startupRecoveryPipelineOwner) Settle(_ context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) error {
+func (s *startupRecoveryPipelineOwner) Settle(_ context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) (runtimepipelineobligation.SettlementOutcome, error) {
 	if err := disposition.ValidateFor(claim.Purpose()); err != nil {
-		return err
+		return runtimepipelineobligation.SettlementOutcome{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	current, ok := s.claims[claim.EventID()]
 	if !ok {
-		return runtimepipelineobligation.ErrStaleClaim
+		return runtimepipelineobligation.SettlementOutcome{}, runtimepipelineobligation.ErrStaleClaim
 	}
 	currentToken, err := s.issuer.Token(current)
 	if err != nil {
-		return err
+		return runtimepipelineobligation.SettlementOutcome{}, err
 	}
 	claimToken, err := s.issuer.Token(claim)
 	if err != nil {
-		return err
+		return runtimepipelineobligation.SettlementOutcome{}, err
 	}
 	if currentToken != claimToken {
-		return runtimepipelineobligation.ErrStaleClaim
+		return runtimepipelineobligation.SettlementOutcome{}, runtimepipelineobligation.ErrStaleClaim
 	}
 	if err := s.issuer.Verify(claim, claim.EventID(), claim.Purpose()); err != nil {
-		return err
+		return runtimepipelineobligation.SettlementOutcome{}, err
 	}
 	delete(s.claims, claim.EventID())
 	if disposition.Kind() != runtimepipelineobligation.DispositionDeferred {
@@ -226,7 +226,7 @@ func (s *startupRecoveryPipelineOwner) Settle(_ context.Context, claim runtimepi
 		}
 		s.work = remaining
 	}
-	return nil
+	return runtimepipelineobligation.CommittedSettlement(disposition.Successful()), nil
 }
 
 func (s *startupRecoveryPipelineOwner) Release(_ context.Context, claim runtimepipelineobligation.Claim) error {
@@ -676,12 +676,13 @@ func assertContainsClass(t *testing.T, classes []string, want string) {
 	t.Fatalf("recoverable_work_classes = %#v, want %q present", classes, want)
 }
 
-func TestStartupRecoveryDecisionTimerFamilyAdmissionMatrix(t *testing.T) {
+func TestStartupRecoveryDecisionAdmissionMatrix(t *testing.T) {
 	tests := []struct {
 		name       string
 		recovery   bool
 		blocking   int
 		intrinsic  int
+		delivery   runtimedelivery.RecoveryInventory
 		want       startupRecoveryOutcome
 		wantReason startupRecoveryReasonCode
 	}{
@@ -730,6 +731,19 @@ func TestStartupRecoveryDecisionTimerFamilyAdmissionMatrix(t *testing.T) {
 			want:       startupRecoveryOutcomeAllowed,
 			wantReason: startupRecoveryReasonDisabledWithIntrinsic,
 		},
+		{
+			name:       "enabled delivery",
+			recovery:   true,
+			delivery:   runtimedelivery.RecoveryInventory{Pending: 1, Failed: 2, InProgress: 3},
+			want:       startupRecoveryOutcomeAllowed,
+			wantReason: startupRecoveryReasonEnabledWithWork,
+		},
+		{
+			name:       "disabled delivery",
+			delivery:   runtimedelivery.RecoveryInventory{Pending: 1},
+			want:       startupRecoveryOutcomeDenied,
+			wantReason: startupRecoveryReasonDisabledWithDelivery,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -738,6 +752,7 @@ func TestStartupRecoveryDecisionTimerFamilyAdmissionMatrix(t *testing.T) {
 				InspectionComplete:       true,
 				StartupBlockingTimers:    test.blocking,
 				StandingTimerObligations: test.intrinsic,
+				Delivery:                 test.delivery,
 			})
 			if report.Outcome != test.want || report.ReasonCode != test.wantReason {
 				t.Fatalf("decision = %s/%s, want %s/%s", report.Outcome, report.ReasonCode, test.want, test.wantReason)
@@ -1165,127 +1180,6 @@ func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *te
 	requireFailureCode(t, dropped.failure, "schedule_restore_failed")
 }
 
-func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	module := loadRuntimeOwnershipWorkflowModule(t)
-	agentIdentity := agentidentitytest.RootRuntime(t, "agent-a", "runtime-test/recovery-diagnostics")
-	managerStore := &startupManagerReplayRuntimeStore{
-		agents: []runtimemanager.PersistedAgent{{
-			Config:    runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-a", Identity: agentIdentity},
-			StartedAt: time.Now().UTC(),
-		}},
-	}
-	deliveryStore := newRuntimeShutdownDeliveryStore(t)
-	runID := eventtest.UUID("runtime-recovery-manager-run")
-	for index, eventType := range []string{
-		"support.replay.ok",
-		"support.replay.skip",
-		"support.replay.leased",
-		"support.replay.drop",
-	} {
-		deliveryStore.seedAgentDelivery(t, ctx,
-			eventtest.PersistedProjection(eventtest.UUID("runtime-recovery-manager-"+eventType), events.EventType(eventType), "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Now().Add(time.Duration(index-4)*time.Minute).UTC()),
-			agentIdentity,
-		)
-	}
-
-	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
-		SQLDB:           db,
-		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		DeliveryStore:   deliveryStore,
-		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
-		EventStore:      startupRecoveryMinimalEventStore{},
-		ManagerStore:    managerStore,
-	}, Options: RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     noopLLMRuntime{},
-	}})
-
-	if err != nil {
-		t.Fatalf("NewRuntime: %v", err)
-	}
-	if err := rt.Manager.Shutdown(); err != nil {
-		t.Fatalf("retire constructed manager before test replacement: %v", err)
-	}
-	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
-		return startupManagerReplayRuntimeAgent{id: cfg.ID}, nil
-	}, runtimemanager.AgentManagerOptions{
-		SemanticSource:                 module.SemanticSource(),
-		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
-		WorkOwner:                      rt.WorkOccurrence(),
-		DeliveryStore:                  deliveryStore,
-	}, managerStore)
-
-	if err := rt.Start(ctx); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	defer func() {
-		if err := rt.Shutdown(); err != nil {
-			t.Fatalf("Shutdown: %v", err)
-		}
-	}()
-
-	level, _, failure, detail := latestStartupRecoveryDecisionLog(t, db)
-	if level != "error" {
-		t.Fatalf("log level = %q, want error", level)
-	}
-	requireFailureCode(t, failure, "unclassified_runtime_error")
-	if got := detailString(detail["decision_outcome"]); got != "degraded" {
-		t.Fatalf("decision_outcome = %q, want degraded", got)
-	}
-	if got := detailString(detail["decision_reason_code"]); got != string(startupRecoveryReasonRecoverFailed) {
-		t.Fatalf("decision_reason_code = %q, want %q", got, startupRecoveryReasonRecoverFailed)
-	}
-	if got := detailInt(detail["manager_replayed_count"]); got != 2 {
-		t.Fatalf("manager_replayed_count = %d, want 2", got)
-	}
-	if got := detailInt(detail["manager_skipped_count"]); got != 0 {
-		t.Fatalf("manager_skipped_count = %d, want 0", got)
-	}
-	if got := detailInt(detail["manager_dropped_count"]); got != 2 {
-		t.Fatalf("manager_dropped_count = %d, want 2", got)
-	}
-
-	logs := listRuntimeLogsByAction(t, db, "startup_recovery_manager_replay_aftermath")
-	if len(logs) != 4 {
-		t.Fatalf("manager replay runtime logs = %d, want 4", len(logs))
-	}
-	findByEventType := func(eventType string) runtimeAftermathLog {
-		t.Helper()
-		for _, entry := range logs {
-			if strings.TrimSpace(entry.eventType) == eventType {
-				return entry
-			}
-		}
-		t.Fatalf("missing manager replay log for event type %q in %#v", eventType, logs)
-		return runtimeAftermathLog{}
-	}
-	replayed := findByEventType("support.replay.ok")
-	if got := detailString(replayed.detail["decision_outcome"]); got != "replayed" {
-		t.Fatalf("replayed decision_outcome = %q, want replayed", got)
-	}
-	replayedSecond := findByEventType("support.replay.skip")
-	if got := detailString(replayedSecond.detail["decision_reason_code"]); got != "persisted_event_replayed" {
-		t.Fatalf("second replay decision_reason_code = %q, want persisted_event_replayed", got)
-	}
-	droppedLeased := findByEventType("support.replay.leased")
-	if got := detailString(droppedLeased.detail["decision_outcome"]); got != "dropped" {
-		t.Fatalf("leased decision_outcome = %q, want dropped without prose classification", got)
-	}
-	if got := detailString(droppedLeased.detail["decision_reason_code"]); got != "event_processing_failed" {
-		t.Fatalf("leased decision_reason_code = %q, want event_processing_failed", got)
-	}
-	requireFailureCode(t, droppedLeased.failure, "unclassified_runtime_error")
-	dropped := findByEventType("support.replay.drop")
-	if got := detailString(dropped.detail["decision_outcome"]); got != "dropped" {
-		t.Fatalf("dropped decision_outcome = %q, want dropped", got)
-	}
-	requireFailureCode(t, dropped.failure, "unclassified_runtime_error")
-}
-
 func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
@@ -1314,8 +1208,8 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	if err := rt.Start(ctx); err != nil {
-		t.Fatalf("Start: %v", err)
+	if err := rt.Start(ctx); err == nil || !strings.Contains(err.Error(), "recover pipeline obligations before delivery enumeration") {
+		t.Fatalf("Start error = %v, want boot-fatal recovery exhaustion failure", err)
 	}
 	defer func() {
 		if err := rt.Shutdown(); err != nil {

@@ -37,17 +37,44 @@ type InternalSubscription interface {
 // by a fixed typed occurrence, so a queued event always owns lifetime before
 // it escapes the producer.
 type EventDelivery struct {
-	event     events.Event
-	route     events.DeliveryRoute
-	lease     *Lease
-	companion *Lease
-	ctx       context.Context
-	once      sync.Once
-	err       error
-	mu        sync.Mutex
-	completed bool
-	callbacks []func()
+	event                events.Event
+	route                events.DeliveryRoute
+	lease                *Lease
+	companion            *Lease
+	ctx                  context.Context
+	err                  error
+	mu                   sync.Mutex
+	completed            bool
+	callbacks            []func()
+	continuation         DeliveryContinuation
+	continuationResult   DeliveryContinuationResolution
+	continuationSettling bool
+	settling             bool
 }
+
+// DeliveryContinuation is an exact one-delivery ownership capability. Its
+// implementation is delivery-specific. One closed transition resolves the
+// carrier atomically as returned, consumed into an attempt, or terminal-fenced.
+type DeliveryContinuation interface {
+	DeliveryID() string
+	Resolve(context.Context, DeliveryContinuationIntent) (DeliveryContinuationResolution, error)
+}
+
+type DeliveryContinuationIntent uint8
+
+const (
+	DeliveryContinuationReturn DeliveryContinuationIntent = iota + 1
+	DeliveryContinuationConsume
+)
+
+type DeliveryContinuationResolution uint8
+
+const (
+	DeliveryContinuationUntracked DeliveryContinuationResolution = iota + 1
+	DeliveryContinuationReturned
+	DeliveryContinuationConsumed
+	DeliveryContinuationTerminal
+)
 
 func newEventDelivery(ctx context.Context, event events.Event, route events.DeliveryRoute, owner Occurrence, begin func(context.Context) (*Lease, error)) (*EventDelivery, error) {
 	if event.Type() == "" {
@@ -109,6 +136,61 @@ func (d *EventDelivery) HandoffRoute() events.DeliveryRoute {
 	return d.route
 }
 
+func (d *EventDelivery) AttachContinuation(continuation DeliveryContinuation) error {
+	if d == nil || continuation == nil || continuation.DeliveryID() == "" {
+		return errors.New("exact delivery continuation is required")
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.completed || d.continuation != nil {
+		return errors.New("delivery continuation cannot be attached")
+	}
+	d.continuation = continuation
+	return nil
+}
+
+func (d *EventDelivery) resolveContinuation(intent DeliveryContinuationIntent) (DeliveryContinuationResolution, error) {
+	if d == nil {
+		return 0, errors.New("local delivery is required")
+	}
+	if intent != DeliveryContinuationReturn && intent != DeliveryContinuationConsume {
+		return 0, errors.New("delivery continuation resolution intent is invalid")
+	}
+	d.mu.Lock()
+	if d.completed {
+		d.mu.Unlock()
+		return 0, errors.New("local delivery is already completed")
+	}
+	if d.continuationResult != 0 {
+		result := d.continuationResult
+		d.mu.Unlock()
+		return result, nil
+	}
+	if d.continuation == nil {
+		d.continuationResult = DeliveryContinuationUntracked
+		d.mu.Unlock()
+		return DeliveryContinuationUntracked, nil
+	}
+	if d.continuationSettling {
+		d.mu.Unlock()
+		return 0, errors.New("delivery continuation resolution is already in progress")
+	}
+	continuation := d.continuation
+	d.continuationSettling = true
+	d.mu.Unlock()
+	result, err := continuation.Resolve(context.WithoutCancel(d.Context()), intent)
+	if err == nil && result != DeliveryContinuationReturned && result != DeliveryContinuationConsumed && result != DeliveryContinuationTerminal {
+		err = errors.New("delivery continuation returned an invalid resolution")
+	}
+	d.mu.Lock()
+	d.continuationSettling = false
+	if err == nil {
+		d.continuationResult = result
+	}
+	d.mu.Unlock()
+	return result, err
+}
+
 func (d *EventDelivery) ID() string             { return d.Event().ID() }
 func (d *EventDelivery) Type() events.EventType { return d.Event().Type() }
 func (d *EventDelivery) RunID() string          { return d.Event().RunID() }
@@ -122,29 +204,49 @@ func (d *EventDelivery) Payload() []byte                      { return d.Event()
 func (d *EventDelivery) CreatedAt() time.Time                 { return d.Event().CreatedAt() }
 
 func (d *EventDelivery) Complete() error {
+	_, err := d.completeCarrier()
+	return err
+}
+
+func (d *EventDelivery) completeCarrier() (DeliveryContinuationResolution, error) {
 	if d == nil {
-		return errors.New("local delivery is required")
+		return 0, errors.New("local delivery is required")
 	}
-	run := false
-	d.once.Do(func() {
-		run = true
-		d.err = d.lease.Done()
-		if d.companion != nil {
-			d.err = errors.Join(d.err, d.companion.Done())
-		}
-		d.mu.Lock()
-		d.completed = true
-		callbacks := append([]func(){}, d.callbacks...)
-		d.callbacks = nil
+	d.mu.Lock()
+	if d.completed {
 		d.mu.Unlock()
-		for _, callback := range callbacks {
-			callback()
-		}
-	})
-	if !run && d.err == nil {
-		return ErrAlreadySettled
+		return 0, ErrAlreadySettled
 	}
-	return d.err
+	if d.settling {
+		d.mu.Unlock()
+		return 0, errors.New("local delivery completion is already in progress")
+	}
+	d.settling = true
+	d.mu.Unlock()
+
+	result, resolveErr := d.resolveContinuation(DeliveryContinuationReturn)
+	if resolveErr != nil {
+		d.mu.Lock()
+		d.settling = false
+		d.mu.Unlock()
+		return 0, resolveErr
+	}
+
+	err := d.lease.Done()
+	if d.companion != nil {
+		err = errors.Join(err, d.companion.Done())
+	}
+	d.mu.Lock()
+	d.err = err
+	d.completed = true
+	d.settling = false
+	callbacks := append([]func(){}, d.callbacks...)
+	d.callbacks = nil
+	d.mu.Unlock()
+	for _, callback := range callbacks {
+		callback()
+	}
+	return result, err
 }
 
 // OnComplete registers process-local accounting that must settle with this

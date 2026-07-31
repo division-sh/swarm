@@ -120,14 +120,14 @@ func (s *outboxClaimStore) MarkDecisionProcessed(context.Context, runtimepipelin
 	return runtimepipelineobligation.ErrIneligible
 }
 
-func (s *outboxClaimStore) Settle(_ context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) error {
+func (s *outboxClaimStore) Settle(_ context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) (runtimepipelineobligation.SettlementOutcome, error) {
 	s.claimMu.Lock()
 	defer s.claimMu.Unlock()
 	if err := s.verifyClaim(claim); err != nil {
-		return err
+		return runtimepipelineobligation.SettlementOutcome{}, err
 	}
 	if err := disposition.ValidateFor(claim.Purpose()); err != nil {
-		return err
+		return runtimepipelineobligation.SettlementOutcome{}, err
 	}
 	s.mu.Lock()
 	if s.receipts == nil {
@@ -136,7 +136,7 @@ func (s *outboxClaimStore) Settle(_ context.Context, claim runtimepipelineobliga
 	s.receipts[claim.EventID()] = disposition.Kind()
 	s.mu.Unlock()
 	delete(s.claims, claim.EventID())
-	return nil
+	return runtimepipelineobligation.CommittedSettlement(disposition.Successful()), nil
 }
 
 func (s *outboxClaimStore) Release(_ context.Context, claim runtimepipelineobligation.Claim) error {
@@ -282,6 +282,9 @@ func (s *directRecipientTransactionalStore) finalizePreparedPublish(_ context.Co
 	}
 	if req.DeadLetter != nil && s.deadLetterErr != nil {
 		return s.deadLetterErr
+	}
+	if err := req.DeliveryReceipt.Record(nil); err != nil {
+		return err
 	}
 	if s.routes == nil {
 		s.routes = map[string][]events.DeliveryRoute{}

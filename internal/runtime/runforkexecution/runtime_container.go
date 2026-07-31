@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -246,10 +247,20 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	}
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(req.Store.DB)
 	var lifecycleManager *runtimemanager.AgentManager
+	deliveryAuthority, err := runtimedelivery.NewSelectedExecutionAuthority(
+		req.LoadedSource.BundleSourceFact,
+		c.authority.SelectedFork.ExecutionID,
+		c.authority.SelectedFork.ForkRunID,
+		c.authority.SelectedFork.Generation,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create selected-contract delivery authority: %w", err)
+	}
 	bus, err := runtimebus.NewEventBusWithOptions(req.Store, runtimebus.EventBusOptions{
 		WorkOwner:                   forkOwner,
 		PipelineObligations:         req.Store.PipelineObligations(),
 		BundleSourceFact:            req.LoadedSource.BundleSourceFact,
+		DeliveryAuthority:           deliveryAuthority,
 		ContractBundle:              req.LoadedSource.Source,
 		Logger:                      selectedContractRuntimeContainerLogger(req.Store),
 		RecipientPlanAdmissionGuard: guard.AuthorizeEvent,

@@ -11,8 +11,10 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -87,8 +89,22 @@ func newStoreTestEventBus(t *testing.T, store runtimebus.EventStore, options ...
 	if opts.BundleSourceFact.Validate() != nil {
 		opts.BundleSourceFact = mustStoreTestEphemeralBundleSourceFact(authorActivityTestBundleHash)
 	}
+	if opts.RuntimeInstanceID == "" {
+		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
+	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = storeTestWorkOwner(t)
+	}
+	if opts.DeliveryAuthority.Kind() == "" {
+		authority, authorityErr := runtimedelivery.NewNormalExecutionAuthority(
+			opts.BundleSourceFact,
+			opts.RuntimeInstanceID,
+			1,
+		)
+		if authorityErr != nil {
+			return nil, authorityErr
+		}
+		opts.DeliveryAuthority = authority
 	}
 	if opts.PipelineObligations == nil {
 		if provider, ok := store.(interface {
@@ -97,7 +113,16 @@ func newStoreTestEventBus(t *testing.T, store runtimebus.EventStore, options ...
 			opts.PipelineObligations = provider.PipelineObligations()
 		}
 	}
-	return runtimebus.NewEventBusWithOptions(store, opts)
+	bus, err := runtimebus.NewEventBusWithOptions(store, opts)
+	if err != nil {
+		return nil, err
+	}
+	if err := bus.SetDeliveryContinuationOwner(
+		runtimebustest.NewDeliveryContinuationOwner(false),
+	); err != nil {
+		return nil, err
+	}
+	return bus, nil
 }
 
 func testAuthorActivityContext() context.Context {

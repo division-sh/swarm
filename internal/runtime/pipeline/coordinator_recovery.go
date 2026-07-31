@@ -31,6 +31,17 @@ func NewRecoveryManagerWithLimit(owner PipelineRecoveryOwner, limit int) *Recove
 }
 
 func (r *RecoveryManager) Recover(ctx context.Context) error {
+	return r.recover(ctx, false)
+}
+
+// RecoverToExhaustion is the startup admission form. A locally blocked pass
+// cannot be treated as recovery completion because delivery enumeration must
+// observe the pipeline handoff committed by every eligible event first.
+func (r *RecoveryManager) RecoverToExhaustion(ctx context.Context) error {
+	return r.recover(ctx, true)
+}
+
+func (r *RecoveryManager) recover(ctx context.Context, requireExhaustion bool) error {
 	if r == nil || r.owner == nil {
 		return errors.New("pipeline recovery owner is required")
 	}
@@ -43,6 +54,9 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 		result, err := r.owner.SweepPipelineObligations(ctx, limit)
 		if err != nil {
 			return err
+		}
+		if result.Blocked && requireExhaustion {
+			return errors.New("pipeline recovery blocked before explicit exhaustion")
 		}
 		if result.Blocked || result.Exhausted {
 			return nil

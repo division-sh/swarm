@@ -104,11 +104,11 @@ func TestAgentDiagnoseExactDeliveryPaginationParity(t *testing.T) {
 			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, routes, runtimepipelineobligation.ScopeSubscribed)
 			wantDeliveryIDs := make([]string, 0, len(routes))
 			for _, route := range routes {
-				obligation, err := runtimedelivery.NewObligation(event.ID(), runID, route)
+				deliveryID, err := runtimedelivery.DeliveryID(event.ID(), route)
 				if err != nil {
 					t.Fatalf("derive diagnosis delivery identity: %v", err)
 				}
-				wantDeliveryIDs = append(wantDeliveryIDs, obligation.DeliveryID())
+				wantDeliveryIDs = append(wantDeliveryIDs, deliveryID)
 			}
 			sort.Strings(wantDeliveryIDs)
 

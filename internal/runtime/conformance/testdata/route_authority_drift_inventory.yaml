@@ -1,7 +1,7 @@
 version: 1
 kind: route_authority_drift_inventory
 issue: 1364
-implementation_issues: [1364, 1494, 1495, 1496, 1545, 1546, 1552, 1577, 1826, 2085, 2105]
+implementation_issues: [1364, 1494, 1495, 1496, 1545, 1546, 1552, 1577, 1826, 2085, 2105, 2126]
 parent_issues: [1340, 1353, 1481, 1493, 1738, 1786, 1827, 2084]
 watchlist: runtime_operations.delivery_and_replay_ownership
 policy:
@@ -101,14 +101,15 @@ search_dimensions:
     canonical_layer: invalid_old_authority
     classified_paths_required: true
   - id: pending_agent_subscription_recovery_authority
-    pattern: '\bClaimAgentBacklog\b|\bClaimAgentDelivery\b|eligible agent delivery'
-    minimum_matching_files: 9
+    pattern: 'DeliveryContinuation|ClaimDelivery'
+    minimum_matching_files: 20
     required_paths:
+      - internal/runtime/deliverycontinuation/coordinator.go
       - internal/runtime/deliverylifecycle/model.go
       - internal/runtime/manager/receipts.go
+      - internal/runtime/pipeline/coordinator.go
       - internal/store/delivery_lifecycle.go
-    canonical_layer: invalid_old_authority
-    classified_paths_required: true
+    canonical_layer: durable_delivery_authority
   - id: flow_owned_subscription_pattern_authority
     pattern: 'wildcard_subscription_scope|ResolveImportBoundaryWildcardSubscription|ImportBoundaryWildcardSubscriptionMatches|\bbuildFlowAgentConfig\b|\bbuildStaticFlowAgentConfig\b|\bresolveSubscribedRecipientsForPlanning\b|\brouteMatches\b'
     minimum_matching_files: 13

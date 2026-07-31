@@ -1260,7 +1260,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	if err := commitSemanticEventFixtureWithRoutes(ctx, store, event, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("PersistEventWithDeliveries trace event: %v", err)
 	}
-	claimed, err := store.ClaimAgentDelivery(ctx, event, route)
+	claimed, err := claimDeliveryFixture(ctx, store, event, route)
 	if err != nil {
 		t.Fatalf("ClaimAgentDelivery trace event: %v", err)
 	}

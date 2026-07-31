@@ -195,7 +195,7 @@ func newExactOnceCoordinator(t *testing.T, db *sql.DB, store *WorkflowInstanceSt
 	}
 	bus := &recordingPipelineBus{}
 	deliveryStore := newPipelineTestDeliveryOwner(t, db, store.isSQLite())
-	return NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
 		WorkflowStore:       store,
 		DeliveryStore:       deliveryStore,
 		TimerScheduleStore:  &recordingScheduleStore{},
@@ -211,6 +211,8 @@ func newExactOnceCoordinator(t *testing.T, db *sql.DB, store *WorkflowInstanceSt
 			}),
 		},
 	})
+	configurePipelineTestDeliveryOwner(t, pc)
+	return pc
 }
 
 func exactOnceCreateEntityHandler() runtimecontracts.SystemNodeEventHandler {

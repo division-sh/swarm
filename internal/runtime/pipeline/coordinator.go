@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -20,6 +21,7 @@ import (
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -65,8 +67,6 @@ type PipelineCoordinator struct {
 	testLifecycleProbe               runtimelifecycleprobe.Observer
 	testEngineEmitNow                func() time.Time
 	workOwner                        worklifetime.Occurrence
-	nodeRecoveryReady                chan struct{}
-	nodeRecoveryReadyOnce            sync.Once
 	testMaintenanceInterval          time.Duration
 }
 
@@ -224,7 +224,6 @@ func newPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		testLifecycleProbe:               opts.TestLifecycleProbe,
 		testEngineEmitNow:                opts.TestEngineEmitNow,
 		workOwner:                        opts.WorkOwner,
-		nodeRecoveryReady:                make(chan struct{}),
 		entityLocks:                      make(map[string]*sync.Mutex),
 	}
 	coordinator.workflowTimers = newWorkflowTimerLifecycle(workflowStore, coordinator.SemanticSource(), bus, opts.WorkOwner, opts.TimerScheduler)
@@ -272,49 +271,6 @@ func (pc *PipelineCoordinator) SetTestLifecycleProbe(probe runtimelifecycleprobe
 	pc.mu.Unlock()
 }
 
-// RecoverNodeDeliveries performs the required startup pass, then authorizes
-// the standing maintenance loop to recover obligations as they become eligible.
-func (pc *PipelineCoordinator) RecoverNodeDeliveries(ctx context.Context) error {
-	if pc == nil || pc.workflowStore == nil {
-		return nil
-	}
-	if err := pc.recoverNodeDeliveriesOnce(ctx); err != nil {
-		return err
-	}
-	pc.nodeRecoveryReadyOnce.Do(func() { close(pc.nodeRecoveryReady) })
-	return nil
-}
-
-func (pc *PipelineCoordinator) recoverNodeDeliveriesOnce(ctx context.Context) error {
-	owner := pc.workflowStore.DeliveryLifecycleStore()
-	if owner == nil {
-		return fmt.Errorf("workflow node delivery lifecycle owner is required")
-	}
-	for _, node := range pc.WorkflowNodes() {
-		nodeID := strings.TrimSpace(node.ID)
-		if nodeID == "" || strings.TrimSpace(node.ExecutionType) != runtimecontracts.SystemNodeExecutionType {
-			continue
-		}
-		for {
-			executions, err := owner.ClaimNodeBacklog(ctx, nodeID, 1)
-			if err != nil {
-				return fmt.Errorf("claim pending deliveries for node %s: %w", nodeID, err)
-			}
-			for _, execution := range executions {
-				executionCtx := withWorkflowNodeDeliveryRoute(ctx, execution.Snapshot.Route)
-				executionCtx = runtimedelivery.WithClaim(executionCtx, execution.Claim)
-				if _, err := pc.executeNodeHandlerPlanResult(executionCtx, nodeID, execution.Event); err != nil {
-					return fmt.Errorf("recover delivery %s for node %s: %w", execution.Snapshot.DeliveryID, nodeID, err)
-				}
-			}
-			if len(executions) == 0 {
-				break
-			}
-		}
-	}
-	return nil
-}
-
 func (pc *PipelineCoordinator) RunMaintenance(ctx context.Context) {
 	draftExpiry, hasDraftExpiry := pc.decisionCards.(interface {
 		ExpireDecisionCardInputDrafts(context.Context, time.Time) (int, error)
@@ -336,13 +292,6 @@ func (pc *PipelineCoordinator) RunMaintenance(ctx context.Context) {
 			if err := pc.expireHumanTaskCards(ctx, humanTaskExpiry, now, 200); err != nil {
 				pc.logRuntimeWarn(ctx, runtimeWorkflowID, "expire_human_task_cards", "", "", runtimeWorkflowID, "", nil, err)
 			}
-		}
-		select {
-		case <-pc.nodeRecoveryReady:
-			if err := pc.recoverNodeDeliveriesOnce(ctx); err != nil {
-				pc.logRuntimeWarn(ctx, runtimeWorkflowID, "recover_node_deliveries", "", "", runtimeWorkflowID, "", nil, err)
-			}
-		default:
 		}
 	}
 	run()
@@ -548,14 +497,26 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 	recoveryClaim := claimed
 	for {
 		if !claimed {
-			owned, err := deliveryStore.ClaimNodeDelivery(ctx, evt, route)
-			if errors.Is(err, runtimedelivery.ErrIneligible) {
+			authorityProvider, ok := pc.bus.(interface {
+				DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error)
+				AcquireDeliveryContinuation(string) (worklifetime.DeliveryContinuation, error)
+				ReleaseDeliveryContinuation(string) error
+			})
+			if !ok {
+				return false, fmt.Errorf("workflow node delivery continuation authority is required")
+			}
+			reportCarrierFailure := func(err error) {
+				diaglog.ProcessLog(diaglog.LevelError, "pipeline", "workflow node delivery carrier transfer failed",
+					"node_id", nodeID, "event_id", evt.ID(), "error", err.Error())
+			}
+			admission, err := admitWorkflowNodeDelivery(ctx, evt, route, authorityProvider, deliveryStore, reportCarrierFailure)
+			if err != nil {
+				return false, err
+			}
+			if admission.handled {
 				return true, nil
 			}
-			if err != nil {
-				return false, fmt.Errorf("claim workflow node delivery: %w", err)
-			}
-			claim = owned.Claim
+			claim = admission.claim
 		}
 		attemptCtx := runtimedelivery.WithClaim(ctx, claim)
 		pc.notifyTestLifecycleDeliveryStatus(attemptCtx, nodeID, evt, string(runtimedelivery.StatusInProgress))
@@ -586,7 +547,18 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 			}
 			_, settleErr = deliveryStore.SettleSuccess(executionCtx, claim, sideEffects, time.Since(started))
 			finishErr := settlementGuard.Finish(settleErr == nil)
-			if err := errors.Join(settleErr, finishErr); err != nil {
+			var releaseErr error
+			if settleErr == nil {
+				releaser, ok := pc.bus.(interface {
+					ReleaseDeliveryContinuation(string) error
+				})
+				if !ok {
+					releaseErr = errors.New("terminal workflow node delivery continuation owner is required")
+				} else {
+					releaseErr = releaser.ReleaseDeliveryContinuation(claim.DeliveryID())
+				}
+			}
+			if err := errors.Join(settleErr, finishErr, releaseErr); err != nil {
 				return false, fmt.Errorf("settle workflow node delivery: %w", err)
 			}
 			pc.notifyTestLifecycleDeliveryStatus(attemptCtx, nodeID, evt, "delivered")
@@ -596,6 +568,10 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 		failure := runtimefailures.FromError(err, runtimeWorkflowID, "execute_handler")
 		disposition := runtimedelivery.FailureRetry
 		reason := "handler_failure"
+		if admission, ok := managedexecution.FromContext(executionCtx); ok && admission.Kind == managedexecution.KindSelectedContractFork {
+			disposition = runtimedelivery.FailureDeadLetter
+			reason = "terminal_failure"
+		}
 		if errors.Is(err, runtimeengine.ErrChainDepthExceeded) || runtimeengine.FailureDispositionFor(failure) != runtimeengine.FailureDispositionRetry {
 			disposition = runtimedelivery.FailureDeadLetter
 			reason = "handler_terminal_failure"
@@ -613,7 +589,18 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 			Duration: time.Since(started), RetryBase: semanticview.HandlerRetryBase(source),
 		})
 		finishErr := settlementGuard.Finish(settleErr == nil)
-		if err := errors.Join(settleErr, finishErr); err != nil {
+		var releaseErr error
+		if settleErr == nil && snapshot.Status == runtimedelivery.StatusDeadLetter {
+			releaser, ok := pc.bus.(interface {
+				ReleaseDeliveryContinuation(string) error
+			})
+			if !ok {
+				releaseErr = errors.New("terminal workflow node delivery continuation owner is required")
+			} else {
+				releaseErr = releaser.ReleaseDeliveryContinuation(snapshot.DeliveryID)
+			}
+		}
+		if err := errors.Join(settleErr, finishErr, releaseErr); err != nil {
 			return false, fmt.Errorf("settle failed workflow node delivery: %w", err)
 		}
 		pc.notifyTestLifecycleDeliveryStatus(attemptCtx, nodeID, evt, string(snapshot.Status))
@@ -626,29 +613,97 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 			}
 			return true, err
 		}
-		if err := waitForWorkflowNodeRetry(ctx, snapshot.NextEligibleAt); err != nil {
-			return true, err
+		retainer, ok := pc.bus.(interface {
+			RetainDeliveryContinuation(runtimedelivery.Snapshot) error
+		})
+		if !ok {
+			return false, fmt.Errorf("workflow node retry continuation owner is required")
 		}
-		claimed = false
+		if err := retainer.RetainDeliveryContinuation(snapshot); err != nil {
+			return false, fmt.Errorf("transfer workflow node retry continuation: %w", err)
+		}
+		return true, nil
 	}
 }
 
-func waitForWorkflowNodeRetry(ctx context.Context, nextEligibleAt time.Time) error {
-	if ctx == nil {
-		ctx = context.Background()
+type workflowNodeDeliveryAuthority interface {
+	DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error)
+	AcquireDeliveryContinuation(string) (worklifetime.DeliveryContinuation, error)
+	ReleaseDeliveryContinuation(string) error
+}
+
+type workflowNodeDeliveryAdmission struct {
+	claim   runtimedelivery.Claim
+	handled bool
+}
+
+func admitWorkflowNodeDelivery(
+	ctx context.Context,
+	evt events.Event,
+	route events.DeliveryRoute,
+	authorityProvider workflowNodeDeliveryAuthority,
+	deliveryStore runtimedelivery.Store,
+	reportCarrierFailure func(error),
+) (workflowNodeDeliveryAdmission, error) {
+	authority, err := authorityProvider.DeliveryAuthority()
+	if err != nil {
+		return workflowNodeDeliveryAdmission{}, err
 	}
-	wait := time.Until(nextEligibleAt)
-	if wait < 0 {
-		wait = 0
+	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), route)
+	if err != nil {
+		return workflowNodeDeliveryAdmission{}, err
 	}
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
+	continuation, err := authorityProvider.AcquireDeliveryContinuation(deliveryID)
+	if err != nil {
+		return workflowNodeDeliveryAdmission{}, err
 	}
+	carrier, err := worklifetime.NewDeliveryContinuationGuard(ctx, continuation)
+	if err != nil {
+		return workflowNodeDeliveryAdmission{}, err
+	}
+	returnCarrier := func(primary error) error {
+		_, completionErr := carrier.Complete(reportCarrierFailure)
+		return errors.Join(primary, completionErr)
+	}
+	claimResult, err := deliveryStore.ClaimDelivery(ctx, authority, evt, route)
+	if err != nil {
+		return workflowNodeDeliveryAdmission{}, returnCarrier(fmt.Errorf("claim workflow node delivery: %w", err))
+	}
+	switch claimResult.Disposition {
+	case runtimedelivery.ClaimDeferred, runtimedelivery.ClaimBusy:
+		if err := returnCarrier(nil); err != nil {
+			return workflowNodeDeliveryAdmission{}, err
+		}
+		return workflowNodeDeliveryAdmission{handled: true}, nil
+	case runtimedelivery.ClaimTerminal:
+		if err := returnCarrier(nil); err != nil {
+			return workflowNodeDeliveryAdmission{}, err
+		}
+		if err := authorityProvider.ReleaseDeliveryContinuation(claimResult.Snapshot.DeliveryID); err != nil {
+			return workflowNodeDeliveryAdmission{}, err
+		}
+		return workflowNodeDeliveryAdmission{handled: true}, nil
+	case runtimedelivery.ClaimWrongAuthority, runtimedelivery.ClaimAbsent, runtimedelivery.ClaimInvariantInvalid:
+		return workflowNodeDeliveryAdmission{}, returnCarrier(fmt.Errorf("claim workflow node delivery disposition %s: %w", claimResult.Disposition, claimResult.Invariant))
+	case runtimedelivery.ClaimAcquired:
+	default:
+		return workflowNodeDeliveryAdmission{}, returnCarrier(fmt.Errorf("claim workflow node delivery returned unknown disposition %q", claimResult.Disposition))
+	}
+	owned, acquired := claimResult.Acquired()
+	if !acquired {
+		return workflowNodeDeliveryAdmission{}, returnCarrier(errors.New("workflow node delivery acquired without an exact claim"))
+	}
+	resolution, consumeErr := carrier.Consume(reportCarrierFailure)
+	if consumeErr != nil {
+		return workflowNodeDeliveryAdmission{}, returnCarrier(fmt.Errorf("consume workflow node delivery continuation: %w", consumeErr))
+	}
+	if resolution == worklifetime.DeliveryContinuationTerminal {
+		if err := authorityProvider.ReleaseDeliveryContinuation(owned.Claim.DeliveryID()); err != nil {
+			return workflowNodeDeliveryAdmission{}, err
+		}
+		return workflowNodeDeliveryAdmission{handled: true}, nil
+	}
+	return workflowNodeDeliveryAdmission{claim: owned.Claim}, nil
 }
 
 func (pc *PipelineCoordinator) recordWorkflowHandlerFailure(ctx context.Context, evt events.Event, nodeID string, err error) {

@@ -8,6 +8,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -103,6 +104,17 @@ func newScopedTestEventBus(store EventStore, options ...EventBusOptions) (*Event
 		}
 		opts.WorkOwner = owner
 	}
+	if opts.DeliveryAuthority.Kind() == "" {
+		authority, err := runtimedelivery.NewNormalExecutionAuthority(
+			opts.BundleSourceFact,
+			opts.RuntimeInstanceID,
+			1,
+		)
+		if err != nil {
+			return nil, err
+		}
+		opts.DeliveryAuthority = authority
+	}
 	if registrar, ok := store.(authorActivityTestCatalogRegistrar); ok {
 		descriptors := authorActivityTestEventDescriptors(opts.ContractBundle)
 		lease, err := registrar.RegisterAuthorActivityEventCatalog(
@@ -113,10 +125,20 @@ func newScopedTestEventBus(store EventStore, options ...EventBusOptions) (*Event
 		}
 		_ = lease // The store and its catalog are scoped to the test that owns them.
 	}
+	var bus *EventBus
+	var err error
 	if opts.PipelineObligations == nil {
-		return NewEphemeralEventBusWithOptions(store, opts)
+		bus, err = NewEphemeralEventBusWithOptions(store, opts)
+	} else {
+		bus, err = NewEventBusWithOptions(store, opts)
 	}
-	return NewEventBusWithOptions(store, opts)
+	if err != nil {
+		return nil, err
+	}
+	if err := bus.SetDeliveryContinuationOwner(permissiveTestDeliveryOwner{}); err != nil {
+		return nil, err
+	}
+	return bus, nil
 }
 
 func authorActivityTestEventDescriptors(source semanticview.Source) []runtimeauthoractivity.EventDescriptor {

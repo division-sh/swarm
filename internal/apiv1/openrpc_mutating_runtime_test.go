@@ -272,7 +272,6 @@ func mutatingHTTPRuntimeMethods(t *testing.T, api *apispec.APISpecification, ope
 func approvedMutatingHTTPRuntimeMethods() []string {
 	return []string{
 		"agent.replay",
-		"agent.replay_backlog",
 		"agent.restart",
 		"agent.send_directive",
 		"bundle.delete",
@@ -328,12 +327,6 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 			ConflictParams: map[string]any{"event_id": "evt-1", "agent_id": "agent-b"},
 			ResultKeys:     []string{"event_id", "agent_id", "replay_event_id", "audit_event_id", "original_deliveries", "new_deliveries"},
 			SuccessEffects: 2,
-		},
-		"agent.replay_backlog": {
-			Params:         map[string]any{"agent_id": "agent-a"},
-			ConflictParams: map[string]any{"agent_id": "agent-b"},
-			ResultKeys:     []string{"ok", "replayed_count"},
-			SuccessEffects: 1,
 		},
 		"agent.restart": {
 			Params:         map[string]any{"agent_id": "agent-a"},
@@ -723,10 +716,6 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 		{Method: "agent.restart", Params: map[string]any{"agent_id": "missing", "idempotency_key": "idem-error"}, Code: AgentNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.agentControl.errs["agent.restart"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrAgentNotFound, AgentID: "missing"}
 		}}},
-		{Method: "agent.replay_backlog", Params: map[string]any{"agent_id": "missing", "idempotency_key": "idem-error"}, Code: AgentNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.agentControl.errs["agent.replay_backlog"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrAgentNotFound, AgentID: "missing"}
-		}}},
-
 		{Method: "runtime.pause", Params: map[string]any{"idempotency_key": "idem-error"}, Code: RuntimeAlreadyPausedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.runtimeIngress.errs["runtime.pause"] = runtimeingress.ErrAlreadyPaused
 		}}},
@@ -1426,7 +1415,7 @@ func mutatingProbeOriginalEvent(t testing.TB, eventID string, subscribers []stri
 			Route:          route,
 			SessionID:      "sess-" + subscriber,
 			Status:         string(status),
-			RetryEligible:  status == runtimedelivery.StatusFailed,
+			RetryScheduled: status == runtimedelivery.StatusFailed,
 			Terminal:       status.Terminal(),
 		})
 	}
@@ -1550,14 +1539,6 @@ func (c *mutatingProbeAgentControl) Restart(_ context.Context, req runtimeagentc
 	}
 	c.state.recordEffect()
 	return runtimeagentcontrol.RestartResult{AgentID: req.AgentID}, nil
-}
-
-func (c *mutatingProbeAgentControl) ReplayBacklog(_ context.Context, req runtimeagentcontrol.ReplayBacklogRequest) (runtimeagentcontrol.ReplayBacklogResult, error) {
-	if err := c.errs["agent.replay_backlog"]; err != nil {
-		return runtimeagentcontrol.ReplayBacklogResult{}, err
-	}
-	c.state.recordEffect()
-	return runtimeagentcontrol.ReplayBacklogResult{AgentID: req.AgentID, ReplayedCount: 3}, nil
 }
 
 type mutatingProbeRuntimeIngress struct {

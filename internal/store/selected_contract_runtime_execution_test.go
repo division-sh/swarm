@@ -444,11 +444,11 @@ func TestSelectedForkDiscardDeletesClaimedAndSettledDeliveryHistoryPostgres(t *t
 			t.Fatalf("commit selected-fork delivery %s: %v", evt.ID(), err)
 		}
 	}
-	claimed, err := store.ClaimAgentDelivery(ctx, eventsByState[0], route)
+	claimed, err := claimDeliveryFixture(ctx, store, eventsByState[0], route)
 	if err != nil {
 		t.Fatalf("claim selected-fork delivery: %v", err)
 	}
-	settled, err := store.ClaimAgentDelivery(ctx, eventsByState[1], route)
+	settled, err := claimDeliveryFixture(ctx, store, eventsByState[1], route)
 	if err != nil {
 		t.Fatalf("claim selected-fork settled delivery: %v", err)
 	}

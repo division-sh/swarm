@@ -318,7 +318,7 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 		if err := commitDeliveryObligationFixture(ctx, sqliteStore, event, route); err != nil {
 			t.Fatalf("commit trace delivery %s/%s: %v", eventID, agentID, err)
 		}
-		claimed, err := sqliteStore.ClaimAgentDelivery(ctx, event, route)
+		claimed, err := claimDeliveryFixture(ctx, sqliteStore, event, route)
 		if err != nil {
 			t.Fatalf("claim trace delivery %s/%s: %v", eventID, agentID, err)
 		}

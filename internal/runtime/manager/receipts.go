@@ -86,30 +86,11 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 	}
 	claim, claimed := runtimedelivery.ClaimFromContext(ctx)
 	if !claimed {
-		if am.deliveryStore == nil {
-			err := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "delivery_lifecycle_owner_missing", "agent-manager", "claim_delivery", map[string]any{"agent_id": agent.ID(), "event_id": evt.ID()})
-			record.Outcome = startupManagerReplayOutcomeDropped
-			record.ReasonCode = startupManagerReplayReasonDeliveryStartFailed
-			record.Failure = failureEnvelope(err, "agent-manager", "claim_delivery")
-			return eventProcessResult{record: record, err: err}
-		}
-		route, ok := runtimedelivery.RouteFromContext(ctx)
-		if !ok {
-			err := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "delivery_route_missing", "agent-manager", "claim_delivery", map[string]any{"agent_id": agent.ID(), "event_id": evt.ID()})
-			record.Outcome = startupManagerReplayOutcomeDropped
-			record.ReasonCode = startupManagerReplayReasonDeliveryStartFailed
-			record.Failure = failureEnvelope(err, "agent-manager", "claim_delivery")
-			return eventProcessResult{record: record, err: err}
-		}
-		claimedDelivery, err := am.deliveryStore.ClaimAgentDelivery(ctx, evt, route)
-		if err != nil {
-			record.Outcome = startupManagerReplayOutcomeDropped
-			record.ReasonCode = startupManagerReplayReasonDeliveryStartFailed
-			record.Failure = failureEnvelope(err, "agent-manager", "claim_delivery")
-			return eventProcessResult{record: record, err: err}
-		}
-		claim = claimedDelivery.Claim
-		ctx = runtimedelivery.WithClaim(ctx, claim)
+		err := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "delivery_claim_missing", "agent-manager", "process_event", map[string]any{"agent_id": agent.ID(), "event_id": evt.ID()})
+		record.Outcome = startupManagerReplayOutcomeDropped
+		record.ReasonCode = startupManagerReplayReasonDeliveryStartFailed
+		record.Failure = failureEnvelope(err, "agent-manager", "process_event")
+		return eventProcessResult{record: record, err: err}
 	}
 	if claim.SubscriberClass() != runtimedelivery.SubscriberAgent || claim.SubscriberID() != agent.ID() {
 		err := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "delivery_claim_subscriber_mismatch", "agent-manager", "process_event", map[string]any{"agent_id": agent.ID(), "delivery_id": claim.DeliveryID()})
@@ -516,6 +497,33 @@ func (am *AgentManager) writeReceipt(ctx context.Context, evt events.Event, stat
 			})
 		}
 		return runtimedelivery.Snapshot{}, errors.Join(err, finishErr)
+	}
+	if snapshot.Status == runtimedelivery.StatusFailed {
+		if finishErr != nil {
+			return runtimedelivery.Snapshot{}, finishErr
+		}
+		ownerProvider, ok := am.bus.(interface {
+			RetainDeliveryContinuation(runtimedelivery.Snapshot) error
+		})
+		if !ok {
+			return runtimedelivery.Snapshot{}, errors.New("retry settlement requires the normal generation continuation owner")
+		}
+		if err := ownerProvider.RetainDeliveryContinuation(snapshot); err != nil {
+			return runtimedelivery.Snapshot{}, fmt.Errorf("transfer retry continuation: %w", err)
+		}
+	} else if snapshot.Terminal() {
+		ownerProvider, ok := am.bus.(interface {
+			ReleaseDeliveryContinuation(string) error
+		})
+		if !ok {
+			return runtimedelivery.Snapshot{}, errors.Join(
+				finishErr,
+				errors.New("terminal settlement requires the exact continuation owner"),
+			)
+		}
+		if err := ownerProvider.ReleaseDeliveryContinuation(snapshot.DeliveryID); err != nil {
+			return runtimedelivery.Snapshot{}, errors.Join(finishErr, fmt.Errorf("release terminal continuation: %w", err))
+		}
 	}
 	if finishErr != nil {
 		return runtimedelivery.Snapshot{}, finishErr

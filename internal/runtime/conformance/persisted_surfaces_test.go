@@ -31,6 +31,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimediaglog "github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -336,10 +337,10 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	conversation.SetToolExecutor(conformanceToolExecutor{})
 	route := events.DeliveryRoute{
 		SubscriberType: "agent",
-		SubscriberID:   "agent-1",
+		SubscriberID:   lifecycleToken.Identity.AgentID(),
 		AgentIdentity:  lifecycleToken.Identity,
 	}
-	firstClaim, err := pg.ClaimAgentDelivery(ctx, event1, route)
+	firstClaim, err := storetest.ClaimDelivery(ctx, pg, event1, route)
 	if err != nil {
 		t.Fatalf("claim first delivery: %v", err)
 	}
@@ -352,7 +353,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		t.Fatalf("settle first delivery: %v", err)
 	}
 
-	secondClaim, err := pg.ClaimAgentDelivery(ctx, event2, route)
+	secondClaim, err := storetest.ClaimDelivery(ctx, pg, event2, route)
 	if err != nil {
 		t.Fatalf("claim second delivery: %v", err)
 	}
@@ -543,9 +544,9 @@ printf '{"result":"ok"}'
 	conversation := runtimellm.NewConversation("agent-1", "", "system", nil, agentmemory.Authored(true), 10, runtime)
 	conversation.Session = session
 	conversation.SetToolExecutor(conformanceToolExecutor{})
-	claimed, err := pg.ClaimAgentDelivery(ctx, evt, events.DeliveryRoute{
+	claimed, err := storetest.ClaimDelivery(ctx, pg, evt, events.DeliveryRoute{
 		SubscriberType: "agent",
-		SubscriberID:   "agent-1",
+		SubscriberID:   lifecycleToken.Identity.AgentID(),
 		AgentIdentity:  lifecycleToken.Identity,
 	})
 	if err != nil {
@@ -939,7 +940,7 @@ func acknowledgeConformancePipelineEvent(t testing.TB, ctx context.Context, owne
 	if err != nil {
 		t.Fatalf("claim pipeline obligation for %s: %v", eventID, err)
 	}
-	if err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
+	if _, err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
 		t.Fatalf("acknowledge pipeline obligation for %s: %v", eventID, err)
 	}
 }
@@ -1154,8 +1155,8 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	if err := rt.Start(ctx); err != nil {
-		t.Fatalf("Start: %v", err)
+	if err := rt.Start(ctx); err == nil || !strings.Contains(err.Error(), "recover pipeline obligations before delivery enumeration") {
+		t.Fatalf("Start error = %v, want boot-fatal recovery exhaustion failure", err)
 	}
 	defer func() {
 		if err := rt.Shutdown(); err != nil {
@@ -1309,7 +1310,7 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 	}
 	replayedDetail, _ := replayed.Detail.(map[string]any)
 	if got := readString(replayedDetail["decision_outcome"]); got != "replayed" {
-		t.Fatalf("replayed detail.decision_outcome = %q, want replayed", got)
+		t.Fatalf("replayed detail.decision_outcome = %q, want replayed: %#v", got, replayed)
 	}
 	if got := readString(replayedDetail["decision_reason_code"]); got != "persisted_schedule_restored" {
 		t.Fatalf("replayed detail.decision_reason_code = %q, want persisted_schedule_restored", got)
@@ -1587,60 +1588,8 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 	if err != nil {
 		t.Fatalf("ListRuntimeLogs: %v", err)
 	}
-	if len(logs) != 4 {
-		t.Fatalf("runtime log rows = %d, want 4: %#v", len(logs), logs)
-	}
-	findByEventID := func(eventID string) int {
-		t.Helper()
-		for idx, log := range logs {
-			if strings.TrimSpace(log.EventID) == strings.TrimSpace(eventID) {
-				return idx
-			}
-		}
-		t.Fatalf("missing runtime log for event %q in %#v", eventID, logs)
-		return -1
-	}
-
-	replayed := logs[findByEventID(eventIDs["support.replay.ok"])]
-	replayedDetail, _ := replayed.Detail.(map[string]any)
-	if got := readString(replayedDetail["decision_outcome"]); got != "replayed" {
-		t.Fatalf("replayed detail.decision_outcome = %q, want replayed", got)
-	}
-	if got := readString(replayedDetail["decision_reason_code"]); got != "persisted_event_replayed" {
-		t.Fatalf("replayed detail.decision_reason_code = %q, want persisted_event_replayed", got)
-	}
-
-	replayedSecond := logs[findByEventID(eventIDs["support.replay.skip"])]
-	replayedSecondDetail, _ := replayedSecond.Detail.(map[string]any)
-	if got := readString(replayedSecondDetail["decision_outcome"]); got != "replayed" {
-		t.Fatalf("second replay detail.decision_outcome = %q, want replayed", got)
-	}
-	if got := readString(replayedSecondDetail["decision_reason_code"]); got != "persisted_event_replayed" {
-		t.Fatalf("second replay detail.decision_reason_code = %q, want persisted_event_replayed", got)
-	}
-
-	droppedLeased := logs[findByEventID(eventIDs["support.replay.leased"])]
-	droppedLeasedDetail, _ := droppedLeased.Detail.(map[string]any)
-	if got := readString(droppedLeasedDetail["decision_outcome"]); got != "dropped" {
-		t.Fatalf("leased detail.decision_outcome = %q, want dropped without prose classification", got)
-	}
-	if got := readString(droppedLeasedDetail["decision_reason_code"]); got != "event_processing_failed" {
-		t.Fatalf("leased detail.decision_reason_code = %q, want event_processing_failed", got)
-	}
-	if droppedLeased.Failure == nil || droppedLeased.Failure.Detail.Code != "unclassified_runtime_error" {
-		t.Fatalf("leased failure = %#v, want generic internal failure", droppedLeased.Failure)
-	}
-
-	dropped := logs[findByEventID(eventIDs["support.replay.drop"])]
-	droppedDetail, _ := dropped.Detail.(map[string]any)
-	if got := readString(droppedDetail["decision_outcome"]); got != "dropped" {
-		t.Fatalf("dropped detail.decision_outcome = %q, want dropped", got)
-	}
-	if got := readString(droppedDetail["decision_reason_code"]); got != "event_processing_failed" {
-		t.Fatalf("dropped detail.decision_reason_code = %q, want event_processing_failed", got)
-	}
-	if dropped.Failure == nil || dropped.Failure.Detail.Code != "unclassified_runtime_error" {
-		t.Fatalf("dropped startup manager replay failure = %#v", dropped.Failure)
+	if len(logs) != 0 {
+		t.Fatalf("retired manager replay aftermath rows = %d, want 0: %#v", len(logs), logs)
 	}
 }
 
@@ -1654,8 +1603,10 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
 	logger := runtimepkg.NewRuntimeLogger(pg)
+	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
-		Logger: conformanceRuntimeLoggerHook{logger: logger},
+		Logger:    conformanceRuntimeLoggerHook{logger: logger},
+		WorkOwner: workOwner,
 	}, "system.parent", "system.recover.replay", "system.recover.skip")
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -1668,6 +1619,11 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: replayRunID})
 	replayParentID := uuid.NewString()
 	replayChildID := uuid.NewString()
+	replayRoute := events.DeliveryRoute{
+		SubscriberType: "agent",
+		SubscriberID:   replayRecipient,
+		AgentIdentity:  replayIdentity,
+	}
 	storetest.CommitSemanticEvent(t, ctx, pg, eventtest.PersistedProjection(replayParentID,
 		events.EventType("system.parent"),
 		"runtime", "", []byte(`{"ok":true}`), 0, replayRunID, "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute).UTC()))
@@ -1675,7 +1631,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 		events.EventType("system.recover.replay"),
 		"runtime", "", []byte(`{"ok":true}`), 0, replayRunID,
 		replayParentID, events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
-		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: replayRecipient, AgentIdentity: replayIdentity}},
+		[]events.DeliveryRoute{replayRoute},
 		runtimepipelineobligation.ScopeSubscribed)
 	acknowledgeConformancePipelineEvent(t, ctx, pg.PipelineObligations(), replayParentID)
 
@@ -1703,20 +1659,71 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 		t.Fatalf("plant missing-run recovery corruption: %v", err)
 	}
 
+	authority, err := bus.DeliveryAuthority()
+	if err != nil {
+		t.Fatalf("load delivery authority: %v", err)
+	}
+	if err := pg.ActivateDeliveryAuthority(ctx, authority); err != nil {
+		t.Fatalf("activate delivery authority: %v", err)
+	}
+	continuations, err := runtimedeliverycontinuation.New(pg, authority, workOwner, bus, nil)
+	if err != nil {
+		t.Fatalf("construct delivery continuation coordinator: %v", err)
+	}
+	if err := bus.SetDeliveryContinuationOwner(continuations); err != nil {
+		t.Fatalf("install delivery continuation coordinator: %v", err)
+	}
 	rm := runtimepipeline.NewRecoveryManagerWith(bus)
 	if err := rm.Recover(ctx); err != nil {
-		t.Fatalf("Recover: %v", err)
+		t.Fatalf("Recover before delivery continuation startup: %v", err)
 	}
+	if err := continuations.Start(ctx); err != nil {
+		t.Fatalf("start delivery continuation coordinator: %v", err)
+	}
+	defer func() {
+		retireCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := continuations.Retire(retireCtx); err != nil {
+			t.Fatalf("retire delivery continuation coordinator: %v", err)
+		}
+	}()
 	select {
 	case delivery := <-replayDeliveries:
 		if delivery.ID() != replayChildID {
-			t.Fatalf("replayed local delivery id = %q, want %q", delivery.ID(), replayChildID)
+			t.Fatalf("continued local delivery id = %q, want %q", delivery.ID(), replayChildID)
 		}
-		if err := delivery.Complete(); err != nil {
-			t.Fatalf("complete replayed local delivery ownership: %v", err)
+		claimResult, err := pg.ClaimDelivery(ctx, authority, delivery.Event(), replayRoute)
+		if err != nil {
+			t.Fatalf("claim continued local delivery: %v", err)
+		}
+		claimed, ok := claimResult.Acquired()
+		if !ok {
+			t.Fatalf("continued local delivery disposition = %q, want acquired", claimResult.Disposition)
+		}
+		carrier, err := worklifetime.NewEventDeliveryCarrierGuard(delivery)
+		if err != nil {
+			t.Fatalf("guard continued local delivery: %v", err)
+		}
+		if resolution, err := carrier.Consume(nil); err != nil || resolution != worklifetime.DeliveryContinuationConsumed {
+			t.Fatalf("transfer continued local delivery into attempt: %v", err)
+		}
+		if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
+			t.Fatalf("settle continued local delivery: %v", err)
+		}
+		if _, err := carrier.Complete(nil); err != nil {
+			t.Fatalf("complete continued local delivery ownership: %v", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("replayed local delivery was not dispatched")
+		t.Fatal("delivery continuation coordinator did not dispatch persisted delivery")
+	}
+
+	if err := rm.Recover(ctx); err != nil {
+		t.Fatalf("repeat Recover: %v", err)
+	}
+	select {
+	case delivery := <-replayDeliveries:
+		t.Fatalf("pipeline recovery redispatched coordinator-owned delivery %q", delivery.ID())
+	default:
 	}
 
 	reader := dashboardserver.NewSQLObservabilityReader(db, pg)
@@ -1750,7 +1757,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	}
 	replayedDetail, _ := replayed.Detail.(map[string]any)
 	if got := readString(replayedDetail["decision_outcome"]); got != "replayed" {
-		t.Fatalf("replayed detail.decision_outcome = %q, want replayed", got)
+		t.Fatalf("replayed detail.decision_outcome = %q, want replayed: %#v", got, replayed)
 	}
 	if got := readString(replayedDetail["decision_reason_code"]); got != "persisted_recipients_replayed" {
 		t.Fatalf("replayed detail.decision_reason_code = %q, want persisted_recipients_replayed", got)

@@ -54,8 +54,17 @@ func commitSemanticEventFixtureWithAgents(ctx context.Context, store any, event 
 }
 
 func commitSemanticEventFixtureWithRoutes(ctx context.Context, store any, event events.Event, routes []events.DeliveryRoute) error {
+	routes = canonicalDeliveryFixtureRoutes(routes)
 	_, err := commitSemanticEventFixtureOutcome(ctx, store, event, routes, runtimepipelineobligation.ScopeSubscribed)
 	return err
+}
+
+func canonicalDeliveryFixtureRoutes(routes []events.DeliveryRoute) []events.DeliveryRoute {
+	canonical := make([]events.DeliveryRoute, len(routes))
+	for i, route := range routes {
+		canonical[i] = canonicalDeliveryFixtureRouteValue(route)
+	}
+	return canonical
 }
 
 func commitSemanticParentFixture(ctx context.Context, store any, runID, parentEventID string, createdAt time.Time) error {
@@ -74,7 +83,8 @@ func commitSemanticParentFixture(ctx context.Context, store any, runID, parentEv
 	if err != nil {
 		return err
 	}
-	return owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted"))
+	_, err = owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted"))
+	return err
 }
 
 func commitSemanticParentFixtureTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, runID, parentEventID string, createdAt time.Time) error {
@@ -124,7 +134,8 @@ func acknowledgePipelineEventFixture(ctx context.Context, selectedStore any, eve
 	if err != nil {
 		return err
 	}
-	return owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted"))
+	_, err = owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted"))
+	return err
 }
 
 func commitDiagnosticRuntimeLogFixture(ctx context.Context, store diagnosticRuntimeLogFixtureStore, event events.Event) error {
@@ -229,11 +240,15 @@ func commitDeliveryReplayEventFixture(
 		if err := insertCommittedPipelineScopeTx(txctx, tx, forkEventID, runtimepipelineobligation.ScopeDirect, true, time.Now().UTC()); err != nil {
 			return err
 		}
-		route := events.DeliveryRoute{SubscriberType: subscriberType, SubscriberID: subscriberID}
-		if route.Normalized().SubscriberType == string(runtimedelivery.SubscriberAgent) {
-			route.AgentIdentity = mustTestAgentIdentity(subscriberID, "fixture/"+subscriberID)
+		route := canonicalDeliveryFixtureRouteValue(events.DeliveryRoute{
+			SubscriberType: subscriberType,
+			SubscriberID:   subscriberID,
+		})
+		authority, err := deliveryFixtureAuthorityForRun(txctx, tx, runtimedelivery.DialectPostgres, forkRunID)
+		if err != nil {
+			return err
 		}
-		obligation, err := runtimedelivery.NewObligation(forkEventID, forkRunID, route)
+		obligation, err := runtimedelivery.NewObligation(forkEventID, forkRunID, route, authority)
 		if err != nil {
 			return err
 		}
@@ -296,6 +311,9 @@ func commitAdmittedSemanticEventFixtureOutcome(
 	req := runtimebus.CommitPublishRequest{
 		Event: admitted, DeliveryRoutes: events.NormalizeDeliveryRoutes(routes), ReplayScope: scope, PipelineClaim: claim,
 	}
+	if len(req.DeliveryRoutes) > 0 {
+		req.DeliveryReceipt = &runtimebus.DeliveryCommitReceipt{}
+	}
 	ctx, release, err := semanticEventFixtureContext(ctx, store, admitted.Event())
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
@@ -306,6 +324,17 @@ func commitAdmittedSemanticEventFixtureOutcome(
 		outcome, appendErr = selected.appendAdmittedEventTxOutcome(txctx, tx, admitted)
 		if appendErr != nil || outcome == runtimebus.EventAppendExactDuplicate {
 			return appendErr
+		}
+		if len(req.DeliveryRoutes) > 0 {
+			req.DeliveryAuthority, appendErr = semanticEventFixtureDeliveryAuthority(
+				txctx,
+				tx,
+				store,
+				admitted.Event().RunID(),
+			)
+			if appendErr != nil {
+				return appendErr
+			}
 		}
 		return (sqlPublishCommitter{tx: tx, store: selected}).commitInitialSideEffects(txctx, req, true)
 	}
@@ -328,6 +357,7 @@ func commitSemanticEventFixtureTx(ctx context.Context, store eventCommitTxStore,
 }
 
 func commitSemanticEventFixtureWithRoutesTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, event events.Event, routes []events.DeliveryRoute) (err error) {
+	routes = canonicalDeliveryFixtureRoutes(routes)
 	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return err
@@ -356,9 +386,38 @@ func commitSemanticEventFixtureWithRoutesTx(ctx context.Context, store eventComm
 	if len(routes) > 0 {
 		scope = runtimepipelineobligation.ScopeSubscribed
 	}
+	var authority runtimedelivery.ExecutionAuthority
+	var receipt *runtimebus.DeliveryCommitReceipt
+	if len(routes) > 0 {
+		authority, err = semanticEventFixtureDeliveryAuthority(ctx, tx, store, admitted.Event().RunID())
+		if err != nil {
+			return err
+		}
+		receipt = &runtimebus.DeliveryCommitReceipt{}
+	}
 	return (sqlPublishCommitter{tx: tx, store: store}).commitInitialSideEffects(ctx, runtimebus.CommitPublishRequest{
-		Event: admitted, DeliveryRoutes: events.NormalizeDeliveryRoutes(routes), ReplayScope: scope, PipelineClaim: claim,
+		Event: admitted, DeliveryRoutes: events.NormalizeDeliveryRoutes(routes), DeliveryAuthority: authority,
+		DeliveryReceipt: receipt, ReplayScope: scope, PipelineClaim: claim,
 	}, true)
+}
+
+func semanticEventFixtureDeliveryAuthority(
+	ctx context.Context,
+	tx *sql.Tx,
+	selected any,
+	runID string,
+) (runtimedelivery.ExecutionAuthority, error) {
+	switch selected.(type) {
+	case *PostgresStore:
+		return deliveryFixtureAuthorityForRun(ctx, tx, runtimedelivery.DialectPostgres, runID)
+	case *SQLiteRuntimeStore:
+		return deliveryFixtureAuthorityForRun(ctx, tx, runtimedelivery.DialectSQLite, runID)
+	default:
+		return runtimedelivery.ExecutionAuthority{}, fmt.Errorf(
+			"semantic event fixture store %T has no delivery authority",
+			selected,
+		)
+	}
 }
 
 func pipelineObligationOwnerForFixture(store any) runtimepipelineobligation.Store {

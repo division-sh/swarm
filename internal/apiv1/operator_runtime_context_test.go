@@ -104,7 +104,7 @@ func TestOperatorRuntimeContextManagerRoutesExistingRunByStoredBundle(t *testing
 		t.Fatalf("event rows for existing run = %d, want 2", got)
 	}
 	assertRunBundleIdentity(t, fixture.db, runID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourcePersisted)
-	got = requireAPIV1RuntimeBusEvent(t, chSelected, "existing-run selected-context delivery")
+	got = requireAPIV1RuntimeBusEventID(t, chSelected, eventID, "existing-run selected-context delivery")
 	if got.ID() != eventID || got.RunID() != runID {
 		t.Fatalf("existing-run delivery id/run = %s/%s, want %s/%s", got.ID(), got.RunID(), eventID, runID)
 	}
@@ -554,17 +554,15 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 			RuntimeContexts: fixture.manager,
 		}),
 	})
-	for _, method := range []string{"agent.restart", "agent.replay_backlog"} {
-		resp := rpcCall(t, agentHandler, agentControlBody(method, "agent-1", "idem-"+method))
-		if resp.Error == nil {
-			t.Fatalf("%s error = nil", method)
-		}
-		if data := asMap(t, resp.Error.Data); data["code"] != BundleScopeRequiredCode {
-			t.Fatalf("%s error data = %#v, want %s", method, data, BundleScopeRequiredCode)
-		}
+	resp := rpcCall(t, agentHandler, agentControlBody("agent.restart", "agent-1", "idem-agent.restart"))
+	if resp.Error == nil {
+		t.Fatal("agent.restart error = nil")
 	}
-	if agentControl.restartCalls != 0 || agentControl.replayCalls != 0 {
-		t.Fatalf("agent singleton calls restart/replay = %d/%d, want 0/0", agentControl.restartCalls, agentControl.replayCalls)
+	if data := asMap(t, resp.Error.Data); data["code"] != BundleScopeRequiredCode {
+		t.Fatalf("agent.restart error data = %#v, want %s", data, BundleScopeRequiredCode)
+	}
+	if agentControl.restartCalls != 0 {
+		t.Fatalf("agent singleton restart calls = %d, want 0", agentControl.restartCalls)
 	}
 
 }

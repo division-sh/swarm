@@ -205,7 +205,6 @@ func newAgentCommand(opts rootCommandOptions) *cobra.Command {
 		newAgentDeliveriesCommand(opts),
 		newAgentRestartCommand(opts),
 		newAgentReplayCommand(opts),
-		newAgentReplayBacklogCommand(opts),
 		newAgentDirectiveCommand(opts),
 	)
 	return cmd

@@ -82,10 +82,10 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 							}
 							route := events.DeliveryRoute{
 								SubscriberType: string(runtimedelivery.SubscriberAgent),
-								SubscriberID:   agentIdentity.AgentID(),
+								SubscriberID:   agentID,
 								AgentIdentity:  agentIdentity,
 							}
-							claimed, err := fixture.store.ClaimAgentDelivery(ctx, event, route)
+							claimed, err := claimDeliveryFixture(ctx, fixture.store, event, route)
 							if err != nil {
 								t.Fatalf("ClaimAgentDelivery: %v", err)
 							}
@@ -257,7 +257,7 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 	}
 	claims := make([]runtimedelivery.Claim, 0, len(routes))
 	for _, route := range routes {
-		claimed, err := pg.ClaimAgentDelivery(ctx, event, route)
+		claimed, err := claimDeliveryFixture(ctx, pg, event, route)
 		if err != nil {
 			t.Fatalf("ClaimAgentDelivery(%s): %v", route.SubscriberID, err)
 		}

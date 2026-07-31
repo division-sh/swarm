@@ -251,8 +251,16 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin delivery author activity: %v", err)
 	}
-	if _, err := postgresDeliveryAdapter.ClaimExact(deliveryTxCtx, deliveryTx, seedEvent, route, runtimedelivery.DefaultLeaseTTL); err != nil {
+	snapshot, err := postgresDeliveryAdapter.SnapshotExact(deliveryTxCtx, deliveryTx, seedEvent, route)
+	if err != nil {
+		t.Fatalf("load delivery authority: %v", err)
+	}
+	result, err := postgresDeliveryAdapter.ClaimExactResult(deliveryTxCtx, deliveryTx, snapshot.Authority, seedEvent, route, runtimedelivery.DefaultLeaseTTL)
+	if err != nil {
 		t.Fatalf("stage delivery start: %v", err)
+	}
+	if _, ok := result.Acquired(); !ok {
+		t.Fatalf("stage delivery start disposition = %s, want acquired", result.Disposition)
 	}
 	var deliveryBackendPID int
 	if err := deliveryTx.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&deliveryBackendPID); err != nil {

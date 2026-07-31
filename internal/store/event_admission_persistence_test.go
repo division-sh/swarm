@@ -193,7 +193,7 @@ func convergeTerminalAdmissionRun(
 	if err != nil {
 		return fmt.Errorf("claim terminal completion event: %w", err)
 	}
-	if err := owner.PipelineObligations().Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
+	if _, err := owner.PipelineObligations().Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
 		return fmt.Errorf("settle terminal completion event: %w", err)
 	}
 	if err := executeRunCompletionCandidateForEvent(ctx, owner, eventID, nil, map[string][]string{"terminal-admission": {"done"}}); err != nil {

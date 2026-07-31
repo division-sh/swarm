@@ -11,8 +11,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -68,7 +71,7 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 					fixture := backend.open(t)
 					ctx := testAuthorActivityContext()
 					withSource := failure.name != "lineage"
-					req := newSelectedForkAtomicityRequest(t, ctx, fixture.store.(eventRecordContractStore), withSource)
+					req := newSelectedForkAtomicityRequest(t, ctx, fixture, withSource)
 					failure.mutate(&req)
 					if outcome, err := fixture.store.(eventRecordContractStore).CommitSelectedForkEvent(ctx, req); err == nil || outcome != runtimebus.EventAppendOutcomeUnknown {
 						t.Fatalf("outcome=%v err=%v, want rollback failure", outcome, err)
@@ -81,7 +84,7 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 				fixture := backend.open(t)
 				ctx := testAuthorActivityContext()
 				store := fixture.store.(eventRecordContractStore)
-				req := newSelectedForkAtomicityRequest(t, ctx, store, true)
+				req := newSelectedForkAtomicityRequest(t, ctx, fixture, true)
 				req.Commit.DeliveryRoutes = []events.DeliveryRoute{testAgentDeliveryRoute(t, "worker", "fixture/worker")}
 				outcome, err := store.CommitSelectedForkEvent(ctx, req)
 				if err != nil || outcome != runtimebus.EventAppendInserted {
@@ -121,7 +124,7 @@ func TestCommitSelectedForkEventHostileRepeatPostgres(t *testing.T) {
 	fixture := openPostgresAuthorActivityReceiptFixture(t)
 	ctx := testAuthorActivityContext()
 	store := fixture.store.(eventRecordContractStore)
-	req := newSelectedForkAtomicityRequest(t, ctx, store, true)
+	req := newSelectedForkAtomicityRequest(t, ctx, fixture, true)
 	req.Commit.DeliveryRoutes = []events.DeliveryRoute{testAgentDeliveryRoute(t, "worker", "fixture/worker")}
 
 	const attempts = 12
@@ -170,7 +173,7 @@ func TestSQLiteCommitSelectedForkEventSerializesWithClaimAbandonment(t *testing.
 	ctx := testAuthorActivityContext()
 	selected := fixture.store.(*SQLiteRuntimeStore)
 	owner := selected.PipelineObligations()
-	req := newSelectedForkAtomicityRequest(t, ctx, selected, true)
+	req := newSelectedForkAtomicityRequest(t, ctx, fixture, true)
 	state, err := selected.sqlitePipelineClaimState(req.Commit.PipelineClaim)
 	if err != nil {
 		t.Fatalf("sqlitePipelineClaimState: %v", err)
@@ -237,8 +240,9 @@ func TestSQLiteCommitSelectedForkEventSerializesWithClaimAbandonment(t *testing.
 	})
 }
 
-func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, store eventRecordContractStore, persistSource bool) CommitSelectedForkEventRequest {
+func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, persistSource bool) CommitSelectedForkEventRequest {
 	t.Helper()
+	store := fixture.store.(eventRecordContractStore)
 	createdAt := time.Date(2026, 7, 18, 19, 0, 0, 0, time.UTC)
 	sourceRunID := uuid.NewString()
 	sourceEventID := uuid.NewString()
@@ -252,6 +256,66 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, store ev
 	forkTrigger := eventtest.RunCreatingRootIngress(uuid.NewString(), "atomic.fork_trigger", "gateway", "fork-task", []byte(`{"fork":true}`), 0, forkRunID, "", events.EventEnvelope{}, createdAt)
 	if err := commitSemanticEventFixture(ctx, store, forkTrigger); err != nil {
 		t.Fatalf("commit fork run trigger: %v", err)
+	}
+	var deliveryAuthority runtimedelivery.ExecutionAuthority
+	if persistSource {
+		bindingID := uuid.NewString()
+		if fixture.dialect == runtimeauthoractivity.DialectSQLite {
+			if _, err := fixture.db.ExecContext(ctx, `
+				INSERT INTO run_fork_selected_contract_bindings (
+					binding_id,fork_run_id,source_run_id,fork_event_id,mode,
+					contracts_root,workflow_name,workflow_version,created_at
+				) VALUES (?,?,?,?,'selected_contracts','/tmp/contracts','workflow','v1',?)`,
+				bindingID, forkRunID, sourceRunID, sourceEventID, createdAt,
+			); err != nil {
+				t.Fatalf("seed selected-contract binding: %v", err)
+			}
+		} else {
+			if _, err := fixture.db.ExecContext(ctx, `
+				INSERT INTO run_fork_selected_contract_bindings (
+					binding_id,fork_run_id,source_run_id,fork_event_id,mode,
+					contracts_root,workflow_name,workflow_version,created_at
+				) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'selected_contracts','/tmp/contracts','workflow','v1',$5)`,
+				bindingID, forkRunID, sourceRunID, sourceEventID, createdAt,
+			); err != nil {
+				t.Fatalf("seed selected-contract binding: %v", err)
+			}
+		}
+		authorityStore, ok := fixture.store.(interface {
+			IssueRunForkSelectedContractRuntimeExecution(context.Context, SelectedContractRuntimeExecutionIssueRequest) (SelectedContractRuntimeExecution, error)
+		})
+		if !ok {
+			t.Fatal("selected-fork atomicity fixture has no selected execution authority owner")
+		}
+		selection := RunForkContractSelection{
+			Mode: "selected_contracts", ContractsRoot: "/tmp/contracts",
+			WorkflowName: "workflow", WorkflowVersion: "v1",
+		}
+		issued, err := authorityStore.IssueRunForkSelectedContractRuntimeExecution(ctx, SelectedContractRuntimeExecutionIssueRequest{
+			Admission: RunForkSelectedContractExecutionAdmission{
+				Owner: RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: RunForkSelectedContractExecutionOwner,
+				NonMutating: true, ExecutionSupported: false, ForkRunID: forkRunID, SourceRunID: sourceRunID, ForkEventID: sourceEventID,
+				ContractSelection: selection, ContractBindingOwner: RunForkSelectedContractBindingOwner,
+				AdmissionOwner: "runtime.run_fork.frontier", AdmissionUse: RunForkSelectedContractExecutionAdmissionUseDurableBinding,
+				ExecutionModelOwner: RunForkSelectedContractExecutionModelOwner, SourceWorkflowName: "workflow", SourceWorkflowVersion: "v1",
+				DeferredWorkAdmissionOwner: RunForkSelectedContractDeferredWorkAdmissionOwner,
+			},
+			ContainerPlanFingerprint:   "sha256:container",
+			ActorCensusFingerprint:     "sha256:actors",
+			EffectiveConfigFingerprint: "sha256:config",
+			Now:                        createdAt,
+		})
+		if err != nil {
+			t.Fatalf("issue selected execution authority: %v", err)
+		}
+		sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+		if !ok {
+			t.Fatal("selected-fork atomicity context has no bundle source fact")
+		}
+		deliveryAuthority, err = runtimedelivery.NewSelectedExecutionAuthority(sourceFact, issued.ExecutionID, forkRunID, issued.Generation)
+		if err != nil {
+			t.Fatalf("construct selected delivery authority: %v", err)
+		}
 	}
 	lineage, err := events.NewSelectedForkLineage(forkRunID, sourceRunID, sourceEventID, "selection:atomic", "fork-task", executionmode.Live)
 	if err != nil {
@@ -271,6 +335,7 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, store ev
 	return CommitSelectedForkEventRequest{
 		Commit: runtimebus.CommitPublishRequest{
 			Event: admitted, ReplayScope: runtimepipelineobligation.ScopeDirect, PipelineClaim: claim,
+			DeliveryAuthority: deliveryAuthority, DeliveryReceipt: &runtimebus.DeliveryCommitReceipt{},
 		},
 		Lineage: RunForkSelectedContractExecutionLineage{
 			ForkRunID: forkRunID, SourceRunID: sourceRunID, SourceEventID: sourceEventID,

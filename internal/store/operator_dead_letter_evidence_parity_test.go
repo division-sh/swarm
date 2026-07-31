@@ -70,7 +70,7 @@ func TestOperatorDeadLetterEvidenceIsScopedToExactDeliveryParity(t *testing.T) {
 
 			snapshots := make(map[string]runtimedelivery.Snapshot, len(routes))
 			for index, route := range routes {
-				claimed, err := selected.ClaimAgentDelivery(ctx, event, route)
+				claimed, err := claimDeliveryFixture(ctx, selected, event, route)
 				if err != nil {
 					t.Fatalf("claim %s: %v", route.SubscriberID, err)
 				}
@@ -154,7 +154,7 @@ func TestOperatorRunTerminalizationPreservesExactDeadLetterEvidenceParity(t *tes
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
 				t.Fatalf("commit terminalized event: %v", err)
 			}
-			claimed, err := selected.ClaimAgentDelivery(ctx, event, route)
+			claimed, err := claimDeliveryFixture(ctx, selected, event, route)
 			if err != nil {
 				t.Fatalf("claim terminalized delivery: %v", err)
 			}

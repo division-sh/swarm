@@ -438,6 +438,22 @@ func QueuePipelinePostCommitAction(ctx context.Context, fn OwnerAction) bool {
 	return queuePipelinePostCommitAction(ctx, fn)
 }
 
+// queuePipelineTransactionPostCommitAction registers synchronous work owned by
+// the transaction outcome itself. It never escapes the mutation call, so it
+// requires commit/rollback authority but no separate process-local lease.
+func queuePipelineTransactionPostCommitAction(ctx context.Context, fn OwnerAction) bool {
+	if ctx == nil || fn == nil {
+		return false
+	}
+	postCommit, commitOK := ctx.Value(pipelinePostCommitActionsKey{}).(*[]OwnerAction)
+	rollback, rollbackOK := ctx.Value(pipelineRollbackActionsKey{}).(*[]OwnerAction)
+	if !commitOK || postCommit == nil || !rollbackOK || rollback == nil {
+		return false
+	}
+	*postCommit = append(*postCommit, fn)
+	return true
+}
+
 // QueuePipelinePostCommitHandoff binds one accepted work lease to exactly one
 // transaction outcome. Commit and rollback are mutually exclusive and settle
 // the lease only after the selected outcome has run.

@@ -1101,6 +1101,25 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
+	continuationOwner := runtimebustest.NewDeliveryContinuationOwner(false)
+	proof, err := pg.ProveHandoff(
+		ctx,
+		forkEventID,
+		events.DeliveryRoute{
+			SubscriberType: "agent",
+			SubscriberID:   safeAgentIdentity.AgentID(),
+			AgentIdentity:  safeAgentIdentity,
+		},
+	)
+	if err != nil {
+		t.Fatalf("prove fork replay delivery handoff: %v", err)
+	}
+	if err := continuationOwner.AcceptCommitted([]runtimedelivery.DurableHandoffProof{proof}); err != nil {
+		t.Fatalf("accept fork replay delivery handoff: %v", err)
+	}
+	if err := eb.SetDeliveryContinuationOwner(continuationOwner); err != nil {
+		t.Fatalf("install fork replay delivery continuation owner: %v", err)
+	}
 	ch := runtimebustest.Subscribe(t, eb, "safe-agent", events.EventType("fork.ready"))
 	currentOnly := runtimebustest.Subscribe(t, eb, "current-only-agent", events.EventType("fork.ready"))
 	eventtestsql.CorruptEventStore(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventtestsql.EventCorruptionClaim{

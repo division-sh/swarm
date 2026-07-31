@@ -20,7 +20,7 @@ type runStartAppendStore struct {
 func (s *runStartAppendStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
 	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, req runtimebus.CommitPublishRequest) error {
 		s.appended = append(s.appended, string(req.Event.Event().Type()))
-		return nil
+		return recordBuilderTestDeliveryReceipt(req)
 	})
 }
 

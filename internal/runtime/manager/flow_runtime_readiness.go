@@ -441,56 +441,6 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessPlan(
 	})
 }
 
-func (am *AgentManager) launchDynamicFlowRuntimeAgentBacklogReplay(
-	ctx context.Context,
-	plan runtimepipeline.DynamicFlowRuntimeReadinessPlan,
-) error {
-	normalized, err := plan.Normalized()
-	if err != nil {
-		return err
-	}
-	replayWork, err := am.beginWork(
-		context.WithoutCancel(ctx),
-		"dynamic flow runtime agent backlog replay",
-	)
-	if err != nil {
-		return err
-	}
-	go func() {
-		defer func() {
-			if settleErr := replayWork.Done(); settleErr != nil && am.bus != nil {
-				_ = am.bus.LogRuntime(context.Background(), runtimepipeline.RuntimeLogEntry{
-					Level:     "error",
-					Message:   "Dynamic flow runtime agent backlog replay settlement failed",
-					Component: "flow_activation",
-					Action:    "runtime_backlog_settlement_failed",
-					Failure:   failureEnvelope(settleErr, "flow_activation", "settle_runtime_backlog_replay"),
-				})
-			}
-		}()
-		for _, expected := range normalized.Agents {
-			if _, replayErr := am.replayAgentBacklogIdentityDetailed(replayWork.Context(), expected.Identity); replayErr != nil {
-				if am.bus != nil {
-					_ = am.bus.LogRuntime(replayWork.Context(), runtimepipeline.RuntimeLogEntry{
-						Level:     "error",
-						Message:   "Dynamic flow runtime agent backlog replay failed after readiness",
-						Component: "flow_activation",
-						Action:    "runtime_backlog_failed",
-						AgentID:   expected.Identity.AgentID(),
-						Detail: map[string]any{
-							"flow_instance": expected.Identity.FlowInstance(),
-						},
-						Failure: failureEnvelope(replayErr, "flow_activation", "replay_runtime_backlog"),
-					})
-				}
-				am.signalDynamicFlowRuntimeReadiness()
-				return
-			}
-		}
-	}()
-	return nil
-}
-
 func (am *AgentManager) dynamicFlowRuntimeReadinessSource(
 	ctx context.Context,
 	candidates ...semanticview.Source,

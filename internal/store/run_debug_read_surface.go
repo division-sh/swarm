@@ -93,7 +93,7 @@ type RunDebugFailureDelivery struct {
 	ReasonCode     string                     `json:"reason_code,omitempty"`
 	Failure        *runtimefailures.Envelope  `json:"failure,omitempty"`
 	RetryCount     int                        `json:"retry_count"`
-	RetryEligible  bool                       `json:"retry_eligible"`
+	RetryScheduled bool                       `json:"retry_scheduled"`
 	Terminal       bool                       `json:"terminal"`
 	CreatedAt      *time.Time                 `json:"created_at,omitempty"`
 	StartedAt      *time.Time                 `json:"started_at,omitempty"`
@@ -196,7 +196,7 @@ type RunDebugTraceRow struct {
 	DeliveryPayloadProjection *events.DeliveryPayloadProjection `json:"delivery_payload_projection,omitempty"`
 	DeliveryFailure           *runtimefailures.Envelope         `json:"delivery_failure,omitempty"`
 	DeliveryRetryCount        int                               `json:"delivery_retry_count,omitempty"`
-	DeliveryRetryEligible     bool                              `json:"delivery_retry_eligible,omitempty"`
+	DeliveryRetryScheduled    bool                              `json:"delivery_retry_scheduled,omitempty"`
 	DeliveryTerminal          bool                              `json:"delivery_terminal,omitempty"`
 	ActiveSessionID           string                            `json:"active_session_id,omitempty"`
 	DeliveryCreatedAt         *time.Time                        `json:"delivery_created_at,omitempty"`
@@ -732,7 +732,7 @@ func runDebugFailuresFromSnapshots(
 			SubscriberID: snapshot.SubscriberID, SessionID: snapshot.ActiveSessionID,
 			Status: string(snapshot.Status), ReasonCode: snapshot.ReasonCode,
 			Failure: runtimefailures.CloneEnvelope(snapshot.Failure), RetryCount: snapshot.RetryCount,
-			RetryEligible: snapshot.RetryEligible, Terminal: snapshot.Terminal(),
+			RetryScheduled: snapshot.RetryScheduled, Terminal: snapshot.Terminal(),
 		}
 		if !snapshot.CreatedAt.IsZero() {
 			at := snapshot.CreatedAt

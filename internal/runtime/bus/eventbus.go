@@ -86,6 +86,19 @@ type EventBus struct {
 	pipelineSweepMu             pipelineSweepLock
 	pipelineScans               map[runtimepipelineobligation.ScanRequest]*pipelineSweepScan
 	workOwner                   worklifetime.Occurrence
+	deliveryAuthority           runtimedelivery.ExecutionAuthority
+	deliveryContinuations       DeliveryContinuationOwner
+}
+
+// DeliveryContinuationOwner is the exact transfer boundary between committed
+// publication, the normal generation coordinator, carriers, and attempts.
+type DeliveryContinuationOwner interface {
+	AcceptCommitted([]runtimedelivery.DurableHandoffProof) error
+	Acquire(string) (worklifetime.DeliveryContinuation, error)
+	Retain(runtimedelivery.Snapshot) error
+	Release(string) error
+	OwnsPersistedRecovery() bool
+	Signal()
 }
 
 // PipelineParentTransition excludes selected-store recovery scans while a
@@ -258,6 +271,7 @@ type EventBusOptions struct {
 	ProviderOutputVerifier      ProviderOutputAuthorizationVerifier
 	WorkOwner                   worklifetime.Occurrence
 	PipelineObligations         runtimepipelineobligation.Store
+	DeliveryAuthority           runtimedelivery.ExecutionAuthority
 }
 
 const deliverySendTimeout = 250 * time.Millisecond
@@ -317,7 +331,90 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 	if err := opts.BundleSourceFact.Validate(); err != nil {
 		return nil, fmt.Errorf("durable event bus requires an immutable bundle source fact: %w", err)
 	}
+	if opts.DeliveryAuthority.Kind() != "" {
+		if err := opts.DeliveryAuthority.Validate(); err != nil {
+			return nil, fmt.Errorf("durable event bus delivery execution authority: %w", err)
+		}
+	}
 	return newEventBusWithOptions(store, opts)
+}
+
+func (eb *EventBus) SetDeliveryAuthority(authority runtimedelivery.ExecutionAuthority) error {
+	if eb == nil {
+		return errors.New("event bus is required")
+	}
+	if err := authority.Validate(); err != nil {
+		return err
+	}
+	eb.mu.Lock()
+	eb.deliveryAuthority = authority
+	eb.mu.Unlock()
+	return nil
+}
+
+func (eb *EventBus) SetDeliveryContinuationOwner(owner DeliveryContinuationOwner) error {
+	if eb == nil {
+		return errors.New("event bus is required")
+	}
+	if owner == nil {
+		return errors.New("delivery continuation owner is required")
+	}
+	eb.mu.Lock()
+	eb.deliveryContinuations = owner
+	eb.mu.Unlock()
+	return nil
+}
+
+func (eb *EventBus) DeliveryContinuationOwner() DeliveryContinuationOwner {
+	if eb == nil {
+		return nil
+	}
+	eb.mu.RLock()
+	defer eb.mu.RUnlock()
+	return eb.deliveryContinuations
+}
+
+func (eb *EventBus) AcquireDeliveryContinuation(deliveryID string) (worklifetime.DeliveryContinuation, error) {
+	owner := eb.DeliveryContinuationOwner()
+	if owner == nil {
+		return nil, errors.New("delivery continuation owner is required")
+	}
+	return owner.Acquire(deliveryID)
+}
+
+func (eb *EventBus) RetainDeliveryContinuation(snapshot runtimedelivery.Snapshot) error {
+	owner := eb.DeliveryContinuationOwner()
+	if owner == nil {
+		return errors.New("delivery continuation owner is required")
+	}
+	return owner.Retain(snapshot)
+}
+
+func (eb *EventBus) ReleaseDeliveryContinuation(deliveryID string) error {
+	owner := eb.DeliveryContinuationOwner()
+	if owner == nil {
+		return errors.New("delivery continuation owner is required")
+	}
+	return owner.Release(deliveryID)
+}
+
+func (eb *EventBus) SignalDeliveryContinuations() {
+	if owner := eb.DeliveryContinuationOwner(); owner != nil {
+		owner.Signal()
+	}
+}
+
+func (eb *EventBus) DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error) {
+	if eb == nil {
+		return runtimedelivery.ExecutionAuthority{}, errors.New("event bus is required")
+	}
+	eb.mu.RLock()
+	authority := eb.deliveryAuthority
+	eb.mu.RUnlock()
+	if err := authority.Validate(); err != nil {
+		return runtimedelivery.ExecutionAuthority{}, err
+	}
+	return authority, nil
 }
 
 // NewEphemeralEventBus is the explicit non-durable constructor for isolated
@@ -400,6 +497,14 @@ func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		testLifecycleProbe:          opts.TestLifecycleProbe,
 		providerOutputVerifier:      opts.ProviderOutputVerifier,
 		workOwner:                   opts.WorkOwner,
+		deliveryAuthority:           opts.DeliveryAuthority,
+	}
+	if opts.DeliveryAuthority.Kind() == runtimedelivery.ExecutionAuthoritySelectedContractFork {
+		transfers, err := newSelectedDeliveryTransfers(opts.DeliveryAuthority)
+		if err != nil {
+			return nil, err
+		}
+		eb.deliveryContinuations = transfers
 	}
 	eb.rebuildRoutePlanners()
 	return eb, nil
@@ -1191,6 +1296,7 @@ func (p *preparedAgentRoute) Publish() error {
 	}
 	eb.mu.Unlock()
 	p.published = true
+	eb.SignalDeliveryContinuations()
 	return nil
 }
 
@@ -1302,6 +1408,7 @@ func (eb *EventBus) RemoveAgentRoute(token runtimeeffects.LifecycleToken) {
 			eb.retainRetiringAgentRoute(route)
 		}
 	}
+	eb.SignalDeliveryContinuations()
 }
 
 func (eb *EventBus) SubscribeInternal(ctx context.Context, subscriberID string, eventTypes ...events.EventType) (worklifetime.InternalSubscription, error) {
@@ -1353,6 +1460,7 @@ func (eb *EventBus) SubscribeInternal(ctx context.Context, subscriberID string, 
 		}
 		eb.notifyInternalSubscriptionChangedLocked()
 		eb.mu.Unlock()
+		eb.SignalDeliveryContinuations()
 		return handle, nil
 	}
 }
@@ -1418,6 +1526,7 @@ func (eb *EventBus) completeInternalSubscription(handle *internalSubscriptionHan
 		eb.retainRetiringInternalHandle(handle)
 		return err
 	}
+	eb.SignalDeliveryContinuations()
 	return nil
 }
 
@@ -1428,6 +1537,7 @@ func (eb *EventBus) notifyInternalSubscriptionChanged() {
 	eb.mu.Lock()
 	eb.notifyInternalSubscriptionChangedLocked()
 	eb.mu.Unlock()
+	eb.SignalDeliveryContinuations()
 }
 
 func (eb *EventBus) notifyInternalSubscriptionChangedLocked() {

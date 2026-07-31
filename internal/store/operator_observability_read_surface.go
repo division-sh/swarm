@@ -109,7 +109,7 @@ type OperatorEventDelivery struct {
 	ReasonCode     string                     `json:"reason_code,omitempty"`
 	Failure        *runtimefailures.Envelope  `json:"failure,omitempty"`
 	RetryCount     int                        `json:"retry_count"`
-	RetryEligible  bool                       `json:"retry_eligible"`
+	RetryScheduled bool                       `json:"retry_scheduled"`
 	Terminal       bool                       `json:"terminal"`
 	CreatedAt      *time.Time                 `json:"created_at,omitempty"`
 	StartedAt      *time.Time                 `json:"started_at,omitempty"`
@@ -526,7 +526,7 @@ func operatorEventDeliveryFromSnapshot(snapshot runtimedelivery.Snapshot) Operat
 		SubscriberID: snapshot.SubscriberID, Route: snapshot.Route.Normalized(), SessionID: snapshot.ActiveSessionID,
 		Status: string(snapshot.Status), ReasonCode: snapshot.ReasonCode,
 		Failure: runtimefailures.CloneEnvelope(snapshot.Failure), RetryCount: snapshot.RetryCount,
-		RetryEligible: snapshot.RetryEligible, Terminal: snapshot.Terminal(),
+		RetryScheduled: snapshot.RetryScheduled, Terminal: snapshot.Terminal(),
 		claimVersion: snapshot.ClaimVersion,
 	}
 	if !snapshot.CreatedAt.IsZero() {

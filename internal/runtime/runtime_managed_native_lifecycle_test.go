@@ -11,10 +11,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -72,18 +72,41 @@ type managedNativeRecoveryDeliveryStore struct {
 	onClaim    func(context.Context) error
 }
 
-func (s *managedNativeRecoveryDeliveryStore) ClaimAgentBacklog(
+func (*managedNativeRecoveryDeliveryStore) ActivateDeliveryAuthority(
+	context.Context,
+	runtimedelivery.ExecutionAuthority,
+) error {
+	return nil
+}
+
+func (*managedNativeRecoveryDeliveryStore) InspectDeliveryRecovery(
+	context.Context,
+	runtimecorrelation.BundleSourceFact,
+) (runtimedelivery.RecoveryInventory, error) {
+	return runtimedelivery.RecoveryInventory{}, nil
+}
+
+func (*managedNativeRecoveryDeliveryStore) ObserveDeliveryContinuation(
+	context.Context,
+	runtimedelivery.ExecutionAuthority,
+	string,
+) (runtimedelivery.ContinuationObservation, error) {
+	return runtimedelivery.ContinuationObservation{Disposition: runtimedelivery.ClaimAbsent}, nil
+}
+
+func (s *managedNativeRecoveryDeliveryStore) ScanDeliveryContinuations(
 	ctx context.Context,
-	_ agentidentity.Identity,
+	_ runtimedelivery.ExecutionAuthority,
+	_ runtimedelivery.ContinuationCursor,
 	limit int,
-) ([]runtimedelivery.AgentExecution, error) {
+) (runtimedelivery.ContinuationPage, error) {
 	s.claimCalls.Add(1)
 	if s.onClaim != nil {
 		if err := s.onClaim(ctx); err != nil {
-			return nil, err
+			return runtimedelivery.ContinuationPage{}, err
 		}
 	}
-	return nil, nil
+	return runtimedelivery.ContinuationPage{Exhausted: true}, nil
 }
 
 func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmission(t *testing.T) {

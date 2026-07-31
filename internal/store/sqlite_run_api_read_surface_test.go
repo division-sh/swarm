@@ -104,7 +104,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 		t.Fatalf("commit sqlite exhausted delivery: %v", err)
 	}
 	nodeFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "node_failure", nil)
-	claimed, err := sqliteStore.ClaimNodeDelivery(ctx, latestEvent, deadRoute)
+	claimed, err := claimDeliveryFixture(ctx, sqliteStore, latestEvent, deadRoute)
 	if err != nil {
 		t.Fatalf("claim sqlite exhausted delivery: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 			break
 		}
 		setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.DB, nodeDeadDelivery, now.Add(6*time.Second), now.Add(6*time.Second))
-		claimed, err = sqliteStore.ClaimNodeDelivery(ctx, latestEvent, deadRoute)
+		claimed, err = claimDeliveryFixture(ctx, sqliteStore, latestEvent, deadRoute)
 		if err != nil {
 			t.Fatalf("reclaim sqlite exhausted delivery attempt %d: %v", attempt+2, err)
 		}
@@ -202,10 +202,10 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 			t.Fatalf("successful delivered/node_processed delivery appeared in FailedDeliveries: %#v", report.FailedDeliveries)
 		}
 	}
-	if got := report.FailedDeliveries[0]; got.DeliveryID != nodeDeadDeliveryID || got.SubscriberType != "node" || got.RetryCount != 3 || got.RetryEligible || !got.Terminal || len(got.DeadLetters) != 1 {
+	if got := report.FailedDeliveries[0]; got.DeliveryID != nodeDeadDeliveryID || got.SubscriberType != "node" || got.RetryCount != 3 || got.RetryScheduled || !got.Terminal || len(got.DeadLetters) != 1 {
 		t.Fatalf("node failed delivery evidence = %#v", got)
 	}
-	if got := report.FailedDeliveries[1]; got.DeliveryID != agentFailedDeliveryID || got.SubscriberType != "agent" || got.RetryCount != 1 || !got.RetryEligible || got.Terminal || got.Failure == nil || got.Failure.Detail.Code != "agent_failure" {
+	if got := report.FailedDeliveries[1]; got.DeliveryID != agentFailedDeliveryID || got.SubscriberType != "agent" || got.RetryCount != 1 || !got.RetryScheduled || got.Terminal || got.Failure == nil || got.Failure.Detail.Code != "agent_failure" {
 		t.Fatalf("agent failed delivery evidence = %#v", got)
 	}
 	traceRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, newer, RunDebugTraceQueryOptions{
@@ -220,7 +220,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	if len(traceRows) != 1 {
 		t.Fatalf("sqlite failed trace rows = %#v, want one failed delivery row", traceRows)
 	}
-	if got := traceRows[0]; got.DeliveryID != agentFailedDeliveryID || got.DeliveryFailure == nil || got.DeliveryFailure.Detail.Code != "agent_failure" || got.DeliveryRetryCount != 1 || !got.DeliveryRetryEligible || got.DeliveryTerminal {
+	if got := traceRows[0]; got.DeliveryID != agentFailedDeliveryID || got.DeliveryFailure == nil || got.DeliveryFailure.Detail.Code != "agent_failure" || got.DeliveryRetryCount != 1 || !got.DeliveryRetryScheduled || got.DeliveryTerminal {
 		t.Fatalf("sqlite trace delivery failure evidence = %#v", got)
 	}
 	if len(report.Events) != 2 || report.Events[0].EventID != newerLatestEvent || report.Events[1].EventID != newerMiddleEvent {

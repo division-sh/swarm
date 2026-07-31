@@ -12,7 +12,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -40,6 +42,23 @@ func deliveryLifecycleConformanceRoute(t testing.TB, subscriberType, subscriberI
 	return route
 }
 
+func claimDeliveryResult(
+	ctx context.Context,
+	selected runtimedelivery.Store,
+	event events.Event,
+	route events.DeliveryRoute,
+) (runtimedelivery.ClaimResult, error) {
+	deliveryID, err := runtimedelivery.DeliveryID(event.ID(), route)
+	if err != nil {
+		return runtimedelivery.ClaimResult{}, err
+	}
+	snapshot, err := selected.Snapshot(ctx, deliveryID)
+	if err != nil {
+		return runtimedelivery.ClaimResult{}, err
+	}
+	return selected.ClaimDelivery(ctx, snapshot.Authority, event, route)
+}
+
 func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 	for _, backend := range deliveryLifecycleConformanceBackends(t) {
 		backend := backend
@@ -65,15 +84,16 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					t.Fatal("distinct exact routes collapsed to one delivery obligation")
 				}
 
-				claimed, err := backend.store.ClaimAgentDelivery(ctx, event, agent)
+				claimed, err := storetest.ClaimDelivery(ctx, backend.store, event, agent)
 				if err != nil {
 					t.Fatalf("claim agent delivery: %v", err)
 				}
 				if claimed.Snapshot.Status != runtimedelivery.StatusInProgress || claimed.Snapshot.MaxRetries != runtimedelivery.AgentMaxRetries {
 					t.Fatalf("claimed agent snapshot = %#v", claimed.Snapshot)
 				}
-				if _, err := backend.store.ClaimAgentDelivery(ctx, event, agent); !errors.Is(err, runtimedelivery.ErrIneligible) {
-					t.Fatalf("second live claim error = %v, want ErrIneligible", err)
+				secondClaim, err := claimDeliveryResult(ctx, backend.store, event, agent)
+				if err != nil || secondClaim.Disposition != runtimedelivery.ClaimBusy {
+					t.Fatalf("second live claim = %#v, err=%v; want busy", secondClaim, err)
 				}
 				sessionID := uuid.NewString()
 				seedDeliveryAgentSession(t, ctx, backend, sessionID, event.RunID(), agent.SubscriberID)
@@ -118,11 +138,481 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				assertDeliveryRetryBudget(t, ctx, backend, runtimedelivery.SubscriberNode, "retry-node", runtimedelivery.NodeMaxRetries)
 			})
 
+			t.Run("closed_claim_and_cursor_disposition_matrix", func(t *testing.T) {
+				pendingEvent := deliveryLifecycleEvent("claim-matrix-pending-" + backend.name)
+				pendingRoute := deliveryLifecycleConformanceRoute(t, "agent", "claim-matrix-pending")
+				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, pendingEvent, []events.DeliveryRoute{pendingRoute}, runtimepipelineobligation.ScopeSubscribed)
+				pendingID, err := runtimedelivery.DeliveryID(pendingEvent.ID(), pendingRoute)
+				if err != nil {
+					t.Fatal(err)
+				}
+				pending, err := backend.store.Snapshot(ctx, pendingID)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				absentEvent := deliveryLifecycleEvent("claim-matrix-absent-" + backend.name)
+				absent, err := backend.store.ClaimDelivery(ctx, pending.Authority, absentEvent, pendingRoute)
+				if err != nil || absent.Disposition != runtimedelivery.ClaimAbsent {
+					t.Fatalf("absent claim = %#v, err=%v", absent, err)
+				}
+
+				wrongAuthority, err := runtimedelivery.NewNormalExecutionAuthority(
+					pending.Authority.BundleSource(),
+					"wrong-authority-"+backend.name,
+					pending.Authority.Generation(),
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
+				wrong, err := backend.store.ClaimDelivery(ctx, wrongAuthority, pendingEvent, pendingRoute)
+				if err != nil || wrong.Disposition != runtimedelivery.ClaimWrongAuthority {
+					t.Fatalf("wrong-authority claim = %#v, err=%v", wrong, err)
+				}
+
+				acquired, err := backend.store.ClaimDelivery(ctx, pending.Authority, pendingEvent, pendingRoute)
+				if err != nil || acquired.Disposition != runtimedelivery.ClaimAcquired {
+					t.Fatalf("pending claim = %#v, err=%v", acquired, err)
+				}
+				busy, err := backend.restart.ClaimDelivery(ctx, pending.Authority, pendingEvent, pendingRoute)
+				if err != nil || busy.Disposition != runtimedelivery.ClaimBusy {
+					t.Fatalf("busy claim = %#v, err=%v", busy, err)
+				}
+				expireDeliveryClaimForConformance(t, ctx, backend, pendingID)
+				reclaimed, err := backend.restart.ClaimDelivery(ctx, pending.Authority, pendingEvent, pendingRoute)
+				if err != nil || reclaimed.Disposition != runtimedelivery.ClaimAcquired ||
+					reclaimed.Previous != runtimedelivery.ClaimReclaimable {
+					t.Fatalf("reclaim claim = %#v, err=%v", reclaimed, err)
+				}
+				reclaimedObligation, ok := reclaimed.Acquired()
+				if !ok {
+					t.Fatalf("reclaim result has no exact claim: %#v", reclaimed)
+				}
+				delivered, err := backend.restart.SettleSuccess(ctx, reclaimedObligation.Claim, nil, 0)
+				if err != nil || !delivered.Terminal() {
+					t.Fatalf("settle reclaimed delivery = %#v, err=%v", delivered, err)
+				}
+				terminal, err := backend.store.ClaimDelivery(ctx, pending.Authority, pendingEvent, pendingRoute)
+				if err != nil || terminal.Disposition != runtimedelivery.ClaimTerminal {
+					t.Fatalf("terminal claim = %#v, err=%v", terminal, err)
+				}
+
+				deferredEvent := deliveryLifecycleEvent("claim-matrix-deferred-" + backend.name)
+				deferredRoute := deliveryLifecycleConformanceRoute(t, "agent", "claim-matrix-deferred")
+				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, deferredEvent, []events.DeliveryRoute{deferredRoute}, runtimepipelineobligation.ScopeSubscribed)
+				deferredClaim, err := storetest.ClaimDelivery(ctx, backend.store, deferredEvent, deferredRoute)
+				if err != nil {
+					t.Fatal(err)
+				}
+				deferredSnapshot, err := backend.store.SettleFailure(ctx, deferredClaim.Claim, runtimedelivery.Settlement{
+					Disposition: runtimedelivery.FailureRetry,
+					Failure:     testFailure("handler_failed"),
+					RetryBase:   time.Hour,
+				})
+				if err != nil || deferredSnapshot.Status != runtimedelivery.StatusFailed {
+					t.Fatalf("schedule deferred retry = %#v, err=%v", deferredSnapshot, err)
+				}
+				deferred, err := backend.restart.ClaimDelivery(ctx, deferredSnapshot.Authority, deferredEvent, deferredRoute)
+				if err != nil || deferred.Disposition != runtimedelivery.ClaimDeferred {
+					t.Fatalf("deferred claim = %#v, err=%v", deferred, err)
+				}
+				beforeHandoff, err := backend.store.ScanDeliveryContinuations(
+					ctx,
+					deferredSnapshot.Authority,
+					runtimedelivery.ContinuationCursor{},
+					1,
+				)
+				if err != nil || !beforeHandoff.Exhausted || len(beforeHandoff.Items) != 0 {
+					t.Fatalf("pre-pipeline-receipt continuation page = %#v, err=%v; want no coordinator-owned work", beforeHandoff, err)
+				}
+				acknowledgeDeliveryLifecyclePipelineEvent(t, ctx, backend.selected, deferredEvent.ID())
+
+				invalidEvent := deliveryLifecycleEvent("claim-matrix-invalid-" + backend.name)
+				invalidRoute := deliveryLifecycleConformanceRoute(t, "agent", "claim-matrix-invalid")
+				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, invalidEvent, []events.DeliveryRoute{invalidRoute}, runtimepipelineobligation.ScopeSubscribed)
+				invalidID, err := runtimedelivery.DeliveryID(invalidEvent.ID(), invalidRoute)
+				if err != nil {
+					t.Fatal(err)
+				}
+				corruptQuery := `UPDATE event_deliveries SET delivery_target_route='{"flow_id":7}'::jsonb WHERE delivery_id=$1::uuid`
+				if !backend.postgres {
+					corruptQuery = `UPDATE event_deliveries SET delivery_target_route='{"flow_id":7}' WHERE delivery_id=?`
+				}
+				if _, err := backend.db.ExecContext(ctx, corruptQuery, invalidID); err != nil {
+					t.Fatalf("seed structurally invalid delivery: %v", err)
+				}
+				invalid, err := backend.store.ClaimDelivery(ctx, pending.Authority, invalidEvent, invalidRoute)
+				if err != nil || invalid.Disposition != runtimedelivery.ClaimInvariantInvalid ||
+					!errors.Is(invalid.Invariant, runtimedelivery.ErrConflict) {
+					t.Fatalf("invariant-invalid claim = %#v, err=%v", invalid, err)
+				}
+
+				firstPage, err := backend.store.ScanDeliveryContinuations(
+					ctx,
+					deferredSnapshot.Authority,
+					runtimedelivery.ContinuationCursor{},
+					1,
+				)
+				if err != nil || !firstPage.Exhausted || len(firstPage.Items) != 1 ||
+					firstPage.Items[0].Disposition != runtimedelivery.ClaimDeferred {
+					t.Fatalf("explicit exhausted continuation page = %#v, err=%v", firstPage, err)
+				}
+				if _, err := backend.store.ScanDeliveryContinuations(ctx, wrongAuthority, firstPage.Next, 1); err == nil {
+					t.Fatal("continuation cursor crossed execution authority")
+				}
+			})
+
+			t.Run("recovery_inventory_and_opaque_wake_are_store_owned", func(t *testing.T) {
+				event := deliveryLifecycleEvent("recovery-inventory-" + backend.name)
+				pendingRoute := deliveryLifecycleConformanceRoute(t, "agent", "inventory-pending")
+				failedRoute := deliveryLifecycleConformanceRoute(t, "agent", "inventory-failed")
+				busyRoute := deliveryLifecycleConformanceRoute(t, "agent", "inventory-busy")
+				storetest.CommitSemanticEventWithInitialFacts(
+					t,
+					ctx,
+					backend.selected,
+					event,
+					[]events.DeliveryRoute{pendingRoute, failedRoute, busyRoute},
+					runtimepipelineobligation.ScopeSubscribed,
+					storetest.AcknowledgedPipelineDisposition(),
+				)
+
+				pendingID, err := runtimedelivery.DeliveryID(event.ID(), pendingRoute)
+				if err != nil {
+					t.Fatal(err)
+				}
+				pendingSnapshot, err := backend.store.Snapshot(ctx, pendingID)
+				if err != nil {
+					t.Fatalf("snapshot pending inventory route: %v", err)
+				}
+				source := pendingSnapshot.Authority.BundleSource()
+				before, err := backend.store.InspectDeliveryRecovery(ctx, source)
+				if err != nil {
+					t.Fatalf("inspect initial delivery recovery inventory: %v", err)
+				}
+
+				failedClaim, err := storetest.ClaimDelivery(ctx, backend.store, event, failedRoute)
+				if err != nil {
+					t.Fatalf("claim failed inventory route: %v", err)
+				}
+				failedSnapshot, err := backend.store.SettleFailure(ctx, failedClaim.Claim, runtimedelivery.Settlement{
+					Disposition: runtimedelivery.FailureRetry,
+					Failure:     testFailure("inventory_retry"),
+					RetryBase:   10 * time.Second,
+				})
+				if err != nil {
+					t.Fatalf("schedule inventory retry: %v", err)
+				}
+				busyClaim, err := storetest.ClaimDelivery(ctx, backend.store, event, busyRoute)
+				if err != nil {
+					t.Fatalf("claim busy inventory route: %v", err)
+				}
+
+				after, err := backend.restart.InspectDeliveryRecovery(ctx, source)
+				if err != nil {
+					t.Fatalf("inspect transitioned delivery recovery inventory: %v", err)
+				}
+				want := runtimedelivery.RecoveryInventory{
+					Pending:    before.Pending - 2,
+					Failed:     before.Failed + 1,
+					InProgress: before.InProgress + 1,
+				}
+				if after != want {
+					t.Fatalf("delivery recovery inventory = %#v, want %#v", after, want)
+				}
+
+				foreignSource, err := runtimecorrelation.NewEphemeralBundleSourceFact(
+					"bundle-v1:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
+				foreign, err := backend.restart.InspectDeliveryRecovery(ctx, foreignSource)
+				if err != nil {
+					t.Fatalf("inspect foreign delivery recovery inventory: %v", err)
+				}
+				if foreign.HasWork() {
+					t.Fatalf("foreign delivery recovery inventory = %#v, want empty exact scope", foreign)
+				}
+
+				page, err := backend.restart.ScanDeliveryContinuations(
+					ctx,
+					pendingSnapshot.Authority,
+					runtimedelivery.ContinuationCursor{},
+					10,
+				)
+				if err != nil {
+					t.Fatalf("scan exact delivery recovery scope: %v", err)
+				}
+				if !page.Exhausted || len(page.Items) != 3 {
+					t.Fatalf("delivery recovery page = %#v, want three exact exhausted items", page)
+				}
+				wantDisposition := map[string]runtimedelivery.ClaimDisposition{
+					pendingID:                     runtimedelivery.ClaimAcquired,
+					failedSnapshot.DeliveryID:     runtimedelivery.ClaimDeferred,
+					busyClaim.Snapshot.DeliveryID: runtimedelivery.ClaimBusy,
+				}
+				for _, item := range page.Items {
+					want, ok := wantDisposition[item.DeliveryID]
+					if !ok || item.Disposition != want {
+						t.Fatalf("continuation item %s disposition = %s, want %s", item.DeliveryID, item.Disposition, want)
+					}
+					after, present := item.Wake.After()
+					if want == runtimedelivery.ClaimDeferred || want == runtimedelivery.ClaimBusy {
+						if !present || after <= 0 {
+							t.Fatalf("continuation item %s wake = %s, %v; want positive store-issued delay", item.DeliveryID, after, present)
+						}
+					} else if present {
+						t.Fatalf("immediately eligible continuation %s carried a wake", item.DeliveryID)
+					}
+					observation, err := backend.restart.ObserveDeliveryContinuation(
+						ctx,
+						pendingSnapshot.Authority,
+						item.DeliveryID,
+					)
+					if err != nil {
+						t.Fatalf("observe continuation %s: %v", item.DeliveryID, err)
+					}
+					if observation.Disposition != want {
+						t.Fatalf("observed continuation %s = %s, want %s", item.DeliveryID, observation.Disposition, want)
+					}
+				}
+
+				if backend.postgres {
+					longEvent := deliveryLifecycleEvent("long-transaction-clock-" + backend.name)
+					longClaimRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "long-claim"}
+					longRetryRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "long-retry"}
+					longLeaseRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "long-lease"}
+					storetest.CommitSemanticEventWithInitialFacts(
+						t,
+						ctx,
+						backend.selected,
+						longEvent,
+						[]events.DeliveryRoute{longClaimRoute, longRetryRoute, longLeaseRoute},
+						runtimepipelineobligation.ScopeSubscribed,
+						storetest.AcknowledgedPipelineDisposition(),
+					)
+					longClaimID, err := runtimedelivery.DeliveryID(longEvent.ID(), longClaimRoute)
+					if err != nil {
+						t.Fatal(err)
+					}
+					longClaimSnapshot, err := backend.store.Snapshot(ctx, longClaimID)
+					if err != nil {
+						t.Fatalf("load long-transaction authority: %v", err)
+					}
+					longRetryClaim, err := storetest.ClaimDelivery(ctx, backend.store, longEvent, longRetryRoute)
+					if err != nil {
+						t.Fatalf("claim long-transaction retry route: %v", err)
+					}
+					longLeaseClaim, err := storetest.ClaimDelivery(ctx, backend.store, longEvent, longLeaseRoute)
+					if err != nil {
+						t.Fatalf("claim long-transaction lease route: %v", err)
+					}
+					adapter, err := runtimedelivery.NewAdapter(runtimedelivery.DialectPostgres)
+					if err != nil {
+						t.Fatal(err)
+					}
+					tx, err := backend.db.BeginTx(ctx, nil)
+					if err != nil {
+						t.Fatalf("begin long delivery transaction: %v", err)
+					}
+					defer func() { _ = tx.Rollback() }()
+					var transactionStartedAt time.Time
+					if err := tx.QueryRowContext(ctx, `SELECT CURRENT_TIMESTAMP`).Scan(&transactionStartedAt); err != nil {
+						t.Fatalf("read PostgreSQL transaction timestamp: %v", err)
+					}
+					txctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+					if err != nil {
+						t.Fatalf("begin long-transaction author activity: %v", err)
+					}
+					if _, err := tx.ExecContext(
+						txctx,
+						`UPDATE event_delivery_attempts SET lease_expires_at=$1
+						 WHERE delivery_id=$2::uuid AND claim_version=$3 AND open_marker=TRUE`,
+						transactionStartedAt.Add(500*time.Millisecond),
+						longLeaseClaim.Claim.DeliveryID(),
+						longLeaseClaim.Claim.Version(),
+					); err != nil {
+						t.Fatalf("age long-transaction lease: %v", err)
+					}
+					time.Sleep(1100 * time.Millisecond)
+					longClaimResult, err := adapter.ClaimExactResult(
+						txctx,
+						tx,
+						longClaimSnapshot.Authority,
+						longEvent,
+						longClaimRoute,
+						runtimedelivery.DefaultLeaseTTL,
+					)
+					if err != nil {
+						t.Fatalf("claim in long PostgreSQL transaction: %v", err)
+					}
+					longClaimed, acquired := longClaimResult.Acquired()
+					if !acquired {
+						t.Fatalf("long-transaction claim = %#v, want acquired", longClaimResult)
+					}
+					longRetry, err := adapter.SettleFailure(txctx, tx, longRetryClaim.Claim, runtimedelivery.Settlement{
+						Disposition: runtimedelivery.FailureRetry,
+						Failure:     testFailure("long_transaction_retry"),
+						RetryBase:   10 * time.Second,
+					})
+					if err != nil {
+						t.Fatalf("settle retry in long PostgreSQL transaction: %v", err)
+					}
+					leaseObservation, err := adapter.ObserveContinuation(
+						txctx,
+						tx,
+						longClaimSnapshot.Authority,
+						longLeaseClaim.Claim.DeliveryID(),
+					)
+					if err != nil {
+						t.Fatalf("observe aged lease in long PostgreSQL transaction: %v", err)
+					}
+					if leaseObservation.Disposition != runtimedelivery.ClaimReclaimable {
+						t.Fatalf("aged lease observation = %s, want reclaimable after transaction-start time", leaseObservation.Disposition)
+					}
+					longPage, err := adapter.ScanContinuations(
+						txctx,
+						tx,
+						longClaimSnapshot.Authority,
+						runtimedelivery.ContinuationCursor{},
+						10,
+					)
+					if err != nil {
+						t.Fatalf("scan long PostgreSQL transaction continuations: %v", err)
+					}
+					longDispositions := map[string]runtimedelivery.ClaimDisposition{}
+					longWakes := map[string]time.Duration{}
+					for _, item := range longPage.Items {
+						longDispositions[item.DeliveryID] = item.Disposition
+						if after, ok := item.Wake.After(); ok {
+							longWakes[item.DeliveryID] = after
+						}
+					}
+					if longDispositions[longClaimed.Snapshot.DeliveryID] != runtimedelivery.ClaimBusy ||
+						longWakes[longClaimed.Snapshot.DeliveryID] <= 0 {
+						t.Fatalf("fresh long-transaction claim scan = %s/%s, want busy with opaque wake", longDispositions[longClaimed.Snapshot.DeliveryID], longWakes[longClaimed.Snapshot.DeliveryID])
+					}
+					if longDispositions[longRetry.DeliveryID] != runtimedelivery.ClaimDeferred ||
+						longWakes[longRetry.DeliveryID] <= 0 {
+						t.Fatalf("long-transaction retry scan = %s/%s, want deferred with opaque wake", longDispositions[longRetry.DeliveryID], longWakes[longRetry.DeliveryID])
+					}
+					if longDispositions[longLeaseClaim.Claim.DeliveryID()] != runtimedelivery.ClaimReclaimable {
+						t.Fatalf("long-transaction expired lease scan = %s, want reclaimable", longDispositions[longLeaseClaim.Claim.DeliveryID()])
+					}
+					for label, observed := range map[string]time.Time{
+						"claim": longClaimed.Snapshot.UpdatedAt,
+						"retry": longRetry.UpdatedAt,
+					} {
+						if elapsed := observed.Sub(transactionStartedAt); elapsed < 900*time.Millisecond {
+							t.Fatalf("%s database clock advanced %s across long transaction; want clock_timestamp semantics", label, elapsed)
+						}
+						if observed.Nanosecond()%1000 != 0 || observed.Location() != time.UTC {
+							t.Fatalf("%s database clock = %s (%s), want UTC microseconds", label, observed, observed.Location())
+						}
+					}
+					if delay := longRetry.NextEligibleAt.Sub(longRetry.UpdatedAt); delay != 10*time.Second {
+						t.Fatalf("long-transaction retry delay = %s, want exact 10s from current database time", delay)
+					}
+					if err := runtimeauthoractivity.Finalize(txctx); err != nil {
+						t.Fatalf("finalize long-transaction author activity: %v", err)
+					}
+					if err := tx.Commit(); err != nil {
+						t.Fatalf("commit long PostgreSQL delivery transaction: %v", err)
+					}
+				}
+			})
+
+			t.Run("postcommit_handoff_restarts_before_prior_cursor", func(t *testing.T) {
+				oldEvent := deliveryLifecycleEvent("handoff-before-cursor-" + backend.name)
+				oldRoute := deliveryLifecycleConformanceRoute(t, "agent", "old-route")
+				storetest.CommitSemanticEventWithRoutes(
+					t,
+					ctx,
+					backend.selected,
+					oldEvent,
+					[]events.DeliveryRoute{oldRoute},
+					runtimepipelineobligation.ScopeSubscribed,
+				)
+				newEvent := eventtest.PersistedChildForProducer(
+					eventtest.UUID("handoff-after-cursor-"+backend.name),
+					events.EventType("delivery.conformance"),
+					eventtest.Producer(events.EventProducerNode, "cursor-proof"),
+					"",
+					json.RawMessage(`{"ok":true}`),
+					0,
+					oldEvent.RunID(),
+					oldEvent.ID(),
+					oldEvent.Envelope(),
+					oldEvent.CreatedAt().Add(time.Second),
+				)
+				newRoute := deliveryLifecycleConformanceRoute(t, "agent", "new-route")
+				storetest.CommitSemanticEventWithInitialFacts(
+					t,
+					ctx,
+					backend.selected,
+					newEvent,
+					[]events.DeliveryRoute{newRoute},
+					runtimepipelineobligation.ScopeSubscribed,
+					storetest.AcknowledgedPipelineDisposition(),
+				)
+				newID, err := runtimedelivery.DeliveryID(newEvent.ID(), newRoute)
+				if err != nil {
+					t.Fatal(err)
+				}
+				newSnapshot, err := backend.store.Snapshot(ctx, newID)
+				if err != nil {
+					t.Fatalf("load cursor proof authority: %v", err)
+				}
+				before, err := backend.store.ScanDeliveryContinuations(
+					ctx,
+					newSnapshot.Authority,
+					runtimedelivery.ContinuationCursor{},
+					1,
+				)
+				if err != nil {
+					t.Fatalf("scan before old handoff commit: %v", err)
+				}
+				if len(before.Items) != 1 || before.Items[0].DeliveryID != newID || !before.Exhausted {
+					t.Fatalf("pre-handoff page = %#v, want only newer visible delivery", before)
+				}
+
+				acknowledgeDeliveryLifecyclePipelineEvent(t, ctx, backend.selected, oldEvent.ID())
+				staleCursorPage, err := backend.store.ScanDeliveryContinuations(
+					ctx,
+					newSnapshot.Authority,
+					before.Next,
+					1,
+				)
+				if err != nil {
+					t.Fatalf("scan from stale cursor after old handoff: %v", err)
+				}
+				if len(staleCursorPage.Items) != 0 {
+					t.Fatalf("stale cursor unexpectedly found older handoff: %#v", staleCursorPage)
+				}
+				oldID, err := runtimedelivery.DeliveryID(oldEvent.ID(), oldRoute)
+				if err != nil {
+					t.Fatal(err)
+				}
+				restarted, err := backend.restart.ScanDeliveryContinuations(
+					ctx,
+					newSnapshot.Authority,
+					runtimedelivery.ContinuationCursor{},
+					1,
+				)
+				if err != nil {
+					t.Fatalf("restart continuation scope after handoff signal: %v", err)
+				}
+				if len(restarted.Items) != 1 || restarted.Items[0].DeliveryID != oldID || restarted.Exhausted {
+					t.Fatalf("restarted post-handoff page = %#v, want older delivery then more work", restarted)
+				}
+			})
+
 			t.Run("claim_renewal_fences_reclaim_and_preserves_settlement", func(t *testing.T) {
 				event := deliveryLifecycleEvent("claim-renewal-" + backend.name)
 				route := deliveryLifecycleConformanceRoute(t, "agent", "renewal-agent")
 				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
-				claimed, err := backend.store.ClaimAgentDelivery(ctx, event, route)
+				claimed, err := storetest.ClaimDelivery(ctx, backend.store, event, route)
 				if err != nil {
 					t.Fatalf("claim delivery: %v", err)
 				}
@@ -138,15 +628,16 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					t.Fatalf("renewed lease window = %s, want %s from exact database renewal time", lease, runtimedelivery.DefaultLeaseTTL)
 				}
 				assertDeliveryAttemptLeaseMatchesObligation(t, ctx, backend, renewed.DeliveryID, renewed.ClaimVersion)
-				if _, err := backend.restart.ClaimAgentDelivery(ctx, event, route); !errors.Is(err, runtimedelivery.ErrIneligible) {
-					t.Fatalf("claim before renewed expiry = %v, want ErrIneligible", err)
+				beforeExpiry, err := claimDeliveryResult(ctx, backend.restart, event, route)
+				if err != nil || beforeExpiry.Disposition != runtimedelivery.ClaimBusy {
+					t.Fatalf("claim before renewed expiry = %#v, err=%v; want busy", beforeExpiry, err)
 				}
 
 				expireDeliveryClaimForConformance(t, ctx, backend, renewed.DeliveryID)
 				if _, err := backend.store.RenewClaim(ctx, claimed.Claim); !errors.Is(err, runtimedelivery.ErrConflict) {
 					t.Fatalf("expired claim renewal = %v, want ErrConflict", err)
 				}
-				reclaimed, err := backend.restart.ClaimAgentDelivery(ctx, event, route)
+				reclaimed, err := storetest.ClaimDelivery(ctx, backend.restart, event, route)
 				if err != nil {
 					t.Fatalf("reclaim after renewed lease expiry: %v", err)
 				}
@@ -167,7 +658,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				event := deliveryLifecycleEvent("terminalize-" + backend.name)
 				route := deliveryLifecycleConformanceRoute(t, "agent", "terminal-agent")
 				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
-				claimed, err := backend.store.ClaimAgentDelivery(ctx, event, route)
+				claimed, err := storetest.ClaimDelivery(ctx, backend.store, event, route)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -203,13 +694,13 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				route := deliveryLifecycleConformanceRoute(t, "agent", "race-agent")
 				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 
-				type claimResult struct {
-					claimed runtimedelivery.ClaimedObligation
-					err     error
+				type concurrentClaimResult struct {
+					result runtimedelivery.ClaimResult
+					err    error
 				}
 				const contenders = 8
 				start := make(chan struct{})
-				results := make(chan claimResult, contenders)
+				results := make(chan concurrentClaimResult, contenders)
 				for index := 0; index < contenders; index++ {
 					claimStore := backend.store
 					if index%2 == 1 {
@@ -217,8 +708,8 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					}
 					go func() {
 						<-start
-						claimed, err := claimStore.ClaimAgentDelivery(ctx, event, route)
-						results <- claimResult{claimed: claimed, err: err}
+						result, err := claimDeliveryResult(ctx, claimStore, event, route)
+						results <- concurrentClaimResult{result: result, err: err}
 					}()
 				}
 				close(start)
@@ -227,13 +718,19 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				wins := 0
 				for index := 0; index < contenders; index++ {
 					result := <-results
-					if result.err == nil {
-						winner = result.claimed
+					if claimed, acquired := result.result.Acquired(); result.err == nil && acquired {
+						winner = claimed
 						wins++
 						continue
 					}
-					if !errors.Is(result.err, runtimedelivery.ErrIneligible) && !errors.Is(result.err, runtimedelivery.ErrConflict) {
-						t.Fatalf("claim race loser error = %v, want typed ineligible/conflict", result.err)
+					if result.err != nil {
+						if !errors.Is(result.err, runtimedelivery.ErrConflict) {
+							t.Fatalf("claim race loser error = %v, want ErrConflict", result.err)
+						}
+						continue
+					}
+					if result.result.Disposition != runtimedelivery.ClaimBusy {
+						t.Fatalf("claim race loser disposition = %s, want busy", result.result.Disposition)
 					}
 				}
 				if wins != 1 {
@@ -243,11 +740,12 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					t.Fatalf("initial winning claim = %#v", winner)
 				}
 
-				if _, err := backend.restart.ClaimAgentDelivery(ctx, event, route); !errors.Is(err, runtimedelivery.ErrIneligible) {
-					t.Fatalf("pre-expiry reconstructed-store claim error = %v, want ErrIneligible", err)
+				beforeExpiry, err := claimDeliveryResult(ctx, backend.restart, event, route)
+				if err != nil || beforeExpiry.Disposition != runtimedelivery.ClaimBusy {
+					t.Fatalf("pre-expiry reconstructed-store claim = %#v, err=%v; want busy", beforeExpiry, err)
 				}
 				expireDeliveryClaimForConformance(t, ctx, backend, winner.Snapshot.DeliveryID)
-				reclaimed, err := backend.restart.ClaimAgentDelivery(ctx, event, route)
+				reclaimed, err := storetest.ClaimDelivery(ctx, backend.restart, event, route)
 				if err != nil {
 					t.Fatalf("post-expiry reconstructed-store reclaim: %v", err)
 				}
@@ -269,30 +767,46 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 			})
 
 			t.Run("expired_claim_precedes_continuous_pending_backlog", func(t *testing.T) {
-				agentID := "selector-agent-" + backend.name
-				identity := agentidentitytest.RootRuntime(t, agentID, "delivery-lifecycle-conformance")
 				expiredEvent := deliveryLifecycleEvent("selector-expired-" + backend.name)
-				route := events.DeliveryRoute{
-					SubscriberType: "agent",
-					SubscriberID:   agentID,
-					AgentIdentity:  identity,
+				route := deliveryLifecycleConformanceRoute(t, "agent", "selector-agent-"+backend.name)
+				routes := []events.DeliveryRoute{route}
+				for index := 0; index < 12; index++ {
+					routes = append(routes, events.DeliveryRoute{
+						SubscriberType: "agent",
+						SubscriberID:   fmt.Sprintf("selector-pending-%s-%02d", backend.name, index),
+						AgentIdentity: agentidentitytest.RootRuntime(
+							t,
+							fmt.Sprintf("selector-pending-%s-%02d", backend.name, index),
+							"delivery-lifecycle-conformance",
+						),
+					})
 				}
-				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, expiredEvent, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
-				claimed, err := backend.store.ClaimAgentDelivery(ctx, expiredEvent, route)
+				storetest.CommitSemanticEventWithInitialFacts(
+					t,
+					ctx,
+					backend.selected,
+					expiredEvent,
+					routes,
+					runtimepipelineobligation.ScopeSubscribed,
+					storetest.AcknowledgedPipelineDisposition(),
+				)
+				claimed, err := storetest.ClaimDelivery(ctx, backend.store, expiredEvent, route)
 				if err != nil {
 					t.Fatalf("claim selector expiry candidate: %v", err)
 				}
 				expireDeliveryClaimForConformance(t, ctx, backend, claimed.Snapshot.DeliveryID)
-				for index := 0; index < 12; index++ {
-					pending := deliveryLifecycleEvent(fmt.Sprintf("selector-pending-%s-%02d", backend.name, index))
-					storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, pending, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
-				}
-				backlog, err := backend.restart.ClaimAgentBacklog(ctx, identity, 1)
+				page, err := backend.restart.ScanDeliveryContinuations(
+					ctx,
+					claimed.Snapshot.Authority,
+					runtimedelivery.ContinuationCursor{},
+					1,
+				)
 				if err != nil {
-					t.Fatalf("claim saturated backlog: %v", err)
+					t.Fatalf("scan saturated continuation scope: %v", err)
 				}
-				if len(backlog) != 1 || backlog[0].Snapshot.DeliveryID != claimed.Snapshot.DeliveryID || backlog[0].Claim.Version() != claimed.Claim.Version()+1 {
-					t.Fatalf("first saturated claim = %#v, want expired delivery %s version %d", backlog, claimed.Snapshot.DeliveryID, claimed.Claim.Version()+1)
+				if len(page.Items) != 1 || page.Items[0].Snapshot.DeliveryID != claimed.Snapshot.DeliveryID ||
+					page.Items[0].Disposition != runtimedelivery.ClaimReclaimable || page.Exhausted {
+					t.Fatalf("first saturated continuation page = %#v, want reclaimable delivery %s and more work", page, claimed.Snapshot.DeliveryID)
 				}
 			})
 
@@ -306,9 +820,9 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 						var claimed runtimedelivery.ClaimedObligation
 						var err error
 						if class == runtimedelivery.SubscriberAgent {
-							claimed, err = backend.store.ClaimAgentDelivery(ctx, event, route)
+							claimed, err = storetest.ClaimDelivery(ctx, backend.store, event, route)
 						} else {
-							claimed, err = backend.store.ClaimNodeDelivery(ctx, event, route)
+							claimed, err = storetest.ClaimDelivery(ctx, backend.store, event, route)
 						}
 						if err != nil {
 							t.Fatalf("claim %s diagnostic delivery: %v", class, err)
@@ -336,6 +850,29 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+func acknowledgeDeliveryLifecyclePipelineEvent(
+	t testing.TB,
+	ctx context.Context,
+	selected any,
+	eventID string,
+) {
+	t.Helper()
+	provider, ok := selected.(interface {
+		PipelineObligations() runtimepipelineobligation.Store
+	})
+	if !ok {
+		t.Fatalf("selected store %T has no pipeline obligation owner", selected)
+	}
+	owner := provider.PipelineObligations()
+	work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
+	if err != nil {
+		t.Fatalf("claim pipeline obligation for %s: %v", eventID, err)
+	}
+	if _, err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
+		t.Fatalf("acknowledge pipeline obligation for %s: %v", eventID, err)
 	}
 }
 
@@ -460,6 +997,9 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := proof.Validate(); err != nil {
+		t.Fatalf("persisted handoff proof is incomplete: %v", err)
+	}
 	assertDeliverySQLRejected(t, backend, "event/run mismatch",
 		`UPDATE event_deliveries SET run_id = $1::uuid WHERE delivery_id = $2::uuid`,
 		`UPDATE event_deliveries SET run_id = ? WHERE delivery_id = ?`,
@@ -479,7 +1019,7 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 
 	sessionEvent := deliveryLifecycleEvent("schema-session-" + backend.name)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, sessionEvent, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
-	claimed, err := backend.store.ClaimAgentDelivery(ctx, sessionEvent, route)
+	claimed, err := storetest.ClaimDelivery(ctx, backend.store, sessionEvent, route)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -509,7 +1049,7 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 	terminatedRoute := deliveryLifecycleConformanceRoute(t, "agent", "terminated-session-agent-"+backend.name)
 	terminatedEvent := deliveryLifecycleEvent("schema-terminated-session-" + backend.name)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, terminatedEvent, []events.DeliveryRoute{terminatedRoute}, runtimepipelineobligation.ScopeSubscribed)
-	terminatedClaim, err := backend.store.ClaimAgentDelivery(ctx, terminatedEvent, terminatedRoute)
+	terminatedClaim, err := storetest.ClaimDelivery(ctx, backend.store, terminatedEvent, terminatedRoute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -582,9 +1122,9 @@ func assertDeliveryRetryBudget(t *testing.T, ctx context.Context, backend delive
 	for attempt := 1; attempt <= maxRetries+1; attempt++ {
 		var claimed runtimedelivery.ClaimedObligation
 		if class == runtimedelivery.SubscriberAgent {
-			claimed, err = backend.store.ClaimAgentDelivery(ctx, event, route)
+			claimed, err = storetest.ClaimDelivery(ctx, backend.store, event, route)
 		} else {
-			claimed, err = backend.store.ClaimNodeDelivery(ctx, event, route)
+			claimed, err = storetest.ClaimDelivery(ctx, backend.store, event, route)
 		}
 		if err != nil {
 			t.Fatalf("claim %s attempt %d: %v", class, attempt, err)

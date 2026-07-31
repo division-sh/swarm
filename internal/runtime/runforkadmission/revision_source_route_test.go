@@ -44,7 +44,7 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 	completedEvent := eventtest.ExistingRunRootIngress(completedEventID, "producer/inst-1/scan.requested", "producer-node", "", []byte(`{}`), 0, runID, envelope, at.Add(time.Second))
 	completedRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "completed-source-node"}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, completedEvent, []events.DeliveryRoute{completedRoute}, runtimepipelineobligation.ScopeSubscribed)
-	completedClaim, err := pg.ClaimNodeDelivery(ctx, completedEvent, completedRoute)
+	completedClaim, err := storetest.ClaimDelivery(ctx, pg, completedEvent, completedRoute)
 	if err != nil {
 		t.Fatalf("claim completed delivery: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 				route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "source-node"}
 				storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 				if tc.deliveryStatus == "completed" {
-					claimed, err := pg.ClaimNodeDelivery(ctx, event, route)
+					claimed, err := storetest.ClaimDelivery(ctx, pg, event, route)
 					if err != nil {
 						t.Fatalf("claim completed delivery: %v", err)
 					}

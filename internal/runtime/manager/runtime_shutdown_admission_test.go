@@ -14,9 +14,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 )
 
-type shutdownAdmissionManagerStore struct {
-	listPendingCalled atomic.Bool
-}
+type shutdownAdmissionManagerStore struct{}
 
 func (*shutdownAdmissionManagerStore) UpsertAgent(context.Context, PersistedAgent) error {
 	return nil
@@ -46,27 +44,6 @@ func TestRun_UsesRuntimeShutdownAdmissionOwner(t *testing.T) {
 
 	if am.IsRunning() {
 		t.Fatal("Run started manager even though runtime shutdown admission was already closed")
-	}
-}
-
-func TestReplayAgentBacklog_UsesRuntimeShutdownAdmissionOwnerBeforeStoreAccess(t *testing.T) {
-	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	var closed atomic.Bool
-	closed.Store(true)
-	store := &shutdownAdmissionManagerStore{}
-
-	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
-		RuntimeShutdownAdmissionClosed: closed.Load,
-	}, store)
-
-	if _, err := am.ReplayBacklog(testAuthorActivityContext(context.Background()), runtimeagentcontrol.ReplayBacklogRequest{AgentID: "agent-1"}); err == nil || err.Error() != "runtime shutting down" {
-		t.Fatalf("ReplayAgentBacklog err = %v, want runtime shutting down", err)
-	}
-	if store.listPendingCalled.Load() {
-		t.Fatal("ReplayAgentBacklog touched the store even though runtime shutdown admission was already closed")
 	}
 }
 
@@ -252,13 +229,6 @@ func TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown
 
 	waitForManagerShuttingDown(t, am)
 
-	if _, err := am.ReplayBacklog(testAuthorActivityContext(context.Background()), runtimeagentcontrol.ReplayBacklogRequest{AgentID: "agent-1"}); err == nil || err.Error() != "runtime shutting down" {
-		t.Fatalf("ReplayAgentBacklog during reset shutdown err = %v, want runtime shutting down", err)
-	}
-	if store.listPendingCalled.Load() {
-		t.Fatal("ReplayAgentBacklog touched the store while reset-driven manager shutdown was in progress")
-	}
-
 	close(release)
 
 	select {
@@ -331,13 +301,6 @@ func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdo
 	}()
 
 	waitForManagerShuttingDown(t, am)
-
-	if _, err := am.ReplayBacklog(testAuthorActivityContext(context.Background()), runtimeagentcontrol.ReplayBacklogRequest{AgentID: "agent-1"}); err == nil || err.Error() != "runtime shutting down" {
-		t.Fatalf("ReplayAgentBacklog during auth-breaker shutdown err = %v, want runtime shutting down", err)
-	}
-	if store.listPendingCalled.Load() {
-		t.Fatal("ReplayAgentBacklog touched the store while auth-breaker shutdown was in progress")
-	}
 
 	close(release)
 

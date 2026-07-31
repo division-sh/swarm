@@ -107,7 +107,7 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 		AgentIdentity:  sqliteAgentUsageIdentity(t, "agent-1"),
 	}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, sqliteStore, evt, []events.DeliveryRoute{route}, "subscribed")
-	claimed, err := sqliteStore.ClaimAgentDelivery(ctx, evt, route)
+	claimed, err := storetest.ClaimDelivery(ctx, sqliteStore, evt, route)
 	if err != nil {
 		t.Fatalf("claim delivery: %v", err)
 	}

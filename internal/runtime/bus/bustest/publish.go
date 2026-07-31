@@ -67,6 +67,13 @@ func (t *Transaction) FinalizePreparedPublish(ctx context.Context, finalization 
 			return err
 		}
 	}
+	if req.DeliveryReceipt != nil {
+		if _, err := req.DeliveryReceipt.Handoffs(); err != nil {
+			if err := req.DeliveryReceipt.Record(nil); err != nil {
+				return err
+			}
+		}
+	}
 	t.active = t.active[:len(t.active)-1]
 	return nil
 }

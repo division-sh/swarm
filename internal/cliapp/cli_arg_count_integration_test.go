@@ -31,7 +31,6 @@ func TestCLIArgCountPromotedCommandsUseSharedDiagnostic(t *testing.T) {
 		{name: "agent view missing id", args: []string{"agent", "view"}, want: "'swarm agent view' requires <agent-id>."},
 		{name: "agent restart missing id", args: []string{"agent", "restart"}, want: "'swarm agent restart' requires <agent-id>."},
 		{name: "agent replay missing id", args: []string{"agent", "replay", "--event-id", "event-1"}, want: "'swarm agent replay' requires <agent-id>."},
-		{name: "agent replay-backlog missing id", args: []string{"agent", "replay-backlog"}, want: "'swarm agent replay-backlog' requires <agent-id>."},
 		{name: "agent directive missing message", args: []string{"agent", "directive", "agent-1"}, want: "'swarm agent directive' requires <message> (got <agent-id>)."},
 		{name: "event view missing id", args: []string{"event", "view"}, want: "'swarm event view' requires <event-id>."},
 		{name: "event replay missing id", args: []string{"event", "replay"}, want: "'swarm event replay' requires <event-id>."},

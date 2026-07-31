@@ -101,7 +101,6 @@ var cliOutputGrandfatheredNonSharedRows = map[string]string{
 	"swarm agent list":             "split",
 	"swarm agent restart":          "split",
 	"swarm agent replay":           "split",
-	"swarm agent replay-backlog":   "split",
 	"swarm agent directive":        "split",
 	"swarm event":                  "exception",
 	"swarm event list":             "split",

@@ -157,8 +157,8 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileDeliveryActiv
 	if err := acknowledgePipelineEventFixture(ctx, pg, deliveryEvent.ID()); err != nil {
 		t.Fatalf("seed delivery-event pipeline receipt: %v", err)
 	}
-	route := testAgentDeliveryRoute(t, "agent-1", "fixture/agent-1")
-	claimed, err := pg.ClaimAgentDelivery(ctx, deliveryEvent, route)
+	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "agent-1"}
+	claimed, err := claimDeliveryFixture(ctx, pg, deliveryEvent, route)
 	if err != nil {
 		t.Fatalf("claim active delivery: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedUntilNodeDeliveryS
 	if err := acknowledgePipelineEventFixture(ctx, pg, deliveryEvent.ID()); err != nil {
 		t.Fatalf("seed delivery-event pipeline receipt: %v", err)
 	}
-	claimed, err := pg.ClaimNodeDelivery(ctx, deliveryEvent, route)
+	claimed, err := claimDeliveryFixture(ctx, pg, deliveryEvent, route)
 	if err != nil {
 		t.Fatalf("claim active node delivery: %v", err)
 	}

@@ -25,9 +25,9 @@ func (t *routeValidationPublishTransaction) BeginPreparedPublish(context.Context
 	return EventAppendInserted, nil
 }
 
-func (t *routeValidationPublishTransaction) FinalizePreparedPublish(context.Context, PreparedPublishFinalization) error {
+func (t *routeValidationPublishTransaction) FinalizePreparedPublish(_ context.Context, finalization PreparedPublishFinalization) error {
 	t.finalized = true
-	return nil
+	return finalization.Request().DeliveryReceipt.Record(nil)
 }
 
 func TestRoutePlanDeliveryIntentsCarryTypedProducer(t *testing.T) {

@@ -85,6 +85,22 @@ func TestSQLiteStatementsForPlanRejectsUnsupportedPostgresConstructs(t *testing.
 	}
 }
 
+func TestSQLiteStatementsForPlanTranslatesDeliveryAuthorityBundleHashExactly(t *testing.T) {
+	statements, err := SQLiteStatementsForPlan(SchemaTableDDL{
+		TableName:  "delivery_authority",
+		SchemaKind: "test",
+		Statements: []string{
+			"CREATE TABLE IF NOT EXISTS delivery_authority (\n    authority_bundle_hash TEXT NOT NULL CHECK (authority_bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$')\n)",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SQLiteStatementsForPlan: %v", err)
+	}
+	if len(statements) != 1 || !strings.Contains(statements[0], "length(authority_bundle_hash) = 81") || strings.Contains(statements[0], "authority_(") {
+		t.Fatalf("rendered statements = %#v, want exact authority bundle hash predicate", statements)
+	}
+}
+
 func TestSQLiteStatementsForPlanAcceptsMultilineTableConstraint(t *testing.T) {
 	statements, err := SQLiteStatementsForPlan(SchemaTableDDL{
 		TableName:  "multiline_check",

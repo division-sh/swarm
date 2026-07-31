@@ -5548,13 +5548,48 @@ engine:
         obligations, selects eligible work, mints persisted lease-fenced claims, binds execution, schedules retries, records
         exact outcomes, terminalizes parent-owned work, and decodes snapshots and run summaries. Agent and node consumers
         cannot reconstruct lifecycle behavior from status strings, retry counters, receipts, timestamps, or raw SQL.
-        Live workflow-node execution consumes only the exact admitted DeliveryRoute interceptor. Startup recovery pages the
-        same owner's eligible node backlog and executes each returned fenced claim before runtime readiness. After readiness,
-        standing node recovery continues asking that owner for newly eligible or expired work; its cadence is only a wake-up
-        trigger and does not interpret statuses, retry counts, eligibility timestamps, or claims. A coordinator-wide
-        subscription, event-ID replay list, or handler-local claim interpretation is forbidden. A recovered handler failure
-        that successfully commits a terminal dead-letter settlement is handled work and MUST NOT fail startup readiness;
-        claim, heartbeat, or settlement failure remains a hard recovery failure.
+        Every obligation carries one closed execution authority. Normal authority consists of the exact bundle source,
+        runtime instance, and runtime generation with no selected-execution fields. Selected-contract authority consists of
+        the exact selected execution, fork run, generation, and bundle source and is structurally coupled to the selected
+        execution row. Bundle identity or subscriber identity alone is never execution authority.
+        Every named event/delivery commit returns exact durable handoff proofs. The retained publication owns those exact
+        continuations until it transfers them to one route carrier or the one normal-runtime-generation delivery coordinator.
+        A route carrier must either consume its exact continuation into a fenced attempt or return it to the coordinator
+        before completing. Read-only handoff proof is not transfer authority, and no nonterminal transition may have zero or
+        two process-local continuation owners. Successful canonical platform/pipeline settlement atomically stamps the exact
+        delivery rows' continuation_handoff_at fact using database time in the same transaction as the receipt. Coordinator
+        enumeration consumes only that delivery-owned fact and never interprets receipt SQL. Pipeline settlement returns one
+        closed outcome that reports whether the receipt and delivery handoff committed independently of any later claim,
+        session, or candidate cleanup error. Consumers signal whenever that outcome says the handoff committed and never
+        infer rollback or commit from the auxiliary error alone. A freshly committed row without that handoff remains
+        publication-owned and cannot be discovered or executed by the coordinator; startup recovers the event-level
+        obligation before enumerating delivery continuations.
+        Recovery-enabled startup first drives the event-level pipeline scope to explicit exhaustion, then performs the
+        normal coordinator's bounded authority-scoped selected-store scan to explicit exhaustion before runtime readiness.
+        Recovery-disabled startup inventories the exact bundle-source delivery scope and rejects pending, failed, busy, or
+        reclaimable agent or node work before execution-authority activation. It never silently adopts that work. The
+        coordinator receives only an opaque relative wake duration computed from the same selected-store time observation
+        that classified a retry or lease; persisted eligibility and lease timestamps never cross into process scheduling.
+        Canonical post-commit pipeline handoff, committed delivery transfer, carrier return, topology/authentication change,
+        and parent terminalization signal the coordinator only after their owning transition commits. Parent terminalization
+        always queues that signal as a synchronous transaction-owned post-commit finalizer inside the same selected-store
+        mutation, even when no execution authority is registered at queue time; an outer post-commit cleanup error cannot
+        erase it, while rollback cannot emit it. The finalizer runs before the mutation call returns and never escapes as
+        independent process-local work. Each concurrently live normal execution authority owns one opaque
+        runtime-generation signal registration installed only after that generation's coordinator and process-local
+        occurrence are admitted. Duplicate registration for the same exact authority fails closed; distinct bundle/runtime
+        authorities may coexist on one selected store. Release is authority-exact. A committed callback signals the typed
+        authorities registered at callback execution, closing the scan-versus-commit race across generation replacement;
+        released predecessors receive nothing, and every current coordinator rechecks only its own selected-store scope.
+        Reconciliation before any registration commits durable terminal state without a process-local callback; each
+        admitted coordinator's authoritative startup scan discovers its own state. A wake is not
+        eligibility authority: every execution decision is rechecked by the selected store. The
+        cursor is opaque and monotonic; an empty or under-filled page is not exhaustion. Claim and scan results are closed
+        over acquired, deferred, busy, reclaimable, terminal, wrong-authority, absent, invariant-invalid, and explicit
+        exhaustion. Corrupt or missing durable facts fail closed.
+        Manager, workflow pipeline, public API, CLI, and dashboard code do not poll, enumerate, or manually claim a delivery
+        backlog. Event-targeted event and agent replay remain named producers and transfer their newly committed exact
+        obligations through the same owner.
         Claims use database time, a random token, monotonic version, and persisted expiry. Every completion requires the
         current capability; reclaim occurs only after expiry and stale writers cannot mutate the obligation or any coupled
         outcome/activity/diagnostic fact. An executing agent or node handler renews its exact claim through the owner before,
@@ -5562,12 +5597,12 @@ engine:
         renewal failure cancels handler execution and forbids settlement through that stale capability. Backlog work is claimed
         one item at a time immediately before execution so queued local work cannot consume its lease before starting. Agent
         max_retries=1 means two total attempts; node max_retries=3 means four total attempts. Existing selected stores are
-        unsupported and no migration, fallback, or compatibility interpretation exists. Bounded selected-contract execution
-        MUST NOT transfer a retryable agent obligation to the store-wide normal-manager backlog: retryable selected-agent
-        failures terminalize under the selected execution owner, and selected-fork activation requires every fork-local agent
-        delivery obligation to be delivered. Pending, in-progress, failed, dead-lettered, or otherwise incomplete fork-local
-        agent delivery state blocks activation and is cleaned up by the selected execution failure path. Node obligations
-        retain their separately declared durable handoff into the activated runtime. Parent terminalization is one closed
+        unsupported and no migration, fallback, or compatibility interpretation exists. Selected-contract execution installs
+        no normal or process-global continuation coordinator. Retryable selected agent and node failures terminalize under
+        the exact selected execution owner, and activation requires every fork-local agent and node obligation to be terminal.
+        Pending, in-progress, or retry-scheduled selected work blocks activation and is cleaned up by the selected execution
+        failure path. Feature-preserving long-lived selected deferred work requires its own future typed owner and cannot be
+        inferred as a normal-runtime handoff. Parent terminalization is one closed
         named store operation: it records a typed lifecycle-conflict failure, advances the delivery fence, closes any prior
         open attempt, commits the exact terminalization attempt/outcome at the new fence, and inserts the matching
         dead_letters row before the transaction may commit. Every terminal dead-letter delivery therefore has exact
@@ -12582,6 +12617,7 @@ platform_tables:
             updated_at                      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             terminal_at                     TIMESTAMPTZ,
             CHECK ((state IN ('prepared', 'running') AND NULLIF(TRIM(COALESCE(execution_owner, '')), '') IS NOT NULL AND lease_expires_at IS NOT NULL AND terminal_at IS NULL) OR (state = 'quiesced' AND NULLIF(TRIM(COALESCE(execution_owner, '')), '') IS NOT NULL AND terminal_at IS NOT NULL) OR (state IN ('failed', 'closed') AND terminal_at IS NOT NULL)),
+            UNIQUE (execution_id, fork_run_id, generation),
             UNIQUE (fork_run_id, generation),
             UNIQUE (fork_run_id, executable_coordinate_fingerprint, generation),
             INDEX idx_run_fork_selected_contract_runtime_executions_recovery (state, lease_expires_at, updated_at)
@@ -12654,9 +12690,16 @@ platform_tables:
         fail-closed shutdown, preserves the leased in_progress claim without fabricated terminal evidence, and transfers reclaim
         to a fresh runtime after lease expiry. Detached contexts, replacement claims, settlement retry frameworks, and
         shutdown-before-settlement attempts are forbidden.
-        After a retry settlement commits and its heartbeat joins, any process-local wait for next_eligible_at is owned by the
-        still-live runtime-generation execution context. A completed attempt or heartbeat context MUST NOT own or cancel that
-        wait; runtime retirement and caller cancellation remain authoritative.
+        After a retry settlement commits and its heartbeat joins, the exact continuation transfers from the represented
+        attempt to the normal runtime-generation coordinator before the attempt may complete. The process-local state
+        machine is closed over coordinator, carrier, and attempt ownership: dequeue consumes the carrier into a represented
+        attempt, terminal settlement releases that exact identity, retry settlement returns it to the coordinator, and
+        abandonment retains it as an attempt until the store reports the lease reclaimable. Parent terminalization signals
+        a bounded reconciliation over the coordinator's exact held identities after commit; historical terminal rows are
+        never scanned. The selected store may return only an opaque relative retry/lease wake computed from its own time
+        observation; raw timestamps and process-clock reconstruction are forbidden. It never authorizes execution without
+        a fresh selected-store disposition. Runtime retirement
+        cancels and joins the coordinator while leaving every nonterminal durable row discoverable by the successor authority.
         A transaction that composes run terminalization with delivery terminalization MUST lock and mutate the run row
         before locking any delivery row. Claim, settlement, and parent terminalization therefore share one run-then-delivery
         lock order; inverse delivery-then-run acquisition is forbidden.
@@ -12697,6 +12740,15 @@ platform_tables:
             delivery_target_route JSONB NOT NULL,
             delivery_context JSONB NOT NULL,
             delivery_payload_projection JSONB NOT NULL,
+            execution_authority_kind TEXT NOT NULL CHECK (execution_authority_kind IN ('normal_runtime', 'selected_contract_fork')),
+            authority_bundle_hash TEXT NOT NULL CHECK (authority_bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),
+            authority_bundle_source TEXT NOT NULL CHECK (authority_bundle_source IN ('persisted', 'ephemeral')),
+            execution_authority_id TEXT NOT NULL CHECK (NULLIF(TRIM(execution_authority_id), '') IS NOT NULL),
+            execution_authority_generation BIGINT NOT NULL CHECK (execution_authority_generation > 0),
+            selected_execution_id UUID,
+            selected_fork_run_id UUID,
+            selected_execution_generation BIGINT,
+            continuation_handoff_at TIMESTAMPTZ,
             status            TEXT NOT NULL CHECK (status IN ('pending', 'in_progress', 'delivered', 'failed', 'dead_letter')),
             retry_count       INTEGER NOT NULL CHECK (retry_count >= 0),
             max_retries       INTEGER NOT NULL CHECK ((subscriber_type = 'agent' AND max_retries = 1) OR (subscriber_type = 'node' AND max_retries = 3)),
@@ -12715,11 +12767,14 @@ platform_tables:
             UNIQUE (delivery_id, run_id, subscriber_type, subscriber_id, agent_name_owner, agent_name_source, agent_route_presence, agent_flow_scope_key, agent_flow_instance_id, agent_flow_instance_path),
             FOREIGN KEY (event_id, run_id) REFERENCES events(event_id, run_id),
             CHECK ((subscriber_type = 'agent' AND NULLIF(TRIM(agent_name_owner), '') IS NOT NULL AND agent_name_source IN ('declared', 'runtime_created') AND agent_route_presence IN ('present', 'root') AND ((agent_route_presence = 'present' AND NULLIF(TRIM(agent_flow_scope_key), '') IS NOT NULL AND NULLIF(TRIM(agent_flow_instance_id), '') IS NOT NULL AND NULLIF(TRIM(agent_flow_instance_path), '') IS NOT NULL) OR (agent_route_presence = 'root' AND agent_flow_scope_key = '' AND agent_flow_instance_id = '' AND agent_flow_instance_path = ''))) OR (subscriber_type = 'node' AND agent_name_owner = '' AND agent_name_source = '' AND agent_route_presence = '' AND agent_flow_scope_key = '' AND agent_flow_instance_id = '' AND agent_flow_instance_path = '')),
+            FOREIGN KEY (selected_execution_id, selected_fork_run_id, selected_execution_generation) REFERENCES run_fork_selected_contract_runtime_executions(execution_id, fork_run_id, generation),
+            CHECK ((execution_authority_kind = 'normal_runtime' AND selected_execution_id IS NULL AND selected_fork_run_id IS NULL AND selected_execution_generation IS NULL) OR (execution_authority_kind = 'selected_contract_fork' AND selected_execution_id IS NOT NULL AND selected_fork_run_id = run_id AND selected_execution_generation = execution_authority_generation AND execution_authority_id = CAST(selected_execution_id AS TEXT))),
             CHECK (retry_count <= max_retries),
             CHECK ((status = 'pending' AND next_eligible_at IS NOT NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'in_progress' AND next_eligible_at IS NULL AND claim_version > 0 AND current_attempt_version = claim_version AND current_attempt_open = TRUE AND started_at IS NOT NULL AND settled_at IS NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'failed' AND retry_count > 0 AND next_eligible_at IS NOT NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NULL AND failure IS NOT NULL) OR (status = 'delivered' AND next_eligible_at IS NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NOT NULL AND failure IS NULL AND reason_code IS NULL) OR (status = 'dead_letter' AND next_eligible_at IS NULL AND current_attempt_version IS NULL AND current_attempt_open IS NULL AND settled_at IS NOT NULL AND failure IS NOT NULL AND NULLIF(TRIM(COALESCE(reason_code, '')), '') IS NOT NULL)),
             CHECK (updated_at >= created_at),
             INDEX idx_deliveries_run (run_id, status) WHERE run_id IS NOT NULL,
             INDEX idx_deliveries_eligibility (subscriber_type, subscriber_id, status, next_eligible_at),
+            INDEX idx_deliveries_continuation_authority (execution_authority_kind, authority_bundle_hash, authority_bundle_source, execution_authority_id, execution_authority_generation, created_at, delivery_id) WHERE status IN ('pending', 'failed', 'in_progress'),
             INDEX idx_deliveries_event (event_id),
             FOREIGN KEY (delivery_id, current_attempt_version, current_attempt_open) REFERENCES event_delivery_attempts(delivery_id, claim_version, open_marker) DEFERRABLE INITIALLY DEFERRED
         );
@@ -19207,10 +19262,9 @@ cli_specification:
       agent_replay:
         rows:
         - agent_replay
-        - agent_replay_backlog
         rule: >
-          Event-targeted replay and backlog replay are separate rows because they have different
-          runtime/API ownership and were intentionally split by the promoted catalog.
+          Event-targeted replay is the only public agent replay operation. Durable
+          delivery continuation is runtime-owned and has no manual backlog command.
       events:
         rows:
         - event_replay
@@ -19375,11 +19429,6 @@ cli_specification:
           split. The public run-fork CLI is implemented as `swarm run fork` (CLI v2.2; the pre-v2.2
           top-level `swarm fork` spelling is retired fail-closed).
     platform_spec_refinements_not_cleanly_present_in_review_artifact:
-      agent_replay_backlog:
-        classification: required_current_contract
-        reason: >
-          Platform spec splits backlog replay from event-targeted replay. This is required to avoid
-          overloading `swarm agent replay` with two different owners.
       agent_replay_event_targeted:
         classification: required_current_contract
         reason: >
@@ -20097,8 +20146,6 @@ cli_specification:
           agent_restart_flow_instance: {command: swarm agent restart, selector: 'flag:flow-instance', family: flow_instance, mode: full_only, safety: mutating}
           agent_replay_agent: {command: swarm agent replay, selector: 'arg:agent-id', family: agent, mode: full_only, safety: mutating}
           agent_replay_flow_instance: {command: swarm agent replay, selector: 'flag:flow-instance', family: flow_instance, mode: full_only, safety: mutating}
-          agent_replay_backlog_agent: {command: swarm agent replay-backlog, selector: 'arg:agent-id', family: agent, mode: full_only, safety: mutating}
-          agent_replay_backlog_flow_instance: {command: swarm agent replay-backlog, selector: 'flag:flow-instance', family: flow_instance, mode: full_only, safety: mutating}
           agent_directive_agent: {command: swarm agent directive, selector: 'arg:agent-id', family: agent, mode: full_only, safety: mutating}
           agent_directive_flow_instance: {command: swarm agent directive, selector: 'flag:flow-instance', family: flow_instance, mode: full_only, safety: mutating}
           conversation_list_agent: {command: swarm conversation list, selector: 'flag:agent-id', family: agent, mode: full_only}
@@ -20736,11 +20783,6 @@ cli_specification:
               classification: split
               owner_issue: '#1712'
               reason: agent mutation output is implemented but not routed through the shared output-mode owner.
-            agent_replay_backlog:
-              command: swarm agent replay-backlog
-              classification: split
-              owner_issue: '#1712'
-              reason: agent mutation output is implemented but not routed through the shared output-mode owner.
             agent_directive:
               command: swarm agent directive
               classification: split
@@ -21216,7 +21258,6 @@ cli_specification:
           - swarm event replay
           - swarm agent restart
           - swarm agent replay
-          - swarm agent replay-backlog
           - swarm agent directive
           - swarm bundle register
           - swarm bundle delete
@@ -22506,22 +22547,27 @@ cli_specification:
               EnsureStandingServiceTargets, or EnsureStandingReplacementTargets restores each admitted standing run's
               exact active workflow timers only after that standing mutation commits and its runtime route is installed.
           - step: 12
-            name: outbox_sweeper
-            owner: internal/runtime
-          - step: 13
             name: static_agents_bootstrap
             owner: internal/runtime
-          - step: 14
+          - step: 13
             name: flow_required_agents
             owner: internal/runtime effective required-agent view derived by internal/runtime/contracts
-          - step: 15
+          - step: 14
             name: workspace_validation_and_system_containers
             owner: internal/runtime
-          - step: 16
+          - step: 15
             name: mcp_tool_validation
             owner: internal/runtime
-          - step: 17
+          - step: 16
             name: manager_event_loop_start
+            owner: internal/runtime
+            ordering: >
+              Managed execution admission synchronously recovers the exact pipeline-obligation scope to explicit
+              exhaustion, activates and enumerates the exact executable-delivery scope to explicit exhaustion,
+              and only then starts manager event loops. No periodic pipeline/outbox sweeper may race this admission
+              sequence or publish readiness while a handoff-hidden delivery remains.
+          - step: 17
+            name: outbox_sweeper
             owner: internal/runtime
           - step: 18
             name: boot_self_check_optional
@@ -23305,7 +23351,7 @@ cli_specification:
       tier: should_have
       implementation_status: implemented
       owner: /v1/rpc agent.replay
-      behavior: Event-targeted redelivery CLI consumer. The CLI sends agent_id, event_id, and optional idempotency_key to /v1/rpc agent.replay through the shared v1 API client. This command MUST NOT replay backlog state, call agent.replay_backlog, derive recipients locally, synthesize replay events, or call dashboard/Builder REST, runtime/store/EventBus/agentcontrol, directive, restart, list, or view owners.
+      behavior: Event-targeted redelivery CLI consumer. The CLI sends agent_id, event_id, and optional idempotency_key to /v1/rpc agent.replay through the shared v1 API client. This command MUST NOT replay backlog state, derive recipients locally, synthesize replay events, or call dashboard/Builder REST, runtime/store/EventBus/agentcontrol, directive, restart, list, or view owners.
       output:
         success_line: agent replay ok with agent_id, event_id, replay_event_id, audit_event_id, exact delivery count, and one source_delivery_id/new_delivery_id/status line per route sibling
       exit_codes:
@@ -23331,34 +23377,7 @@ cli_specification:
       - output validates and renders every one-to-one source_delivery_id/new delivery pair from AgentReplayResult.original_deliveries/new_deliveries without subscriber-level collapse
       - invalid args/flags and missing explicit token for non-loopback API targets make zero API calls
       - EVENT_NOT_FOUND, EVENT_REPLAY_NO_DELIVERY_HISTORY, EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL, EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE, EVENT_REPLAY_NOT_ELIGIBLE, PAYLOAD_VALIDATION_FAILED, IDEMPOTENCY_CONFLICT, HTTP failures, unknown RPC errors, and malformed success responses fail closed with tested exit codes
-      - no agent.replay_backlog, direct DB/store/runtime/EventBus/agentcontrol, dashboard/Builder REST, legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, directive, restart, list, or view method usage
-    agent_replay_backlog:
-      command: swarm agent replay-backlog <agent-id> [--idempotency-key <key>]
-      group: run_operate
-      tier: should_have
-      implementation_status: implemented
-      owner: /v1/rpc agent.replay_backlog
-      behavior: Backlog recovery CLI consumer. The CLI sends agent_id and optional idempotency_key to /v1/rpc agent.replay_backlog through the shared v1 API client and renders only the server-owned replayed_count. This command is distinct from event-targeted redelivery and MUST NOT call agent.replay, event.replay, dashboard/Builder REST, runtime/store/EventBus/agentcontrol directly, or infer event/delivery/session replay evidence locally.
-      output:
-        success_line: agent replay-backlog ok with agent_id and replayed_count
-      exit_codes:
-        success: 0
-        cli_validation: 2
-        transport_or_malformed_response: 3
-        auth_or_missing_token: 4
-        not_found: 5
-        not_found_errors:
-        - AGENT_NOT_FOUND
-        resource_state_or_conflict: 6
-        resource_state_or_conflict_errors:
-        - IDEMPOTENCY_CONFLICT
-      proof_expectations:
-      - exact /v1/rpc agent.replay_backlog call with agent_id param
-      - --idempotency-key passes idempotency_key exactly when provided and is never generated or persisted locally
-      - output renders replayed_count and validates ok is true
-      - invalid args/flags and missing explicit token for non-loopback API targets make zero API calls
-      - AGENT_NOT_FOUND, IDEMPOTENCY_CONFLICT, HTTP failures, unknown RPC errors, and malformed success responses fail closed with tested exit codes
-      - no agent.replay, event.replay, direct DB/store/runtime/EventBus/agentcontrol, dashboard/Builder REST, legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, directive, restart, list, or view method usage
+      - no direct DB/store/runtime/EventBus/agentcontrol, dashboard/Builder REST, legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, directive, restart, list, or view method usage
     agent_directive:
       command: swarm agent directive <agent-id> "<message>" [--run-id <run-id>] [--idempotency-key <key>]
       group: run_operate
@@ -23430,7 +23449,7 @@ cli_specification:
       - filter fields match EventListFilter and bool has_dead_letter is sent only when explicitly provided
       - invalid flags and missing explicit token for non-loopback API targets make zero API calls
       - malformed event list results and HTTP/RPC failures fail closed with tested exit codes
-      - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.trace, event.publish, event.replay, agent.replay, or agent.replay_backlog usage
+      - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.trace, event.publish, event.replay, or agent.replay usage
     events_follow:
       command: swarm event follow
       group: run_operate
@@ -23465,7 +23484,7 @@ cli_specification:
       - filter shape is identical to event.list EventListFilter; pagination and list-only until are not accepted
       - invalid flags and missing explicit token for non-loopback API targets make zero WS calls
       - malformed subscription result/notification and HTTP/RPC/WS failures fail closed with tested exit codes
-      - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.subscribe_trace, event.publish, event.replay, agent.replay, or agent.replay_backlog usage
+      - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.subscribe_trace, event.publish, event.replay, or agent.replay usage
     event_view:
       command: swarm event view <event-id>
       group: run_operate
@@ -23487,7 +23506,7 @@ cli_specification:
       - exact /v1/rpc event.get call with event_id param only
       - missing or blank event id and missing explicit token for non-loopback API targets make zero API calls
       - EVENT_NOT_FOUND, HTTP/RPC failures, and malformed EventFull results fail closed with tested exit codes
-      - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.trace, event.publish, event.replay, agent.replay, or agent.replay_backlog usage
+      - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.trace, event.publish, event.replay, or agent.replay usage
     event_replay:
       command: swarm event replay <event-id> [--subscriber <agent-id> ...] [--idempotency-key <key>]
       group: run_operate
@@ -23530,7 +23549,7 @@ cli_specification:
       - missing or blank event id, blank --subscriber, invalid args, and missing explicit token for non-loopback API targets make zero API calls
       - success output renders server-owned replay_event_id, audit_event_id, subscribers_replayed, and original/new delivery lineage
       - EVENT_NOT_FOUND, replay conflict errors, auth/HTTP/RPC failures, and malformed EventReplayResult values fail closed with tested exit codes
-      - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.start, event.publish, agent.replay, or agent.replay_backlog usage
+      - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.start, event.publish, or agent.replay usage
     event_publish:
       command: swarm event publish <event-name> --payload-json <json-object> [--run-id <run-id>] [--source-event-id <event-id>] [--target-flow-instance <flow-instance>] [--target-entity-id <entity-id>] [--bundle-hash <bundle-v1:sha256:...>] [--emitter <source>] [--idempotency-key <key>]
       group: run_operate
@@ -23619,7 +23638,7 @@ cli_specification:
       - missing/blank event name, invalid or non-object --payload-json, blank optional flags, partial target route flags, target route flags without --run-id, malformed bundle_hash, retired identity flags, invalid args, and missing explicit token for non-loopback API targets make zero API calls
       - success output renders only server-owned EventPublishResult event_id, run_id, operator_reference_event_id when present, new_run_created, and typed persisted delivery rows; it never labels operator reference provenance as causal source_event_id
       - RUN_NOT_FOUND, EVENT_NOT_FOUND, publish rejection errors, auth/HTTP/RPC failures, and malformed EventPublishResult values fail closed with tested exit codes
-      - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.start, event.replay, agent.replay, or agent.replay_backlog usage
+      - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.start, event.replay, or agent.replay usage
       relation_to_run_start: '`run.start` remains usable for #743 until a separate migration changes the CLI internals to event.publish.'
     conversations_list:
       command: swarm conversation list [--agent-id <agent-id>] [--run-id <run-id>] [--limit <n>] [--cursor <cursor>]
@@ -24244,7 +24263,6 @@ cli_specification:
     - swarm agent restart
     - swarm agent directive
     - swarm agent replay
-    - swarm agent replay-backlog
     - swarm event list
     - swarm event follow
     - swarm event view
@@ -24820,7 +24838,6 @@ api_specification:
       - mailbox.acknowledge
       - agent.send_directive
       - agent.restart
-      - agent.replay_backlog
       - runtime.pause
       - runtime.resume
       - runtime.nuke
@@ -25603,7 +25620,7 @@ api_specification:
         - subscriber_id
         - status
         - retry_count
-        - retry_eligible
+        - retry_scheduled
         - terminal
         properties:
           event_id:
@@ -25629,7 +25646,7 @@ api_specification:
           retry_count:
             type: integer
             minimum: 0
-          retry_eligible:
+          retry_scheduled:
             type: boolean
             description: True exactly when status is failed, the retry-visible failure state.
           terminal:
@@ -25887,7 +25904,7 @@ api_specification:
         - subscriber_id
         - status
         - retry_count
-        - retry_eligible
+        - retry_scheduled
         - terminal
         properties:
           delivery_id:
@@ -25907,7 +25924,7 @@ api_specification:
           retry_count:
             type: integer
             minimum: 0
-          retry_eligible:
+          retry_scheduled:
             type: boolean
           terminal:
             type: boolean
@@ -25950,7 +25967,7 @@ api_specification:
         - status
         - attempt
         - retry_count
-        - retry_eligible
+        - retry_scheduled
         - terminal
         properties:
           delivery_id:
@@ -25973,7 +25990,7 @@ api_specification:
           retry_count:
             type: integer
             minimum: 0
-          retry_eligible:
+          retry_scheduled:
             type: boolean
           terminal:
             type: boolean
@@ -26056,7 +26073,7 @@ api_specification:
         - status
         - attempt
         - retry_count
-        - retry_eligible
+        - retry_scheduled
         - terminal
         properties:
           delivery_id:
@@ -26077,7 +26094,7 @@ api_specification:
           retry_count:
             type: integer
             minimum: 0
-          retry_eligible:
+          retry_scheduled:
             type: boolean
           terminal:
             type: boolean
@@ -27903,7 +27920,7 @@ api_specification:
           delivery_retry_count:
             type: integer
             minimum: 0
-          delivery_retry_eligible:
+          delivery_retry_scheduled:
             type: boolean
           delivery_terminal:
             type: boolean
@@ -30677,46 +30694,6 @@ api_specification:
       - EVENT_REPLAY_NOT_ELIGIBLE
       - PAYLOAD_VALIDATION_FAILED
       - IDEMPOTENCY_CONFLICT
-    agent.replay_backlog:
-      tier: should_have
-      description: Replay the agent's pending event backlog. Used for recovery after restart or ingress pause.
-      scope:
-        required:
-        - control:agents
-      idempotency: per the convention.
-      params:
-      - name: agent_id
-        required: true
-        schema:
-          $ref: '#/components/schemas/OpaqueId'
-      - name: flow_instance
-        required: false
-        description: Exact concrete flow-instance target. A bare agent_id is accepted only when it resolves to one live agent.
-        schema:
-          type: string
-      - name: idempotency_key
-        required: false
-        schema:
-          type: string
-      result:
-        name: result
-        required: true
-        schema:
-          type: object
-          additionalProperties: false
-          required:
-          - ok
-          - replayed_count
-          properties:
-            ok:
-              type: boolean
-              const: true
-            replayed_count:
-              type: integer
-              minimum: 0
-      errors:
-      - AGENT_NOT_FOUND
-      - IDEMPOTENCY_CONFLICT
     conversation.list:
       tier: should_have
       description: List conversation summaries (one per session).
@@ -31388,7 +31365,6 @@ api_specification:
       - "GET /api/agents/{id} \u2192 agent.get"
       - "POST /api/agents/{id}/actions/directive \u2192 agent.send_directive"
       - "POST /api/agents/{id}/actions/restart \u2192 agent.restart"
-      - "POST /api/agents/{id}/actions/replay \u2192 agent.replay_backlog"
       - "GET /api/conversations \u2192 conversation.list"
       - "GET /api/conversations/{sessionID} \u2192 conversation.list_turns"
       - "GET /api/events \u2192 event.list"
@@ -31486,7 +31462,7 @@ api_specification:
       string discriminators).
 
 process_local_work_lifetime_authority:
-  implemented_by: '#2073'
+  implemented_by: '#2073/#2126'
   owner: one serve-process root with fixed typed runtime, standing-service, route, and selected-fork occurrences
   scope:
     broadest_concept: ownership of every process-local asynchronous operation from admission through completion, cancellation, durable handoff, generation retirement, and final selected-store release
@@ -31510,9 +31486,11 @@ process_local_work_lifetime_authority:
     manager_run_composition: An idle constructed AgentManager owns no work occurrence. Its first admitted Manager operation or Run start atomically creates one current Manager run occurrence and reserves one distinct standing executor from the parent runtime occurrence before the work becomes reachable. Every AgentManager flow, pipeline, direct execution, and event execution acquires a finite Manager lease and composes any exact standing, delivery, route, or selected-fork occurrence carried by its caller. Re-admission from the same Manager projection normalizes to its exact ambient companion rather than nesting a second copy of the Manager generation. The retry and agent execution loops acquire typed standing Manager leases. Manager quiescence therefore joins finite operations without waiting for those loops to terminate, while shutdown/reset atomically fences and cancels the Manager run occurrence and joins both classes. A running Manager's watcher consumes the pre-reserved executor; a pre-Run transition consumes it directly. The executor cannot own a Manager lease or be admitted after the parent runtime fence. No ambient runtime occurrence, lifecycle phase predicate, or successor Manager generation may admit or settle predecessor work.
     reset: EventBus reset retires and joins retained carriers and claims before clearing owner maps or counters. A snapshotted sender either completes admission before retirement drains it or observes the retired handle and admits nothing. Clearing memory never manufactures quiescence.
   durable_handoff:
-    rule: Local ownership may end before execution only after the private selected-store adapter proves the exact event and exact delivery route obligation are committed.
-    boundary: This proof carries no eligibility, retry, claim, outcome, settlement, liveness, or replay semantics; those remain governed by their durable owners.
-    failure: Missing, forged, wrong-event, wrong-route, or unreadable proof fails closed and leaves local ownership unsettled. The exact carrier and its retirement authority remain reachable for retry until proof and settlement both succeed.
+    rule: Local publication ownership may end before execution only after the private selected-store adapter commits and returns the exact event and exact delivery route obligations. The publication transfers each returned delivery identity to one carrier or the one normal runtime-generation continuation coordinator before release.
+    delivery_continuation: The exact opaque continuation capability is attached to the EventDelivery before enqueue. One scoped carrier guard retains the exact EventDelivery or raw continuation across every Manager and Pipeline exit and resolves the capability exactly once through one atomic typed operation. The only successful resolutions are returned to the same coordinator, consumed into a fenced execution attempt, or terminal-fenced because terminal settlement won the race. Terminal claim outcomes return rather than consume the carrier, then release the exact durable continuation. Resolution errors remain visible and fence the owning generation; carriers never poll, sleep, retry the capability, or infer success. Retry settlement returns a fresh retry-scheduled snapshot to that coordinator before attempt completion. Duplicate resolution, cross-authority transfer, or resolution after coordinator retirement fails closed.
+    coordinator: The normal runtime-generation coordinator begins under the runtime occurrence before readiness, enumerates its exact persisted authority to explicit bounded-cursor exhaustion, and is joined before runtime/store teardown. Canonical route, topology, and authentication lifecycle changes signal it; no fixed delivery sweep, manual backlog API, process-global retry registry, or successor-barrier reuse exists.
+    boundary: The durable handoff proof itself carries no eligibility, retry, claim, outcome, settlement, liveness, or replay semantics. Those remain governed by the delivery lifecycle owner and are rechecked at every selected-store boundary.
+    failure: Missing, forged, wrong-event, wrong-route, wrong-authority, or unreadable proof fails closed and leaves local ownership unsettled. The exact retained owner remains reachable until a typed transfer or terminal settlement succeeds.
   replacement_and_standing:
     fence: Admission fencing is reversible only while the occurrence is not retired and has drained. Retirement is irreversible.
     runtime_replacement: Runtime selection and occurrence acquisition are atomic under the runtime-context selector lock. Normal, restored, and process-admission-aware replacement use one staged publication that installs metadata, the exact executable runtime occurrence, fresh standing occurrences, and catalog authority atomically. A context is loaded only when acquisition can begin on that exact candidate. A drain timeout never reopens or republishes a partially fenced predecessor. Every failure after predecessor retirement restores, if possible, through a fully started fresh runtime occurrence from immutable predecessor metadata; it never republishes the retired occurrence. Failed compensation remains unavailable.

@@ -3085,7 +3085,7 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 		sessionID, agentFields.FlowInstancePath, entityID, sourceEventID, capabilitySurfaceID, at); err != nil {
 		t.Fatalf("seed source turn: %v", err)
 	}
-	claimed, err := pg.ClaimAgentDelivery(ctx, sourceEvent, agentRoute)
+	claimed, err := storetest.ClaimDelivery(ctx, pg, sourceEvent, agentRoute)
 	if err != nil {
 		t.Fatalf("claim in-progress source delivery: %v", err)
 	}

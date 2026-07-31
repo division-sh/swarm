@@ -605,7 +605,7 @@ func TestOperatorEventPublishPostgresUsesPublisherScopeWithPlainRequestContext(t
 	explicitEventID := stringValue(t, explicitResult["event_id"], "event_id")
 	explicitRunID := stringValue(t, explicitResult["run_id"], "run_id")
 	assertEventPublishPersistence(t, db, explicitRunID, explicitEventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
-	explicitEvent := requireAPIV1RuntimeBusEvent(t, ch, "explicit-bundle event.publish delivery")
+	explicitEvent := requireAPIV1RuntimeBusEventID(t, ch, explicitEventID, "explicit-bundle event.publish delivery")
 	if explicitEvent.ID() != explicitEventID {
 		t.Fatalf("explicit-bundle delivered event = %s, want %s", explicitEvent.ID(), explicitEventID)
 	}
@@ -645,7 +645,7 @@ func TestOperatorEventPublishSQLiteUsesPublisherScopeWithPlainRequestContext(t *
 	explicitEventID := stringValue(t, explicitResult["event_id"], "event_id")
 	explicitRunID := stringValue(t, explicitResult["run_id"], "run_id")
 	assertSQLiteEventPublishRows(t, sqliteStore.DB, explicitRunID, explicitEventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
-	explicitEvent := requireAPIV1RuntimeBusEvent(t, ch, "sqlite explicit-bundle event.publish delivery")
+	explicitEvent := requireAPIV1RuntimeBusEventID(t, ch, explicitEventID, "sqlite explicit-bundle event.publish delivery")
 	if explicitEvent.ID() != explicitEventID {
 		t.Fatalf("sqlite explicit-bundle delivered event = %s, want %s", explicitEvent.ID(), explicitEventID)
 	}
@@ -972,7 +972,7 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
 		t.Fatalf("scan.requested events after targeted publish = %d, want 2", count)
 	}
-	got := requireAPIV1RuntimeBusEvent(t, ch, "targeted explicit-run delivery")
+	got := requireAPIV1RuntimeBusEventID(t, ch, targetedEventID, "targeted explicit-run delivery")
 	if got.ID() != targetedEventID || got.RunID() != runID {
 		t.Fatalf("targeted delivered event id/run = %s/%s, want %s/%s", got.ID(), got.RunID(), targetedEventID, runID)
 	}
@@ -1073,7 +1073,7 @@ func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersisten
 	if got := countEventDeliveriesForEvent(t, ctx, db, followUpEventID); got != 1 {
 		t.Fatalf("event_deliveries for follow-up = %d, want 1", got)
 	}
-	got := requireAPIV1RuntimeBusEvent(t, followUpCh, "follow-up delivery")
+	got := requireAPIV1RuntimeBusEventID(t, followUpCh, followUpEventID, "follow-up delivery")
 	if got.ID() != followUpEventID || got.RunID() != runID {
 		t.Fatalf("follow-up delivered event id/run = %s/%s, want %s/%s", got.ID(), got.RunID(), followUpEventID, runID)
 	}
@@ -1409,7 +1409,7 @@ func TestOperatorEventPublishSQLiteExplicitRunFollowUpUsesSelectedRun(t *testing
 		t.Fatalf("sqlite follow-up deliveries = %#v, want 1", deliveries)
 	}
 	assertEventPublishDeliveryIdentity(t, asMap(t, deliveries[0]), "agent", "scan-orchestrator", "pending", 1)
-	got := requireAPIV1RuntimeBusEvent(t, followUpCh, "sqlite follow-up delivery")
+	got := requireAPIV1RuntimeBusEventID(t, followUpCh, eventID, "sqlite follow-up delivery")
 	if got.ID() != eventID || got.RunID() != runID {
 		t.Fatalf("sqlite follow-up delivered id/run = %s/%s, want %s/%s", got.ID(), got.RunID(), eventID, runID)
 	}
@@ -1534,7 +1534,7 @@ func TestOperatorEventPublishOperatorReferenceValidatesSameRunProvenance(t *test
 	if count := countAPIIdempotencyRows(t, db); count != 2 {
 		t.Fatalf("api_idempotency rows after sourced publish = %d, want 2", count)
 	}
-	got := requireAPIV1RuntimeBusEvent(t, ch, "operator-injected event delivery")
+	got := requireAPIV1RuntimeBusEventID(t, ch, childEventID, "operator-injected event delivery")
 	if got.ID() != childEventID || got.RunID() != parentRunID {
 		t.Fatalf("child delivered event id/run = %s/%s, want %s/%s", got.ID(), got.RunID(), childEventID, parentRunID)
 	}
@@ -1923,11 +1923,11 @@ type failAPIPipelineSettlementOnceStore struct {
 	err error
 }
 
-func (s *failAPIPipelineSettlementOnceStore) Settle(ctx context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) error {
+func (s *failAPIPipelineSettlementOnceStore) Settle(ctx context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) (runtimepipelineobligation.SettlementOutcome, error) {
 	if s.err != nil {
 		err := s.err
 		s.err = nil
-		return err
+		return runtimepipelineobligation.SettlementOutcome{}, err
 	}
 	return s.Store.Settle(ctx, claim, disposition)
 }

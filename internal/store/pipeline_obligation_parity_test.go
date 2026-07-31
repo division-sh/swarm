@@ -103,7 +103,61 @@ func TestPipelineObligationSQLitePostgresParityMatrix(t *testing.T) {
 			t.Run("settlement_retires_claim_before_lifecycle_handoff", func(t *testing.T) {
 				provePipelineClaimRetiredBeforeLifecycleHandoff(t, ctx, fixture, selected)
 			})
+			t.Run("committed_settlement_survives_cleanup_failure", func(t *testing.T) {
+				provePipelineCommittedSettlementCleanupOutcome(t, ctx, fixture, selected)
+			})
 		})
+	}
+}
+
+func provePipelineCommittedSettlementCleanupOutcome(
+	t *testing.T,
+	ctx context.Context,
+	fixture authorActivityReceiptFixture,
+	selected pipelineObligationParityStore,
+) {
+	t.Helper()
+	runID := uuid.NewString()
+	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
+	owner := selected.PipelineObligations()
+	work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
+	if err != nil {
+		t.Fatalf("claim pipeline event: %v", err)
+	}
+	injectedErr := errors.New("injected pipeline settlement cleanup failure")
+	switch store := selected.(type) {
+	case *SQLiteRuntimeStore:
+		store.testPipelineReleaseErr = func() error { return injectedErr }
+		defer func() { store.testPipelineReleaseErr = nil }()
+	case *PostgresStore:
+		state, err := store.postgresPipelineClaimState(work.Claim)
+		if err != nil {
+			t.Fatalf("load postgres pipeline claim state: %v", err)
+		}
+		session := state.postgresLease.session
+		session.mu.Lock()
+		session.testEndTxError = func() error { return injectedErr }
+		session.mu.Unlock()
+		defer func() {
+			session.mu.Lock()
+			session.testEndTxError = nil
+			session.mu.Unlock()
+		}()
+	default:
+		t.Fatalf("unsupported pipeline settlement fixture %T", selected)
+	}
+
+	outcome, err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("processed"))
+	if !errors.Is(err, injectedErr) {
+		t.Fatalf("settlement error = %v, want cleanup failure", err)
+	}
+	if !outcome.Committed() || !outcome.DeliveryHandoffCommitted() {
+		t.Fatalf("settlement outcome = committed:%v handoff:%v, want true/true",
+			outcome.Committed(), outcome.DeliveryHandoffCommitted())
+	}
+	if _, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery); !errors.Is(err, runtimepipelineobligation.ErrIneligible) {
+		t.Fatalf("committed settlement remained replayable after cleanup failure: %v", err)
 	}
 }
 
@@ -143,7 +197,7 @@ func provePipelineClaimRetiredBeforeLifecycleHandoff(
 	}
 	defer registration.Release()
 
-	if err := owner.Settle(runtimeCtx, work.Claim, runtimepipelineobligation.Acknowledged("processed")); err != nil {
+	if _, err := owner.Settle(runtimeCtx, work.Claim, runtimepipelineobligation.Acknowledged("processed")); err != nil {
 		t.Fatalf("settle pipeline event: %v", err)
 	}
 	select {
@@ -190,7 +244,7 @@ func provePipelineAgeIndependentSelection(
 	if work.Event.ID() != eventID || work.Scope != runtimepipelineobligation.ScopeDirect || work.Acknowledged {
 		t.Fatalf("claimed work = %#v, want exact old direct unacknowledged event %s", work, eventID)
 	}
-	if err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("processed")); err != nil {
+	if _, err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("processed")); err != nil {
 		t.Fatalf("Settle old event: %v", err)
 	}
 }
@@ -231,7 +285,7 @@ func provePipelineClaimLifecycle(
 	if err := owner.Release(ctx, work.Claim); err != nil {
 		t.Fatalf("release recovery claim: %v", err)
 	}
-	if err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("stale")); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
+	if _, err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("stale")); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
 		t.Fatalf("released claim settlement error = %v, want ErrStaleClaim", err)
 	}
 	if err := owner.Release(ctx, work.Claim); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
@@ -242,7 +296,7 @@ func provePipelineClaimLifecycle(
 	if err != nil {
 		t.Fatalf("reclaim recovery event: %v", err)
 	}
-	if err := owner.Settle(ctx, reclaimed.Claim, runtimepipelineobligation.Terminal("test_terminal", nil)); err != nil {
+	if _, err := owner.Settle(ctx, reclaimed.Claim, runtimepipelineobligation.Terminal("test_terminal", nil)); err != nil {
 		t.Fatalf("settle reclaimed event: %v", err)
 	}
 	if _, ok, err := claimNextPipelineWorkForTest(t, ctx, owner, runtimepipelineobligation.RunRecoveryQuery(runID)); err != nil || ok {
@@ -280,7 +334,7 @@ func provePipelineScopeFailure(
 		disposition.ReasonCode() != "committed_pipeline_scope_missing" {
 		t.Fatalf("missing scope classification = %#v classified=%v", disposition, preclassified)
 	}
-	if err := owner.Settle(ctx, work.Claim, disposition); err != nil {
+	if _, err := owner.Settle(ctx, work.Claim, disposition); err != nil {
 		t.Fatalf("settle missing scope classification: %v", err)
 	}
 	if _, ok, err := claimNextPipelineWorkForTest(t, ctx, owner, runtimepipelineobligation.RunRecoveryQuery(runID)); err != nil || ok {
@@ -335,7 +389,7 @@ func provePipelineMalformedRecoveryPreclassification(
 		disposition.ReasonCode() != "persisted_replay_run_identity_invalid" {
 		t.Fatalf("malformed recovery disposition = %#v classified=%v", disposition, classified)
 	}
-	if err := owner.Settle(ctx, work.Claim, disposition); err != nil {
+	if _, err := owner.Settle(ctx, work.Claim, disposition); err != nil {
 		t.Fatalf("settle malformed recovery: %v", err)
 	}
 	count, outcome, reason := readExactPipelineReceipt(t, ctx, fixture, eventID)
@@ -369,7 +423,7 @@ func provePipelineRunSummary(
 	if err != nil || !ok || deferred.Event.ID() != deferredID {
 		t.Fatalf("claim deferred decision route: work=%s ok=%v err=%v", deferred.Event.ID(), ok, err)
 	}
-	if err := owner.Settle(ctx, deferred.Claim, runtimepipelineobligation.Deferred("retry", time.Now().UTC().Add(time.Hour), nil)); err != nil {
+	if _, err := owner.Settle(ctx, deferred.Claim, runtimepipelineobligation.Deferred("retry", time.Now().UTC().Add(time.Hour), nil)); err != nil {
 		t.Fatalf("defer decision route: %v", err)
 	}
 	diagnostic := eventtest.DiagnosticDirect(
@@ -435,7 +489,7 @@ func provePipelineDecisionRouteDispositions(
 		pendingSummary.ProcessedDeferred != 1 || pendingSummary.BlocksCompletion() || !pendingSummary.HasOpenWork() {
 		t.Fatalf("processed-before-convergence summary = %#v err=%v", pendingSummary, err)
 	}
-	if err := owner.Settle(ctx, processed.Claim, runtimepipelineobligation.Acknowledged("decision_route_converged")); err != nil {
+	if _, err := owner.Settle(ctx, processed.Claim, runtimepipelineobligation.Acknowledged("decision_route_converged")); err != nil {
 		t.Fatalf("complete processed decision route: %v", err)
 	}
 	if status := readDecisionRouteStatus(t, ctx, fixture, processedID); status != "completed" {
@@ -448,7 +502,7 @@ func provePipelineDecisionRouteDispositions(
 	if err != nil || !ok || quarantined.Event.ID() != quarantineID {
 		t.Fatalf("claim quarantine decision route: work=%s ok=%v err=%v", quarantined.Event.ID(), ok, err)
 	}
-	if err := owner.Settle(ctx, quarantined.Claim, runtimepipelineobligation.Quarantined("invalid_decision", nil)); err != nil {
+	if _, err := owner.Settle(ctx, quarantined.Claim, runtimepipelineobligation.Quarantined("invalid_decision", nil)); err != nil {
 		t.Fatalf("quarantine decision route: %v", err)
 	}
 	if status := readDecisionRouteStatus(t, ctx, fixture, quarantineID); status != "quarantined" {
@@ -472,7 +526,7 @@ func provePipelineReceiptFamilySeparation(
 	if err != nil {
 		t.Fatalf("workflow-transition receipt hid platform obligation: %v", err)
 	}
-	if err := selected.PipelineObligations().Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("processed")); err != nil {
+	if _, err := selected.PipelineObligations().Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("processed")); err != nil {
 		t.Fatalf("settle exact platform obligation: %v", err)
 	}
 	count, outcome, _ := readExactPipelineReceipt(t, ctx, fixture, eventID)
@@ -526,7 +580,7 @@ func provePipelineParentTerminalizationFence(
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit terminalization: %v", err)
 	}
-	if err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("late_success")); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
+	if _, err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("late_success")); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
 		t.Fatalf("late success error = %v, want ErrStaleClaim", err)
 	}
 	_, outcome, reason := readExactPipelineReceipt(t, ctx, fixture, eventID)
@@ -544,14 +598,27 @@ func provePipelineSettlementRollback(
 	t.Helper()
 	runID := uuid.NewString()
 	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
-	eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
+	eventID := uuid.NewString()
+	event := eventtest.PersistedProjection(
+		eventID, events.EventType("test.event"), "runtime", "", []byte(`{"ok":true}`),
+		0, runID, "", events.EventEnvelope{}, time.Now().UTC().Add(-time.Minute),
+	)
+	if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{{
+		SubscriberType: "agent",
+		SubscriberID:   "pipeline-handoff-rollback",
+	}}); err != nil {
+		t.Fatalf("commit pipeline handoff rollback event: %v", err)
+	}
+	if total, handoff := readDeliveryContinuationHandoffCounts(t, ctx, fixture, eventID); total != 1 || handoff != 0 {
+		t.Fatalf("initial delivery continuation facts = total:%d handoff:%d, want total:1 handoff:0", total, handoff)
+	}
 	owner := selected.PipelineObligations()
 	work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
 	if err != nil {
 		t.Fatalf("claim rollback target: %v", err)
 	}
 	removeFault := installPipelineReceiptInsertFault(t, ctx, fixture)
-	if err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("processed")); err == nil {
+	if _, err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("processed")); err == nil {
 		removeFault()
 		t.Fatal("forced receipt failure was ignored")
 	}
@@ -560,9 +627,16 @@ func provePipelineSettlementRollback(
 		removeFault()
 		t.Fatalf("failed settlement committed %d receipts", count)
 	}
+	if _, handoff := readDeliveryContinuationHandoffCounts(t, ctx, fixture, eventID); handoff != 0 {
+		removeFault()
+		t.Fatalf("failed settlement committed %d delivery continuation handoffs", handoff)
+	}
 	removeFault()
-	if err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("processed")); err != nil {
+	if _, err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("processed")); err != nil {
 		t.Fatalf("claim was not retained after rollback: %v", err)
+	}
+	if _, handoff := readDeliveryContinuationHandoffCounts(t, ctx, fixture, eventID); handoff != 1 {
+		t.Fatalf("successful settlement committed %d delivery continuation handoffs, want 1", handoff)
 	}
 }
 
@@ -657,7 +731,7 @@ func settlePipelineParityEvent(
 	if err != nil {
 		t.Fatalf("claim event %s: %v", eventID, err)
 	}
-	if err := owner.Settle(ctx, work.Claim, disposition); err != nil {
+	if _, err := owner.Settle(ctx, work.Claim, disposition); err != nil {
 		t.Fatalf("settle event %s: %v", eventID, err)
 	}
 }
@@ -699,6 +773,24 @@ func readExactPipelineReceipt(t *testing.T, ctx context.Context, fixture authorA
 		t.Fatalf("read exact platform pipeline receipt: %v", err)
 	}
 	return count, outcome, reason
+}
+
+func readDeliveryContinuationHandoffCounts(
+	t *testing.T,
+	ctx context.Context,
+	fixture authorActivityReceiptFixture,
+	eventID string,
+) (int, int) {
+	t.Helper()
+	query := `SELECT COUNT(*), COUNT(continuation_handoff_at) FROM event_deliveries WHERE event_id = ?`
+	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+		query = `SELECT COUNT(*), COUNT(continuation_handoff_at) FROM event_deliveries WHERE event_id = $1::uuid`
+	}
+	var total, handoff int
+	if err := fixture.db.QueryRowContext(ctx, query, eventID).Scan(&total, &handoff); err != nil {
+		t.Fatalf("read delivery continuation handoff: %v", err)
+	}
+	return total, handoff
 }
 
 func readDecisionRouteStatus(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, eventID string) string {

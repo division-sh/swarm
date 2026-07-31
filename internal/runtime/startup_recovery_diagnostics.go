@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -26,6 +27,7 @@ type startupRecoveryReasonCode string
 const (
 	startupRecoveryReasonDisabledNoWork          startupRecoveryReasonCode = "recovery_disabled_no_persisted_work"
 	startupRecoveryReasonDisabledWithWork        startupRecoveryReasonCode = "recovery_disabled_with_persisted_work"
+	startupRecoveryReasonDisabledWithDelivery    startupRecoveryReasonCode = "recovery_disabled_with_delivery_work"
 	startupRecoveryReasonDisabledWithIntrinsic   startupRecoveryReasonCode = "recovery_disabled_with_intrinsic_timer_work"
 	startupRecoveryReasonDisabledWithManagerWork startupRecoveryReasonCode = "recovery_disabled_with_manager_snapshot_work"
 	startupRecoveryReasonEnabledNoWork           startupRecoveryReasonCode = "recovery_enabled_no_persisted_work"
@@ -43,20 +45,25 @@ type startupRecoverySnapshot struct {
 	StandingTimerObligations      int
 	TimerObligations              runtimetimerobligation.Snapshot
 	Manager                       runtimemanager.RecoverableStateSnapshot
+	Delivery                      runtimedelivery.RecoveryInventory
 }
 
 func (s startupRecoverySnapshot) HasRecoverableWork() bool {
-	return s.StartupBlockingTimers > 0 || s.StandingTimerObligations > 0 || s.Manager.HasRecoverableWork()
+	return s.StartupBlockingTimers > 0 || s.StandingTimerObligations > 0 ||
+		s.Manager.HasRecoverableWork() || s.Delivery.HasWork()
 }
 
 func (s startupRecoverySnapshot) HasStartupBlockingRecoverableWork() bool {
-	return s.StartupBlockingTimers > 0
+	return s.StartupBlockingTimers > 0 || s.Delivery.HasWork()
 }
 
 func (s startupRecoverySnapshot) WorkClasses() []string {
-	classes := make([]string, 0, 1+len(s.Manager.Classes()))
+	classes := make([]string, 0, 2+len(s.Manager.Classes()))
 	if s.StartupBlockingTimers > 0 || s.StandingTimerObligations > 0 {
 		classes = append(classes, "timer obligations")
+	}
+	if s.Delivery.HasWork() {
+		classes = append(classes, "executable delivery obligations")
 	}
 	classes = append(classes, s.Manager.Classes()...)
 	sort.Strings(classes)
@@ -64,10 +71,14 @@ func (s startupRecoverySnapshot) WorkClasses() []string {
 }
 
 func (s startupRecoverySnapshot) StartupBlockingWorkClasses() []string {
-	if s.StartupBlockingTimers <= 0 {
-		return nil
+	classes := make([]string, 0, 2)
+	if s.StartupBlockingTimers > 0 {
+		classes = append(classes, "timer obligations")
 	}
-	return []string{"timer obligations"}
+	if s.Delivery.HasWork() {
+		classes = append(classes, "executable delivery obligations")
+	}
+	return classes
 }
 
 func (s startupRecoverySnapshot) Detail() map[string]any {
@@ -83,6 +94,8 @@ func (s startupRecoverySnapshot) Detail() map[string]any {
 		detail["recoverable_work_present"] = s.HasRecoverableWork()
 		detail["startup_blocking_recoverable_work_present"] = s.HasStartupBlockingRecoverableWork()
 		detail["manager_recoverable_work_present"] = s.Manager.HasRecoverableWork()
+		detail["delivery_recovery_inventory"] = s.Delivery
+		detail["delivery_recoverable_work_present"] = s.Delivery.HasWork()
 		detail["recoverable_work_classes"] = s.WorkClasses()
 		detail["startup_blocking_recoverable_work_classes"] = s.StartupBlockingWorkClasses()
 		for key, value := range s.Manager.Detail() {
@@ -134,7 +147,11 @@ func newStartupRecoveryDecisionReport(snapshot startupRecoverySnapshot) startupR
 		report.ReasonCode = startupRecoveryReasonEnabledNoWork
 	case snapshot.HasStartupBlockingRecoverableWork():
 		report.Outcome = startupRecoveryOutcomeDenied
-		report.ReasonCode = startupRecoveryReasonDisabledWithWork
+		if snapshot.Delivery.HasWork() {
+			report.ReasonCode = startupRecoveryReasonDisabledWithDelivery
+		} else {
+			report.ReasonCode = startupRecoveryReasonDisabledWithWork
+		}
 	case snapshot.Manager.HasRecoverableWork():
 		report.ReasonCode = startupRecoveryReasonDisabledWithManagerWork
 	case snapshot.StandingTimerObligations > 0:
@@ -228,6 +245,7 @@ func (r startupRecoveryDecisionReport) bootPayload() map[string]any {
 		payload["startup_blocking_timer_count"] = r.Snapshot.StartupBlockingTimers
 		payload["standing_timer_obligation_count"] = r.Snapshot.StandingTimerObligations
 		payload["timer_obligations"] = r.Snapshot.TimerObligations
+		payload["delivery_recovery_inventory"] = r.Snapshot.Delivery
 	}
 	return payload
 }
@@ -240,6 +258,12 @@ func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context, observedA
 	if rt == nil {
 		return snapshot, nil
 	}
+	delivery, err := rt.inspectDeliveryRecoveryInventory(ctx)
+	if err != nil {
+		snapshot.InspectionComplete = false
+		return snapshot, err
+	}
+	snapshot.Delivery = delivery
 	reader, err := rt.startupTimerObligationReader()
 	if err != nil {
 		snapshot.InspectionComplete = false
@@ -290,6 +314,17 @@ func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context, observedA
 		snapshot.Manager = managerSnapshot
 	}
 	return snapshot, nil
+}
+
+func (rt *Runtime) inspectDeliveryRecoveryInventory(ctx context.Context) (runtimedelivery.RecoveryInventory, error) {
+	if rt == nil || rt.Stores.DeliveryStore == nil {
+		return runtimedelivery.RecoveryInventory{}, nil
+	}
+	inventory, err := rt.Stores.DeliveryStore.InspectDeliveryRecovery(ctx, rt.Options.BundleSourceFact)
+	if err != nil {
+		return runtimedelivery.RecoveryInventory{}, fmt.Errorf("inspect executable delivery recovery: %w", err)
+	}
+	return inventory, nil
 }
 
 func (rt *Runtime) startupTimerObligationReader() (runtimetimerobligation.Reader, error) {

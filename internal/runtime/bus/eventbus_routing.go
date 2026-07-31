@@ -126,38 +126,40 @@ func (h *internalSubscriptionHandle) restartContext() context.Context {
 	return h.lifecycleCtx
 }
 
-func (h *internalSubscriptionHandle) send(ctx context.Context, evt events.Event, handoff events.DeliveryRoute) agentRouteSendResult {
+func (h *internalSubscriptionHandle) send(ctx context.Context, evt events.Event, handoff events.DeliveryRoute, continuation worklifetime.DeliveryContinuation) (agentRouteSendResult, error) {
 	if h == nil || h.bus == nil {
-		return agentRouteSendInactive
+		return agentRouteSendInactive, returnDeliveryContinuation(ctx, continuation)
 	}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	if !h.active || h.ch == nil {
-		return agentRouteSendInactive
+		return agentRouteSendInactive, returnDeliveryContinuation(ctx, continuation)
 	}
 	owner := h.bus.workOwnerForContext(ctx)
 	if owner == nil {
-		return agentRouteSendInactive
+		return agentRouteSendInactive, returnDeliveryContinuation(ctx, continuation)
 	}
 	delivery, err := owner.NewRoutedEventDelivery(localDeliveryContext(ctx), evt, handoff)
 	if err != nil {
-		return agentRouteSendInactive
+		return agentRouteSendInactive, errors.Join(err, returnDeliveryContinuation(ctx, continuation))
+	}
+	if continuation != nil {
+		if err := delivery.AttachContinuation(continuation); err != nil {
+			return agentRouteSendInactive, errors.Join(err, delivery.Complete())
+		}
 	}
 	if err := trackLocalDeliveryCompletion(ctx, delivery); err != nil {
-		_ = delivery.Complete()
-		return agentRouteSendInactive
+		return agentRouteSendInactive, errors.Join(err, delivery.Complete())
 	}
 	timer := time.NewTimer(deliverySendTimeout)
 	defer timer.Stop()
 	select {
 	case h.ch <- delivery:
-		return agentRouteSendDelivered
+		return agentRouteSendDelivered, nil
 	case <-ctx.Done():
-		_ = delivery.Complete()
-		return agentRouteSendContextDone
+		return agentRouteSendContextDone, delivery.Complete()
 	case <-timer.C:
-		_ = delivery.Complete()
-		return agentRouteSendTimedOut
+		return agentRouteSendTimedOut, delivery.Complete()
 	}
 }
 
@@ -226,34 +228,36 @@ const (
 	agentRouteSendContextDone
 )
 
-func (r *agentRouteHandle) send(ctx context.Context, evt events.Event, handoff events.DeliveryRoute) agentRouteSendResult {
+func (r *agentRouteHandle) send(ctx context.Context, evt events.Event, handoff events.DeliveryRoute, continuation worklifetime.DeliveryContinuation) (agentRouteSendResult, error) {
 	if r == nil {
-		return agentRouteSendInactive
+		return agentRouteSendInactive, returnDeliveryContinuation(ctx, continuation)
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if !r.active || r.ch == nil {
-		return agentRouteSendInactive
+		return agentRouteSendInactive, returnDeliveryContinuation(ctx, continuation)
 	}
 	delivery, err := r.owner.NewRoutedEventDelivery(localDeliveryContext(ctx), evt, handoff)
 	if err != nil {
-		return agentRouteSendInactive
+		return agentRouteSendInactive, errors.Join(err, returnDeliveryContinuation(ctx, continuation))
+	}
+	if continuation != nil {
+		if err := delivery.AttachContinuation(continuation); err != nil {
+			return agentRouteSendInactive, errors.Join(err, delivery.Complete())
+		}
 	}
 	if err := trackLocalDeliveryCompletion(ctx, delivery); err != nil {
-		_ = delivery.Complete()
-		return agentRouteSendInactive
+		return agentRouteSendInactive, errors.Join(err, delivery.Complete())
 	}
 	timer := time.NewTimer(deliverySendTimeout)
 	defer timer.Stop()
 	select {
 	case r.ch <- delivery:
-		return agentRouteSendDelivered
+		return agentRouteSendDelivered, nil
 	case <-ctx.Done():
-		_ = delivery.Complete()
-		return agentRouteSendContextDone
+		return agentRouteSendContextDone, delivery.Complete()
 	case <-timer.C:
-		_ = delivery.Complete()
-		return agentRouteSendTimedOut
+		return agentRouteSendTimedOut, delivery.Complete()
 	}
 }
 
@@ -297,20 +301,6 @@ func (r *agentRouteHandle) retireAndWait(ctx context.Context, store EventStore) 
 func settleBufferedLocalDelivery(ctx context.Context, store EventStore, delivery *LocalDelivery) error {
 	if delivery == nil {
 		return nil
-	}
-	if store == nil {
-		return errors.New("selected event store is required for buffered delivery handoff")
-	}
-	prover, ok := store.(runtimedelivery.Store)
-	if !ok {
-		return errors.New("selected event store does not expose exact durable delivery handoff proof")
-	}
-	proof, err := prover.ProveHandoff(ctx, delivery.ID(), delivery.HandoffRoute())
-	if err != nil {
-		return fmt.Errorf("prove exact durable handoff for buffered event %s: %w", delivery.ID(), err)
-	}
-	if strings.TrimSpace(proof.DeliveryID()) == "" {
-		return fmt.Errorf("prove exact durable handoff for buffered event %s: empty proof", delivery.ID())
 	}
 	return delivery.Complete()
 }
@@ -616,14 +606,43 @@ func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt eve
 			}
 		}
 		if len(routes) == 0 {
-			routes = []events.DeliveryRoute{{}}
+			route := events.DeliveryRoute{}
+			if eb.ephemeral && recipient.kind == inMemorySubscriberAgent && eb.DeliveryContinuationOwner() != nil {
+				route = events.DeliveryRoute{
+					SubscriberType: string(runtimedelivery.SubscriberAgent),
+					SubscriberID:   recipient.subscriberID(),
+					AgentIdentity:  recipient.identity,
+				}
+			}
+			routes = []events.DeliveryRoute{route}
 		}
 		for _, route := range routes {
 			deliverEvent, err := projectEventForDeliveryRoute(evt, route)
 			if err != nil {
 				return err
 			}
-			sendResult := recipient.send(ctx, deliverEvent.Event(), route)
+			var continuation worklifetime.DeliveryContinuation
+			if route.SubscriberType != "" {
+				deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), route)
+				if err != nil {
+					return err
+				}
+				owner := eb.DeliveryContinuationOwner()
+				if owner == nil {
+					if !eb.ephemeral {
+						return errors.New("exact delivery continuation owner is required")
+					}
+				} else {
+					continuation, err = owner.Acquire(deliveryID)
+					if err != nil {
+						return err
+					}
+				}
+			}
+			sendResult, sendErr := recipient.send(ctx, deliverEvent.Event(), route, continuation)
+			if sendErr != nil {
+				return fmt.Errorf("settle delivery carrier for %s: %w", recipient.subscriberID(), sendErr)
+			}
 			switch sendResult {
 			case agentRouteSendDelivered:
 				delivered = append(delivered, targetKey)
@@ -657,6 +676,66 @@ func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt eve
 		return eb.logAuthoritativeDeliveryIncomplete(ctx, evt, expected, delivered, missing, timedOut, nil)
 	}
 	return nil
+}
+
+// DispatchDeliveryContinuation re-enters one exact persisted route. It is used
+// only by the normal generation coordinator after a selected-store scan.
+func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events.Event, route events.DeliveryRoute) (err error) {
+	if eb == nil {
+		return errors.New("event bus is required")
+	}
+	if _, err := route.Identity(); err != nil {
+		return err
+	}
+	ctx, err = eb.admitBundleSourceFact(ctx)
+	if err != nil {
+		return err
+	}
+	var standingLease *worklifetime.Lease
+	ctx, standingLease, err = eb.bindClaimedRunWork(ctx, evt)
+	if err != nil {
+		return err
+	}
+	if standingLease != nil {
+		defer func() {
+			err = errors.Join(err, standingLease.Done())
+		}()
+	}
+	ctx = WithCurrentRuntimeEpoch(ctx)
+	if err := ensurePublishEpoch(ctx); err != nil {
+		return err
+	}
+	ctx = events.WithDeliveryContext(ctx, evt.DeliveryContext())
+	if runID := strings.TrimSpace(evt.RunID()); runID != "" {
+		ctx = runtimecorrelation.WithRunID(ctx, runID)
+	}
+	ctx, err = eb.withAuthorActivityEventDescriptor(ctx, evt)
+	if err != nil {
+		return err
+	}
+	if route.SubscriberType == string(runtimedelivery.SubscriberNode) {
+		passthrough, deferred, outcome, err := eb.runInterceptorsForDeliveryRoutes(ctx, evt, []events.DeliveryRoute{route})
+		if err != nil {
+			return err
+		}
+		if len(deferred) > 0 {
+			return errors.New("delivery continuation cannot create uncommitted deferred publications")
+		}
+		if _, retry := outcome.RetryRelease(); retry {
+			return errors.New("delivery continuation route requested event-level retry release")
+		}
+		if _, settled := outcome.Disposition(); settled || !passthrough {
+			return nil
+		}
+	}
+	recipient := RoutePlanLiveRecipient{
+		RecipientID:       route.SubscriberID,
+		SubscriberType:    route.SubscriberType,
+		AgentIdentity:     route.AgentIdentity,
+		PersistAsDelivery: true,
+		liveAuthority:     liveRecipientAuthorityIdentity,
+	}
+	return eb.deliverLiveRecipientsWithRoutes(ctx, evt, []RoutePlanLiveRecipient{recipient}, []events.DeliveryRoute{route})
 }
 
 func deliveryRoutesBySubscriber(deliveryRoutes []events.DeliveryRoute) map[deliveryRouteTargetKey][]events.DeliveryRoute {
@@ -836,14 +915,31 @@ type agentRecipient struct {
 	internal   *internalSubscriptionHandle
 }
 
-func (r agentRecipient) send(ctx context.Context, evt events.Event, handoff events.DeliveryRoute) agentRouteSendResult {
+func (r agentRecipient) send(ctx context.Context, evt events.Event, handoff events.DeliveryRoute, continuation worklifetime.DeliveryContinuation) (agentRouteSendResult, error) {
 	if r.route != nil {
-		return r.route.send(ctx, evt, handoff)
+		return r.route.send(ctx, evt, handoff, continuation)
 	}
 	if r.internal != nil {
-		return r.internal.send(ctx, evt, handoff)
+		return r.internal.send(ctx, evt, handoff, continuation)
 	}
-	return agentRouteSendInactive
+	if continuation != nil {
+		return agentRouteSendInactive, returnDeliveryContinuation(ctx, continuation)
+	}
+	return agentRouteSendInactive, nil
+}
+
+func returnDeliveryContinuation(ctx context.Context, continuation worklifetime.DeliveryContinuation) error {
+	if continuation == nil {
+		return nil
+	}
+	resolution, err := continuation.Resolve(context.WithoutCancel(ctx), worklifetime.DeliveryContinuationReturn)
+	if err != nil {
+		return err
+	}
+	if resolution != worklifetime.DeliveryContinuationReturned && resolution != worklifetime.DeliveryContinuationTerminal {
+		return fmt.Errorf("delivery continuation return resolved as %d", resolution)
+	}
+	return nil
 }
 
 const workflowRuntimeInternalCarrierID = "workflow-runtime"

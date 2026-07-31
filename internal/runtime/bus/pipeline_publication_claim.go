@@ -86,7 +86,11 @@ func (c *pipelinePublicationClaim) Settle(ctx context.Context, disposition runti
 		}
 		return fmt.Errorf("pipeline publication claim owner is required")
 	}
-	if err := c.bus.pipelineObligations.Settle(ctx, c.claim, disposition); err != nil {
+	outcome, err := c.bus.settlePipelineObligationOutcome(ctx, c.claim, disposition)
+	if err != nil {
+		if outcome.Committed() {
+			return err
+		}
 		releaseErr := c.bus.pipelineObligations.Release(context.WithoutCancel(ctx), c.claim)
 		if errors.Is(releaseErr, runtimepipelineobligation.ErrStaleClaim) {
 			releaseErr = nil
@@ -94,6 +98,30 @@ func (c *pipelinePublicationClaim) Settle(ctx context.Context, disposition runti
 		return errors.Join(err, releaseErr)
 	}
 	return nil
+}
+
+func (eb *EventBus) settlePipelineObligation(
+	ctx context.Context,
+	claim runtimepipelineobligation.Claim,
+	disposition runtimepipelineobligation.Disposition,
+) error {
+	_, err := eb.settlePipelineObligationOutcome(ctx, claim, disposition)
+	return err
+}
+
+func (eb *EventBus) settlePipelineObligationOutcome(
+	ctx context.Context,
+	claim runtimepipelineobligation.Claim,
+	disposition runtimepipelineobligation.Disposition,
+) (runtimepipelineobligation.SettlementOutcome, error) {
+	if eb == nil || eb.pipelineObligations == nil {
+		return runtimepipelineobligation.SettlementOutcome{}, errors.New("pipeline obligation owner is required")
+	}
+	outcome, err := eb.pipelineObligations.Settle(ctx, claim, disposition)
+	if outcome.DeliveryHandoffCommitted() {
+		eb.SignalDeliveryContinuations()
+	}
+	return outcome, err
 }
 
 func (c *pipelinePublicationClaim) MarkDecisionProcessed(ctx context.Context) error {

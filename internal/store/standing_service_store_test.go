@@ -1,21 +1,641 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+type standingSignalMutationRunner struct {
+	delegate       runtimepipeline.RuntimeMutationRunner
+	afterCommitErr error
+	rollbackErr    error
+	beforeCommit   func() error
+}
+
+type standingSignalCoordinatorDispatcher struct {
+	dispatched atomic.Int32
+}
+
+func (d *standingSignalCoordinatorDispatcher) DispatchDeliveryContinuation(context.Context, events.Event, events.DeliveryRoute) error {
+	d.dispatched.Add(1)
+	return nil
+}
+
+func (r *standingSignalMutationRunner) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
+	if r == nil || r.delegate == nil {
+		return errors.New("standing signal mutation delegate is required")
+	}
+	err := r.delegate.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
+		if err := fn(txctx); err != nil {
+			return err
+		}
+		if r.beforeCommit != nil {
+			if err := r.beforeCommit(); err != nil {
+				return err
+			}
+		}
+		if r.rollbackErr != nil {
+			return r.rollbackErr
+		}
+		return nil
+	})
+	if err == nil && r.afterCommitErr != nil {
+		return r.afterCommitErr
+	}
+	return err
+}
+
+func TestStandingServiceTerminalizationSignalUsesCallbackTimeRegistrationParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, outcome := range []string{"commit", "rollback"} {
+			t.Run(backend+"/"+outcome, func(t *testing.T) {
+				process := worklifetime.NewProcess()
+				occurrence := newRunLifecycleExecutorOccurrence(t, process)
+				ctx := worklifetime.WithRuntimeOccurrence(testAuthorActivityRuntimeContext(), occurrence)
+				t.Cleanup(func() {
+					retireRunLifecycleExecutorOccurrence(t, occurrence)
+					retireRunLifecycleProcess(t, process)
+				})
+
+				var (
+					db            *sql.DB
+					base          runtimepipeline.RuntimeMutationRunner
+					deliveryStore runtimedelivery.Store
+					workflowStore *runtimepipeline.WorkflowInstanceStore
+					dialect       runtimeauthoractivity.Dialect
+					adapter       *runtimedelivery.Adapter
+				)
+				if backend == "sqlite" {
+					selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+					db, base, deliveryStore = selected.DB, selected, selected
+					dialect, adapter = runtimeauthoractivity.DialectSQLite, sqliteDeliveryAdapter
+				} else {
+					_, opened, cleanup := testutil.StartPostgres(t)
+					t.Cleanup(cleanup)
+					selected := admitTestPostgresStore(t, opened)
+					db, base, deliveryStore = opened, selected, selected
+					dialect, adapter = runtimeauthoractivity.DialectPostgres, postgresDeliveryAdapter
+				}
+				runner := &standingSignalMutationRunner{delegate: base}
+				if backend == "sqlite" {
+					workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
+				} else {
+					workflowStore = runtimepipeline.NewWorkflowInstanceStore(db)
+					workflowStore.ConfigureRuntimeMutationRunner(runner)
+				}
+				selectedDelivery := deliveryStore.(interface {
+					PipelineObligations() runtimepipelineobligation.Store
+				})
+				workflowStore.ConfigureDeliveryLifecycleStore(deliveryStore)
+				workflowStore.ConfigurePipelineObligationStore(selectedDelivery.PipelineObligations())
+				workflowStore.ConfigureRunLifecycle(deliveryStore.(runtimerunlifecycle.OperationOwner))
+
+				candidate := runtimepipeline.StandingServiceCandidate{
+					ServiceID:  runtimeflowidentity.StandingServiceID("project", "signal-registration-order"),
+					PackageKey: "project", FlowID: "signal-registration-order",
+					InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
+					Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("9", 64)),
+				}
+				seedStoreTestPersistedBundle(t, db, candidate.Source.BundleHash())
+				created, err := workflowStore.ReconcileStandingServiceSet(ctx, []runtimepipeline.StandingServiceCandidate{candidate})
+				if err != nil || len(created) != 1 {
+					t.Fatalf("seed standing service = %#v, %v", created, err)
+				}
+
+				predecessorAuthority, err := runtimedelivery.NewNormalExecutionAuthority(candidate.Source, "standing-registration-owner", 1)
+				if err != nil {
+					t.Fatal(err)
+				}
+				successorAuthority, err := runtimedelivery.NewNormalExecutionAuthority(candidate.Source, "standing-registration-owner", 2)
+				if err != nil {
+					t.Fatal(err)
+				}
+				route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberNode), SubscriberID: "standing-registration-node"}
+				commit := func(eventType events.EventType, authority runtimedelivery.ExecutionAuthority) (events.Event, runtimedelivery.DurableHandoffProof) {
+					evt := eventtest.RuntimeControl(uuid.NewString(), eventType, "test", candidate.EntityID, []byte(`{}`), 0, created[0].RunID, "", events.EventEnvelope{}, time.Now().UTC())
+					if err := eventfixture.Insert(ctx, db, dialect, evt); err != nil {
+						t.Fatalf("insert registration-order event: %v", err)
+					}
+					var proofs []runtimedelivery.DurableHandoffProof
+					run := func(txctx context.Context, tx *sql.Tx) error {
+						var err error
+						proofs, err = adapter.CommitInitial(txctx, tx, evt.ID(), evt.RunID(), []events.DeliveryRoute{route}, authority)
+						return err
+					}
+					if backend == "sqlite" {
+						if err := deliveryStore.(*SQLiteRuntimeStore).runEventTransaction(ctx, run); err != nil {
+							t.Fatalf("commit SQLite registration-order delivery: %v", err)
+						}
+					} else if err := deliveryStore.(*PostgresStore).runEventTransaction(ctx, run); err != nil {
+						t.Fatalf("commit PostgreSQL registration-order delivery: %v", err)
+					}
+					return evt, proofs[0]
+				}
+				predecessorEvent, predecessorProof := commit("standing.signal.predecessor", predecessorAuthority)
+				successorEvent, successorProof := commit("standing.signal.successor", successorAuthority)
+
+				predecessorCoordinator, err := runtimedeliverycontinuation.New(deliveryStore, predecessorAuthority, occurrence, &standingSignalCoordinatorDispatcher{}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				successorCoordinator, err := runtimedeliverycontinuation.New(deliveryStore, successorAuthority, occurrence, &standingSignalCoordinatorDispatcher{}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, configured := range []struct {
+					coordinator *runtimedeliverycontinuation.Coordinator
+					proof       runtimedelivery.DurableHandoffProof
+				}{{predecessorCoordinator, predecessorProof}, {successorCoordinator, successorProof}} {
+					if err := configured.coordinator.AcceptCommitted([]runtimedelivery.DurableHandoffProof{configured.proof}); err != nil {
+						t.Fatalf("accept registration-order handoff: %v", err)
+					}
+					if err := configured.coordinator.Start(ctx); err != nil {
+						t.Fatalf("start registration-order coordinator: %v", err)
+					}
+					coordinator := configured.coordinator
+					t.Cleanup(func() {
+						retireCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+						defer cancel()
+						if err := coordinator.Retire(retireCtx); err != nil {
+							t.Errorf("retire registration-order coordinator: %v", err)
+						}
+					})
+				}
+				predecessorDeliveryID, _ := runtimedelivery.DeliveryID(predecessorEvent.ID(), route)
+				successorDeliveryID, _ := runtimedelivery.DeliveryID(successorEvent.ID(), route)
+				predecessorCarrier, err := predecessorCoordinator.Acquire(predecessorDeliveryID)
+				if err != nil {
+					t.Fatalf("acquire predecessor carrier: %v", err)
+				}
+
+				var predecessorSignals, successorSignals atomic.Int32
+				predecessorRegistration, err := workflowStore.RegisterDeliveryContinuationSignal(predecessorAuthority, func() {
+					predecessorSignals.Add(1)
+					predecessorCoordinator.Signal()
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var successorRegistration *runtimepipeline.DeliveryContinuationSignalRegistration
+				runner.beforeCommit = func() error {
+					predecessorRegistration.Release()
+					var err error
+					successorRegistration, err = workflowStore.RegisterDeliveryContinuationSignal(successorAuthority, func() {
+						successorSignals.Add(1)
+						successorCoordinator.Signal()
+					})
+					return err
+				}
+				if outcome == "rollback" {
+					runner.rollbackErr = errors.New("injected registration-order rollback")
+				}
+				_, operationErr := workflowStore.SuspendStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: candidate.ServiceID, Actor: "test"})
+				if outcome == "rollback" && !errors.Is(operationErr, runner.rollbackErr) {
+					t.Fatalf("registration-order rollback = %v", operationErr)
+				}
+				if outcome == "commit" && operationErr != nil {
+					t.Fatalf("registration-order commit: %v", operationErr)
+				}
+				if successorRegistration == nil {
+					t.Fatal("successor registration was not installed before commit callback")
+				}
+				t.Cleanup(successorRegistration.Release)
+				if got := predecessorSignals.Load(); got != 0 {
+					t.Fatalf("released predecessor signals = %d, want 0", got)
+				}
+				wantSuccessorSignals := int32(1)
+				if outcome == "rollback" {
+					wantSuccessorSignals = 0
+				}
+				if got := successorSignals.Load(); got != wantSuccessorSignals {
+					t.Fatalf("current successor signals = %d, want %d", got, wantSuccessorSignals)
+				}
+
+				if outcome == "rollback" {
+					if resolution, err := predecessorCarrier.Resolve(ctx, worklifetime.DeliveryContinuationReturn); err != nil || resolution != worklifetime.DeliveryContinuationReturned {
+						t.Fatalf("rolled-back predecessor carrier = %d, %v", resolution, err)
+					}
+					successorCarrier, err := successorCoordinator.Acquire(successorDeliveryID)
+					if err != nil {
+						t.Fatalf("acquire rolled-back successor carrier: %v", err)
+					}
+					if resolution, err := successorCarrier.Resolve(ctx, worklifetime.DeliveryContinuationReturn); err != nil || resolution != worklifetime.DeliveryContinuationReturned {
+						t.Fatalf("rolled-back successor carrier = %d, %v", resolution, err)
+					}
+					return
+				}
+
+				awaitStandingTerminalResolution(t, successorCoordinator, successorDeliveryID, nil)
+				resolution, err := predecessorCarrier.Resolve(ctx, worklifetime.DeliveryContinuationReturn)
+				if err != nil {
+					t.Fatalf("resolve unsignaled predecessor carrier: %v", err)
+				}
+				if resolution == worklifetime.DeliveryContinuationReturned {
+					predecessorCoordinator.Signal()
+					awaitStandingTerminalResolution(t, predecessorCoordinator, predecessorDeliveryID, nil)
+				} else if resolution != worklifetime.DeliveryContinuationTerminal {
+					t.Fatalf("unsignaled predecessor carrier = %d, want returned or terminal", resolution)
+				}
+			})
+		}
+	}
+}
+
+func TestStandingServiceTerminalizationBeforeRegistrationIsRecoveredByStartupScanParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			process := worklifetime.NewProcess()
+			occurrence := newRunLifecycleExecutorOccurrence(t, process)
+			ctx := worklifetime.WithRuntimeOccurrence(testAuthorActivityRuntimeContext(), occurrence)
+			t.Cleanup(func() {
+				retireRunLifecycleExecutorOccurrence(t, occurrence)
+				retireRunLifecycleProcess(t, process)
+			})
+
+			var (
+				db            *sql.DB
+				base          runtimepipeline.RuntimeMutationRunner
+				deliveryStore runtimedelivery.Store
+				workflowStore *runtimepipeline.WorkflowInstanceStore
+				dialect       runtimeauthoractivity.Dialect
+				adapter       *runtimedelivery.Adapter
+			)
+			if backend == "sqlite" {
+				selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				db, base, deliveryStore = selected.DB, selected, selected
+				dialect, adapter = runtimeauthoractivity.DialectSQLite, sqliteDeliveryAdapter
+			} else {
+				_, opened, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				selected := admitTestPostgresStore(t, opened)
+				db, base, deliveryStore = opened, selected, selected
+				dialect, adapter = runtimeauthoractivity.DialectPostgres, postgresDeliveryAdapter
+			}
+			runner := &standingSignalMutationRunner{delegate: base}
+			if backend == "sqlite" {
+				workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
+			} else {
+				workflowStore = runtimepipeline.NewWorkflowInstanceStore(db)
+				workflowStore.ConfigureRuntimeMutationRunner(runner)
+			}
+			selectedDelivery := deliveryStore.(interface {
+				PipelineObligations() runtimepipelineobligation.Store
+			})
+			workflowStore.ConfigureDeliveryLifecycleStore(deliveryStore)
+			workflowStore.ConfigurePipelineObligationStore(selectedDelivery.PipelineObligations())
+			workflowStore.ConfigureRunLifecycle(deliveryStore.(runtimerunlifecycle.OperationOwner))
+
+			candidate := runtimepipeline.StandingServiceCandidate{
+				ServiceID:  runtimeflowidentity.StandingServiceID("project", "signal-startup-order"),
+				PackageKey: "project", FlowID: "signal-startup-order",
+				InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
+				Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("7", 64)),
+			}
+			seedStoreTestPersistedBundle(t, db, candidate.Source.BundleHash())
+			created, err := workflowStore.ReconcileStandingServiceSet(ctx, []runtimepipeline.StandingServiceCandidate{candidate})
+			if err != nil || len(created) != 1 {
+				t.Fatalf("seed standing service = %#v, %v", created, err)
+			}
+			authority, err := runtimedelivery.NewNormalExecutionAuthority(candidate.Source, "standing-startup-owner", 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberNode), SubscriberID: "standing-startup-node"}
+			evt := eventtest.RuntimeControl(uuid.NewString(), "standing.signal.startup", "test", candidate.EntityID, []byte(`{}`), 0, created[0].RunID, "", events.EventEnvelope{}, time.Now().UTC())
+			if err := eventfixture.Insert(ctx, db, dialect, evt); err != nil {
+				t.Fatalf("insert startup-order event: %v", err)
+			}
+			var proofs []runtimedelivery.DurableHandoffProof
+			commit := func(txctx context.Context, tx *sql.Tx) error {
+				var err error
+				proofs, err = adapter.CommitInitial(txctx, tx, evt.ID(), evt.RunID(), []events.DeliveryRoute{route}, authority)
+				return err
+			}
+			if backend == "sqlite" {
+				err = deliveryStore.(*SQLiteRuntimeStore).runEventTransaction(ctx, commit)
+			} else {
+				err = deliveryStore.(*PostgresStore).runEventTransaction(ctx, commit)
+			}
+			if err != nil {
+				t.Fatalf("commit startup-order delivery: %v", err)
+			}
+
+			if _, err := workflowStore.SuspendStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: candidate.ServiceID, Actor: "test"}); err != nil {
+				t.Fatalf("terminalize before registration: %v", err)
+			}
+
+			coordinator, err := runtimedeliverycontinuation.New(deliveryStore, authority, occurrence, &standingSignalCoordinatorDispatcher{}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := coordinator.AcceptCommitted(proofs); err != nil {
+				t.Fatalf("accept startup-order handoff: %v", err)
+			}
+			var signals atomic.Int32
+			registration, err := workflowStore.RegisterDeliveryContinuationSignal(authority, func() {
+				signals.Add(1)
+				coordinator.Signal()
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(registration.Release)
+			if err := coordinator.Start(ctx); err != nil {
+				t.Fatalf("startup scan after pre-registration callback: %v", err)
+			}
+			t.Cleanup(func() {
+				retireCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				if err := coordinator.Retire(retireCtx); err != nil {
+					t.Errorf("retire startup-order coordinator: %v", err)
+				}
+			})
+			if got := signals.Load(); got != 0 {
+				t.Fatalf("callback executed before registration replayed %d signals", got)
+			}
+			deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := coordinator.Acquire(deliveryID); err == nil {
+				t.Fatal("startup scan retained a terminal delivery continuation")
+			}
+		})
+	}
+}
+
+func TestStandingServiceTerminalizationSignalFollowsTransactionOutcomeParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, operation := range []string{"orphan", "replacement", "suspend", "reset"} {
+			for _, outcome := range []string{"committed_cleanup_failure", "rollback"} {
+				t.Run(backend+"/"+operation+"/"+outcome, func(t *testing.T) {
+					process := worklifetime.NewProcess()
+					occurrence := newRunLifecycleExecutorOccurrence(t, process)
+					ctx := worklifetime.WithRuntimeOccurrence(testAuthorActivityRuntimeContext(), occurrence)
+					t.Cleanup(func() {
+						retireRunLifecycleExecutorOccurrence(t, occurrence)
+						retireRunLifecycleProcess(t, process)
+					})
+					var (
+						db             *sql.DB
+						base           runtimepipeline.RuntimeMutationRunner
+						deliveryStore  runtimedelivery.Store
+						workflowStore  *runtimepipeline.WorkflowInstanceStore
+						dialect        runtimeauthoractivity.Dialect
+						commitDelivery func(events.Event, events.DeliveryRoute, runtimedelivery.ExecutionAuthority) []runtimedelivery.DurableHandoffProof
+					)
+					if backend == "sqlite" {
+						selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+						db = selected.DB
+						base = selected
+						deliveryStore = selected
+						dialect = runtimeauthoractivity.DialectSQLite
+						commitDelivery = func(evt events.Event, route events.DeliveryRoute, authority runtimedelivery.ExecutionAuthority) []runtimedelivery.DurableHandoffProof {
+							if err := eventfixture.Insert(ctx, db, dialect, evt); err != nil {
+								t.Fatalf("insert standing delivery event: %v", err)
+							}
+							var proofs []runtimedelivery.DurableHandoffProof
+							if err := selected.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+								var err error
+								proofs, err = sqliteDeliveryAdapter.CommitInitial(txctx, tx, evt.ID(), evt.RunID(), []events.DeliveryRoute{route}, authority)
+								return err
+							}); err != nil {
+								t.Fatalf("commit standing delivery: %v", err)
+							}
+							return proofs
+						}
+					} else {
+						_, opened, cleanup := testutil.StartPostgres(t)
+						t.Cleanup(cleanup)
+						selected := admitTestPostgresStore(t, opened)
+						db = opened
+						base = selected
+						deliveryStore = selected
+						dialect = runtimeauthoractivity.DialectPostgres
+						commitDelivery = func(evt events.Event, route events.DeliveryRoute, authority runtimedelivery.ExecutionAuthority) []runtimedelivery.DurableHandoffProof {
+							if err := eventfixture.Insert(ctx, db, dialect, evt); err != nil {
+								t.Fatalf("insert standing delivery event: %v", err)
+							}
+							var proofs []runtimedelivery.DurableHandoffProof
+							if err := selected.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+								var err error
+								proofs, err = postgresDeliveryAdapter.CommitInitial(txctx, tx, evt.ID(), evt.RunID(), []events.DeliveryRoute{route}, authority)
+								return err
+							}); err != nil {
+								t.Fatalf("commit standing delivery: %v", err)
+							}
+							return proofs
+						}
+					}
+					runner := &standingSignalMutationRunner{delegate: base}
+					if backend == "sqlite" {
+						workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
+					} else {
+						workflowStore = runtimepipeline.NewWorkflowInstanceStore(db)
+						workflowStore.ConfigureRuntimeMutationRunner(runner)
+					}
+					selectedDelivery, ok := deliveryStore.(interface {
+						PipelineObligations() runtimepipelineobligation.Store
+					})
+					if !ok {
+						t.Fatalf("%T does not expose pipeline obligations", deliveryStore)
+					}
+					workflowStore.ConfigureDeliveryLifecycleStore(deliveryStore)
+					workflowStore.ConfigurePipelineObligationStore(selectedDelivery.PipelineObligations())
+					workflowStore.ConfigureRunLifecycle(deliveryStore.(runtimerunlifecycle.OperationOwner))
+					candidate := runtimepipeline.StandingServiceCandidate{
+						ServiceID:  runtimeflowidentity.StandingServiceID("project", "signal-"+operation),
+						PackageKey: "project", FlowID: "signal-" + operation,
+						InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
+						Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("8", 64)),
+					}
+					seedStoreTestPersistedBundle(t, db, candidate.Source.BundleHash())
+					created, err := workflowStore.ReconcileStandingServiceSet(ctx, []runtimepipeline.StandingServiceCandidate{candidate})
+					if err != nil || len(created) != 1 {
+						t.Fatalf("seed standing service = %#v, %v", created, err)
+					}
+					var signals atomic.Int32
+					authority, err := runtimedelivery.NewNormalExecutionAuthority(candidate.Source, "standing-signal-owner", 1)
+					if err != nil {
+						t.Fatalf("build delivery continuation signal authority: %v", err)
+					}
+					route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberNode), SubscriberID: "standing-signal-node"}
+					coordinatorEvent := eventtest.RuntimeControl(
+						uuid.NewString(), "standing.signal.coordinator", "test", candidate.EntityID, []byte(`{}`), 0,
+						created[0].RunID, "", events.EventEnvelope{}, time.Now().UTC(),
+					)
+					carrierEvent := eventtest.RuntimeControl(
+						uuid.NewString(), "standing.signal.carrier", "test", candidate.EntityID, []byte(`{}`), 0,
+						created[0].RunID, "", events.EventEnvelope{}, time.Now().UTC(),
+					)
+					proofs := append(
+						commitDelivery(coordinatorEvent, route, authority),
+						commitDelivery(carrierEvent, route, authority)...,
+					)
+					dispatcher := &standingSignalCoordinatorDispatcher{}
+					coordinator, err := runtimedeliverycontinuation.New(deliveryStore, authority, occurrence, dispatcher, nil)
+					if err != nil {
+						t.Fatalf("construct standing delivery coordinator: %v", err)
+					}
+					if err := coordinator.AcceptCommitted(proofs); err != nil {
+						t.Fatalf("accept standing delivery handoffs: %v", err)
+					}
+					if err := coordinator.Start(ctx); err != nil {
+						t.Fatalf("start standing delivery coordinator: %v", err)
+					}
+					t.Cleanup(func() {
+						retireCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+						defer cancel()
+						if err := coordinator.Retire(retireCtx); err != nil {
+							t.Errorf("retire standing delivery coordinator: %v", err)
+						}
+					})
+					carrierDeliveryID, err := runtimedelivery.DeliveryID(carrierEvent.ID(), route)
+					if err != nil {
+						t.Fatalf("derive standing carrier delivery id: %v", err)
+					}
+					carrier, err := coordinator.Acquire(carrierDeliveryID)
+					if err != nil {
+						t.Fatalf("acquire standing carrier continuation: %v", err)
+					}
+					coordinatorDeliveryID, err := runtimedelivery.DeliveryID(coordinatorEvent.ID(), route)
+					if err != nil {
+						t.Fatalf("derive standing coordinator delivery id: %v", err)
+					}
+					registration, err := workflowStore.RegisterDeliveryContinuationSignal(authority, func() {
+						signals.Add(1)
+						coordinator.Signal()
+					})
+					if err != nil {
+						t.Fatalf("register delivery continuation signal: %v", err)
+					}
+					t.Cleanup(registration.Release)
+					injectedErr := errors.New("injected standing mutation outcome failure")
+					if outcome == "rollback" {
+						runner.rollbackErr = injectedErr
+					} else {
+						runner.afterCommitErr = injectedErr
+					}
+					switch operation {
+					case "orphan":
+						_, err = workflowStore.ReconcileStandingServiceSet(ctx, nil)
+					case "replacement":
+						_, err = workflowStore.ReconcileStandingServiceReplacement(ctx, []runtimepipeline.StandingServiceCandidate{candidate}, nil)
+					case "suspend":
+						_, err = workflowStore.SuspendStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: candidate.ServiceID, Actor: "test"})
+					case "reset":
+						_, err = workflowStore.ResetStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: candidate.ServiceID, Actor: "test"})
+					}
+					if !errors.Is(err, injectedErr) {
+						t.Fatalf("terminalization error = %v, want injected outcome failure", err)
+					}
+					wantSignals := int32(1)
+					if outcome == "rollback" {
+						wantSignals = 0
+					}
+					if got := signals.Load(); got != wantSignals {
+						t.Fatalf("delivery continuation signals = %d, want %d", got, wantSignals)
+					}
+					if outcome == "rollback" {
+						if resolution, err := carrier.Resolve(context.Background(), worklifetime.DeliveryContinuationReturn); err != nil || resolution != worklifetime.DeliveryContinuationReturned {
+							t.Fatalf("rolled-back carrier resolution = %d, %v; want returned", resolution, err)
+						}
+						pending, err := coordinator.Acquire(coordinatorDeliveryID)
+						if err != nil {
+							t.Fatalf("rolled-back coordinator continuation was released: %v", err)
+						}
+						if resolution, err := pending.Resolve(context.Background(), worklifetime.DeliveryContinuationReturn); err != nil || resolution != worklifetime.DeliveryContinuationReturned {
+							t.Fatalf("rolled-back coordinator resolution = %d, %v; want returned", resolution, err)
+						}
+					} else {
+						awaitStandingTerminalResolution(t, coordinator, carrierDeliveryID, carrier)
+						awaitStandingTerminalResolution(t, coordinator, coordinatorDeliveryID, nil)
+						if err := coordinator.Release(carrierDeliveryID); err != nil {
+							t.Fatalf("repeat carrier terminal release: %v", err)
+						}
+					}
+
+					runner.afterCommitErr = nil
+					runner.rollbackErr = nil
+					statuses, err := workflowStore.ListStandingServiceStatuses(ctx)
+					if err != nil || len(statuses) != 1 {
+						t.Fatalf("load standing service after outcome = %#v, %v", statuses, err)
+					}
+					if outcome == "rollback" {
+						if !statuses[0].DeclarationPresent || statuses[0].EffectiveState != "active" || statuses[0].Generation != 1 {
+							t.Fatalf("rolled-back terminalization leaked state: %#v", statuses[0])
+						}
+					} else if operation == "orphan" || operation == "replacement" {
+						if statuses[0].DeclarationPresent || statuses[0].EffectiveState != "orphaned" {
+							t.Fatalf("committed orphan terminalization missing: %#v", statuses[0])
+						}
+					} else if operation == "suspend" {
+						if statuses[0].EffectiveState != "suspended" {
+							t.Fatalf("committed suspend terminalization missing: %#v", statuses[0])
+						}
+					} else if statuses[0].Generation != 2 {
+						t.Fatalf("committed reset generation = %d, want 2", statuses[0].Generation)
+					}
+				})
+			}
+		}
+	}
+}
+
+func awaitStandingTerminalResolution(
+	t *testing.T,
+	coordinator *runtimedeliverycontinuation.Coordinator,
+	deliveryID string,
+	capability worklifetime.DeliveryContinuation,
+) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if capability == nil {
+			var err error
+			capability, err = coordinator.Acquire(deliveryID)
+			if err != nil {
+				return
+			}
+		}
+		resolution, err := capability.Resolve(context.Background(), worklifetime.DeliveryContinuationReturn)
+		if err != nil {
+			t.Fatalf("resolve standing terminal continuation %s: %v", deliveryID, err)
+		}
+		if resolution == worklifetime.DeliveryContinuationTerminal {
+			return
+		}
+		if resolution != worklifetime.DeliveryContinuationReturned {
+			t.Fatalf("standing continuation %s resolved as %d, want returned or terminal", deliveryID, resolution)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("standing continuation %s did not observe terminalization", deliveryID)
+		}
+		capability = nil
+		time.Sleep(time.Millisecond)
+	}
+}
 
 func TestSQLiteStandingServiceReconcileCreatesPublishesAndRepairsRestartAbandon(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
@@ -172,7 +792,7 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.ClaimAgentDelivery(fixtureCtx, workEvent, workRoute)
+	claimed, err := claimDeliveryFixture(fixtureCtx, store, workEvent, workRoute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,7 +1059,7 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := selected.ClaimAgentDelivery(fixtureCtx, workEvent, workRoute); err != nil {
+	if _, err := claimDeliveryFixture(fixtureCtx, selected, workEvent, workRoute); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, owner_kind, status) VALUES ($1::uuid, $2, $3::uuid, 'timer.fire', $4, 'system', 'active')`, timerID, aggregateWorkflowTimerTaskID(timerID), created[0].RunID, time.Now().UTC().Add(time.Hour)); err != nil {

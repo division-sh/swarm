@@ -245,7 +245,7 @@ func TestPipelineScanDecisionPhaseHighWaterPreventsRecoveryStarvationOnSQLiteAnd
 				if work.Claim.Purpose() != runtimepipelineobligation.PurposeDecisionRoute {
 					t.Fatalf("claim purpose = %q", work.Claim.Purpose())
 				}
-				if err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("decision_route_converged")); err != nil {
+				if _, err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("decision_route_converged")); err != nil {
 					t.Fatalf("settle decision route: %v", err)
 				}
 				// Each write sorts after the cursor but before the original phase tail.
@@ -345,7 +345,7 @@ func TestPostgresPipelineScanSnapshotExcludesEarlierSequenceCommittedAfterBounda
 	// the deliberately delayed event transaction after the scan boundary has
 	// been fixed, but before settlement acquires that run lock.
 	releaseCommit()
-	if err := owner.Settle(ctx, first.Work[0].Claim, runtimepipelineobligation.Acknowledged("boundary_visible")); err != nil {
+	if _, err := owner.Settle(ctx, first.Work[0].Claim, runtimepipelineobligation.Acknowledged("boundary_visible")); err != nil {
 		t.Fatalf("settle boundary-visible event: %v", err)
 	}
 
@@ -435,14 +435,14 @@ func TestPostgresPipelineScanSnapshotRetainsRouteAfterPostBoundaryDeferral(t *te
 	if err != nil {
 		t.Fatalf("claim target route after boundary: %v", err)
 	}
-	if err := owner.Settle(ctx, target.Claim, runtimepipelineobligation.Deferred(
+	if _, err := owner.Settle(ctx, target.Claim, runtimepipelineobligation.Deferred(
 		"retry_after_boundary",
 		time.Now().UTC().Add(-time.Second),
 		nil,
 	)); err != nil {
 		t.Fatalf("defer target route after boundary: %v", err)
 	}
-	if err := owner.Settle(ctx, first.Work[0].Claim, runtimepipelineobligation.Acknowledged("first_processed")); err != nil {
+	if _, err := owner.Settle(ctx, first.Work[0].Claim, runtimepipelineobligation.Acknowledged("first_processed")); err != nil {
 		t.Fatalf("settle first route: %v", err)
 	}
 
@@ -468,7 +468,7 @@ func TestPostgresPipelineScanSnapshotRetainsRouteAfterPostBoundaryDeferral(t *te
 	if len(second.Work) != 1 || second.Work[0].Event.ID() != targetID {
 		t.Fatalf("retained scan lost deferred pre-boundary route: %#v", second)
 	}
-	if err := owner.Settle(ctx, second.Work[0].Claim, runtimepipelineobligation.Acknowledged("target_processed")); err != nil {
+	if _, err := owner.Settle(ctx, second.Work[0].Claim, runtimepipelineobligation.Acknowledged("target_processed")); err != nil {
 		t.Fatalf("settle target route: %v", err)
 	}
 }
@@ -500,7 +500,7 @@ func TestPipelineScanExaminesDeferredDecisionRouteOncePerPassOnSQLiteAndPostgres
 			if err != nil || len(first.Work) != 1 || first.Work[0].Event.ID() != eventID {
 				t.Fatalf("first ClaimBatch: %#v err=%v", first, err)
 			}
-			if err := owner.Settle(ctx, first.Work[0].Claim, runtimepipelineobligation.Deferred(
+			if _, err := owner.Settle(ctx, first.Work[0].Claim, runtimepipelineobligation.Deferred(
 				"retry_in_fresh_pass",
 				time.Now().UTC().Add(-time.Second),
 				nil,
@@ -527,7 +527,7 @@ func TestPipelineScanExaminesDeferredDecisionRouteOncePerPassOnSQLiteAndPostgres
 			if err != nil || len(retry.Work) != 1 || retry.Work[0].Event.ID() != eventID {
 				t.Fatalf("fresh ClaimBatch: %#v err=%v", retry, err)
 			}
-			if err := owner.Settle(ctx, retry.Work[0].Claim, runtimepipelineobligation.Acknowledged("retry_processed")); err != nil {
+			if _, err := owner.Settle(ctx, retry.Work[0].Claim, runtimepipelineobligation.Acknowledged("retry_processed")); err != nil {
 				t.Fatalf("settle retry: %v", err)
 			}
 			if err := owner.CloseScan(ctx, fresh); err != nil {
@@ -586,7 +586,8 @@ func TestSQLitePipelineClaimMutationSerializesWithReleaseAndCloseScan(t *testing
 				go func() {
 					switch mutation {
 					case "settle":
-						mutationDone <- owner.Settle(ctx, claim, runtimepipelineobligation.Acknowledged("serialized_settlement"))
+						_, err := owner.Settle(ctx, claim, runtimepipelineobligation.Acknowledged("serialized_settlement"))
+						mutationDone <- err
 					case "mark_decision_processed":
 						mutationDone <- owner.MarkDecisionProcessed(ctx, claim)
 					default:
@@ -836,14 +837,14 @@ func TestPipelineScanRechecksDecisionEligibilityAfterEachMutationOnSQLiteAndPost
 			if err != nil || len(first.Work) != 1 || first.Work[0].Event.ID() != firstID {
 				t.Fatalf("first ClaimBatch: %#v err=%v", first, err)
 			}
-			if err := owner.Settle(ctx, first.Work[0].Claim, runtimepipelineobligation.Quarantined("first_poison", nil)); err != nil {
+			if _, err := owner.Settle(ctx, first.Work[0].Claim, runtimepipelineobligation.Quarantined("first_poison", nil)); err != nil {
 				t.Fatalf("settle first: %v", err)
 			}
 			second, err := owner.ClaimBatch(ctx, scan, 10-first.Examined)
 			if err != nil || len(second.Work) != 1 || second.Work[0].Event.ID() != secondID {
 				t.Fatalf("second ClaimBatch: %#v err=%v", second, err)
 			}
-			if err := owner.Settle(ctx, second.Work[0].Claim, runtimepipelineobligation.Acknowledged("second_processed")); err != nil {
+			if _, err := owner.Settle(ctx, second.Work[0].Claim, runtimepipelineobligation.Acknowledged("second_processed")); err != nil {
 				t.Fatalf("settle second: %v", err)
 			}
 		})
@@ -912,7 +913,7 @@ func TestInactiveProcessedDecisionRouteClosesAtParentTerminalizationOnSQLiteAndP
 			if presence.Any() {
 				t.Fatalf("inactive processed route remains globally visible: %#v", presence)
 			}
-			if err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("late_success")); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
+			if _, err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("late_success")); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
 				t.Fatalf("late decision-route settlement error = %v, want ErrStaleClaim", err)
 			}
 		})

@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -121,12 +122,42 @@ func CommitDeliveryObligationsForPersistedEvent(
 		t.Fatalf("begin persisted event delivery fixture: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := adapter.CommitInitial(ctx, tx, event.ID(), event.RunID(), events.NormalizeDeliveryRoutes(routes)); err != nil {
+	authority := deliveryFixtureAuthority(t, ctx, tx, event.RunID(), adapter)
+	if _, err := adapter.CommitInitial(ctx, tx, event.ID(), event.RunID(), events.NormalizeDeliveryRoutes(routes), authority); err != nil {
 		t.Fatalf("commit persisted event delivery fixture: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit persisted event delivery fixture transaction: %v", err)
 	}
+}
+
+type DeliveryLifecycleStore interface {
+	ClaimDelivery(context.Context, runtimedelivery.ExecutionAuthority, events.Event, events.DeliveryRoute) (runtimedelivery.ClaimResult, error)
+	Snapshot(context.Context, string) (runtimedelivery.Snapshot, error)
+}
+
+// ClaimDelivery acquires an exact fixture delivery through the same typed
+// authority boundary as production. It is intentionally unsuitable for tests
+// that need to assert non-acquired dispositions; those should call the store
+// method directly and inspect ClaimResult.
+func ClaimDelivery(ctx context.Context, selected DeliveryLifecycleStore, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimedObligation, error) {
+	deliveryID, err := runtimedelivery.DeliveryID(event.ID(), route)
+	if err != nil {
+		return runtimedelivery.ClaimedObligation{}, err
+	}
+	snapshot, err := selected.Snapshot(ctx, deliveryID)
+	if err != nil {
+		return runtimedelivery.ClaimedObligation{}, err
+	}
+	result, err := selected.ClaimDelivery(ctx, snapshot.Authority, event, route)
+	if err != nil {
+		return runtimedelivery.ClaimedObligation{}, err
+	}
+	claimed, ok := result.Acquired()
+	if !ok {
+		return runtimedelivery.ClaimedObligation{}, fmt.Errorf("delivery %s was not acquired: %s", deliveryID, result.Disposition)
+	}
+	return claimed, nil
 }
 
 // LoadCanonicalEventRecord exercises the same complete-record decoder used by
@@ -395,7 +426,8 @@ func commitSemanticEventWithInitialFacts(
 		}
 		return runtimebus.EventAppendExactDuplicate
 	}
-	if _, err := deliveryAdapter.CommitInitial(ctx, tx, record.EventID, record.RunID, events.NormalizeDeliveryRoutes(routes)); err != nil {
+	authority := deliveryFixtureAuthority(t, ctx, tx, record.RunID, deliveryAdapter)
+	if _, err := deliveryAdapter.CommitInitial(ctx, tx, record.EventID, record.RunID, events.NormalizeDeliveryRoutes(routes), authority); err != nil {
 		t.Fatalf("commit semantic event fixture routes: %v", err)
 	}
 	if err := insertPipelineScopeFixture(ctx, tx, record.EventID, scope, postgres, time.Now().UTC()); err != nil {
@@ -426,6 +458,27 @@ func commitSemanticEventWithInitialFacts(
 		t.Fatalf("commit semantic event fixture: %v", err)
 	}
 	return runtimebus.EventAppendInserted
+}
+
+func deliveryFixtureAuthority(t testing.TB, ctx context.Context, tx *sql.Tx, runID string, adapter *runtimedelivery.Adapter) runtimedelivery.ExecutionAuthority {
+	t.Helper()
+	query := `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=$1::uuid`
+	if adapter.Dialect() == runtimedelivery.DialectSQLite {
+		query = `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=?`
+	}
+	var bundleHash, bundleSource string
+	if err := tx.QueryRowContext(ctx, query, runID).Scan(&bundleHash, &bundleSource); err != nil {
+		t.Fatalf("load delivery fixture run bundle source: %v", err)
+	}
+	source, err := runtimecorrelation.DecodeBundleSourceFact(bundleHash, bundleSource)
+	if err != nil {
+		t.Fatalf("construct delivery fixture source: %v", err)
+	}
+	authority, err := runtimedelivery.NewNormalExecutionAuthority(source, "storetest:"+runID, 1)
+	if err != nil {
+		t.Fatalf("construct delivery fixture authority: %v", err)
+	}
+	return authority
 }
 
 func insertPipelineScopeFixture(
@@ -538,6 +591,19 @@ func insertPipelineDispositionFixture(
 	}
 	if rows != 1 {
 		return fmt.Errorf("pipeline disposition fixture affected %d rows, want 1", rows)
+	}
+	if disposition.Successful() {
+		dialect := runtimedelivery.DialectSQLite
+		if postgres {
+			dialect = runtimedelivery.DialectPostgres
+		}
+		adapter, err := runtimedelivery.NewAdapter(dialect)
+		if err != nil {
+			return err
+		}
+		if err := adapter.CommitPipelineHandoff(ctx, tx, eventID); err != nil {
+			return err
+		}
 	}
 	return nil
 }

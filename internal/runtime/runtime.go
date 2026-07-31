@@ -33,6 +33,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -145,12 +146,12 @@ var canonicalBootProgressNames = [...]string{
 	"system_nodes_start",
 	"manager_recovery_if_enabled",
 	"schedule_restoration",
-	"outbox_sweeper",
 	"static_agents_bootstrap",
 	"flow_required_agents",
 	"workspace_validation_and_system_containers",
 	"mcp_tool_validation",
 	"manager_event_loop_start",
+	"outbox_sweeper",
 	"boot_self_check_optional",
 	"platform_boot_event_published",
 	"http_listener_bind",
@@ -185,27 +186,29 @@ type BootProgressEvent struct {
 }
 
 type Runtime struct {
-	lifecycleMu               sync.Mutex
-	startCtx                  context.Context
-	cancelStart               context.CancelFunc
-	ownershipLease            runtimestartupownership.Lease
-	ownershipLeaseBorrowed    bool
-	pendingOwnershipLease     runtimestartupownership.Lease
-	pendingOwnershipOwned     bool
-	ownershipHandoffPending   bool
-	replacementQuiesced       bool
-	workOccurrence            *worklifetime.RuntimeOccurrence
-	runLifecycleExecutor      *runtimerunlifecycle.Executor
-	runLifecycleRegistration  runtimerunlifecycle.CandidateRegistration
-	ownerID                   string
-	bootID                    string
-	startupAdmission          managedexecution.Admission
-	pendingOwnershipHandoff   runtimestartupownership.Handoff
-	shutdownGate              shutdownAdmission
-	payloadValidator          runtimebus.PayloadValidator
-	authorActivityDescriptors []runtimeauthoractivity.EventDescriptor
-	authorActivityScope       runtimeauthoractivity.Scope
-	authorActivityLeases      []*runtimeauthoractivity.EventCatalogLease
+	lifecycleMu                sync.Mutex
+	startCtx                   context.Context
+	cancelStart                context.CancelFunc
+	ownershipLease             runtimestartupownership.Lease
+	ownershipLeaseBorrowed     bool
+	pendingOwnershipLease      runtimestartupownership.Lease
+	pendingOwnershipOwned      bool
+	ownershipHandoffPending    bool
+	replacementQuiesced        bool
+	workOccurrence             *worklifetime.RuntimeOccurrence
+	runLifecycleExecutor       *runtimerunlifecycle.Executor
+	runLifecycleRegistration   runtimerunlifecycle.CandidateRegistration
+	deliveryContinuations      *runtimedeliverycontinuation.Coordinator
+	deliverySignalRegistration *runtimepipeline.DeliveryContinuationSignalRegistration
+	ownerID                    string
+	bootID                     string
+	startupAdmission           managedexecution.Admission
+	pendingOwnershipHandoff    runtimestartupownership.Handoff
+	shutdownGate               shutdownAdmission
+	payloadValidator           runtimebus.PayloadValidator
+	authorActivityDescriptors  []runtimeauthoractivity.EventDescriptor
+	authorActivityScope        runtimeauthoractivity.Scope
+	authorActivityLeases       []*runtimeauthoractivity.EventCatalogLease
 
 	Config             *config.Config
 	Stores             Stores
@@ -417,6 +420,15 @@ func (h *StartupOwnershipHandoff) Commit() error {
 		if err := h.candidate.Manager.Run(h.candidate.startCtx); err != nil {
 			return fmt.Errorf("start replacement managed execution after ownership commit: %w", err)
 		}
+	}
+	if h.candidate.Bus != nil {
+		if err := h.candidate.startOutboxSweeper(h.candidate.startCtx); err != nil {
+			h.candidate.emitBootProgress(17, "outbox_sweeper", "FAILED", err.Error())
+			return err
+		}
+		h.candidate.emitBootProgress(17, "outbox_sweeper", "started", "")
+	} else {
+		h.candidate.emitBootProgress(17, "outbox_sweeper", "skipped", "event bus unavailable")
 	}
 	return nil
 }
@@ -1424,7 +1436,13 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}
 	var err error
 	if skipPersistentStartupRecovery {
-		rt.emitBootProgress(6, "recovery_snapshot_inspection", "skipped", "persistent startup recovery disabled")
+		startupRecoverySnapshot.Delivery, err = rt.inspectDeliveryRecoveryInventory(ctx)
+		if err != nil {
+			startupRecoverySnapshot.InspectionComplete = false
+			rt.emitBootProgress(6, "recovery_snapshot_inspection", "FAILED", err.Error())
+		} else {
+			rt.emitBootProgress(6, "recovery_snapshot_inspection", "ok", startupRecoverySnapshot.summary())
+		}
 	} else {
 		startupRecoverySnapshot, err = rt.inspectStartupRecoverySnapshot(ctx, bootStartedAt)
 		if err != nil {
@@ -1450,7 +1468,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		return denyErr
 	}
 	if skipPersistentStartupRecovery {
-		rt.emitBootProgress(7, "recovery_decision", "skipped", "persistent startup recovery disabled")
+		rt.emitBootProgress(7, "recovery_decision", string(startupRecoveryDecision.Outcome), string(startupRecoveryDecision.ReasonCode))
 	} else {
 		rt.emitBootProgress(7, "recovery_decision", string(startupRecoveryDecision.Outcome), string(startupRecoveryDecision.ReasonCode))
 	}
@@ -1505,13 +1523,6 @@ func (rt *Runtime) Start(ctx context.Context) error {
 				recovered = append(recovered, "agent state")
 			}
 		}
-		if rt.Pipeline != nil && agentHydrationSucceeded {
-			if err := rt.Pipeline.RecoverNodeDeliveries(ctx); err != nil {
-				rt.emitBootProgress(10, "manager_recovery_if_enabled", "FAILED", err.Error())
-				return fmt.Errorf("recover executable workflow-node deliveries: %w", err)
-			}
-			recovered = append(recovered, "workflow-node deliveries")
-		}
 		status := "ok"
 		if startupRecoveryDecision.Outcome == startupRecoveryOutcomeDegraded {
 			status = string(startupRecoveryDecision.Outcome)
@@ -1522,7 +1533,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		} else if !agentHydrationSucceeded {
 			detail = "agent state hydration failed"
 		} else if len(recovered) > 0 {
-			detail = strings.Join(recovered, " and ") + " hydrated; managed replay awaits execution admission"
+			detail = strings.Join(recovered, " and ") + " hydrated; delivery continuations await execution admission"
 		}
 		rt.emitBootProgress(10, "manager_recovery_if_enabled", status, detail)
 	}
@@ -1576,68 +1587,56 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	} else {
 		rt.emitBootProgress(11, "schedule_restoration", "skipped", "scheduler unavailable")
 	}
-	if rt.Bus != nil {
-		sweeperConfig := rt.Options.TestOutboxSweeperConfig
-		if sweeperConfig == (runtimebus.OutboxSweeperConfig{}) {
-			sweeperConfig = runtimebus.DefaultOutboxSweeperConfig()
-		}
-		if err := rt.Bus.StartOutboxSweeper(startCtx, sweeperConfig); err != nil {
-			return fmt.Errorf("start outbox sweeper: %w", err)
-		}
-		rt.emitBootProgress(12, "outbox_sweeper", "started", "")
-	} else {
-		rt.emitBootProgress(12, "outbox_sweeper", "skipped", "event bus unavailable")
-	}
 	staticAgentIDs := []string{}
 	if rt.Manager != nil {
 		staticAgentIDs, err = staticBootAgentIDs(rt.Options.WorkflowModule.SemanticSource())
 		if err != nil {
-			rt.emitBootProgress(13, "static_agents_bootstrap", "FAILED", err.Error())
+			rt.emitBootProgress(12, "static_agents_bootstrap", "FAILED", err.Error())
 			return fmt.Errorf("bootstrap static agents: %w", err)
 		}
 		if err := rt.Manager.EnsureStaticAgents(ctx, rt.Options.WorkflowModule.SemanticSource()); err != nil {
-			rt.emitBootProgress(13, "static_agents_bootstrap", "FAILED", err.Error())
+			rt.emitBootProgress(12, "static_agents_bootstrap", "FAILED", err.Error())
 			return fmt.Errorf("bootstrap static agents: %w", err)
 		}
-		rt.emitBootProgress(13, "static_agents_bootstrap", "ok", fmt.Sprintf("%d static agents", len(staticAgentIDs)))
+		rt.emitBootProgress(12, "static_agents_bootstrap", "ok", fmt.Sprintf("%d static agents", len(staticAgentIDs)))
 	} else {
-		rt.emitBootProgress(13, "static_agents_bootstrap", "skipped", "manager unavailable")
+		rt.emitBootProgress(12, "static_agents_bootstrap", "skipped", "manager unavailable")
 	}
 	flowRequiredAgentIDs := []string{}
 	if rt.Manager != nil {
 		flowRequiredAgentIDs, err = staticFlowRequiredBootAgentIDs(rt.Options.WorkflowModule.SemanticSource())
 		if err != nil {
-			rt.emitBootProgress(14, "flow_required_agents", "FAILED", err.Error())
+			rt.emitBootProgress(13, "flow_required_agents", "FAILED", err.Error())
 			return fmt.Errorf("bootstrap static flow required agents: %w", err)
 		}
 		if err := rt.Manager.EnsureStaticFlowRequiredAgents(ctx, rt.Options.WorkflowModule.SemanticSource()); err != nil {
-			rt.emitBootProgress(14, "flow_required_agents", "FAILED", err.Error())
+			rt.emitBootProgress(13, "flow_required_agents", "FAILED", err.Error())
 			return fmt.Errorf("bootstrap static flow required agents: %w", err)
 		}
-		rt.emitBootProgress(14, "flow_required_agents", "ok", fmt.Sprintf("%d flow-required agents", len(flowRequiredAgentIDs)))
+		rt.emitBootProgress(13, "flow_required_agents", "ok", fmt.Sprintf("%d flow-required agents", len(flowRequiredAgentIDs)))
 	} else {
-		rt.emitBootProgress(14, "flow_required_agents", "skipped", "manager unavailable")
+		rt.emitBootProgress(13, "flow_required_agents", "skipped", "manager unavailable")
 	}
 	source := rt.Options.WorkflowModule.SemanticSource()
 	if rt.Options.LLMRuntime == nil {
 		if err := validateSelectedBackendCredentialForActiveAgents(ctx, rt.Config, rt.Options, source, rt.Manager); err != nil {
-			rt.emitBootProgress(15, "workspace_validation_and_system_containers", "FAILED", err.Error())
+			rt.emitBootProgress(14, "workspace_validation_and_system_containers", "FAILED", err.Error())
 			return fmt.Errorf("llm backend credential validation failed: %w", err)
 		}
 	}
 	if err := validateClaudeStartupConfigForActiveAgents(ctx, rt.Config, rt.Options, source, rt.Manager); err != nil {
-		rt.emitBootProgress(15, "workspace_validation_and_system_containers", "FAILED", err.Error())
+		rt.emitBootProgress(14, "workspace_validation_and_system_containers", "FAILED", err.Error())
 		return fmt.Errorf("claude runtime startup validation failed: %w", err)
 	}
 	if err := validateClaudeManagedAgentWorkspaces(ctx, rt.Config, source, rt.Workspace, rt.Manager); err != nil {
-		rt.emitBootProgress(15, "workspace_validation_and_system_containers", "FAILED", err.Error())
+		rt.emitBootProgress(14, "workspace_validation_and_system_containers", "FAILED", err.Error())
 		return fmt.Errorf("claude runtime workspace validation failed: %w", err)
 	}
-	rt.emitBootProgress(15, "workspace_validation_and_system_containers", "ok", fmt.Sprintf("%d system containers", len(rt.Options.SystemContainers)))
+	rt.emitBootProgress(14, "workspace_validation_and_system_containers", "ok", fmt.Sprintf("%d system containers", len(rt.Options.SystemContainers)))
 	startupProbe, _ := llm.StartupVisibleToolSurfaceProberForRuntime(rt.LLM)
 	startupAuthority, err := rt.currentStartupProbeAuthority()
 	if err != nil {
-		rt.emitBootProgress(16, "mcp_tool_validation", "FAILED", err.Error())
+		rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())
 		return err
 	}
 	var preflightAuthority ManagedProviderPreflightAuthority
@@ -1650,25 +1649,29 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	} else if claudeEnabled && hasManagedAgents {
 		preflightAuthority, err = rt.managedProviderPreflightAuthority(startupAuthority)
 		if err != nil {
-			rt.emitBootProgress(16, "mcp_tool_validation", "FAILED", err.Error())
+			rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())
 			return err
 		}
 	}
 	surfaceIDs, err := ValidateManagedProviderPreflight(ctx, rt.Config, source, rt.Options.ToolGatewayBinding, rt.LLM, startupProbe, rt.MCPTurns, rt.ToolExecutor, rt.Manager, preflightAuthority)
 	if err != nil {
-		rt.emitBootProgress(16, "mcp_tool_validation", "FAILED", err.Error())
+		rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())
 		return fmt.Errorf("claude runtime mcp validation failed: %w", err)
 	}
 	settledAuthority, handoffPending, err := rt.settleManagedStartupPreflight(ctx, surfaceIDs)
 	if err != nil {
-		rt.emitBootProgress(16, "mcp_tool_validation", "FAILED", err.Error())
+		rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())
 		return fmt.Errorf("settle managed startup preflight: %w", err)
 	}
-	rt.emitBootProgress(16, "mcp_tool_validation", "ok", fmt.Sprintf("%d capability surfaces settled", len(surfaceIDs)))
+	rt.emitBootProgress(15, "mcp_tool_validation", "ok", fmt.Sprintf("%d capability surfaces settled", len(surfaceIDs)))
 	if rt.Manager != nil && !handoffPending {
 		activation, activateErr := rt.admitManagedExecution(startCtx, settledAuthority, rt.Config.Runtime.RecoveryOnStartup && !skipPersistentStartupRecovery)
 		if activateErr != nil {
-			rt.emitBootProgress(17, "manager_event_loop_start", "FAILED", activateErr.Error())
+			if activation.ReplayErr != nil {
+				rt.recordStartupManagerRecoveryFailure(ctx, &startupRecoveryDecision, activation.ReplayErr)
+				rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)
+			}
+			rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", activateErr.Error())
 			return fmt.Errorf("activate managed execution: %w", activateErr)
 		}
 		startCtx = managedexecution.WithAdmission(startCtx, activation.Admission)
@@ -1688,14 +1691,25 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			}
 		}
 		if err := rt.Manager.Run(startCtx); err != nil {
-			rt.emitBootProgress(17, "manager_event_loop_start", "FAILED", err.Error())
+			rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
 			return fmt.Errorf("start managed execution loops: %w", err)
 		}
-		rt.emitBootProgress(17, "manager_event_loop_start", "ok", "")
+		rt.emitBootProgress(16, "manager_event_loop_start", "ok", "")
 	} else if handoffPending {
-		rt.emitBootProgress(17, "manager_event_loop_start", "deferred", "replacement execution awaits startup ownership commit")
+		rt.emitBootProgress(16, "manager_event_loop_start", "deferred", "replacement execution awaits startup ownership commit")
 	} else {
-		rt.emitBootProgress(17, "manager_event_loop_start", "skipped", "manager unavailable")
+		rt.emitBootProgress(16, "manager_event_loop_start", "skipped", "manager unavailable")
+	}
+	if handoffPending {
+		rt.emitBootProgress(17, "outbox_sweeper", "deferred", "replacement execution awaits startup ownership commit")
+	} else if rt.Bus != nil {
+		if err := rt.startOutboxSweeper(startCtx); err != nil {
+			rt.emitBootProgress(17, "outbox_sweeper", "FAILED", err.Error())
+			return err
+		}
+		rt.emitBootProgress(17, "outbox_sweeper", "started", "")
+	} else {
+		rt.emitBootProgress(17, "outbox_sweeper", "skipped", "event bus unavailable")
 	}
 	rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)
 	if rt.Stores.SQLDB != nil && rt.Logger != nil {
@@ -1734,6 +1748,20 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		}
 	}
 	started = true
+	return nil
+}
+
+func (rt *Runtime) startOutboxSweeper(ctx context.Context) error {
+	if rt == nil || rt.Bus == nil {
+		return nil
+	}
+	sweeperConfig := rt.Options.TestOutboxSweeperConfig
+	if sweeperConfig == (runtimebus.OutboxSweeperConfig{}) {
+		sweeperConfig = runtimebus.DefaultOutboxSweeperConfig()
+	}
+	if err := rt.Bus.StartOutboxSweeper(ctx, sweeperConfig); err != nil {
+		return fmt.Errorf("start outbox sweeper: %w", err)
+	}
 	return nil
 }
 
@@ -1923,6 +1951,15 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions, releaseOwnership bool) 
 		}
 	}
 	if rt.Bus != nil {
+		if rt.deliveryContinuations != nil {
+			if err := rt.deliveryContinuations.Retire(drainCtx); err != nil {
+				shutdownErr = errors.Join(shutdownErr, fmt.Errorf("delivery continuation coordinator shutdown: %w", err))
+			}
+		}
+		if rt.deliverySignalRegistration != nil {
+			rt.deliverySignalRegistration.Release()
+			rt.deliverySignalRegistration = nil
+		}
 		if err := rt.Bus.WaitForOutboxSweeper(drainCtx); err != nil {
 			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("outbox sweeper shutdown: %w", err))
 			_ = rt.Bus.WaitForOutboxSweeper(context.Background())

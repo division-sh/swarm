@@ -425,14 +425,14 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 			storetest.CommitSemanticEvent(t, ctx, f.store, parent)
 			storetest.CommitSemanticEventWithRoutes(t, ctx, f.store, original, routes, runtimepipelineobligation.ScopeSubscribed)
 
-			firstClaim, err := f.store.ClaimAgentDelivery(ctx, original, routes[0])
+			firstClaim, err := storetest.ClaimDelivery(ctx, f.store, original, routes[0])
 			if err != nil {
 				t.Fatalf("claim delivered route: %v", err)
 			}
 			if _, err := f.store.SettleSuccess(ctx, firstClaim.Claim, nil, time.Millisecond); err != nil {
 				t.Fatalf("settle delivered route: %v", err)
 			}
-			secondClaim, err := f.store.ClaimAgentDelivery(ctx, original, routes[1])
+			secondClaim, err := storetest.ClaimDelivery(ctx, f.store, original, routes[1])
 			if err != nil {
 				t.Fatalf("claim failed route: %v", err)
 			}
@@ -460,16 +460,16 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 				sourceByNew[fmt.Sprint(row["delivery_id"])] = fmt.Sprint(row["source_delivery_id"])
 			}
 			for _, route := range routes {
-				originalObligation, err := runtimedelivery.NewObligation(originalID, runID, route)
+				originalDeliveryID, err := runtimedelivery.DeliveryID(originalID, route)
 				if err != nil {
 					t.Fatal(err)
 				}
-				newObligation, err := runtimedelivery.NewObligation(replayID, runID, route)
+				newDeliveryID, err := runtimedelivery.DeliveryID(replayID, route)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if got := sourceByNew[newObligation.DeliveryID()]; got != originalObligation.DeliveryID() {
-					t.Fatalf("new delivery %s source = %q, want exact sibling %s", newObligation.DeliveryID(), got, originalObligation.DeliveryID())
+				if got := sourceByNew[newDeliveryID]; got != originalDeliveryID {
+					t.Fatalf("new delivery %s source = %q, want exact sibling %s", newDeliveryID, got, originalDeliveryID)
 				}
 			}
 
@@ -529,16 +529,16 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 				agentSourceByNew[fmt.Sprint(row["delivery_id"])] = fmt.Sprint(row["source_delivery_id"])
 			}
 			for _, route := range routes {
-				originalObligation, err := runtimedelivery.NewObligation(originalID, runID, route)
+				originalDeliveryID, err := runtimedelivery.DeliveryID(originalID, route)
 				if err != nil {
 					t.Fatal(err)
 				}
-				newObligation, err := runtimedelivery.NewObligation(agentReplayID, runID, route)
+				newDeliveryID, err := runtimedelivery.DeliveryID(agentReplayID, route)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if got := agentSourceByNew[newObligation.DeliveryID()]; got != originalObligation.DeliveryID() {
-					t.Fatalf("agent replay delivery %s source = %q, want %s", newObligation.DeliveryID(), got, originalObligation.DeliveryID())
+				if got := agentSourceByNew[newDeliveryID]; got != originalDeliveryID {
+					t.Fatalf("agent replay delivery %s source = %q, want %s", newDeliveryID, got, originalDeliveryID)
 				}
 			}
 			for range routes {
@@ -633,7 +633,7 @@ func completeOperatorReplayTestHandler(t *testing.T, owner completeOperatorRepla
 
 func markOperatorReplayDeliveryTerminal(t *testing.T, ctx context.Context, owner runtimedelivery.Store, db *sql.DB, sqlite bool, evt events.Event, route events.DeliveryRoute) {
 	t.Helper()
-	claimed, err := owner.ClaimAgentDelivery(ctx, evt, route)
+	claimed, err := storetest.ClaimDelivery(ctx, owner, evt, route)
 	if err != nil {
 		t.Fatalf("claim original delivery: %v", err)
 	}
@@ -1401,7 +1401,7 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 		case runtimedelivery.StatusPending:
 			continue
 		case runtimedelivery.StatusInProgress, runtimedelivery.StatusDelivered:
-			claimed, err := pg.ClaimAgentDelivery(ctx, semanticEvent, route)
+			claimed, err := storetest.ClaimDelivery(ctx, pg, semanticEvent, route)
 			if err != nil {
 				t.Fatalf("claim original delivery %s %s: %v", eventID, subscriber, err)
 			}

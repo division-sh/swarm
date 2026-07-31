@@ -742,6 +742,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		}
 	}
 
+	enableServeRuntimeRecovery(t, configPath)
 	second := startServeRuntimeTestProcess(t, opts)
 	second.waitForReadyLine()
 	secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())
@@ -822,6 +823,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		t.Fatalf("close SQLite inspection store before restart matrix: %v", err)
 	}
 	sqliteStore = nil
+	disableServeRuntimeRecovery(t, opts.ConfigPath)
 	requireChangedStandingColdStartMatrix(t, opts, contractsRoot, standingRunID, nil)
 }
 
@@ -979,6 +981,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	if err != nil {
 		t.Fatalf("reopen PostgresStore: %v", err)
 	}
+	enableServeRuntimeRecovery(t, opts.ConfigPath)
 	second := startServeRuntimeTestProcess(t, opts)
 	second.waitForReadyLine()
 	if got := sendStandingTelegramUpdate(t, "http://"+serveRuntimeAPIListenerFromOutput(t, second.outputString()), 203, 84); got != entity {
@@ -1049,6 +1052,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	if entityEvents == 0 || wrongRunEvents != 0 {
 		t.Fatalf("standing entity event lineage = events:%d wrong_run:%d, want events>0/wrong_run:0", entityEvents, wrongRunEvents)
 	}
+	disableServeRuntimeRecovery(t, opts.ConfigPath)
 	requireChangedStandingColdStartMatrix(t, opts, contractsRoot, standingRunID, func(t *testing.T) {
 		var reopenErr error
 		runtimePG, reopenErr = store.NewPostgresStore(dsn)
@@ -1056,6 +1060,33 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 			t.Fatalf("reopen PostgresStore for changed-bundle probe: %v", reopenErr)
 		}
 	})
+}
+
+func enableServeRuntimeRecovery(t *testing.T, configPath string) {
+	t.Helper()
+	setServeRuntimeRecovery(t, configPath, false, true)
+}
+
+func disableServeRuntimeRecovery(t *testing.T, configPath string) {
+	t.Helper()
+	setServeRuntimeRecovery(t, configPath, true, false)
+}
+
+func setServeRuntimeRecovery(t *testing.T, configPath string, from, to bool) {
+	t.Helper()
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read serve runtime config: %v", err)
+	}
+	fromLine := fmt.Sprintf("recovery_on_startup: %t", from)
+	toLine := fmt.Sprintf("recovery_on_startup: %t", to)
+	if count := strings.Count(string(raw), fromLine); count != 1 {
+		t.Fatalf("%s count = %d, want 1", fromLine, count)
+	}
+	updated := strings.Replace(string(raw), fromLine, toLine, 1)
+	if err := os.WriteFile(configPath, []byte(updated), 0o644); err != nil {
+		t.Fatalf("set serve runtime recovery to %t: %v", to, err)
+	}
 }
 
 func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOptions, contractsRoot, originalRunID string, prepare func(*testing.T)) {

@@ -247,6 +247,12 @@ func (s *capturingInboundEventStore) finalizePublish(_ context.Context, req runt
 	if len(s.active) == 0 || s.active[len(s.active)-1] != req.Event.ID() {
 		return errors.New("prepared event finalization does not match active inbound event")
 	}
+	if req.DeliveryReceipt == nil {
+		return errors.New("test inbound delivery receipt is required")
+	}
+	if err := req.DeliveryReceipt.Record(nil); err != nil {
+		return err
+	}
 	s.active = s.active[:len(s.active)-1]
 	return nil
 }

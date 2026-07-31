@@ -39,8 +39,8 @@ func (unavailablePipelineTestObligationOwner) MarkDecisionProcessed(context.Cont
 	return errPipelineTestObligationUnavailable
 }
 
-func (unavailablePipelineTestObligationOwner) Settle(context.Context, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) error {
-	return errPipelineTestObligationUnavailable
+func (unavailablePipelineTestObligationOwner) Settle(context.Context, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) (runtimepipelineobligation.SettlementOutcome, error) {
+	return runtimepipelineobligation.SettlementOutcome{}, errPipelineTestObligationUnavailable
 }
 
 func (unavailablePipelineTestObligationOwner) Release(context.Context, runtimepipelineobligation.Claim) error {

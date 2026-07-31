@@ -246,19 +246,7 @@ type RestartResult struct {
 	Generation   uint64 `json:"generation,omitempty"`
 }
 
-type ReplayBacklogRequest struct {
-	AgentID      string
-	FlowInstance string
-}
-
-type ReplayBacklogResult struct {
-	AgentID       string
-	FlowInstance  string
-	ReplayedCount int
-}
-
 type Controller interface {
 	SendDirective(context.Context, SendDirectiveRequest) (SendDirectiveResult, error)
 	Restart(context.Context, RestartRequest) (RestartResult, error)
-	ReplayBacklog(context.Context, ReplayBacklogRequest) (ReplayBacklogResult, error)
 }

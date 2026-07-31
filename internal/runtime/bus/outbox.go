@@ -29,6 +29,7 @@ type pendingOutboxOperation struct {
 	intent           runtimeengine.EmitIntent
 	outcome          EventAppendOutcome
 	publicationClaim *pipelinePublicationClaim
+	deliveryReceipt  *DeliveryCommitReceipt
 }
 
 func (eb *EventBus) EngineOutbox() runtimeengine.OutboxWriter {
@@ -91,7 +92,7 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 			return fmt.Errorf("persist event: %w", err)
 		}
 		if appendOutcome == EventAppendExactDuplicate {
-			o.bus.stagePendingOutboxOperation(ctx, *intent, appendOutcome, publicationClaim)
+			o.bus.stagePendingOutboxOperation(ctx, *intent, appendOutcome, publicationClaim, nil)
 			continue
 		}
 		plan, err := o.deliveryPlanForIntent(intentCtx, *intent)
@@ -106,8 +107,14 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 			_, _, record := targetDeliveryFailureRecord(intent.Event, plan, plan.TargetFailure)
 			deadLetter = &record
 		}
+		authority, err := o.bus.DeliveryAuthority()
+		if err != nil {
+			return err
+		}
+		receipt := newDeliveryCommitReceipt()
 		if err := finalizePreparedPublish(intentCtx, transaction, CommitPublishRequest{
-			Event: admitted, DeliveryRoutes: plan.DeliveryRoutes(), ReplayScope: replayScopeForEmitIntent(*intent),
+			Event: admitted, DeliveryRoutes: plan.DeliveryRoutes(), DeliveryAuthority: authority,
+			DeliveryReceipt: receipt, ReplayScope: replayScopeForEmitIntent(*intent),
 			PipelineClaim: publicationClaim.Claim(), Disposition: disposition, DeadLetter: deadLetter,
 		}); err != nil {
 			return fmt.Errorf("finalize event publish: %w", err)
@@ -120,7 +127,7 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 			})
 		}
 		o.bus.setPendingInternalDeliveryRoutes(intent.Event.ID(), plan.InternalDeliveryRoutes())
-		o.bus.stagePendingOutboxOperation(ctx, *intent, appendOutcome, publicationClaim)
+		o.bus.stagePendingOutboxOperation(ctx, *intent, appendOutcome, publicationClaim, receipt)
 	}
 	return nil
 }
@@ -220,6 +227,13 @@ func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fa
 	if operation.outcome != EventAppendInserted {
 		return true, errors.New("pending outbox operation has invalid append outcome")
 	}
+	handoffs, handoffErr := operation.deliveryReceipt.Handoffs()
+	if handoffErr != nil {
+		return true, fmt.Errorf("read committed outbox delivery handoffs: %w", handoffErr)
+	}
+	if err := d.bus.AcceptCommittedDeliveryHandoffs(handoffs); err != nil {
+		return true, err
+	}
 	return true, d.dispatchAndRecord(ctx, operation.intent, operation.publicationClaim)
 }
 
@@ -255,7 +269,7 @@ func (d engineDispatcher) dispatchAndRecord(ctx context.Context, intent runtimee
 		if d.bus.pipelineObligations == nil {
 			return nil
 		}
-		if err := d.bus.pipelineObligations.Settle(ctx, recoveryClaim, disposition); err != nil {
+		if err := d.bus.settlePipelineObligation(ctx, recoveryClaim, disposition); err != nil {
 			return err
 		}
 		claimOpen = false
@@ -428,7 +442,7 @@ func (eb *EventBus) clearPendingInternalDeliveryRoutes(eventID string) {
 	delete(eb.pendingInternalByID, eventID)
 }
 
-func (eb *EventBus) stagePendingOutboxOperation(ctx context.Context, intent runtimeengine.EmitIntent, outcome EventAppendOutcome, publicationClaim *pipelinePublicationClaim) {
+func (eb *EventBus) stagePendingOutboxOperation(ctx context.Context, intent runtimeengine.EmitIntent, outcome EventAppendOutcome, publicationClaim *pipelinePublicationClaim, deliveryReceipt *DeliveryCommitReceipt) {
 	if eb == nil {
 		return
 	}
@@ -445,6 +459,7 @@ func (eb *EventBus) stagePendingOutboxOperation(ctx context.Context, intent runt
 	sequence := eb.pendingOutboxSequence
 	eb.pendingOutboxByID[eventID] = append(eb.pendingOutboxByID[eventID], pendingOutboxOperation{
 		sequence: sequence, intent: intent, outcome: outcome, publicationClaim: publicationClaim,
+		deliveryReceipt: deliveryReceipt,
 	})
 	eb.mu.Unlock()
 	_ = runtimepipeline.QueuePipelineRollbackAction(ctx, func(context.Context) {

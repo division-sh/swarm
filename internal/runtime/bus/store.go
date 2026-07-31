@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -49,12 +51,58 @@ const (
 // mandatory initial side effects are the delivery manifest, replay scope, and
 // optional failure evidence declared here.
 type CommitPublishRequest struct {
-	Event          events.AdmittedEvent
-	DeliveryRoutes []events.DeliveryRoute
-	ReplayScope    runtimepipelineobligation.CommittedScope
-	PipelineClaim  runtimepipelineobligation.Claim
-	Disposition    *runtimepipelineobligation.Disposition
-	DeadLetter     *runtimedeadletters.Record
+	Event             events.AdmittedEvent
+	DeliveryRoutes    []events.DeliveryRoute
+	DeliveryAuthority runtimedelivery.ExecutionAuthority
+	DeliveryReceipt   *DeliveryCommitReceipt
+	ReplayScope       runtimepipelineobligation.CommittedScope
+	PipelineClaim     runtimepipelineobligation.Claim
+	Disposition       *runtimepipelineobligation.Disposition
+	DeadLetter        *runtimedeadletters.Record
+}
+
+// DeliveryCommitReceipt is the transaction result channel for exact committed
+// delivery handoffs. Only the selected-store commit owner may populate it;
+// dispatch consumers receive an immutable copy after commit.
+type DeliveryCommitReceipt struct {
+	mu       sync.Mutex
+	recorded bool
+	proofs   []runtimedelivery.DurableHandoffProof
+}
+
+func newDeliveryCommitReceipt() *DeliveryCommitReceipt {
+	return &DeliveryCommitReceipt{}
+}
+
+func (r *DeliveryCommitReceipt) Record(proofs []runtimedelivery.DurableHandoffProof) error {
+	if r == nil {
+		return errors.New("delivery commit receipt is required")
+	}
+	for _, proof := range proofs {
+		if err := proof.Validate(); err != nil {
+			return err
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.recorded {
+		return errors.New("delivery commit receipt was already recorded")
+	}
+	r.recorded = true
+	r.proofs = append([]runtimedelivery.DurableHandoffProof(nil), proofs...)
+	return nil
+}
+
+func (r *DeliveryCommitReceipt) Handoffs() ([]runtimedelivery.DurableHandoffProof, error) {
+	if r == nil {
+		return nil, errors.New("delivery commit receipt is required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.recorded {
+		return nil, errors.New("delivery commit receipt has not been recorded")
+	}
+	return append([]runtimedelivery.DurableHandoffProof(nil), r.proofs...), nil
 }
 
 // CommitPublishTransaction is the transaction-local half of the sealed
@@ -333,6 +381,12 @@ func (t *inMemoryCommitPublishTransaction) FinalizePreparedPublish(_ context.Con
 	request := finalization.Request()
 	if len(t.activeEventIDs) == 0 || t.activeEventIDs[len(t.activeEventIDs)-1] != request.Event.ID() {
 		return errors.New("prepared event finalization does not match the active event")
+	}
+	if request.DeliveryReceipt == nil {
+		return errors.New("in-memory event commit requires a delivery receipt")
+	}
+	if err := request.DeliveryReceipt.Record(nil); err != nil {
+		return err
 	}
 	t.activeEventIDs = t.activeEventIDs[:len(t.activeEventIDs)-1]
 	return nil
