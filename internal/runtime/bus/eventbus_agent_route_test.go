@@ -392,8 +392,20 @@ func TestSelectedDeliveryTransfersAcceptCommittedIsAtomic(t *testing.T) {
 	if err := owner.Release(proof.DeliveryID()); err != nil {
 		t.Fatalf("terminalize selected carrier: %v", err)
 	}
+	if err := owner.Release(proof.DeliveryID()); err != nil {
+		t.Fatalf("repeat selected terminal release before carrier resolution: %v", err)
+	}
+	if held := owner.held[proof.DeliveryID()]; held != selectedDeliveryTerminalCarrier {
+		t.Fatalf("selected terminal carrier ownership = %d; want terminal carrier fence", held)
+	}
 	if resolution, err := terminalCarrier.Resolve(context.Background(), worklifetime.DeliveryContinuationConsume); err != nil || resolution != worklifetime.DeliveryContinuationTerminal {
 		t.Fatalf("selected terminal-race resolution = %d, %v; want terminal", resolution, err)
+	}
+	if _, exists := owner.held[proof.DeliveryID()]; exists {
+		t.Fatal("selected terminal carrier retained a process-local owner")
+	}
+	if err := owner.Release(proof.DeliveryID()); err != nil {
+		t.Fatalf("repeat selected terminal release after carrier resolution: %v", err)
 	}
 }
 
