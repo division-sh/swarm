@@ -1822,6 +1822,59 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionCanMintFromEventID(t *t
 	}
 }
 
+func TestEventBusPublish_ConnectRoutePlanSelectResolutionUsesRenamedPayloadSourceExclusively(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload string
+	}{
+		{name: "renamed field only", payload: `{"external_account_id":"acct-authoritative"}`},
+		{name: "conflicting same-named field", payload: `{"external_account_id":"acct-authoritative","account_id":"acct-conflicting"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := connectRoutePlanSelectResolutionSourceWithIdentitySource(t, "payload.external_account_id")
+			store := &connectRoutePlanLifecycleStore{
+				connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+					targetRouteMemoryStore: newTargetRouteMemoryStore(),
+					flowInstances: []ActiveFlowInstanceDescriptor{
+						{InstanceID: "authoritative", EntityID: eventtest.UUID("ent-authoritative"), FlowInstance: "account/authoritative", AddressFields: map[string]string{"entity.account_id": "acct-authoritative"}},
+						{InstanceID: "conflicting", EntityID: eventtest.UUID("ent-conflicting"), FlowInstance: "account/conflicting", AddressFields: map[string]string{"entity.account_id": "acct-conflicting"}},
+					},
+				},
+			}
+			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TemplateInstanceActivator: store.Activate})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			store.bus = eb
+			for _, instanceID := range []string{"authoritative", "conflicting"} {
+				if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("account", instanceID)}); err != nil {
+					t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
+				}
+			}
+			eventID := uuid.NewString()
+			evt := eventtest.RunCreatingRootIngress(eventID,
+				events.EventType("producer/account.ready"), "", "", json.RawMessage(tc.payload), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+
+			if err := eb.Publish(context.Background(), evt); err != nil {
+				t.Fatalf("Publish: %v", err)
+			}
+			want := events.DeliveryRoute{
+				SubscriberType: "node",
+				SubscriberID:   "account-node-authoritative",
+				Target: events.RouteIdentity{
+					FlowID: "account", FlowInstance: "account/authoritative", EntityID: eventtest.UUID("ent-authoritative"),
+				},
+			}
+			if !deliveryRoutesContain(store.routes[eventID], want) || len(store.routes[eventID]) != 1 {
+				t.Fatalf("persisted routes = %#v, want authoritative renamed-source route %#v", store.routes[eventID], want)
+			}
+			if len(store.activations) != 0 {
+				t.Fatalf("activations = %d, want select-only reuse", len(store.activations))
+			}
+		})
+	}
+}
+
 func mustDeliveryPayloadProjection(t *testing.T, fields map[string]string) events.DeliveryPayloadProjection {
 	t.Helper()
 	projection, err := events.NewDeliveryPayloadProjection(fields)
@@ -3624,6 +3677,25 @@ func connectRoutePlanCreateResolutionSource(t testing.TB, mint string) semanticv
 func connectRoutePlanSelectResolutionSourceWithPolicy(t testing.TB, onMissing, onConflict string) semanticview.Source {
 	t.Helper()
 	return connectRoutePlanCarriedKeyResolutionSourceWithPolicy(t, runtimecontracts.FlowInputResolutionModeSelect, onMissing, onConflict)
+}
+
+func connectRoutePlanSelectResolutionSourceWithIdentitySource(t testing.TB, identitySource string) semanticview.Source {
+	t.Helper()
+	repoRoot := canonicalrouting.RepoRoot(t)
+	root := writeConnectRoutePlanCarriedKeyResolutionFixtureWithPolicy(t, runtimecontracts.FlowInputResolutionModeSelect, "create", "reuse")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	pins := bundle.Semantics.FlowInputEventPins["account"]
+	if len(pins) != 2 {
+		t.Fatalf("account input pins = %#v, want two", pins)
+	}
+	carry := pins[1].Carries["account_id"]
+	carry.From = identitySource
+	pins[1].Carries["account_id"] = carry
+	bundle.Semantics.FlowInputEventPins["account"] = pins
+	return semanticview.Wrap(bundle)
 }
 
 func connectRoutePlanSelectOrCreateResolutionSourceWithPolicy(t testing.TB, onMissing, onConflict string) semanticview.Source {

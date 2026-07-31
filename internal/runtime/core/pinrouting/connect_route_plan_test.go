@@ -244,6 +244,52 @@ func TestLowerTargetFreeInputRoutePlans_RejectsHarnessSource(t *testing.T) {
 	}
 }
 
+func TestLowerTargetFreeInputRoutePlansUsesCanonicalRenamedIdentitySource(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	root := canonicalrouting.CopyProviderRollback(t, true)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load provider rollback artifact: %v", err)
+	}
+	pins := bundle.Semantics.FlowInputEventPins["consumer"]
+	if len(pins) != 1 {
+		t.Fatalf("consumer input pins = %#v, want one", pins)
+	}
+	carry := pins[0].Carries["chat_id"]
+	carry.From = "payload.external_chat_id"
+	pins[0].Carries["chat_id"] = carry
+	bundle.Semantics.FlowInputEventPins["consumer"] = pins
+	authorization := runtimeprovideroutput.MustAuthorization(
+		"telegram", "inbound.telegram.text_message", "provider.telegram", "1.0.0",
+		"sha256:"+strings.Repeat("a", 64),
+		triggergeneration.FromCanonicalBytes([]byte("target-free-renamed-source")),
+	)
+
+	plans, issues := LowerTargetFreeInputRoutePlans(semanticview.Wrap(bundle), []runtimeprovideroutput.Authorization{authorization})
+	if len(issues) != 0 || len(plans) != 1 || plans[0].InstanceKey == nil {
+		t.Fatalf("plans/issues = %#v/%#v, want one target-free instance plan", plans, issues)
+	}
+	plan := plans[0]
+	if got, want := plan.InstanceKey.Source.Path, "payload.external_chat_id"; got != want {
+		t.Fatalf("typed source = %q, want %q", got, want)
+	}
+	materialized := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
+		MatchValues: map[string]string{
+			"payload.external_chat_id": "chat-authoritative",
+			"payload.chat_id":          "chat-conflicting",
+		},
+		Descriptors: []Descriptor{
+			{EntityID: "ent-authoritative", FlowInstance: "consumer/authoritative", AddressFields: map[string]string{"entity.chat_id": "chat-authoritative"}},
+			{EntityID: "ent-conflicting", FlowInstance: "consumer/conflicting", AddressFields: map[string]string{"entity.chat_id": "chat-conflicting"}},
+		},
+	})
+	if materialized.Failure != "" || materialized.Target.FlowInstance != "consumer/authoritative" {
+		t.Fatalf("materialized target/failure = %#v/%q, want renamed-source consumer/authoritative", materialized.Target, materialized.Failure)
+	}
+}
+
 func TestLowerCompositionConnectRoutePlansFromLoadedPackageFixture(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	if err != nil {
@@ -631,6 +677,50 @@ func TestLowerCompositionConnectRoutePlanDerivesRenamedPayloadSourceFromCarry(t 
 	}
 	if plans[0].InstanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourcePayload || plans[0].InstanceKey.Source.Path != "payload.external_account_id" || !reflect.DeepEqual(plans[0].InstanceKey.Fields, []string{"account_id"}) {
 		t.Fatalf("derived identity/source = %#v, want account_id from renamed payload source", plans[0].InstanceKey)
+	}
+	for _, tc := range []struct {
+		name        string
+		matchValues map[string]string
+	}{
+		{name: "renamed field only", matchValues: map[string]string{"payload.external_account_id": "acct-authoritative"}},
+		{name: "conflicting same-named field", matchValues: map[string]string{
+			"payload.external_account_id": "acct-authoritative",
+			"payload.account_id":          "acct-conflicting",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			materialized := MaterializeConnectRoutePlan(plans[0], ConnectRoutePlanMaterializationInput{
+				MatchValues: tc.matchValues,
+				Descriptors: []Descriptor{
+					{EntityID: "ent-authoritative", FlowInstance: "account/authoritative", AddressFields: map[string]string{"entity.account_id": "acct-authoritative"}},
+					{EntityID: "ent-conflicting", FlowInstance: "account/conflicting", AddressFields: map[string]string{"entity.account_id": "acct-conflicting"}},
+				},
+			})
+			if materialized.Failure != "" || materialized.Target.FlowInstance != "account/authoritative" {
+				t.Fatalf("materialized target/failure = %#v/%q, want renamed-source account/authoritative", materialized.Target, materialized.Failure)
+			}
+		})
+	}
+}
+
+func TestInstanceKeyMaterialRejectsTypedSourceWithMappings(t *testing.T) {
+	plan := ConnectRoutePlan{
+		Receiver: ConnectRoutePlanEndpoint{FlowID: "account"},
+		InstanceKey: &ConnectRoutePlanInstanceKey{
+			Fields: []string{"account_id"},
+			Source: runtimecontracts.FlowInputInstanceSource{
+				Kind: runtimecontracts.FlowInputInstanceSourcePayload,
+				Path: "payload.external_account_id",
+			},
+			Mappings: []ConnectRoutePlanInstanceKeyMapping{{Source: "account_id", Target: "account_id"}},
+		},
+	}
+	_, failure := InstanceKeyMaterialForConnectRoutePlan(plan, map[string]string{
+		"payload.external_account_id": "acct-authoritative",
+		"payload.account_id":          "acct-conflicting",
+	})
+	if failure != ConnectFailureInstanceResolutionInvalid {
+		t.Fatalf("failure = %q, want %q", failure, ConnectFailureInstanceResolutionInvalid)
 	}
 }
 

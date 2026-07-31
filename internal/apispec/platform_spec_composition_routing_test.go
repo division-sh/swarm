@@ -190,8 +190,11 @@ func TestPlatformSpecInstanceIdentityAuthoringSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, owner, "authored_identity_owner"), "flow instance.by")
 	assertScalarValue(t, mustMappingValue(t, owner, "authored_source_owner"), "receiver input carries.<instance.by>.from")
 	assertScalarValue(t, mustMappingValue(t, owner, "authored_behavior_owner"), "receiver input resolution.mode")
+	assertScalarContains(t, mustMappingValue(t, owner, "effective_owner"), "mutually exclusive")
+	assertScalarContains(t, mustMappingValue(t, owner, "effective_owner"), "hard-invalid")
 	assertScalarContains(t, mustMappingValue(t, owner, "retirement"), "hard-invalid")
 	assertScalarContains(t, mustMappingValue(t, owner, "retirement"), "migrate-resolution-instance-key")
+	assertScalarContains(t, mustMappingValue(t, owner, "retirement"), "production loader and verifier")
 
 	create := mustYAMLPath(t, slice, "modes", "create")
 	assertScalarContains(t, mustMappingValue(t, create, "contract"), "generated.uuid")

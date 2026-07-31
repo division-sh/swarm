@@ -10836,7 +10836,10 @@ flow_model:
             authored_identity_owner: flow instance.by
             authored_source_owner: receiver input carries.<instance.by>.from
             authored_behavior_owner: receiver input resolution.mode
-            effective_owner: internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey
+            effective_owner: >
+              internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey; its typed Source and legacy-style
+              Mappings representations are mutually exclusive, and a plan containing both is hard-invalid rather
+              than agreement-checked or defaulted.
             readback: >
               Routing topology, authoring view, and CLI describe render the effective instance.by field,
               resolution mode, typed source kind/path, and derivation provenance from the lowered plan. They do not
@@ -10844,8 +10847,9 @@ flow_model:
             retirement: >
               resolution.instance_key and instance.key.<field> sources are hard-invalid during strict load. There is
               no warning, alias, fallback reader, compatibility DTO, or dual semantic owner. The deterministic
-              `swarm migrate-resolution-instance-key --contracts <bundle-root>` codemod validates the complete tree
-              before writing, preserves every file byte-for-byte on a blocker, and is idempotent.
+              `swarm migrate-resolution-instance-key --contracts <bundle-root>` codemod builds a complete off-tree
+              candidate and runs the production loader and verifier before writing the source tree, preserves every
+              file byte-for-byte on a blocker, and is idempotent.
           rule: |
             Receiver input pins may declare an explicit instance-resolution
             contract under `resolution:{mode,...}`. This receiver-side contract
@@ -22756,7 +22760,7 @@ cli_specification:
       implementation_status: implemented
       owner: platform-spec.yaml#flow_model.flow_package.composition_routing.route_plan_lowering.implementation_slice_1835.instance_identity_owner_2021
       behavior: >
-        Validate the complete contract tree before writing, remove deterministic retired
+        Build and production-verify a complete off-tree candidate before writing, remove deterministic retired
         `resolution.instance_key` declarations, and move create sources from `instance.key.<field>` to exact
         `generated.uuid` or `event.id`. Refuse ambiguous declarations without changing any schema file.
     runs:
