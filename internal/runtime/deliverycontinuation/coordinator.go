@@ -230,7 +230,8 @@ func (c *Coordinator) Retain(snapshot runtimedelivery.Snapshot) error {
 }
 
 // Release settles the exact process-local continuation after the selected
-// store has committed a terminal delivery transition.
+// store has committed a terminal delivery transition, or fences a live carrier
+// until that exact capability resolves.
 func (c *Coordinator) Release(deliveryID string) error {
 	if c == nil || deliveryID == "" {
 		return errors.New("exact delivery continuation identity is required")
@@ -242,11 +243,14 @@ func (c *Coordinator) Release(deliveryID string) error {
 		return nil
 	}
 	switch current.state {
-	case ownershipCoordinator, ownershipAttempt, ownershipTerminalCarrier:
+	case ownershipCoordinator, ownershipAttempt:
 		delete(c.entries, deliveryID)
 		return nil
 	case ownershipCarrier:
 		c.entries[deliveryID] = entry{state: ownershipTerminalCarrier}
+		return nil
+	case ownershipTerminalCarrier:
+		// The exact carrier capability owns removal of this terminal fence.
 		return nil
 	default:
 		return fmt.Errorf("delivery %s has unknown continuation ownership", deliveryID)
@@ -457,9 +461,14 @@ func (c *Coordinator) reconcileHeld(ctx context.Context) (time.Duration, bool, e
 
 func (c *Coordinator) releaseTerminal(deliveryID string) {
 	c.mu.Lock()
-	if current, exists := c.entries[deliveryID]; exists && current.state == ownershipCarrier {
+	current, exists := c.entries[deliveryID]
+	switch {
+	case !exists:
+	case current.state == ownershipCarrier:
 		c.entries[deliveryID] = entry{state: ownershipTerminalCarrier}
-	} else {
+	case current.state == ownershipTerminalCarrier:
+		// Repeated durable observations cannot consume the carrier's fence.
+	default:
 		delete(c.entries, deliveryID)
 	}
 	c.mu.Unlock()

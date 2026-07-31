@@ -88,12 +88,16 @@ func (o *selectedDeliveryTransfers) Release(deliveryID string) error {
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if _, exists := o.held[deliveryID]; !exists {
+	held, exists := o.held[deliveryID]
+	if !exists {
 		return nil
 	}
-	if o.held[deliveryID] == selectedDeliveryCarrier {
+	switch held {
+	case selectedDeliveryCarrier:
 		o.held[deliveryID] = selectedDeliveryTerminalCarrier
-	} else {
+	case selectedDeliveryTerminalCarrier:
+		// The exact carrier capability owns removal of this terminal fence.
+	default:
 		delete(o.held, deliveryID)
 	}
 	return nil

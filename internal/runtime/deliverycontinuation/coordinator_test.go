@@ -489,8 +489,9 @@ func TestCoordinatorAttemptOwnershipReconcilesFromExactStoreState(t *testing.T) 
 func TestCoordinatorTerminalReleaseFencesUnclaimedAndCarrierOwnedWork(t *testing.T) {
 	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
 	defer cleanup()
+	store := &coordinatorTestStore{observations: make(map[string]runtimedelivery.ContinuationObservation)}
 	coordinator, err := New(
-		&coordinatorTestStore{},
+		store,
 		authority,
 		owner,
 		&coordinatorTestDispatcher{dispatched: make(chan struct{}, 1)},
@@ -520,6 +521,9 @@ func TestCoordinatorTerminalReleaseFencesUnclaimedAndCarrierOwnedWork(t *testing
 	if err := coordinator.Release("terminal-with-carrier"); err != nil {
 		t.Fatalf("release carrier-owned terminal continuation: %v", err)
 	}
+	if err := coordinator.Release("terminal-with-carrier"); err != nil {
+		t.Fatalf("repeat release before terminal carrier resolution: %v", err)
+	}
 	if state, ok := coordinatorOwnershipState(coordinator, "terminal-with-carrier"); !ok || state != ownershipTerminalCarrier {
 		t.Fatalf("terminal carrier ownership = %d, %v; want terminal carrier fence", state, ok)
 	}
@@ -548,6 +552,32 @@ func TestCoordinatorTerminalReleaseFencesUnclaimedAndCarrierOwnedWork(t *testing
 	}
 	if _, ok := coordinatorOwnershipState(coordinator, "terminal-during-consume"); ok {
 		t.Fatal("terminal consume retained a process-local owner")
+	}
+
+	if err := coordinator.observe("terminal-during-reconcile"); err != nil {
+		t.Fatal(err)
+	}
+	reconciledCarrier, err := coordinator.Acquire("terminal-during-reconcile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.observations["terminal-during-reconcile"] = runtimedelivery.ContinuationObservation{
+		DeliveryID:  "terminal-during-reconcile",
+		Disposition: runtimedelivery.ClaimTerminal,
+	}
+	for range 2 {
+		if _, _, err := coordinator.reconcileHeld(context.Background()); err != nil {
+			t.Fatalf("reconcile repeated terminal carrier observation: %v", err)
+		}
+	}
+	if state, ok := coordinatorOwnershipState(coordinator, "terminal-during-reconcile"); !ok || state != ownershipTerminalCarrier {
+		t.Fatalf("repeated reconciliation ownership = %d, %v; want terminal carrier fence", state, ok)
+	}
+	if resolution, err := reconciledCarrier.Resolve(context.Background(), worklifetime.DeliveryContinuationReturn); err != nil || resolution != worklifetime.DeliveryContinuationTerminal {
+		t.Fatalf("reconciled terminal carrier resolution = %d, %v; want terminal", resolution, err)
+	}
+	if _, ok := coordinatorOwnershipState(coordinator, "terminal-during-reconcile"); ok {
+		t.Fatal("reconciled terminal carrier retained a process-local owner")
 	}
 }
 
