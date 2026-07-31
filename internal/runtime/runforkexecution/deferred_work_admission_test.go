@@ -133,7 +133,7 @@ func TestSelectedContractHandlerDynamicFlowCreationCapabilityMatrix(t *testing.T
 
 func TestSelectedContractFlowInputResolutionDynamicFlowOwnerMatrix(t *testing.T) {
 	for _, tc := range []struct {
-		mode string
+		mode runtimecontracts.FlowInputResolutionMode
 		want bool
 	}{
 		{mode: runtimecontracts.FlowInputResolutionModeCreate, want: true},
@@ -142,10 +142,10 @@ func TestSelectedContractFlowInputResolutionDynamicFlowOwnerMatrix(t *testing.T)
 		{mode: runtimecontracts.FlowInputResolutionModeFanIn, want: false},
 		{mode: runtimecontracts.FlowInputResolutionModeFanOut, want: false},
 		{mode: runtimecontracts.FlowInputResolutionModeReply, want: false},
-		{mode: "", want: false},
-		{mode: "future-mode", want: true},
+		{mode: runtimecontracts.FlowInputResolutionModeNone, want: false},
+		{mode: runtimecontracts.FlowInputResolutionMode(255), want: true},
 	} {
-		t.Run(strings.ReplaceAll(tc.mode, "-", "_"), func(t *testing.T) {
+		t.Run(strings.ReplaceAll(tc.mode.String(), "-", "_"), func(t *testing.T) {
 			if got := selectedContractFlowInputResolutionRequiresDynamicFlowOwner(tc.mode); got != tc.want {
 				t.Fatalf("selectedContractFlowInputResolutionRequiresDynamicFlowOwner(%q) = %t, want %t", tc.mode, got, tc.want)
 			}

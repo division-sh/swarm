@@ -86,7 +86,7 @@ func checkRedundantInTopologySelectEntity(c *checkerContext) []Finding {
 				findings = append(findings, Finding{
 					CheckID:  "redundant_in_topology_select_entity",
 					Severity: SeverityHardInvalidity,
-					Message:  fmt.Sprintf("flow %s handler %s on node %s declares %s for normal in-topology composition; use receiver instance.by plus parent connect routing instead", flowID, eventType, nodeID, label),
+					Message:  fmt.Sprintf("flow %s handler %s on node %s declares %s for normal in-topology composition; use scalar receiver instance, input resolution.mode, a same-named carry, and parent connect routing instead", flowID, eventType, nodeID, label),
 					Location: flowID,
 				})
 			}

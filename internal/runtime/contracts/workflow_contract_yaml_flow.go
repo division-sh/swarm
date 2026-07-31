@@ -76,12 +76,6 @@ var ruleFieldOptions = map[string]struct{}{
 	"fan_out":           {},
 }
 
-var templateInstanceFieldOptions = map[string]struct{}{
-	"by":          {},
-	"on_missing":  {},
-	"on_conflict": {},
-}
-
 func (p *FlowInputPins) UnmarshalYAML(node *yaml.Node) error {
 	if p == nil {
 		return nil
@@ -136,68 +130,22 @@ func (p *FlowOutputPins) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-func (i *FlowTemplateInstanceDeclaration) UnmarshalYAML(node *yaml.Node) error {
+func (i *TemplateInstanceField) UnmarshalYAML(node *yaml.Node) error {
 	if i == nil {
 		return nil
 	}
 	if node == nil || node.Kind == 0 {
 		return nil
 	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("template instance must be a mapping")
+	if node.Kind != yaml.ScalarNode || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
+		return fmt.Errorf("retired template instance form; use `instance: <field>` with one non-empty scalar identity field")
 	}
-	out := FlowTemplateInstanceDeclaration{Declared: true}
-	for idx := 0; idx+1 < len(node.Content); idx += 2 {
-		key := strings.TrimSpace(node.Content[idx].Value)
-		value := node.Content[idx+1]
-		switch key {
-		case "":
-			continue
-		case "by":
-			by, err := decodeTemplateInstanceByNode(value)
-			if err != nil {
-				return err
-			}
-			out.By = by
-		case "on_missing":
-			out.OnMissingDeclared = true
-			if err := value.Decode(&out.OnMissing); err != nil {
-				return fmt.Errorf("template instance on_missing: %w", err)
-			}
-			out.OnMissing = strings.TrimSpace(out.OnMissing)
-		case "on_conflict":
-			out.OnConflictDeclared = true
-			if err := value.Decode(&out.OnConflict); err != nil {
-				return fmt.Errorf("template instance on_conflict: %w", err)
-			}
-			out.OnConflict = strings.TrimSpace(out.OnConflict)
-		default:
-			return NewUndefinedFieldDiagnostic("template instance", key, templateInstanceFieldOptions)
-		}
+	field, err := ParseTemplateInstanceField(node.Value)
+	if err != nil {
+		return err
 	}
-	*i = out
+	*i = field
 	return nil
-}
-
-func decodeTemplateInstanceByNode(node *yaml.Node) ([]string, error) {
-	if node == nil || node.Kind == 0 {
-		return nil, nil
-	}
-	switch node.Kind {
-	case yaml.ScalarNode:
-		return []string{strings.TrimSpace(node.Value)}, nil
-	case yaml.SequenceNode:
-		out := make([]string, 0, len(node.Content))
-		for _, item := range node.Content {
-			if item == nil || item.Kind != yaml.ScalarNode {
-				return nil, fmt.Errorf("template instance by entries must be strings")
-			}
-			out = append(out, strings.TrimSpace(item.Value))
-		}
-		return out, nil
-	default:
-		return nil, fmt.Errorf("template instance by must be a string or sequence")
-	}
 }
 
 func decodeFlowInputPinEventsNode(node *yaml.Node) ([]string, []FlowInputEventPin, error) {
@@ -281,14 +229,6 @@ var inputEventPinResolutionFieldOptions = map[string]struct{}{
 	"correlation_key": {},
 }
 
-var inputEventPinAddressFieldOptions = map[string]struct{}{
-	"by":          {},
-	"source":      {},
-	"target":      {},
-	"cardinality": {},
-	"mode":        {},
-}
-
 var computeFieldOptions = map[string]struct{}{
 	"operation":   {},
 	"tiers":       {},
@@ -332,11 +272,7 @@ func decodeFlowInputPinEventNode(node *yaml.Node) (FlowInputEventPin, error) {
 				return FlowInputEventPin{}, fmt.Errorf("input event pin source must be external or harness")
 			}
 		case "address":
-			var address FlowInputPinAddress
-			if err := value.Decode(&address); err != nil {
-				return FlowInputEventPin{}, fmt.Errorf("input event pin address: %w", err)
-			}
-			out.Address = &address
+			return FlowInputEventPin{}, fmt.Errorf("retired input pin address; declare `instance: <field>`, a same-named carry source, and `resolution.mode`")
 		case "resolution":
 			if err := value.Decode(&out.Resolution); err != nil {
 				return FlowInputEventPin{}, fmt.Errorf("input event pin resolution: %w", err)
@@ -526,9 +462,15 @@ func (r *FlowInputPinResolution) UnmarshalYAML(node *yaml.Node) error {
 		case "":
 			continue
 		case "mode":
-			if err := value.Decode(&out.Mode); err != nil {
+			var raw string
+			if err := value.Decode(&raw); err != nil {
 				return fmt.Errorf("resolution.mode: %w", err)
 			}
+			mode, err := ParseFlowInputResolutionMode(raw)
+			if err != nil {
+				return fmt.Errorf("resolution.mode: %w", err)
+			}
+			out.Mode = mode
 		case "instance_key":
 			return NewRetiredResolutionInstanceKeyDiagnostic()
 		case "aggregation":
@@ -562,52 +504,6 @@ func (r *FlowInputPinResolution) UnmarshalYAML(node *yaml.Node) error {
 		}
 	}
 	*r = out.normalized()
-	return nil
-}
-
-func (a *FlowInputPinAddress) UnmarshalYAML(node *yaml.Node) error {
-	if a == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 {
-		*a = FlowInputPinAddress{}
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("input event pin address must be a mapping")
-	}
-	var out FlowInputPinAddress
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		value := node.Content[i+1]
-		switch key {
-		case "":
-			continue
-		case "by":
-			if err := value.Decode(&out.By); err != nil {
-				return fmt.Errorf("address.by: %w", err)
-			}
-		case "source":
-			if err := value.Decode(&out.Source); err != nil {
-				return fmt.Errorf("address.source: %w", err)
-			}
-		case "target":
-			if err := value.Decode(&out.Target); err != nil {
-				return fmt.Errorf("address.target: %w", err)
-			}
-		case "cardinality":
-			if err := value.Decode(&out.Cardinality); err != nil {
-				return fmt.Errorf("address.cardinality: %w", err)
-			}
-		case "mode":
-			if err := value.Decode(&out.Mode); err != nil {
-				return fmt.Errorf("address.mode: %w", err)
-			}
-		default:
-			return NewUndefinedFieldDiagnostic("input event pin address", key, inputEventPinAddressFieldOptions)
-		}
-	}
-	*a = out.normalized()
 	return nil
 }
 

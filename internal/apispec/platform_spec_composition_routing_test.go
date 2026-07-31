@@ -13,7 +13,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
 	composition := mustYAMLPath(t, root, "flow_model", "flow_package", "composition_routing")
 
-	assertScalarValue(t, mustMappingValue(t, composition, "status"), "source_authority_promoted_runtime_migration_pending")
+	assertScalarValue(t, mustMappingValue(t, composition, "status"), "scalar_receiver_identity_authoritative")
 	assertScalarValue(t, mustMappingValue(t, composition, "promoted_by"), "#1467")
 	assertScalarValue(t, mustMappingValue(t, composition, "parent_decision"), "#1466")
 	assertScalarValue(t, mustMappingValue(t, composition, "owner"), "platform-spec.yaml#flow_model.flow_package.composition_routing")
@@ -24,10 +24,12 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	outputPin := mustMappingValue(t, authored, "output_event_pin")
 	assertScalarContains(t, mustMappingValue(t, outputPin, "canonical_form"), "{name, event, key, carries}")
 	assertScalarContains(t, mustMappingValue(t, outputPin, "canonical_form"), "MUST include `key`")
-	assertScalarContains(t, mustMappingValue(t, outputPin, "scalar_form"), "fails closed")
-	addressed := mustMappingValue(t, authored, "addressed_input_pin")
-	assertScalarContains(t, mustMappingValue(t, addressed, "canonical_form"), "{name, event, source, address}")
-	assertScalarContains(t, mustYAMLPath(t, addressed, "address_fields", "cardinality"), "one and many")
+	assertScalarContains(t, mustMappingValue(t, outputPin, "scalar_form"), "never inferred")
+	resolved := mustMappingValue(t, authored, "resolved_input_pin")
+	assertScalarContains(t, mustMappingValue(t, resolved, "canonical_form"), "{name, event, source, resolution, carries}")
+	assertScalarContains(t, mustYAMLPath(t, resolved, "instance_fields", "identity"), "instance: <field>")
+	assertScalarContains(t, mustYAMLPath(t, resolved, "instance_fields", "source"), "typed source")
+	assertScalarContains(t, mustYAMLPath(t, resolved, "instance_fields", "mode"), "exhaustive typed value")
 
 	connect := mustMappingValue(t, authored, "parent_connect")
 	assertScalarValue(t, mustMappingValue(t, connect, "location"), "parent package.yaml connect")
@@ -39,12 +41,14 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	}
 	assertScalarContains(t, mustYAMLPath(t, connect, "retired_fields", "delivery"), "Retired on presence")
 	assertScalarContains(t, mustYAMLPath(t, connect, "retired_fields", "reply"), "resolution")
+	assertScalarContains(t, mustYAMLPath(t, connect, "retired_fields", "map"), "Retired on presence")
+	assertScalarContains(t, mustYAMLPath(t, connect, "retired_fields", "using"), "Retired on presence")
 
 	ownership := mustMappingValue(t, composition, "ownership_split")
 	assertScalarContains(t, mustMappingValue(t, ownership, "parent_connect"), "owns only the directed inter-flow edge")
 	assertScalarContains(t, mustMappingValue(t, ownership, "receiver_input_resolution"), "cardinality")
-	assertScalarContains(t, mustMappingValue(t, ownership, "output_pins"), "key/carries evidence")
-	assertScalarContains(t, mustMappingValue(t, ownership, "input_pins"), "receiver interface")
+	assertScalarContains(t, mustMappingValue(t, ownership, "output_pins"), "never receiver identity")
+	assertScalarContains(t, mustMappingValue(t, ownership, "input_pins"), "typed identity source")
 	assertScalarContains(t, mustMappingValue(t, ownership, "producer_emit_target"), "exceptional dynamic routing")
 
 	verify := mustMappingValue(t, composition, "analyzer_verify_requirements")
@@ -54,7 +58,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 		"receiver_flow_exists",
 		"receiver_input_pin_exists",
 		"event_alias_or_adapter_valid",
-		"output_carries_address_key",
+		"output_carries_instance_field",
 		"receiver_route_key_present",
 		"key_types_compatible",
 		"receiver_resolution_valid",
@@ -70,9 +74,9 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, lowering, "owner"), "platform-spec.yaml#flow_model.flow_package.composition_routing.route_plan_lowering")
 	for _, want := range []string{
 		"parent package.yaml connect entries",
-		"producer output pin event identity and verified key/carries evidence, including explicit package-root `.pin_name` output endpoints",
-		"receiver template instance.by / on_missing / on_conflict contracts from WorkflowContractBundle.ResolveFlowTemplateInstance",
-		"receiver addressed input pin rules",
+		"producer output pin event identity and verified interface evidence, including explicit package-root `.pin_name` output endpoints",
+		"receiver scalar template instance identity from WorkflowContractBundle.ResolveFlowTemplateInstance",
+		"receiver input same-named typed carry source and resolution mode",
 		"import-boundary pin alias bindings",
 	} {
 		if !sequenceContainsScalar(mustMappingValue(t, lowering, "consumes"), want) {
@@ -80,7 +84,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"concrete target or target_set routes derived from receiver-owned address/resolution facts",
+		"concrete target routes derived from receiver-owned scalar instance/source/mode facts",
 		"typed reply resolution derived from receiver input resolution and paired connect edges",
 	} {
 		if !sequenceContainsScalar(mustMappingValue(t, lowering, "produces"), want) {
@@ -102,11 +106,10 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, slice1545, "canonical_code_owner"), "ConnectRoutePlan.ResolutionKind")
 	assertScalarContains(t, mustMappingValue(t, slice1545, "canonical_code_owner"), "ConnectRoutePlan.InstanceKey")
 	assertScalarContains(t, mustMappingValue(t, slice1545, "rule"), "ResolutionKind: instance_key")
-	assertScalarContains(t, mustMappingValue(t, slice1545, "rule"), "ResolutionKind: address")
 	assertScalarContains(t, mustMappingValue(t, slice1545, "rule"), "WorkflowContractBundle.ResolveFlowTemplateInstance")
-	assertScalarContains(t, mustMappingValue(t, slice1545, "rule"), "TemplateInstanceContract.CanonicalKeyMaterial")
-	if !sequenceContainsScalar(mustMappingValue(t, slice1545, "non_authoritative_for_this_slice"), "receiver input-pin address for the addressless normal instance-key path") {
-		t.Fatal("implementation_slice_1545 must classify receiver input-pin address as non-authoritative only for normal instance-key routing")
+	assertScalarContains(t, mustMappingValue(t, slice1545, "rule"), "opaque identity field")
+	if !sequenceContainsScalar(mustMappingValue(t, slice1545, "non_authoritative_for_this_slice"), "receiver input-pin address") {
+		t.Fatal("implementation_slice_1545 must reject receiver input-pin address authority")
 	}
 
 	retirement := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1827_connect_delivery_reply_retirement")
@@ -116,22 +119,10 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustYAMLPath(t, retirement, "migration", "delivery_reply_and_reply_map"), "resolution.mode: reply")
 
 	slice1546 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1546")
-	assertScalarValue(t, mustMappingValue(t, slice1546, "status"), "merge_bearing_runtime_behavior")
-	assertScalarContains(t, mustMappingValue(t, slice1546, "canonical_code_owner"), "ConnectRoutePlan.InstanceKey.Mappings")
-	assertScalarContains(t, mustMappingValue(t, slice1546, "canonical_code_owner"), "connectRoutePlanResolver")
-	assertScalarContains(t, mustMappingValue(t, slice1546, "rule"), "connect.using.instance.source")
-	assertScalarContains(t, mustMappingValue(t, slice1546, "rule"), "connect.using.instance.target")
-	assertScalarContains(t, mustMappingValue(t, slice1546, "rule"), "Same-name key/carries")
-	assertScalarContains(t, mustMappingValue(t, slice1546, "rule"), "`connect.map` remains the explicit addressed-input map concept")
-	if !sequenceContainsScalar(mustMappingValue(t, slice1546, "consumes"), "FlowPackageConnect.Using.Instance source/target adapter evidence") {
-		t.Fatal("implementation_slice_1546 must consume parsed using.instance adapter evidence")
-	}
-	if !sequenceContainsScalar(mustMappingValue(t, slice1546, "produces"), "ConnectRoutePlan.InstanceKey.Mappings for scalar and composite renamed keys") {
-		t.Fatal("implementation_slice_1546 must produce explicit instance-key mappings")
-	}
-	if !sequenceContainsScalar(mustMappingValue(t, slice1546, "non_authoritative_for_this_slice"), "connect.map as addressless template instance-key adapter authority") {
-		t.Fatal("implementation_slice_1546 must mark connect.map non-authoritative for addressless template instance-key adapters")
-	}
+	assertScalarValue(t, mustMappingValue(t, slice1546, "status"), "retired_by_2087")
+	assertScalarContains(t, mustMappingValue(t, slice1546, "canonical_code_owner"), "ConnectRoutePlan.InstanceKey.Source")
+	assertScalarContains(t, mustMappingValue(t, slice1546, "rule"), "receiver input carry")
+	assertScalarContains(t, mustMappingValue(t, slice1546, "rule"), "ConnectRoutePlan.InstanceKey.Mappings are removed")
 
 	slice1475 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1475")
 	assertScalarValue(t, mustMappingValue(t, slice1475, "status"), "merge_bearing_runtime_behavior")
@@ -155,16 +146,14 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 
 	entityContracts := mustYAMLPath(t, root, "entity_contracts")
 	assertScalarContains(t, mustYAMLPath(t, entityContracts, "routing_indexes", "rule"), "indexed: true")
-	assertScalarContains(t, mustYAMLPath(t, entityContracts, "routing_indexes", "rule"), "descriptor/index materialization")
-	assertScalarContains(t, mustYAMLPath(t, entityContracts, "routing_indexes", "rule"), "top-level")
-	assertScalarContains(t, mustYAMLPath(t, entityContracts, "routing_indexes", "rule"), "Nested entity paths")
+	assertScalarContains(t, mustYAMLPath(t, entityContracts, "routing_indexes", "rule"), "not composition-routing selectors")
+	assertScalarContains(t, mustYAMLPath(t, entityContracts, "routing_indexes", "rule"), "scalar instance field")
 
 	slice1479 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1479")
-	assertScalarValue(t, mustMappingValue(t, slice1479, "status"), "merge_bearing_runtime_behavior")
-	assertScalarContains(t, mustMappingValue(t, slice1479, "canonical_code_owner"), "MaterializeConnectRoutePlan")
+	assertScalarValue(t, mustMappingValue(t, slice1479, "status"), "retired_by_2087")
+	assertScalarContains(t, mustMappingValue(t, slice1479, "canonical_code_owner"), "ConnectRoutePlan.InstanceKey")
 	assertScalarContains(t, mustMappingValue(t, slice1479, "rule"), "indexed: true")
-	assertScalarContains(t, mustMappingValue(t, slice1479, "rule"), "nested")
-	assertScalarContains(t, mustMappingValue(t, slice1479, "rule"), "zero executable routes")
+	assertScalarContains(t, mustMappingValue(t, slice1479, "rule"), "invalid")
 }
 
 func TestPlatformSpecReplyRuntimeStatusDoesNotContradictHistoricalSlice(t *testing.T) {
@@ -186,15 +175,14 @@ func TestPlatformSpecInstanceIdentityAuthoringSourceAuthority(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
 	slice := mustYAMLPath(t, root, "flow_model", "flow_package", "composition_routing", "route_plan_lowering", "implementation_slice_1835")
 	owner := mustMappingValue(t, slice, "instance_identity_owner_2021")
-	assertScalarValue(t, mustMappingValue(t, owner, "status"), "implemented_single_authored_identity_owner")
-	assertScalarValue(t, mustMappingValue(t, owner, "authored_identity_owner"), "flow instance.by")
-	assertScalarValue(t, mustMappingValue(t, owner, "authored_source_owner"), "receiver input carries.<instance.by>.from")
+	assertScalarValue(t, mustMappingValue(t, owner, "status"), "scalar_typed_owner_finalized_by_2087")
+	assertScalarValue(t, mustMappingValue(t, owner, "authored_identity_owner"), "flow instance: <field>")
+	assertScalarValue(t, mustMappingValue(t, owner, "authored_source_owner"), "receiver input carries.<instance>.from")
 	assertScalarValue(t, mustMappingValue(t, owner, "authored_behavior_owner"), "receiver input resolution.mode")
-	assertScalarContains(t, mustMappingValue(t, owner, "effective_owner"), "mutually exclusive")
-	assertScalarContains(t, mustMappingValue(t, owner, "effective_owner"), "hard-invalid")
+	assertScalarContains(t, mustMappingValue(t, owner, "effective_owner"), "opaque validated Field")
+	assertScalarContains(t, mustMappingValue(t, owner, "effective_owner"), "No second representation")
 	assertScalarContains(t, mustMappingValue(t, owner, "retirement"), "hard-invalid")
-	assertScalarContains(t, mustMappingValue(t, owner, "retirement"), "migrate-resolution-instance-key")
-	assertScalarContains(t, mustMappingValue(t, owner, "retirement"), "production loader and verifier")
+	assertScalarContains(t, mustMappingValue(t, owner, "retirement"), "No warning, codemod")
 
 	create := mustYAMLPath(t, slice, "modes", "create")
 	assertScalarContains(t, mustMappingValue(t, create, "contract"), "generated.uuid")
@@ -202,22 +190,23 @@ func TestPlatformSpecInstanceIdentityAuthoringSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustYAMLPath(t, create, "sources", "generated.uuid"), "fresh event identity")
 	assertScalarContains(t, mustYAMLPath(t, create, "sources", "payload.field"), "immutable journal payload")
 	assertScalarContains(t, mustMappingValue(t, create, "delivery_projection"), "persisted projection")
+	assertScalarContains(t, mustMappingValue(t, create, "contract"), "hard conflict")
 
 	selectMode := mustYAMLPath(t, slice, "modes", "select")
 	selectOrCreate := mustYAMLPath(t, slice, "modes", "select-or-create")
 	assertScalarContains(t, mustMappingValue(t, selectMode, "contract"), "carry whose name equals")
 	assertScalarContains(t, mustMappingValue(t, selectMode, "contract"), "typed payload")
-	assertScalarContains(t, mustMappingValue(t, selectOrCreate, "contract"), "sole `instance.by`")
+	assertScalarContains(t, mustMappingValue(t, selectOrCreate, "contract"), "scalar `instance`")
 	if strings.Contains(mustMappingValue(t, slice, "authoring_shape").Value, "instance_key") {
 		t.Fatal("canonical instance identity authoring shape retains retired resolution.instance_key")
 	}
 
 	proofs := mustMappingValue(t, slice, "proof_obligations")
 	for _, want := range []string{
-		"route-plan lowering records create mode, the sole `instance.by` field, typed `Source` derived from the same-named carry, create/reuse lifecycle policy, and does not require producer output key/carries",
-		"downstream receiver routes can render the receiver-targeted identity projection derived from typed `Source` as `payload.<instance.by>`",
-		"route-plan lowering records select mode, the sole `instance.by` field and typed payload `Source` derived from the same-named carry, runtime descriptor resolution, and reject/reject lifecycle policy",
-		"route-plan lowering records select-or-create mode, the sole `instance.by` field and typed payload `Source` derived from the same-named carry, runtime descriptor resolution, and create/reuse lifecycle policy",
+		"route-plan lowering records typed create mode, the scalar instance Field, and typed Source derived from the same-named carry, with no policy facts or producer output-key dependency",
+		"downstream receiver routes can render the receiver-targeted identity projection derived from typed Source as payload.<instance>",
+		"route-plan lowering records typed select mode, scalar instance Field, and typed payload Source derived from the same-named carry, with no policy facts",
+		"route-plan lowering records typed select-or-create mode, scalar instance Field, and typed payload Source derived from the same-named carry, with no policy facts",
 	} {
 		if !sequenceContainsScalar(proofs, want) {
 			t.Fatalf("instance identity proof obligations missing canonical typed-source proof %q", want)

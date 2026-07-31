@@ -134,17 +134,14 @@ func TestMergeAgentContractsRejectsDuplicateScopedAgentID(t *testing.T) {
 	}
 }
 
-func TestWorkflowContractBundleResolveFlowTemplateInstance_PreservesOrderedCompositeKey(t *testing.T) {
+func TestWorkflowContractBundleResolveFlowTemplateInstance_UsesScalarIdentity(t *testing.T) {
+	field := mustTemplateInstanceField(t, "scope_id")
 	bundle := &WorkflowContractBundle{
 		FlowSchemas: map[string]FlowSchemaDocument{
 			"spec_repo": {
-				Name: "spec_repo",
-				Mode: "template",
-				Instance: FlowTemplateInstanceDeclaration{
-					By:         []string{"scope", "scope_id", "artifact_type"},
-					OnMissing:  "create",
-					OnConflict: "reject",
-				},
+				Name:     "spec_repo",
+				Mode:     "template",
+				Instance: field,
 			},
 		},
 		flowEntities: map[string]EntityContractsDocument{
@@ -164,104 +161,24 @@ func TestWorkflowContractBundleResolveFlowTemplateInstance_PreservesOrderedCompo
 	if err != nil {
 		t.Fatalf("ResolveFlowTemplateInstance: %v", err)
 	}
-	if got, want := strings.Join(resolved.By, ","), "scope,scope_id,artifact_type"; got != want {
-		t.Fatalf("resolved By = %q, want %q", got, want)
+	if got, want := resolved.Field.String(), "scope_id"; got != want {
+		t.Fatalf("resolved Field = %q, want %q", got, want)
 	}
 	key, err := resolved.CanonicalKeyMaterial(map[string]any{
-		"artifact_type": "contract",
-		"scope_id":      "vertical-1",
-		"scope":         "project",
+		"scope_id": "vertical-1",
 	})
 	if err != nil {
 		t.Fatalf("CanonicalKeyMaterial: %v", err)
 	}
-	if got, want := keyMaterialString(key), "scope=project,scope_id=vertical-1,artifact_type=contract"; got != want {
+	if got, want := keyMaterialString(key), "scope_id=vertical-1"; got != want {
 		t.Fatalf("CanonicalKeyMaterial = %q, want %q", got, want)
 	}
 }
 
-func TestWorkflowContractBundleResolveFlowTemplateInstance_DefaultsOmittedPolicies(t *testing.T) {
-	bundle := &WorkflowContractBundle{
-		FlowSchemas: map[string]FlowSchemaDocument{
-			"spec_repo": {
-				Name: "spec_repo",
-				Mode: "template",
-				Instance: FlowTemplateInstanceDeclaration{
-					Declared: true,
-					By:       []string{"scope_id"},
-				},
-			},
-		},
-		flowEntities: map[string]EntityContractsDocument{
-			"spec_repo": {
-				"artifact_repo": {
-					Fields: map[string]EntityFieldDecl{
-						"scope_id": {Type: "uuid"},
-					},
-				},
-			},
-		},
-	}
-
-	resolved, err := bundle.ResolveFlowTemplateInstance("spec_repo")
-	if err != nil {
-		t.Fatalf("ResolveFlowTemplateInstance: %v", err)
-	}
-	if resolved.OnMissing != "create" || resolved.OnConflict != "reject" {
-		t.Fatalf("resolved policies = %s/%s, want create/reject", resolved.OnMissing, resolved.OnConflict)
-	}
-}
-
-func TestWorkflowContractBundleResolveFlowTemplateInstance_PreservesExplicitPolicies(t *testing.T) {
-	tests := []struct {
-		name       string
-		onMissing  string
-		onConflict string
-	}{
-		{name: "create reject", onMissing: "create", onConflict: "reject"},
-		{name: "reject reject", onMissing: "reject", onConflict: "reject"},
-		{name: "create reuse", onMissing: "create", onConflict: "reuse"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			bundle := &WorkflowContractBundle{
-				FlowSchemas: map[string]FlowSchemaDocument{
-					"spec_repo": {
-						Name: "spec_repo",
-						Mode: "template",
-						Instance: FlowTemplateInstanceDeclaration{
-							Declared:           true,
-							By:                 []string{"scope_id"},
-							OnMissing:          tc.onMissing,
-							OnMissingDeclared:  true,
-							OnConflict:         tc.onConflict,
-							OnConflictDeclared: true,
-						},
-					},
-				},
-				flowEntities: map[string]EntityContractsDocument{
-					"spec_repo": {
-						"artifact_repo": {
-							Fields: map[string]EntityFieldDecl{
-								"scope_id": {Type: "uuid"},
-							},
-						},
-					},
-				},
-			}
-
-			resolved, err := bundle.ResolveFlowTemplateInstance("spec_repo")
-			if err != nil {
-				t.Fatalf("ResolveFlowTemplateInstance: %v", err)
-			}
-			if resolved.OnMissing != tc.onMissing || resolved.OnConflict != tc.onConflict {
-				t.Fatalf("resolved policies = %s/%s, want %s/%s", resolved.OnMissing, resolved.OnConflict, tc.onMissing, tc.onConflict)
-			}
-		})
-	}
-}
-
 func TestWorkflowContractBundleResolveFlowTemplateInstance_RejectsInvalidDeclarations(t *testing.T) {
+	missingField := mustTemplateInstanceField(t, "account_id")
+	nonScalarField := mustTemplateInstanceField(t, "tags")
+	staticField := mustTemplateInstanceField(t, "tenant_id")
 	tests := []struct {
 		name     string
 		schema   FlowSchemaDocument
@@ -269,68 +186,19 @@ func TestWorkflowContractBundleResolveFlowTemplateInstance_RejectsInvalidDeclara
 		wantErr  string
 	}{
 		{
-			name: "duplicate key",
-			schema: FlowSchemaDocument{
-				Mode: "template",
-				Instance: FlowTemplateInstanceDeclaration{
-					By:         []string{"tenant_id", "tenant_id"},
-					OnMissing:  "create",
-					OnConflict: "reject",
-				},
-			},
-			entities: EntityContractsDocument{"tenant": {Fields: map[string]EntityFieldDecl{"tenant_id": {Type: "text"}}}},
-			wantErr:  "duplicated",
-		},
-		{
 			name: "missing field",
 			schema: FlowSchemaDocument{
-				Mode: "template",
-				Instance: FlowTemplateInstanceDeclaration{
-					By:         []string{"account_id"},
-					OnMissing:  "create",
-					OnConflict: "reject",
-				},
+				Mode:     "template",
+				Instance: missingField,
 			},
 			entities: EntityContractsDocument{"tenant": {Fields: map[string]EntityFieldDecl{"tenant_id": {Type: "text"}}}},
 			wantErr:  "not declared",
 		},
 		{
-			name: "nested field",
-			schema: FlowSchemaDocument{
-				Mode: "template",
-				Instance: FlowTemplateInstanceDeclaration{
-					By:         []string{"tenant.id"},
-					OnMissing:  "create",
-					OnConflict: "reject",
-				},
-			},
-			entities: EntityContractsDocument{"tenant": {Fields: map[string]EntityFieldDecl{"tenant": {Type: "Tenant"}}}},
-			wantErr:  "top-level",
-		},
-		{
-			name: "explicit empty policy",
-			schema: FlowSchemaDocument{
-				Mode: "template",
-				Instance: FlowTemplateInstanceDeclaration{
-					Declared:           true,
-					By:                 []string{"tenant_id"},
-					OnMissingDeclared:  true,
-					OnConflict:         "reject",
-					OnConflictDeclared: true,
-				},
-			},
-			entities: EntityContractsDocument{"tenant": {Fields: map[string]EntityFieldDecl{"tenant_id": {Type: "text"}}}},
-			wantErr:  "on_missing",
-		},
-		{
 			name: "non scalar key field",
 			schema: FlowSchemaDocument{
-				Mode: "template",
-				Instance: FlowTemplateInstanceDeclaration{
-					By:         []string{"tags"},
-					OnMissing:  "create",
-					OnConflict: "reject",
-				},
+				Mode:     "template",
+				Instance: nonScalarField,
 			},
 			entities: EntityContractsDocument{"tenant": {Fields: map[string]EntityFieldDecl{"tags": {Type: "[text]"}}}},
 			wantErr:  "scalar or enum",
@@ -338,12 +206,8 @@ func TestWorkflowContractBundleResolveFlowTemplateInstance_RejectsInvalidDeclara
 		{
 			name: "non template",
 			schema: FlowSchemaDocument{
-				Mode: "static",
-				Instance: FlowTemplateInstanceDeclaration{
-					By:         []string{"tenant_id"},
-					OnMissing:  "create",
-					OnConflict: "reject",
-				},
+				Mode:     "static",
+				Instance: staticField,
 			},
 			entities: EntityContractsDocument{"tenant": {Fields: map[string]EntityFieldDecl{"tenant_id": {Type: "text"}}}},
 			wantErr:  "not mode: template",
@@ -361,6 +225,14 @@ func TestWorkflowContractBundleResolveFlowTemplateInstance_RejectsInvalidDeclara
 				t.Fatalf("ResolveFlowTemplateInstance error = %v, want %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestParseTemplateInstanceFieldRejectsNestedAndEmptyIdentity(t *testing.T) {
+	for _, raw := range []string{"", "tenant.id"} {
+		if _, err := ParseTemplateInstanceField(raw); err == nil {
+			t.Fatalf("ParseTemplateInstanceField(%q) error = nil", raw)
+		}
 	}
 }
 
@@ -422,6 +294,7 @@ func TestWorkflowContractBundleResolveFlowSingletonCoordinator_UsesPrimaryEntity
 }
 
 func TestWorkflowContractBundleResolveFlowSingletonCoordinator_RejectsInvalidDeclarations(t *testing.T) {
+	instanceField := mustTemplateInstanceField(t, "vertical_id")
 	tests := []struct {
 		name     string
 		schema   FlowSchemaDocument
@@ -439,12 +312,8 @@ func TestWorkflowContractBundleResolveFlowSingletonCoordinator_RejectsInvalidDec
 		{
 			name: "template instance mix",
 			schema: FlowSchemaDocument{
-				Mode: FlowModeSingleton,
-				Instance: FlowTemplateInstanceDeclaration{
-					By:         []string{"vertical_id"},
-					OnMissing:  "create",
-					OnConflict: "reject",
-				},
+				Mode:     FlowModeSingleton,
+				Instance: instanceField,
 			},
 			entities: EntityContractsDocument{"coordinator_state": {Fields: map[string]EntityFieldDecl{"verticals": {Type: "map[text]VerticalState"}}}},
 			wantErr:  "must not declare template instance",
@@ -512,9 +381,18 @@ func TestWorkflowContractBundleResolveFlowSingletonCoordinator_RejectsInvalidDec
 func keyMaterialString(values []TemplateInstanceKeyValue) string {
 	parts := make([]string, 0, len(values))
 	for _, value := range values {
-		parts = append(parts, value.Field+"="+value.Value)
+		parts = append(parts, value.Field.String()+"="+value.Value)
 	}
 	return strings.Join(parts, ",")
+}
+
+func mustTemplateInstanceField(t testing.TB, raw string) TemplateInstanceField {
+	t.Helper()
+	field, err := ParseTemplateInstanceField(raw)
+	if err != nil {
+		t.Fatalf("ParseTemplateInstanceField(%q): %v", raw, err)
+	}
+	return field
 }
 
 func TestLoadWorkflowContractBundle_RejectsLegacyPackageEntitySchema(t *testing.T) {

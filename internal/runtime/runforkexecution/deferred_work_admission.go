@@ -141,8 +141,8 @@ func selectedContractSourceCanCreateDynamicFlow(source semanticview.Source) bool
 	return false
 }
 
-func selectedContractFlowInputResolutionRequiresDynamicFlowOwner(mode string) bool {
-	switch strings.TrimSpace(mode) {
+func selectedContractFlowInputResolutionRequiresDynamicFlowOwner(mode runtimecontracts.FlowInputResolutionMode) bool {
+	switch mode {
 	case runtimecontracts.FlowInputResolutionModeCreate,
 		runtimecontracts.FlowInputResolutionModeSelectOrCreate:
 		return true
@@ -151,7 +151,7 @@ func selectedContractFlowInputResolutionRequiresDynamicFlowOwner(mode string) bo
 		runtimecontracts.FlowInputResolutionModeFanOut,
 		runtimecontracts.FlowInputResolutionModeReply:
 		return false
-	case "":
+	case runtimecontracts.FlowInputResolutionModeNone:
 		return false
 	default:
 		// Invalid or newly introduced modes cannot silently bypass the selected

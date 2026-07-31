@@ -56,7 +56,7 @@ func TestPayloadCarriesAreNotPersistedInDeliveryProjection(t *testing.T) {
 		InstanceKey: &runtimepinrouting.ConnectRoutePlanInstanceKey{Mode: runtimecontracts.FlowInputResolutionModeSelect},
 	}, TemplateInstanceLifecycleDecision{
 		Action:      templateInstanceLifecycleActionSelectedExisting,
-		KeyMaterial: []runtimecontracts.TemplateInstanceKeyValue{{Field: "account_id", Value: "acct-1"}},
+		KeyMaterial: []runtimecontracts.TemplateInstanceKeyValue{{Field: mustBusTemplateInstanceField(t, "account_id"), Value: "acct-1"}},
 	})
 	if err != nil {
 		t.Fatalf("syntheticDeliveryPayloadProjection: %v", err)

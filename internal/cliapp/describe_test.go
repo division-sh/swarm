@@ -246,12 +246,12 @@ func TestDescribeRoutesCarriesExistingDanglingEventDiagnostic(t *testing.T) {
 }
 
 func TestDescribeRoutesHumanRendersTypedConnectIssueWithExactSource(t *testing.T) {
-	contractsRoot := templateflowpilot.Write(t, templateflowpilot.Options{BadConnectMapping: true})
+	contractsRoot := canonicalrouting.CopyCompositionConnect(t, canonicalrouting.CompositionConnectMissingReceiverPin)
 	var humanOut, humanErr bytes.Buffer
 	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", "--contracts", contractsRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
 		t.Fatalf("describe routes code=%d stderr=%s", code, humanErr.String())
 	}
-	for _, want := range []string{"route issues:", "route_plan_instance_resolution_invalid", "package.yaml:"} {
+	for _, want := range []string{"route issues:", "receiver_input_pin_missing", "package.yaml:"} {
 		if !strings.Contains(humanOut.String(), want) {
 			t.Fatalf("human route issue missing %q:\n%s", want, humanOut.String())
 		}
@@ -312,7 +312,7 @@ func TestDescribeRoutesRendersDerivedInstanceIdentitySource(t *testing.T) {
 	if identity == nil {
 		t.Fatalf("topology edges = %#v, want derived create route", topology.Edges)
 	}
-	if strings.Join(identity.Fields, ",") != "validation_case_id" || identity.SourceKind != "generated_uuid" || identity.SourcePath != "generated.uuid" || identity.DerivedFrom == "" {
+	if identity.Field != "validation_case_id" || identity.SourceKind != "generated_uuid" || identity.SourcePath != "generated.uuid" || identity.DerivedFrom == "" {
 		t.Fatalf("derived identity readback = %#v", identity)
 	}
 
@@ -320,7 +320,7 @@ func TestDescribeRoutesRendersDerivedInstanceIdentitySource(t *testing.T) {
 	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", "--contracts", contractsRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
 		t.Fatalf("describe routes code=%d stderr=%s", code, humanErr.String())
 	}
-	for _, want := range []string{"key=validation_case_id", "source_kind=generated_uuid", "source=generated.uuid", "derived_from="} {
+	for _, want := range []string{"field=validation_case_id", "source_kind=generated_uuid", "source=generated.uuid", "derived_from="} {
 		if !strings.Contains(humanOut.String(), want) {
 			t.Fatalf("human routes missing %q:\n%s", want, humanOut.String())
 		}
@@ -405,8 +405,8 @@ func TestDescribeMissingContractsIsValidationExit(t *testing.T) {
 	}
 }
 
-func TestDescribeCommandRendersDefaultedTemplateInstancePolicies(t *testing.T) {
-	contractsRoot := writeDescribeDefaultedTemplatePolicyContracts(t)
+func TestDescribeCommandRendersScalarTemplateInstanceIdentity(t *testing.T) {
+	contractsRoot := writeDescribeScalarTemplateInstanceContracts(t)
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
 		"describe",
@@ -418,8 +418,8 @@ func TestDescribeCommandRendersDefaultedTemplateInstancePolicies(t *testing.T) {
 	if stderr.String() != "" {
 		t.Fatalf("describe stderr = %q, want empty", stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "instance: by=account_id on_missing=create on_conflict=reject") {
-		t.Fatalf("describe output missing defaulted policy readback:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), "instance: field=account_id") {
+		t.Fatalf("describe output missing scalar instance readback:\n%s", stdout.String())
 	}
 }
 
@@ -730,7 +730,7 @@ func reportContainsVerifyError(findings []verifyFindingOutput, checkID, message 
 	return false
 }
 
-func writeDescribeDefaultedTemplatePolicyContracts(t testing.TB) string {
+func writeDescribeScalarTemplateInstanceContracts(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	writeDescribeTestFile(t, filepath.Join(root, "package.yaml"), `
@@ -751,8 +751,7 @@ flows:
 	writeDescribeTestFile(t, filepath.Join(root, "flows", "scoring", "schema.yaml"), `
 name: scoring
 mode: template
-instance:
-  by: account_id
+instance: account_id
 pins:
   inputs:
     events: []

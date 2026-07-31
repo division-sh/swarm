@@ -17,7 +17,6 @@ const (
 	FanInWrongSingleton
 	FanInAccumulateDedupRedeclaration
 	FanInAccumulateWindowRedeclaration
-	FanInLegacyConnectMap
 	FanInEventIDDedup
 	FanInNonSingletonReceiver
 	FanInMissingReceiverHandler
@@ -53,8 +52,6 @@ func ApplyFanInNegativeMutation(t testing.TB, root string, mutation FanInNegativ
 		applyClosedReplacement(t, receiverNodes, "        from: payload\n", "        from: payload\n        dedup_by: payload.period_id\n")
 	case FanInAccumulateWindowRedeclaration:
 		applyClosedReplacement(t, receiverNodes, "        from: payload\n", "        from: payload\n        window: payload.operating_id\n")
-	case FanInLegacyConnectMap:
-		applyClosedReplacement(t, packageFile, "  - from: operating.operating_reported\n    to: portfolio.operating_reported\n", "  - from: operating.operating_reported\n    to: portfolio.operating_reported\n    map:\n      operating_id:\n        source: payload.operating_id\n        target: entity.operating_id\n")
 	case FanInEventIDDedup:
 		applyClosedReplacement(t, receiverSchema, "          dedup_by: payload.operating_id\n", "          dedup_by: event.id\n")
 	case FanInNonSingletonReceiver:

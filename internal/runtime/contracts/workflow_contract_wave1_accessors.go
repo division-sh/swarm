@@ -35,29 +35,19 @@ func (b *WorkflowContractBundle) ResolveFlowTemplateInstance(flowID string) (Tem
 		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s is not mode: template", flowID)
 	}
 	if schema.Instance.Empty() {
-		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s mode: template must declare instance.by", flowID)
+		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s mode: template must declare instance: <field>", flowID)
 	}
 	primary, err := b.ResolveFlowPrimaryEntity(flowID)
 	if err != nil {
-		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s primary entity required for instance.by: %w", flowID, err)
+		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s primary entity required for instance: %w", flowID, err)
 	}
-	by, err := validateTemplateInstanceBy(flowID, schema.Instance.By, primary)
-	if err != nil {
-		return TemplateInstanceContract{}, err
-	}
-	onMissing, err := validateTemplateInstancePolicy(flowID, "on_missing", schema.Instance.OnMissing, schema.Instance.OnMissingDeclared, "create", "create", "reject")
-	if err != nil {
-		return TemplateInstanceContract{}, err
-	}
-	onConflict, err := validateTemplateInstancePolicy(flowID, "on_conflict", schema.Instance.OnConflict, schema.Instance.OnConflictDeclared, "reject", "reject", "reuse")
+	field, err := validateTemplateInstanceField(flowID, schema.Instance, primary)
 	if err != nil {
 		return TemplateInstanceContract{}, err
 	}
 	return TemplateInstanceContract{
 		FlowID:        flowID,
-		By:            by,
-		OnMissing:     onMissing,
-		OnConflict:    onConflict,
+		Field:         field,
 		PrimaryEntity: primary,
 	}, nil
 }
@@ -241,36 +231,21 @@ func singletonCoordinatorListItemType(typeRef string) string {
 	}
 }
 
-func validateTemplateInstanceBy(flowID string, fields []string, primary PrimaryEntityContract) ([]string, error) {
+func validateTemplateInstanceField(flowID string, field TemplateInstanceField, primary PrimaryEntityContract) (TemplateInstanceField, error) {
 	flowID = strings.TrimSpace(flowID)
-	if len(fields) == 0 {
-		return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.by is required", defaultPrimaryEntityFlowLabel(flowID))
+	if field.Empty() {
+		return TemplateInstanceField{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance: <field> is required", defaultPrimaryEntityFlowLabel(flowID))
 	}
-	out := make([]string, 0, len(fields))
-	seen := map[string]struct{}{}
-	for _, rawField := range fields {
-		field := strings.TrimSpace(rawField)
-		switch {
-		case field == "":
-			return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.by contains an empty field", flowID)
-		case strings.Contains(field, "."):
-			return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.by field %q must be a top-level primary-entity field", flowID, field)
-		}
-		if _, ok := seen[field]; ok {
-			return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.by field %q is duplicated; composite keys must be unambiguous", flowID, field)
-		}
-		decl, ok := primary.Contract.Fields[field]
-		if !ok {
-			return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.by field %q is not declared on primary entity %s", flowID, field, primary.EntityType)
-		}
-		kind := templateInstanceFieldLeafKind(primary, decl.Type)
-		if kind != "scalar" && kind != "enum" {
-			return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.by field %q must resolve to a scalar or enum primary-entity field", flowID, field)
-		}
-		seen[field] = struct{}{}
-		out = append(out, field)
+	name := field.String()
+	decl, ok := primary.Contract.Fields[name]
+	if !ok {
+		return TemplateInstanceField{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance field %q is not declared on primary entity %s", flowID, name, primary.EntityType)
 	}
-	return out, nil
+	kind := templateInstanceFieldLeafKind(primary, decl.Type)
+	if kind != "scalar" && kind != "enum" {
+		return TemplateInstanceField{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance field %q must resolve to a scalar or enum primary-entity field", flowID, name)
+	}
+	return field, nil
 }
 
 func templateInstanceFieldLeafKind(primary PrimaryEntityContract, typeRef string) string {
@@ -361,22 +336,6 @@ func templateInstanceIsListType(typeRef string) bool {
 		strings.HasPrefix(typeRef, "[") && strings.HasSuffix(typeRef, "]") ||
 		strings.HasSuffix(typeRef, "[]") ||
 		strings.HasPrefix(typeRef, "[]")
-}
-
-func validateTemplateInstancePolicy(flowID, field, value string, declared bool, defaultValue string, allowed ...string) (string, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		if !declared {
-			return defaultValue, nil
-		}
-		return "", fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.%s is empty", defaultPrimaryEntityFlowLabel(flowID), field)
-	}
-	for _, option := range allowed {
-		if value == option {
-			return value, nil
-		}
-	}
-	return "", fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.%s value %q is unsupported; allowed values: %s", defaultPrimaryEntityFlowLabel(flowID), field, value, strings.Join(allowed, ", "))
 }
 
 func validateWave1ContractsLoadBoundary(bundle *WorkflowContractBundle) error {

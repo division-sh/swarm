@@ -28,7 +28,6 @@ type Options struct {
 	WrongSingleton           bool
 	AccumulateDedupMismatch  bool
 	AccumulateWindowMismatch bool
-	LegacyConnectMap         bool
 	EventIDDedup             bool
 	NonSingletonReceiver     bool
 	MissingReceiverHandler   bool
@@ -75,7 +74,6 @@ func Write(t testing.TB, opts Options) string {
 		{opts.WrongSingleton, canonicalrouting.FanInWrongSingleton},
 		{opts.AccumulateDedupMismatch, canonicalrouting.FanInAccumulateDedupRedeclaration},
 		{opts.AccumulateWindowMismatch, canonicalrouting.FanInAccumulateWindowRedeclaration},
-		{opts.LegacyConnectMap, canonicalrouting.FanInLegacyConnectMap},
 		{opts.EventIDDedup, canonicalrouting.FanInEventIDDedup},
 		{opts.NonSingletonReceiver, canonicalrouting.FanInNonSingletonReceiver},
 		{opts.MissingReceiverHandler, canonicalrouting.FanInMissingReceiverHandler},

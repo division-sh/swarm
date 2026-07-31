@@ -226,11 +226,9 @@ type PrimaryEntityView struct {
 }
 
 type TemplateInstanceView struct {
-	By            []string `json:"by"`
-	OnMissing     string   `json:"on_missing"`
-	OnConflict    string   `json:"on_conflict"`
-	PrimaryEntity string   `json:"primary_entity"`
-	SourceFile    string   `json:"source_file,omitempty"`
+	Field         string `json:"field"`
+	PrimaryEntity string `json:"primary_entity"`
+	SourceFile    string `json:"source_file,omitempty"`
 }
 
 type SingletonCoordinatorView struct {
@@ -246,19 +244,19 @@ type SingletonContainedFieldView struct {
 }
 
 type InputPinView struct {
-	Name          string               `json:"name"`
-	Event         string               `json:"event"`
-	ResolvedEvent string               `json:"resolved_event"`
-	Source        string               `json:"source,omitempty"`
-	Address       *InputPinAddressView `json:"address,omitempty"`
+	Name           string                       `json:"name"`
+	Event          string                       `json:"event"`
+	ResolvedEvent  string                       `json:"resolved_event"`
+	Source         string                       `json:"source,omitempty"`
+	ResolutionMode string                       `json:"resolution_mode,omitempty"`
+	Carries        map[string]InputPinCarryView `json:"carries,omitempty"`
 }
 
-type InputPinAddressView struct {
-	By          string `json:"by,omitempty"`
-	Source      string `json:"source,omitempty"`
-	Target      string `json:"target,omitempty"`
-	Cardinality string `json:"cardinality,omitempty"`
-	Mode        string `json:"mode,omitempty"`
+type InputPinCarryView struct {
+	From     string `json:"from"`
+	Type     string `json:"type,omitempty"`
+	Optional bool   `json:"optional,omitempty"`
+	Convert  string `json:"convert,omitempty"`
 }
 
 type OutputPinView struct {
@@ -465,9 +463,7 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 		if strings.TrimSpace(schema.Mode) == runtimecontracts.FlowModeTemplate || !schema.Instance.Empty() {
 			if instance, err := bundle.ResolveFlowTemplateInstance(flowID); err == nil {
 				item.TemplateInstance = &TemplateInstanceView{
-					By:            append([]string{}, instance.By...),
-					OnMissing:     strings.TrimSpace(instance.OnMissing),
-					OnConflict:    strings.TrimSpace(instance.OnConflict),
+					Field:         instance.Field.String(),
 					PrimaryEntity: strings.TrimSpace(instance.PrimaryEntity.EntityType),
 					SourceFile:    strings.TrimSpace(flow.Paths.SchemaFile),
 				}
@@ -1027,18 +1023,21 @@ func inputPinViews(source semanticview.Source, flowID string, pins []runtimecont
 	out := make([]InputPinView, 0, len(pins))
 	for _, pin := range pins {
 		item := InputPinView{
-			Name:          strings.TrimSpace(pin.PinName()),
-			Event:         strings.TrimSpace(pin.EventType()),
-			ResolvedEvent: strings.TrimSpace(source.ResolveFlowEventReference(flowID, pin.EventType())),
-			Source:        strings.TrimSpace(pin.Source),
+			Name:           strings.TrimSpace(pin.PinName()),
+			Event:          strings.TrimSpace(pin.EventType()),
+			ResolvedEvent:  strings.TrimSpace(source.ResolveFlowEventReference(flowID, pin.EventType())),
+			Source:         strings.TrimSpace(pin.Source),
+			ResolutionMode: pin.Resolution.Mode.String(),
 		}
-		if pin.Address != nil {
-			item.Address = &InputPinAddressView{
-				By:          strings.TrimSpace(pin.Address.By),
-				Source:      strings.TrimSpace(pin.Address.Source),
-				Target:      strings.TrimSpace(pin.Address.Target),
-				Cardinality: strings.TrimSpace(pin.Address.Cardinality),
-				Mode:        strings.TrimSpace(pin.Address.Mode),
+		if len(pin.Carries) > 0 {
+			item.Carries = make(map[string]InputPinCarryView, len(pin.Carries))
+			for name, carry := range pin.Carries {
+				item.Carries[strings.TrimSpace(name)] = InputPinCarryView{
+					From:     strings.TrimSpace(carry.From),
+					Type:     strings.TrimSpace(carry.Type),
+					Optional: carry.Optional,
+					Convert:  strings.TrimSpace(carry.Convert),
+				}
 			}
 		}
 		out = append(out, item)

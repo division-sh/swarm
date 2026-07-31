@@ -61,10 +61,7 @@ func TestRun_RejectsSingletonCoordinatorTemplateInstanceMix(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
 mode: singleton
-instance:
-  by: vertical_id
-  on_missing: create
-  on_conflict: reject
+instance: vertical_id
 pins:
   inputs:
     events: [job.received]

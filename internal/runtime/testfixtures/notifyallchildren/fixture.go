@@ -40,7 +40,6 @@ const (
 type Options struct {
 	OmitOutputPin               bool
 	OmitConnect                 bool
-	BadConnectMapping           bool
 	MissingEmitCarry            bool
 	ProducerTarget              bool
 	ProducerBroadcast           bool
@@ -97,17 +96,6 @@ func WriteVariant(t testing.TB, opts Options) string {
     to: account.account_notify_requested
 `, "")
 	}
-	if opts.BadConnectMapping {
-		replaceFile(t, packageFile, `  - from: portfolio.account_notify_requested
-    to: account.account_notify_requested
-`, `  - from: portfolio.account_notify_requested
-    to: account.account_notify_requested
-    using:
-      instance:
-        source: missing_account_id
-        target: account_id
-`)
-	}
 	if opts.OmitOutputPin {
 		replaceFile(t, ownerSchema, `      - name: account_notify_requested
         event: account.notify.requested
@@ -149,8 +137,6 @@ func WriteVariant(t testing.TB, opts Options) string {
 `, `account.created:
   account_id: text
   template_instance_key: text
-  template_instance_on_missing: text
-  template_instance_on_conflict: text
   template_instance_source_event: text
   required: [account_id]
 account.notify.requested:

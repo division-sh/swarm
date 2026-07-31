@@ -27,7 +27,7 @@ func TestEmpireValidationCreateMintedKeyCounterpart(t *testing.T) {
 	plan := requireCounterpartPlan(t, plans, func(plan runtimepinrouting.ConnectRoutePlan) bool {
 		return plan.InstanceKey != nil && plan.InstanceKey.Mode == runtimecontracts.FlowInputResolutionModeCreate
 	})
-	if plan.InstanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourceGeneratedUUID || plan.InstanceKey.Source.Path != runtimecontracts.FlowInputCarrySourceGeneratedUUID || len(plan.InstanceKey.Fields) != 1 || plan.InstanceKey.Fields[0] != "validation_case_id" {
+	if plan.InstanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourceGeneratedUUID || plan.InstanceKey.Source.Path != runtimecontracts.FlowInputCarrySourceGeneratedUUID || plan.InstanceKey.Field.String() != "validation_case_id" {
 		t.Fatalf("%s counterpart = %#v, want UUID-minted validation_case_id", empireValidationNodes, plan.InstanceKey)
 	}
 }
@@ -71,7 +71,7 @@ func TestEmpireKeyedRoutingCounterparts(t *testing.T) {
 	selectedOrCreated := requireCounterpartPlan(t, selectOrCreatePlans, func(plan runtimepinrouting.ConnectRoutePlan) bool {
 		return plan.InstanceKey != nil && plan.InstanceKey.Mode == runtimecontracts.FlowInputResolutionModeSelectOrCreate
 	})
-	if len(selected.InstanceKey.Fields) != 1 || len(selectedOrCreated.InstanceKey.Fields) != 1 {
+	if selected.InstanceKey.Field.Empty() || selectedOrCreated.InstanceKey.Field.Empty() {
 		t.Fatalf("%s/%s/%s keyed counterparts require one carried key: select=%#v select-or-create=%#v", empireValidationNodes, empireSpecRepoNodes, empireRepoScaffoldNodes, selected.InstanceKey, selectedOrCreated.InstanceKey)
 	}
 }
@@ -88,7 +88,7 @@ func TestEmpireResolutionCounterpartsRequireNoSeventhModeOrMultiPrimaryInstance(
 	type counterpart struct {
 		path     string
 		artifact canonicalrouting.ArtifactID
-		mode     string
+		mode     runtimecontracts.FlowInputResolutionMode
 		key      string
 	}
 	evidence := []counterpart{

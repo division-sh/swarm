@@ -1,7 +1,6 @@
 name: validator
 mode: template
-instance:
-  by: validation_case_id
+instance: validation_case_id
 pins:
   inputs:
     events:

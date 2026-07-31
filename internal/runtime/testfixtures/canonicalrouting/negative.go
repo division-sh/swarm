@@ -72,11 +72,11 @@ func ApplyRetiredResolutionInstanceKeyBlocker(t testing.TB, root string, blocker
 func ApplyCompositionConnectReceiverPinCollisionMutation(t testing.TB, root string) {
 	t.Helper()
 	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
-		"        target: entity.vertical_id\n",
-		"        target: entity.vertical_id\n  - from: producer.deploy_done\n    to: consumer.deploy_audited\n    adapter: deploy_done_to_audited\n    map:\n      vertical_id:\n        source: payload.vertical_id\n        target: entity.vertical_id\n")
+		"    adapter: deploy_done_to_completed\n",
+		"    adapter: deploy_done_to_completed\n  - from: producer.deploy_done\n    to: consumer.deploy_audited\n    adapter: deploy_done_to_audited\n")
 	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "schema.yaml"),
-		"          cardinality: one\n",
-		"          cardinality: one\n      - name: deploy_audited\n        event: deploy.audited\n        address:\n          by: vertical_id\n          source: payload.vertical_id\n          target: entity.vertical_id\n          cardinality: one\n")
+		"        event: deploy.completed\n",
+		"        event: deploy.completed\n      - name: deploy_audited\n        event: deploy.audited\n")
 	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "events.yaml"),
 		"deploy.completed:\n  vertical_id: string\n",
 		"deploy.completed:\n  vertical_id: string\ndeploy.audited:\n  vertical_id: string\n")
@@ -155,9 +155,7 @@ func retiredConnectMigrationBlockerField(t testing.TB, blocker RetiredConnectMig
 type TemplateSelectOrCreateNegativeMutation uint8
 
 const (
-	TemplateSelectOrCreateBadConnectMapping TemplateSelectOrCreateNegativeMutation = iota + 1
-	TemplateSelectOrCreateDuplicateConnectMapping
-	TemplateSelectOrCreateRetiredInstanceKey
+	TemplateSelectOrCreateRetiredInstanceKey TemplateSelectOrCreateNegativeMutation = iota + 1
 	TemplateSelectOrCreateMissingCarry
 	TemplateSelectOrCreateReceiverSelector
 	TemplateSelectOrCreateProducerTarget
@@ -166,19 +164,10 @@ const (
 
 func ApplyTemplateSelectOrCreateNegativeMutation(t testing.TB, root string, mutation TemplateSelectOrCreateNegativeMutation) {
 	t.Helper()
-	packageFile := filepath.Join(root, "package.yaml")
 	receiverSchema := filepath.Join(root, "flows", "account", "schema.yaml")
 	receiverNodes := filepath.Join(root, "flows", "account", "nodes.yaml")
 	producerNodes := filepath.Join(root, "flows", "producer", "nodes.yaml")
 	switch mutation {
-	case TemplateSelectOrCreateBadConnectMapping:
-		applyClosedReplacement(t, packageFile,
-			"  - from: producer.account_ready\n    to: account.account_ready\n",
-			"  - from: producer.account_ready\n    to: account.account_ready\n    using:\n      instance:\n        source: missing_account_id\n        target: account_id\n")
-	case TemplateSelectOrCreateDuplicateConnectMapping:
-		applyClosedReplacement(t, packageFile,
-			"  - from: producer.account_ready\n    to: account.account_ready\n",
-			"  - from: producer.account_ready\n    to: account.account_ready\n    using:\n      instance:\n        source: [account_id, account_id]\n        target: [account_id, account_id]\n")
 	case TemplateSelectOrCreateRetiredInstanceKey:
 		applyClosedReplacement(t, receiverSchema, "          mode: select-or-create\n", "          mode: select-or-create\n          instance_key: account_id\n")
 	case TemplateSelectOrCreateMissingCarry:

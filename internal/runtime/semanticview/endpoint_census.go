@@ -996,7 +996,7 @@ func (b *endpointCensusBuilder) addPinEndpoints() {
 			endpoint := b.endpoint(EventEndpointInputPin, EventEndpointFlowInputPin, flowID, pin.EventType())
 			endpoint.PinName = strings.TrimSpace(pin.PinName())
 			endpoint.SourceLocation = "pins.inputs.events." + endpoint.PinName
-			endpoint.ResolutionMode = strings.TrimSpace(pin.Resolution.Mode)
+			endpoint.ResolutionMode = pin.Resolution.Mode.String()
 			b.add(endpoint)
 		}
 		for _, pin := range sortedOutputPins(b.source.FlowOutputEventPins(flowID)) {

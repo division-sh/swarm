@@ -1,9 +1,6 @@
 name: worker
 mode: template
-instance:
-  by: name
-  on_missing: create
-  on_conflict: reject
+instance: name
 initial_state: ready
 terminal_states: [done]
 states: [ready, done]

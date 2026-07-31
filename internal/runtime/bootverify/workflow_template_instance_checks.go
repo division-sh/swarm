@@ -55,15 +55,14 @@ func checkTemplateInstanceValidation(c *checkerContext) []Finding {
 			})
 			continue
 		}
-		for _, field := range resolved.By {
-			if _, err := entityruntime.ResolveLeafField(entityContract, field); err != nil {
-				findings = append(findings, Finding{
-					CheckID:  "template_instance_validation",
-					Severity: "error",
-					Message:  fmt.Sprintf("flow %s template instance invalid: instance.by field %q must resolve to a scalar or enum primary-entity field: %v", flowID, field, err),
-					Location: flowID,
-				})
-			}
+		field := resolved.Field.String()
+		if _, err := entityruntime.ResolveLeafField(entityContract, field); err != nil {
+			findings = append(findings, Finding{
+				CheckID:  "template_instance_validation",
+				Severity: "error",
+				Message:  fmt.Sprintf("flow %s template instance invalid: instance field %q must resolve to a scalar or enum primary-entity field: %v", flowID, field, err),
+				Location: flowID,
+			})
 		}
 	}
 	return findings

@@ -18,8 +18,7 @@ type FlowInputInstanceSource struct {
 	Path string
 }
 
-func ResolveFlowInputInstanceSource(mode, raw string) (FlowInputInstanceSource, error) {
-	mode = strings.TrimSpace(mode)
+func ResolveFlowInputInstanceSource(mode FlowInputResolutionMode, raw string) (FlowInputInstanceSource, error) {
 	path := strings.TrimSpace(raw)
 	switch path {
 	case FlowInputCarrySourceGeneratedUUID:

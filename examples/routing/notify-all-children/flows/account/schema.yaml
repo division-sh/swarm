@@ -3,8 +3,7 @@ mode: template
 initial_state: active
 states: [active, completed]
 terminal_states: [completed]
-instance:
-  by: account_id
+instance: account_id
 pins:
   inputs:
     events:

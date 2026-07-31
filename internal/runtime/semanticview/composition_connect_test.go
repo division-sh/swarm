@@ -9,7 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-func TestCompositionConnectFactsExposeTypedPinsAndParentConnect(t *testing.T) {
+func TestCompositionConnectFactsExposeCanonicalReceiverResolution(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -23,48 +23,52 @@ func TestCompositionConnectFactsExposeTypedPinsAndParentConnect(t *testing.T) {
 	source := Wrap(bundle)
 
 	inputPins := source.FlowInputEventPins("consumer")
-	if len(inputPins) != 1 {
-		t.Fatalf("FlowInputEventPins = %#v, want one", inputPins)
+	inputPins = source.FlowInputEventPins("account")
+	if len(inputPins) != 2 {
+		t.Fatalf("FlowInputEventPins = %#v, want two", inputPins)
 	}
-	if got, want := inputPins[0].PinName(), "work_ready"; got != want {
+	inputPin := inputPins[1]
+	if got, want := inputPin.PinName(), "account_ready"; got != want {
 		t.Fatalf("input pin name = %q, want %q", got, want)
 	}
-	if got, want := inputPins[0].EventType(), "work.ready"; got != want {
+	if got, want := inputPin.EventType(), "account.ready"; got != want {
 		t.Fatalf("input pin event = %q, want %q", got, want)
 	}
-	if inputPins[0].Address == nil || inputPins[0].Address.By != "work_id" {
-		t.Fatalf("input pin address = %#v, want work_id", inputPins[0].Address)
+	if inputPin.Resolution.Mode != runtimecontracts.FlowInputResolutionModeSelect {
+		t.Fatalf("input pin resolution = %#v, want select", inputPin.Resolution)
+	}
+	if carry := inputPin.Carries["account_id"]; carry.From != "payload.account_id" {
+		t.Fatalf("input pin carry = %#v, want payload.account_id", carry)
 	}
 
 	outputPins := source.FlowOutputEventPins("producer")
-	if len(outputPins) != 1 {
-		t.Fatalf("FlowOutputEventPins = %#v, want one", outputPins)
+	if len(outputPins) != 2 {
+		t.Fatalf("FlowOutputEventPins = %#v, want two", outputPins)
 	}
-	if got, want := outputPins[0].PinName(), "work_ready"; got != want {
+	outputPin := outputPins[1]
+	if got, want := outputPin.PinName(), "account_ready"; got != want {
 		t.Fatalf("output pin name = %q, want %q", got, want)
 	}
-	if got, want := outputPins[0].Key, "work_id"; got != want {
-		t.Fatalf("output pin key = %q, want %q", got, want)
-	}
-	if got, want := len(outputPins[0].Carries), 1; got != want || outputPins[0].Carries[0] != "work_id" {
-		t.Fatalf("output pin carries = %#v, want [work_id]", outputPins[0].Carries)
+	if outputPin.Key != "" || len(outputPin.Carries) != 0 {
+		t.Fatalf("output pin key/carries = %q/%#v, want no receiver authority", outputPin.Key, outputPin.Carries)
 	}
 
 	connects := source.CompositionConnects()
-	if len(connects) != 1 {
-		t.Fatalf("CompositionConnects = %#v, want one", connects)
+	if len(connects) != 2 {
+		t.Fatalf("CompositionConnects = %#v, want two", connects)
 	}
-	if got, want := connects[0].From, "producer.work_ready"; got != want {
+	connect := connects[1]
+	if got, want := connect.From, "producer.account_ready"; got != want {
 		t.Fatalf("connect from = %q, want %q", got, want)
 	}
-	if got, want := connects[0].To, "consumer.work_ready"; got != want {
+	if got, want := connect.To, "account.account_ready"; got != want {
 		t.Fatalf("connect to = %q, want %q", got, want)
 	}
-	if got := ResolvedCompositionConnectsFrom(source, "producer", "work_ready"); len(got) != 1 || got[0].Connect.From != connects[0].From {
-		t.Fatalf("ResolvedCompositionConnectsFrom = %#v, want %#v", got, connects)
+	if got := ResolvedCompositionConnectsFrom(source, "producer", "account_ready"); len(got) != 1 || got[0].Connect.From != connect.From {
+		t.Fatalf("ResolvedCompositionConnectsFrom = %#v, want %#v", got, connect)
 	}
-	if got := ResolvedCompositionConnectsTo(source, "consumer", "work_ready"); len(got) != 1 || got[0].Connect.To != connects[0].To {
-		t.Fatalf("ResolvedCompositionConnectsTo = %#v, want %#v", got, connects)
+	if got := ResolvedCompositionConnectsTo(source, "account", "account_ready"); len(got) != 1 || got[0].Connect.To != connect.To {
+		t.Fatalf("ResolvedCompositionConnectsTo = %#v, want %#v", got, connect)
 	}
 }
 
@@ -107,7 +111,7 @@ func TestCompositionConnectFactsExposeRootProducerEndpoint(t *testing.T) {
 
 func writeCompositionConnectSemanticFixture(t *testing.T) string {
 	t.Helper()
-	return canonicalrouting.CopyParentConnectAddressVariant(t, canonicalrouting.ParentConnectAddressSemanticView)
+	return canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting)
 }
 
 func writeRootCompositionConnectSemanticFixture(t *testing.T) string {

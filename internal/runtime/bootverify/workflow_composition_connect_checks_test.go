@@ -173,29 +173,9 @@ func TestRun_FailsClosedForInvalidSelectInputResolution(t *testing.T) {
 			want: "must declare a carry named account_id",
 		},
 		{
-			name: "composite receiver key",
-			opts: selectResolutionCompositionFixtureOptions{compositeKey: true},
-			want: "requires exactly one receiver instance.by field",
-		},
-		{
 			name: "type mismatch",
 			opts: selectResolutionCompositionFixtureOptions{carryType: "integer"},
 			want: "key_types_incompatible",
-		},
-		{
-			name: "legacy address is incompatible",
-			opts: selectResolutionCompositionFixtureOptions{legacyAddress: true},
-			want: "input pin resolution is incompatible with legacy address",
-		},
-		{
-			name: "legacy connect using instance is incompatible",
-			opts: selectResolutionCompositionFixtureOptions{usingInstance: true},
-			want: "connect.using.instance is incompatible with input pin resolution",
-		},
-		{
-			name: "legacy connect map is incompatible",
-			opts: selectResolutionCompositionFixtureOptions{connectMap: true},
-			want: "connect.map is incompatible with input pin resolution",
 		},
 		{
 			name: "non-template receiver",
@@ -203,9 +183,9 @@ func TestRun_FailsClosedForInvalidSelectInputResolution(t *testing.T) {
 			want: "INVALID-TEMPLATE-INSTANCE",
 		},
 	}
-	for _, mode := range []string{runtimecontracts.FlowInputResolutionModeSelect, runtimecontracts.FlowInputResolutionModeSelectOrCreate} {
+	for _, mode := range []runtimecontracts.FlowInputResolutionMode{runtimecontracts.FlowInputResolutionModeSelect, runtimecontracts.FlowInputResolutionModeSelectOrCreate} {
 		for _, tc := range tests {
-			t.Run(mode+"/"+tc.name, func(t *testing.T) {
+			t.Run(mode.String()+"/"+tc.name, func(t *testing.T) {
 				tc.opts.mode = mode
 				root := writeSelectResolutionCompositionConnectFixture(t, tc.opts)
 				bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
@@ -251,16 +231,6 @@ func TestRun_FailsClosedForInvalidCreateInputResolution(t *testing.T) {
 				source: runtimecontracts.FlowInputCarrySourceGeneratedUUID,
 			},
 			want: "must declare a carry named validation_case_id",
-		},
-		{
-			name: "legacy connect using instance is incompatible",
-			opts: createResolutionCompositionFixtureOptions{
-				mode:          runtimecontracts.FlowInputResolutionModeCreate,
-				source:        runtimecontracts.FlowInputCarrySourceGeneratedUUID,
-				includeCarry:  true,
-				usingInstance: true,
-			},
-			want: "connect.using.instance is incompatible with input pin resolution",
 		},
 	}
 	for _, tc := range tests {
@@ -315,7 +285,6 @@ func TestRun_FailsClosedForInvalidFanInStreamInputResolution(t *testing.T) {
 		{name: "missing accumulate", opts: templatefanin.Options{MissingAccumulate: true}, want: "for fan-in input must declare accumulate"},
 		{name: "accumulator dedup redeclaration", opts: templatefanin.Options{AccumulateDedupMismatch: true}, want: "accumulate.dedup_by \"payload.period_id\" must not redeclare fan-in dedup_by"},
 		{name: "accumulator window redeclaration", opts: templatefanin.Options{AccumulateWindowMismatch: true}, want: "accumulate.window \"payload.operating_id\" must not redeclare fan-in window"},
-		{name: "legacy map", opts: templatefanin.Options{LegacyConnectMap: true}, want: "connect.map is incompatible with input pin resolution"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -497,93 +466,6 @@ func applyFanInMultipleJoinRows(t *testing.T, bundle *runtimecontracts.WorkflowC
 	t.Fatal("canonical portfolio join plan is unavailable")
 }
 
-func TestRun_AllowsCompositeTemplateInstanceKeyCompositionConnectWithoutAddress(t *testing.T) {
-	root := writeCompositionConnectBootverifyFixture(t, canonicalrouting.CompositionConnectCompositeTemplateInstance)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if reportContains(report.Errors(), "composition_connect_validation", "") {
-		t.Fatalf("unexpected composition_connect_validation error: %#v", report.Errors())
-	}
-	if reportContains(report.Errors(), "output_pin_key_carries_validation", "") {
-		t.Fatalf("unexpected output_pin_key_carries_validation error: %#v", report.Errors())
-	}
-	if reportContains(report.Errors(), "template_instance_validation", "") {
-		t.Fatalf("unexpected template_instance_validation error: %#v", report.Errors())
-	}
-}
-
-func TestRun_AllowsRenamedTemplateInstanceKeyCompositionConnectWithUsingInstance(t *testing.T) {
-	tests := []struct {
-		name    string
-		variant canonicalrouting.CompositionConnectAdapterVariant
-	}{
-		{
-			name:    "scalar renamed key",
-			variant: canonicalrouting.CompositionAdapterScalar,
-		},
-		{
-			name:    "complete composite renamed key",
-			variant: canonicalrouting.CompositionAdapterComposite,
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			root := writeCompositionConnectAdapterBootverifyFixture(t, tc.variant)
-			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-			if reportContains(report.Errors(), "composition_connect_validation", "") {
-				t.Fatalf("unexpected composition_connect_validation error: %#v", report.Errors())
-			}
-			if reportContains(report.Errors(), "template_instance_validation", "") {
-				t.Fatalf("unexpected template_instance_validation error: %#v", report.Errors())
-			}
-			if reportContains(report.Errors(), "output_pin_key_carries_validation", "") {
-				t.Fatalf("unexpected output_pin_key_carries_validation error: %#v", report.Errors())
-			}
-		})
-	}
-}
-
-func TestRun_FailsClosedForInvalidRenamedTemplateInstanceKeyAdapters(t *testing.T) {
-	tests := []struct {
-		name      string
-		variant   canonicalrouting.CompositionConnectAdapterVariant
-		want      string
-		wantExtra string
-	}{
-		{name: "missing adapter for renamed key", variant: canonicalrouting.CompositionAdapterMissing, want: "instance_key_mismatch"},
-		{name: "missing source", variant: canonicalrouting.CompositionAdapterMissingSource, want: "connect_key_adapter_missing_source"},
-		{name: "missing target", variant: canonicalrouting.CompositionAdapterMissingTarget, want: "connect_key_adapter_missing_target"},
-		{name: "source not carried", variant: canonicalrouting.CompositionAdapterSourceNotCarried, want: "connect_key_adapter_source_missing", wantExtra: "missing_region"},
-		{name: "target not instance key", variant: canonicalrouting.CompositionAdapterTargetNotKey, want: "connect_key_adapter_target_missing", wantExtra: "missing_region"},
-		{name: "partial composite mapping", variant: canonicalrouting.CompositionAdapterPartial, want: "connect_key_adapter_partial"},
-		{name: "source target cardinality mismatch", variant: canonicalrouting.CompositionAdapterCardinality, want: "connect_key_adapter_cardinality"},
-		{name: "duplicate source mapping", variant: canonicalrouting.CompositionAdapterDuplicateSource, want: "connect_key_adapter_duplicate_source"},
-		{name: "duplicate target mapping", variant: canonicalrouting.CompositionAdapterDuplicateTarget, want: "connect_key_adapter_duplicate_target"},
-		{name: "incompatible adapter types", variant: canonicalrouting.CompositionAdapterIncompatibleTypes, want: "key_types_incompatible"},
-		{name: "old connect map remains invalid for addressless template receiver", variant: canonicalrouting.CompositionAdapterLegacyMap, want: "connect_key_adapter_unsupported"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			root := writeCompositionConnectAdapterBootverifyFixture(t, tc.variant)
-			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-			if !reportContains(report.Errors(), "composition_connect_validation", tc.want) {
-				t.Fatalf("expected composition_connect_validation %q, got %#v", tc.want, report.Errors())
-			}
-			if tc.wantExtra != "" && !reportContains(report.Errors(), "composition_connect_validation", tc.wantExtra) {
-				t.Fatalf("expected composition_connect_validation detail %q, got %#v", tc.wantExtra, report.Errors())
-			}
-		})
-	}
-}
-
 func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -596,12 +478,6 @@ func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 		{name: "missing receiver flow", variant: canonicalrouting.CompositionConnectMissingReceiverFlow, want: "receiver_flow_missing"},
 		{name: "missing receiver input pin", variant: canonicalrouting.CompositionConnectMissingReceiverPin, want: "receiver_input_pin_missing"},
 		{name: "event names differ without adapter", variant: canonicalrouting.CompositionConnectMissingAdapter, want: "event_alias_or_adapter_invalid"},
-		{name: "missing address key", variant: canonicalrouting.CompositionConnectMissingAddressKey, want: "output_carries_address_key", wantExtra: "missing_vertical_id"},
-		{name: "incompatible address key types", variant: canonicalrouting.CompositionConnectIncompatibleKeyType, want: "key_types_incompatible"},
-		{name: "unindexed business-field target", variant: canonicalrouting.CompositionConnectUnindexedTarget, want: "receiver_address_rule_invalid", wantExtra: "indexed: true"},
-		{name: "nested business-field target", variant: canonicalrouting.CompositionConnectNestedTarget, want: "receiver_address_rule_invalid", wantExtra: "top-level indexed entity fields"},
-		{name: "template receiver missing address rule", variant: canonicalrouting.CompositionConnectTemplateMissingAddress, want: "receiver_instance_key_invalid"},
-		{name: "template instance key route rejects renamed connect map", variant: canonicalrouting.CompositionConnectTemplateLegacyMap, want: "connect_key_adapter_unsupported"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -640,7 +516,7 @@ func TestRun_FailsClosedForInvalidOutputPinKeyCarriesEvidence(t *testing.T) {
 		want    string
 	}{
 		{name: "connected output missing key", variant: canonicalrouting.CompositionConnectMissingOutputKey, want: "missing_key"},
-		{name: "connected output missing carries", variant: canonicalrouting.CompositionConnectMissingOutputCarries, want: "missing_carries"},
+		{name: "connected output missing carries", variant: canonicalrouting.CompositionConnectMissingOutputCarries, want: "key_not_carried"},
 		{name: "key not listed in carries", variant: canonicalrouting.CompositionConnectKeyNotCarried, want: "key_not_carried"},
 		{name: "duplicate carried field", variant: canonicalrouting.CompositionConnectDuplicateCarry, want: "duplicate_carry_field"},
 		{name: "ambiguous output key", variant: canonicalrouting.CompositionConnectAmbiguousOutputKey, want: "ambiguous_output_key"},
@@ -752,11 +628,6 @@ func writeCompositionConnectBootverifyFixture(t *testing.T, variant canonicalrou
 	return canonicalrouting.CopyCompositionConnect(t, variant)
 }
 
-func writeCompositionConnectAdapterBootverifyFixture(t *testing.T, variant canonicalrouting.CompositionConnectAdapterVariant) string {
-	t.Helper()
-	return canonicalrouting.CopyCompositionConnectAdapter(t, variant)
-}
-
 func writeCompositionConnectTopologyFixture(t *testing.T) string {
 	t.Helper()
 	return canonicalrouting.CopyCompositionConnectTopology(t)
@@ -778,43 +649,30 @@ func writeRootAutoEmitOutputPinKeyCarriesFixture(t *testing.T) string {
 }
 
 type createResolutionCompositionFixtureOptions struct {
-	mode          string
-	source        string
-	includeCarry  bool
-	usingInstance bool
+	mode         runtimecontracts.FlowInputResolutionMode
+	source       string
+	includeCarry bool
 }
 
 type selectResolutionCompositionFixtureOptions struct {
-	mode          string
-	instanceKey   string
-	carryType     string
-	receiverMode  string
-	compositeKey  bool
-	legacyAddress bool
-	usingInstance bool
-	connectMap    bool
+	mode         runtimecontracts.FlowInputResolutionMode
+	instanceKey  string
+	carryType    string
+	receiverMode string
 }
 
 func writeSelectResolutionCompositionConnectFixture(t *testing.T, opts selectResolutionCompositionFixtureOptions) string {
 	t.Helper()
 	mode := canonicalrouting.SelectResolutionSelect
-	if strings.TrimSpace(opts.mode) == runtimecontracts.FlowInputResolutionModeSelectOrCreate {
+	if opts.mode == runtimecontracts.FlowInputResolutionModeSelectOrCreate {
 		mode = canonicalrouting.SelectResolutionSelectOrCreate
 	}
 	invalidity := canonicalrouting.SelectResolutionValid
 	switch {
 	case strings.TrimSpace(opts.instanceKey) == "missing_account_id":
 		invalidity = canonicalrouting.SelectResolutionUndeclaredCarry
-	case opts.compositeKey:
-		invalidity = canonicalrouting.SelectResolutionCompositeKey
 	case strings.TrimSpace(opts.carryType) == "integer":
 		invalidity = canonicalrouting.SelectResolutionCarryTypeMismatch
-	case opts.legacyAddress:
-		invalidity = canonicalrouting.SelectResolutionLegacyAddress
-	case opts.usingInstance:
-		invalidity = canonicalrouting.SelectResolutionLegacyUsingInstance
-	case opts.connectMap:
-		invalidity = canonicalrouting.SelectResolutionLegacyConnectMap
 	case strings.TrimSpace(opts.receiverMode) == "static":
 		invalidity = canonicalrouting.SelectResolutionStaticReceiver
 	}
@@ -831,8 +689,6 @@ func writeCreateResolutionCompositionConnectFixture(t *testing.T, opts createRes
 		invalidity = canonicalrouting.CreateResolutionInvalidMint
 	case !opts.includeCarry:
 		invalidity = canonicalrouting.CreateResolutionMissingCarry
-	case opts.usingInstance:
-		invalidity = canonicalrouting.CreateResolutionLegacyUsingInstance
 	}
 	return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{
 		Mint:       canonicalrouting.CreateMintUUID,

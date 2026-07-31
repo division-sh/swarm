@@ -319,9 +319,6 @@ func TestLowerCompositionConnectRoutePlansFromLoadedPackageFixture(t *testing.T)
 	if got, want := plan.Receiver.ResolvedEvent, "consumer/work.ready"; got != want {
 		t.Fatalf("Receiver.ResolvedEvent = %q, want %q", got, want)
 	}
-	if plan.Address == nil || plan.Address.By != "work_id" {
-		t.Fatalf("Address = %#v, want loaded work_id address", plan.Address)
-	}
 	if got, want := plan.ResolutionKind, ConnectResolutionStatic; got != want {
 		t.Fatalf("ResolutionKind = %q, want %q", got, want)
 	}
@@ -404,7 +401,6 @@ func TestLowerCompositionConnectRoutePlansFailsClosedForInvalidFanInStream(t *te
 		{name: "missing window", opts: templatefanin.Options{MissingWindow: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "requires window"},
 		{name: "wrong singleton", opts: templatefanin.Options{WrongSingleton: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "must be the receiver singleton route or a child"},
 		{name: "non-singleton receiver", opts: templatefanin.Options{NonSingletonReceiver: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "is not mode: singleton"},
-		{name: "legacy map", opts: templatefanin.Options{LegacyConnectMap: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "connect.map is incompatible"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -459,82 +455,25 @@ func requireFanInRoutePlan(t *testing.T, plans []ConnectRoutePlan) ConnectRouteP
 	return matches[0]
 }
 
-func TestLowerCompositionConnectRoutePlansUsesTemplateInstanceKey(t *testing.T) {
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", "..", ".."))
-	root := writeInstanceKeyConnectRoutePlanPackageFixture(t)
+func TestLowerCompositionConnectRoutePlansRejectsAddresslessImplicitInstanceKey(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	root := canonicalrouting.CopyTemplateSelectResolution(t, canonicalrouting.TemplateSelectResolutionOptions{})
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
+	pins := bundle.Semantics.FlowInputEventPins["account"]
+	for i := range pins {
+		pins[i].Resolution = runtimecontracts.FlowInputPinResolution{}
+	}
+	bundle.Semantics.FlowInputEventPins["account"] = pins
 
 	plans, issues := LowerCompositionConnectRoutePlans(semanticview.Wrap(bundle))
-	if len(issues) != 0 {
-		t.Fatalf("issues = %#v, want none", issues)
+	if len(plans) != 0 {
+		t.Fatalf("plans = %#v, want none without receiver resolution", plans)
 	}
-	if len(plans) != 1 {
-		t.Fatalf("plans = %#v, want one", plans)
-	}
-	plan := plans[0]
-	if plan.Address != nil {
-		t.Fatalf("Address = %#v, want nil for canonical instance-key plan", plan.Address)
-	}
-	if plan.InstanceKey == nil {
-		t.Fatal("InstanceKey = nil, want canonical receiver instance key evidence")
-	}
-	if got, want := plan.ResolutionKind, ConnectResolutionInstanceKey; got != want {
-		t.Fatalf("ResolutionKind = %q, want %q", got, want)
-	}
-	if got, want := plan.Source.Key, "vertical_id"; got != want {
-		t.Fatalf("Source.Key = %q, want %q", got, want)
-	}
-	if len(plan.Source.Carries) != 1 || plan.Source.Carries[0] != "vertical_id" {
-		t.Fatalf("Source.Carries = %#v, want [vertical_id]", plan.Source.Carries)
-	}
-	if len(plan.InstanceKey.Fields) != 1 || plan.InstanceKey.Fields[0] != "vertical_id" {
-		t.Fatalf("InstanceKey.Fields = %#v, want [vertical_id]", plan.InstanceKey.Fields)
-	}
-	if got, want := plan.InstanceKey.OnMissing, "reject"; got != want {
-		t.Fatalf("InstanceKey.OnMissing = %q, want %q", got, want)
-	}
-	if !plan.RequiresRuntimeResolution {
-		t.Fatal("template instance-key receiver should require runtime resolution")
-	}
-
-	materialized := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
-		MatchValues: map[string]string{"vertical_id": "v-1"},
-		Descriptors: []Descriptor{{
-			EntityID:      "ent-1",
-			FlowInstance:  "consumer/one",
-			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
-		}},
-	})
-	if materialized.Failure != "" {
-		t.Fatalf("Failure = %q, want empty", materialized.Failure)
-	}
-	if got, want := materialized.Target.FlowInstance, "consumer/one"; got != want {
-		t.Fatalf("Target.FlowInstance = %q, want %q", got, want)
-	}
-
-	missing := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
-		MatchValues: map[string]string{},
-	})
-	if missing.Failure != ConnectFailureAddressValueMissing {
-		t.Fatalf("missing Failure = %q, want %q", missing.Failure, ConnectFailureAddressValueMissing)
-	}
-
-	ambiguous := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
-		MatchValues: map[string]string{"payload.vertical_id": "v-1"},
-		Descriptors: []Descriptor{
-			{EntityID: "ent-1", FlowInstance: "consumer/one", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
-			{EntityID: "ent-2", FlowInstance: "consumer/two", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
-		},
-	})
-	if ambiguous.Failure != ConnectFailureTargetAmbiguous {
-		t.Fatalf("ambiguous Failure = %q, want %q", ambiguous.Failure, ConnectFailureTargetAmbiguous)
+	if len(issues) != 1 || issues[0].Failure != ConnectFailureReceiverResolutionMissing {
+		t.Fatalf("issues = %#v, want %q", issues, ConnectFailureReceiverResolutionMissing)
 	}
 }
 
@@ -582,21 +521,15 @@ func TestLowerCompositionConnectRoutePlansUsesCreateInputResolution(t *testing.T
 	if got, want := plan.InstanceKey.Source.Path, runtimecontracts.FlowInputCarrySourceGeneratedUUID; got != want {
 		t.Fatalf("InstanceKey.Source.Path = %q, want %q", got, want)
 	}
-	if got, want := plan.InstanceKey.Fields, []string{"validation_case_id"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("InstanceKey.Fields = %#v, want %#v", got, want)
-	}
-	if got, want := plan.InstanceKey.OnMissing, "create"; got != want {
-		t.Fatalf("InstanceKey.OnMissing = %q, want %q", got, want)
-	}
-	if got, want := plan.InstanceKey.OnConflict, "reuse"; got != want {
-		t.Fatalf("InstanceKey.OnConflict = %q, want %q", got, want)
+	if got, want := plan.InstanceKey.Field.String(), "validation_case_id"; got != want {
+		t.Fatalf("InstanceKey.Field = %q, want %q", got, want)
 	}
 	eventID := "11111111-1111-4111-8111-111111111111"
 	material, failure := EventSourcedInstanceKeyMaterialForConnectRoutePlan(plan, eventID)
 	if failure != "" {
 		t.Fatalf("MintedInstanceKeyMaterialForConnectRoutePlan failure = %q", failure)
 	}
-	if len(material.Keys) != 1 || material.Keys[0].Field != "validation_case_id" || material.Keys[0].Value == "" || material.Keys[0].Value == eventID {
+	if len(material.Keys) != 1 || material.Keys[0].Field.String() != "validation_case_id" || material.Keys[0].Value == "" || material.Keys[0].Value == eventID {
 		t.Fatalf("minted material = %#v, want deterministic uuid material distinct from event id", material)
 	}
 }
@@ -605,8 +538,8 @@ func TestGeneratedUUIDMaterialIsReplayStableAndFreshForForkEventIdentity(t *test
 	plan := ConnectRoutePlan{
 		Receiver: ConnectRoutePlanEndpoint{FlowID: "validator", Pin: "validation_requested"},
 		InstanceKey: &ConnectRoutePlanInstanceKey{
-			Mode:   runtimecontracts.FlowInputResolutionModeCreate,
-			Fields: []string{"validation_case_id"},
+			Mode:  runtimecontracts.FlowInputResolutionModeCreate,
+			Field: mustTemplateInstanceField(t, "validation_case_id"),
 			Source: runtimecontracts.FlowInputInstanceSource{
 				Kind: runtimecontracts.FlowInputInstanceSourceGeneratedUUID,
 				Path: runtimecontracts.FlowInputCarrySourceGeneratedUUID,
@@ -641,10 +574,10 @@ func TestInputPinResolutionMultiPinSatisfactionDerivesOneFlowIdentity(t *testing
 	if len(issues) != 0 || len(plans) != 2 {
 		t.Fatalf("plans/issues = %#v/%#v, want two valid input-pin plans", plans, issues)
 	}
-	modes := map[string]bool{}
+	modes := map[runtimecontracts.FlowInputResolutionMode]bool{}
 	for _, plan := range plans {
-		if plan.InstanceKey == nil || !reflect.DeepEqual(plan.InstanceKey.Fields, []string{"account_id"}) {
-			t.Fatalf("plan instance identity = %#v, want sole flow instance.by account_id", plan.InstanceKey)
+		if plan.InstanceKey == nil || plan.InstanceKey.Field.String() != "account_id" {
+			t.Fatalf("plan instance identity = %#v, want scalar flow instance account_id", plan.InstanceKey)
 		}
 		if plan.InstanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourcePayload || plan.InstanceKey.Source.Path != "payload.account_id" {
 			t.Fatalf("plan source = %#v, want per-pin payload.account_id", plan.InstanceKey.Source)
@@ -675,7 +608,7 @@ func TestLowerCompositionConnectRoutePlanDerivesRenamedPayloadSourceFromCarry(t 
 	if len(issues) != 0 || len(plans) != 1 || plans[0].InstanceKey == nil {
 		t.Fatalf("plans/issues = %#v/%#v, want one derived plan", plans, issues)
 	}
-	if plans[0].InstanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourcePayload || plans[0].InstanceKey.Source.Path != "payload.external_account_id" || !reflect.DeepEqual(plans[0].InstanceKey.Fields, []string{"account_id"}) {
+	if plans[0].InstanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourcePayload || plans[0].InstanceKey.Source.Path != "payload.external_account_id" || plans[0].InstanceKey.Field.String() != "account_id" {
 		t.Fatalf("derived identity/source = %#v, want account_id from renamed payload source", plans[0].InstanceKey)
 	}
 	for _, tc := range []struct {
@@ -703,44 +636,21 @@ func TestLowerCompositionConnectRoutePlanDerivesRenamedPayloadSourceFromCarry(t 
 	}
 }
 
-func TestInstanceKeyMaterialRejectsTypedSourceWithMappings(t *testing.T) {
-	plan := ConnectRoutePlan{
-		Receiver: ConnectRoutePlanEndpoint{FlowID: "account"},
-		InstanceKey: &ConnectRoutePlanInstanceKey{
-			Fields: []string{"account_id"},
-			Source: runtimecontracts.FlowInputInstanceSource{
-				Kind: runtimecontracts.FlowInputInstanceSourcePayload,
-				Path: "payload.external_account_id",
-			},
-			Mappings: []ConnectRoutePlanInstanceKeyMapping{{Source: "account_id", Target: "account_id"}},
-		},
-	}
-	_, failure := InstanceKeyMaterialForConnectRoutePlan(plan, map[string]string{
-		"payload.external_account_id": "acct-authoritative",
-		"payload.account_id":          "acct-conflicting",
-	})
-	if failure != ConnectFailureInstanceResolutionInvalid {
-		t.Fatalf("failure = %q, want %q", failure, ConnectFailureInstanceResolutionInvalid)
-	}
-}
-
-func TestEventSourcedInstanceKeyMaterialRejectsTypedSourceWithMappings(t *testing.T) {
-	for _, sourceKind := range []runtimecontracts.FlowInputInstanceSourceKind{
-		runtimecontracts.FlowInputInstanceSourceGeneratedUUID,
-		runtimecontracts.FlowInputInstanceSourceEventID,
+func TestConnectRoutePlanProductionAPIHasNoRetiredIdentityOrPolicyFacts(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		typeValue reflect.Type
+		forbidden []string
+	}{
+		{name: "plan", typeValue: reflect.TypeOf(ConnectRoutePlan{}), forbidden: []string{"Address", "Map"}},
+		{name: "instance key", typeValue: reflect.TypeOf(ConnectRoutePlanInstanceKey{}), forbidden: []string{"Fields", "Mappings", "OnMissing", "OnConflict"}},
+		{name: "materialization input", typeValue: reflect.TypeOf(ConnectRoutePlanMaterializationInput{}), forbidden: []string{"SupportedAddressTargets"}},
 	} {
-		t.Run(string(sourceKind), func(t *testing.T) {
-			plan := ConnectRoutePlan{
-				Receiver: ConnectRoutePlanEndpoint{FlowID: "account", Pin: "account_ready"},
-				InstanceKey: &ConnectRoutePlanInstanceKey{
-					Fields:   []string{"account_id"},
-					Source:   runtimecontracts.FlowInputInstanceSource{Kind: sourceKind},
-					Mappings: []ConnectRoutePlanInstanceKeyMapping{{Source: "account_id", Target: "account_id"}},
-				},
-			}
-			_, failure := EventSourcedInstanceKeyMaterialForConnectRoutePlan(plan, "event-1")
-			if failure != ConnectFailureInstanceResolutionInvalid {
-				t.Fatalf("failure = %q, want %q", failure, ConnectFailureInstanceResolutionInvalid)
+		t.Run(tc.name, func(t *testing.T) {
+			for _, field := range tc.forbidden {
+				if _, ok := tc.typeValue.FieldByName(field); ok {
+					t.Fatalf("%s still exposes retired field %s", tc.typeValue, field)
+				}
 			}
 		})
 	}
@@ -778,14 +688,8 @@ func TestLowerCompositionConnectRoutePlansUsesSelectInputResolution(t *testing.T
 	if got, want := plan.InstanceKey.Mode, runtimecontracts.FlowInputResolutionModeSelect; got != want {
 		t.Fatalf("InstanceKey.Mode = %q, want %q", got, want)
 	}
-	if got, want := plan.InstanceKey.OnMissing, "reject"; got != want {
-		t.Fatalf("InstanceKey.OnMissing = %q, want %q", got, want)
-	}
-	if got, want := plan.InstanceKey.OnConflict, "reject"; got != want {
-		t.Fatalf("InstanceKey.OnConflict = %q, want %q", got, want)
-	}
-	if len(plan.InstanceKey.Fields) != 1 || plan.InstanceKey.Fields[0] != "account_id" {
-		t.Fatalf("InstanceKey.Fields = %#v, want [account_id]", plan.InstanceKey.Fields)
+	if got, want := plan.InstanceKey.Field.String(), "account_id"; got != want {
+		t.Fatalf("InstanceKey.Field = %q, want %q", got, want)
 	}
 	if plan.InstanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourcePayload || plan.InstanceKey.Source.Path != "payload.account_id" {
 		t.Fatalf("InstanceKey.Source = %#v, want payload.account_id", plan.InstanceKey.Source)
@@ -859,14 +763,8 @@ func TestLowerCompositionConnectRoutePlansUsesSelectOrCreateInputResolution(t *t
 	if got, want := plan.InstanceKey.Mode, runtimecontracts.FlowInputResolutionModeSelectOrCreate; got != want {
 		t.Fatalf("InstanceKey.Mode = %q, want %q", got, want)
 	}
-	if got, want := plan.InstanceKey.OnMissing, "create"; got != want {
-		t.Fatalf("InstanceKey.OnMissing = %q, want %q", got, want)
-	}
-	if got, want := plan.InstanceKey.OnConflict, "reuse"; got != want {
-		t.Fatalf("InstanceKey.OnConflict = %q, want %q", got, want)
-	}
-	if len(plan.InstanceKey.Fields) != 1 || plan.InstanceKey.Fields[0] != "account_id" {
-		t.Fatalf("InstanceKey.Fields = %#v, want [account_id]", plan.InstanceKey.Fields)
+	if got, want := plan.InstanceKey.Field.String(), "account_id"; got != want {
+		t.Fatalf("InstanceKey.Field = %q, want %q", got, want)
 	}
 	if plan.InstanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourcePayload || plan.InstanceKey.Source.Path != "payload.account_id" {
 		t.Fatalf("InstanceKey.Source = %#v, want payload.account_id", plan.InstanceKey.Source)
@@ -967,173 +865,6 @@ func TestLowerCompositionConnectRoutePlansRejectsSelectOrCreateCarryTypeMismatch
 	}
 }
 
-func TestLowerCompositionConnectRoutePlansUsesRenamedInstanceKeyAdapter(t *testing.T) {
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", "..", ".."))
-	root := writeInstanceKeyAdapterConnectRoutePlanPackageFixture(t, `
-    using:
-      instance:
-        source: source_vertical_id
-        target: vertical_id
-`, "source_vertical_id", "[source_vertical_id]", "vertical_id")
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-
-	plans, issues := LowerCompositionConnectRoutePlans(semanticview.Wrap(bundle))
-	if len(issues) != 0 {
-		t.Fatalf("issues = %#v, want none", issues)
-	}
-	if len(plans) != 1 {
-		t.Fatalf("plans = %#v, want one", plans)
-	}
-	plan := plans[0]
-	if got, want := plan.ResolutionKind, ConnectResolutionInstanceKey; got != want {
-		t.Fatalf("ResolutionKind = %q, want %q", got, want)
-	}
-	if plan.InstanceKey == nil {
-		t.Fatal("InstanceKey = nil, want adapter-backed instance key")
-	}
-	if len(plan.InstanceKey.Fields) != 1 || plan.InstanceKey.Fields[0] != "vertical_id" {
-		t.Fatalf("InstanceKey.Fields = %#v, want receiver target field vertical_id", plan.InstanceKey.Fields)
-	}
-	if len(plan.InstanceKey.Mappings) != 1 || plan.InstanceKey.Mappings[0].Source != "source_vertical_id" || plan.InstanceKey.Mappings[0].Target != "vertical_id" || !plan.InstanceKey.Mappings[0].Explicit {
-		t.Fatalf("InstanceKey.Mappings = %#v, want source_vertical_id -> vertical_id", plan.InstanceKey.Mappings)
-	}
-
-	materialized := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
-		MatchValues: map[string]string{"payload.source_vertical_id": "v-1", "source_vertical_id": "wrong-alias"},
-		Descriptors: []Descriptor{{
-			EntityID:      "ent-1",
-			FlowInstance:  "consumer/one",
-			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
-		}},
-	})
-	if materialized.Failure != "" {
-		t.Fatalf("Failure = %q, want empty", materialized.Failure)
-	}
-	if got, want := materialized.Target.FlowInstance, "consumer/one"; got != want {
-		t.Fatalf("Target.FlowInstance = %q, want %q", got, want)
-	}
-
-	unqualifiedAlias := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
-		MatchValues: map[string]string{"source_vertical_id": "v-1"},
-		Descriptors: []Descriptor{{
-			EntityID:      "ent-1",
-			FlowInstance:  "consumer/one",
-			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
-		}},
-	})
-	if unqualifiedAlias.Failure != ConnectFailureAddressValueMissing {
-		t.Fatalf("unqualified alias Failure = %q, want %q", unqualifiedAlias.Failure, ConnectFailureAddressValueMissing)
-	}
-
-	wrongCanonicalField := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
-		MatchValues: map[string]string{"vertical_id": "v-1"},
-		Descriptors: []Descriptor{{
-			EntityID:      "ent-1",
-			FlowInstance:  "consumer/one",
-			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
-		}},
-	})
-	if wrongCanonicalField.Failure != ConnectFailureAddressValueMissing {
-		t.Fatalf("wrong canonical field Failure = %q, want %q", wrongCanonicalField.Failure, ConnectFailureAddressValueMissing)
-	}
-}
-
-func TestLowerCompositionConnectRoutePlansFailsClosedForInvalidRenamedInstanceKeyAdapter(t *testing.T) {
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", "..", ".."))
-	root := writeInstanceKeyAdapterConnectRoutePlanPackageFixture(t, `
-    using:
-      instance:
-        source: source_vertical_id
-        target: missing_vertical_id
-`, "source_vertical_id", "[source_vertical_id]", "vertical_id")
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-
-	plans, issues := LowerCompositionConnectRoutePlans(semanticview.Wrap(bundle))
-	if len(plans) != 0 {
-		t.Fatalf("plans = %#v, want none for invalid adapter", plans)
-	}
-	if len(issues) != 1 || issues[0].Failure != ConnectFailureInstanceKeyAdapterInvalid {
-		t.Fatalf("issues = %#v, want %q", issues, ConnectFailureInstanceKeyAdapterInvalid)
-	}
-}
-
-func TestLowerCompositionConnectRoutePlansPreservesAddressedTemplateRoute(t *testing.T) {
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", "..", ".."))
-	root := writeAddressedTemplateConnectRoutePlanPackageFixture(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-
-	plans, issues := LowerCompositionConnectRoutePlans(semanticview.Wrap(bundle))
-	if len(issues) != 0 {
-		t.Fatalf("issues = %#v, want none", issues)
-	}
-	if len(plans) != 1 {
-		t.Fatalf("plans = %#v, want one", plans)
-	}
-	plan := plans[0]
-	if plan.Address == nil {
-		t.Fatal("Address = nil, want addressed-input route evidence")
-	}
-	if plan.InstanceKey != nil {
-		t.Fatalf("InstanceKey = %#v, want nil when receiver input declares address", plan.InstanceKey)
-	}
-	if got, want := plan.ResolutionKind, ConnectResolutionAddress; got != want {
-		t.Fatalf("ResolutionKind = %q, want %q", got, want)
-	}
-
-	materialized := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
-		MatchValues: map[string]string{
-			"customer_id": "cust-1",
-			"vertical_id": "v-wrong",
-		},
-		Descriptors: []Descriptor{
-			{
-				EntityID:     "ent-address",
-				FlowInstance: "account/addressed",
-				AddressFields: map[string]string{
-					"entity.customer_id": "cust-1",
-					"entity.vertical_id": "v-other",
-				},
-			},
-			{
-				EntityID:     "ent-instance",
-				FlowInstance: "account/instance-key",
-				AddressFields: map[string]string{
-					"entity.customer_id": "cust-other",
-					"entity.vertical_id": "v-wrong",
-				},
-			},
-		},
-		SupportedAddressTargets: []string{"entity.customer_id"},
-	})
-	if materialized.Failure != "" {
-		t.Fatalf("Failure = %q, want empty", materialized.Failure)
-	}
-	if got, want := materialized.Target.FlowInstance, "account/addressed"; got != want {
-		t.Fatalf("Target.FlowInstance = %q, want %q", got, want)
-	}
-}
-
 func TestLowerCompositionConnectRoutePlansOneToOneStatic(t *testing.T) {
 	source := testConnectRoutePlanSource([]connectRoutePlanFlow{
 		{
@@ -1150,21 +881,12 @@ func TestLowerCompositionConnectRoutePlansOneToOneStatic(t *testing.T) {
 			inputs: []runtimecontracts.FlowInputEventPin{{
 				Name:  "deploy_completed",
 				Event: "deploy.completed",
-				Address: &runtimecontracts.FlowInputPinAddress{
-					By:          "vertical_id",
-					Source:      "payload.vertical_id",
-					Target:      "entity.vertical_id",
-					Cardinality: "one",
-				},
 			}},
 		},
 	}, []runtimecontracts.FlowPackageConnect{{
 		From:    "producer.deploy_done",
 		To:      "consumer.deploy_completed",
 		Adapter: "deploy_done_to_completed",
-		Map: map[string]runtimecontracts.FlowPackageConnectMap{
-			"vertical_id": {Source: "payload.vertical_id", Target: "entity.vertical_id"},
-		},
 	}})
 
 	plans, issues := LowerCompositionConnectRoutePlans(source)
@@ -1198,12 +920,6 @@ func TestLowerCompositionConnectRoutePlansOneToOneStatic(t *testing.T) {
 	}
 	if got, want := plan.ResolutionKind, ConnectResolutionStatic; got != want {
 		t.Fatalf("ResolutionKind = %q, want %q", got, want)
-	}
-	if plan.Address == nil || plan.Address.By != "vertical_id" || plan.Address.Source != "payload.vertical_id" || plan.Address.Target != "entity.vertical_id" {
-		t.Fatalf("Address = %#v, want vertical_id payload/entity mapping", plan.Address)
-	}
-	if len(plan.Map) != 1 || plan.Map[0].Key != "vertical_id" {
-		t.Fatalf("Map = %#v, want vertical_id entry", plan.Map)
 	}
 	if plan.Target.FlowInstance != "consumer" {
 		t.Fatalf("Target.FlowInstance = %q, want consumer", plan.Target.FlowInstance)
@@ -1296,70 +1012,6 @@ func TestLowerCompositionConnectRoutePlansSupportsRootReceiverEndpoint(t *testin
 	}
 }
 
-func TestMaterializeConnectRoutePlanFanoutForTemplateDescriptors(t *testing.T) {
-	source := testConnectRoutePlanSource([]connectRoutePlanFlow{
-		{
-			id:   "producer",
-			mode: "static",
-			outputs: []runtimecontracts.FlowOutputEventPin{{
-				Name:  "ticket_ready",
-				Event: "ticket.ready",
-			}},
-		},
-		{
-			id:   "worker",
-			mode: "template",
-			inputs: []runtimecontracts.FlowInputEventPin{{
-				Name:  "ticket_ready",
-				Event: "ticket.ready",
-				Address: &runtimecontracts.FlowInputPinAddress{
-					By:          "team_entity",
-					Source:      "payload.team_entity",
-					Target:      "_entity.id",
-					Cardinality: "many",
-				},
-			}},
-		},
-	}, []runtimecontracts.FlowPackageConnect{{
-		From: "producer.ticket_ready",
-		To:   "worker.ticket_ready",
-	}})
-
-	plans, issues := LowerCompositionConnectRoutePlans(source)
-	if len(issues) != 0 {
-		t.Fatalf("issues = %#v, want none", issues)
-	}
-	if len(plans) != 1 {
-		t.Fatalf("plans = %#v, want one", plans)
-	}
-	plan := plans[0]
-	if !plan.RequiresRuntimeResolution {
-		t.Fatal("template receiver should require runtime descriptor resolution")
-	}
-	if got, want := plan.TargetKind, ConnectTargetKindTargetSet; got != want {
-		t.Fatalf("TargetKind = %q, want %q", got, want)
-	}
-
-	materialized := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
-		MatchValues: map[string]string{"team_entity": "team-a"},
-		Descriptors: []Descriptor{
-			{EntityID: "team-a", FlowInstance: "worker/alpha"},
-			{EntityID: "team-a", FlowInstance: "worker/beta"},
-			{EntityID: "team-a", FlowInstance: "other/alpha"},
-			{EntityID: "team-b", FlowInstance: "worker/gamma"},
-		},
-	})
-	if materialized.Failure != "" {
-		t.Fatalf("Failure = %q, want empty", materialized.Failure)
-	}
-	if len(materialized.TargetSet) != 2 {
-		t.Fatalf("TargetSet = %#v, want two team-a routes", materialized.TargetSet)
-	}
-	if materialized.TargetSet[0].FlowInstance != "worker/alpha" || materialized.TargetSet[1].FlowInstance != "worker/beta" {
-		t.Fatalf("TargetSet = %#v, want deterministic worker alpha/beta routes", materialized.TargetSet)
-	}
-}
-
 func TestLowerCompositionConnectRoutePlanDoesNotDependOnRawPinNamesOrProducerTargets(t *testing.T) {
 	source := testConnectRoutePlanSource([]connectRoutePlanFlow{
 		{
@@ -1442,51 +1094,6 @@ func TestLowerCompositionConnectRoutePlanFailsClosedForInvalidInputs(t *testing.
 				t.Fatalf("Failure = %q, want %q (issue %#v)", issue.Failure, tc.want, issue)
 			}
 		})
-	}
-}
-
-func TestMaterializeConnectRoutePlanFailsClosedForUnsupportedAddressTarget(t *testing.T) {
-	source := testConnectRoutePlanSource([]connectRoutePlanFlow{
-		{
-			id:   "producer",
-			mode: "static",
-			outputs: []runtimecontracts.FlowOutputEventPin{{
-				Name:  "deploy_done",
-				Event: "deploy.done",
-			}},
-		},
-		{
-			id:   "consumer",
-			mode: "template",
-			inputs: []runtimecontracts.FlowInputEventPin{{
-				Name:  "deploy_completed",
-				Event: "deploy.completed",
-				Address: &runtimecontracts.FlowInputPinAddress{
-					By:          "vertical_id",
-					Source:      "payload.vertical_id",
-					Target:      "entity.vertical_id",
-					Cardinality: "one",
-				},
-			}},
-		},
-	}, []runtimecontracts.FlowPackageConnect{{
-		From: "producer.deploy_done",
-		To:   "consumer.deploy_completed",
-	}})
-
-	plans, issues := LowerCompositionConnectRoutePlans(source)
-	if len(issues) != 0 {
-		t.Fatalf("issues = %#v, want none", issues)
-	}
-	materialized := MaterializeConnectRoutePlan(plans[0], ConnectRoutePlanMaterializationInput{
-		MatchValues: map[string]string{"vertical_id": "v1"},
-		Descriptors: []Descriptor{{
-			EntityID:     "entity-1",
-			FlowInstance: "consumer/inst-1",
-		}},
-	})
-	if materialized.Failure != ConnectFailureTargetUnsupported {
-		t.Fatalf("Failure = %q, want %q", materialized.Failure, ConnectFailureTargetUnsupported)
 	}
 }
 
@@ -1603,15 +1210,7 @@ func outputEventNames(pins []runtimecontracts.FlowOutputEventPin) []string {
 
 func writeConnectRoutePlanPackageFixture(t *testing.T) string {
 	t.Helper()
-	return canonicalrouting.CopyParentConnectAddressVariant(t, canonicalrouting.ParentConnectAddressLowering)
-}
-
-func writeInstanceKeyConnectRoutePlanPackageFixture(t *testing.T) string {
-	t.Helper()
-	return canonicalrouting.CopyLegacyInstanceRoute(t, canonicalrouting.LegacyInstanceRouteOptions{
-		Missing:  canonicalrouting.LegacyInstancePolicyReject,
-		Conflict: canonicalrouting.LegacyInstancePolicyReject,
-	})
+	return canonicalrouting.CopyExample(t, canonicalrouting.ParentConnect)
 }
 
 func writeCreateResolutionConnectRoutePlanPackageFixture(t *testing.T, source string) string {
@@ -1632,7 +1231,7 @@ func writeSelectResolutionConnectRoutePlanPackageFixtureWithExtraResolution(t *t
 }
 
 type selectResolutionConnectRoutePlanFixtureOptions struct {
-	mode                string
+	mode                runtimecontracts.FlowInputResolutionMode
 	extraResolution     string
 	accountIDEntityType string
 	accountIDCarryType  string
@@ -1641,7 +1240,7 @@ type selectResolutionConnectRoutePlanFixtureOptions struct {
 func writeSelectResolutionConnectRoutePlanPackageFixtureWithOptions(t *testing.T, options selectResolutionConnectRoutePlanFixtureOptions) string {
 	t.Helper()
 	mode := canonicalrouting.SelectResolutionSelect
-	if strings.TrimSpace(options.mode) == runtimecontracts.FlowInputResolutionModeSelectOrCreate {
+	if options.mode == runtimecontracts.FlowInputResolutionModeSelectOrCreate {
 		mode = canonicalrouting.SelectResolutionSelectOrCreate
 	}
 	invalidity := canonicalrouting.SelectResolutionValid
@@ -1656,48 +1255,11 @@ func writeSelectResolutionConnectRoutePlanPackageFixtureWithOptions(t *testing.T
 	return canonicalrouting.CopyTemplateSelectResolution(t, canonicalrouting.TemplateSelectResolutionOptions{Mode: mode, Invalidity: invalidity})
 }
 
-func writeInstanceKeyAdapterConnectRoutePlanPackageFixture(t *testing.T, usingBlock, outputKey, outputCarries, instanceBy string) string {
+func mustTemplateInstanceField(t testing.TB, raw string) runtimecontracts.TemplateInstanceField {
 	t.Helper()
-	if outputKey != "source_vertical_id" || outputCarries != "[source_vertical_id]" || instanceBy != "vertical_id" {
-		t.Fatalf("unsupported legacy instance adapter shape")
+	field, err := runtimecontracts.ParseTemplateInstanceField(raw)
+	if err != nil {
+		t.Fatalf("ParseTemplateInstanceField(%q): %v", raw, err)
 	}
-	adapter := canonicalrouting.LegacyInstanceAdapterRenamed
-	if strings.Contains(usingBlock, "target: missing_vertical_id") {
-		adapter = canonicalrouting.LegacyInstanceAdapterInvalidTarget
-	} else if !strings.Contains(usingBlock, "target: vertical_id") {
-		t.Fatalf("unsupported legacy instance adapter %q", usingBlock)
-	}
-	return canonicalrouting.CopyLegacyInstanceRoute(t, canonicalrouting.LegacyInstanceRouteOptions{
-		Missing:  canonicalrouting.LegacyInstancePolicyReject,
-		Conflict: canonicalrouting.LegacyInstancePolicyReject,
-		Adapter:  adapter,
-	})
-}
-
-func writeAddressedTemplateConnectRoutePlanPackageFixture(t *testing.T) string {
-	t.Helper()
-	return canonicalrouting.CopyLegacyAddressedTemplateSelect(t)
-}
-
-func writeConnectRoutePlanFlowFixture(t *testing.T, root, flowID, schemaTail, events, entities string) {
-	t.Helper()
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), `
-name: `+flowID+`
-mode: static
-`+schemaTail)
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", flowID, "agents.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", flowID, "nodes.yaml"), "{}\n")
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), events)
-	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", flowID, "entities.yaml"), entities)
-}
-
-func writeConnectRoutePlanFixtureFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("MkdirAll(%s): %v", filepath.Dir(path), err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("WriteFile(%s): %v", path, err)
-	}
+	return field
 }

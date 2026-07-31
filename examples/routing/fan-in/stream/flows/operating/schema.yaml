@@ -1,7 +1,6 @@
 name: operating
 mode: template
-instance:
-  by: operating_id
+instance: operating_id
 pins:
   inputs:
     events:

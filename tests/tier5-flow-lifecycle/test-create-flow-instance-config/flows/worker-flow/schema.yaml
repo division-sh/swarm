@@ -1,9 +1,6 @@
 name: worker-flow
 mode: template
-instance:
-  by: max_retries
-  on_missing: create
-  on_conflict: reject
+instance: max_retries
 initial_state: idle
 terminal_states: [complete]
 states: [idle, complete]

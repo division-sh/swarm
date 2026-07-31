@@ -1333,41 +1333,32 @@ type ContractItemSource struct {
 	File       string
 }
 type FlowSchemaDocument struct {
-	Name                   string                          `yaml:"name"`
-	Mode                   string                          `yaml:"mode"`
-	Entity                 string                          `yaml:"entity"`
-	Instance               FlowTemplateInstanceDeclaration `yaml:"instance"`
-	InitialState           string                          `yaml:"initial_state"`
-	InitialStateDeclared   bool                            `yaml:"-"`
-	NamespacePrefix        string                          `yaml:"-"`
-	NamespaceRule          string                          `yaml:"-"`
-	TerminalStates         []string                        `yaml:"terminal_states"`
-	TerminalStatesDeclared bool                            `yaml:"-"`
-	States                 []string                        `yaml:"states"`
-	StatesDeclared         bool                            `yaml:"-"`
-	StageDeclarations      FlowStageDeclarations           `yaml:"stages"`
-	LoopDeclarations       FlowLoopDeclarations            `yaml:"loops"`
-	Pins                   FlowPins                        `yaml:"pins"`
-	ToolSurface            FlowToolSurfaceContract         `yaml:"tool_surface"`
-	RequiredAgents         []FlowRequiredAgent             `yaml:"required_agents"`
-	RequiredAgentsDeclared bool                            `yaml:"-"`
-	InstanceVariables      FlowInstanceVariables           `yaml:"instance_variables"`
-	AutoEmitOnCreate       AutoEmitOnCreateContract        `yaml:"auto_emit_on_create"`
+	Name                   string                   `yaml:"name"`
+	Mode                   string                   `yaml:"mode"`
+	Entity                 string                   `yaml:"entity"`
+	Instance               TemplateInstanceField    `yaml:"instance"`
+	InitialState           string                   `yaml:"initial_state"`
+	InitialStateDeclared   bool                     `yaml:"-"`
+	NamespacePrefix        string                   `yaml:"-"`
+	NamespaceRule          string                   `yaml:"-"`
+	TerminalStates         []string                 `yaml:"terminal_states"`
+	TerminalStatesDeclared bool                     `yaml:"-"`
+	States                 []string                 `yaml:"states"`
+	StatesDeclared         bool                     `yaml:"-"`
+	StageDeclarations      FlowStageDeclarations    `yaml:"stages"`
+	LoopDeclarations       FlowLoopDeclarations     `yaml:"loops"`
+	Pins                   FlowPins                 `yaml:"pins"`
+	ToolSurface            FlowToolSurfaceContract  `yaml:"tool_surface"`
+	RequiredAgents         []FlowRequiredAgent      `yaml:"required_agents"`
+	RequiredAgentsDeclared bool                     `yaml:"-"`
+	InstanceVariables      FlowInstanceVariables    `yaml:"instance_variables"`
+	AutoEmitOnCreate       AutoEmitOnCreateContract `yaml:"auto_emit_on_create"`
 }
 
 const (
 	FlowModeStatic    = "static"
 	FlowModeTemplate  = "template"
 	FlowModeSingleton = "singleton"
-)
-
-const (
-	FlowInputResolutionModeCreate         = "create"
-	FlowInputResolutionModeSelect         = "select"
-	FlowInputResolutionModeSelectOrCreate = "select-or-create"
-	FlowInputResolutionModeFanIn          = "fan-in"
-	FlowInputResolutionModeFanOut         = "fan-out"
-	FlowInputResolutionModeReply          = "reply"
 )
 
 const (
@@ -1379,24 +1370,9 @@ type FlowToolSurfaceContract struct {
 	RoleScopedEntityTools bool `yaml:"role_scoped_entity_tools"`
 }
 
-type FlowTemplateInstanceDeclaration struct {
-	Declared           bool     `yaml:"-"`
-	By                 []string `yaml:"by"`
-	OnMissing          string   `yaml:"on_missing"`
-	OnMissingDeclared  bool     `yaml:"-"`
-	OnConflict         string   `yaml:"on_conflict"`
-	OnConflictDeclared bool     `yaml:"-"`
-}
-
-func (i FlowTemplateInstanceDeclaration) Empty() bool {
-	return !i.Declared && len(i.By) == 0 && strings.TrimSpace(i.OnMissing) == "" && !i.OnMissingDeclared && strings.TrimSpace(i.OnConflict) == "" && !i.OnConflictDeclared
-}
-
 type TemplateInstanceContract struct {
 	FlowID        string
-	By            []string
-	OnMissing     string
-	OnConflict    string
+	Field         TemplateInstanceField
 	PrimaryEntity PrimaryEntityContract
 }
 
@@ -1413,31 +1389,24 @@ type SingletonCoordinatorContainedField struct {
 }
 
 type TemplateInstanceKeyValue struct {
-	Field string
+	Field TemplateInstanceField
 	Value string
 }
 
 func (c TemplateInstanceContract) CanonicalKeyMaterial(values map[string]any) ([]TemplateInstanceKeyValue, error) {
-	if len(c.By) == 0 {
-		return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.by is required", defaultPrimaryEntityFlowLabel(c.FlowID))
+	if c.Field.Empty() {
+		return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s must declare instance: <field>", defaultPrimaryEntityFlowLabel(c.FlowID))
 	}
-	out := make([]TemplateInstanceKeyValue, 0, len(c.By))
-	for _, field := range c.By {
-		field = strings.TrimSpace(field)
-		if field == "" {
-			return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.by contains an empty field", defaultPrimaryEntityFlowLabel(c.FlowID))
-		}
-		value, ok := values[field]
-		if !ok || value == nil {
-			return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance key field %q is missing", defaultPrimaryEntityFlowLabel(c.FlowID), field)
-		}
-		valueText := strings.TrimSpace(fmt.Sprint(value))
-		if valueText == "" {
-			return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance key field %q is empty", defaultPrimaryEntityFlowLabel(c.FlowID), field)
-		}
-		out = append(out, TemplateInstanceKeyValue{Field: field, Value: valueText})
+	field := c.Field.String()
+	value, ok := values[field]
+	if !ok || value == nil {
+		return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance key field %q is missing", defaultPrimaryEntityFlowLabel(c.FlowID), field)
 	}
-	return out, nil
+	valueText := strings.TrimSpace(fmt.Sprint(value))
+	if valueText == "" {
+		return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance key field %q is empty", defaultPrimaryEntityFlowLabel(c.FlowID), field)
+	}
+	return []TemplateInstanceKeyValue{{Field: c.Field, Value: valueText}}, nil
 }
 
 type FlowInstanceVariables struct {
@@ -1466,7 +1435,6 @@ type FlowInputEventPin struct {
 	Name       string                 `yaml:"name"`
 	Event      string                 `yaml:"event"`
 	Source     string                 `yaml:"source"`
-	Address    *FlowInputPinAddress   `yaml:"address"`
 	Resolution FlowInputPinResolution `yaml:"resolution"`
 	Carries    FlowInputPinCarries    `yaml:"carries"`
 }
@@ -1483,43 +1451,22 @@ type FlowInputPinCarry struct {
 	Optional bool   `yaml:"optional,omitempty"`
 	Convert  string `yaml:"convert,omitempty"`
 }
-type FlowInputPinAddress struct {
-	By          string `yaml:"by"`
-	Source      string `yaml:"source"`
-	Target      string `yaml:"target"`
-	Cardinality string `yaml:"cardinality"`
-	Mode        string `yaml:"mode"`
-}
 type FlowInputPinResolution struct {
-	Mode           string   `yaml:"mode"`
-	Aggregation    string   `yaml:"aggregation"`
-	Window         string   `yaml:"window"`
-	DedupBy        []string `yaml:"dedup_by"`
-	Singleton      string   `yaml:"singleton"`
-	RepliesTo      string   `yaml:"replies_to"`
-	CorrelationKey string   `yaml:"correlation_key"`
+	Mode           FlowInputResolutionMode `yaml:"mode"`
+	Aggregation    string                  `yaml:"aggregation"`
+	Window         string                  `yaml:"window"`
+	DedupBy        []string                `yaml:"dedup_by"`
+	Singleton      string                  `yaml:"singleton"`
+	RepliesTo      string                  `yaml:"replies_to"`
+	CorrelationKey string                  `yaml:"correlation_key"`
 }
 type FlowPackageConnect struct {
-	PackageKey string                           `yaml:"-"`
-	SourceFile string                           `yaml:"-"`
-	SourceLine int                              `yaml:"-"`
-	From       string                           `yaml:"from"`
-	To         string                           `yaml:"to"`
-	Adapter    string                           `yaml:"adapter"`
-	Using      FlowPackageConnectUsing          `yaml:"using"`
-	Map        map[string]FlowPackageConnectMap `yaml:"map"`
-}
-type FlowPackageConnectUsing struct {
-	Instance FlowPackageConnectInstanceAdapter `yaml:"instance"`
-}
-type FlowPackageConnectInstanceAdapter struct {
-	Declared bool     `yaml:"-"`
-	Source   []string `yaml:"source"`
-	Target   []string `yaml:"target"`
-}
-type FlowPackageConnectMap struct {
-	Source string `yaml:"source"`
-	Target string `yaml:"target"`
+	PackageKey string `yaml:"-"`
+	SourceFile string `yaml:"-"`
+	SourceLine int    `yaml:"-"`
+	From       string `yaml:"from"`
+	To         string `yaml:"to"`
+	Adapter    string `yaml:"adapter"`
 }
 type FlowPackagePinRef struct {
 	Root   bool

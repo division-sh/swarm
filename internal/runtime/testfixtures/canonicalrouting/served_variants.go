@@ -156,10 +156,7 @@ func CopyRootIngressLegacyTemplateTargetRoute(t testing.TB) string {
 	writeClosedVariantFile(t, root, "flows/operating/schema.yaml", `
 name: operating
 mode: template
-instance:
-  by: product_id
-  on_missing: create
-  on_conflict: reject
+instance: product_id
 initial_state: initializing
 terminal_states: [ready]
 states: [initializing, waiting, ready]
@@ -223,10 +220,7 @@ func CopyRootIngressLegacyTemplateAutoEmit(t testing.TB) string {
 	writeClosedVariantFile(t, root, "flows/operating/schema.yaml", `
 name: operating
 mode: template
-instance:
-  by: product_id
-  on_missing: create
-  on_conflict: reject
+instance: product_id
 initial_state: initializing
 terminal_states: [ready]
 states: [initializing, spawning, ready]

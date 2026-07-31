@@ -32,8 +32,6 @@ const (
 type Options struct {
 	RetiredInstanceKey          bool
 	MissingOutputCarries        bool
-	BadConnectMapping           bool
-	DuplicateConnectMapping     bool
 	UnsupportedReceiverSelector bool
 	ProducerTarget              bool
 	ProducerBroadcast           bool
@@ -94,12 +92,6 @@ func applyRoutingMutation(t testing.TB, root string, opts Options) {
 	}
 	if opts.MissingOutputCarries {
 		canonicalrouting.ApplyTemplateSelectOrCreateNegativeMutation(t, root, canonicalrouting.TemplateSelectOrCreateMissingCarry)
-	}
-	if opts.BadConnectMapping {
-		canonicalrouting.ApplyTemplateSelectOrCreateNegativeMutation(t, root, canonicalrouting.TemplateSelectOrCreateBadConnectMapping)
-	}
-	if opts.DuplicateConnectMapping {
-		canonicalrouting.ApplyTemplateSelectOrCreateNegativeMutation(t, root, canonicalrouting.TemplateSelectOrCreateDuplicateConnectMapping)
 	}
 	if opts.UnsupportedReceiverSelector {
 		canonicalrouting.ApplyTemplateSelectOrCreateNegativeMutation(t, root, canonicalrouting.TemplateSelectOrCreateReceiverSelector)

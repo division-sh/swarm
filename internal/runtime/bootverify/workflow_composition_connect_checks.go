@@ -121,24 +121,19 @@ func validateCompositionConnect(source semanticview.Source, connect runtimecontr
 	}
 	findings = append(findings, validateCompositionConnectSyntheticCarryCollisions(source, connect, from, outputPin, inputPin)...)
 	if to.Root {
-		if inputPin.Address != nil || !inputPin.Resolution.Empty() {
-			findings = append(findings, compositionConnectFinding(connect, "root_receiver_resolution_invalid", "root input pins are static receivers and cannot declare address or instance resolution", "root"))
+		if !inputPin.Resolution.Empty() {
+			findings = append(findings, compositionConnectFinding(connect, "root_receiver_resolution_invalid", "root input pins are static receivers and cannot declare instance resolution", "root"))
 		}
 		return findings
 	}
-
-	instanceKeyFindings := validateCompositionConnectInstanceKey(source, connect, outputPin, inputPin, from.FlowID, to.FlowID)
-	findings = append(findings, validateCompositionConnectReceiverAddress(connect, inputPin, receiverSchema, to.FlowID, len(instanceKeyFindings) == 0)...)
-	if len(instanceKeyFindings) > 0 {
-		findings = append(findings, instanceKeyFindings...)
-	} else {
-		findings = append(findings, validateCompositionConnectAddress(source, connect, outputPin, inputPin, from.FlowID, to.FlowID)...)
+	if compositionReceiverResolutionRequired(receiverSchema) && inputPin.Resolution.Empty() {
+		findings = append(findings, compositionConnectFinding(connect, "receiver_resolution_missing", fmt.Sprintf("receiver flow %s is a template and requires receiver-owned resolution.mode plus a same-named instance carry", to.FlowID), to.FlowID))
 	}
 	return findings
 }
 
 func validateCompositionConnectSyntheticCarryCollisions(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, from runtimecontracts.FlowPackagePinRef, outputPin runtimecontracts.FlowOutputEventPin, inputPin runtimecontracts.FlowInputEventPin) []Finding {
-	if from.Root || strings.TrimSpace(inputPin.Resolution.Mode) != runtimecontracts.FlowInputResolutionModeCreate {
+	if from.Root || inputPin.Resolution.Mode != runtimecontracts.FlowInputResolutionModeCreate {
 		return nil
 	}
 	syntheticFields := map[string]string{}
@@ -246,102 +241,8 @@ func compositionConnectEventCompatible(source semanticview.Source, connect runti
 	return false
 }
 
-func validateCompositionConnectReceiverAddress(connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin, receiverSchema runtimecontracts.FlowSchemaDocument, receiverFlowID string, hasInstanceKeyRoute bool) []Finding {
-	var findings []Finding
-	if inputPin.Address == nil {
-		if compositionReceiverAddressRequired(receiverSchema) && !hasInstanceKeyRoute {
-			findings = append(findings, compositionConnectFinding(connect, "receiver_route_key_missing", fmt.Sprintf("receiver flow %s requires a matching instance key route or an explicit addressed input pin", receiverFlowID), receiverFlowID))
-		}
-		return findings
-	}
-	cardinality := strings.TrimSpace(inputPin.Address.Cardinality)
-	switch cardinality {
-	case "one", "many":
-	default:
-		findings = append(findings, compositionConnectFinding(connect, "delivery_topology_invalid", fmt.Sprintf("input pin address cardinality %q is not one or many", cardinality), receiverFlowID))
-	}
-	mode := strings.TrimSpace(inputPin.Address.Mode)
-	switch mode {
-	case "", "select_existing", "select_or_create", "static_instance":
-	default:
-		findings = append(findings, compositionConnectFinding(connect, "receiver_address_rule_invalid", fmt.Sprintf("address mode %q is not supported", mode), receiverFlowID))
-	}
-	return findings
-}
-
-func compositionReceiverAddressRequired(schema runtimecontracts.FlowSchemaDocument) bool {
+func compositionReceiverResolutionRequired(schema runtimecontracts.FlowSchemaDocument) bool {
 	return strings.EqualFold(strings.TrimSpace(schema.Mode), "template")
-}
-
-func validateCompositionConnectInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, outputPin runtimecontracts.FlowOutputEventPin, inputPin runtimecontracts.FlowInputEventPin, producerFlowID, receiverFlowID string) []Finding {
-	adapter := connect.Using.Instance
-	if !inputPin.Resolution.Empty() {
-		if adapter.Declared {
-			return []Finding{compositionConnectFinding(connect, "instance_resolution_invalid", "connect.using.instance is incompatible with input pin resolution", receiverFlowID)}
-		}
-		if len(connect.Map) > 0 {
-			return []Finding{compositionConnectFinding(connect, "instance_resolution_invalid", "connect.map is incompatible with input pin resolution", receiverFlowID)}
-		}
-		return nil
-	}
-	if inputPin.Address != nil {
-		if adapter.Declared {
-			return []Finding{compositionConnectFinding(connect, "connect_key_adapter_invalid", "connect.using.instance is valid only for addressless template receiver instance-key routes", receiverFlowID)}
-		}
-		return nil
-	}
-	receiverSchema, ok := source.FlowSchemaByID(receiverFlowID)
-	if !ok || !compositionReceiverAddressRequired(receiverSchema) {
-		if adapter.Declared {
-			return []Finding{compositionConnectFinding(connect, "connect_key_adapter_invalid", "connect.using.instance requires a template receiver", receiverFlowID)}
-		}
-		return nil
-	}
-	if len(connect.Map) > 0 {
-		for key := range connect.Map {
-			return []Finding{compositionConnectFinding(connect, "connect_key_adapter_unsupported", fmt.Sprintf("connect map key %s is a renamed-key adapter surface and is tracked separately from same-name instance-key routing", key), receiverFlowID)}
-		}
-	}
-	bundle, ok := semanticview.Bundle(source)
-	if !ok {
-		return []Finding{compositionConnectFinding(connect, "receiver_instance_key_unavailable", "receiver instance key owner is unavailable for this semantic source", receiverFlowID)}
-	}
-	instance, err := bundle.ResolveFlowTemplateInstance(receiverFlowID)
-	if err != nil {
-		return []Finding{compositionConnectFinding(connect, "receiver_instance_key_invalid", err.Error(), receiverFlowID)}
-	}
-	outputKey := strings.TrimSpace(outputPin.Key)
-	if outputKey == "" {
-		return []Finding{compositionConnectFinding(connect, "output_key_missing", "producer output pin must declare key before it can route to a receiver instance key", producerFlowID)}
-	}
-	carries := outputPinCarries(outputPin)
-	if !stringSliceContains(carries, outputKey) {
-		return []Finding{compositionConnectFinding(connect, "output_carries_instance_key", fmt.Sprintf("producer output pin key %s must also be listed in carries", outputKey), producerFlowID)}
-	}
-	if adapter.Declared {
-		return validateCompositionConnectInstanceKeyAdapter(source, connect, adapter, carries, instance.By, outputPin, producerFlowID, receiverFlowID)
-	}
-	if !stringSliceContains(instance.By, outputKey) {
-		return []Finding{compositionConnectFinding(connect, "instance_key_mismatch", fmt.Sprintf("producer output key %s does not match receiver instance.by %v", outputKey, instance.By), receiverFlowID)}
-	}
-	for _, field := range instance.By {
-		field = strings.TrimSpace(field)
-		if !stringSliceContains(carries, field) {
-			return []Finding{compositionConnectFinding(connect, "output_carries_instance_key", fmt.Sprintf("producer output pin carries must include receiver instance.by field %s", field), producerFlowID)}
-		}
-		sourceType, err := outputPinCarriedPayloadFieldType(source, producerFlowID, outputPin, field)
-		if err != nil {
-			return []Finding{compositionConnectFinding(connect, "output_carries_instance_key", err.Error(), producerFlowID)}
-		}
-		targetType, err := compositionConnectTargetType(source, receiverFlowID, "entity."+field)
-		if err != nil {
-			return []Finding{compositionConnectFinding(connect, "receiver_instance_key_invalid", err.Error(), receiverFlowID)}
-		}
-		if !compositionConnectTypesCompatible(sourceType, targetType) {
-			return []Finding{compositionConnectFinding(connect, "key_types_incompatible", fmt.Sprintf("source payload.%s type %s is incompatible with receiver instance.by field entity.%s type %s", field, sourceType, field, targetType), receiverFlowID)}
-		}
-	}
-	return nil
 }
 
 func validateInputPinResolutions(source semanticview.Source) []Finding {
@@ -383,9 +284,6 @@ func validateInputPinResolution(source semanticview.Source, flowID string, pin r
 	var findings []Finding
 	resolution := pin.Resolution
 	location := flowID
-	if pin.Address != nil {
-		return []Finding{inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", "input pin resolution is incompatible with legacy address", location)}
-	}
 	switch resolution.Mode {
 	case runtimecontracts.FlowInputResolutionModeCreate, runtimecontracts.FlowInputResolutionModeSelect, runtimecontracts.FlowInputResolutionModeSelectOrCreate:
 		return validateCanonicalInstanceInputPinResolution(source, flowID, pin)
@@ -394,11 +292,11 @@ func validateInputPinResolution(source semanticview.Source, flowID string, pin r
 	case runtimecontracts.FlowInputResolutionModeReply:
 		return validateReplyInputPinResolution(source, flowID, pin)
 	case runtimecontracts.FlowInputResolutionModeFanOut:
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_unimplemented", fmt.Sprintf("resolution mode %q is design-locked but not runnable in this slice", resolution.Mode), location))
-	case "":
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_unimplemented", fmt.Sprintf("resolution mode %q is design-locked but not runnable in this slice", resolution.Mode.String()), location))
+	case runtimecontracts.FlowInputResolutionModeNone:
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", "resolution.mode is required", location))
 	default:
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode %q is not supported", resolution.Mode), location))
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode %q is not supported", resolution.Mode.String()), location))
 	}
 	return findings
 }
@@ -502,7 +400,7 @@ func validateFanInInputPinResolution(source semanticview.Source, flowID string, 
 }
 
 func validateFanInDedupBy(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin, aggregation string, dedupBy []string) (string, bool, string) {
-	dedupBy = normalizedConnectAdapterFields(dedupBy)
+	dedupBy = normalizeCompositionFields(dedupBy)
 	if len(dedupBy) == 0 {
 		return "", false, fmt.Sprintf("resolution mode fan-in %s requires dedup_by; sender identity is not an implicit default", aggregation)
 	}
@@ -655,10 +553,11 @@ func inputPinPayloadFieldExists(source semanticview.Source, flowID string, pin r
 func validateCanonicalInstanceInputPinResolution(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin) []Finding {
 	var findings []Finding
 	resolution := pin.Resolution
-	mode := strings.TrimSpace(resolution.Mode)
+	mode := resolution.Mode
+	modeText := mode.String()
 	location := flowID
 	if resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" || resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode %s may only declare mode and carries", mode), location))
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode %s may only declare mode and carries", modeText), location))
 	}
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
@@ -668,11 +567,11 @@ func validateCanonicalInstanceInputPinResolution(source semanticview.Source, flo
 	if err != nil {
 		return append(findings, inputPinResolutionFinding(flowID, pin, "receiver_instance_key_invalid", err.Error(), location))
 	}
-	if len(instance.By) != 1 {
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode %s requires exactly one receiver instance.by field, got %v", mode, instance.By), location))
+	if instance.Field.Empty() {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode %s requires receiver `instance: <field>`", modeText), location))
 		return findings
 	}
-	key := strings.TrimSpace(instance.By[0])
+	key := instance.Field.String()
 	carry, ok := pin.Carries[key]
 	if !ok {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("flow %s is one instance per %s; input pin %s must declare a carry named %s (add carries: %s: {from: payload.<field>})", flowID, key, pin.PinName(), key, key), location))
@@ -680,7 +579,7 @@ func validateCanonicalInstanceInputPinResolution(source semanticview.Source, flo
 	}
 	instanceSource, err := runtimecontracts.ResolveFlowInputInstanceSource(mode, carry.From)
 	if err != nil {
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("carry %s source %q is invalid for resolution mode %s: %v", key, strings.TrimSpace(carry.From), mode, err), location))
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("carry %s source %q is invalid for resolution mode %s: %v", key, strings.TrimSpace(carry.From), modeText, err), location))
 	} else if instanceSource.Kind == runtimecontracts.FlowInputInstanceSourcePayload && !inputPinPayloadFieldExists(source, flowID, pin, instanceSource.Path) {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("carry %s source %s is not declared by input event %s", key, instanceSource.Path, pin.EventType()), location))
 	}
@@ -705,101 +604,6 @@ func inputPinResolutionFinding(flowID string, pin runtimecontracts.FlowInputEven
 		Message:  fmt.Sprintf("input pin %s.%s resolution is invalid: %s: %s", strings.TrimSpace(flowID), strings.TrimSpace(pin.PinName()), reason, detail),
 		Location: location,
 	}
-}
-
-func validateCompositionConnectInstanceKeyAdapter(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, adapter runtimecontracts.FlowPackageConnectInstanceAdapter, carries, receiverFields []string, outputPin runtimecontracts.FlowOutputEventPin, producerFlowID, receiverFlowID string) []Finding {
-	sources := normalizedConnectAdapterFields(adapter.Source)
-	targets := normalizedConnectAdapterFields(adapter.Target)
-	if len(sources) == 0 {
-		return []Finding{compositionConnectFinding(connect, "connect_key_adapter_missing_source", "connect.using.instance.source is required", receiverFlowID)}
-	}
-	if len(targets) == 0 {
-		return []Finding{compositionConnectFinding(connect, "connect_key_adapter_missing_target", "connect.using.instance.target is required", receiverFlowID)}
-	}
-	if len(sources) != len(targets) {
-		return []Finding{compositionConnectFinding(connect, "connect_key_adapter_cardinality", fmt.Sprintf("connect.using.instance source count %d must equal target count %d", len(sources), len(targets)), receiverFlowID)}
-	}
-	if duplicate := duplicateString(sources); duplicate != "" {
-		return []Finding{compositionConnectFinding(connect, "connect_key_adapter_duplicate_source", fmt.Sprintf("connect.using.instance.source contains duplicate field %s", duplicate), producerFlowID)}
-	}
-	if duplicate := duplicateString(targets); duplicate != "" {
-		return []Finding{compositionConnectFinding(connect, "connect_key_adapter_duplicate_target", fmt.Sprintf("connect.using.instance.target contains duplicate field %s", duplicate), receiverFlowID)}
-	}
-	receiverFields = normalizedConnectAdapterFields(receiverFields)
-	for _, targetField := range targets {
-		if !stringSliceContains(receiverFields, targetField) {
-			return []Finding{compositionConnectFinding(connect, "connect_key_adapter_target_missing", fmt.Sprintf("adapter target field %s is not declared in receiver instance.by %v", targetField, receiverFields), receiverFlowID)}
-		}
-	}
-	if len(targets) != len(receiverFields) || !sameStringSet(targets, receiverFields) {
-		return []Finding{compositionConnectFinding(connect, "connect_key_adapter_partial", fmt.Sprintf("connect.using.instance.target must map every receiver instance.by field %v", receiverFields), receiverFlowID)}
-	}
-	for idx, sourceField := range sources {
-		targetField := targets[idx]
-		if !stringSliceContains(carries, sourceField) {
-			return []Finding{compositionConnectFinding(connect, "connect_key_adapter_source_missing", fmt.Sprintf("adapter source field %s is not declared in producer output carries %v", sourceField, carries), producerFlowID)}
-		}
-		sourceType, err := outputPinCarriedPayloadFieldType(source, producerFlowID, outputPin, sourceField)
-		if err != nil {
-			return []Finding{compositionConnectFinding(connect, "connect_key_adapter_source_missing", err.Error(), producerFlowID)}
-		}
-		targetType, err := compositionConnectTargetType(source, receiverFlowID, "entity."+targetField)
-		if err != nil {
-			return []Finding{compositionConnectFinding(connect, "connect_key_adapter_target_missing", err.Error(), receiverFlowID)}
-		}
-		if !compositionConnectTypesCompatible(sourceType, targetType) {
-			return []Finding{compositionConnectFinding(connect, "key_types_incompatible", fmt.Sprintf("adapter source payload.%s type %s is incompatible with receiver instance.by field entity.%s type %s", sourceField, sourceType, targetField, targetType), receiverFlowID)}
-		}
-	}
-	return nil
-}
-
-func validateCompositionConnectAddress(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, outputPin runtimecontracts.FlowOutputEventPin, inputPin runtimecontracts.FlowInputEventPin, producerFlowID, receiverFlowID string) []Finding {
-	if inputPin.Address == nil {
-		for key := range connect.Map {
-			return []Finding{compositionConnectFinding(connect, "receiver_address_rule_missing", fmt.Sprintf("connect map key %s has no receiver input-pin address rule", key), receiverFlowID)}
-		}
-		return nil
-	}
-	address := runtimecontracts.FlowInputPinAddress{
-		By:          strings.TrimSpace(inputPin.Address.By),
-		Source:      strings.TrimSpace(inputPin.Address.Source),
-		Target:      strings.TrimSpace(inputPin.Address.Target),
-		Cardinality: strings.TrimSpace(inputPin.Address.Cardinality),
-		Mode:        strings.TrimSpace(inputPin.Address.Mode),
-	}
-	if address.By == "" {
-		return []Finding{compositionConnectFinding(connect, "receiver_address_rule_missing", "input pin address.by is required", receiverFlowID)}
-	}
-	for key := range connect.Map {
-		if strings.TrimSpace(key) != address.By {
-			return []Finding{compositionConnectFinding(connect, "connect_map_unknown_address_key", fmt.Sprintf("connect map key %s is not declared by receiver address key %s", key, address.By), receiverFlowID)}
-		}
-	}
-	mapEntry := connect.Map[address.By]
-	sourceExpr := firstNonEmpty(mapEntry.Source, address.Source)
-	if sourceExpr == "" {
-		sourceExpr = "payload." + address.By
-	}
-	targetExpr := firstNonEmpty(mapEntry.Target, address.Target)
-	if targetExpr == "" {
-		targetExpr = "entity." + address.By
-	}
-	sourceType, err := outputPinKeyCarriesSourceType(source, producerFlowID, outputPin, sourceExpr)
-	if err != nil {
-		return []Finding{compositionConnectFinding(connect, "output_carries_address_key", err.Error(), producerFlowID)}
-	}
-	if err := compositionConnectTargetIndexed(source, receiverFlowID, targetExpr); err != nil {
-		return []Finding{compositionConnectFinding(connect, "receiver_address_rule_invalid", err.Error(), receiverFlowID)}
-	}
-	targetType, err := compositionConnectTargetType(source, receiverFlowID, targetExpr)
-	if err != nil {
-		return []Finding{compositionConnectFinding(connect, "receiver_address_rule_invalid", err.Error(), receiverFlowID)}
-	}
-	if !compositionConnectTypesCompatible(sourceType, targetType) {
-		return []Finding{compositionConnectFinding(connect, "key_types_incompatible", fmt.Sprintf("source %s type %s is incompatible with target %s type %s", sourceExpr, sourceType, targetExpr, targetType), receiverFlowID)}
-	}
-	return nil
 }
 
 func compositionConnectTargetType(source semanticview.Source, flowID, expr string) (string, error) {
@@ -843,54 +647,13 @@ func compositionConnectTargetType(source semanticview.Source, flowID, expr strin
 	return "", fmt.Errorf("target expression %q must be _entity.id, entity.*, config.*, or instance.*", expr)
 }
 
-func compositionConnectTargetIndexed(source semanticview.Source, flowID, expr string) error {
-	expr = strings.TrimSpace(expr)
-	switch {
-	case expr == "_entity.id":
-		return nil
-	case strings.HasPrefix(expr, "entity."):
-		fieldPath := strings.TrimSpace(strings.TrimPrefix(expr, "entity."))
-		switch fieldPath {
-		case "", "entity_id":
-			return nil
-		}
-		if strings.Contains(fieldPath, ".") {
-			return fmt.Errorf("receiver target %s uses a nested entity path; descriptor/index route evidence supports only top-level indexed entity fields", expr)
-		}
-		contract, ok := entityruntime.ResolveForFlow(source, flowID)
-		if !ok {
-			return fmt.Errorf("receiver flow %s has no entity contract for %s", flowID, expr)
-		}
-		field, err := entityruntime.ResolveLeafField(contract, fieldPath)
-		if err != nil {
-			return fmt.Errorf("receiver target %s is invalid: %v", expr, err)
-		}
-		if !field.FieldDecl.Indexed {
-			return fmt.Errorf("receiver target %s must declare indexed: true before it can be used as descriptor/index route evidence", expr)
-		}
-		return nil
-	case strings.HasPrefix(expr, "config."):
-		return fmt.Errorf("receiver target %s has no typed descriptor/index owner; use an indexed entity field or an identity descriptor target", expr)
-	case strings.HasPrefix(expr, "instance."):
-		fieldPath := strings.TrimSpace(strings.TrimPrefix(expr, "instance."))
-		switch fieldPath {
-		case "flow_instance", "instance_id":
-			return nil
-		default:
-			return fmt.Errorf("receiver target %s has no typed descriptor/index owner; use an indexed entity field or an identity descriptor target", expr)
-		}
-	default:
-		return nil
-	}
-}
-
 func compositionConnectTypesCompatible(sourceType, targetType string) bool {
 	sourceType = compositionConnectTypeFamily(sourceType)
 	targetType = compositionConnectTypeFamily(targetType)
 	return sourceType != "" && targetType != "" && sourceType == targetType
 }
 
-func normalizedConnectAdapterFields(in []string) []string {
+func normalizeCompositionFields(in []string) []string {
 	if len(in) == 0 {
 		return nil
 	}
@@ -902,45 +665,6 @@ func normalizedConnectAdapterFields(in []string) []string {
 		}
 	}
 	return out
-}
-
-func duplicateString(in []string) string {
-	seen := map[string]struct{}{}
-	for _, item := range in {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		if _, ok := seen[item]; ok {
-			return item
-		}
-		seen[item] = struct{}{}
-	}
-	return ""
-}
-
-func sameStringSet(left, right []string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	seen := map[string]struct{}{}
-	for _, item := range left {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			return false
-		}
-		seen[item] = struct{}{}
-	}
-	for _, item := range right {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			return false
-		}
-		if _, ok := seen[item]; !ok {
-			return false
-		}
-	}
-	return true
 }
 
 func compositionConnectTypeFamily(raw string) string {
@@ -974,15 +698,6 @@ func compositionConnectsFromOutputEvent(source semanticview.Source, flowID, even
 		}
 	}
 	return false
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }
 
 func stringSliceContains(values []string, needle string) bool {

@@ -28,10 +28,6 @@ func (p FlowInputEventPin) normalized() FlowInputEventPin {
 	if out.Event == "" {
 		out.Event = out.Name
 	}
-	if p.Address != nil {
-		address := p.Address.normalized()
-		out.Address = &address
-	}
 	return out
 }
 
@@ -74,7 +70,7 @@ func (c FlowInputPinCarry) normalized() FlowInputPinCarry {
 
 func (r FlowInputPinResolution) Empty() bool {
 	r = r.normalized()
-	return r.Mode == "" &&
+	return r.Mode == FlowInputResolutionModeNone &&
 		r.Aggregation == "" &&
 		r.Window == "" &&
 		len(r.DedupBy) == 0 &&
@@ -85,7 +81,7 @@ func (r FlowInputPinResolution) Empty() bool {
 
 func (r FlowInputPinResolution) normalized() FlowInputPinResolution {
 	return FlowInputPinResolution{
-		Mode:           strings.ToLower(strings.TrimSpace(r.Mode)),
+		Mode:           r.Mode,
 		Aggregation:    strings.ToLower(strings.TrimSpace(r.Aggregation)),
 		Window:         strings.TrimSpace(r.Window),
 		DedupBy:        normalizeStringListPreserveOrder(r.DedupBy),
@@ -117,16 +113,6 @@ func (p FlowOutputEventPin) normalized() FlowOutputEventPin {
 		out.Event = out.Name
 	}
 	return out
-}
-
-func (a FlowInputPinAddress) normalized() FlowInputPinAddress {
-	return FlowInputPinAddress{
-		By:          strings.TrimSpace(a.By),
-		Source:      strings.TrimSpace(a.Source),
-		Target:      strings.TrimSpace(a.Target),
-		Cardinality: strings.TrimSpace(a.Cardinality),
-		Mode:        strings.TrimSpace(a.Mode),
-	}
 }
 
 func (c FlowPackageConnect) FromRef() (FlowPackagePinRef, error) {
@@ -165,22 +151,6 @@ func (c FlowPackageConnect) normalized() FlowPackageConnect {
 		From:       strings.TrimSpace(c.From),
 		To:         strings.TrimSpace(c.To),
 		Adapter:    strings.TrimSpace(c.Adapter),
-		Using:      c.Using.normalized(),
-		Map:        cloneFlowPackageConnectMap(c.Map),
-	}
-}
-
-func (u FlowPackageConnectUsing) normalized() FlowPackageConnectUsing {
-	return FlowPackageConnectUsing{
-		Instance: u.Instance.normalized(),
-	}
-}
-
-func (a FlowPackageConnectInstanceAdapter) normalized() FlowPackageConnectInstanceAdapter {
-	return FlowPackageConnectInstanceAdapter{
-		Declared: a.Declared,
-		Source:   normalizeStringListPreserveOrder(a.Source),
-		Target:   normalizeStringListPreserveOrder(a.Target),
 	}
 }
 
@@ -290,33 +260,6 @@ func cloneFlowPackageConnects(in []FlowPackageConnect) []FlowPackageConnect {
 	for _, connect := range in {
 		normalized := connect.normalized()
 		out = append(out, normalized)
-	}
-	return out
-}
-
-func cloneFlowPackageConnectMap(in map[string]FlowPackageConnectMap) map[string]FlowPackageConnectMap {
-	if len(in) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(in))
-	for key := range in {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	out := make(map[string]FlowPackageConnectMap, len(in))
-	for _, key := range keys {
-		normalizedKey := strings.TrimSpace(key)
-		if normalizedKey == "" {
-			continue
-		}
-		entry := in[key]
-		out[normalizedKey] = FlowPackageConnectMap{
-			Source: strings.TrimSpace(entry.Source),
-			Target: strings.TrimSpace(entry.Target),
-		}
-	}
-	if len(out) == 0 {
-		return nil
 	}
 	return out
 }
