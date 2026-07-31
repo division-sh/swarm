@@ -10831,6 +10831,21 @@ flow_model:
           status: create_select_select_or_create_fan_in_stream_barrier_and_reply_modes_runnable_fan_out_fail_closed
           canonical_spec_owner: platform-spec.yaml#flow_model.flow_package.composition_routing.route_plan_lowering.implementation_slice_1835
           canonical_code_owner: internal/runtime/contracts.FlowInputPinResolution/WorkflowJoinPlan + internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey/FanIn/ReplyResolution + internal/runtime/bus.templateInstanceLifecycleOwner/connectRoutePlanResolver + internal/runtime/engine.AccumulateSpec/joinruntime.Activation + internal/store.ReplyContextStore + internal/runtime/bootverify.composition_connect_validation
+          instance_identity_owner_2021:
+            status: implemented_single_authored_identity_owner
+            authored_identity_owner: flow instance.by
+            authored_source_owner: receiver input carries.<instance.by>.from
+            authored_behavior_owner: receiver input resolution.mode
+            effective_owner: internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey
+            readback: >
+              Routing topology, authoring view, and CLI describe render the effective instance.by field,
+              resolution mode, typed source kind/path, and derivation provenance from the lowered plan. They do not
+              expose retired resolution.instance_key as authored authority.
+            retirement: >
+              resolution.instance_key and instance.key.<field> sources are hard-invalid during strict load. There is
+              no warning, alias, fallback reader, compatibility DTO, or dual semantic owner. The deterministic
+              `swarm migrate-resolution-instance-key --contracts <bundle-root>` codemod validates the complete tree
+              before writing, preserves every file byte-for-byte on a blocker, and is idempotent.
           rule: |
             Receiver input pins may declare an explicit instance-resolution
             contract under `resolution:{mode,...}`. This receiver-side contract
@@ -10860,6 +10875,8 @@ flow_model:
             harness-injected inputs remain existing #1807 input-source /
             connect behavior; they are not instance-resolution runtime modes.
           authoring_shape: |
+            instance:
+              by: validation_case_id
             pins:
               inputs:
                 events:
@@ -10867,36 +10884,30 @@ flow_model:
                     event: validation.requested
                     resolution:
                       mode: create
-                      instance_key:
-                        mint: uuid
-                        as: validation_case_id
                     carries:
                       validation_case_id:
-                        from: instance.key.validation_case_id
+                        from: generated.uuid
                         type: uuid
           modes:
             create:
               status: runnable_in_1835_pr1
               contract: >
-                `mode: create` mints the receiver template instance key at the
-                boundary, carries that key as `instance.key.<as>`, creates the
-                receiver instance if absent, and reuses the same keyed instance
-                on replay or duplicate delivery. The receiver flow MUST be
-                `mode: template`, MUST have a single `instance.by` field in this
-                slice, and `instance_key.as` MUST equal that field. The input pin
-                MUST declare a matching `carries.<field>.from:
-                instance.key.<field>` entry so downstream route rendering and
-                lifecycle activation consume the same canonical key material.
-              mint:
-                uuid: >
-                  Deterministically mints a UUID-shaped instance key from the
-                  source event id plus receiver flow, receiver pin, and
-                  `instance_key.as`. It is replay-stable: the same committed
-                  event resolves to the same receiver instance and does not
-                  create another instance.
-                event_id: >
-                  Carries the source event id directly as the receiver instance
-                  key. The source event id must be present and non-empty.
+                `mode: create` obtains the receiver template identity from the same-named carry required by the
+                receiver's sole `instance.by` field, creates the receiver instance if absent, and reuses that exact
+                keyed instance on duplicate delivery. The carry source may be exact `generated.uuid`, `event.id`, or
+                one admitted top-level `payload.<field>`. `generated.uuid` is valid only for create; no other
+                `generated.*` member exists. `event.id` and generated sources require a non-empty admitted event id.
+              sources:
+                generated.uuid: >
+                  Deterministically derives a UUID-shaped key at route admission from the admitted event id,
+                  receiver flow, receiver pin, and sole `instance.by` field. Recovery and ordinary committed replay
+                  consume the persisted projection and never derive again. A genuine fork has a fresh event identity
+                  and therefore derives and stamps a fresh value.
+                event.id: >
+                  Uses the admitted event id directly and stamps it as receiver-targeted route projection.
+                payload.field: >
+                  Reads the immutable journal payload for identity/lifecycle matching. It is not copied into route
+                  projection, and a renamed payload source does not create an implicit handler payload alias.
               runtime_policy: >
                 The lowered plan internally uses create/reuse lifecycle
                 semantics for this new resolution surface. Legacy
@@ -10904,14 +10915,13 @@ flow_model:
                 legacy addressless template instance-key composition; it does
                 not override `resolution.mode:create`.
               delivery_projection: >
-                Lifecycle-produced `instance.key.<as>` material is stamped on
-                each concrete DeliveryRoute as a normalized synthetic payload
-                projection. Only synthetic values without another
+                `generated.uuid` and `event.id` material is stamped on each concrete DeliveryRoute as a normalized
+                receiver-targeted payload projection. Only values without another
                 authoritative home may be stored there; `payload.*` carries
                 continue to consume the immutable journal event payload and
                 MUST NOT be duplicated. The canonical route projector exposes
                 the stamped value to that receiver handler as ordinary
-                `payload.<as>` while leaving the persisted event payload
+                `payload.<instance.by>` while leaving the persisted event payload
                 unchanged. Downstream propagation remains an explicit authored
                 `fields:` mapping. Committed replay consumes the exact persisted
                 projection and never remints; a genuine fork creates a fresh
@@ -10925,10 +10935,11 @@ flow_model:
                 unsupported and no migration, fallback, export, or dual-write
                 path is defined.
               fail_closed:
-              - missing, empty, or unsupported mint
-              - missing instance_key.as
-              - instance_key.as not matching the receiver single instance.by
-              - missing carries.<as>.from: instance.key.<as>
+              - missing or composite receiver instance.by
+              - missing same-named carries.<instance.by>.from
+              - empty or unsupported carry source, including unknown generated.*
+              - generated.uuid on any non-create mode
+              - empty event id for generated.uuid or event.id
               - type-incompatible carried key
               - combined legacy input address
               - combined connect.using.instance or connect.map
@@ -10939,13 +10950,11 @@ flow_model:
               status: runnable_in_1835_pr2
               contract: >
                 Select routes to exactly one existing receiver template
-                instance by a declared carried key. The input pin declares the
-                seam identity once under `carries.<field>`, and
-                `resolution.instance_key` MUST name that carried field. In this
-                slice the receiver flow MUST be `mode: template`, MUST have a
-                single `instance.by` field, and that field MUST equal
-                `resolution.instance_key`. The carry MUST use `from:
-                payload.<field>` and may declare a type compatible with the
+                instance by the carry whose name equals the receiver's sole
+                `instance.by` field. `instance.by` owns partition identity,
+                `carries.<instance.by>.from` owns sourcing, and `resolution.mode`
+                owns unmatched behavior; no pin-level identity field is authored.
+                The carry MUST use one top-level `payload.<field>` and may declare a type compatible with the
                 receiver `entity.<field>`. The lowered route plan records
                 `Mode: select`, the single field mapping, runtime descriptor
                 resolution, and reject/reject lifecycle policy. Missing or
@@ -10955,11 +10964,10 @@ flow_model:
                 the receiver flow, key field, key value when available, and an
                 imperative remediation.
               fail_closed:
-              - missing or empty instance_key
-              - instance_key not naming declared carries.<field>
+              - missing same-named carries.<instance.by>
               - receiver not mode: template
-              - receiver instance.by missing, composite, or not equal to instance_key
-              - carry source not payload.<field>
+              - receiver instance.by missing or composite
+              - carry source not one top-level payload.<field>
               - type-incompatible carried key
               - combined legacy input address
               - combined connect.using.instance or connect.map
@@ -10973,11 +10981,9 @@ flow_model:
                 template instance by a declared carried key, or creates exactly
                 one receiver instance when no exact match exists. The authoring
                 contract is the same single-field carried-key boundary as
-                `select`: `carries.<field>` declares the seam identity once,
-                `resolution.instance_key` MUST name that carry, the receiver
-                flow MUST be `mode: template`, and its single `instance.by`
-                field MUST equal the key. The lowered route plan records
-                `Mode: select-or-create`, explicit field mapping, runtime
+                `select`: the receiver flow's sole `instance.by` owns identity and the same-named carry supplies one
+                top-level payload source. The lowered route plan records
+                `Mode: select-or-create`, the typed identity source, runtime
                 descriptor resolution, and create/reuse lifecycle policy.
                 Missing targets create through the canonical template lifecycle
                 owner; exact existing matches reuse; ambiguous matches fail
@@ -10985,11 +10991,10 @@ flow_model:
                 converge on one receiver instance or fail closed without
                 duplicating the receiver key.
               fail_closed:
-              - missing or empty instance_key
-              - instance_key not naming declared carries.<field>
+              - missing same-named carries.<instance.by>
               - receiver not mode: template
-              - receiver instance.by missing, composite, or not equal to instance_key
-              - carry source not payload.<field>
+              - receiver instance.by missing or composite
+              - carry source not one top-level payload.<field>
               - type-incompatible carried key
               - combined legacy input address
               - combined connect.using.instance or connect.map
@@ -20582,6 +20587,13 @@ cli_specification:
               json_shape: object with package_file and removed
               quiet_values:
               - number of removed connect.delivery one declarations
+            migrate_resolution_instance_key:
+              command: swarm migrate-resolution-instance-key
+              classification: shared_output
+              fact_owner: local deterministic resolution.instance_key codemod
+              json_shape: object with contracts_root, files, and declarations
+              quiet_values:
+              - number of migrated resolution.instance_key declarations
             runs:
               command: swarm run list
               classification: shared_output
@@ -22737,6 +22749,16 @@ cli_specification:
       behavior: >
         Deterministically remove only retired scalar `connect.delivery: one` declarations. Refuse every
         author-decision form, including `many`, `broadcast`, `reply`, and `connect.reply`, without changing the file.
+    migrate_resolution_instance_key:
+      command: swarm migrate-resolution-instance-key --contracts <bundle-root>
+      group: author_validate
+      tier: must_have
+      implementation_status: implemented
+      owner: platform-spec.yaml#flow_model.flow_package.composition_routing.route_plan_lowering.implementation_slice_1835.instance_identity_owner_2021
+      behavior: >
+        Validate the complete contract tree before writing, remove deterministic retired
+        `resolution.instance_key` declarations, and move create sources from `instance.key.<field>` to exact
+        `generated.uuid` or `event.id`. Refuse ambiguous declarations without changing any schema file.
     runs:
       command: swarm run list [filters]
       group: run_operate

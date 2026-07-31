@@ -75,7 +75,6 @@ func (c FlowInputPinCarry) normalized() FlowInputPinCarry {
 func (r FlowInputPinResolution) Empty() bool {
 	r = r.normalized()
 	return r.Mode == "" &&
-		r.InstanceKey.Empty() &&
 		r.Aggregation == "" &&
 		r.Window == "" &&
 		len(r.DedupBy) == 0 &&
@@ -87,26 +86,12 @@ func (r FlowInputPinResolution) Empty() bool {
 func (r FlowInputPinResolution) normalized() FlowInputPinResolution {
 	return FlowInputPinResolution{
 		Mode:           strings.ToLower(strings.TrimSpace(r.Mode)),
-		InstanceKey:    r.InstanceKey.normalized(),
 		Aggregation:    strings.ToLower(strings.TrimSpace(r.Aggregation)),
 		Window:         strings.TrimSpace(r.Window),
 		DedupBy:        normalizeStringListPreserveOrder(r.DedupBy),
 		Singleton:      strings.TrimSpace(r.Singleton),
 		RepliesTo:      strings.TrimSpace(r.RepliesTo),
 		CorrelationKey: strings.TrimSpace(r.CorrelationKey),
-	}
-}
-
-func (k FlowInputPinResolutionInstanceKey) Empty() bool {
-	k = k.normalized()
-	return k.From == "" && k.Mint == "" && k.As == ""
-}
-
-func (k FlowInputPinResolutionInstanceKey) normalized() FlowInputPinResolutionInstanceKey {
-	return FlowInputPinResolutionInstanceKey{
-		From: strings.TrimSpace(k.From),
-		Mint: strings.ToLower(strings.TrimSpace(k.Mint)),
-		As:   strings.TrimSpace(k.As),
 	}
 }
 

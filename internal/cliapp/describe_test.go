@@ -292,6 +292,44 @@ func TestDescribeRoutesRendersCanonicalRootConnectWithoutLegacyDebt(t *testing.T
 	}
 }
 
+func TestDescribeRoutesRendersDerivedInstanceIdentitySource(t *testing.T) {
+	contractsRoot := canonicalrouting.CopyExample(t, canonicalrouting.TemplateCreateMintedKey)
+	var jsonOut, jsonErr bytes.Buffer
+	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", "--contracts", contractsRoot, "--json"}, &jsonOut, &jsonErr, defaultRootCommandOptions()); code != 0 {
+		t.Fatalf("describe routes --json code=%d stderr=%s", code, jsonErr.String())
+	}
+	var topology routingtopology.Topology
+	if err := json.Unmarshal(jsonOut.Bytes(), &topology); err != nil {
+		t.Fatalf("decode routes topology: %v", err)
+	}
+	var identity *routingtopology.InstanceKey
+	for _, edge := range topology.Edges {
+		if edge.Scope == routingtopology.DeliveryScopeInterFlowConnect && edge.Resolution != nil && edge.Resolution.Mode == "create" {
+			identity = edge.Resolution.InstanceKey
+			break
+		}
+	}
+	if identity == nil {
+		t.Fatalf("topology edges = %#v, want derived create route", topology.Edges)
+	}
+	if strings.Join(identity.Fields, ",") != "validation_case_id" || identity.SourceKind != "generated_uuid" || identity.SourcePath != "generated.uuid" || identity.DerivedFrom == "" {
+		t.Fatalf("derived identity readback = %#v", identity)
+	}
+
+	var humanOut, humanErr bytes.Buffer
+	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", "--contracts", contractsRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
+		t.Fatalf("describe routes code=%d stderr=%s", code, humanErr.String())
+	}
+	for _, want := range []string{"key=validation_case_id", "source_kind=generated_uuid", "source=generated.uuid", "derived_from="} {
+		if !strings.Contains(humanOut.String(), want) {
+			t.Fatalf("human routes missing %q:\n%s", want, humanOut.String())
+		}
+	}
+	if strings.Contains(humanOut.String(), "mint=") || strings.Contains(humanOut.String(), " as=") {
+		t.Fatalf("human routes retained retired mint/as authority:\n%s", humanOut.String())
+	}
+}
+
 func TestDescribeCommandDiagnosticsCarryRemediationAndEvidence(t *testing.T) {
 	contractsRoot := writeVerifyBootTimerCommandFixture(t, "state:done")
 

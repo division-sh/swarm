@@ -5,6 +5,68 @@ import (
 	"testing"
 )
 
+// ApplyRetiredResolutionInstanceKeyMutation restores only the deterministic
+// pre-#2021 spelling so loader and codemod tests can prove its retirement.
+func ApplyRetiredResolutionInstanceKeyMutation(t testing.TB, root string, id ArtifactID) {
+	t.Helper()
+	insertCarried := func(path, mode string) {
+		applyClosedReplacement(t, path,
+			"          mode: "+mode+"\n",
+			"          mode: "+mode+"\n          instance_key: account_id\n")
+	}
+	switch id {
+	case TemplateSelectExisting:
+		path := filepath.Join(root, "flows/account/schema.yaml")
+		insertCarried(path, "select-or-create")
+		insertCarried(path, "select")
+	case TemplateSelectOrCreate:
+		insertCarried(filepath.Join(root, "flows/account/schema.yaml"), "select-or-create")
+	case TemplateReply:
+		path := filepath.Join(root, "flows/requester/schema.yaml")
+		applyClosedReplacement(t, path, "          mode: select-or-create\n", "          mode: select-or-create\n          instance_key: account_id\n")
+		applyClosedReplacement(t, path, "          mode: select\n", "          mode: select\n          instance_key: account_id\n")
+	case TemplateCreateMintedKey:
+		path := filepath.Join(root, "flows/validator/schema.yaml")
+		applyClosedReplacement(t, path, "          mode: create\n", "          mode: create\n          instance_key:\n            mint: uuid\n            as: validation_case_id\n")
+		applyClosedReplacement(t, path, "            from: generated.uuid\n", "            from: instance.key.validation_case_id\n")
+	case FanInStream, FanInBarrier:
+		path := filepath.Join(root, "flows/operating/schema.yaml")
+		applyClosedReplacement(t, path, "          mode: create\n", "          mode: create\n          instance_key:\n            mint: event_id\n            as: operating_id\n")
+		applyClosedReplacement(t, path, "            from: event.id\n", "            from: instance.key.operating_id\n")
+	case ArtifactID("examples/routing/notify-all-children"):
+		path := filepath.Join(root, "flows/account/schema.yaml")
+		insertCarried(path, "select-or-create")
+		insertCarried(path, "select")
+	default:
+		t.Fatalf("artifact %q has no deterministic retired resolution.instance_key mutation", id)
+	}
+}
+
+type RetiredResolutionInstanceKeyBlocker uint8
+
+const (
+	RetiredResolutionInstanceKeyMismatch RetiredResolutionInstanceKeyBlocker = iota + 1
+	RetiredResolutionInstanceKeyUnknownMint
+	RetiredResolutionInstanceKeySelectingSyntheticSource
+)
+
+func ApplyRetiredResolutionInstanceKeyBlocker(t testing.TB, root string, blocker RetiredResolutionInstanceKeyBlocker) {
+	t.Helper()
+	switch blocker {
+	case RetiredResolutionInstanceKeyMismatch:
+		path := filepath.Join(root, "flows/account/schema.yaml")
+		applyClosedReplacement(t, path, "          instance_key: account_id\n", "          instance_key: wrong_id\n")
+	case RetiredResolutionInstanceKeyUnknownMint:
+		path := filepath.Join(root, "flows/validator/schema.yaml")
+		applyClosedReplacement(t, path, "            mint: uuid\n", "            mint: random\n")
+	case RetiredResolutionInstanceKeySelectingSyntheticSource:
+		path := filepath.Join(root, "flows/account/schema.yaml")
+		applyClosedReplacement(t, path, "            from: payload.account_id\n", "            from: generated.uuid\n")
+	default:
+		t.Fatalf("unsupported retired resolution.instance_key blocker %d", blocker)
+	}
+}
+
 // ApplyCompositionConnectReceiverPinCollisionMutation creates two distinct
 // receiver-local edges that collapse onto one durable event x subscriber row.
 func ApplyCompositionConnectReceiverPinCollisionMutation(t testing.TB, root string) {
@@ -95,7 +157,7 @@ type TemplateSelectOrCreateNegativeMutation uint8
 const (
 	TemplateSelectOrCreateBadConnectMapping TemplateSelectOrCreateNegativeMutation = iota + 1
 	TemplateSelectOrCreateDuplicateConnectMapping
-	TemplateSelectOrCreateMissingInstanceKey
+	TemplateSelectOrCreateRetiredInstanceKey
 	TemplateSelectOrCreateMissingCarry
 	TemplateSelectOrCreateReceiverSelector
 	TemplateSelectOrCreateProducerTarget
@@ -117,8 +179,8 @@ func ApplyTemplateSelectOrCreateNegativeMutation(t testing.TB, root string, muta
 		applyClosedReplacement(t, packageFile,
 			"  - from: producer.account_ready\n    to: account.account_ready\n",
 			"  - from: producer.account_ready\n    to: account.account_ready\n    using:\n      instance:\n        source: [account_id, account_id]\n        target: [account_id, account_id]\n")
-	case TemplateSelectOrCreateMissingInstanceKey:
-		applyClosedReplacement(t, receiverSchema, "          instance_key: account_id\n", "")
+	case TemplateSelectOrCreateRetiredInstanceKey:
+		applyClosedReplacement(t, receiverSchema, "          mode: select-or-create\n", "          mode: select-or-create\n          instance_key: account_id\n")
 	case TemplateSelectOrCreateMissingCarry:
 		applyClosedReplacement(t, receiverSchema,
 			"        carries:\n          account_id:\n            from: payload.account_id\n            type: text\n", "")

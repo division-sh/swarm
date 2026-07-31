@@ -9,12 +9,9 @@ pins:
         event: validation.requested
         resolution:
           mode: create
-          instance_key:
-            mint: uuid
-            as: validation_case_id
         carries:
           validation_case_id:
-            from: instance.key.validation_case_id
+            from: generated.uuid
             type: uuid
   outputs:
     events:

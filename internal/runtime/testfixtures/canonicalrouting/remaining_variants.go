@@ -488,7 +488,7 @@ pins:
       - name: telegram_text
         event: inbound.telegram.text_message
         source: external
-        resolution: {mode: select-or-create, instance_key: chat_id}
+        resolution: {mode: select-or-create}
         carries:
           chat_id: {from: payload.chat_id, type: text}
 `,
@@ -560,7 +560,7 @@ pins:
       - name: telegram_text_message
         event: inbound.telegram.text_message
         source: external
-        resolution: {mode: select-or-create, instance_key: conversation_reference}
+        resolution: {mode: select-or-create}
         carries:
           conversation_reference: {from: payload.conversation_reference, type: text}
   outputs: {events: []}

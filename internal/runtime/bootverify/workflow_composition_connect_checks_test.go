@@ -72,7 +72,7 @@ func TestRun_AllowsTemplateInstanceKeyCompositionConnectWithoutAddress(t *testin
 func TestRun_AllowsCreateInputResolutionCompositionConnect(t *testing.T) {
 	root := writeCreateResolutionCompositionConnectFixture(t, createResolutionCompositionFixtureOptions{
 		mode:         runtimecontracts.FlowInputResolutionModeCreate,
-		mint:         runtimecontracts.FlowInputResolutionMintUUID,
+		source:       runtimecontracts.FlowInputCarrySourceGeneratedUUID,
 		includeCarry: true,
 	})
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
@@ -98,7 +98,7 @@ func TestCreateSyntheticCarryRejectsStaticallyAuthoredProducerCollision(t *testi
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-	if !reportContains(report.Errors(), "composition_connect_validation", "producer producer-node emit field validation_case_id conflicts with receiver-owned carry instance.key.validation_case_id") {
+	if !reportContains(report.Errors(), "composition_connect_validation", "producer producer-node emit field validation_case_id conflicts with receiver-owned carry generated.uuid") {
 		t.Fatalf("expected producer/synthetic carry collision blocker, got %#v", report.Errors())
 	}
 }
@@ -170,7 +170,7 @@ func TestRun_FailsClosedForInvalidSelectInputResolution(t *testing.T) {
 		{
 			name: "undeclared carried key",
 			opts: selectResolutionCompositionFixtureOptions{instanceKey: "missing_account_id"},
-			want: "instance_key missing_account_id must name a declared carries.missing_account_id field",
+			want: "must declare a carry named account_id",
 		},
 		{
 			name: "composite receiver key",
@@ -230,33 +230,33 @@ func TestRun_FailsClosedForInvalidCreateInputResolution(t *testing.T) {
 			name: "non-runnable modes are design-locked but not runnable",
 			opts: createResolutionCompositionFixtureOptions{
 				mode:         runtimecontracts.FlowInputResolutionModeFanOut,
-				mint:         runtimecontracts.FlowInputResolutionMintUUID,
+				source:       runtimecontracts.FlowInputCarrySourceGeneratedUUID,
 				includeCarry: true,
 			},
 			want: "instance_resolution_unimplemented",
 		},
 		{
-			name: "invalid mint",
+			name: "invalid generated source",
 			opts: createResolutionCompositionFixtureOptions{
 				mode:         runtimecontracts.FlowInputResolutionModeCreate,
-				mint:         "random",
+				source:       "generated.random",
 				includeCarry: true,
 			},
-			want: "mint \"random\" must be uuid or event_id",
+			want: "only generated.uuid is supported",
 		},
 		{
 			name: "missing carried instance key",
 			opts: createResolutionCompositionFixtureOptions{
-				mode: runtimecontracts.FlowInputResolutionModeCreate,
-				mint: runtimecontracts.FlowInputResolutionMintUUID,
+				mode:   runtimecontracts.FlowInputResolutionModeCreate,
+				source: runtimecontracts.FlowInputCarrySourceGeneratedUUID,
 			},
-			want: "must carry validation_case_id from instance.key.validation_case_id",
+			want: "must declare a carry named validation_case_id",
 		},
 		{
 			name: "legacy connect using instance is incompatible",
 			opts: createResolutionCompositionFixtureOptions{
 				mode:          runtimecontracts.FlowInputResolutionModeCreate,
-				mint:          runtimecontracts.FlowInputResolutionMintUUID,
+				source:        runtimecontracts.FlowInputCarrySourceGeneratedUUID,
 				includeCarry:  true,
 				usingInstance: true,
 			},
@@ -779,7 +779,7 @@ func writeRootAutoEmitOutputPinKeyCarriesFixture(t *testing.T) string {
 
 type createResolutionCompositionFixtureOptions struct {
 	mode          string
-	mint          string
+	source        string
 	includeCarry  bool
 	usingInstance bool
 }
@@ -827,7 +827,7 @@ func writeCreateResolutionCompositionConnectFixture(t *testing.T, opts createRes
 	switch {
 	case opts.mode == runtimecontracts.FlowInputResolutionModeFanOut:
 		invalidity = canonicalrouting.CreateResolutionNonRunnableMode
-	case opts.mint == "random":
+	case opts.source == "generated.random":
 		invalidity = canonicalrouting.CreateResolutionInvalidMint
 	case !opts.includeCarry:
 		invalidity = canonicalrouting.CreateResolutionMissingCarry

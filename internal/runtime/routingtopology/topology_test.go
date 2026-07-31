@@ -144,7 +144,7 @@ func TestBuildProjectsSelectAndSelectOrCreateModes(t *testing.T) {
 			if edge.Resolution == nil || edge.Resolution.Mode != tc.mode || edge.Resolution.InstanceKey == nil {
 				t.Fatalf("resolution = %#v, want %s instance key", edge.Resolution, tc.mode)
 			}
-			if !reflect.DeepEqual(edge.Resolution.InstanceKey.Fields, []string{"account_id"}) || len(edge.Resolution.InstanceKey.Mappings) != 1 {
+			if !reflect.DeepEqual(edge.Resolution.InstanceKey.Fields, []string{"account_id"}) || edge.Resolution.InstanceKey.SourceKind != string(runtimecontracts.FlowInputInstanceSourcePayload) || edge.Resolution.InstanceKey.SourcePath != "payload.account_id" {
 				t.Fatalf("instance key = %#v, want carried account_id", edge.Resolution.InstanceKey)
 			}
 		})
@@ -210,7 +210,11 @@ func TestResolutionViewPreservesCreateStaticAndAddressDeclarations(t *testing.T)
 	}{
 		{name: "create", want: runtimecontracts.FlowInputResolutionModeCreate, plan: pinrouting.ConnectRoutePlan{
 			ResolutionKind: pinrouting.ConnectResolutionInstanceKey,
-			InstanceKey:    &pinrouting.ConnectRoutePlanInstanceKey{Mode: runtimecontracts.FlowInputResolutionModeCreate, Mint: runtimecontracts.FlowInputResolutionMintUUID, As: "account_id", OnMissing: "create", OnConflict: "reject"},
+			InstanceKey: &pinrouting.ConnectRoutePlanInstanceKey{
+				Mode: runtimecontracts.FlowInputResolutionModeCreate, Fields: []string{"account_id"},
+				Source:    runtimecontracts.FlowInputInstanceSource{Kind: runtimecontracts.FlowInputInstanceSourceGeneratedUUID, Path: runtimecontracts.FlowInputCarrySourceGeneratedUUID},
+				OnMissing: "create", OnConflict: "reject",
+			},
 		}},
 		{name: "static", want: string(pinrouting.ConnectResolutionStatic), plan: pinrouting.ConnectRoutePlan{ResolutionKind: pinrouting.ConnectResolutionStatic}},
 		{name: "address", want: string(pinrouting.ConnectResolutionAddress), plan: pinrouting.ConnectRoutePlan{ResolutionKind: pinrouting.ConnectResolutionAddress, Address: &pinrouting.ConnectRoutePlanAddress{By: "key", Source: "payload.id", Target: "entity.id", Cardinality: "one", Mode: "select"}}},
@@ -221,8 +225,8 @@ func TestResolutionViewPreservesCreateStaticAndAddressDeclarations(t *testing.T)
 			if resolution == nil || resolution.Mode != tc.want {
 				t.Fatalf("resolution = %#v, want mode %s", resolution, tc.want)
 			}
-			if tc.name == "create" && (resolution.InstanceKey == nil || resolution.InstanceKey.Mint != "uuid" || resolution.InstanceKey.As != "account_id") {
-				t.Fatalf("create resolution = %#v, want mint/as", resolution)
+			if tc.name == "create" && (resolution.InstanceKey == nil || resolution.InstanceKey.SourceKind != string(runtimecontracts.FlowInputInstanceSourceGeneratedUUID) || resolution.InstanceKey.SourcePath != runtimecontracts.FlowInputCarrySourceGeneratedUUID) {
+				t.Fatalf("create resolution = %#v, want generated UUID source", resolution)
 			}
 		})
 	}

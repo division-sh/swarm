@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring"
@@ -68,11 +69,8 @@ func TestFinalFlowInstanceAuthoringFixture_CoversSealedContractOwners(t *testing
 	if plan.InstanceKey == nil || plan.InstanceKey.Mode != "select-or-create" || strings.Join(plan.InstanceKey.Fields, ",") != finalflowinstanceauthoring.TemplateInstanceBy {
 		t.Fatalf("route plan instance key = %#v, want select-or-create/%s", plan.InstanceKey, finalflowinstanceauthoring.TemplateInstanceBy)
 	}
-	if len(plan.InstanceKey.Mappings) != 1 ||
-		plan.InstanceKey.Mappings[0].Source != finalflowinstanceauthoring.TemplatePayloadKey ||
-		plan.InstanceKey.Mappings[0].Target != finalflowinstanceauthoring.TemplateInstanceBy ||
-		!plan.InstanceKey.Mappings[0].Explicit {
-		t.Fatalf("route plan mappings = %#v, want explicit %s -> %s", plan.InstanceKey.Mappings, finalflowinstanceauthoring.TemplatePayloadKey, finalflowinstanceauthoring.TemplateInstanceBy)
+	if plan.InstanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourcePayload || plan.InstanceKey.Source.Path != "payload."+finalflowinstanceauthoring.TemplatePayloadKey {
+		t.Fatalf("route plan source = %#v, want payload source for %s", plan.InstanceKey.Source, finalflowinstanceauthoring.TemplatePayloadKey)
 	}
 
 }
@@ -86,16 +84,16 @@ func TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix(t *testing.T) {
 		loadError   bool
 	}{
 		{
-			name:        "missing receiver instance key",
-			opts:        finalflowinstanceauthoring.Options{MissingOutputKey: true},
-			checkID:     "composition_connect_validation",
-			wantMessage: "requires instance_key to name a carried field",
+			name:        "retired receiver instance key",
+			opts:        finalflowinstanceauthoring.Options{RetiredInstanceKey: true},
+			wantMessage: "resolution.instance_key is retired",
+			loadError:   true,
 		},
 		{
 			name:        "missing receiver carry evidence",
 			opts:        finalflowinstanceauthoring.Options{MissingOutputCarries: true},
 			checkID:     "composition_connect_validation",
-			wantMessage: "must name a declared carries.account_id field",
+			wantMessage: "must declare a carry named account_id",
 		},
 		{
 			name:        "renamed key adapter references missing producer evidence",

@@ -631,7 +631,7 @@ func plannedCreateAgentCarrierIdentity(
 }
 
 func syntheticDeliveryPayloadProjection(plan runtimepinrouting.ConnectRoutePlan, decision TemplateInstanceLifecycleDecision) (events.DeliveryPayloadProjection, error) {
-	if plan.InstanceKey == nil || strings.TrimSpace(plan.InstanceKey.Mint) == "" {
+	if plan.InstanceKey == nil || !plan.InstanceKey.Source.RequiresDeliveryProjection() {
 		return events.DeliveryPayloadProjection{}, nil
 	}
 	if decision.Empty() {

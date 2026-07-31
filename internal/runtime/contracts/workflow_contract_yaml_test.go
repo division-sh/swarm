@@ -901,24 +901,18 @@ func TestFlowSchemaDocumentDecode_PreservesInputPinResolutionModes(t *testing.T)
 	if got, want := create.Resolution.Mode, FlowInputResolutionModeCreate; got != want {
 		t.Fatalf("create Resolution.Mode = %q, want %q", got, want)
 	}
-	if got, want := create.Resolution.InstanceKey.Mint, FlowInputResolutionMintUUID; got != want {
-		t.Fatalf("create Resolution.InstanceKey.Mint = %q, want %q", got, want)
-	}
-	if got, want := create.Resolution.InstanceKey.As, "validation_case_id"; got != want {
-		t.Fatalf("create Resolution.InstanceKey.As = %q, want %q", got, want)
-	}
 	carry := create.Carries["validation_case_id"]
-	if got, want := carry.From, "instance.key.validation_case_id"; got != want {
+	if got, want := carry.From, FlowInputCarrySourceGeneratedUUID; got != want {
 		t.Fatalf("create carry From = %q, want %q", got, want)
 	}
 	if got, want := carry.Type, "uuid"; got != want {
 		t.Fatalf("create carry Type = %q, want %q", got, want)
 	}
-	if got, want := pins[1].Resolution.InstanceKey.From, "account_id"; got != want {
-		t.Fatalf("select instance_key scalar = %q, want %q", got, want)
+	if got, want := pins[1].Carries["account_id"].From, "payload.account_id"; got != want {
+		t.Fatalf("select identity carry source = %q, want %q", got, want)
 	}
-	if got, want := pins[2].Resolution.InstanceKey.From, "payload.account_id"; got != want {
-		t.Fatalf("select-or-create instance_key.from = %q, want %q", got, want)
+	if got, want := pins[2].Carries["account_id"].From, "payload.account_id"; got != want {
+		t.Fatalf("select-or-create identity carry source = %q, want %q", got, want)
 	}
 	if got, want := pins[3].Resolution.Aggregation, "stream"; got != want {
 		t.Fatalf("fan-in aggregation = %q, want %q", got, want)
@@ -939,25 +933,29 @@ func TestFlowSchemaDocumentDecode_RejectsUnsupportedInputPinResolutionFields(t *
 	tests := []struct {
 		name string
 		body canonicalrouting.ParserSnippet
+		want string
 	}{
 		{
 			name: "resolution",
 			body: canonicalrouting.UnsupportedInputPinResolutionSnippet(t, canonicalrouting.UnsupportedResolutionField),
+			want: "is not supported",
 		},
 		{
 			name: "instance_key",
 			body: canonicalrouting.UnsupportedInputPinResolutionSnippet(t, canonicalrouting.UnsupportedInstanceKeyField),
+			want: "resolution.instance_key is retired",
 		},
 		{
 			name: "carries",
 			body: canonicalrouting.UnsupportedInputPinResolutionSnippet(t, canonicalrouting.UnsupportedResolutionCarry),
+			want: "is not supported",
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var doc FlowSchemaDocument
 			err := tc.body.Decode(&doc)
-			if err == nil || !strings.Contains(err.Error(), "is not supported") {
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("yaml.Unmarshal error = %v, want typed field rejection", err)
 			}
 		})

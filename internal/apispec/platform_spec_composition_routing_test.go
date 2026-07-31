@@ -182,6 +182,33 @@ func TestPlatformSpecReplyRuntimeStatusDoesNotContradictHistoricalSlice(t *testi
 	assertScalarContains(t, mustMappingValue(t, sliceReply, "contract"), "engine.cross_flow_routing.reply_resolution")
 }
 
+func TestPlatformSpecInstanceIdentityAuthoringSourceAuthority(t *testing.T) {
+	root := loadPlatformSpecYAMLNode(t)
+	slice := mustYAMLPath(t, root, "flow_model", "flow_package", "composition_routing", "route_plan_lowering", "implementation_slice_1835")
+	owner := mustMappingValue(t, slice, "instance_identity_owner_2021")
+	assertScalarValue(t, mustMappingValue(t, owner, "status"), "implemented_single_authored_identity_owner")
+	assertScalarValue(t, mustMappingValue(t, owner, "authored_identity_owner"), "flow instance.by")
+	assertScalarValue(t, mustMappingValue(t, owner, "authored_source_owner"), "receiver input carries.<instance.by>.from")
+	assertScalarValue(t, mustMappingValue(t, owner, "authored_behavior_owner"), "receiver input resolution.mode")
+	assertScalarContains(t, mustMappingValue(t, owner, "retirement"), "hard-invalid")
+	assertScalarContains(t, mustMappingValue(t, owner, "retirement"), "migrate-resolution-instance-key")
+
+	create := mustYAMLPath(t, slice, "modes", "create")
+	assertScalarContains(t, mustMappingValue(t, create, "contract"), "generated.uuid")
+	assertScalarContains(t, mustYAMLPath(t, create, "sources", "generated.uuid"), "admitted event id")
+	assertScalarContains(t, mustYAMLPath(t, create, "sources", "generated.uuid"), "fresh event identity")
+	assertScalarContains(t, mustYAMLPath(t, create, "sources", "payload.field"), "immutable journal payload")
+	assertScalarContains(t, mustMappingValue(t, create, "delivery_projection"), "persisted projection")
+
+	selectMode := mustYAMLPath(t, slice, "modes", "select")
+	selectOrCreate := mustYAMLPath(t, slice, "modes", "select-or-create")
+	assertScalarContains(t, mustMappingValue(t, selectMode, "contract"), "carry whose name equals")
+	assertScalarContains(t, mustMappingValue(t, selectOrCreate, "contract"), "sole `instance.by`")
+	if strings.Contains(mustMappingValue(t, slice, "authoring_shape").Value, "instance_key") {
+		t.Fatal("canonical instance identity authoring shape retains retired resolution.instance_key")
+	}
+}
+
 func TestPlatformSpecCompositionRoutingDemotesProducerTargetAuthority(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
 
