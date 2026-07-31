@@ -1875,6 +1875,53 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionUsesRenamedPayloadSourc
 	}
 }
 
+func TestEventBusCheckPublishRecipientPlan_RenamedInstanceSourceRemediationUsesAuthoredPath(t *testing.T) {
+	for _, mode := range []string{
+		runtimecontracts.FlowInputResolutionModeSelect,
+		runtimecontracts.FlowInputResolutionModeSelectOrCreate,
+	} {
+		t.Run(mode, func(t *testing.T) {
+			source := connectRoutePlanCarriedKeyResolutionSourceWithIdentitySource(t, mode, "payload.external_account_id")
+			store := &connectRoutePlanLifecycleStore{
+				connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+					targetRouteMemoryStore: newTargetRouteMemoryStore(),
+				},
+			}
+			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TemplateInstanceActivator: store.Activate})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			store.bus = eb
+			evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
+				events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"cannot-satisfy-authored-source"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+
+			preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+			if err != nil {
+				t.Fatalf("CheckPublishRecipientPlan: %v", err)
+			}
+			if got, want := preflight.TargetFailure, string(runtimepinrouting.ConnectFailureAddressValueMissing); got != want {
+				t.Fatalf("preflight target failure = %q, want %q", got, want)
+			}
+			if len(preflight.DeliveryRoutes) != 0 || len(store.activations) != 0 {
+				t.Fatalf("preflight routes/activations = %#v/%d, want unchanged fail-closed state", preflight.DeliveryRoutes, len(store.activations))
+			}
+
+			routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
+			if err != nil {
+				t.Fatalf("planSubscribedRoutePlan: %v", err)
+			}
+			want := fmt.Sprintf("Provide payload.external_account_id before publishing to account; resolution mode %s requires a carried key value.", mode)
+			got, _ := routePlan.ExtraDetail["connect_route_plan_failure_remediation"].(string)
+			if got != want {
+				t.Fatalf("remediation = %q, want exact authored-source remediation %q", got, want)
+			}
+			if strings.Contains(got, "payload.account_id") {
+				t.Fatalf("remediation = %q, must not reconstruct source from instance.by", got)
+			}
+		})
+	}
+}
+
 func mustDeliveryPayloadProjection(t *testing.T, fields map[string]string) events.DeliveryPayloadProjection {
 	t.Helper()
 	projection, err := events.NewDeliveryPayloadProjection(fields)
@@ -3683,6 +3730,25 @@ func connectRoutePlanSelectResolutionSourceWithIdentitySource(t testing.TB, iden
 	t.Helper()
 	repoRoot := canonicalrouting.RepoRoot(t)
 	root := writeConnectRoutePlanCarriedKeyResolutionFixtureWithPolicy(t, runtimecontracts.FlowInputResolutionModeSelect, "create", "reuse")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	pins := bundle.Semantics.FlowInputEventPins["account"]
+	if len(pins) != 2 {
+		t.Fatalf("account input pins = %#v, want two", pins)
+	}
+	carry := pins[1].Carries["account_id"]
+	carry.From = identitySource
+	pins[1].Carries["account_id"] = carry
+	bundle.Semantics.FlowInputEventPins["account"] = pins
+	return semanticview.Wrap(bundle)
+}
+
+func connectRoutePlanCarriedKeyResolutionSourceWithIdentitySource(t testing.TB, mode, identitySource string) semanticview.Source {
+	t.Helper()
+	repoRoot := canonicalrouting.RepoRoot(t)
+	root := writeConnectRoutePlanCarriedKeyResolutionFixtureWithPolicy(t, mode, "reject", "reject")
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)

@@ -10960,7 +10960,8 @@ flow_model:
                 owns unmatched behavior; no pin-level identity field is authored.
                 The carry MUST use one top-level `payload.<field>` and may declare a type compatible with the
                 receiver `entity.<field>`. The lowered route plan records
-                `Mode: select`, the single field mapping, runtime descriptor
+                `Mode: select`, the sole `instance.by` field and typed payload
+                `Source` derived from the same-named carry, runtime descriptor
                 resolution, and reject/reject lifecycle policy. Missing or
                 ambiguous target is invalid; this mode never creates an
                 instance and receiver legacy `on_missing:create` does not
@@ -11092,16 +11093,16 @@ flow_model:
           proof_obligations:
           - contracts decode every locked mode and reject unknown resolution fields fail-closed
           - bootverify accepts valid create/select/select-or-create/fan-in stream/barrier resolution and rejects other non-runnable modes as not runnable in this slice
-          - route-plan lowering records create mode, mint kind, carried `as` field, create/reuse lifecycle policy, and does not require producer output key/carries
+          - route-plan lowering records create mode, the sole `instance.by` field, typed `Source` derived from the same-named carry, create/reuse lifecycle policy, and does not require producer output key/carries
           - EventBus publish/preflight creates a missing receiver instance through the canonical lifecycle path
-          - downstream receiver routes can render the carried minted instance key from activation variables
+          - downstream receiver routes can render the receiver-targeted identity projection derived from typed `Source` as `payload.<instance.by>`
           - same committed event replay reuses persisted delivery route/scope and does not create another receiver instance
-          - route-plan lowering records select mode, declared carried key mapping, runtime descriptor resolution, and reject/reject lifecycle policy
+          - route-plan lowering records select mode, the sole `instance.by` field and typed payload `Source` derived from the same-named carry, runtime descriptor resolution, and reject/reject lifecycle policy
           - EventBus publish/preflight for select routes to exactly one existing receiver instance
           - missing/ambiguous select target failures fail closed with receiver/key/value/remediation detail and no activation
           - same committed select event replay reuses persisted delivery route/scope and does not reselect after descriptor drift
           - standalone #1828 `template-select-existing` conformance fixture verifies and materializes through the canonical select route plan
-          - route-plan lowering records select-or-create mode, declared carried key mapping, runtime descriptor resolution, and create/reuse lifecycle policy
+          - route-plan lowering records select-or-create mode, the sole `instance.by` field and typed payload `Source` derived from the same-named carry, runtime descriptor resolution, and create/reuse lifecycle policy
           - EventBus publish/preflight for select-or-create reuses exactly one existing receiver instance
           - EventBus publish/preflight for select-or-create creates exactly one missing receiver instance through the canonical lifecycle path
           - concurrent same-key select-or-create deliveries converge on one receiver instance or fail closed without duplicate key ownership

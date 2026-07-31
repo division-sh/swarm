@@ -206,9 +206,43 @@ func TestPlatformSpecInstanceIdentityAuthoringSourceAuthority(t *testing.T) {
 	selectMode := mustYAMLPath(t, slice, "modes", "select")
 	selectOrCreate := mustYAMLPath(t, slice, "modes", "select-or-create")
 	assertScalarContains(t, mustMappingValue(t, selectMode, "contract"), "carry whose name equals")
+	assertScalarContains(t, mustMappingValue(t, selectMode, "contract"), "typed payload")
 	assertScalarContains(t, mustMappingValue(t, selectOrCreate, "contract"), "sole `instance.by`")
 	if strings.Contains(mustMappingValue(t, slice, "authoring_shape").Value, "instance_key") {
 		t.Fatal("canonical instance identity authoring shape retains retired resolution.instance_key")
+	}
+
+	proofs := mustMappingValue(t, slice, "proof_obligations")
+	for _, want := range []string{
+		"route-plan lowering records create mode, the sole `instance.by` field, typed `Source` derived from the same-named carry, create/reuse lifecycle policy, and does not require producer output key/carries",
+		"downstream receiver routes can render the receiver-targeted identity projection derived from typed `Source` as `payload.<instance.by>`",
+		"route-plan lowering records select mode, the sole `instance.by` field and typed payload `Source` derived from the same-named carry, runtime descriptor resolution, and reject/reject lifecycle policy",
+		"route-plan lowering records select-or-create mode, the sole `instance.by` field and typed payload `Source` derived from the same-named carry, runtime descriptor resolution, and create/reuse lifecycle policy",
+	} {
+		if !sequenceContainsScalar(proofs, want) {
+			t.Fatalf("instance identity proof obligations missing canonical typed-source proof %q", want)
+		}
+	}
+	var activeScalars []string
+	var collectScalars func(*yaml.Node)
+	collectScalars = func(node *yaml.Node) {
+		if node == nil {
+			return
+		}
+		if node.Kind == yaml.ScalarNode {
+			activeScalars = append(activeScalars, node.Value)
+			return
+		}
+		for _, child := range node.Content {
+			collectScalars(child)
+		}
+	}
+	collectScalars(slice)
+	activeSurface := strings.Join(activeScalars, "\n")
+	for _, retired := range []string{"mint kind", "carried `as` field", "carried minted instance key", "declared carried key mapping", "single field mapping"} {
+		if strings.Contains(activeSurface, retired) {
+			t.Fatalf("active instance identity slice retains retired authority %q", retired)
+		}
 	}
 }
 

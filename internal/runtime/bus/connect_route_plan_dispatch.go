@@ -894,9 +894,19 @@ func connectRoutePlanInstanceResolutionRemediation(plan runtimepinrouting.Connec
 	if value := strings.TrimSpace(keyValue); value != "" {
 		valueText = " = " + value
 	}
+	sourcePath := ""
+	if plan.InstanceKey != nil {
+		sourcePath = strings.TrimSpace(plan.InstanceKey.Source.Path)
+		if sourcePath == "" && plan.InstanceKey.Source.Kind == "" && len(plan.InstanceKey.Mappings) > 0 {
+			sourcePath = "payload." + keyLabel
+		}
+	}
+	if sourcePath == "" {
+		sourcePath = "the authored instance-key source"
+	}
 	switch failure {
 	case runtimepinrouting.ConnectFailureAddressValueMissing:
-		return fmt.Sprintf("Provide payload.%s before publishing to %s; resolution mode %s requires a carried key value.", keyLabel, receiverFlow, mode)
+		return fmt.Sprintf("Provide %s before publishing to %s; resolution mode %s requires a carried key value.", sourcePath, receiverFlow, mode)
 	case runtimepinrouting.ConnectFailureTargetAmbiguous:
 		return fmt.Sprintf("Ensure exactly one active %s instance has %s%s; resolution mode %s cannot choose between multiple matches.", receiverFlow, keyLabel, valueText, mode)
 	default:
