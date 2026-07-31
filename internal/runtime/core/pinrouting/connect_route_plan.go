@@ -183,8 +183,7 @@ type ConnectRoutePlanInstanceKey struct {
 	Mode       string
 	Fields     []string
 	Mappings   []ConnectRoutePlanInstanceKeyMapping
-	Mint       string
-	As         string
+	Source     runtimecontracts.FlowInputInstanceSource
 	OnMissing  string
 	OnConflict string
 }
@@ -633,10 +632,21 @@ func InstanceKeyMaterialForConnectRoutePlan(plan ConnectRoutePlan, matchValues m
 	if instanceKey == nil || len(instanceKey.Fields) == 0 {
 		return ConnectRoutePlanInstanceKeyMaterial{}, ConnectFailureReceiverAddressRuleMissing
 	}
-	if strings.TrimSpace(instanceKey.Mint) != "" {
+	if instanceKey.Source.RequiresDeliveryProjection() {
 		return ConnectRoutePlanInstanceKeyMaterial{}, ConnectFailureAddressValueMissing
 	}
 	values := make(map[string]any, len(instanceKey.Fields))
+	if instanceKey.Source.Kind != "" {
+		if instanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourcePayload || len(instanceKey.Fields) != 1 {
+			return ConnectRoutePlanInstanceKeyMaterial{}, ConnectFailureInstanceResolutionInvalid
+		}
+		sourcePath := strings.TrimSpace(instanceKey.Source.Path)
+		value := firstMatchValue(matchValues, sourcePath)
+		if sourcePath == "" || value == "" {
+			return ConnectRoutePlanInstanceKeyMaterial{}, ConnectFailureAddressValueMissing
+		}
+		values[instanceKey.Fields[0]] = value
+	}
 	mappings := connectInstanceKeyMaterializationMappings(instanceKey)
 	for _, mapping := range mappings {
 		source := strings.TrimSpace(mapping.Source)
@@ -668,27 +678,25 @@ func InstanceKeyMaterialForConnectRoutePlan(plan ConnectRoutePlan, matchValues m
 	}, ""
 }
 
-func MintedInstanceKeyMaterialForConnectRoutePlan(plan ConnectRoutePlan, eventID string) (ConnectRoutePlanInstanceKeyMaterial, ConnectRoutePlanFailure) {
+func EventSourcedInstanceKeyMaterialForConnectRoutePlan(plan ConnectRoutePlan, eventID string) (ConnectRoutePlanInstanceKeyMaterial, ConnectRoutePlanFailure) {
 	instanceKey := plan.InstanceKey
-	if instanceKey == nil || len(instanceKey.Fields) == 0 {
+	if instanceKey == nil || len(instanceKey.Fields) != 1 {
 		return ConnectRoutePlanInstanceKeyMaterial{}, ConnectFailureReceiverAddressRuleMissing
 	}
-	mint := strings.TrimSpace(instanceKey.Mint)
-	as := strings.TrimSpace(instanceKey.As)
 	eventID = strings.TrimSpace(eventID)
-	if mint == "" || as == "" || eventID == "" {
+	if eventID == "" {
 		return ConnectRoutePlanInstanceKeyMaterial{}, ConnectFailureAddressValueMissing
 	}
 	value := ""
-	switch mint {
-	case runtimecontracts.FlowInputResolutionMintUUID:
+	switch instanceKey.Source.Kind {
+	case runtimecontracts.FlowInputInstanceSourceGeneratedUUID:
 		value = deterministicResolutionUUID(plan, eventID)
-	case runtimecontracts.FlowInputResolutionMintEventID:
+	case runtimecontracts.FlowInputInstanceSourceEventID:
 		value = eventID
 	default:
 		return ConnectRoutePlanInstanceKeyMaterial{}, ConnectFailureInstanceResolutionInvalid
 	}
-	values := map[string]any{as: value}
+	values := map[string]any{instanceKey.Fields[0]: value}
 	keys, err := (runtimecontracts.TemplateInstanceContract{
 		FlowID: plan.Receiver.FlowID,
 		By:     append([]string{}, instanceKey.Fields...),
@@ -710,8 +718,8 @@ func deterministicResolutionUUID(plan ConnectRoutePlan, eventID string) string {
 	_, _ = h.Write([]byte{0})
 	_, _ = h.Write([]byte(strings.TrimSpace(plan.Receiver.Pin)))
 	_, _ = h.Write([]byte{0})
-	if plan.InstanceKey != nil {
-		_, _ = h.Write([]byte(strings.TrimSpace(plan.InstanceKey.As)))
+	if plan.InstanceKey != nil && len(plan.InstanceKey.Fields) == 1 {
+		_, _ = h.Write([]byte(strings.TrimSpace(plan.InstanceKey.Fields[0])))
 	}
 	sum := h.Sum(nil)
 	b := append([]byte{}, sum[:16]...)
@@ -831,10 +839,8 @@ func connectInstanceKey(source semanticview.Source, connect runtimecontracts.Flo
 
 func connectResolutionInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin, resolution runtimecontracts.FlowInputPinResolution, receiverFlowID string) (*ConnectRoutePlanInstanceKey, ConnectRoutePlanIssue) {
 	switch resolution.Mode {
-	case runtimecontracts.FlowInputResolutionModeCreate:
-		return connectCreateResolutionInstanceKey(source, connect, resolution, receiverFlowID)
-	case runtimecontracts.FlowInputResolutionModeSelect, runtimecontracts.FlowInputResolutionModeSelectOrCreate:
-		return connectCarriedKeyResolutionInstanceKey(source, connect, inputPin, resolution, receiverFlowID)
+	case runtimecontracts.FlowInputResolutionModeCreate, runtimecontracts.FlowInputResolutionModeSelect, runtimecontracts.FlowInputResolutionModeSelectOrCreate:
+		return connectCanonicalResolutionInstanceKey(source, connect, inputPin, resolution, receiverFlowID)
 	case runtimecontracts.FlowInputResolutionModeFanIn:
 		return nil, ConnectRoutePlanIssue{}
 	case runtimecontracts.FlowInputResolutionModeReply:
@@ -847,7 +853,7 @@ func connectResolutionInstanceKey(source semanticview.Source, connect runtimecon
 func connectReplyResolution(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, sourceEndpoint ConnectRoutePlanEndpoint, receiverRef runtimecontracts.FlowPackagePinRef, inputPin runtimecontracts.FlowInputEventPin) (*ConnectRoutePlanReplyResolution, ConnectRoutePlanIssue) {
 	if inputPin.Resolution.Mode == runtimecontracts.FlowInputResolutionModeReply {
 		resolution := inputPin.Resolution
-		if inputPin.Address != nil || !resolution.InstanceKey.Empty() || resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" {
+		if inputPin.Address != nil || resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" {
 			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: "resolution mode reply may only declare replies_to and correlation_key"}
 		}
 		requestOutputPin := strings.TrimSpace(resolution.RepliesTo)
@@ -918,7 +924,7 @@ func connectFanIn(source semanticview.Source, connect runtimecontracts.FlowPacka
 		return nil, ConnectRoutePlanIssue{}
 	}
 	resolution := inputPin.Resolution
-	if !resolution.InstanceKey.Empty() || resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
+	if resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: "resolution mode fan-in may only declare aggregation, window, dedup_by, singleton, and carries"}
 	}
 	if resolution.Aggregation != "stream" && resolution.Aggregation != "barrier" {
@@ -978,40 +984,10 @@ func connectFanInPayloadFieldSupported(path string) bool {
 	return field != "" && !strings.Contains(field, ".")
 }
 
-func connectCreateResolutionInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, resolution runtimecontracts.FlowInputPinResolution, receiverFlowID string) (*ConnectRoutePlanInstanceKey, ConnectRoutePlanIssue) {
-	bundle, ok := semanticview.Bundle(source)
-	if !ok {
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureLifecycleUnavailable, Detail: "receiver instance contract owner is unavailable"}
-	}
-	instance, err := bundle.ResolveFlowTemplateInstance(receiverFlowID)
-	if err != nil {
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: err.Error()}
-	}
-	mint := strings.TrimSpace(resolution.InstanceKey.Mint)
-	as := strings.TrimSpace(resolution.InstanceKey.As)
-	switch mint {
-	case runtimecontracts.FlowInputResolutionMintUUID, runtimecontracts.FlowInputResolutionMintEventID:
-	default:
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode create mint %q must be uuid or event_id", mint)}
-	}
-	fields := normalizedStringList(instance.By)
-	if as == "" || len(fields) != 1 || fields[0] != as {
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode create instance_key.as %q must match the receiver's single instance.by field %v", as, fields)}
-	}
-	return &ConnectRoutePlanInstanceKey{
-		Mode:       runtimecontracts.FlowInputResolutionModeCreate,
-		Fields:     fields,
-		Mint:       mint,
-		As:         as,
-		OnMissing:  "create",
-		OnConflict: "reuse",
-	}, ConnectRoutePlanIssue{}
-}
-
-func connectCarriedKeyResolutionInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin, resolution runtimecontracts.FlowInputPinResolution, receiverFlowID string) (*ConnectRoutePlanInstanceKey, ConnectRoutePlanIssue) {
+func connectCanonicalResolutionInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin, resolution runtimecontracts.FlowInputPinResolution, receiverFlowID string) (*ConnectRoutePlanInstanceKey, ConnectRoutePlanIssue) {
 	mode := strings.TrimSpace(resolution.Mode)
-	if resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" || resolution.RepliesTo != "" || resolution.CorrelationKey != "" || strings.TrimSpace(resolution.InstanceKey.Mint) != "" || strings.TrimSpace(resolution.InstanceKey.As) != "" {
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode %s may only declare instance_key and carries", mode)}
+	if resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" || resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode %s may only declare mode and carries", mode)}
 	}
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -1022,20 +998,17 @@ func connectCarriedKeyResolutionInstanceKey(source semanticview.Source, connect 
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: err.Error()}
 	}
 	fields := normalizedStringList(instance.By)
-	key := strings.TrimSpace(resolution.InstanceKey.From)
-	if key == "" {
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode %s requires instance_key to name a carried field", mode)}
+	if len(fields) != 1 {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode %s requires exactly one receiver instance.by field, got %v", mode, fields)}
 	}
-	if len(fields) != 1 || fields[0] != key {
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode %s instance_key %q must match the receiver's single instance.by field %v", mode, key, fields)}
-	}
+	key := fields[0]
 	carry, ok := inputPin.Carries[key]
 	if !ok {
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode %s instance_key %s must name declared carries.%s", mode, key, key)}
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("flow %s is one instance per %s; input pin %s must declare a carry named %s (add carries: %s: {from: payload.<field>})", receiverFlowID, key, inputPin.PinName(), key, key)}
 	}
-	wantFrom := "payload." + key
-	if strings.TrimSpace(carry.From) != wantFrom {
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode %s carry %s must use from: %s", mode, key, wantFrom)}
+	keySource, sourceErr := runtimecontracts.ResolveFlowInputInstanceSource(mode, carry.From)
+	if sourceErr != nil {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("carry %s source %q is invalid for resolution mode %s: %v", key, strings.TrimSpace(carry.From), mode, sourceErr)}
 	}
 	if strings.TrimSpace(carry.Type) != "" {
 		targetType, err := connectResolutionReceiverEntityFieldType(source, receiverFlowID, key)
@@ -1048,14 +1021,14 @@ func connectCarriedKeyResolutionInstanceKey(source semanticview.Source, connect 
 	}
 	onMissing := "reject"
 	onConflict := "reject"
-	if mode == runtimecontracts.FlowInputResolutionModeSelectOrCreate {
+	if mode == runtimecontracts.FlowInputResolutionModeCreate || mode == runtimecontracts.FlowInputResolutionModeSelectOrCreate {
 		onMissing = "create"
 		onConflict = "reuse"
 	}
 	return &ConnectRoutePlanInstanceKey{
 		Mode:       mode,
 		Fields:     fields,
-		Mappings:   []ConnectRoutePlanInstanceKeyMapping{{Source: key, Target: key, Explicit: true}},
+		Source:     keySource,
 		OnMissing:  onMissing,
 		OnConflict: onConflict,
 	}, ConnectRoutePlanIssue{}

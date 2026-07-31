@@ -273,19 +273,12 @@ var inputEventPinCarryFieldOptions = map[string]struct{}{
 
 var inputEventPinResolutionFieldOptions = map[string]struct{}{
 	"mode":            {},
-	"instance_key":    {},
 	"aggregation":     {},
 	"window":          {},
 	"dedup_by":        {},
 	"singleton":       {},
 	"replies_to":      {},
 	"correlation_key": {},
-}
-
-var inputEventPinResolutionInstanceKeyFieldOptions = map[string]struct{}{
-	"from": {},
-	"mint": {},
-	"as":   {},
 }
 
 var inputEventPinAddressFieldOptions = map[string]struct{}{
@@ -533,9 +526,7 @@ func (r *FlowInputPinResolution) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("resolution.mode: %w", err)
 			}
 		case "instance_key":
-			if err := value.Decode(&out.InstanceKey); err != nil {
-				return fmt.Errorf("resolution.instance_key: %w", err)
-			}
+			return NewRetiredResolutionInstanceKeyDiagnostic()
 		case "aggregation":
 			if err := value.Decode(&out.Aggregation); err != nil {
 				return fmt.Errorf("resolution.aggregation: %w", err)
@@ -567,48 +558,6 @@ func (r *FlowInputPinResolution) UnmarshalYAML(node *yaml.Node) error {
 		}
 	}
 	*r = out.normalized()
-	return nil
-}
-
-func (k *FlowInputPinResolutionInstanceKey) UnmarshalYAML(node *yaml.Node) error {
-	if k == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 {
-		*k = FlowInputPinResolutionInstanceKey{}
-		return nil
-	}
-	if node.Kind == yaml.ScalarNode {
-		*k = (FlowInputPinResolutionInstanceKey{From: strings.TrimSpace(node.Value)}).normalized()
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("resolution.instance_key must be a string or mapping")
-	}
-	var out FlowInputPinResolutionInstanceKey
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		value := node.Content[i+1]
-		switch key {
-		case "":
-			continue
-		case "from":
-			if err := value.Decode(&out.From); err != nil {
-				return fmt.Errorf("instance_key.from: %w", err)
-			}
-		case "mint":
-			if err := value.Decode(&out.Mint); err != nil {
-				return fmt.Errorf("instance_key.mint: %w", err)
-			}
-		case "as":
-			if err := value.Decode(&out.As); err != nil {
-				return fmt.Errorf("instance_key.as: %w", err)
-			}
-		default:
-			return NewUndefinedFieldDiagnostic("input event pin resolution.instance_key", key, inputEventPinResolutionInstanceKeyFieldOptions)
-		}
-	}
-	*k = out.normalized()
 	return nil
 }
 

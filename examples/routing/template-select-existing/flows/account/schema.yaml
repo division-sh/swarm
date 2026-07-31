@@ -9,7 +9,6 @@ pins:
         event: account.setup
         resolution:
           mode: select-or-create
-          instance_key: account_id
         carries:
           account_id:
             from: payload.account_id
@@ -18,7 +17,6 @@ pins:
         event: account.ready
         resolution:
           mode: select
-          instance_key: account_id
         carries:
           account_id:
             from: payload.account_id

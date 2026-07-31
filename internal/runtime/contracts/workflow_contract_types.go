@@ -1371,8 +1371,8 @@ const (
 )
 
 const (
-	FlowInputResolutionMintUUID    = "uuid"
-	FlowInputResolutionMintEventID = "event_id"
+	FlowInputCarrySourceGeneratedUUID = "generated.uuid"
+	FlowInputCarrySourceEventID       = "event.id"
 )
 
 type FlowToolSurfaceContract struct {
@@ -1491,19 +1491,13 @@ type FlowInputPinAddress struct {
 	Mode        string `yaml:"mode"`
 }
 type FlowInputPinResolution struct {
-	Mode           string                            `yaml:"mode"`
-	InstanceKey    FlowInputPinResolutionInstanceKey `yaml:"instance_key"`
-	Aggregation    string                            `yaml:"aggregation"`
-	Window         string                            `yaml:"window"`
-	DedupBy        []string                          `yaml:"dedup_by"`
-	Singleton      string                            `yaml:"singleton"`
-	RepliesTo      string                            `yaml:"replies_to"`
-	CorrelationKey string                            `yaml:"correlation_key"`
-}
-type FlowInputPinResolutionInstanceKey struct {
-	From string `yaml:"from"`
-	Mint string `yaml:"mint"`
-	As   string `yaml:"as"`
+	Mode           string   `yaml:"mode"`
+	Aggregation    string   `yaml:"aggregation"`
+	Window         string   `yaml:"window"`
+	DedupBy        []string `yaml:"dedup_by"`
+	Singleton      string   `yaml:"singleton"`
+	RepliesTo      string   `yaml:"replies_to"`
+	CorrelationKey string   `yaml:"correlation_key"`
 }
 type FlowPackageConnect struct {
 	PackageKey string                           `yaml:"-"`

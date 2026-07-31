@@ -165,16 +165,16 @@ func CopyTemplateSelectResolution(t testing.TB, opts TemplateSelectResolutionOpt
 	applyClosedReplacement(t, packageFile, "  - from: producer.account_setup\n    to: account.account_setup\n", "")
 	// The historical lowering matrix deliberately exercises the accepted
 	// string/text alias while keeping the checked example's entity type.
-	selectedPin := "      - name: account_ready\n        event: account.ready\n        resolution:\n          mode: " + mode + "\n          instance_key: account_id\n        carries:\n          account_id:\n            from: payload.account_id\n            type: string\n"
+	selectedPin := "      - name: account_ready\n        event: account.ready\n        resolution:\n          mode: " + mode + "\n        carries:\n          account_id:\n            from: payload.account_id\n            type: string\n"
 	applyClosedReplacement(t, accountSchema,
-		"      - name: account_ready\n        event: account.ready\n        resolution:\n          mode: select\n          instance_key: account_id\n        carries:\n          account_id:\n            from: payload.account_id\n            type: text\n",
+		"      - name: account_ready\n        event: account.ready\n        resolution:\n          mode: select\n        carries:\n          account_id:\n            from: payload.account_id\n            type: text\n",
 		selectedPin)
 
 	switch opts.Invalidity {
 	case SelectResolutionValid:
 	case SelectResolutionUndeclaredCarry:
 		applyClosedReplacement(t, accountSchema, selectedPin,
-			"      - name: account_ready\n        event: account.ready\n        resolution:\n          mode: "+mode+"\n          instance_key: missing_account_id\n        carries:\n          account_id:\n            from: payload.account_id\n            type: string\n")
+			"      - name: account_ready\n        event: account.ready\n        resolution:\n          mode: "+mode+"\n        carries:\n          missing_account_id:\n            from: payload.account_id\n            type: string\n")
 	case SelectResolutionCompositeKey:
 		applyClosedReplacement(t, accountSchema, "  by: account_id\n", "  by: [account_id, region]\n")
 		applyClosedReplacement(t, filepath.Join(root, "flows", "account", "entities.yaml"),
@@ -182,10 +182,10 @@ func CopyTemplateSelectResolution(t testing.TB, opts TemplateSelectResolutionOpt
 			"    _unused_reason: receiver instance identity\n  region:\n    type: text\n    _unused_reason: composition select composite-key test field\n")
 	case SelectResolutionCarryTypeMismatch:
 		applyClosedReplacement(t, accountSchema, selectedPin,
-			"      - name: account_ready\n        event: account.ready\n        resolution:\n          mode: "+mode+"\n          instance_key: account_id\n        carries:\n          account_id:\n            from: payload.account_id\n            type: integer\n")
+			"      - name: account_ready\n        event: account.ready\n        resolution:\n          mode: "+mode+"\n        carries:\n          account_id:\n            from: payload.account_id\n            type: integer\n")
 	case SelectResolutionLegacyAddress:
 		applyClosedReplacement(t, accountSchema, selectedPin,
-			"      - name: account_ready\n        event: account.ready\n        address:\n          by: account_id\n          source: payload.account_id\n          target: entity.account_id\n          cardinality: one\n        resolution:\n          mode: "+mode+"\n          instance_key: account_id\n        carries:\n          account_id:\n            from: payload.account_id\n            type: string\n")
+			"      - name: account_ready\n        event: account.ready\n        address:\n          by: account_id\n          source: payload.account_id\n          target: entity.account_id\n          cardinality: one\n        resolution:\n          mode: "+mode+"\n        carries:\n          account_id:\n            from: payload.account_id\n            type: string\n")
 	case SelectResolutionLegacyUsingInstance:
 		applyClosedReplacement(t, packageFile, "    to: account.account_ready\n", "    to: account.account_ready\n    using:\n      instance:\n        source: account_id\n        target: account_id\n")
 	case SelectResolutionLegacyConnectMap:
@@ -195,7 +195,7 @@ func CopyTemplateSelectResolution(t testing.TB, opts TemplateSelectResolutionOpt
 		applyClosedReplacement(t, accountSchema, "mode: template\n", "mode: static\n")
 	case SelectResolutionExtraAggregation:
 		applyClosedReplacement(t, accountSchema, selectedPin,
-			"      - name: account_ready\n        event: account.ready\n        resolution:\n          mode: "+mode+"\n          instance_key: account_id\n          aggregation: stream\n        carries:\n          account_id:\n            from: payload.account_id\n            type: string\n")
+			"      - name: account_ready\n        event: account.ready\n        resolution:\n          mode: "+mode+"\n          aggregation: stream\n        carries:\n          account_id:\n            from: payload.account_id\n            type: string\n")
 	case SelectResolutionEntityTypeMismatch:
 		applyClosedReplacement(t, filepath.Join(root, "flows", "account", "entities.yaml"), "    type: text\n", "    type: integer\n")
 	default:
@@ -237,7 +237,7 @@ func CopyTemplateCreateResolution(t testing.TB, opts TemplateCreateResolutionOpt
 	switch opts.Mint {
 	case CreateMintUUID:
 	case CreateMintEventID:
-		applyClosedReplacement(t, validatorSchema, "            mint: uuid\n", "            mint: event_id\n")
+		applyClosedReplacement(t, validatorSchema, "            from: generated.uuid\n", "            from: event.id\n")
 	default:
 		t.Fatalf("unsupported create mint %d", opts.Mint)
 	}
@@ -246,9 +246,9 @@ func CopyTemplateCreateResolution(t testing.TB, opts TemplateCreateResolutionOpt
 	case CreateResolutionNonRunnableMode:
 		applyClosedReplacement(t, validatorSchema, "          mode: create\n", "          mode: fan-out\n")
 	case CreateResolutionInvalidMint:
-		applyClosedReplacement(t, validatorSchema, "            mint: uuid\n", "            mint: random\n")
+		applyClosedReplacement(t, validatorSchema, "            from: generated.uuid\n", "            from: generated.random\n")
 	case CreateResolutionMissingCarry:
-		applyClosedReplacement(t, validatorSchema, "        carries:\n          validation_case_id:\n            from: instance.key.validation_case_id\n            type: uuid\n", "")
+		applyClosedReplacement(t, validatorSchema, "        carries:\n          validation_case_id:\n            from: generated.uuid\n            type: uuid\n", "")
 	case CreateResolutionLegacyUsingInstance:
 		applyClosedReplacement(t, filepath.Join(root, "package.yaml"), "    to: validator.validation_requested\n", "    to: validator.validation_requested\n    using:\n      instance:\n        source: validation_case_id\n        target: validation_case_id\n")
 	case CreateResolutionProducerCollision:
@@ -298,7 +298,7 @@ func CopyLegacyAddressedTemplateSelect(t testing.TB) string {
 		applyClosedReplacement(t, filepath.Join(root, eventsFile), "account.ready:\n  account_id: text\n", "account.ready:\n  account_id: text\n  customer_id: text\n")
 	}
 	applyClosedReplacement(t, filepath.Join(root, "flows", "account", "schema.yaml"),
-		"      - name: account_ready\n        event: account.ready\n        resolution:\n          mode: select\n          instance_key: account_id\n        carries:\n          account_id:\n            from: payload.account_id\n            type: text\n",
+		"      - name: account_ready\n        event: account.ready\n        resolution:\n          mode: select\n        carries:\n          account_id:\n            from: payload.account_id\n            type: text\n",
 		"      - name: account_ready\n        event: account.ready\n        address:\n          by: customer_id\n          source: payload.customer_id\n          target: entity.customer_id\n          cardinality: one\n")
 	applyClosedReplacement(t, filepath.Join(root, "flows", "account", "entities.yaml"),
 		"    _unused_reason: receiver instance identity\n",

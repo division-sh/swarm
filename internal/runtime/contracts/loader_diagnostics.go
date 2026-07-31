@@ -154,6 +154,16 @@ func NewRetiredConnectReplyDiagnostic() *LoaderDiagnostic {
 	)
 }
 
+func NewRetiredResolutionInstanceKeyDiagnostic() *LoaderDiagnostic {
+	return NewExpectedShapeDiagnostic(
+		"contract_loader.retired_resolution_instance_key",
+		"schema.yaml.pins.inputs.events.resolution.instance_key",
+		"resolution.instance_key is retired; instance.by is the sole receiver identity owner.",
+		"Remove instance_key and declare carries.<instance.by>.from explicitly. Run 'swarm migrate-resolution-instance-key --contracts <bundle-root>' for deterministic legacy declarations.",
+		nil,
+	)
+}
+
 func NewExpectedShapeDiagnostic(code, yamlPath, problem, remediation string, cause error) *LoaderDiagnostic {
 	return &LoaderDiagnostic{
 		Code:        strings.TrimSpace(code),
@@ -361,8 +371,6 @@ func loaderFieldOptionsForContext(context string) map[string]struct{} {
 		return inputEventPinCarryFieldOptions
 	case "input event pin resolution":
 		return inputEventPinResolutionFieldOptions
-	case "input event pin resolution.instance_key":
-		return inputEventPinResolutionInstanceKeyFieldOptions
 	case "input event pin address":
 		return inputEventPinAddressFieldOptions
 	case "rule":

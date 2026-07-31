@@ -12,6 +12,7 @@ import (
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -79,8 +80,8 @@ func TestTemplateFlowPilotConformance_CoversInstanceCenteredAuthoringOwners(t *t
 	if plan.InstanceKey == nil || plan.InstanceKey.Mode != "select-or-create" || strings.Join(plan.InstanceKey.Fields, ",") != "account_id" {
 		t.Fatalf("route plan instance key = %#v, want select-or-create/account_id", plan.InstanceKey)
 	}
-	if len(plan.InstanceKey.Mappings) != 1 || plan.InstanceKey.Mappings[0].Source != "account_id" || plan.InstanceKey.Mappings[0].Target != "account_id" || !plan.InstanceKey.Mappings[0].Explicit {
-		t.Fatalf("route plan instance key mappings = %#v, want explicit account_id -> account_id", plan.InstanceKey.Mappings)
+	if plan.InstanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourcePayload || plan.InstanceKey.Source.Path != "payload.account_id" {
+		t.Fatalf("route plan instance source = %#v, want payload.account_id", plan.InstanceKey.Source)
 	}
 }
 
@@ -159,8 +160,8 @@ func TestTemplateSelectExistingConformance_CoversResolutionSelectOwner(t *testin
 	if plan.InstanceKey == nil || plan.InstanceKey.Mode != "select" || strings.Join(plan.InstanceKey.Fields, ",") != templateselectexisting.TemplateInstanceBy {
 		t.Fatalf("route plan instance key = %#v, want select/account_id", plan.InstanceKey)
 	}
-	if len(plan.InstanceKey.Mappings) != 1 || plan.InstanceKey.Mappings[0].Source != templateselectexisting.TemplateInstanceBy || plan.InstanceKey.Mappings[0].Target != templateselectexisting.TemplateInstanceBy || !plan.InstanceKey.Mappings[0].Explicit {
-		t.Fatalf("route plan mappings = %#v, want explicit account_id -> account_id", plan.InstanceKey.Mappings)
+	if plan.InstanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourcePayload || plan.InstanceKey.Source.Path != "payload."+templateselectexisting.TemplateInstanceBy {
+		t.Fatalf("route plan source = %#v, want payload.%s", plan.InstanceKey.Source, templateselectexisting.TemplateInstanceBy)
 	}
 
 	materialized := runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{
@@ -209,8 +210,8 @@ func TestTemplateSelectOrCreateConformance_CoversResolutionSelectOrCreateOwner(t
 	if plan.InstanceKey.OnMissing != "create" || plan.InstanceKey.OnConflict != "reuse" {
 		t.Fatalf("route plan lifecycle policy = %s/%s, want create/reuse", plan.InstanceKey.OnMissing, plan.InstanceKey.OnConflict)
 	}
-	if len(plan.InstanceKey.Mappings) != 1 || plan.InstanceKey.Mappings[0].Source != templateselectorcreate.TemplateInstanceBy || plan.InstanceKey.Mappings[0].Target != templateselectorcreate.TemplateInstanceBy || !plan.InstanceKey.Mappings[0].Explicit {
-		t.Fatalf("route plan mappings = %#v, want explicit account_id -> account_id", plan.InstanceKey.Mappings)
+	if plan.InstanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourcePayload || plan.InstanceKey.Source.Path != "payload."+templateselectorcreate.TemplateInstanceBy {
+		t.Fatalf("route plan source = %#v, want payload.%s", plan.InstanceKey.Source, templateselectorcreate.TemplateInstanceBy)
 	}
 
 	materialized := runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{

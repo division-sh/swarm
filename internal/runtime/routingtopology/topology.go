@@ -144,13 +144,14 @@ type Address struct {
 }
 
 type InstanceKey struct {
-	Mode       string               `json:"mode,omitempty"`
-	Fields     []string             `json:"fields,omitempty"`
-	Mappings   []InstanceKeyMapping `json:"mappings,omitempty"`
-	Mint       string               `json:"mint,omitempty"`
-	As         string               `json:"as,omitempty"`
-	OnMissing  string               `json:"on_missing,omitempty"`
-	OnConflict string               `json:"on_conflict,omitempty"`
+	Mode        string               `json:"mode,omitempty"`
+	Fields      []string             `json:"fields,omitempty"`
+	Mappings    []InstanceKeyMapping `json:"mappings,omitempty"`
+	SourceKind  string               `json:"source_kind,omitempty"`
+	SourcePath  string               `json:"source_path,omitempty"`
+	DerivedFrom string               `json:"derived_from,omitempty"`
+	OnMissing   string               `json:"on_missing,omitempty"`
+	OnConflict  string               `json:"on_conflict,omitempty"`
 }
 
 type InstanceKeyMapping struct {
@@ -668,10 +669,13 @@ func resolutionView(plan pinrouting.ConnectRoutePlan) *Resolution {
 		instance := &InstanceKey{
 			Mode:       strings.TrimSpace(plan.InstanceKey.Mode),
 			Fields:     normalizedStrings(plan.InstanceKey.Fields),
-			Mint:       strings.TrimSpace(plan.InstanceKey.Mint),
-			As:         strings.TrimSpace(plan.InstanceKey.As),
+			SourceKind: strings.TrimSpace(string(plan.InstanceKey.Source.Kind)),
+			SourcePath: strings.TrimSpace(plan.InstanceKey.Source.Path),
 			OnMissing:  strings.TrimSpace(plan.InstanceKey.OnMissing),
 			OnConflict: strings.TrimSpace(plan.InstanceKey.OnConflict),
+		}
+		if instance.SourcePath != "" && len(instance.Fields) == 1 {
+			instance.DerivedFrom = fmt.Sprintf("instance.by.%s + carries.%s.from", instance.Fields[0], instance.Fields[0])
 		}
 		for _, mapping := range plan.InstanceKey.Mappings {
 			instance.Mappings = append(instance.Mappings, InstanceKeyMapping{Source: strings.TrimSpace(mapping.Source), Target: strings.TrimSpace(mapping.Target), Explicit: mapping.Explicit})

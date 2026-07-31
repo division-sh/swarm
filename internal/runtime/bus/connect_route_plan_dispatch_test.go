@@ -1642,7 +1642,7 @@ func TestEventBusPublish_ConnectRoutePlanPreviewCreateFeedsLaterSelect(t *testin
 }
 
 func TestCommittedReplayReusesPersistedSyntheticCarryWithoutReminting(t *testing.T) {
-	source := connectRoutePlanCreateResolutionSource(t, runtimecontracts.FlowInputResolutionMintUUID)
+	source := connectRoutePlanCreateResolutionSource(t, runtimecontracts.FlowInputCarrySourceGeneratedUUID)
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -1742,7 +1742,7 @@ func TestCommittedReplayReusesPersistedSyntheticCarryWithoutReminting(t *testing
 }
 
 func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanCreateResolutionAdmitsEmptyEventID(t *testing.T) {
-	source := connectRoutePlanCreateResolutionSource(t, runtimecontracts.FlowInputResolutionMintUUID)
+	source := connectRoutePlanCreateResolutionSource(t, runtimecontracts.FlowInputCarrySourceGeneratedUUID)
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -1779,7 +1779,7 @@ func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanCreateResolutionAdmit
 }
 
 func TestEventBusPublish_ConnectRoutePlanCreateResolutionCanMintFromEventID(t *testing.T) {
-	source := connectRoutePlanCreateResolutionSource(t, runtimecontracts.FlowInputResolutionMintEventID)
+	source := connectRoutePlanCreateResolutionSource(t, runtimecontracts.FlowInputCarrySourceEventID)
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -3654,10 +3654,10 @@ func writeConnectRoutePlanInstanceKeyFixture(t testing.TB) string {
 	})
 }
 
-func writeConnectRoutePlanCreateResolutionFixture(t testing.TB, mint string) string {
+func writeConnectRoutePlanCreateResolutionFixture(t testing.TB, source string) string {
 	t.Helper()
 	mode := canonicalrouting.CreateMintUUID
-	if strings.TrimSpace(mint) == runtimecontracts.FlowInputResolutionMintEventID {
+	if strings.TrimSpace(source) == runtimecontracts.FlowInputCarrySourceEventID {
 		mode = canonicalrouting.CreateMintEventID
 	}
 	return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: mode})

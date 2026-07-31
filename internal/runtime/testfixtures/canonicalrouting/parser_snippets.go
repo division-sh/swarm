@@ -92,23 +92,23 @@ pins:
         event: validation.requested
         resolution:
           mode: create
-          instance_key:
-            mint: uuid
-            as: validation_case_id
         carries:
           validation_case_id:
-            from: instance.key.validation_case_id
+            from: generated.uuid
             type: uuid
       - name: select_requested
         event: account.selected
         resolution:
           mode: select
-          instance_key: account_id
+        carries:
+          account_id:
+            from: payload.account_id
       - name: select_or_create_requested
         event: account.requested
         resolution:
           mode: select-or-create
-          instance_key:
+        carries:
+          account_id:
             from: payload.account_id
       - name: fan_in_requested
         event: report.ready
@@ -122,7 +122,6 @@ pins:
         event: operating.requested
         resolution:
           mode: fan-out
-          instance_key: operating_id
       - name: reply_received
         event: provider.replied
         resolution:

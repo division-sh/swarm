@@ -218,8 +218,8 @@ func (o templateInstanceLifecycleOwner) Materialize(ctx context.Context, evt eve
 }
 
 func instanceKeyMaterialForTemplateLifecycle(evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string) (runtimepinrouting.ConnectRoutePlanInstanceKeyMaterial, runtimepinrouting.ConnectRoutePlanFailure) {
-	if plan.InstanceKey != nil && strings.TrimSpace(plan.InstanceKey.Mint) != "" {
-		return runtimepinrouting.MintedInstanceKeyMaterialForConnectRoutePlan(plan, evt.ID())
+	if plan.InstanceKey != nil && plan.InstanceKey.Source.RequiresDeliveryProjection() {
+		return runtimepinrouting.EventSourcedInstanceKeyMaterialForConnectRoutePlan(plan, evt.ID())
 	}
 	return runtimepinrouting.InstanceKeyMaterialForConnectRoutePlan(plan, values)
 }

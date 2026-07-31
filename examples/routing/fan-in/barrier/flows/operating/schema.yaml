@@ -9,12 +9,9 @@ pins:
         event: operating.report.requested
         resolution:
           mode: create
-          instance_key:
-            mint: event_id
-            as: operating_id
         carries:
           operating_id:
-            from: instance.key.operating_id
+            from: event.id
             type: text
   outputs:
     events:

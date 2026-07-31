@@ -30,7 +30,7 @@ const (
 )
 
 type Options struct {
-	MissingOutputKey            bool
+	RetiredInstanceKey          bool
 	MissingOutputCarries        bool
 	BadConnectMapping           bool
 	DuplicateConnectMapping     bool
@@ -89,8 +89,8 @@ func addTemplateLifecycleOverlay(t testing.TB, root string) {
 
 func applyRoutingMutation(t testing.TB, root string, opts Options) {
 	t.Helper()
-	if opts.MissingOutputKey {
-		canonicalrouting.ApplyTemplateSelectOrCreateNegativeMutation(t, root, canonicalrouting.TemplateSelectOrCreateMissingInstanceKey)
+	if opts.RetiredInstanceKey {
+		canonicalrouting.ApplyTemplateSelectOrCreateNegativeMutation(t, root, canonicalrouting.TemplateSelectOrCreateRetiredInstanceKey)
 	}
 	if opts.MissingOutputCarries {
 		canonicalrouting.ApplyTemplateSelectOrCreateNegativeMutation(t, root, canonicalrouting.TemplateSelectOrCreateMissingCarry)

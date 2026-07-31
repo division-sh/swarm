@@ -189,8 +189,8 @@ func TestBuildShowsTemplateInstanceRouteKeysAndCarries(t *testing.T) {
 	if got := strings.Join(edge.Resolution.InstanceKey.Fields, ","); got != "account_id" {
 		t.Fatalf("route instance key fields = %q, want account_id", got)
 	}
-	if len(edge.Resolution.InstanceKey.Mappings) != 1 || edge.Resolution.InstanceKey.Mappings[0].Source != "account_id" || edge.Resolution.InstanceKey.Mappings[0].Target != "account_id" || !edge.Resolution.InstanceKey.Mappings[0].Explicit {
-		t.Fatalf("route explicit mapping = %#v, want account_id -> account_id explicit=true", edge.Resolution.InstanceKey.Mappings)
+	if edge.Resolution.InstanceKey.SourceKind != string(runtimecontracts.FlowInputInstanceSourcePayload) || edge.Resolution.InstanceKey.SourcePath != "payload.account_id" || edge.Resolution.InstanceKey.DerivedFrom == "" {
+		t.Fatalf("route derived source = %#v, want payload.account_id with provenance", edge.Resolution.InstanceKey)
 	}
 }
 
@@ -776,11 +776,11 @@ func TestBuildShowsFinalFlowInstanceAuthoringFixture(t *testing.T) {
 	if edge.Producer.FlowID != finalflowinstanceauthoring.ProducerFlowID || edge.Consumer.FlowID != finalflowinstanceauthoring.TemplateFlowID {
 		t.Fatalf("route endpoints = %#v -> %#v, want final fixture producer to template", edge.Producer, edge.Consumer)
 	}
-	if edge.Resolution == nil || edge.Resolution.InstanceKey == nil || len(edge.Resolution.InstanceKey.Mappings) != 1 ||
-		edge.Resolution.InstanceKey.Mappings[0].Source != finalflowinstanceauthoring.TemplatePayloadKey ||
-		edge.Resolution.InstanceKey.Mappings[0].Target != finalflowinstanceauthoring.TemplateInstanceBy ||
-		!edge.Resolution.InstanceKey.Mappings[0].Explicit {
-		t.Fatalf("route instance key = %#v, want explicit receiver carry mapping", edge.Resolution)
+	if edge.Resolution == nil || edge.Resolution.InstanceKey == nil ||
+		edge.Resolution.InstanceKey.SourceKind != string(runtimecontracts.FlowInputInstanceSourcePayload) ||
+		edge.Resolution.InstanceKey.SourcePath != "payload."+finalflowinstanceauthoring.TemplatePayloadKey ||
+		edge.Resolution.InstanceKey.DerivedFrom == "" {
+		t.Fatalf("route instance key = %#v, want derived receiver carry source", edge.Resolution)
 	}
 
 }
