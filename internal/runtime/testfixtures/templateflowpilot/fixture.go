@@ -11,7 +11,6 @@ import (
 // Options applies one deliberate negative mutation to the canonical
 // select-or-create artifact.
 type Options struct {
-	BadConnectMapping            bool
 	UnsupportedReceiverSelection bool
 	ProducerTarget               bool
 	ProducerBroadcast            bool
@@ -52,9 +51,6 @@ func addLifecycleOverlay(t testing.TB, root string) {
 
 func applyNegativeMutation(t testing.TB, root string, opts Options) {
 	t.Helper()
-	if opts.BadConnectMapping {
-		canonicalrouting.ApplyTemplateSelectOrCreateNegativeMutation(t, root, canonicalrouting.TemplateSelectOrCreateBadConnectMapping)
-	}
 	if opts.UnsupportedReceiverSelection {
 		canonicalrouting.ApplyTemplateSelectOrCreateNegativeMutation(t, root, canonicalrouting.TemplateSelectOrCreateReceiverSelector)
 	}

@@ -17,7 +17,7 @@ func TestAuthoredEventEndpointCensusEnumeratesExecutableFactsAndAssertions(t *te
 		Name:  "work",
 		Event: "work.requested",
 		Resolution: runtimecontracts.FlowInputPinResolution{
-			Mode:        "fan-in",
+			Mode:        runtimecontracts.FlowInputResolutionModeFanIn,
 			Aggregation: "stream",
 			Window:      "5m",
 			DedupBy:     []string{"work_id"},
@@ -167,7 +167,7 @@ func TestResolveFanInInputForHandlerSupportsEventAndPinNameAndRejectsAmbiguity(t
 	source := endpointCensusFixture([]runtimecontracts.FlowInputEventPin{{
 		Name:       "work",
 		Event:      "work.requested",
-		Resolution: runtimecontracts.FlowInputPinResolution{Mode: "fan-in"},
+		Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeFanIn},
 	}})
 	census := BuildAuthoredEventEndpointCensus(source)
 	for _, identity := range []string{"work.requested", "work"} {
@@ -179,8 +179,8 @@ func TestResolveFanInInputForHandlerSupportsEventAndPinNameAndRejectsAmbiguity(t
 	}
 
 	ambiguousSource := endpointCensusFixture([]runtimecontracts.FlowInputEventPin{
-		{Name: "work-a", Event: "work.requested", Resolution: runtimecontracts.FlowInputPinResolution{Mode: "fan-in"}},
-		{Name: "work-b", Event: "work.requested", Resolution: runtimecontracts.FlowInputPinResolution{Mode: "fan-in"}},
+		{Name: "work-a", Event: "work.requested", Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeFanIn}},
+		{Name: "work-b", Event: "work.requested", Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeFanIn}},
 	})
 	ambiguous := BuildAuthoredEventEndpointCensus(ambiguousSource).ResolveFanInInputForHandler("worker", "worker-node", "work.requested")
 	if ambiguous.Status != EndpointAssociationAmbiguous || len(ambiguous.Candidates) != 2 {

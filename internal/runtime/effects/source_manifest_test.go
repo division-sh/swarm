@@ -27,12 +27,8 @@ const (
 	ownerComputeSandbox      primitiveOwner = "compute_sandbox"
 	ownerBuildTest           primitiveOwner = "build_test_infrastructure"
 
-	canonicalImportBoundaryAliasWrite     = "internal/runtime/testfixtures/canonicalrouting/import_boundary_variants.go:CopyImportBoundaryAlias:filesystem_write:1"
-	canonicalImportBoundaryWildcardWrite  = "internal/runtime/testfixtures/canonicalrouting/import_boundary_variants.go:CopyImportBoundaryWildcard:filesystem_write:1"
-	resolutionInstanceKeyCandidateCleanup = "internal/runtime/contracts/resolution_instance_key_codemod.go:RewriteRetiredResolutionInstanceKeys:filesystem_write:1"
-	resolutionInstanceKeyCandidateCreate  = "internal/runtime/contracts/resolution_instance_key_codemod.go:copyResolutionInstanceKeyCandidateTree:filesystem_write:1"
-	resolutionInstanceKeyCandidateMkdir   = "internal/runtime/contracts/resolution_instance_key_codemod.go:copyResolutionInstanceKeyCandidateTree:filesystem_write:2"
-	resolutionInstanceKeyCandidateWrite   = "internal/runtime/contracts/resolution_instance_key_codemod.go:copyResolutionInstanceKeyCandidateTree:filesystem_write:3"
+	canonicalImportBoundaryAliasWrite    = "internal/runtime/testfixtures/canonicalrouting/import_boundary_variants.go:CopyImportBoundaryAlias:filesystem_write:1"
+	canonicalImportBoundaryWildcardWrite = "internal/runtime/testfixtures/canonicalrouting/import_boundary_variants.go:CopyImportBoundaryWildcard:filesystem_write:1"
 )
 
 // sourcePrimitiveOwners is an exact source-derived ledger. Keys include the
@@ -49,15 +45,6 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/contracts/connect_delivery_one_codemod.go:writeConnectDeliveryOneRewrite:filesystem_write:3":        ownerOperatorInfra,
 	"internal/runtime/contracts/connect_delivery_one_codemod.go:writeConnectDeliveryOneRewrite:filesystem_write:4":        ownerOperatorInfra,
 	"internal/runtime/contracts/connect_delivery_one_codemod.go:writeConnectDeliveryOneRewrite:filesystem_write:5":        ownerOperatorInfra,
-	"internal/runtime/contracts/resolution_instance_key_codemod.go:writeResolutionInstanceKeyRewrites:filesystem_write:1": ownerOperatorInfra,
-	"internal/runtime/contracts/resolution_instance_key_codemod.go:writeResolutionInstanceKeyRewrites:filesystem_write:2": ownerOperatorInfra,
-	"internal/runtime/contracts/resolution_instance_key_codemod.go:writeResolutionInstanceKeyRewrites:filesystem_write:3": ownerOperatorInfra,
-	"internal/runtime/contracts/resolution_instance_key_codemod.go:writeResolutionInstanceKeyRewrites:filesystem_write:4": ownerOperatorInfra,
-	"internal/runtime/contracts/resolution_instance_key_codemod.go:writeResolutionInstanceKeyRewrites:filesystem_write:5": ownerOperatorInfra,
-	resolutionInstanceKeyCandidateCleanup:                                                                                 ownerOperatorInfra,
-	resolutionInstanceKeyCandidateCreate:                                                                                  ownerOperatorInfra,
-	resolutionInstanceKeyCandidateMkdir:                                                                                   ownerOperatorInfra,
-	resolutionInstanceKeyCandidateWrite:                                                                                   ownerOperatorInfra,
 	"internal/runtime/context_manager.go:Done:http_do:1":                                                                  ownerRuntimeDependency,
 	"internal/runtime/bus/eventbus.go:acquire:http_do:1":                                                                  ownerRuntimeDependency,
 	"internal/runtime/bus/eventbus.go:Done:http_do:1":                                                                     ownerRuntimeDependency,

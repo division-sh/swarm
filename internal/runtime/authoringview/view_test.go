@@ -159,8 +159,8 @@ func TestBuildShowsTemplateInstanceRouteKeysAndCarries(t *testing.T) {
 	if account.TemplateInstance == nil {
 		t.Fatalf("account template instance missing")
 	}
-	if got := strings.Join(account.TemplateInstance.By, ","); got != "account_id" {
-		t.Fatalf("account instance.by = %q, want account_id", got)
+	if got := account.TemplateInstance.Field; got != "account_id" {
+		t.Fatalf("account instance field = %q, want account_id", got)
 	}
 
 	producer := flowByID(t, view, "producer")
@@ -186,8 +186,8 @@ func TestBuildShowsTemplateInstanceRouteKeysAndCarries(t *testing.T) {
 	if edge.Resolution.InstanceKey == nil {
 		t.Fatalf("route instance key missing")
 	}
-	if got := strings.Join(edge.Resolution.InstanceKey.Fields, ","); got != "account_id" {
-		t.Fatalf("route instance key fields = %q, want account_id", got)
+	if got := edge.Resolution.InstanceKey.Field; got != "account_id" {
+		t.Fatalf("route instance key field = %q, want account_id", got)
 	}
 	if edge.Resolution.InstanceKey.SourceKind != string(runtimecontracts.FlowInputInstanceSourcePayload) || edge.Resolution.InstanceKey.SourcePath != "payload.account_id" || edge.Resolution.InstanceKey.DerivedFrom == "" {
 		t.Fatalf("route derived source = %#v, want payload.account_id with provenance", edge.Resolution.InstanceKey)
@@ -218,7 +218,7 @@ func TestBuildDiagnosticsPreservesRemediationAndEvidence(t *testing.T) {
 	}
 }
 
-func TestBuildShowsDefaultedTemplateInstancePolicies(t *testing.T) {
+func TestBuildShowsScalarTemplateInstanceWithoutPolicyFacts(t *testing.T) {
 	source := loadDefaultedTemplatePolicySource(t)
 	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
 	view := mustBuild(t, source, &report)
@@ -227,11 +227,8 @@ func TestBuildShowsDefaultedTemplateInstancePolicies(t *testing.T) {
 	if scoring.TemplateInstance == nil {
 		t.Fatalf("scoring template instance missing")
 	}
-	if got := strings.Join(scoring.TemplateInstance.By, ","); got != "account_id" {
-		t.Fatalf("scoring instance.by = %q, want account_id", got)
-	}
-	if scoring.TemplateInstance.OnMissing != "create" || scoring.TemplateInstance.OnConflict != "reject" {
-		t.Fatalf("scoring defaulted instance policy = %#v, want create/reject", scoring.TemplateInstance)
+	if got := scoring.TemplateInstance.Field; got != "account_id" {
+		t.Fatalf("scoring instance field = %q, want account_id", got)
 	}
 	if diagnosticByCheckIDOrNil(view, "template_instance_validation") != nil {
 		t.Fatalf("template_instance_validation diagnostic present for defaulted policies: %#v", view.Diagnostics)
@@ -659,19 +656,25 @@ func assertDefaultedAgentField(t testing.TB, agent AgentView, field string, want
 }
 
 func TestBuildShowsRouteIssueAndAuthoredDiagnosticLocation(t *testing.T) {
-	source := templateflowpilot.LoadSource(t, templateflowpilot.Options{BadConnectMapping: true})
+	repoRoot := canonicalrouting.RepoRoot(t)
+	root := canonicalrouting.CopyCompositionConnect(t, canonicalrouting.CompositionConnectMissingReceiverPin)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("load canonical malformed connect: %v", err)
+	}
+	source := semanticview.Wrap(bundle)
 	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
 	view := mustBuild(t, source, &report)
 
 	var issue *routingtopology.Issue
 	for i := range view.RoutingTopology.Issues {
-		if view.RoutingTopology.Issues[i].Failure == "route_plan_instance_resolution_invalid" {
+		if view.RoutingTopology.Issues[i].Failure == "receiver_input_pin_missing" {
 			issue = &view.RoutingTopology.Issues[i]
 			break
 		}
 	}
 	if issue == nil {
-		t.Fatalf("route issues = %#v, want route_plan_instance_resolution_invalid", view.RoutingTopology.Issues)
+		t.Fatalf("route issues = %#v, want receiver_input_pin_missing", view.RoutingTopology.Issues)
 	}
 	if issue.AuthoredLocation == "" || !strings.Contains(issue.AuthoredLocation, "package.yaml:") {
 		t.Fatalf("route issue authored location = %q, want exact package.yaml:line", issue.AuthoredLocation)
@@ -681,7 +684,7 @@ func TestBuildShowsRouteIssueAndAuthoredDiagnosticLocation(t *testing.T) {
 	if diag.AuthoredLocation == "" {
 		t.Fatalf("diagnostic authored location empty: %#v", diag)
 	}
-	if !strings.Contains(diag.Message, "connect producer.account_ready -> account.account_ready") {
+	if !strings.Contains(diag.Message, "connect producer.deploy_done -> consumer.missing_pin") {
 		t.Fatalf("diagnostic message = %q, want connect context", diag.Message)
 	}
 }
@@ -759,7 +762,7 @@ func TestBuildShowsFinalFlowInstanceAuthoringFixture(t *testing.T) {
 	if account.PrimaryEntity == nil || account.PrimaryEntity.Type != finalflowinstanceauthoring.TemplateEntityType {
 		t.Fatalf("account primary entity = %#v, want %s", account.PrimaryEntity, finalflowinstanceauthoring.TemplateEntityType)
 	}
-	if account.TemplateInstance == nil || strings.Join(account.TemplateInstance.By, ",") != finalflowinstanceauthoring.TemplateInstanceBy {
+	if account.TemplateInstance == nil || account.TemplateInstance.Field != finalflowinstanceauthoring.TemplateInstanceBy {
 		t.Fatalf("account template instance = %#v, want %s", account.TemplateInstance, finalflowinstanceauthoring.TemplateInstanceBy)
 	}
 
@@ -927,8 +930,7 @@ flows:
 	writeAuthoringViewTestFile(t, filepath.Join(root, "flows", "scoring", "schema.yaml"), `
 name: scoring
 mode: template
-instance:
-  by: account_id
+instance: account_id
 pins:
   inputs:
     events: []

@@ -759,17 +759,16 @@ func flowInputEventDeclaresPayloadField(source semanticview.Source, flowID, even
 	return eventEntryDeclaresPayloadField(proof.Entry, field)
 }
 
-func flowInputHandlerUsesResolutionMode(source semanticview.Source, flowID, handlerEvent, mode string) bool {
+func flowInputHandlerUsesResolutionMode(source semanticview.Source, flowID, handlerEvent string, mode runtimecontracts.FlowInputResolutionMode) bool {
 	if source == nil {
 		return false
 	}
 	handlerEvent = strings.TrimSpace(handlerEvent)
-	mode = strings.TrimSpace(mode)
-	if handlerEvent == "" || mode == "" {
+	if handlerEvent == "" || mode == runtimecontracts.FlowInputResolutionModeNone {
 		return false
 	}
 	endpoint, ok := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint(flowID, handlerEvent).Endpoint()
-	return ok && strings.TrimSpace(endpoint.ResolutionMode) == mode
+	return ok && strings.TrimSpace(endpoint.ResolutionMode) == mode.String()
 }
 
 func eventEntryDeclaresPayloadField(entry runtimecontracts.EventCatalogEntry, field string) bool {

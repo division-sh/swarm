@@ -22,10 +22,9 @@ func checkOutputPinKeyCarriesValidation(c *checkerContext) []Finding {
 		return nil
 	}
 	source := c.source
-	addressedConnects := outputPinKeyCarriesAddressedConnects(source)
 	var findings []Finding
 	for _, flowID := range outputPinKeyCarriesFlowIDs(source) {
-		findings = append(findings, validateOutputPinKeyCarriesForFlow(source, flowID, addressedConnects)...)
+		findings = append(findings, validateOutputPinKeyCarriesForFlow(source, flowID)...)
 	}
 	findings = append(findings, validateOutputPinKeyCarriesNodeEmitSites(source)...)
 	findings = append(findings, validateOutputPinKeyCarriesNonNodeProducerSites(source)...)
@@ -38,14 +37,12 @@ func checkOutputPinKeyCarriesValidation(c *checkerContext) []Finding {
 	return findings
 }
 
-func validateOutputPinKeyCarriesForFlow(source semanticview.Source, flowID string, addressedConnects map[outputPinKeyCarriesIdentity]struct{}) []Finding {
+func validateOutputPinKeyCarriesForFlow(source semanticview.Source, flowID string) []Finding {
 	var findings []Finding
 	seenEventKeys := map[string]string{}
 	for _, pin := range source.FlowOutputEventPins(flowID) {
-		identity := outputPinKeyCarriesIdentity{FlowID: strings.TrimSpace(flowID), PinName: pin.PinName()}
-		_, requiredByAddressedConnect := addressedConnects[identity]
-		if requiredByAddressedConnect || outputPinHasKeyCarries(pin) {
-			findings = append(findings, validateOutputPinKeyCarriesDeclaration(source, flowID, pin, requiredByAddressedConnect)...)
+		if outputPinHasKeyCarries(pin) {
+			findings = append(findings, validateOutputPinKeyCarriesDeclaration(source, flowID, pin)...)
 		}
 		if strings.TrimSpace(pin.Key) == "" {
 			continue
@@ -64,16 +61,10 @@ func validateOutputPinKeyCarriesForFlow(source semanticview.Source, flowID strin
 	return findings
 }
 
-func validateOutputPinKeyCarriesDeclaration(source semanticview.Source, flowID string, pin runtimecontracts.FlowOutputEventPin, required bool) []Finding {
+func validateOutputPinKeyCarriesDeclaration(source semanticview.Source, flowID string, pin runtimecontracts.FlowOutputEventPin) []Finding {
 	var findings []Finding
 	key := strings.TrimSpace(pin.Key)
 	carries := outputPinCarries(pin)
-	if required && key == "" {
-		findings = append(findings, outputPinKeyCarriesFinding(flowID, pin, "missing_key", "connected output pin must declare key before it can provide instance-key producer evidence"))
-	}
-	if required && len(carries) == 0 {
-		findings = append(findings, outputPinKeyCarriesFinding(flowID, pin, "missing_carries", "connected output pin must declare carries before it can provide instance-key producer evidence"))
-	}
 	if key == "" && len(carries) > 0 {
 		findings = append(findings, outputPinKeyCarriesFinding(flowID, pin, "missing_key", "output pin declares carries without a key"))
 	}
@@ -160,65 +151,6 @@ func validateOutputPinKeyCarriesNodeEmitSites(source semanticview.Source) []Find
 	return findings
 }
 
-func outputPinKeyCarriesSourceType(source semanticview.Source, flowID string, pin runtimecontracts.FlowOutputEventPin, expr string) (string, error) {
-	expr = strings.TrimSpace(expr)
-	if expr == "" {
-		return "", fmt.Errorf("source expression is required")
-	}
-	if !strings.HasPrefix(expr, "payload.") {
-		return "", fmt.Errorf("source expression %q must reference the producer output pin key as payload.<key>", expr)
-	}
-	field := strings.TrimSpace(strings.TrimPrefix(expr, "payload."))
-	if field == "" || strings.Contains(field, ".") {
-		return "", fmt.Errorf("source expression %q must reference a single top-level payload field", expr)
-	}
-	key := strings.TrimSpace(pin.Key)
-	if key == "" {
-		return "", fmt.Errorf("producer output pin %s must declare key before it can supply %s", pin.PinName(), expr)
-	}
-	if field != key {
-		return "", fmt.Errorf("source expression %s does not match producer output pin key %s; renamed-key adapters are not supported", expr, key)
-	}
-	carries := outputPinCarries(pin)
-	if !outputPinStringSetContains(carries, key) {
-		return "", fmt.Errorf("producer output pin %s must include key %s in carries", pin.PinName(), key)
-	}
-	typ, err := outputPinPayloadFieldType(source, flowID, pin.EventType(), field)
-	if err != nil {
-		return "", err
-	}
-	if !outputPinScalarType(typ) {
-		return "", fmt.Errorf("producer output event %s payload field %s type %s is not a scalar key type", pin.EventType(), field, typ)
-	}
-	return typ, nil
-}
-
-func outputPinCarriedPayloadFieldType(source semanticview.Source, flowID string, pin runtimecontracts.FlowOutputEventPin, field string) (string, error) {
-	field = strings.TrimSpace(field)
-	if field == "" || strings.Contains(field, ".") {
-		return "", fmt.Errorf("producer output pin %s carried instance-key field %q must be a single top-level payload field", pin.PinName(), field)
-	}
-	key := strings.TrimSpace(pin.Key)
-	if key == "" {
-		return "", fmt.Errorf("producer output pin %s must declare key before it can supply payload.%s", pin.PinName(), field)
-	}
-	carries := outputPinCarries(pin)
-	if !outputPinStringSetContains(carries, key) {
-		return "", fmt.Errorf("producer output pin %s must include key %s in carries", pin.PinName(), key)
-	}
-	if !outputPinStringSetContains(carries, field) {
-		return "", fmt.Errorf("producer output pin %s must include receiver instance.by field %s in carries", pin.PinName(), field)
-	}
-	typ, err := outputPinPayloadFieldType(source, flowID, pin.EventType(), field)
-	if err != nil {
-		return "", err
-	}
-	if !outputPinScalarType(typ) {
-		return "", fmt.Errorf("producer output event %s payload field %s type %s is not a scalar key type", pin.EventType(), field, typ)
-	}
-	return typ, nil
-}
-
 func outputPinPayloadFieldType(source semanticview.Source, flowID, eventType, field string) (string, error) {
 	field = strings.TrimSpace(field)
 	if field == "" {
@@ -240,26 +172,6 @@ func outputPinPayloadFieldType(source semanticview.Source, flowID, eventType, fi
 		return "", fmt.Errorf("producer output event %s payload field %s has no scalar type", eventType, field)
 	}
 	return typ, nil
-}
-
-func outputPinKeyCarriesAddressedConnects(source semanticview.Source) map[outputPinKeyCarriesIdentity]struct{} {
-	out := map[outputPinKeyCarriesIdentity]struct{}{}
-	if source == nil {
-		return out
-	}
-	for _, connect := range source.CompositionConnects() {
-		from, fromErr := connect.FromRef()
-		to, toErr := connect.ToRef()
-		if fromErr != nil || toErr != nil || to.Root {
-			continue
-		}
-		inputPin, ok := source.FlowInputEventPin(to.FlowID, to.Pin)
-		if !ok || inputPin.Address == nil {
-			continue
-		}
-		out[outputPinKeyCarriesIdentity{FlowID: strings.TrimSpace(from.FlowID), PinName: strings.TrimSpace(from.Pin)}] = struct{}{}
-	}
-	return out
 }
 
 func outputPinKeyCarriesFlowIDs(source semanticview.Source) []string {

@@ -38,8 +38,8 @@ func TestFinalFlowInstanceAuthoringFixture_CoversSealedContractOwners(t *testing
 	if err != nil {
 		t.Fatalf("ResolveFlowTemplateInstance(%s): %v", finalflowinstanceauthoring.TemplateFlowID, err)
 	}
-	if got := strings.Join(instance.By, ","); got != finalflowinstanceauthoring.TemplateInstanceBy {
-		t.Fatalf("template instance.by = %q, want %s", got, finalflowinstanceauthoring.TemplateInstanceBy)
+	if got := instance.Field.String(); got != finalflowinstanceauthoring.TemplateInstanceBy {
+		t.Fatalf("template instance = %q, want %s", got, finalflowinstanceauthoring.TemplateInstanceBy)
 	}
 	output, ok := bundle.FlowOutputEventPin(finalflowinstanceauthoring.ProducerFlowID, finalflowinstanceauthoring.ProducerOutputPin)
 	if !ok {
@@ -66,7 +66,7 @@ func TestFinalFlowInstanceAuthoringFixture_CoversSealedContractOwners(t *testing
 	if plan.Receiver.FlowID != finalflowinstanceauthoring.TemplateFlowID || plan.Receiver.Pin != finalflowinstanceauthoring.TemplateInputPin || plan.Receiver.Mode != "template" {
 		t.Fatalf("route plan receiver = %#v, want template %s.%s", plan.Receiver, finalflowinstanceauthoring.TemplateFlowID, finalflowinstanceauthoring.TemplateInputPin)
 	}
-	if plan.InstanceKey == nil || plan.InstanceKey.Mode != "select-or-create" || strings.Join(plan.InstanceKey.Fields, ",") != finalflowinstanceauthoring.TemplateInstanceBy {
+	if plan.InstanceKey == nil || plan.InstanceKey.Mode != runtimecontracts.FlowInputResolutionModeSelectOrCreate || plan.InstanceKey.Field.String() != finalflowinstanceauthoring.TemplateInstanceBy {
 		t.Fatalf("route plan instance key = %#v, want select-or-create/%s", plan.InstanceKey, finalflowinstanceauthoring.TemplateInstanceBy)
 	}
 	if plan.InstanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourcePayload || plan.InstanceKey.Source.Path != "payload."+finalflowinstanceauthoring.TemplatePayloadKey {
@@ -96,22 +96,10 @@ func TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix(t *testing.T) {
 			wantMessage: "must declare a carry named account_id",
 		},
 		{
-			name:        "renamed key adapter references missing producer evidence",
-			opts:        finalflowinstanceauthoring.Options{BadConnectMapping: true},
-			checkID:     "composition_connect_validation",
-			wantMessage: "connect.using.instance is incompatible with input pin resolution",
-		},
-		{
-			name:        "duplicate adapter mapping is ambiguous",
-			opts:        finalflowinstanceauthoring.Options{DuplicateConnectMapping: true},
-			checkID:     "composition_connect_validation",
-			wantMessage: "connect.using.instance is incompatible with input pin resolution",
-		},
-		{
 			name:        "normal connected receiver select_entity is illegal",
 			opts:        finalflowinstanceauthoring.Options{UnsupportedReceiverSelector: true},
 			checkID:     "redundant_in_topology_select_entity",
-			wantMessage: "instance.by plus parent connect",
+			wantMessage: "scalar receiver instance",
 		},
 		{
 			name:        "producer target cannot rescue common composition",

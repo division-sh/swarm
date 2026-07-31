@@ -5,8 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -377,87 +376,6 @@ func TestConnectRoutePlanReceiverPinCollisionGuardPreservesLegalFanoutAndDuplica
 	}
 }
 
-func TestEventBusPublish_ConnectRoutePlanAddressCollisionRejectsRuntimeResolvedNodeAgentAndMixedFanout(t *testing.T) {
-	for _, tc := range []struct {
-		name           string
-		subscriberType string
-		distinctEvents bool
-		mixed          bool
-	}{
-		{name: "node/same local event", subscriberType: "node"},
-		{name: "node/distinct local events", subscriberType: "node", distinctEvents: true},
-		{name: "agent/same local event", subscriberType: "agent"},
-		{name: "agent/distinct local events", subscriberType: "agent", distinctEvents: true},
-		{name: "mixed legal and colliding recipients", subscriberType: "node", distinctEvents: true, mixed: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			source := connectReceiverPinAddressCollisionSource(tc.subscriberType, tc.distinctEvents, tc.mixed)
-			interceptor := &connectRoutePlanNodeInterceptor{}
-			store := &connectRoutePlanDescriptorStore{
-				targetRouteMemoryStore: newTargetRouteMemoryStore(),
-				flowInstances: []ActiveFlowInstanceDescriptor{{
-					InstanceID:    "one",
-					EntityID:      eventtest.UUID("ent-1"),
-					FlowInstance:  "consumer/one",
-					AddressFields: map[string]string{"entity.vertical_id": "v-1"},
-				}},
-			}
-			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Interceptors: []EventInterceptor{interceptor}})
-			if err != nil {
-				t.Fatalf("NewEventBusWithOptions: %v", err)
-			}
-			if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", "one")}); err != nil {
-				t.Fatalf("AddFlowInstanceRoute: %v", err)
-			}
-			var agentEvents <-chan *LocalDelivery
-			if tc.subscriberType == "agent" {
-				identity := connectRoutePlanTestDeclaredAgentIdentity(t, source, "consumer", "receiver", "consumer/one")
-				admission := testAgentSubscriptionAdmissionForFlow(t, "receiver", "consumer/one", events.EventType("work.accepted"))
-				if tc.distinctEvents {
-					admission = testAgentSubscriptionAdmissionForFlow(t, "receiver", "consumer/one", "work.accepted", "work.audited")
-				}
-				agentEvents = subscribeTestAgentAdmissionWithIdentity(t, eb, admission, identity, eventtest.UUID("ent-1"))
-			} else if tc.mixed {
-				identity := connectRoutePlanTestDeclaredAgentIdentity(t, source, "consumer", "legal-agent", "consumer/one")
-				admission := testAgentSubscriptionAdmissionForFlow(t, "legal-agent", "consumer/one", "work.accepted")
-				agentEvents = subscribeTestAgentAdmissionWithIdentity(t, eb, admission, identity, eventtest.UUID("ent-1"))
-			}
-			eventID := uuid.NewString()
-			evt := eventtest.RunCreatingRootIngress(eventID, "producer/work.ready", "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-
-			preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
-			if err != nil {
-				t.Fatalf("CheckPublishRecipientPlan: %v", err)
-			}
-			if got, want := preflight.TargetFailure, string(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid); got != want {
-				t.Fatalf("preflight target failure = %q, want %q; routes=%#v", got, want, preflight.DeliveryRoutes)
-			}
-			if len(preflight.DeliveryRoutes) != 0 {
-				t.Fatalf("preflight delivery routes = %#v, want none", preflight.DeliveryRoutes)
-			}
-			if err := eb.Publish(context.Background(), evt); err != nil {
-				t.Fatalf("Publish: %v", err)
-			}
-			if len(store.routes[eventID]) != 0 {
-				t.Fatalf("persisted delivery routes = %#v, want none", store.routes[eventID])
-			}
-			if got := interceptor.Count(); got != 0 {
-				t.Fatalf("node handler interceptions = %d, want none", got)
-			}
-			if agentEvents != nil {
-				select {
-				case delivered := <-agentEvents:
-					t.Fatalf("agent delivery = %#v, want none", delivered)
-				default:
-				}
-			}
-			if len(store.flowInstances) != 1 {
-				t.Fatalf("flow instance descriptors = %#v, want unchanged existing target", store.flowInstances)
-			}
-		})
-	}
-}
-
 func TestConnectRoutePlanReceiverPinCollisionFailsBeforeReplyContextMutation(t *testing.T) {
 	source := connectReceiverPinCollisionSource("static", false, "node", false)
 	routeTable, err := DeriveRouteTable(source)
@@ -572,50 +490,6 @@ func connectReceiverPinLegalSource(shape string) semanticview.Source {
 		{id: "producer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Name: "work_ready", Event: "work.ready"}}},
 		{id: "consumer", mode: "static", inputs: inputs, nodes: nodes},
 	}, connects))
-}
-
-func connectReceiverPinAddressCollisionSource(subscriberType string, distinctEvents, mixed bool) semanticview.Source {
-	secondEvent := "work.accepted"
-	if distinctEvents {
-		secondEvent = "work.audited"
-	}
-	inputs := []runtimecontracts.FlowInputEventPin{
-		{Name: "work_primary", Event: "work.accepted", Address: &runtimecontracts.FlowInputPinAddress{By: "vertical_id", Source: "payload.vertical_id", Target: "entity.vertical_id", Cardinality: "one"}},
-		{Name: "work_secondary", Event: secondEvent, Address: &runtimecontracts.FlowInputPinAddress{By: "vertical_id", Source: "payload.vertical_id", Target: "entity.vertical_id", Cardinality: "one"}},
-	}
-	consumer := connectRoutePlanTestFlow{
-		id: "consumer", mode: "template", inputs: inputs,
-		entityFields: map[string]runtimecontracts.EntityFieldDecl{"vertical_id": {Type: "string", Indexed: true}},
-	}
-	subscriptions := []string{"work.accepted"}
-	if distinctEvents {
-		subscriptions = append(subscriptions, secondEvent)
-	}
-	if subscriberType == "agent" {
-		consumer.agents = map[string]runtimecontracts.AgentRegistryEntry{
-			"receiver": {ID: "receiver", Subscriptions: subscriptions},
-		}
-	} else {
-		handlers := map[string]runtimecontracts.SystemNodeEventHandler{"work.accepted": {}}
-		if distinctEvents {
-			handlers[secondEvent] = runtimecontracts.SystemNodeEventHandler{}
-		}
-		consumer.nodes = map[string]runtimecontracts.SystemNodeContract{
-			"receiver": {ID: "receiver-{instance_id}", EventHandlers: handlers},
-		}
-		if mixed {
-			consumer.agents = map[string]runtimecontracts.AgentRegistryEntry{
-				"legal-agent": {ID: "legal-agent", Subscriptions: []string{"work.accepted"}},
-			}
-		}
-	}
-	return semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
-		{id: "producer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Name: "work_ready", Event: "work.ready"}}},
-		consumer,
-	}, []runtimecontracts.FlowPackageConnect{
-		{From: "producer.work_ready", To: "consumer.work_primary"},
-		{From: "producer.work_ready", To: "consumer.work_secondary"},
-	}))
 }
 
 func runConnectRoutePlanCommitScope(ctx context.Context, transaction CommitPublishTransaction, fn func(context.Context) error) error {
@@ -926,16 +800,16 @@ func connectRoutePlanTestDeclaredAgentIdentity(
 func connectRoutePlanLifecycleAgentRoute(
 	t *testing.T,
 	source semanticview.Source,
-	secondPin canonicalrouting.LegacyInstanceSecondPin,
+	secondPin canonicalrouting.TemplateInstanceSecondPin,
 ) (agentidentity.Identity, semanticview.FlowOwnedAgentSubscriptionAdmission, string) {
 	t.Helper()
 	instanceID := templateInstanceLifecycleInstanceID("consumer", []runtimecontracts.TemplateInstanceKeyValue{{
-		Field: "vertical_id", Value: "v-1",
+		Field: mustBusTemplateInstanceField(t, "vertical_id"), Value: "v-1",
 	}})
 	instance := runtimeflowidentity.Derive(source, "consumer", instanceID)
 	identity := connectRoutePlanTestDeclaredAgentIdentity(t, source, "consumer", "consumer-agent", instance.InstancePath)
 	subscriptions := []events.EventType{"deploy.done"}
-	if secondPin == canonicalrouting.LegacyInstanceSecondPinDistinctEvent {
+	if secondPin == canonicalrouting.TemplateInstanceSecondPinDistinctEvent {
 		subscriptions = append(subscriptions, "deploy.audited")
 	}
 	return identity, testAgentSubscriptionAdmissionForFlow(t, "consumer-agent", instance.InstancePath, subscriptions...), instance.EntityID
@@ -1234,76 +1108,21 @@ func TestEngineOutbox_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 	}
 }
 
-func TestEventBusPublish_ConnectRoutePlanPersistsTargetSetFanout(t *testing.T) {
-	source := connectRoutePlanFanoutSource()
-	interceptor := &connectRoutePlanNodeInterceptor{}
-	store := &connectRoutePlanDescriptorStore{
-		targetRouteMemoryStore: newTargetRouteMemoryStore(),
-		flowInstances: []ActiveFlowInstanceDescriptor{
-			{InstanceID: "alpha", EntityID: "team-a", FlowInstance: "worker/alpha"},
-			{InstanceID: "beta", EntityID: "team-a", FlowInstance: "worker/beta"},
-			{InstanceID: "gamma", EntityID: "team-b", FlowInstance: "worker/gamma"},
-		},
-	}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Interceptors: []EventInterceptor{interceptor}})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	for _, instanceID := range []string{"alpha", "beta", "gamma"} {
-		if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
-			Identity: runtimeflowidentity.DeriveRoute("worker", instanceID),
-		}); err != nil {
-			t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
-		}
-	}
-	resolvedAlpha := eb.RouteTable().Resolve("worker/alpha/ticket.ready")
-	if !subscriberListContainsRouteSource(resolvedAlpha, "worker-alpha", "worker/alpha", "receiver_carrier") {
-		t.Fatalf("receiver carrier route worker/alpha/ticket.ready = %#v, want worker-alpha receiver_carrier", resolvedAlpha)
-	}
-	eventID := uuid.NewString()
-	evt := eventtest.RunCreatingRootIngress(eventID,
-		events.EventType("producer/ticket.ready"), "", "", json.RawMessage(`{"team_entity":"team-a"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-
-	wantAlpha := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker-alpha", Target: events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/alpha", EntityID: "team-a"}}
-	wantBeta := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker-beta", Target: events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/beta", EntityID: "team-a"}}
-
-	preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
-	if err != nil {
-		t.Fatalf("CheckPublishRecipientPlan: %v", err)
-	}
-	if preflight.TargetFailure != "" || !deliveryRoutesContain(preflight.DeliveryRoutes, wantAlpha) || !deliveryRoutesContain(preflight.DeliveryRoutes, wantBeta) || len(preflight.DeliveryRoutes) != 2 {
-		t.Fatalf("preflight = failure:%q routes:%#v, want two distinct legal targets", preflight.TargetFailure, preflight.DeliveryRoutes)
-	}
-	if err := eb.Publish(context.Background(), evt); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-	if store.flowInstanceDescriptorCalls == 0 {
-		t.Fatalf("flow-instance descriptor loader was not called for descriptor-backed connect fanout")
-	}
-	routes := store.routes[eventID]
-	if !deliveryRoutesContain(routes, wantAlpha) || !deliveryRoutesContain(routes, wantBeta) {
-		t.Fatalf("persisted delivery routes = %#v, want alpha and beta", routes)
-	}
-	if len(routes) != 2 {
-		t.Fatalf("persisted delivery routes = %#v, want exactly two team-a fanout routes", routes)
-	}
-	if got := interceptor.Count(); got != 2 {
-		t.Fatalf("node handler interceptions = %d, want two distinct-target executions", got)
-	}
-}
-
 func TestEventBusResetInMemoryStateRefreshesConnectRoutePlanner(t *testing.T) {
-	source := connectRoutePlanFanoutSource()
+	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, false)
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
-		flowInstances:          []ActiveFlowInstanceDescriptor{{InstanceID: "alpha", EntityID: "team-a", FlowInstance: "worker/alpha"}},
+		flowInstances: []ActiveFlowInstanceDescriptor{{
+			InstanceID: "alpha", EntityID: "ent-alpha", FlowInstance: "consumer/alpha",
+			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
+		}},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
-		Identity: runtimeflowidentity.DeriveRoute("worker", "alpha"),
+		Identity: runtimeflowidentity.DeriveRoute("consumer", "alpha"),
 	}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(alpha): %v", err)
 	}
@@ -1311,18 +1130,21 @@ func TestEventBusResetInMemoryStateRefreshesConnectRoutePlanner(t *testing.T) {
 	if err := eb.ResetInMemoryState(); err != nil {
 		t.Fatalf("ResetInMemoryState: %v", err)
 	}
-	store.flowInstances = []ActiveFlowInstanceDescriptor{{InstanceID: "beta", EntityID: "team-a", FlowInstance: "worker/beta"}}
+	store.flowInstances = []ActiveFlowInstanceDescriptor{{
+		InstanceID: "beta", EntityID: "ent-beta", FlowInstance: "consumer/beta",
+		AddressFields: map[string]string{"entity.vertical_id": "v-1"},
+	}}
 	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
-		Identity: runtimeflowidentity.DeriveRoute("worker", "beta"),
+		Identity: runtimeflowidentity.DeriveRoute("consumer", "beta"),
 	}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(beta): %v", err)
 	}
 
 	eventID := uuid.NewString()
 	evt := eventtest.RunCreatingRootIngress(eventID,
-		events.EventType("producer/ticket.ready"), "", "", json.RawMessage(`{"team_entity":"team-a"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	wantBeta := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker-beta", Target: events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/beta", EntityID: "team-a"}}
+	wantBeta := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-beta", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/beta", EntityID: "ent-beta"}}
 
 	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
 	if err != nil {
@@ -1358,50 +1180,8 @@ func TestEventBusResetInMemoryStateRefreshesConnectRoutePlanner(t *testing.T) {
 	}
 }
 
-func TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTarget(t *testing.T) {
-	source := connectRoutePlanBusinessFieldSource("one", true)
-	store := &connectRoutePlanDescriptorStore{
-		targetRouteMemoryStore: newTargetRouteMemoryStore(),
-		flowInstances: []ActiveFlowInstanceDescriptor{{
-			InstanceID:    "one",
-			EntityID:      eventtest.UUID("ent-1"),
-			FlowInstance:  "consumer/one",
-			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
-		}},
-	}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", "one")}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
-	}
-	eventID := uuid.NewString()
-	evt := eventtest.RunCreatingRootIngress(eventID,
-		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-
-	want := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-one", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: eventtest.UUID("ent-1")}}
-
-	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
-	if err != nil {
-		t.Fatalf("planSubscribedRoutePlan: %v", err)
-	}
-	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
-		t.Fatalf("route plan authority = %q/%q, want matched connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
-	}
-	if !deliveryRoutesContain(routePlan.DeliveryRoutes(), want) || len(routePlan.DeliveryRoutes()) != 1 {
-		t.Fatalf("route plan delivery routes = %#v, want indexed business-field route %#v", routePlan.DeliveryRoutes(), want)
-	}
-	if err := eb.Publish(context.Background(), evt); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-	if !deliveryRoutesContain(store.routes[eventID], want) || len(store.routes[eventID]) != 1 {
-		t.Fatalf("persisted delivery routes = %#v, want indexed business-field route %#v", store.routes[eventID], want)
-	}
-}
-
 func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *testing.T) {
-	source := connectRoutePlanInstanceKeySource(t)
+	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, false)
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		flowInstances: []ActiveFlowInstanceDescriptor{{
@@ -1464,8 +1244,8 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *te
 	}
 }
 
-func TestEventBusPublish_ConnectRoutePlanCreatesTemplateInstanceOnMissingCreate(t *testing.T) {
-	source := connectRoutePlanInstanceKeySourceWithPolicy(t, "create", "reuse")
+func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateInstance(t *testing.T) {
+	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelectOrCreate, false)
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -1822,6 +1602,95 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionCanMintFromEventID(t *t
 	}
 }
 
+func TestTemplateInstanceLifecycleUsesResolutionModeWithoutContractPolicyFallback(t *testing.T) {
+	source := connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelect)
+	plan := mustInstanceKeyConnectRoutePlan(t, source)
+	evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
+		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	descriptors := []runtimepinrouting.Descriptor{{
+		ID:            "one",
+		EntityID:      eventtest.UUID("ent-1"),
+		FlowInstance:  "account/one",
+		AddressFields: map[string]string{"entity.account_id": "acct-1"},
+	}}
+	owner := newTemplateInstanceLifecycleOwner(source, nil, nil, nil)
+	for _, tc := range []struct {
+		name        string
+		mode        runtimecontracts.FlowInputResolutionMode
+		wantFailure runtimepinrouting.ConnectRoutePlanFailure
+		wantAction  TemplateInstanceLifecycleAction
+	}{
+		{name: "create conflicts", mode: runtimecontracts.FlowInputResolutionModeCreate, wantFailure: runtimepinrouting.ConnectFailureInstanceConflict},
+		{name: "select selects", mode: runtimecontracts.FlowInputResolutionModeSelect, wantAction: templateInstanceLifecycleActionSelectedExisting},
+		{name: "select-or-create reuses", mode: runtimecontracts.FlowInputResolutionModeSelectOrCreate, wantAction: templateInstanceLifecycleActionReused},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := plan
+			instanceKey := *plan.InstanceKey
+			instanceKey.Mode = tc.mode
+			candidate.InstanceKey = &instanceKey
+			materialization, decision, handled, err := owner.Materialize(context.Background(), evt, candidate, map[string]string{"payload.account_id": "acct-1"}, descriptors)
+			if err != nil {
+				t.Fatalf("Materialize: %v", err)
+			}
+			if !handled {
+				t.Fatal("typed instance resolution was not handled")
+			}
+			if materialization.Failure != tc.wantFailure {
+				t.Fatalf("failure = %q, want %q", materialization.Failure, tc.wantFailure)
+			}
+			if decision.Action != tc.wantAction {
+				t.Fatalf("action = %q, want %q", decision.Action.String(), tc.wantAction.String())
+			}
+		})
+	}
+}
+
+func TestTemplateInstanceLifecycleDecisionAndActivationConfigContainNoPolicyFacts(t *testing.T) {
+	source := connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelectOrCreate)
+	plan := mustInstanceKeyConnectRoutePlan(t, source)
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("canonical resolution source does not expose a bundle")
+	}
+	instanceContract, err := bundle.ResolveFlowTemplateInstance(plan.Receiver.FlowID)
+	if err != nil {
+		t.Fatalf("ResolveFlowTemplateInstance: %v", err)
+	}
+	evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
+		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	owner := newTemplateInstanceLifecycleOwner(source, nil, nil, nil)
+	request, decision, failure := owner.activationRequest(evt, plan, instanceContract, []runtimecontracts.TemplateInstanceKeyValue{{
+		Field: plan.InstanceKey.Field,
+		Value: "acct-1",
+	}})
+	if failure != "" {
+		t.Fatalf("activationRequest failure = %q", failure)
+	}
+	for _, typ := range []reflect.Type{reflect.TypeOf(TemplateInstanceLifecycleDecision{}), reflect.TypeOf(runtimepipeline.FlowInstanceActivationRequest{})} {
+		for index := 0; index < typ.NumField(); index++ {
+			name := strings.ToLower(typ.Field(index).Name)
+			if strings.Contains(name, "onmissing") || strings.Contains(name, "onconflict") || strings.Contains(name, "policy") {
+				t.Fatalf("%s retains policy field %s", typ, typ.Field(index).Name)
+			}
+		}
+	}
+	for label, facts := range map[string]map[string]any{"config": request.Config, "metadata": request.Metadata} {
+		for key := range facts {
+			normalized := strings.ToLower(key)
+			if strings.Contains(normalized, "on_missing") || strings.Contains(normalized, "on_conflict") || strings.Contains(normalized, "policy") {
+				t.Fatalf("activation %s retains policy fact %q: %#v", label, key, facts)
+			}
+		}
+	}
+	for key := range decision.ActivationVariables() {
+		normalized := strings.ToLower(key)
+		if strings.Contains(normalized, "on_missing") || strings.Contains(normalized, "on_conflict") || strings.Contains(normalized, "policy") {
+			t.Fatalf("activation variables retain policy fact %q", key)
+		}
+	}
+}
+
 func TestEventBusPublish_ConnectRoutePlanSelectResolutionUsesRenamedPayloadSourceExclusively(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -1831,7 +1700,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionUsesRenamedPayloadSourc
 		{name: "conflicting same-named field", payload: `{"external_account_id":"acct-authoritative","account_id":"acct-conflicting"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			source := connectRoutePlanSelectResolutionSourceWithIdentitySource(t, "payload.external_account_id")
+			source := connectRoutePlanCarriedKeyResolutionSourceWithIdentitySource(t, runtimecontracts.FlowInputResolutionModeSelect, "payload.external_account_id")
 			store := &connectRoutePlanLifecycleStore{
 				connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 					targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -1876,11 +1745,11 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionUsesRenamedPayloadSourc
 }
 
 func TestEventBusCheckPublishRecipientPlan_RenamedInstanceSourceRemediationUsesAuthoredPath(t *testing.T) {
-	for _, mode := range []string{
+	for _, mode := range []runtimecontracts.FlowInputResolutionMode{
 		runtimecontracts.FlowInputResolutionModeSelect,
 		runtimecontracts.FlowInputResolutionModeSelectOrCreate,
 	} {
-		t.Run(mode, func(t *testing.T) {
+		t.Run(mode.String(), func(t *testing.T) {
 			source := connectRoutePlanCarriedKeyResolutionSourceWithIdentitySource(t, mode, "payload.external_account_id")
 			store := &connectRoutePlanLifecycleStore{
 				connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
@@ -1899,7 +1768,7 @@ func TestEventBusCheckPublishRecipientPlan_RenamedInstanceSourceRemediationUsesA
 			if err != nil {
 				t.Fatalf("CheckPublishRecipientPlan: %v", err)
 			}
-			if got, want := preflight.TargetFailure, string(runtimepinrouting.ConnectFailureAddressValueMissing); got != want {
+			if got, want := preflight.TargetFailure, string(runtimepinrouting.ConnectFailureInstanceSourceValueMissing); got != want {
 				t.Fatalf("preflight target failure = %q, want %q", got, want)
 			}
 			if len(preflight.DeliveryRoutes) != 0 || len(store.activations) != 0 {
@@ -1910,13 +1779,13 @@ func TestEventBusCheckPublishRecipientPlan_RenamedInstanceSourceRemediationUsesA
 			if err != nil {
 				t.Fatalf("planSubscribedRoutePlan: %v", err)
 			}
-			want := fmt.Sprintf("Provide payload.external_account_id before publishing to account; resolution mode %s requires a carried key value.", mode)
+			want := fmt.Sprintf("Provide payload.external_account_id before publishing to account; resolution mode %s requires a carried key value.", mode.String())
 			got, _ := routePlan.ExtraDetail["connect_route_plan_failure_remediation"].(string)
 			if got != want {
 				t.Fatalf("remediation = %q, want exact authored-source remediation %q", got, want)
 			}
 			if strings.Contains(got, "payload.account_id") {
-				t.Fatalf("remediation = %q, must not reconstruct source from instance.by", got)
+				t.Fatalf("remediation = %q, must not reconstruct source from the scalar instance field", got)
 			}
 		})
 	}
@@ -1932,7 +1801,7 @@ func mustDeliveryPayloadProjection(t *testing.T, fields map[string]string) event
 }
 
 func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceAndReplaysCommittedRoute(t *testing.T) {
-	source := connectRoutePlanSelectResolutionSourceWithPolicy(t, "create", "reuse")
+	source := connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelect)
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -2052,7 +1921,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGap
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			source := connectRoutePlanSelectResolutionSourceWithPolicy(t, "create", "reuse")
+			source := connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelect)
 			store := &connectRoutePlanLifecycleStore{
 				connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 					targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -2119,7 +1988,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGap
 }
 
 func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAndReplaysCommittedRoute(t *testing.T) {
-	source := connectRoutePlanSelectOrCreateResolutionSourceWithPolicy(t, "reject", "reject")
+	source := connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelectOrCreate)
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -2187,8 +2056,11 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 		t.Fatalf("missing publish activations = %d, want 1 create", got)
 	}
 	activation := store.activations[0]
-	if activation.Config["template_instance_on_missing"] != "create" || activation.Config["template_instance_on_conflict"] != "reuse" {
-		t.Fatalf("activation policy config = %#v, want canonical select-or-create create/reuse", activation.Config)
+	if _, ok := activation.Config["template_instance_on_missing"]; ok {
+		t.Fatalf("activation config retains on_missing policy fact: %#v", activation.Config)
+	}
+	if _, ok := activation.Config["template_instance_on_conflict"]; ok {
+		t.Fatalf("activation config retains on_conflict policy fact: %#v", activation.Config)
 	}
 	if activation.Config["account_id"] != "acct-2" || activation.Metadata["account_id"] != "acct-2" {
 		t.Fatalf("activation config/metadata = %#v/%#v, want carried account_id acct-2", activation.Config, activation.Metadata)
@@ -2246,7 +2118,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 }
 
 func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionDoesNotReuseUnroutableActivationFailure(t *testing.T) {
-	source := connectRoutePlanSelectOrCreateResolutionSourceWithPolicy(t, "reject", "reject")
+	source := connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelectOrCreate)
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -2287,7 +2159,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionDoesNotReuseUnr
 }
 
 func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionFailsClosedForAmbiguousTarget(t *testing.T) {
-	source := connectRoutePlanSelectOrCreateResolutionSourceWithPolicy(t, "reject", "reject")
+	source := connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelectOrCreate)
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -2339,7 +2211,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionFailsClosedForA
 }
 
 func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionConcurrentSameKeyConverges(t *testing.T) {
-	source := connectRoutePlanSelectOrCreateResolutionSourceWithPolicy(t, "reject", "reject")
+	source := connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelectOrCreate)
 	base := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -2404,16 +2276,16 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionConcurrentSameK
 func TestEventBusPublish_ConnectRoutePlanLifecycleCollisionFailsBeforeActivation(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
-		secondPin canonicalrouting.LegacyInstanceSecondPin
-		consumer  canonicalrouting.LegacyInstanceConsumer
+		secondPin canonicalrouting.TemplateInstanceSecondPin
+		consumer  canonicalrouting.TemplateInstanceConsumer
 	}{
-		{name: "node/same local event", secondPin: canonicalrouting.LegacyInstanceSecondPinSameEvent, consumer: canonicalrouting.LegacyInstanceNodeConsumer},
-		{name: "node/distinct local events", secondPin: canonicalrouting.LegacyInstanceSecondPinDistinctEvent, consumer: canonicalrouting.LegacyInstanceNodeConsumer},
-		{name: "agent/same local event", secondPin: canonicalrouting.LegacyInstanceSecondPinSameEvent, consumer: canonicalrouting.LegacyInstanceAgentConsumer},
-		{name: "agent/distinct local events", secondPin: canonicalrouting.LegacyInstanceSecondPinDistinctEvent, consumer: canonicalrouting.LegacyInstanceAgentConsumer},
+		{name: "node/same local event", secondPin: canonicalrouting.TemplateInstanceSecondPinSameEvent, consumer: canonicalrouting.TemplateInstanceNodeConsumer},
+		{name: "node/distinct local events", secondPin: canonicalrouting.TemplateInstanceSecondPinDistinctEvent, consumer: canonicalrouting.TemplateInstanceNodeConsumer},
+		{name: "agent/same local event", secondPin: canonicalrouting.TemplateInstanceSecondPinSameEvent, consumer: canonicalrouting.TemplateInstanceAgentConsumer},
+		{name: "agent/distinct local events", secondPin: canonicalrouting.TemplateInstanceSecondPinDistinctEvent, consumer: canonicalrouting.TemplateInstanceAgentConsumer},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			source := connectRoutePlanInstanceKeyMultiInputSourceWithPolicy(t, "create", "reuse", tc.secondPin, tc.consumer)
+			source := connectRoutePlanTemplateInstanceMultiInputSource(t, canonicalrouting.TemplateInstanceRouteSelectOrCreate, tc.secondPin, tc.consumer)
 			store := &connectRoutePlanLifecycleStore{
 				connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 					targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -2427,7 +2299,7 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleCollisionFailsBeforeActivation
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			store.bus = eb
-			if tc.consumer == canonicalrouting.LegacyInstanceAgentConsumer {
+			if tc.consumer == canonicalrouting.TemplateInstanceAgentConsumer {
 				identity, admission, entityID := connectRoutePlanLifecycleAgentRoute(t, source, tc.secondPin)
 				subscribeTestAgentAdmissionWithIdentity(t, eb, admission, identity, entityID)
 			}
@@ -2467,12 +2339,11 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleCollisionFailsBeforeActivation
 }
 
 func TestEventBusPublish_ConnectRoutePlanPersistsCreatedAgentBeforeLiveCarrier(t *testing.T) {
-	source := connectRoutePlanInstanceKeyMultiInputSourceWithPolicy(
+	source := connectRoutePlanTemplateInstanceMultiInputSource(
 		t,
-		"create",
-		"reuse",
-		canonicalrouting.LegacyInstanceNoSecondPin,
-		canonicalrouting.LegacyInstanceNodeAndAgentConsumer,
+		canonicalrouting.TemplateInstanceRouteSelectOrCreate,
+		canonicalrouting.TemplateInstanceNoSecondPin,
+		canonicalrouting.TemplateInstanceNodeAndAgentConsumer,
 	)
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
@@ -2489,7 +2360,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsCreatedAgentBeforeLiveCarrier(t
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	store.bus = eb
-	identity, _, _ := connectRoutePlanLifecycleAgentRoute(t, source, canonicalrouting.LegacyInstanceNoSecondPin)
+	identity, _, _ := connectRoutePlanLifecycleAgentRoute(t, source, canonicalrouting.TemplateInstanceNoSecondPin)
 	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		"producer/deploy.done",
@@ -2541,17 +2412,17 @@ func TestEventBusPublish_ConnectRoutePlanPersistsCreatedAgentBeforeLiveCarrier(t
 func TestEventBusPublish_ConnectRoutePlanLifecycleAdmissionPreservesDuplicateEdgeAndDistinctSubscriber(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
-		secondPin  canonicalrouting.LegacyInstanceSecondPin
-		consumer   canonicalrouting.LegacyInstanceConsumer
+		secondPin  canonicalrouting.TemplateInstanceSecondPin
+		consumer   canonicalrouting.TemplateInstanceConsumer
 		wantRoutes int
 		wantNodes  int
 		wantAgent  bool
 	}{
-		{name: "duplicate identical edge", secondPin: canonicalrouting.LegacyInstanceSecondPinDuplicateEdge, consumer: canonicalrouting.LegacyInstanceNodeConsumer, wantRoutes: 1, wantNodes: 1},
-		{name: "distinct node and agent subscribers", consumer: canonicalrouting.LegacyInstanceNodeAndAgentConsumer, wantRoutes: 2, wantAgent: true},
+		{name: "duplicate identical edge", secondPin: canonicalrouting.TemplateInstanceSecondPinDuplicateEdge, consumer: canonicalrouting.TemplateInstanceNodeConsumer, wantRoutes: 1, wantNodes: 1},
+		{name: "distinct node and agent subscribers", consumer: canonicalrouting.TemplateInstanceNodeAndAgentConsumer, wantRoutes: 2, wantAgent: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			source := connectRoutePlanInstanceKeyMultiInputSourceWithPolicy(t, "create", "reuse", tc.secondPin, tc.consumer)
+			source := connectRoutePlanTemplateInstanceMultiInputSource(t, canonicalrouting.TemplateInstanceRouteSelectOrCreate, tc.secondPin, tc.consumer)
 			store := &connectRoutePlanLifecycleStore{
 				connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 					targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -2629,7 +2500,7 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleAdmissionPreservesDuplicateEdg
 }
 
 func TestEventBusPublish_ConnectRoutePlanCreateRejectSameEventRetryIsNoOpAndExplicitReplayUsesCommittedScope(t *testing.T) {
-	source := connectRoutePlanInstanceKeySourceWithPolicy(t, "create", "reject")
+	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteCreate, false)
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -2676,50 +2547,8 @@ func TestEventBusPublish_ConnectRoutePlanCreateRejectSameEventRetryIsNoOpAndExpl
 	}
 }
 
-func TestEventBusPublish_ConnectRoutePlanDefaultedPoliciesMatchCreateReject(t *testing.T) {
-	source := connectRoutePlanInstanceKeySourceWithDefaultedPolicies(t)
-	store := &connectRoutePlanLifecycleStore{
-		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
-			targetRouteMemoryStore: newTargetRouteMemoryStore(),
-		},
-	}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:            source,
-		TemplateInstanceActivator: store.Activate,
-	})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	store.bus = eb
-	evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
-		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-
-	if err := eb.Publish(context.Background(), evt); err != nil {
-		t.Fatalf("Publish defaulted policies: %v", err)
-	}
-	if len(store.activations) != 1 {
-		t.Fatalf("activations = %d, want 1", len(store.activations))
-	}
-	activation := store.activations[0]
-	if activation.Config["template_instance_on_missing"] != "create" || activation.Config["template_instance_on_conflict"] != "reject" {
-		t.Fatalf("activation policy config = %#v, want defaulted create/reject", activation.Config)
-	}
-	want := events.DeliveryRoute{
-		SubscriberType: "node",
-		SubscriberID:   "consumer-node-" + activation.Instance.InstanceID,
-		Target: events.RouteIdentity{
-			FlowID:       "consumer",
-			FlowInstance: activation.Instance.InstancePath,
-			EntityID:     activation.Instance.EntityID,
-		},
-	}
-	if !deliveryRoutesContain(store.routes[evt.ID()], want) || len(store.routes[evt.ID()]) != 1 {
-		t.Fatalf("persisted delivery routes = %#v, want defaulted create/reject route %#v", store.routes[evt.ID()], want)
-	}
-}
-
 func TestEventBusPublish_ConnectRoutePlanCreatesRenamedTemplateInstanceKeyTarget(t *testing.T) {
-	source := connectRoutePlanRenamedInstanceKeySourceWithPolicy(t, "create", "reuse")
+	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelectOrCreate, true)
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -2761,7 +2590,7 @@ func TestEventBusPublish_ConnectRoutePlanCreatesRenamedTemplateInstanceKeyTarget
 }
 
 func TestEventBusPublish_ConnectRoutePlanRejectsCreateConflict(t *testing.T) {
-	source := connectRoutePlanInstanceKeySourceWithPolicy(t, "create", "reject")
+	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteCreate, false)
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -2803,7 +2632,7 @@ func TestEventBusPublish_ConnectRoutePlanRejectsCreateConflict(t *testing.T) {
 }
 
 func TestEventBusPublish_ConnectRoutePlanLifecycleUnavailableBlocksLowerPrecedenceRescue(t *testing.T) {
-	source := connectRoutePlanInstanceKeySourceWithPolicy(t, "create", "reuse")
+	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelectOrCreate, false)
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
 	}
@@ -2847,7 +2676,7 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleUnavailableBlocksLowerPreceden
 }
 
 func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescriptorDrift(t *testing.T) {
-	source := connectRoutePlanInstanceKeySource(t)
+	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, false)
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		flowInstances: []ActiveFlowInstanceDescriptor{{
@@ -2916,7 +2745,7 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 }
 
 func TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarget(t *testing.T) {
-	source := connectRoutePlanRenamedInstanceKeySource(t)
+	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, true)
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		flowInstances: []ActiveFlowInstanceDescriptor{{
@@ -2980,7 +2809,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarge
 }
 
 func TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKeySourceGap(t *testing.T) {
-	source := connectRoutePlanRenamedInstanceKeySource(t)
+	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, true)
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		flowInstances: []ActiveFlowInstanceDescriptor{{
@@ -3008,8 +2837,8 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKe
 	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
 		t.Fatalf("route plan authority = %q/%q, want fail-closed connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
 	}
-	if routePlan.TargetFailure != runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureAddressValueMissing) {
-		t.Fatalf("target failure = %q, want %q", routePlan.TargetFailure, runtimepinrouting.ConnectFailureAddressValueMissing)
+	if routePlan.TargetFailure != runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureInstanceSourceValueMissing) {
+		t.Fatalf("target failure = %q, want %q", routePlan.TargetFailure, runtimepinrouting.ConnectFailureInstanceSourceValueMissing)
 	}
 	if len(routePlan.LiveRecipients) != 0 || len(routePlan.DeliveryIntents) != 0 || len(routePlan.RoutedRecipients) != 0 ||
 		len(routePlan.SubscribedRecipients) != 0 || len(routePlan.RecipientIDs()) != 0 ||
@@ -3023,7 +2852,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKe
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
 	}
-	if got, want := plan.TargetFailure, string(runtimepinrouting.ConnectFailureAddressValueMissing); got != want {
+	if got, want := plan.TargetFailure, string(runtimepinrouting.ConnectFailureInstanceSourceValueMissing); got != want {
 		t.Fatalf("preflight target failure = %q, want %q", got, want)
 	}
 	if len(plan.Recipients) != 0 || len(plan.PersistedRecipients) != 0 || len(plan.RoutedRecipients) != 0 ||
@@ -3050,7 +2879,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 		{
 			name:        "missing source key value",
 			payload:     `{}`,
-			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureAddressValueMissing),
+			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureInstanceSourceValueMissing),
 		},
 		{
 			name:    "no receiver instance under rejecting policy",
@@ -3077,7 +2906,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			source := connectRoutePlanInstanceKeySource(t)
+			source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, false)
 			store := &connectRoutePlanDescriptorStore{
 				targetRouteMemoryStore: newTargetRouteMemoryStore(),
 				flowInstances:          tc.flowInstances,
@@ -3132,194 +2961,6 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 				t.Fatalf("persisted delivery routes = %#v, want none for fail-closed instance-key route", routes)
 			}
 		})
-	}
-}
-
-func TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTargetSet(t *testing.T) {
-	source := connectRoutePlanBusinessFieldSource("many", true)
-	store := &connectRoutePlanDescriptorStore{
-		targetRouteMemoryStore: newTargetRouteMemoryStore(),
-		flowInstances: []ActiveFlowInstanceDescriptor{
-			{InstanceID: "one", EntityID: eventtest.UUID("ent-1"), FlowInstance: "consumer/one", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
-			{InstanceID: "two", EntityID: eventtest.UUID("ent-2"), FlowInstance: "consumer/two", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
-			{InstanceID: "other", EntityID: eventtest.UUID("ent-3"), FlowInstance: "consumer/other", AddressFields: map[string]string{"entity.vertical_id": "v-2"}},
-		},
-	}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	for _, id := range []string{"one", "two", "other"} {
-		if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", id)}); err != nil {
-			t.Fatalf("AddFlowInstanceRoute(%s): %v", id, err)
-		}
-	}
-	eventID := uuid.NewString()
-	evt := eventtest.RunCreatingRootIngress(eventID,
-		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-
-	wantOne := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-one", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: eventtest.UUID("ent-1")}}
-	wantTwo := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-two", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/two", EntityID: eventtest.UUID("ent-2")}}
-
-	if err := eb.Publish(context.Background(), evt); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-	routes := store.routes[eventID]
-	if !deliveryRoutesContain(routes, wantOne) || !deliveryRoutesContain(routes, wantTwo) || len(routes) != 2 {
-		t.Fatalf("persisted target_set delivery routes = %#v, want one/two only", routes)
-	}
-}
-
-func TestEventBusPublish_ConnectRoutePlanFailsClosedForBusinessFieldDescriptorGaps(t *testing.T) {
-	tests := []struct {
-		name          string
-		source        semanticview.Source
-		payload       string
-		flowInstances []ActiveFlowInstanceDescriptor
-		wantFailure   runtimepinrouting.TargetFailure
-	}{
-		{
-			name:        "missing source value",
-			source:      connectRoutePlanBusinessFieldSource("one", true),
-			payload:     `{}`,
-			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureAddressValueMissing),
-		},
-		{
-			name:    "no descriptor match",
-			source:  connectRoutePlanBusinessFieldSource("one", true),
-			payload: `{"vertical_id":"v-1"}`,
-			flowInstances: []ActiveFlowInstanceDescriptor{{
-				InstanceID:    "one",
-				EntityID:      eventtest.UUID("ent-1"),
-				FlowInstance:  "consumer/one",
-				AddressFields: map[string]string{"entity.vertical_id": "v-2"},
-			}},
-			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetUnresolved),
-		},
-		{
-			name:    "ambiguous singular target",
-			source:  connectRoutePlanBusinessFieldSource("one", true),
-			payload: `{"vertical_id":"v-1"}`,
-			flowInstances: []ActiveFlowInstanceDescriptor{
-				{InstanceID: "one", EntityID: eventtest.UUID("ent-1"), FlowInstance: "consumer/one", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
-				{InstanceID: "two", EntityID: eventtest.UUID("ent-2"), FlowInstance: "consumer/two", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
-			},
-			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetAmbiguous),
-		},
-		{
-			name:    "unsupported unindexed target",
-			source:  connectRoutePlanBusinessFieldSource("one", false),
-			payload: `{"vertical_id":"v-1"}`,
-			flowInstances: []ActiveFlowInstanceDescriptor{{
-				InstanceID:    "one",
-				EntityID:      eventtest.UUID("ent-1"),
-				FlowInstance:  "consumer/one",
-				AddressFields: map[string]string{"entity.vertical_id": "v-1"},
-			}},
-			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetUnsupported),
-		},
-		{
-			name:    "unsupported nested target",
-			source:  connectRoutePlanBusinessFieldSourceWithTarget("one", true, "entity.profile.vertical_id"),
-			payload: `{"vertical_id":"v-1"}`,
-			flowInstances: []ActiveFlowInstanceDescriptor{{
-				InstanceID:    "one",
-				EntityID:      eventtest.UUID("ent-1"),
-				FlowInstance:  "consumer/one",
-				AddressFields: map[string]string{"entity.profile.vertical_id": "v-1"},
-			}},
-			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetUnsupported),
-		},
-		{
-			name:    "wrong receiver scope",
-			source:  connectRoutePlanBusinessFieldSource("one", true),
-			payload: `{"vertical_id":"v-1"}`,
-			flowInstances: []ActiveFlowInstanceDescriptor{{
-				InstanceID:    "one",
-				EntityID:      eventtest.UUID("ent-1"),
-				FlowInstance:  "other/one",
-				AddressFields: map[string]string{"entity.vertical_id": "v-1"},
-			}},
-			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetUnresolved),
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			store := &connectRoutePlanDescriptorStore{
-				targetRouteMemoryStore: newTargetRouteMemoryStore(),
-				flowInstances:          tc.flowInstances,
-			}
-			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: tc.source})
-			if err != nil {
-				t.Fatalf("NewEventBusWithOptions: %v", err)
-			}
-			evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
-				events.EventType("producer/deploy.done"), "", "", json.RawMessage(tc.payload), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-
-			routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
-			if err != nil {
-				t.Fatalf("planSubscribedRoutePlan: %v", err)
-			}
-			if routePlan.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
-				t.Fatalf("route plan authority = %q/%q, want fail-closed connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
-			}
-			if routePlan.TargetFailure != tc.wantFailure {
-				t.Fatalf("target failure = %q, want %q", routePlan.TargetFailure, tc.wantFailure)
-			}
-			if len(routePlan.LiveRecipients) != 0 || len(routePlan.DeliveryIntents) != 0 || len(routePlan.RoutedRecipients) != 0 ||
-				len(routePlan.RecipientIDs()) != 0 || len(routePlan.PersistedRecipientIDs()) != 0 || len(routePlan.DeliveryRoutes()) != 0 {
-				t.Fatalf("fail-closed business-field route exposed executable routes: live=%#v intents=%#v routed=%#v recipients=%#v persisted=%#v routes=%#v",
-					routePlan.LiveRecipients, routePlan.DeliveryIntents, routePlan.RoutedRecipients, routePlan.RecipientIDs(), routePlan.PersistedRecipientIDs(), routePlan.DeliveryRoutes())
-			}
-		})
-	}
-}
-
-func TestEventBusPublish_ConnectRoutePlanFailsClosedForUnsupportedBusinessFieldTarget(t *testing.T) {
-	source := connectRoutePlanBusinessFieldSource("one", false)
-	store := &connectRoutePlanDescriptorStore{
-		targetRouteMemoryStore: newTargetRouteMemoryStore(),
-		flowInstances: []ActiveFlowInstanceDescriptor{{
-			InstanceID:    "one",
-			EntityID:      eventtest.UUID("ent-1"),
-			FlowInstance:  "consumer/one",
-			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
-		}},
-	}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
-		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-
-	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
-	if err != nil {
-		t.Fatalf("planSubscribedRoutePlan: %v", err)
-	}
-	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
-		t.Fatalf("route plan authority = %q/%q, want fail-closed connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
-	}
-	if got, want := routePlan.TargetFailure, runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetUnsupported); got != want {
-		t.Fatalf("route plan target failure = %q, want %q", got, want)
-	}
-	if len(routePlan.LiveRecipients) != 0 || len(routePlan.DeliveryIntents) != 0 || len(routePlan.RoutedRecipients) != 0 ||
-		len(routePlan.RecipientIDs()) != 0 || len(routePlan.PersistedRecipientIDs()) != 0 || len(routePlan.DeliveryRoutes()) != 0 {
-		t.Fatalf("unsupported target exposed executable routes: live=%#v intents=%#v routed=%#v recipients=%#v persisted=%#v routes=%#v",
-			routePlan.LiveRecipients, routePlan.DeliveryIntents, routePlan.RoutedRecipients, routePlan.RecipientIDs(), routePlan.PersistedRecipientIDs(), routePlan.DeliveryRoutes())
-	}
-
-	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
-	if err != nil {
-		t.Fatalf("CheckPublishRecipientPlan: %v", err)
-	}
-	if got, want := plan.TargetFailure, "route_plan_target_unsupported"; got != want {
-		t.Fatalf("target failure = %q, want %q", got, want)
-	}
-	if len(plan.Recipients) != 0 || len(plan.PersistedRecipients) != 0 || len(plan.RoutedRecipients) != 0 ||
-		len(plan.SubscriptionRecipients) != 0 || len(plan.DeliveryRoutes) != 0 {
-		t.Fatalf("unsupported target preflight exposed executable routes: recipients=%#v persisted=%#v routed=%#v subscriptions=%#v routes=%#v",
-			plan.Recipients, plan.PersistedRecipients, plan.RoutedRecipients, plan.SubscriptionRecipients, plan.DeliveryRoutes)
 	}
 }
 
@@ -3641,256 +3282,106 @@ func TestRoutePlanNormalizationPreservesAuthorityState(t *testing.T) {
 	}
 }
 
-func connectRoutePlanInstanceKeySource(t testing.TB) semanticview.Source {
+func connectRoutePlanTemplateInstanceSource(t testing.TB, mode canonicalrouting.TemplateInstanceRouteMode, renamedSource bool) semanticview.Source {
 	t.Helper()
-	return connectRoutePlanInstanceKeySourceWithPolicy(t, "reject", "reject")
+	root := canonicalrouting.CopyTemplateInstanceRoute(t, canonicalrouting.TemplateInstanceRouteOptions{
+		Mode:          mode,
+		RenamedSource: renamedSource,
+	})
+	return loadConnectRoutePlanCanonicalSource(t, root)
 }
 
-func connectRoutePlanInstanceKeySourceWithDefaultedPolicies(t testing.TB) semanticview.Source {
+func connectRoutePlanTemplateInstanceMultiInputSource(
+	t testing.TB,
+	mode canonicalrouting.TemplateInstanceRouteMode,
+	secondPin canonicalrouting.TemplateInstanceSecondPin,
+	consumer canonicalrouting.TemplateInstanceConsumer,
+) semanticview.Source {
 	t.Helper()
-	return connectRoutePlanInstanceKeySourceWithPolicyLines(t, "")
-}
-
-func connectRoutePlanInstanceKeySourceWithPolicy(t testing.TB, onMissing, onConflict string) semanticview.Source {
-	t.Helper()
-	return connectRoutePlanInstanceKeySourceWithPolicyLines(t, "  on_missing: "+onMissing+"\n  on_conflict: "+onConflict+"\n")
-}
-
-func connectRoutePlanInstanceKeySourceWithPolicyLines(t testing.TB, policyLines string) semanticview.Source {
-	t.Helper()
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
-	root := writeConnectRoutePlanInstanceKeyFixtureWithPolicyLines(t, policyLines)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	return semanticview.Wrap(bundle)
-}
-
-func connectRoutePlanInstanceKeyMultiInputSourceWithPolicy(t testing.TB, onMissing, onConflict string, secondPin canonicalrouting.LegacyInstanceSecondPin, consumer canonicalrouting.LegacyInstanceConsumer) semanticview.Source {
-	t.Helper()
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
-	root := writeConnectRoutePlanInstanceKeyMultiInputFixtureWithPolicy(t, onMissing, onConflict, secondPin, consumer)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	return semanticview.Wrap(bundle)
-}
-
-func connectRoutePlanRenamedInstanceKeySource(t testing.TB) semanticview.Source {
-	t.Helper()
-	return connectRoutePlanRenamedInstanceKeySourceWithPolicy(t, "reject", "reject")
-}
-
-func connectRoutePlanRenamedInstanceKeySourceWithPolicy(t testing.TB, onMissing, onConflict string) semanticview.Source {
-	t.Helper()
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
-	root := writeConnectRoutePlanRenamedInstanceKeyFixtureWithPolicy(t, onMissing, onConflict)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	return semanticview.Wrap(bundle)
+	root := canonicalrouting.CopyTemplateInstanceRoute(t, canonicalrouting.TemplateInstanceRouteOptions{
+		Mode:      mode,
+		SecondPin: secondPin,
+		Consumer:  consumer,
+	})
+	return loadConnectRoutePlanCanonicalSource(t, root)
 }
 
 func connectRoutePlanCreateResolutionSource(t testing.TB, mint string) semanticview.Source {
 	t.Helper()
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
-	root := writeConnectRoutePlanCreateResolutionFixture(t, mint)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	return semanticview.Wrap(bundle)
-}
-
-func connectRoutePlanSelectResolutionSourceWithPolicy(t testing.TB, onMissing, onConflict string) semanticview.Source {
-	t.Helper()
-	return connectRoutePlanCarriedKeyResolutionSourceWithPolicy(t, runtimecontracts.FlowInputResolutionModeSelect, onMissing, onConflict)
-}
-
-func connectRoutePlanSelectResolutionSourceWithIdentitySource(t testing.TB, identitySource string) semanticview.Source {
-	t.Helper()
-	repoRoot := canonicalrouting.RepoRoot(t)
-	root := writeConnectRoutePlanCarriedKeyResolutionFixtureWithPolicy(t, runtimecontracts.FlowInputResolutionModeSelect, "create", "reuse")
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	pins := bundle.Semantics.FlowInputEventPins["account"]
-	if len(pins) != 2 {
-		t.Fatalf("account input pins = %#v, want two", pins)
-	}
-	carry := pins[1].Carries["account_id"]
-	carry.From = identitySource
-	pins[1].Carries["account_id"] = carry
-	bundle.Semantics.FlowInputEventPins["account"] = pins
-	return semanticview.Wrap(bundle)
-}
-
-func connectRoutePlanCarriedKeyResolutionSourceWithIdentitySource(t testing.TB, mode, identitySource string) semanticview.Source {
-	t.Helper()
-	repoRoot := canonicalrouting.RepoRoot(t)
-	root := writeConnectRoutePlanCarriedKeyResolutionFixtureWithPolicy(t, mode, "reject", "reject")
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	pins := bundle.Semantics.FlowInputEventPins["account"]
-	if len(pins) != 2 {
-		t.Fatalf("account input pins = %#v, want two", pins)
-	}
-	carry := pins[1].Carries["account_id"]
-	carry.From = identitySource
-	pins[1].Carries["account_id"] = carry
-	bundle.Semantics.FlowInputEventPins["account"] = pins
-	return semanticview.Wrap(bundle)
-}
-
-func connectRoutePlanSelectOrCreateResolutionSourceWithPolicy(t testing.TB, onMissing, onConflict string) semanticview.Source {
-	t.Helper()
-	return connectRoutePlanCarriedKeyResolutionSourceWithPolicy(t, runtimecontracts.FlowInputResolutionModeSelectOrCreate, onMissing, onConflict)
-}
-
-func connectRoutePlanCarriedKeyResolutionSourceWithPolicy(t testing.TB, mode, onMissing, onConflict string) semanticview.Source {
-	t.Helper()
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
-	root := writeConnectRoutePlanCarriedKeyResolutionFixtureWithPolicy(t, mode, onMissing, onConflict)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	return semanticview.Wrap(bundle)
-}
-
-func writeConnectRoutePlanInstanceKeyFixture(t testing.TB) string {
-	t.Helper()
-	return canonicalrouting.CopyLegacyInstanceRoute(t, canonicalrouting.LegacyInstanceRouteOptions{
-		Missing:  canonicalrouting.LegacyInstancePolicyReject,
-		Conflict: canonicalrouting.LegacyInstancePolicyReject,
-	})
-}
-
-func writeConnectRoutePlanCreateResolutionFixture(t testing.TB, source string) string {
-	t.Helper()
 	mode := canonicalrouting.CreateMintUUID
-	if strings.TrimSpace(source) == runtimecontracts.FlowInputCarrySourceEventID {
+	if strings.TrimSpace(mint) == runtimecontracts.FlowInputCarrySourceEventID {
 		mode = canonicalrouting.CreateMintEventID
 	}
-	return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: mode})
+	root := canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: mode})
+	return loadConnectRoutePlanCanonicalSource(t, root)
 }
 
-func writeConnectRoutePlanSelectResolutionFixtureWithPolicy(t testing.TB, onMissing, onConflict string) string {
-	t.Helper()
-	return writeConnectRoutePlanCarriedKeyResolutionFixtureWithPolicy(t, runtimecontracts.FlowInputResolutionModeSelect, onMissing, onConflict)
-}
-
-func writeConnectRoutePlanCarriedKeyResolutionFixtureWithPolicy(t testing.TB, mode, onMissing, onConflict string) string {
+func connectRoutePlanCarriedKeyResolutionSource(t testing.TB, mode runtimecontracts.FlowInputResolutionMode) semanticview.Source {
 	t.Helper()
 	resolutionMode := canonicalrouting.SelectResolutionSelect
-	if strings.TrimSpace(mode) == runtimecontracts.FlowInputResolutionModeSelectOrCreate {
+	if mode == runtimecontracts.FlowInputResolutionModeSelectOrCreate {
 		resolutionMode = canonicalrouting.SelectResolutionSelectOrCreate
-	} else if strings.TrimSpace(mode) != "" && strings.TrimSpace(mode) != runtimecontracts.FlowInputResolutionModeSelect {
-		t.Fatalf("unsupported select resolution mode %q", mode)
+	} else if mode != runtimecontracts.FlowInputResolutionModeSelect {
+		t.Fatalf("unsupported carried-key resolution mode %q", mode.String())
 	}
-	return canonicalrouting.CopyTemplateSelectResolution(t, canonicalrouting.TemplateSelectResolutionOptions{
-		Mode:     resolutionMode,
-		Missing:  legacyInstancePolicy(t, onMissing),
-		Conflict: legacyInstancePolicy(t, onConflict),
-	})
+	root := canonicalrouting.CopyTemplateSelectResolution(t, canonicalrouting.TemplateSelectResolutionOptions{Mode: resolutionMode})
+	return loadConnectRoutePlanCanonicalSource(t, root)
 }
 
-func writeConnectRoutePlanRenamedInstanceKeyFixture(t testing.TB) string {
-	return writeConnectRoutePlanRenamedInstanceKeyFixtureWithPolicy(t, "reject", "reject")
-}
-
-func writeConnectRoutePlanRenamedInstanceKeyFixtureWithPolicy(t testing.TB, onMissing, onConflict string) string {
+func connectRoutePlanCarriedKeyResolutionSourceWithIdentitySource(
+	t testing.TB,
+	mode runtimecontracts.FlowInputResolutionMode,
+	identitySource string,
+) semanticview.Source {
 	t.Helper()
-	return canonicalrouting.CopyLegacyInstanceRoute(t, canonicalrouting.LegacyInstanceRouteOptions{
-		Missing:  legacyInstancePolicy(t, onMissing),
-		Conflict: legacyInstancePolicy(t, onConflict),
-		Adapter:  canonicalrouting.LegacyInstanceAdapterRenamed,
-	})
-}
-
-func writeConnectRoutePlanInstanceKeyFixtureWithPolicyLines(t testing.TB, policyLines string) string {
-	t.Helper()
-	missing, conflict := legacyInstancePolicyLines(t, policyLines)
-	return canonicalrouting.CopyLegacyInstanceRoute(t, canonicalrouting.LegacyInstanceRouteOptions{
-		Missing:  missing,
-		Conflict: conflict,
-	})
-}
-
-func writeConnectRoutePlanInstanceKeyMultiInputFixtureWithPolicy(t testing.TB, onMissing, onConflict string, secondPin canonicalrouting.LegacyInstanceSecondPin, consumer canonicalrouting.LegacyInstanceConsumer) string {
-	t.Helper()
-	return canonicalrouting.CopyLegacyInstanceRoute(t, canonicalrouting.LegacyInstanceRouteOptions{
-		Missing:   legacyInstancePolicy(t, onMissing),
-		Conflict:  legacyInstancePolicy(t, onConflict),
-		SecondPin: secondPin,
-		Consumer:  consumer,
-	})
-}
-
-func legacyInstancePolicy(t testing.TB, value string) canonicalrouting.LegacyInstancePolicy {
-	t.Helper()
-	switch strings.TrimSpace(value) {
-	case "":
-		return canonicalrouting.LegacyInstancePolicyDefault
-	case "reject":
-		return canonicalrouting.LegacyInstancePolicyReject
-	case "create":
-		return canonicalrouting.LegacyInstancePolicyCreate
-	case "reuse":
-		return canonicalrouting.LegacyInstancePolicyReuse
-	default:
-		t.Fatalf("unsupported legacy instance policy %q", value)
-		return canonicalrouting.LegacyInstancePolicyDefault
+	source := connectRoutePlanCarriedKeyResolutionSource(t, mode)
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("canonical carried-key source does not expose a bundle")
 	}
+	pins := bundle.Semantics.FlowInputEventPins["account"]
+	if len(pins) != 2 {
+		t.Fatalf("account input pins = %#v, want two", pins)
+	}
+	carry := pins[1].Carries["account_id"]
+	carry.From = identitySource
+	pins[1].Carries["account_id"] = carry
+	bundle.Semantics.FlowInputEventPins["account"] = pins
+	return semanticview.Wrap(bundle)
 }
 
-func legacyInstancePolicyLines(t testing.TB, lines string) (canonicalrouting.LegacyInstancePolicy, canonicalrouting.LegacyInstancePolicy) {
+func loadConnectRoutePlanCanonicalSource(t testing.TB, root string) semanticview.Source {
 	t.Helper()
-	trimmed := strings.TrimSpace(lines)
-	if trimmed == "" {
-		return canonicalrouting.LegacyInstancePolicyDefault, canonicalrouting.LegacyInstancePolicyDefault
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
-	fields := strings.Fields(trimmed)
-	if len(fields) != 4 || fields[0] != "on_missing:" || fields[2] != "on_conflict:" {
-		t.Fatalf("unsupported legacy instance policy block %q", lines)
-	}
-	return legacyInstancePolicy(t, fields[1]), legacyInstancePolicy(t, fields[3])
+	return semanticview.Wrap(bundle)
 }
 
-func writeConnectRoutePlanBusFixtureFile(t testing.TB, path, content string) {
+func mustInstanceKeyConnectRoutePlan(t testing.TB, source semanticview.Source) runtimepinrouting.ConnectRoutePlan {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("MkdirAll(%s): %v", filepath.Dir(path), err)
+	plans, issues := runtimepinrouting.LowerCompositionConnectRoutePlans(source)
+	if len(issues) != 0 {
+		t.Fatalf("LowerCompositionConnectRoutePlans issues = %#v", issues)
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("WriteFile(%s): %v", path, err)
+	for _, plan := range plans {
+		if plan.InstanceKey != nil {
+			return plan
+		}
 	}
+	t.Fatalf("lowered plans contain no instance-key route: %#v", plans)
+	return runtimepinrouting.ConnectRoutePlan{}
+}
+
+func mustBusTemplateInstanceField(t testing.TB, raw string) runtimecontracts.TemplateInstanceField {
+	t.Helper()
+	field, err := runtimecontracts.ParseTemplateInstanceField(raw)
+	if err != nil {
+		t.Fatalf("ParseTemplateInstanceField(%q): %v", raw, err)
+	}
+	return field
 }
 
 func connectRoutePlanStaticSource(connect runtimecontracts.FlowPackageConnect) semanticview.Source {
@@ -3966,85 +3457,6 @@ func connectRoutePlanStaticDeliveryRoute() events.DeliveryRoute {
 			EntityID:     runtimeflowidentity.EntityID("consumer"),
 		},
 	}
-}
-
-func connectRoutePlanFanoutSource() semanticview.Source {
-	return semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
-		{
-			id:   "producer",
-			mode: "static",
-			outputs: []runtimecontracts.FlowOutputEventPin{{
-				Name:  "ticket_ready",
-				Event: "ticket.ready",
-			}},
-		},
-		{
-			id:   "worker",
-			mode: "template",
-			inputs: []runtimecontracts.FlowInputEventPin{{
-				Name:  "ticket_ready",
-				Event: "ticket.ready",
-				Address: &runtimecontracts.FlowInputPinAddress{
-					By:          "team_entity",
-					Source:      "payload.team_entity",
-					Target:      "_entity.id",
-					Cardinality: "many",
-				},
-			}},
-			nodes: map[string]runtimecontracts.SystemNodeContract{
-				"worker-node": {
-					ID:            "worker-{instance_id}",
-					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"ticket.ready": {}},
-				},
-			},
-		},
-	}, []runtimecontracts.FlowPackageConnect{{
-		From: "producer.ticket_ready",
-		To:   "worker.ticket_ready",
-	}}))
-}
-
-func connectRoutePlanBusinessFieldSource(cardinality string, indexed bool) semanticview.Source {
-	return connectRoutePlanBusinessFieldSourceWithTarget(cardinality, indexed, "entity.vertical_id")
-}
-
-func connectRoutePlanBusinessFieldSourceWithTarget(cardinality string, indexed bool, target string) semanticview.Source {
-	return semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
-		{
-			id:   "producer",
-			mode: "static",
-			outputs: []runtimecontracts.FlowOutputEventPin{{
-				Name:  "deploy_done",
-				Event: "deploy.done",
-			}},
-		},
-		{
-			id:   "consumer",
-			mode: "template",
-			inputs: []runtimecontracts.FlowInputEventPin{{
-				Name:  "deploy_completed",
-				Event: "deploy.completed",
-				Address: &runtimecontracts.FlowInputPinAddress{
-					By:          "vertical_id",
-					Source:      "payload.vertical_id",
-					Target:      target,
-					Cardinality: cardinality,
-				},
-			}},
-			nodes: map[string]runtimecontracts.SystemNodeContract{
-				"consumer-node": {
-					ID:            "consumer-node-{instance_id}",
-					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"deploy.completed": {}},
-				},
-			},
-			entityFields: map[string]runtimecontracts.EntityFieldDecl{
-				"vertical_id": {Type: "string", Indexed: indexed},
-			},
-		},
-	}, []runtimecontracts.FlowPackageConnect{{
-		From: "producer.deploy_done",
-		To:   "consumer.deploy_completed",
-	}}))
 }
 
 func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []runtimecontracts.FlowPackageConnect) *runtimecontracts.WorkflowContractBundle {

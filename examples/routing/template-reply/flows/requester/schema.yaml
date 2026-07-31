@@ -1,7 +1,6 @@
 name: requester
 mode: template
-instance:
-  by: account_id
+instance: account_id
 initial_state: active
 states: [active]
 pins:

@@ -128,36 +128,17 @@ type Boundary struct {
 type Resolution struct {
 	Mode        string       `json:"mode"`
 	TargetKind  string       `json:"target_kind"`
-	Address     *Address     `json:"address,omitempty"`
 	InstanceKey *InstanceKey `json:"instance_key,omitempty"`
 	FanIn       *FanIn       `json:"fan_in,omitempty"`
 	Reply       *Reply       `json:"reply,omitempty"`
-	Map         []MapEntry   `json:"map,omitempty"`
-}
-
-type Address struct {
-	By          string `json:"by,omitempty"`
-	Source      string `json:"source,omitempty"`
-	Target      string `json:"target,omitempty"`
-	Cardinality string `json:"cardinality,omitempty"`
-	Mode        string `json:"mode,omitempty"`
 }
 
 type InstanceKey struct {
-	Mode        string               `json:"mode,omitempty"`
-	Fields      []string             `json:"fields,omitempty"`
-	Mappings    []InstanceKeyMapping `json:"mappings,omitempty"`
-	SourceKind  string               `json:"source_kind,omitempty"`
-	SourcePath  string               `json:"source_path,omitempty"`
-	DerivedFrom string               `json:"derived_from,omitempty"`
-	OnMissing   string               `json:"on_missing,omitempty"`
-	OnConflict  string               `json:"on_conflict,omitempty"`
-}
-
-type InstanceKeyMapping struct {
-	Source   string `json:"source"`
-	Target   string `json:"target"`
-	Explicit bool   `json:"explicit"`
+	Mode        string `json:"mode,omitempty"`
+	Field       string `json:"field"`
+	SourceKind  string `json:"source_kind,omitempty"`
+	SourcePath  string `json:"source_path,omitempty"`
+	DerivedFrom string `json:"derived_from,omitempty"`
 }
 
 type FanIn struct {
@@ -176,12 +157,6 @@ type Reply struct {
 	ProviderInputPin  string `json:"provider_input_pin"`
 	ProviderOutputPin string `json:"provider_output_pin"`
 	CorrelationKey    string `json:"correlation_key,omitempty"`
-}
-
-type MapEntry struct {
-	Key    string `json:"key"`
-	Source string `json:"source,omitempty"`
-	Target string `json:"target,omitempty"`
 }
 
 type Issue struct {
@@ -652,38 +627,24 @@ func resolutionView(plan pinrouting.ConnectRoutePlan) *Resolution {
 		Mode:       string(plan.ResolutionKind),
 		TargetKind: string(plan.TargetKind),
 	}
-	if plan.Address != nil {
-		resolution.Address = &Address{
-			By:          strings.TrimSpace(plan.Address.By),
-			Source:      strings.TrimSpace(plan.Address.Source),
-			Target:      strings.TrimSpace(plan.Address.Target),
-			Cardinality: strings.TrimSpace(plan.Address.Cardinality),
-			Mode:        strings.TrimSpace(plan.Address.Mode),
-		}
-	}
 	if plan.InstanceKey != nil {
-		resolution.Mode = strings.TrimSpace(plan.InstanceKey.Mode)
+		resolution.Mode = plan.InstanceKey.Mode.String()
 		if resolution.Mode == "" {
 			resolution.Mode = string(plan.ResolutionKind)
 		}
 		instance := &InstanceKey{
-			Mode:       strings.TrimSpace(plan.InstanceKey.Mode),
-			Fields:     normalizedStrings(plan.InstanceKey.Fields),
+			Mode:       plan.InstanceKey.Mode.String(),
+			Field:      plan.InstanceKey.Field.String(),
 			SourceKind: strings.TrimSpace(string(plan.InstanceKey.Source.Kind)),
 			SourcePath: strings.TrimSpace(plan.InstanceKey.Source.Path),
-			OnMissing:  strings.TrimSpace(plan.InstanceKey.OnMissing),
-			OnConflict: strings.TrimSpace(plan.InstanceKey.OnConflict),
 		}
-		if instance.SourcePath != "" && len(instance.Fields) == 1 {
-			instance.DerivedFrom = fmt.Sprintf("instance.by.%s + carries.%s.from", instance.Fields[0], instance.Fields[0])
-		}
-		for _, mapping := range plan.InstanceKey.Mappings {
-			instance.Mappings = append(instance.Mappings, InstanceKeyMapping{Source: strings.TrimSpace(mapping.Source), Target: strings.TrimSpace(mapping.Target), Explicit: mapping.Explicit})
+		if instance.SourcePath != "" && instance.Field != "" {
+			instance.DerivedFrom = fmt.Sprintf("instance.%s + carries.%s.from", instance.Field, instance.Field)
 		}
 		resolution.InstanceKey = instance
 	}
 	if plan.FanIn != nil {
-		resolution.Mode = runtimecontracts.FlowInputResolutionModeFanIn
+		resolution.Mode = runtimecontracts.FlowInputResolutionModeFanIn.String()
 		resolution.FanIn = &FanIn{
 			Aggregation: strings.TrimSpace(plan.FanIn.Aggregation),
 			Window:      strings.TrimSpace(plan.FanIn.Window),
@@ -692,7 +653,7 @@ func resolutionView(plan pinrouting.ConnectRoutePlan) *Resolution {
 		}
 	}
 	if plan.ReplyResolution != nil {
-		resolution.Mode = runtimecontracts.FlowInputResolutionModeReply
+		resolution.Mode = runtimecontracts.FlowInputResolutionModeReply.String()
 		resolution.Reply = &Reply{
 			Role:              strings.TrimSpace(plan.ReplyResolution.Role),
 			RequesterFlowID:   strings.TrimSpace(plan.ReplyResolution.RequesterFlowID),
@@ -703,9 +664,6 @@ func resolutionView(plan pinrouting.ConnectRoutePlan) *Resolution {
 			ProviderOutputPin: strings.TrimSpace(plan.ReplyResolution.ProviderOutputPin),
 			CorrelationKey:    strings.TrimSpace(plan.ReplyResolution.CorrelationKey),
 		}
-	}
-	for _, entry := range plan.Map {
-		resolution.Map = append(resolution.Map, MapEntry{Key: strings.TrimSpace(entry.Key), Source: strings.TrimSpace(entry.Source), Target: strings.TrimSpace(entry.Target)})
 	}
 	return resolution
 }

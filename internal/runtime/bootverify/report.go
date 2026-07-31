@@ -122,22 +122,18 @@ var routingRemediationSplitCheckIDs = map[string]struct{}{
 	"input_pin_wiring":                       {},
 	"instance_key_mismatch":                  {},
 	"key_types_incompatible":                 {},
-	"output_carries_address_key":             {},
-	"output_carries_instance_key":            {},
 	"output_key_missing":                     {},
 	"pin_target_resolution":                  {},
 	"producer_flow_missing":                  {},
 	"producer_output_pin_missing":            {},
 	"producer_reference_invalid":             {},
-	"receiver_address_rule_invalid":          {},
-	"receiver_address_rule_missing":          {},
 	"receiver_flow_missing":                  {},
 	"receiver_input_pin_missing":             {},
 	"receiver_instance_key_invalid":          {},
 	"receiver_instance_key_unavailable":      {},
 	"receiver_reference_invalid":             {},
+	"receiver_resolution_missing":            {},
 	"root_receiver_resolution_invalid":       {},
-	"receiver_route_key_missing":             {},
 }
 
 type FindingOption func(*Finding)

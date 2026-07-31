@@ -1,7 +1,6 @@
 name: account
 mode: template
-instance:
-  by: account_id
+instance: account_id
 pins:
   inputs:
     events:

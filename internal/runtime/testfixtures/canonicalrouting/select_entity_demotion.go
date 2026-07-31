@@ -44,9 +44,6 @@ func CopySelectEntityDemotion(t testing.TB, opts SelectEntityDemotionOptions) st
 			targetPin = "deploy_completed"
 		}
 		connect = "\nconnect:\n  - from: producer.deploy_done\n    to: " + targetFlow + "." + targetPin
-		if !opts.TemplateReceiver {
-			connect += "\n    map:\n      vertical_id:\n        source: payload.vertical_id\n        target: entity.vertical_id"
-		}
 	}
 	writeClosedVariantFile(t, root, "package.yaml", "name: select-entity-demotion\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:"+flows+connect+"\n")
 	for _, name := range []string{"schema.yaml", "policy.yaml", "tools.yaml", "agents.yaml", "events.yaml", "entities.yaml"} {
@@ -107,7 +104,6 @@ pins:
     events:
       - name: deploy_done
         event: deploy.done
-        address: {by: vertical_id, source: payload.vertical_id, target: entity.vertical_id, cardinality: one}
   outputs: {events: []}
 `)
 	writeClosedVariantFile(t, root, "flows/other_consumer/events.yaml", "deploy.done:\n  vertical_id: string\n")
@@ -123,7 +119,7 @@ func writeSelectEntityDemotionConsumer(t testing.TB, root string, opts SelectEnt
 	instance := ""
 	if opts.TemplateReceiver {
 		mode = "template"
-		instance = "instance:\n  by: vertical_id\n  on_missing: reject\n  on_conflict: reject\n"
+		instance = "instance: vertical_id\n"
 	}
 	pinName := "deploy_done"
 	eventName := "deploy.done"
@@ -132,8 +128,8 @@ func writeSelectEntityDemotionConsumer(t testing.TB, root string, opts SelectEnt
 		eventName = "deploy.completed"
 	}
 	pin := "      - name: " + pinName + "\n        event: " + eventName + "\n"
-	if !opts.TemplateReceiver {
-		pin += "        address: {by: vertical_id, source: payload.vertical_id, target: entity.vertical_id, cardinality: one}\n"
+	if opts.TemplateReceiver {
+		pin += "        resolution:\n          mode: select\n        carries:\n          vertical_id:\n            from: payload.vertical_id\n"
 	}
 	if opts.External {
 		pin += "        source: external\n"

@@ -15,6 +15,7 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"gopkg.in/yaml.v3"
 )
 
 func canonicalExampleNames() []ArtifactID {
@@ -155,6 +156,65 @@ func TestCanonicalRoutingDocumentationRejectsRetiredInstanceIdentitySyntax(t *te
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestTemplateInstanceCheckedSchemasUseScalarPolicyFreeGrammar(t *testing.T) {
+	paths := []string{
+		"examples/routing/fan-in/barrier/flows/operating/schema.yaml",
+		"examples/routing/fan-in/stream/flows/operating/schema.yaml",
+		"examples/routing/notify-all-children/flows/account/schema.yaml",
+		"examples/routing/template-create-minted-key/flows/validator/schema.yaml",
+		"examples/routing/template-reply/flows/requester/schema.yaml",
+		"examples/routing/template-select-existing/flows/account/schema.yaml",
+		"examples/routing/template-select-or-create/flows/account/schema.yaml",
+		"tests/tier5-flow-lifecycle/test-create-flow-instance-config/flows/worker-flow/schema.yaml",
+		"tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate/flows/worker-flow/schema.yaml",
+		"tests/tier5-flow-lifecycle/test-create-flow-instance/flows/worker-flow/schema.yaml",
+		"tests/tier9-composition-patterns/test-compose-create-instance-config/flows/worker/schema.yaml",
+		"tests/tier11-flow-composition/test-dynamic-flow-instance/flows/worker/schema.yaml",
+	}
+	for _, rel := range paths {
+		t.Run(rel, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join(RepoRoot(t), filepath.FromSlash(rel)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var document yaml.Node
+			if err := yaml.Unmarshal(raw, &document); err != nil {
+				t.Fatalf("decode checked schema: %v", err)
+			}
+			instances := 0
+			walkYAMLMapping(t, &document, func(key string, value *yaml.Node) {
+				switch key {
+				case "instance":
+					instances++
+					if value.Kind != yaml.ScalarNode || strings.TrimSpace(value.Value) == "" {
+						t.Fatalf("instance must be one non-empty scalar, got kind=%d value=%q", value.Kind, value.Value)
+					}
+				case "on_missing", "on_conflict", "address":
+					t.Fatalf("checked schema retains retired routing key %q", key)
+				}
+			})
+			if instances != 1 {
+				t.Fatalf("instance declarations = %d, want exactly 1", instances)
+			}
+		})
+	}
+}
+
+func walkYAMLMapping(t *testing.T, node *yaml.Node, visit func(string, *yaml.Node)) {
+	t.Helper()
+	if node == nil {
+		return
+	}
+	if node.Kind == yaml.MappingNode {
+		for index := 0; index+1 < len(node.Content); index += 2 {
+			visit(node.Content[index].Value, node.Content[index+1])
+		}
+	}
+	for _, child := range node.Content {
+		walkYAMLMapping(t, child, visit)
 	}
 }
 

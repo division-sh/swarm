@@ -34,6 +34,9 @@ func (d *FlowSchemaDocument) UnmarshalYAML(node *yaml.Node) error {
 	if err := validateFlowSchemaDocumentFields(node); err != nil {
 		return err
 	}
+	if instanceNode := yamlMappingValue(node, "instance"); instanceNode != nil && strings.EqualFold(strings.TrimSpace(instanceNode.Tag), "!!null") {
+		return fmt.Errorf("retired template instance form; use `instance: <field>` with one non-empty scalar identity field")
+	}
 	type alias FlowSchemaDocument
 	var aux alias
 	if err := node.Decode(&aux); err != nil {

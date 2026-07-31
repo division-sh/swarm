@@ -158,8 +158,8 @@ func NewRetiredResolutionInstanceKeyDiagnostic() *LoaderDiagnostic {
 	return NewExpectedShapeDiagnostic(
 		"contract_loader.retired_resolution_instance_key",
 		"schema.yaml.pins.inputs.events.resolution.instance_key",
-		"resolution.instance_key is retired; instance.by is the sole receiver identity owner.",
-		"Remove instance_key and declare carries.<instance.by>.from explicitly. Run 'swarm migrate-resolution-instance-key --contracts <bundle-root>' for deterministic legacy declarations.",
+		"resolution.instance_key is retired; scalar instance: <field> is the sole receiver identity owner.",
+		"Remove instance_key and declare carries.<field>.from explicitly for the field named by instance.",
 		nil,
 	)
 }
@@ -168,8 +168,8 @@ func NewRetiredInstanceKeyCarrySourceDiagnostic() *LoaderDiagnostic {
 	return NewExpectedShapeDiagnostic(
 		"contract_loader.retired_instance_key_carry_source",
 		"schema.yaml.pins.inputs.events.carries.*.from",
-		"instance.key.* carry sources are retired; carries.<instance.by>.from is the sole input identity source owner.",
-		"For create mode use generated.uuid, event.id, or one payload.<field>; selecting modes require one payload.<field>. Run 'swarm migrate-resolution-instance-key --contracts <bundle-root>' for deterministic legacy declarations.",
+		"instance.key.* carry sources are retired; carries.<field>.from is the sole input identity source owner for scalar instance: <field>.",
+		"For create mode use generated.uuid, event.id, or one payload.<field>; selecting modes require one payload.<field>.",
 		nil,
 	)
 }
@@ -381,12 +381,8 @@ func loaderFieldOptionsForContext(context string) map[string]struct{} {
 		return inputEventPinCarryFieldOptions
 	case "input event pin resolution":
 		return inputEventPinResolutionFieldOptions
-	case "input event pin address":
-		return inputEventPinAddressFieldOptions
 	case "rule":
 		return ruleFieldOptions
-	case "template instance":
-		return templateInstanceFieldOptions
 	case "compute":
 		return computeFieldOptions
 	case "guard.on_fail":
@@ -435,12 +431,6 @@ func loaderFieldOptionsForContext(context string) map[string]struct{} {
 		return flowPackageRequiresPolicyFieldOptions
 	case "connect":
 		return flowPackageConnectFieldOptions
-	case "connect using":
-		return flowPackageConnectUsingFieldOptions
-	case "connect using instance":
-		return flowPackageConnectInstanceFieldOptions
-	case "connect map":
-		return flowPackageConnectMapFieldOptions
 	case "type catalog":
 		return typeCatalogFieldOptions
 	case "type metadata":

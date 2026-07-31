@@ -364,14 +364,15 @@ pins:
 		"flows/producer/policy.yaml": "{}\n", "flows/producer/agents.yaml": "{}\n", "flows/producer/events.yaml": "deploy.done:\n  vertical_id: string\n", "flows/producer/entities.yaml": "{}\n", "flows/producer/nodes.yaml": "{}\n",
 		"flows/consumer/schema.yaml": `name: consumer
 mode: template
-instance:
-  by: vertical_id
-  on_missing: create
-  on_conflict: reuse
+instance: vertical_id
 pins:
   inputs:
     events:
-      - {name: deploy_completed, event: deploy.done}
+      - name: deploy_completed
+        event: deploy.done
+        resolution: {mode: select-or-create}
+        carries:
+          vertical_id: {from: payload.vertical_id, type: string}
 `,
 		"flows/consumer/policy.yaml": "{}\n", "flows/consumer/agents.yaml": "{}\n", "flows/consumer/events.yaml": "deploy.done:\n  vertical_id: string\n",
 		"flows/consumer/entities.yaml": "deployment:\n  vertical_id:\n    type: string\n",
@@ -478,10 +479,7 @@ flows:
 		"events.yaml": "inbound.telegram:\n  raw: boolean\ninbound.telegram.text_message:\n  chat_id: text\n",
 		"flows/consumer/schema.yaml": `name: consumer
 mode: template
-instance:
-  by: chat_id
-  on_missing: create
-  on_conflict: reuse
+instance: chat_id
 pins:
   inputs:
     events:
@@ -548,10 +546,7 @@ pins:
 		"flows/telegram-ingress/entities.yaml": "telegram_service:\n  service_id:\n    type: text\n    initial: standing\n  active_chats:\n    type: map[text]json\n    initial: {}\n",
 		"flows/telegram-chat/schema.yaml": `name: telegram-chat
 mode: template
-instance:
-  by: conversation_reference
-  on_missing: create
-  on_conflict: reuse
+instance: conversation_reference
 initial_state: active
 states: [active]
 pins:

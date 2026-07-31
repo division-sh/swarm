@@ -167,7 +167,7 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 		if err := r.installTemplateInstanceLifecyclePreview(ctx, decision); err != nil {
 			return connectRoutePlanDispatch{}, err
 		}
-		action := strings.TrimSpace(decision.Action)
+		action := decision.Action
 		if action == templateInstanceLifecycleActionPreviewCreate || action == templateInstanceLifecycleActionCreated {
 			if route := decision.Route(); route.Valid() {
 				createdRoutes[route] = struct{}{}
@@ -412,14 +412,13 @@ func (r connectRoutePlanResolver) materializeConnectRoutePlan(ctx context.Contex
 		return materialized, decision, err
 	}
 	return runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{
-		MatchValues:             values,
-		Descriptors:             descriptors,
-		SupportedAddressTargets: runtimepinrouting.SupportedConnectAddressTargets(r.source, plan),
+		MatchValues: values,
+		Descriptors: descriptors,
 	}), TemplateInstanceLifecycleDecision{}, nil
 }
 
 func (r connectRoutePlanResolver) installTemplateInstanceLifecyclePreview(ctx context.Context, decision TemplateInstanceLifecycleDecision) error {
-	if strings.TrimSpace(decision.Action) != templateInstanceLifecycleActionPreviewCreate {
+	if decision.Action != templateInstanceLifecycleActionPreviewCreate {
 		return nil
 	}
 	var preview *connectRoutePlanPreviewRoutes
@@ -578,7 +577,7 @@ func (r connectRoutePlanResolver) resolveAgentCarrierIdentity(
 		if !available {
 			return agentidentity.Identity{}, false, fmt.Errorf(
 				"connect agent carrier identity is unavailable for lifecycle action %q and route %q",
-				strings.TrimSpace(decision.Action),
+				decision.Action.String(),
 				subscriber.AgentIdentity.FlowInstance(),
 			)
 		}
@@ -639,7 +638,7 @@ func syntheticDeliveryPayloadProjection(plan runtimepinrouting.ConnectRoutePlan,
 	}
 	fields := make(map[string]string, len(decision.KeyMaterial))
 	for _, key := range decision.KeyMaterial {
-		fields[key.Field] = key.Value
+		fields[key.Field.String()] = key.Value
 	}
 	projection, err := events.NewDeliveryPayloadProjection(fields)
 	if err != nil {
@@ -839,34 +838,30 @@ func connectRoutePlanFailureDetail(plan runtimepinrouting.ConnectRoutePlan, fail
 	if plan.InstanceKey == nil {
 		return nil
 	}
-	mode := strings.TrimSpace(plan.InstanceKey.Mode)
+	mode := plan.InstanceKey.Mode
 	if mode != runtimecontracts.FlowInputResolutionModeSelect && mode != runtimecontracts.FlowInputResolutionModeSelectOrCreate {
 		return nil
 	}
-	fields := plan.InstanceKey.Fields
-	if len(fields) != 1 {
-		return nil
-	}
-	keyField := strings.TrimSpace(fields[0])
+	keyField := plan.InstanceKey.Field.String()
 	if keyField == "" {
 		return nil
 	}
 	out := map[string]any{
-		"connect_route_plan_resolution_mode":     mode,
+		"connect_route_plan_resolution_mode":     mode.String(),
 		"connect_route_plan_receiver_flow":       strings.TrimSpace(plan.Receiver.FlowID),
 		"connect_route_plan_instance_key_field":  keyField,
 		"connect_route_plan_failure_remediation": connectRoutePlanInstanceResolutionRemediation(plan, failure, keyField, "", mode),
 	}
 	material, materialFailure := runtimepinrouting.InstanceKeyMaterialForConnectRoutePlan(plan, values)
 	if materialFailure != "" {
-		if failure == runtimepinrouting.ConnectFailureAddressValueMissing {
+		if failure == runtimepinrouting.ConnectFailureInstanceSourceValueMissing {
 			out["connect_route_plan_failure_remediation"] = connectRoutePlanInstanceResolutionRemediation(plan, failure, keyField, "", mode)
 		}
 		return out
 	}
 	keyValue := ""
 	for _, key := range material.Keys {
-		if strings.TrimSpace(key.Field) == keyField {
+		if key.Field.String() == keyField {
 			keyValue = strings.TrimSpace(key.Value)
 			break
 		}
@@ -881,7 +876,7 @@ func connectRoutePlanFailureDetail(plan runtimepinrouting.ConnectRoutePlan, fail
 	return out
 }
 
-func connectRoutePlanInstanceResolutionRemediation(plan runtimepinrouting.ConnectRoutePlan, failure runtimepinrouting.ConnectRoutePlanFailure, keyField, keyValue, mode string) string {
+func connectRoutePlanInstanceResolutionRemediation(plan runtimepinrouting.ConnectRoutePlan, failure runtimepinrouting.ConnectRoutePlanFailure, keyField, keyValue string, mode runtimecontracts.FlowInputResolutionMode) string {
 	receiverFlow := strings.TrimSpace(plan.Receiver.FlowID)
 	if receiverFlow == "" {
 		receiverFlow = "receiver flow"
@@ -897,23 +892,20 @@ func connectRoutePlanInstanceResolutionRemediation(plan runtimepinrouting.Connec
 	sourcePath := ""
 	if plan.InstanceKey != nil {
 		sourcePath = strings.TrimSpace(plan.InstanceKey.Source.Path)
-		if sourcePath == "" && plan.InstanceKey.Source.Kind == "" && len(plan.InstanceKey.Mappings) > 0 {
-			sourcePath = "payload." + keyLabel
-		}
 	}
 	if sourcePath == "" {
 		sourcePath = "the authored instance-key source"
 	}
 	switch failure {
-	case runtimepinrouting.ConnectFailureAddressValueMissing:
-		return fmt.Sprintf("Provide %s before publishing to %s; resolution mode %s requires a carried key value.", sourcePath, receiverFlow, mode)
+	case runtimepinrouting.ConnectFailureInstanceSourceValueMissing:
+		return fmt.Sprintf("Provide %s before publishing to %s; resolution mode %s requires a carried key value.", sourcePath, receiverFlow, mode.String())
 	case runtimepinrouting.ConnectFailureTargetAmbiguous:
-		return fmt.Sprintf("Ensure exactly one active %s instance has %s%s; resolution mode %s cannot choose between multiple matches.", receiverFlow, keyLabel, valueText, mode)
+		return fmt.Sprintf("Ensure exactly one active %s instance has %s%s; resolution mode %s cannot choose between multiple matches.", receiverFlow, keyLabel, valueText, mode.String())
 	default:
 		if mode == runtimecontracts.FlowInputResolutionModeSelectOrCreate {
-			return fmt.Sprintf("Ensure %s can create or reuse exactly one active instance with %s%s; resolution mode %s must converge on one instance.", receiverFlow, keyLabel, valueText, mode)
+			return fmt.Sprintf("Ensure %s can create or reuse exactly one active instance with %s%s; resolution mode %s must converge on one instance.", receiverFlow, keyLabel, valueText, mode.String())
 		}
-		return fmt.Sprintf("Create or connect exactly one active %s instance with %s%s before publishing; resolution mode %s never creates a missing instance.", receiverFlow, keyLabel, valueText, mode)
+		return fmt.Sprintf("Create or connect exactly one active %s instance with %s%s before publishing; resolution mode %s never creates a missing instance.", receiverFlow, keyLabel, valueText, mode.String())
 	}
 }
 

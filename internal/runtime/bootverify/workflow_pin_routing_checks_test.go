@@ -91,14 +91,6 @@ func TestPinTargetResolution_FanOutEmitFailsClosedWithoutOutputPin(t *testing.T)
 	}
 }
 
-func TestPinTargetResolution_FanOutEmitFailsClosedForMissingConnectKeyMaterial(t *testing.T) {
-	source := notifyallchildren.LoadSource(t, notifyallchildren.Options{BadConnectMapping: true})
-	report := Run(context.Background(), source, Options{})
-	if !reportContains(report.Errors(), "composition_connect_validation", "instance_resolution_invalid") {
-		t.Fatalf("expected incompatible instance adapter to fail closed, got %#v", report.Errors())
-	}
-}
-
 func TestPinTargetResolution_FanOutEmitFailsClosedForMissingCarriesPayload(t *testing.T) {
 	source := notifyallchildren.LoadSource(t, notifyallchildren.Options{MissingEmitCarry: true})
 	report := Run(context.Background(), source, Options{})
@@ -144,7 +136,7 @@ func TestRedundantInTopologySelectEntityFailsClosedForParentConnect(t *testing.T
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "redundant_in_topology_select_entity", "instance.by plus parent connect") {
+	if !reportContains(report.Errors(), "redundant_in_topology_select_entity", "scalar receiver instance") {
 		t.Fatalf("expected redundant_in_topology_select_entity hard invalidity, got errors=%#v warnings=%#v", report.Errors(), report.Warnings())
 	}
 	if reportContains(report.Warnings(), "redundant_in_topology_select_entity", "") {
@@ -161,7 +153,7 @@ func TestRedundantInTopologySelectEntityFailsClosedForRenamedConnectEvents(t *te
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "redundant_in_topology_select_entity", "instance.by plus parent connect") {
+	if !reportContains(report.Errors(), "redundant_in_topology_select_entity", "scalar receiver instance") {
 		t.Fatalf("renamed connect must retain producer topology proof, got errors=%#v warnings=%#v", report.Errors(), report.Warnings())
 	}
 }
@@ -175,7 +167,7 @@ func TestRedundantInTopologySelectEntityFailsClosedForStagedParentConnect(t *tes
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "redundant_in_topology_select_entity", "instance.by plus parent connect") {
+	if !reportContains(report.Errors(), "redundant_in_topology_select_entity", "scalar receiver instance") {
 		t.Fatalf("expected redundant_in_topology_select_entity hard invalidity for staged flow, got errors=%#v warnings=%#v", report.Errors(), report.Warnings())
 	}
 	if reportContains(report.Warnings(), "redundant_in_topology_select_entity", "") {
@@ -192,7 +184,7 @@ func TestRedundantInTopologySelectOrCreateEntityFailsClosedForParentConnect(t *t
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
 	if !reportContains(report.Errors(), "redundant_in_topology_select_entity", "select_or_create_entity") ||
-		!reportContains(report.Errors(), "redundant_in_topology_select_entity", "instance.by plus parent connect") {
+		!reportContains(report.Errors(), "redundant_in_topology_select_entity", "scalar receiver instance") {
 		t.Fatalf("expected redundant_in_topology_select_entity hard invalidity for select_or_create_entity, got errors=%#v warnings=%#v", report.Errors(), report.Warnings())
 	}
 }
@@ -206,7 +198,7 @@ func TestRedundantInTopologySelectEntityAllowsTemplateInstanceConnectReplacement
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
 	if report.HasErrors() {
-		t.Fatalf("template instance.by plus parent connect should verify without receiver acquisition, got %#v", report.Errors())
+		t.Fatalf("template scalar instance plus parent connect should verify without receiver acquisition, got %#v", report.Errors())
 	}
 	if reportContains(report.Warnings(), "redundant_in_topology_select_entity", "") {
 		t.Fatalf("connect-routed replacement should not report select_entity warning, got %#v", report.Warnings())

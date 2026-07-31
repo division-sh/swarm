@@ -142,7 +142,7 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 		{
 			name:        "missing producer key",
 			payload:     json.RawMessage(`{"score":"91","decision":"approved"}`),
-			wantFailure: string(runtimepinrouting.ConnectFailureAddressValueMissing),
+			wantFailure: string(runtimepinrouting.ConnectFailureInstanceSourceValueMissing),
 		},
 		{
 			name:    "ambiguous receiver key",

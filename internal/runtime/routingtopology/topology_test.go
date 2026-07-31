@@ -124,8 +124,8 @@ func TestBuildProjectsSelectAndSelectOrCreateModes(t *testing.T) {
 		mode string
 		load func() Topology
 	}{
-		{name: "select", mode: runtimecontracts.FlowInputResolutionModeSelect, load: func() Topology { return Build(templateselectexisting.LoadSource(t)) }},
-		{name: "select-or-create", mode: runtimecontracts.FlowInputResolutionModeSelectOrCreate, load: func() Topology { return Build(templateselectorcreate.LoadSource(t)) }},
+		{name: "select", mode: runtimecontracts.FlowInputResolutionModeSelect.String(), load: func() Topology { return Build(templateselectexisting.LoadSource(t)) }},
+		{name: "select-or-create", mode: runtimecontracts.FlowInputResolutionModeSelectOrCreate.String(), load: func() Topology { return Build(templateselectorcreate.LoadSource(t)) }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -144,7 +144,7 @@ func TestBuildProjectsSelectAndSelectOrCreateModes(t *testing.T) {
 			if edge.Resolution == nil || edge.Resolution.Mode != tc.mode || edge.Resolution.InstanceKey == nil {
 				t.Fatalf("resolution = %#v, want %s instance key", edge.Resolution, tc.mode)
 			}
-			if !reflect.DeepEqual(edge.Resolution.InstanceKey.Fields, []string{"account_id"}) || edge.Resolution.InstanceKey.SourceKind != string(runtimecontracts.FlowInputInstanceSourcePayload) || edge.Resolution.InstanceKey.SourcePath != "payload.account_id" {
+			if edge.Resolution.InstanceKey.Field != "account_id" || edge.Resolution.InstanceKey.SourceKind != string(runtimecontracts.FlowInputInstanceSourcePayload) || edge.Resolution.InstanceKey.SourcePath != "payload.account_id" {
 				t.Fatalf("instance key = %#v, want carried account_id", edge.Resolution.InstanceKey)
 			}
 		})
@@ -202,22 +202,21 @@ func TestBuildProjectsReplyAsPairedEdges(t *testing.T) {
 	}
 }
 
-func TestResolutionViewPreservesCreateStaticAndAddressDeclarations(t *testing.T) {
+func TestResolutionViewPreservesCreateAndStaticDeclarations(t *testing.T) {
 	tests := []struct {
 		name string
 		plan pinrouting.ConnectRoutePlan
 		want string
 	}{
-		{name: "create", want: runtimecontracts.FlowInputResolutionModeCreate, plan: pinrouting.ConnectRoutePlan{
+		{name: "create", want: runtimecontracts.FlowInputResolutionModeCreate.String(), plan: pinrouting.ConnectRoutePlan{
 			ResolutionKind: pinrouting.ConnectResolutionInstanceKey,
 			InstanceKey: &pinrouting.ConnectRoutePlanInstanceKey{
-				Mode: runtimecontracts.FlowInputResolutionModeCreate, Fields: []string{"account_id"},
-				Source:    runtimecontracts.FlowInputInstanceSource{Kind: runtimecontracts.FlowInputInstanceSourceGeneratedUUID, Path: runtimecontracts.FlowInputCarrySourceGeneratedUUID},
-				OnMissing: "create", OnConflict: "reject",
+				Mode:   runtimecontracts.FlowInputResolutionModeCreate,
+				Field:  mustTopologyTemplateInstanceField(t, "account_id"),
+				Source: runtimecontracts.FlowInputInstanceSource{Kind: runtimecontracts.FlowInputInstanceSourceGeneratedUUID, Path: runtimecontracts.FlowInputCarrySourceGeneratedUUID},
 			},
 		}},
 		{name: "static", want: string(pinrouting.ConnectResolutionStatic), plan: pinrouting.ConnectRoutePlan{ResolutionKind: pinrouting.ConnectResolutionStatic}},
-		{name: "address", want: string(pinrouting.ConnectResolutionAddress), plan: pinrouting.ConnectRoutePlan{ResolutionKind: pinrouting.ConnectResolutionAddress, Address: &pinrouting.ConnectRoutePlanAddress{By: "key", Source: "payload.id", Target: "entity.id", Cardinality: "one", Mode: "select"}}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -230,6 +229,15 @@ func TestResolutionViewPreservesCreateStaticAndAddressDeclarations(t *testing.T)
 			}
 		})
 	}
+}
+
+func mustTopologyTemplateInstanceField(t testing.TB, raw string) runtimecontracts.TemplateInstanceField {
+	t.Helper()
+	field, err := runtimecontracts.ParseTemplateInstanceField(raw)
+	if err != nil {
+		t.Fatalf("ParseTemplateInstanceField(%q): %v", raw, err)
+	}
+	return field
 }
 
 func TestBuildKeepsInvalidConnectAsIssueOnly(t *testing.T) {
@@ -571,13 +579,13 @@ func TestConnectReceiverPinCollisionIssuesRespectDurableDeliveryIdentity(t *test
 				func() Edge {
 					edge := connect("input-a", "consumer.work_accepted", "consumer/work.accepted", "package.yaml:10")
 					edge.RequiresRuntimeResolution = true
-					edge.Resolution.Mode = runtimecontracts.FlowInputResolutionModeSelect
+					edge.Resolution.Mode = runtimecontracts.FlowInputResolutionModeSelect.String()
 					return edge
 				}(),
 				func() Edge {
 					edge := connect("input-b", "consumer.work_audited", "consumer/work.audited", "package.yaml:12")
 					edge.RequiresRuntimeResolution = true
-					edge.Resolution.Mode = runtimecontracts.FlowInputResolutionModeSelect
+					edge.Resolution.Mode = runtimecontracts.FlowInputResolutionModeSelect.String()
 					return edge
 				}(),
 				consumer("input-a", semanticview.EventEndpointNodeHandler, "consumer-node", "consumer"),

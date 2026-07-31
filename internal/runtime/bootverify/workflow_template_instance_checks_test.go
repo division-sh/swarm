@@ -8,27 +8,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func TestRun_ValidatesTemplateInstanceSingleAndCompositeKeys(t *testing.T) {
-	tests := []struct {
-		name       string
-		instanceBy string
-	}{
-		{
-			name:       "single key",
-			instanceBy: "account_id",
-		},
-		{
-			name:       "composite key",
-			instanceBy: "[tenant_id, account_id]",
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			bundle := loadPrimaryEntityFixtureBundle(t, `
+func TestRunValidatesScalarTemplateInstanceIdentity(t *testing.T) {
+	bundle := loadPrimaryEntityFixtureBundle(t, `
 name: scoring
 mode: template
-instance:
-  by: `+tc.instanceBy+`
+instance: account_id
 pins:
   inputs:
     events: []
@@ -40,24 +24,18 @@ account:
   account_id: uuid
 `)
 
-			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-			if reportContains(report.Errors(), "template_instance_validation", "") {
-				t.Fatalf("unexpected template_instance_validation error: %#v", report.Errors())
-			}
-		})
+	if reportContains(report.Errors(), "template_instance_validation", "") {
+		t.Fatalf("unexpected template_instance_validation error: %#v", report.Errors())
 	}
 }
 
 func TestRun_RejectsRootTemplateInstanceDeclaration(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Name: "root",
-			Instance: runtimecontracts.FlowTemplateInstanceDeclaration{
-				By:         []string{"account_id"},
-				OnMissing:  "create",
-				OnConflict: "reject",
-			},
+			Name:     "root",
+			Instance: mustBootverifyTemplateInstanceField(t, "account_id"),
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{},
 	}
@@ -92,38 +70,14 @@ pins:
 account:
   account_id: uuid
 `,
-			want: "must declare instance.by",
-		},
-		{
-			name: "duplicate composite key field",
-			flowSchema: `
-name: scoring
-mode: template
-instance:
-  by: [account_id, account_id]
-  on_missing: create
-  on_conflict: reject
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
-`,
-			flowEntities: `
-account:
-  account_id: uuid
-`,
-			want: "duplicated",
+			want: "instance: <field>",
 		},
 		{
 			name: "undeclared key field",
 			flowSchema: `
 name: scoring
 mode: template
-instance:
-  by: missing_id
-  on_missing: create
-  on_conflict: reject
+instance: missing_id
 pins:
   inputs:
     events: []
@@ -141,10 +95,7 @@ account:
 			flowSchema: `
 name: scoring
 mode: template
-instance:
-  by: tags
-  on_missing: create
-  on_conflict: reject
+instance: tags
 pins:
   inputs:
     events: []
@@ -158,56 +109,11 @@ account:
 			want: "scalar or enum",
 		},
 		{
-			name: "invalid on_missing policy",
-			flowSchema: `
-name: scoring
-mode: template
-instance:
-  by: account_id
-  on_missing: ignore
-  on_conflict: reject
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
-`,
-			flowEntities: `
-account:
-  account_id: uuid
-`,
-			want: "on_missing",
-		},
-		{
-			name: "explicit empty on_conflict policy",
-			flowSchema: `
-name: scoring
-mode: template
-instance:
-  by: account_id
-  on_missing: create
-  on_conflict: ""
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
-`,
-			flowEntities: `
-account:
-  account_id: uuid
-`,
-			want: "on_conflict",
-		},
-		{
 			name: "non template declares instance",
 			flowSchema: `
 name: scoring
 mode: static
-instance:
-  by: account_id
-  on_missing: create
-  on_conflict: reject
+instance: account_id
 pins:
   inputs:
     events: []
@@ -219,21 +125,6 @@ account:
   account_id: uuid
 `,
 			want: "not mode: template",
-		},
-		{
-			name: "non template declares empty instance",
-			flowSchema: `
-name: scoring
-mode: static
-instance: {}
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
-`,
-			flowEntities: "",
-			want:         "not mode: template",
 		},
 	}
 	for _, tc := range tests {
@@ -247,4 +138,13 @@ pins:
 			}
 		})
 	}
+}
+
+func mustBootverifyTemplateInstanceField(t testing.TB, raw string) runtimecontracts.TemplateInstanceField {
+	t.Helper()
+	field, err := runtimecontracts.ParseTemplateInstanceField(raw)
+	if err != nil {
+		t.Fatalf("ParseTemplateInstanceField(%q): %v", raw, err)
+	}
+	return field
 }

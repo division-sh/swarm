@@ -64,8 +64,8 @@ func TestProjectPackageDocumentDecode_PreservesRequiresAndImportBinds(t *testing
 	if got, want := doc.Connect[0].From, "worker.work.completed"; got != want {
 		t.Fatalf("Connect[0].From = %q, want %q", got, want)
 	}
-	if got, want := doc.Connect[0].Map["work_id"].Target, "entity.work_id"; got != want {
-		t.Fatalf("Connect[0].Map[work_id].Target = %q, want %q", got, want)
+	if got, want := doc.Connect[0].To, "worker.work.requested"; got != want {
+		t.Fatalf("Connect[0].To = %q, want %q", got, want)
 	}
 }
 
@@ -779,61 +779,55 @@ packages:
 	}
 }
 
-func TestFlowSchemaDocumentDecode_PreservesAddressedInputPins(t *testing.T) {
-	var doc FlowSchemaDocument
-	if err := yaml.Unmarshal([]byte(`
-name: addressed-pins
-pins:
-  inputs:
-    events:
-      - work.started
-      - name: deploy_completed
-        event: deploy.completed
-        address:
-          by: vertical_id
-          source: payload.vertical_id
-          target: entity.vertical_id
-          cardinality: one
-          mode: select_existing
-  outputs:
-    events:
-      - name: deploy_done
-        event: deploy.done
-        key: vertical_id
-        carries: [vertical_id, component_id]
-`), &doc); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
+func TestFlowSchemaDocumentDecodeRejectsRetiredInputAddressOnPresence(t *testing.T) {
+	for _, specimen := range []canonicalrouting.RetiredReceiverRoutingSnippet{
+		canonicalrouting.RetiredInputAddressEmpty,
+		canonicalrouting.RetiredInputAddressMalformed,
+		canonicalrouting.RetiredInputAddressPopulated,
+		canonicalrouting.RetiredInputAddressMixed,
+	} {
+		t.Run(string(specimen), func(t *testing.T) {
+			var doc FlowSchemaDocument
+			err := canonicalrouting.RetiredReceiverRoutingParserSnippet(t, specimen).Decode(&doc)
+			if err == nil || !strings.Contains(err.Error(), "retired input pin address") {
+				t.Fatalf("yaml.Unmarshal error = %v, want retired input address rejection", err)
+			}
+		})
 	}
-	if got, want := strings.Join(doc.Pins.Inputs.Events, ","), "work.started,deploy.completed"; got != want {
-		t.Fatalf("input Events = %q, want %q", got, want)
+}
+
+func TestFlowPackageConnectDecodeRejectsRetiredMapOnPresence(t *testing.T) {
+	for _, specimen := range []canonicalrouting.RetiredReceiverRoutingSnippet{
+		canonicalrouting.RetiredConnectMapEmpty,
+		canonicalrouting.RetiredConnectMapMalformed,
+		canonicalrouting.RetiredConnectMapPopulated,
+		canonicalrouting.RetiredConnectMapMixed,
+	} {
+		t.Run(string(specimen), func(t *testing.T) {
+			var doc ProjectPackageDocument
+			err := canonicalrouting.RetiredReceiverRoutingParserSnippet(t, specimen).Decode(&doc)
+			if err == nil || !strings.Contains(err.Error(), "retired connect.map") {
+				t.Fatalf("yaml.Unmarshal error = %v, want retired connect.map rejection", err)
+			}
+		})
 	}
-	if len(doc.Pins.Inputs.EventPins) != 2 {
-		t.Fatalf("input EventPins len = %d, want 2", len(doc.Pins.Inputs.EventPins))
-	}
-	addressed := doc.Pins.Inputs.EventPins[1]
-	if got, want := addressed.PinName(), "deploy_completed"; got != want {
-		t.Fatalf("addressed PinName = %q, want %q", got, want)
-	}
-	if got, want := addressed.EventType(), "deploy.completed"; got != want {
-		t.Fatalf("addressed EventType = %q, want %q", got, want)
-	}
-	if addressed.Address == nil {
-		t.Fatal("expected addressed input pin address")
-	}
-	if got, want := addressed.Address.Target, "entity.vertical_id"; got != want {
-		t.Fatalf("Address.Target = %q, want %q", got, want)
-	}
-	if got, want := strings.Join(doc.Pins.Outputs.Events, ","), "deploy.done"; got != want {
-		t.Fatalf("output Events = %q, want %q", got, want)
-	}
-	if got, want := doc.Pins.Outputs.EventPins[0].PinName(), "deploy_done"; got != want {
-		t.Fatalf("output PinName = %q, want %q", got, want)
-	}
-	if got, want := doc.Pins.Outputs.EventPins[0].Key, "vertical_id"; got != want {
-		t.Fatalf("output Key = %q, want %q", got, want)
-	}
-	if got, want := strings.Join(doc.Pins.Outputs.EventPins[0].Carries, ","), "vertical_id,component_id"; got != want {
-		t.Fatalf("output Carries = %q, want %q", got, want)
+}
+
+func TestFlowPackageConnectDecodeRejectsRetiredUsingInstanceOnPresence(t *testing.T) {
+	for _, specimen := range []canonicalrouting.RetiredReceiverRoutingSnippet{
+		canonicalrouting.RetiredConnectUsingEmpty,
+		canonicalrouting.RetiredConnectUsingMalformed,
+		canonicalrouting.RetiredConnectUsingPopulated,
+		canonicalrouting.RetiredConnectUsingComposite,
+		canonicalrouting.RetiredConnectUsingMixed,
+	} {
+		t.Run(string(specimen), func(t *testing.T) {
+			var doc ProjectPackageDocument
+			err := canonicalrouting.RetiredReceiverRoutingParserSnippet(t, specimen).Decode(&doc)
+			if err == nil || !strings.Contains(err.Error(), "retired connect.using.instance") {
+				t.Fatalf("yaml.Unmarshal error = %v, want retired connect.using.instance rejection", err)
+			}
+		})
 	}
 }
 
@@ -869,21 +863,11 @@ func TestFlowSchemaDocumentDecode_NormalizesClosedInputPinSourceEnum(t *testing.
 	}
 }
 
-func TestFlowSchemaDocumentDecode_RejectsUnsupportedAddressedPinFields(t *testing.T) {
+func TestFlowSchemaDocumentDecodeRejectsRetiredAddressBeforeNestedFields(t *testing.T) {
 	var doc FlowSchemaDocument
-	err := yaml.Unmarshal([]byte(`
-name: invalid-pins
-pins:
-  inputs:
-    events:
-      - name: deploy_completed
-        event: deploy.completed
-        address:
-          by: vertical_id
-          unsupported: nope
-`), &doc)
-	if err == nil || !strings.Contains(err.Error(), `input event pin address field "unsupported" is not supported.`) {
-		t.Fatalf("yaml.Unmarshal error = %v, want typed address field rejection", err)
+	err := canonicalrouting.RetiredReceiverRoutingParserSnippet(t, canonicalrouting.RetiredInputAddressUnsupportedNested).Decode(&doc)
+	if err == nil || !strings.Contains(err.Error(), "retired input pin address") {
+		t.Fatalf("yaml.Unmarshal error = %v, want retired address rejection", err)
 	}
 }
 
@@ -980,7 +964,6 @@ func TestFlowSchemaDocumentDecodeRejectsRetiredInstanceKeyCarrySource(t *testing
 		"generated.uuid",
 		"event.id",
 		"payload.<field>",
-		"migrate-resolution-instance-key",
 	} {
 		if !strings.Contains(diagnostic.Remediation, want) {
 			t.Fatalf("diagnostic remediation = %q, want teaching detail %q", diagnostic.Remediation, want)
@@ -1094,81 +1077,50 @@ func TestFlowSchemaDocumentDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *
 	}
 }
 
-func TestFlowSchemaDocumentDecode_PreservesTemplateInstanceDeclaration(t *testing.T) {
-
+func TestFlowTemplateInstanceDecodeAcceptsScalarIdentity(t *testing.T) {
 	var doc FlowSchemaDocument
 	if err := yaml.Unmarshal([]byte(`
 name: template-flow
 mode: template
-instance:
-  by: [scope, scope_id, artifact_type]
-  on_missing: create
-  on_conflict: reject
+instance: scope_id
 `), &doc); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	if got, want := doc.Mode, "template"; got != want {
 		t.Fatalf("Mode = %q, want %q", got, want)
 	}
-	if got, want := strings.Join(doc.Instance.By, ","), "scope,scope_id,artifact_type"; got != want {
-		t.Fatalf("Instance.By = %q, want %q", got, want)
-	}
-	if got, want := doc.Instance.OnMissing, "create"; got != want {
-		t.Fatalf("Instance.OnMissing = %q, want %q", got, want)
-	}
-	if !doc.Instance.OnMissingDeclared {
-		t.Fatal("Instance.OnMissingDeclared = false, want true")
-	}
-	if got, want := doc.Instance.OnConflict, "reject"; got != want {
-		t.Fatalf("Instance.OnConflict = %q, want %q", got, want)
-	}
-	if !doc.Instance.OnConflictDeclared {
-		t.Fatal("Instance.OnConflictDeclared = false, want true")
+	if got, want := doc.Instance.String(), "scope_id"; got != want {
+		t.Fatalf("Instance = %q, want %q", got, want)
 	}
 }
 
-func TestFlowSchemaDocumentDecode_PreservesOmittedTemplateInstancePolicyPresence(t *testing.T) {
-	var doc FlowSchemaDocument
-	if err := yaml.Unmarshal([]byte(`
-name: template-flow
-mode: template
-instance:
-  by: scope_id
-`), &doc); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
+func TestFlowTemplateInstanceDecodeRejectsRetiredMappingForms(t *testing.T) {
+	tests := []struct {
+		name     string
+		instance string
+	}{
+		{name: "by only", instance: "{by: scope_id}"},
+		{name: "empty", instance: "{}"},
+		{name: "malformed", instance: "{unexpected: scope_id}"},
+		{name: "list", instance: "{by: [scope_id]}"},
+		{name: "composite", instance: "{by: [scope, scope_id, artifact_type]}"},
+		{name: "on_missing only", instance: "{on_missing: create}"},
+		{name: "on_conflict only", instance: "{on_conflict: reject}"},
+		{name: "both policies", instance: "{on_missing: create, on_conflict: reject}"},
+		{name: "mixed old and new", instance: "{field: scope_id, on_missing: create}"},
+		{name: "sequence", instance: "[scope_id]"},
+		{name: "null", instance: "null"},
+		{name: "empty scalar", instance: `""`},
+		{name: "nested scalar", instance: "tenant.scope_id"},
 	}
-	if !doc.Instance.Declared {
-		t.Fatal("Instance.Declared = false, want true")
-	}
-	if got, want := strings.Join(doc.Instance.By, ","), "scope_id"; got != want {
-		t.Fatalf("Instance.By = %q, want %q", got, want)
-	}
-	if doc.Instance.OnMissingDeclared || doc.Instance.OnConflictDeclared {
-		t.Fatalf("policy presence = %v/%v, want both omitted", doc.Instance.OnMissingDeclared, doc.Instance.OnConflictDeclared)
-	}
-	if doc.Instance.OnMissing != "" || doc.Instance.OnConflict != "" {
-		t.Fatalf("raw policies = %q/%q, want empty before resolver defaults", doc.Instance.OnMissing, doc.Instance.OnConflict)
-	}
-}
-
-func TestFlowSchemaDocumentDecode_PreservesExplicitEmptyTemplateInstancePolicies(t *testing.T) {
-
-	var doc FlowSchemaDocument
-	if err := yaml.Unmarshal([]byte(`
-name: template-flow
-mode: template
-instance:
-  by: scope_id
-  on_missing: ""
-  on_conflict:
-`), &doc); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if !doc.Instance.OnMissingDeclared || !doc.Instance.OnConflictDeclared {
-		t.Fatalf("policy presence = %v/%v, want both explicit", doc.Instance.OnMissingDeclared, doc.Instance.OnConflictDeclared)
-	}
-	if doc.Instance.OnMissing != "" || doc.Instance.OnConflict != "" {
-		t.Fatalf("raw policies = %q/%q, want empty explicit values", doc.Instance.OnMissing, doc.Instance.OnConflict)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var doc FlowSchemaDocument
+			err := yaml.Unmarshal([]byte("name: template-flow\nmode: template\ninstance: "+tc.instance+"\n"), &doc)
+			if err == nil || !strings.Contains(err.Error(), "instance: <field>") {
+				t.Fatalf("yaml.Unmarshal error = %v, want scalar instance teaching error", err)
+			}
+		})
 	}
 }
 
@@ -1182,58 +1134,6 @@ mode: singleton
 	}
 	if got, want := doc.Mode, "singleton"; got != want {
 		t.Fatalf("Mode = %q, want %q", got, want)
-	}
-}
-
-func TestFlowSchemaDocumentDecode_PreservesTemplateInstanceDuplicateKeysForResolver(t *testing.T) {
-
-	var doc FlowSchemaDocument
-	if err := yaml.Unmarshal([]byte(`
-name: template-flow
-mode: template
-instance:
-  by: [tenant_id, tenant_id]
-  on_missing: reject
-  on_conflict: reuse
-`), &doc); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if got, want := strings.Join(doc.Instance.By, ","), "tenant_id,tenant_id"; got != want {
-		t.Fatalf("Instance.By = %q, want duplicate-preserving %q", got, want)
-	}
-}
-
-func TestFlowSchemaDocumentDecode_PreservesEmptyTemplateInstancePresence(t *testing.T) {
-	var doc FlowSchemaDocument
-	if err := yaml.Unmarshal([]byte(`
-name: template-flow
-mode: static
-instance: {}
-`), &doc); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if !doc.Instance.Declared {
-		t.Fatal("Instance.Declared = false, want explicit empty declaration preserved")
-	}
-	if doc.Instance.Empty() {
-		t.Fatal("Instance.Empty() = true for explicit empty declaration, want false")
-	}
-}
-
-func TestFlowSchemaDocumentDecode_RejectsUnsupportedTemplateInstanceFields(t *testing.T) {
-
-	var doc FlowSchemaDocument
-	err := yaml.Unmarshal([]byte(`
-name: invalid-template
-mode: template
-instance:
-  by: account_id
-  on_missing: create
-  on_conflict: reject
-  fallback: legacy
-`), &doc)
-	if err == nil || !strings.Contains(err.Error(), `template instance field "fallback" is not supported.`) {
-		t.Fatalf("yaml.Unmarshal error = %v, want typed template instance field rejection", err)
 	}
 }
 

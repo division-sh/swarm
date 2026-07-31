@@ -60,8 +60,8 @@ pins:
 	return root
 }
 
-// CopyRootAutoEmitKeyCarries owns the fixed legacy address/key proof used by
-// boot verification. It is not an open overlay surface.
+// CopyRootAutoEmitKeyCarries owns the fixed root output key/carries proof used
+// by boot verification. It is not an open overlay surface.
 func CopyRootAutoEmitKeyCarries(t testing.TB) string {
 	t.Helper()
 	root := CopyRootOutputConnect(t, RootConnectNoEmitter)
@@ -75,10 +75,6 @@ flows:
 connect:
   - from: .root_ready
     to: consumer.ready
-    map:
-      entity_id:
-        source: payload.entity_id
-        target: _entity.id
 `)
 	writeClosedVariantFile(t, root, "schema.yaml", `name: root-auto-emit-key-carries
 auto_emit_on_create:
@@ -99,16 +95,6 @@ pins:
     events:
       - name: ready
         event: root.ready
-        address:
-          by: entity_id
-          source: payload.entity_id
-          target: _entity.id
-          cardinality: one
-`, "root.ready:\n  entity_id: string\n", `deployment:
-  entity_id:
-    type: string
-    indexed: true
-    _unused_reason: root output pin key/carries receiver address proof field
-`, "{}\n")
+`, "root.ready:\n  entity_id: string\n", "{}\n", "{}\n")
 	return root
 }
