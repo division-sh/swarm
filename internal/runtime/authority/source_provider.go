@@ -204,6 +204,20 @@ func (p *sourceProvider) RemoveManagedAgent(identity agentidentity.Identity) err
 	return nil
 }
 
+func (p *sourceProvider) ManagedAgentParent(identity agentidentity.Identity) (agentidentity.Identity, bool, error) {
+	if p == nil {
+		return agentidentity.Identity{}, false, nil
+	}
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		return agentidentity.Identity{}, false, fmt.Errorf("managed agent identity: %w", err)
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	parent, ok := p.managedParents[identity]
+	return parent, ok, nil
+}
+
 func (p *sourceProvider) AuthorizeMailboxSend(actor models.AgentConfig) error {
 	if containsCanonical(p.mailboxSendRoles, actor.Role) {
 		return nil

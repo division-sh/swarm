@@ -46,7 +46,11 @@ type Scheduler interface {
 type Manager interface {
 	ResolveAgentConfig(agentID, flowInstance string) (models.AgentConfig, error)
 	SpawnAgentForEntity(entityID string, cfg models.AgentConfig) error
-	TeardownAgentTarget(agentID, flowInstance string) error
+	TeardownAgentTarget(
+		agentID, flowInstance string,
+		beforeCommit func(models.AgentConfig) error,
+		restoreBeforeCommit func(models.AgentConfig) error,
+	) error
 	ReconfigureAgentTarget(agentID, flowInstance string, cfg models.AgentConfig, onCommitted func(models.AgentConfig) error) error
 }
 

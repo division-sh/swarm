@@ -409,7 +409,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	go func() {
 		defer mutations.Done()
 		<-start
-		genericMutationErrs <- runtimeV2.manager.TeardownAgentTarget(retiredID, descriptor.FlowInstance)
+		genericMutationErrs <- runtimeV2.manager.TeardownAgentTarget(retiredID, descriptor.FlowInstance, nil, nil)
 	}()
 	go func() {
 		defer mutations.Done()
@@ -485,7 +485,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	assertNotifyAllChildrenReadinessOwnershipFailure(
 		t,
 		"generic teardown",
-		runtimeV2.manager.TeardownAgentTarget(writerID, descriptor.FlowInstance),
+		runtimeV2.manager.TeardownAgentTarget(writerID, descriptor.FlowInstance, nil, nil),
 	)
 	recordingStore, ok := selected.(lifecycleTransitionRecordingStore)
 	if !ok {

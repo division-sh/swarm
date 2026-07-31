@@ -41,7 +41,16 @@ func (m managerStub) ResolveAgentConfig(agentID, flowInstance string) (models.Ag
 }
 
 func (managerStub) SpawnAgentForEntity(string, models.AgentConfig) error { return nil }
-func (managerStub) TeardownAgentTarget(string, string) error             { return nil }
+func (managerStub) TeardownAgentTarget(
+	_, _ string,
+	beforeCommit func(models.AgentConfig) error,
+	_ func(models.AgentConfig) error,
+) error {
+	if beforeCommit != nil {
+		return beforeCommit(models.AgentConfig{})
+	}
+	return nil
+}
 func (managerStub) ReconfigureAgentTarget(_ string, _ string, cfg models.AgentConfig, onCommitted func(models.AgentConfig) error) error {
 	if onCommitted != nil {
 		return onCommitted(cfg)
@@ -109,9 +118,19 @@ func (m *captureManagerStub) SpawnAgentForEntity(entityID string, cfg models.Age
 	return nil
 }
 
-func (m *captureManagerStub) TeardownAgentTarget(agentID, flowInstance string) error {
-	if _, err := m.ResolveAgentConfig(agentID, flowInstance); err != nil {
+func (m *captureManagerStub) TeardownAgentTarget(
+	agentID, flowInstance string,
+	beforeCommit func(models.AgentConfig) error,
+	_ func(models.AgentConfig) error,
+) error {
+	cfg, err := m.ResolveAgentConfig(agentID, flowInstance)
+	if err != nil {
 		return err
+	}
+	if beforeCommit != nil {
+		if err := beforeCommit(cfg); err != nil {
+			return err
+		}
 	}
 	m.tornDownID = agentID
 	m.teardownCalled = true
@@ -159,13 +178,16 @@ func (m *captureManagerStub) ReconfigureAgentTarget(
 }
 
 type staleAuthorizationManagerStub struct {
-	stateMu      sync.Mutex
-	reconfigure  sync.Mutex
-	agents       map[string]models.AgentConfig
-	arrivals     chan struct{}
-	firstApplied chan struct{}
-	releaseFirst chan struct{}
-	first        bool
+	stateMu        sync.Mutex
+	reconfigure    sync.Mutex
+	agents         map[string]models.AgentConfig
+	arrivals       chan struct{}
+	firstApplied   chan struct{}
+	releaseFirst   chan struct{}
+	first          bool
+	teardownArrive chan<- struct{}
+	teardownStart  <-chan struct{}
+	teardownFail   bool
 }
 
 func (m *staleAuthorizationManagerStub) ResolveAgentConfig(agentID, flowInstance string) (models.AgentConfig, error) {
@@ -182,7 +204,37 @@ func (*staleAuthorizationManagerStub) SpawnAgentForEntity(string, models.AgentCo
 	return nil
 }
 
-func (*staleAuthorizationManagerStub) TeardownAgentTarget(string, string) error {
+func (m *staleAuthorizationManagerStub) TeardownAgentTarget(
+	agentID, flowInstance string,
+	beforeCommit func(models.AgentConfig) error,
+	restoreBeforeCommit func(models.AgentConfig) error,
+) error {
+	if m.teardownArrive != nil {
+		m.teardownArrive <- struct{}{}
+	}
+	if m.teardownStart != nil {
+		<-m.teardownStart
+	}
+	current, err := m.ResolveAgentConfig(agentID, flowInstance)
+	if err != nil {
+		return err
+	}
+	if beforeCommit != nil {
+		if err := beforeCommit(current); err != nil {
+			return err
+		}
+	}
+	if m.teardownFail {
+		if restoreBeforeCommit != nil {
+			if err := restoreBeforeCommit(current); err != nil {
+				return err
+			}
+		}
+		return errors.New("injected teardown persistence failure")
+	}
+	m.stateMu.Lock()
+	delete(m.agents, agentID)
+	m.stateMu.Unlock()
 	return nil
 }
 
@@ -275,10 +327,19 @@ func (m *concreteManagerStub) SpawnAgentForEntity(_ string, cfg models.AgentConf
 	return nil
 }
 
-func (m *concreteManagerStub) TeardownAgentTarget(agentID, flowInstance string) error {
+func (m *concreteManagerStub) TeardownAgentTarget(
+	agentID, flowInstance string,
+	beforeCommit func(models.AgentConfig) error,
+	_ func(models.AgentConfig) error,
+) error {
 	cfg, err := m.ResolveAgentConfig(agentID, flowInstance)
 	if err != nil {
 		return err
+	}
+	if beforeCommit != nil {
+		if err := beforeCommit(cfg); err != nil {
+			return err
+		}
 	}
 	identity, err := cfg.ConcreteIdentity()
 	if err != nil {
@@ -441,6 +502,120 @@ func TestExecAgentFire_RemovesOnlySelectedSameSlugAuthority(t *testing.T) {
 	}
 	if err := provider.AuthorizeManagement(managerB, workerB); err != nil {
 		t.Fatalf("same-slug sibling authority was removed by fire: %v", err)
+	}
+}
+
+func TestExecAgentFire_RevalidatesQueuedActorAtSerializedCommit(t *testing.T) {
+	const route = "review/inst-1"
+	newAgent := func(id, role string) models.AgentConfig {
+		return models.AgentConfig{
+			ExecutionMode: "live",
+			ID:            id,
+			Identity:      agentidentitytest.Runtime(t, id, "runtime-tools-test", "review", "inst-1", route),
+			Role:          role,
+			Permissions:   []string{"agent_fire"},
+			FlowPath:      route,
+		}
+	}
+	oldParent := newAgent("old-parent", "manager")
+	newParent := newAgent("new-parent", "manager")
+	target := newAgent("worker", "worker")
+	target.ParentAgent = oldParent.ID
+
+	provider := runtimeauthority.NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+	if err := runtimeauthority.UpsertManagedAgent(provider, target.Identity, oldParent.Identity); err != nil {
+		t.Fatalf("seed authority: %v", err)
+	}
+	arrived := make(chan struct{}, 1)
+	start := make(chan struct{})
+	manager := &staleAuthorizationManagerStub{
+		agents: map[string]models.AgentConfig{
+			oldParent.ID: oldParent,
+			newParent.ID: newParent,
+			target.ID:    target,
+		},
+		teardownArrive: arrived,
+		teardownStart:  start,
+	}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
+
+	fireErr := make(chan error, 1)
+	go func() {
+		_, err := exec.ExecAgentFireDirect(oldParent, map[string]any{
+			"agent_id": target.ID, "flow_instance": route,
+		})
+		fireErr <- err
+	}()
+	<-arrived
+
+	manager.stateMu.Lock()
+	updated := manager.agents[target.ID]
+	updated.ParentAgent = newParent.ID
+	manager.agents[target.ID] = updated
+	manager.stateMu.Unlock()
+	if err := runtimeauthority.UpsertManagedAgent(provider, target.Identity, newParent.Identity); err != nil {
+		t.Fatalf("transfer authority while fire waits: %v", err)
+	}
+	close(start)
+
+	if err := <-fireErr; err == nil || !strings.Contains(err.Error(), "revalidate serialized fire authority") {
+		t.Fatalf("queued fire error = %v, want serialized authority rejection", err)
+	}
+	stored, err := manager.ResolveAgentConfig(target.ID, route)
+	if err != nil {
+		t.Fatalf("queued stale fire removed target: %v", err)
+	}
+	if err := provider.AuthorizeManagement(newParent, stored); err != nil {
+		t.Fatalf("new parent lacks authority after rejected stale fire: %v", err)
+	}
+	if err := provider.AuthorizeManagement(oldParent, stored); err == nil {
+		t.Fatal("stale parent retained authority after rejected fire")
+	}
+}
+
+func TestExecAgentFire_PersistenceFailureRestoresPriorAuthority(t *testing.T) {
+	const route = "review/inst-1"
+	parent := models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "manager",
+		Identity:      agentidentitytest.Runtime(t, "manager", "runtime-tools-test", "review", "inst-1", route),
+		Role:          "manager",
+		Permissions:   []string{"agent_fire"},
+		FlowPath:      route,
+	}
+	target := models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "worker",
+		Identity:      agentidentitytest.Runtime(t, "worker", "runtime-tools-test", "review", "inst-1", route),
+		Role:          "worker",
+		ParentAgent:   parent.ID,
+		FlowPath:      route,
+	}
+	provider := runtimeauthority.NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+	if err := runtimeauthority.UpsertManagedAgent(provider, target.Identity, parent.Identity); err != nil {
+		t.Fatalf("seed authority: %v", err)
+	}
+	manager := &staleAuthorizationManagerStub{
+		agents: map[string]models.AgentConfig{
+			parent.ID: parent,
+			target.ID: target,
+		},
+		teardownFail: true,
+	}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
+
+	_, err := exec.ExecAgentFireDirect(parent, map[string]any{
+		"agent_id": target.ID, "flow_instance": route,
+	})
+	if err == nil || !strings.Contains(err.Error(), "injected teardown persistence failure") {
+		t.Fatalf("fire error = %v, want persistence failure", err)
+	}
+	stored, err := manager.ResolveAgentConfig(target.ID, route)
+	if err != nil {
+		t.Fatalf("failed fire removed target: %v", err)
+	}
+	if err := provider.AuthorizeManagement(parent, stored); err != nil {
+		t.Fatalf("failed fire did not restore prior authority: %v", err)
 	}
 }
 

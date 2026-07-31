@@ -862,6 +862,7 @@ seam_families:
       - internal/apiv1/operator_event_replay_test.go
       - internal/runtime/agents/agent_llm_test.go
       - internal/runtime/bus/delivery_planner.go
+      - internal/runtime/bus/delivery_planner_test.go
       - internal/runtime/bus/eventbus_publish.go
       - internal/runtime/bus/eventbus_publish_test.go
       - internal/runtime/bus/event_authority_contract_test.go

@@ -201,12 +201,18 @@ func TestSourceProvider_ManagedAgentGraphUpdates(t *testing.T) {
 	if err := provider.UpsertManagedAgent(worker.Identity, reviewer.Identity); err != nil {
 		t.Fatalf("upsert worker authority: %v", err)
 	}
+	if parent, found, err := ManagedAgentParent(provider, worker.Identity); err != nil || !found || parent != reviewer.Identity {
+		t.Fatalf("managed worker parent = %#v found=%v err=%v, want exact reviewer identity", parent, found, err)
+	}
 	if err := provider.AuthorizeManagement(controlPlane, worker); err != nil {
 		t.Fatalf("expected dynamic managed descendant authorization, got %v", err)
 	}
 
 	if err := provider.RemoveManagedAgent(reviewer.Identity); err != nil {
 		t.Fatalf("remove reviewer authority: %v", err)
+	}
+	if _, found, err := ManagedAgentParent(provider, reviewer.Identity); err != nil || found {
+		t.Fatalf("removed reviewer parent found=%v err=%v, want absent", found, err)
 	}
 	if err := provider.AuthorizeManagement(controlPlane, worker); err == nil {
 		t.Fatal("expected descendant authorization to break after manager removal")

@@ -627,7 +627,7 @@ func TestExecutionProjectionTeardownRemovesExactRoute(t *testing.T) {
 	if !ok {
 		t.Fatal("run did not install route")
 	}
-	if err := am.TeardownAgentTarget(agentID, ""); err != nil {
+	if err := am.TeardownAgentTarget(agentID, "", nil, nil); err != nil {
 		t.Fatalf("TeardownAgent: %v", err)
 	}
 	if _, live := bus.current(agentID); live {

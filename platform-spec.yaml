@@ -1333,6 +1333,12 @@ contract_formats:
             direct RoutePlan path and MUST NOT reinterpret caller-supplied
             recipients as subscribed RoutePlan authority or rebuild subscribed
             routing from replay/readback evidence.
+            Slug ambiguity MUST be decided from the canonical scoped recipient
+            manifest after event entity and target-route filtering, not from the
+            unfiltered active-agent census. A persisted human-task requester route
+            therefore selects its one matching concrete same-name agent before
+            ambiguity is evaluated; multiple eligible concrete identities after
+            filtering still fail closed and require an exact route.
             Public operator replay MUST use PublishDirectRoutes: current direct
             policy proves only live recipient capability, while every persisted
             and dispatched target, reply-context, and payload-projection fact is
@@ -15148,6 +15154,15 @@ agent_identity_model:
       #1025 must treat duplicate agent slugs across live bundles as unsupported unless a later #977 implementation child
       promotes UUID-internal identity and proves bundle-scoped lookup across all affected surfaces.
   management_authority:
+    fire: >
+      agent_fire may perform a pre-read authorization only as fail-fast validation. The exact current target configuration
+      and actor authority must be revalidated after the target lifecycle operation is serialized and immediately before
+      teardown persistence. The same commit hook snapshots the exact current edge from the canonical mutable authority graph
+      and removes it before persistence; declaration fallback is not reconstructed as a concrete edge. A lifecycle or
+      subordinate-session persistence failure restores that exact prior graph snapshot before returning.
+      A queued fire authorized from a replaced or temporarily applied mapping cannot terminate the target, and a successful
+      fire cannot leave a live managed-parent edge for the terminated child. Post-persistence authority cleanup, pre-read-only
+      authorization, and mutation without compensation are forbidden.
     reconfigure: >
       agent_reconfigure derives one complete candidate with the same canonical partial-patch merge used by AgentManager,
       including parent_agent_id precedence over manager_fallback. Before manager mutation, the candidate child and effective
@@ -15164,7 +15179,8 @@ agent_identity_model:
       authority in manager commit order. Actor management authority is revalidated against the exact serialized predecessor
       immediately before authority handoff, so a queued request authorized from a pre-read mapping cannot mutate after that
       mapping is replaced or restored. Concrete parent updates reject direct and indirect cycles atomically and leave the prior
-      graph unchanged. A pre-read actor decision, candidate, or authority plan cannot authorize a later manager commit.
+      graph unchanged. Compensation restores the exact pre-handoff graph snapshot and must not reconstruct declaration fallback
+      as a concrete mutable edge. A pre-read actor decision, candidate, or authority plan cannot authorize a later manager commit.
       Mutation-first validation, cyclic management authority, and a second parent-merge interpreter are forbidden.
   uuid_internal_migration_target:
     tracker: '#977'

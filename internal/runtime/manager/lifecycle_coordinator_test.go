@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"sync"
 	"testing"
@@ -423,8 +424,32 @@ func TestLifecycleCoordinatorTeardownPersistenceFailureLeavesLoopOwned(t *testin
 	probe.mu.Lock()
 	probe.failNext = fmt.Errorf("injected teardown persistence failure")
 	probe.mu.Unlock()
-	if err := coordinator.terminateIdentityWithTopology(testAuthorActivityContext(context.Background()), rec.Config.Identity, "teardown", AgentLifecycleTerminated, nil); err == nil {
+	var hookSequence []string
+	if err := coordinator.terminateIdentityWithTopologyCommitHooks(
+		testAuthorActivityContext(context.Background()),
+		rec.Config.Identity,
+		"teardown",
+		AgentLifecycleTerminated,
+		nil,
+		func(current runtimeactors.AgentConfig) error {
+			hookSequence = append(hookSequence, "before")
+			if current.Identity != rec.Config.Identity {
+				t.Fatalf("teardown commit identity = %#v, want %#v", current.Identity, rec.Config.Identity)
+			}
+			return nil
+		},
+		func(current runtimeactors.AgentConfig) error {
+			hookSequence = append(hookSequence, "restore")
+			if current.Identity != rec.Config.Identity {
+				t.Fatalf("teardown restore identity = %#v, want %#v", current.Identity, rec.Config.Identity)
+			}
+			return nil
+		},
+	); err == nil {
 		t.Fatal("teardown succeeded despite persistence failure")
+	}
+	if !reflect.DeepEqual(hookSequence, []string{"before", "restore"}) {
+		t.Fatalf("teardown hook sequence = %v, want [before restore]", hookSequence)
 	}
 	select {
 	case <-loopCtx.Done():
