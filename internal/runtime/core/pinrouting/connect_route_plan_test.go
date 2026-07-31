@@ -724,6 +724,28 @@ func TestInstanceKeyMaterialRejectsTypedSourceWithMappings(t *testing.T) {
 	}
 }
 
+func TestEventSourcedInstanceKeyMaterialRejectsTypedSourceWithMappings(t *testing.T) {
+	for _, sourceKind := range []runtimecontracts.FlowInputInstanceSourceKind{
+		runtimecontracts.FlowInputInstanceSourceGeneratedUUID,
+		runtimecontracts.FlowInputInstanceSourceEventID,
+	} {
+		t.Run(string(sourceKind), func(t *testing.T) {
+			plan := ConnectRoutePlan{
+				Receiver: ConnectRoutePlanEndpoint{FlowID: "account", Pin: "account_ready"},
+				InstanceKey: &ConnectRoutePlanInstanceKey{
+					Fields:   []string{"account_id"},
+					Source:   runtimecontracts.FlowInputInstanceSource{Kind: sourceKind},
+					Mappings: []ConnectRoutePlanInstanceKeyMapping{{Source: "account_id", Target: "account_id"}},
+				},
+			}
+			_, failure := EventSourcedInstanceKeyMaterialForConnectRoutePlan(plan, "event-1")
+			if failure != ConnectFailureInstanceResolutionInvalid {
+				t.Fatalf("failure = %q, want %q", failure, ConnectFailureInstanceResolutionInvalid)
+			}
+		})
+	}
+}
+
 func TestLowerCompositionConnectRoutePlansUsesSelectInputResolution(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	if err != nil {

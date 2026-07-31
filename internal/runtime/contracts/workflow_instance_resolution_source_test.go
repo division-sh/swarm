@@ -47,9 +47,22 @@ func TestInputPinResolutionRejectsUnknownGeneratedSource(t *testing.T) {
 }
 
 func TestInputPinResolutionSelectingSourceMustBeTopLevelPayload(t *testing.T) {
-	for _, path := range []string{"event.id", "payload", "payload.account.id", "payload.", "account_id"} {
+	for _, path := range []string{"event.id", "payload", "payload.account.id", "payload.", "payload. account_id", "account_id"} {
 		if _, err := ResolveFlowInputInstanceSource(FlowInputResolutionModeSelect, path); err == nil {
 			t.Fatalf("ResolveFlowInputInstanceSource(select, %q) succeeded, want fail-closed", path)
 		}
+	}
+}
+
+func TestInputPinResolutionPayloadSourceUsesCanonicalPathSpelling(t *testing.T) {
+	source, err := ResolveFlowInputInstanceSource(FlowInputResolutionModeSelect, "  payload.account_id  ")
+	if err != nil {
+		t.Fatalf("ResolveFlowInputInstanceSource: %v", err)
+	}
+	if source.Path != "payload.account_id" {
+		t.Fatalf("source path = %q, want canonical payload.account_id", source.Path)
+	}
+	if _, err := ResolveFlowInputInstanceSource(FlowInputResolutionModeSelect, "payload. account_id"); err == nil {
+		t.Fatal("internally spaced payload source succeeded, want fail-closed canonical spelling")
 	}
 }
