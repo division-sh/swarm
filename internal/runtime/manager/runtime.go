@@ -1753,10 +1753,14 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 		}
 		return cleanupErr
 	}
-	var beforeProjection func() error
+	var beforeCommit func() error
+	var restoreBeforeCommit func() error
 	if onCommitted != nil {
-		beforeProjection = func() error {
+		beforeCommit = func() error {
 			return onCommitted(candidate.Config)
+		}
+		restoreBeforeCommit = func() error {
+			return onCommitted(current.Config)
 		}
 	}
 	loopCtx, token, done, err := am.lifecycle.replaceLoopLocked(
@@ -1769,7 +1773,8 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 		topology,
 		cell,
 		proposedToken,
-		beforeProjection,
+		beforeCommit,
+		restoreBeforeCommit,
 	)
 	if err != nil {
 		return replaceExecutionResult{}, errors.Join(err, cleanupPrepared())

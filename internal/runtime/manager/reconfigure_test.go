@@ -125,11 +125,16 @@ func TestReconfigureAgent_AuthorityHandoffFailureLeavesProjectionUnchanged(t *te
 	}
 	beforeGeneration := lifecycleGenerationForTest(t, am, cfg.ID)
 	handoffErr := errors.New("injected authority handoff failure")
+	var handedOffTools []string
 
 	err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{
 		Tools: []string{"tool-new"},
-	}, func(models.AgentConfig) error {
-		return handoffErr
+	}, func(candidate models.AgentConfig) error {
+		handedOffTools = append(handedOffTools, candidate.Tools...)
+		if reflect.DeepEqual(candidate.Tools, []string{"tool-new"}) {
+			return handoffErr
+		}
+		return nil
 	})
 	if !errors.Is(err, handoffErr) {
 		t.Fatalf("ReconfigureAgentTarget error = %v, want %v", err, handoffErr)
@@ -143,6 +148,54 @@ func TestReconfigureAgent_AuthorityHandoffFailureLeavesProjectionUnchanged(t *te
 	}
 	if got := lifecycleGenerationForTest(t, am, cfg.ID); got != beforeGeneration {
 		t.Fatalf("generation after rejected handoff = %d, want %d", got, beforeGeneration)
+	}
+	if !reflect.DeepEqual(handedOffTools, []string{"tool-new", "tool-old"}) {
+		t.Fatalf("authority handoff sequence = %v, want candidate then prior projection", handedOffTools)
+	}
+}
+
+func TestReconfigureAgent_PersistenceFailureRestoresPriorAuthorityAndProjection(t *testing.T) {
+	probe := newLifecyclePersistenceProbe()
+	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
+		return reconfigureTestAgent{id: cfg.ID}, nil
+	}, AgentManagerOptions{LifecycleStore: probe})
+	cfg := models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "worker",
+		FlowPath:      "review/inst-1",
+		Tools:         []string{"tool-old"},
+	}
+	if err := am.SpawnAgent(cfg); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	beforeGeneration := lifecycleGenerationForTest(t, am, cfg.ID)
+	persistenceErr := errors.New("injected reconfigure persistence failure")
+	probe.mu.Lock()
+	probe.failNext = persistenceErr
+	probe.mu.Unlock()
+	var handedOffTools []string
+
+	err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{
+		Tools: []string{"tool-new"},
+	}, func(candidate models.AgentConfig) error {
+		handedOffTools = append(handedOffTools, candidate.Tools...)
+		return nil
+	})
+	if !errors.Is(err, persistenceErr) {
+		t.Fatalf("ReconfigureAgentTarget error = %v, want %v", err, persistenceErr)
+	}
+	visible, err := am.ResolveAgentConfig(cfg.ID, cfg.FlowPath)
+	if err != nil {
+		t.Fatalf("ResolveAgentConfig after persistence failure: %v", err)
+	}
+	if !reflect.DeepEqual(visible.Tools, cfg.Tools) {
+		t.Fatalf("visible tools after persistence failure = %v, want %v", visible.Tools, cfg.Tools)
+	}
+	if got := lifecycleGenerationForTest(t, am, cfg.ID); got != beforeGeneration {
+		t.Fatalf("generation after persistence failure = %d, want %d", got, beforeGeneration)
+	}
+	if !reflect.DeepEqual(handedOffTools, []string{"tool-new", "tool-old"}) {
+		t.Fatalf("authority handoff sequence = %v, want candidate then prior projection", handedOffTools)
 	}
 }
 

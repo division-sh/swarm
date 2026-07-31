@@ -1199,7 +1199,8 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 	topology *DynamicAgentTopologyMutation,
 	lockedCell *agentLifecycleCell,
 	preparedToken runtimeeffects.LifecycleToken,
-	beforeProjection func() error,
+	beforeCommit func() error,
+	restoreBeforeCommit func() error,
 ) (context.Context, runtimeeffects.LifecycleToken, chan struct{}, error) {
 	plan, planHash, err := normalizedLifecycleSubordinate(subordinate)
 	if err != nil {
@@ -1272,6 +1273,28 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 		PreviousPhase: previousPhase, Phase: targetPhase, ConfigRevision: revision, RunMode: targetMode,
 		Subordinate: runtimesessions.LifecycleMutationOutcome{Action: plan.Action},
 	}
+	if beforeCommit != nil {
+		// Authority must move first so no successor projection can coexist with
+		// the predecessor mapping. Persistence rejection restores the prior edge.
+		c.mu.Unlock()
+		if err := beforeCommit(); err != nil {
+			if restoreBeforeCommit != nil {
+				err = errors.Join(err, restoreBeforeCommit())
+			}
+			return nil, runtimeeffects.LifecycleToken{}, nil, err
+		}
+		c.mu.Lock()
+		cell = c.cells[identity]
+		if cell == nil || cell != lockedCell ||
+			cell.epoch != previousEpoch || cell.generation != previousGeneration || cell.phase != previousPhase {
+			c.mu.Unlock()
+			var transitionErr error = runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID})
+			if restoreBeforeCommit != nil {
+				transitionErr = errors.Join(transitionErr, restoreBeforeCommit())
+			}
+			return nil, runtimeeffects.LifecycleToken{}, nil, transitionErr
+		}
+	}
 	if c.store != nil {
 		var err error
 		result, err = c.store.CommitAgentLifecycleTransition(context.WithoutCancel(ctx), AgentLifecycleTransition{
@@ -1283,6 +1306,9 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 		})
 		if err != nil {
 			c.mu.Unlock()
+			if restoreBeforeCommit != nil {
+				err = errors.Join(err, restoreBeforeCommit())
+			}
 			return nil, runtimeeffects.LifecycleToken{}, nil, err
 		}
 	} else if c.sessions != nil {
@@ -1294,6 +1320,9 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 		})
 		if err != nil {
 			c.mu.Unlock()
+			if restoreBeforeCommit != nil {
+				err = errors.Join(err, restoreBeforeCommit())
+			}
 			return nil, runtimeeffects.LifecycleToken{}, nil, err
 		}
 		result.Subordinate = outcome
@@ -1310,22 +1339,11 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 			result.RuntimeEpoch != nextEpoch || result.Generation != nextGeneration || result.Phase != targetPhase ||
 			result.ConfigRevision != revision || result.RunMode != targetMode {
 			c.mu.Unlock()
-			return nil, runtimeeffects.LifecycleToken{}, nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_replay_projection_conflict", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID, "operation_id": operationID})
-		}
-	}
-	if beforeProjection != nil {
-		// Persistence accepted the candidate, but the successor remains hidden until
-		// its external authority owner has committed the same identity facts.
-		c.mu.Unlock()
-		if err := beforeProjection(); err != nil {
-			return nil, runtimeeffects.LifecycleToken{}, nil, err
-		}
-		c.mu.Lock()
-		cell = c.cells[identity]
-		if cell == nil || cell != lockedCell ||
-			cell.epoch != previousEpoch || cell.generation != previousGeneration || cell.phase != previousPhase {
-			c.mu.Unlock()
-			return nil, runtimeeffects.LifecycleToken{}, nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID})
+			var transitionErr error = runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_replay_projection_conflict", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID, "operation_id": operationID})
+			if restoreBeforeCommit != nil {
+				transitionErr = errors.Join(transitionErr, restoreBeforeCommit())
+			}
+			return nil, runtimeeffects.LifecycleToken{}, nil, transitionErr
 		}
 	}
 	cell.epoch, cell.generation, cell.phase, cell.configRevision, cell.runMode = result.RuntimeEpoch, result.Generation, result.Phase, result.ConfigRevision, result.RunMode
