@@ -15147,6 +15147,15 @@ agent_identity_model:
     final_matrix_dependency: >
       #1025 must treat duplicate agent slugs across live bundles as unsupported unless a later #977 implementation child
       promotes UUID-internal identity and proves bundle-scoped lookup across all affected surfaces.
+  management_authority:
+    reconfigure: >
+      agent_reconfigure derives one complete candidate with the same canonical partial-patch merge used by AgentManager,
+      including parent_agent_id precedence over manager_fallback. Before manager mutation, the candidate child and effective
+      parent must be valid complete concrete identities on the same exact route and must not be equal. Unresolved, malformed,
+      cross-route, and self-parent candidates fail with both manager configuration and management-authority state unchanged.
+      After successful manager mutation, the authority graph applies the already validated typed child/parent plan; a
+      no-parent candidate removes any managed-parent edge. Mutation-first validation and a second parent-merge interpreter
+      are forbidden.
   uuid_internal_migration_target:
     tracker: '#977'
     status: staged_parent_only_not_current_runtime_behavior

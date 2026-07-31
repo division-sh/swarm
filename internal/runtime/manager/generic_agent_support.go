@@ -49,7 +49,7 @@ func (a *genericAgent) OnEvent(context.Context, events.Event) ([]events.Event, e
 }
 
 func mergeAgentConfig(base, patch runtimeactors.AgentConfig) runtimeactors.AgentConfig {
-	return MergeAgentConfig(base, patch)
+	return runtimeactors.MergeAgentConfig(base, patch)
 }
 
 func extractSystemPromptFromConfig(raw json.RawMessage) string {

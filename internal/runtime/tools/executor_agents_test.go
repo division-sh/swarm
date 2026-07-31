@@ -73,11 +73,12 @@ type captureManagerStub struct {
 	reconfigureCalled bool
 	tornDownID        string
 	teardownCalled    bool
+	allowCrossRoute   bool
 }
 
 func (m *captureManagerStub) ResolveAgentConfig(agentID, flowInstance string) (models.AgentConfig, error) {
 	cfg, ok := m.agents[agentID]
-	if !ok || (flowInstance != "" && cfg.CanonicalFlowPath() != flowInstance) {
+	if !ok || (!m.allowCrossRoute && flowInstance != "" && cfg.CanonicalFlowPath() != flowInstance) {
 		return models.AgentConfig{}, fmt.Errorf("agent not found")
 	}
 	return withRuntimeToolsTestIdentity(cfg)
@@ -120,7 +121,7 @@ func (m *captureManagerStub) ReconfigureAgentTarget(agentID, flowInstance string
 		m.agents = map[string]models.AgentConfig{}
 	}
 	current := m.agents[agentID]
-	current = mergeDelegablePrivilegeConfig(current, cfg)
+	current = models.MergeAgentConfig(current, cfg)
 	current.ID = agentID
 	var err error
 	current, err = withRuntimeToolsTestIdentity(current)
@@ -206,7 +207,7 @@ func (m *concreteManagerStub) ReconfigureAgentTarget(agentID, flowInstance strin
 	if err != nil {
 		return err
 	}
-	m.agents[identity] = mergeDelegablePrivilegeConfig(current, cfg)
+	m.agents[identity] = models.MergeAgentConfig(current, cfg)
 	return nil
 }
 
@@ -374,6 +375,162 @@ func TestExecAgentReconfigure_UsesAuthorizedManagerLifecyclePath(t *testing.T) {
 	if got := result.(map[string]any)["status"]; got != "reconfigured" {
 		t.Fatalf("status = %v, want reconfigured", got)
 	}
+}
+
+func TestExecAgentReconfigure_RejectsInvalidParentCandidatesBeforeMutation(t *testing.T) {
+	route := "review/inst-1"
+	otherRoute := "review/inst-2"
+	for _, tc := range []struct {
+		name            string
+		parentID        string
+		wantError       string
+		allowCrossRoute bool
+		parentConfig    *models.AgentConfig
+	}{
+		{name: "unresolved", parentID: "missing-parent", wantError: "resolve managed parent missing-parent"},
+		{
+			name: "malformed", parentID: "malformed-parent",
+			wantError: "resolve concrete managed parent malformed-parent identity",
+			parentConfig: &models.AgentConfig{
+				ID: "malformed-parent", Role: "manager", FlowPath: route,
+				Identity: agentidentity.Identity{
+					Name:  agentidentity.Name{AgentID: "malformed-parent", Owner: "runtime-tools-test", Source: agentidentity.NameSourceRuntimeCreated},
+					Route: agentidentity.Route{Presence: agentidentity.RoutePresent, ScopeKey: "review", InstanceID: "inst-1"},
+				},
+			},
+		},
+		{
+			name: "cross_route", parentID: "cross-route-parent",
+			wantError: "is not in target flow route " + route, allowCrossRoute: true,
+			parentConfig: &models.AgentConfig{
+				ID: "cross-route-parent", Role: "manager", FlowPath: otherRoute,
+				Identity: agentidentitytest.Runtime(t, "cross-route-parent", "runtime-tools-test", "review", "inst-2", otherRoute),
+			},
+		},
+		{name: "self_parent", parentID: "worker", wantError: "managed agent identity cannot be its own parent"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			oldParent := models.AgentConfig{
+				ExecutionMode: "live", ID: "old-parent",
+				Identity: agentidentitytest.Runtime(t, "old-parent", "runtime-tools-test", "review", "inst-1", route),
+				Role:     "manager", Permissions: []string{"agent_reconfigure"}, FlowPath: route,
+			}
+			target := models.AgentConfig{
+				ID: "worker", Identity: agentidentitytest.Runtime(t, "worker", "runtime-tools-test", "review", "inst-1", route),
+				Role: "worker", ParentAgent: oldParent.ID, ManagerFallback: oldParent.ID, Model: "regular", FlowPath: route,
+			}
+			provider := runtimeauthority.NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+			if err := runtimeauthority.UpsertManagedAgent(provider, target.Identity, oldParent.Identity); err != nil {
+				t.Fatalf("seed managed authority: %v", err)
+			}
+			agents := map[string]models.AgentConfig{oldParent.ID: oldParent, target.ID: target}
+			if tc.parentConfig != nil {
+				agents[tc.parentConfig.ID] = *tc.parentConfig
+			}
+			manager := &captureManagerStub{agents: agents, allowCrossRoute: tc.allowCrossRoute}
+			exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
+
+			_, err := exec.ExecAgentReconfigureDirect(oldParent, map[string]any{
+				"agent_id": target.ID, "flow_instance": route,
+				"config": map[string]any{"model": "fast", "parent_agent_id": tc.parentID},
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("reconfigure error = %v, want %q", err, tc.wantError)
+			}
+			if manager.reconfigureCalled {
+				t.Fatal("invalid parent candidate reached manager mutation")
+			}
+			stored := manager.agents[target.ID]
+			if stored.Model != target.Model || stored.ParentAgent != target.ParentAgent || stored.ManagerFallback != target.ManagerFallback {
+				t.Fatalf("invalid parent changed manager state: before=%+v after=%+v", target, stored)
+			}
+			if err := provider.AuthorizeManagement(oldParent, target); err != nil {
+				t.Fatalf("invalid parent changed prior authority mapping: %v", err)
+			}
+		})
+	}
+}
+
+func TestExecAgentReconfigure_ParentCandidateAndAuthorityGraphAgree(t *testing.T) {
+	const route = "review/inst-1"
+	newAgent := func(t *testing.T, id, role string) models.AgentConfig {
+		t.Helper()
+		return models.AgentConfig{
+			ExecutionMode: "live", ID: id,
+			Identity: agentidentitytest.Runtime(t, id, "runtime-tools-test", "review", "inst-1", route),
+			Role:     role, Permissions: []string{"agent_reconfigure"}, FlowPath: route,
+		}
+	}
+
+	t.Run("parent_agent_precedes_manager_fallback", func(t *testing.T) {
+		oldParent := newAgent(t, "old-parent", "manager")
+		newParent := newAgent(t, "new-parent", "manager")
+		ignoredFallback := newAgent(t, "ignored-fallback", "manager")
+		target := newAgent(t, "worker", "worker")
+		target.ParentAgent = oldParent.ID
+		target.ManagerFallback = oldParent.ID
+
+		provider := runtimeauthority.NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+		if err := runtimeauthority.UpsertManagedAgent(provider, target.Identity, oldParent.Identity); err != nil {
+			t.Fatalf("seed managed authority: %v", err)
+		}
+		manager := &captureManagerStub{agents: map[string]models.AgentConfig{
+			oldParent.ID:       oldParent,
+			newParent.ID:       newParent,
+			ignoredFallback.ID: ignoredFallback,
+			target.ID:          target,
+		}}
+		exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
+
+		if _, err := exec.ExecAgentReconfigureDirect(oldParent, map[string]any{
+			"agent_id": target.ID, "flow_instance": route,
+			"config": map[string]any{
+				"model": "fast", "parent_agent_id": newParent.ID, "manager_fallback": ignoredFallback.ID,
+			},
+		}); err != nil {
+			t.Fatalf("reconfigure exact parent: %v", err)
+		}
+		stored := manager.agents[target.ID]
+		if stored.Model != "fast" || stored.ParentAgent != newParent.ID || stored.ManagerFallback != ignoredFallback.ID {
+			t.Fatalf("stored candidate = %+v", stored)
+		}
+		if err := provider.AuthorizeManagement(newParent, stored); err != nil {
+			t.Fatalf("new exact parent lacks authority: %v", err)
+		}
+		if err := provider.AuthorizeManagement(oldParent, stored); err == nil {
+			t.Fatal("old parent retained authority after replacement")
+		}
+		if err := provider.AuthorizeManagement(ignoredFallback, stored); err == nil {
+			t.Fatal("manager_fallback overrode explicit parent_agent_id")
+		}
+	})
+
+	t.Run("no_parent_clears_managed_authority", func(t *testing.T) {
+		oldParent := newAgent(t, "old-parent", "manager")
+		target := newAgent(t, "worker", "worker")
+		provider := runtimeauthority.NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+		if err := runtimeauthority.UpsertManagedAgent(provider, target.Identity, oldParent.Identity); err != nil {
+			t.Fatalf("seed stale managed authority: %v", err)
+		}
+		manager := &captureManagerStub{agents: map[string]models.AgentConfig{
+			oldParent.ID: oldParent,
+			target.ID:    target,
+		}}
+		exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
+
+		if _, err := exec.ExecAgentReconfigureDirect(oldParent, map[string]any{
+			"agent_id": target.ID, "flow_instance": route, "config": map[string]any{"model": "fast"},
+		}); err != nil {
+			t.Fatalf("reconfigure no-parent candidate: %v", err)
+		}
+		stored := manager.agents[target.ID]
+		if stored.Model != "fast" || stored.ParentAgent != "" || stored.ManagerFallback != "" {
+			t.Fatalf("stored no-parent candidate = %+v", stored)
+		}
+		if err := provider.AuthorizeManagement(oldParent, stored); err == nil {
+			t.Fatal("no-parent candidate retained stale managed authority")
+		}
+	})
 }
 
 func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
@@ -758,6 +915,45 @@ func TestExecAgentHire_RejectsUnresolvedParentBeforeSpawn(t *testing.T) {
 	}
 	if manager.spawnCalled {
 		t.Fatal("unresolved parent was discovered after spawning")
+	}
+}
+
+func TestExecAgentHire_RejectsSelfParentBeforeSpawn(t *testing.T) {
+	t.Parallel()
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"manager": {ID: "manager", Role: "manager"},
+			"worker":  {ID: "worker", Role: "worker", ManagerFallback: "manager"},
+		},
+	})
+	manager := &captureManagerStub{}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+		Manager:           manager,
+		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
+		WorkflowSource:    source,
+	})
+	actor := models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "manager",
+		Identity:      agentidentitytest.Runtime(t, "manager", "runtime-tools-test", "review", "inst-1", "review/inst-1"),
+		Role:          "manager",
+		Permissions:   []string{"agent_hire"},
+		FlowPath:      "review/inst-1",
+	}
+
+	_, err := exec.ExecAgentHireDirect(actor, map[string]any{
+		"config": map[string]any{
+			"id":               "worker-1",
+			"role":             "worker",
+			"manager_fallback": "worker-1",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot be its own parent") {
+		t.Fatalf("ExecAgentHireDirect error = %v, want self-parent preflight", err)
+	}
+	if manager.spawnCalled {
+		t.Fatal("self-parent was discovered after spawning")
 	}
 }
 
