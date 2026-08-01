@@ -84,8 +84,8 @@ func CopyEventMetadataAuthority(t testing.TB, variant EventMetadataAuthorityVari
 		taskDoneSwarm = "    producer: reminder\n"
 		timerBlock = "  timers:\n    - id: reminder\n      owner: worker\n      event: task.done\n      delay: 1m\n      start_on: event:task.start\n"
 	case EventMetadataAuthorityExternalProof:
-		externalRequestedSwarm = "    source: external webhook\n    producer: mailbox_human\n    consumer: external_ui"
-		taskDoneSwarm = "    source: platform timer\n    producer: mailbox_human\n    consumer: external_ui\n"
+		externalRequestedSwarm = "    source: external webhook\n    producer: mailbox_human\n    consumer: external"
+		taskDoneSwarm = "    source: platform timer\n    producer: mailbox_human\n    consumer: external\n"
 	default:
 		t.Fatalf("unsupported event-metadata authority variant %d", variant)
 	}
@@ -176,7 +176,7 @@ func CopyTimerValidation(t testing.TB, variant TimerValidationVariant) string {
 	case TimerValidationWildcardConsumer:
 		settings.timerHandlerKey = "timer.*"
 	case TimerValidationExternalConsumer:
-		settings.omitTimerHandler, settings.timerEventSwarm = true, "consumer: mailbox_system"
+		settings.omitTimerHandler, settings.timerEventSwarm = true, "consumer: external"
 	case TimerValidationOutputBoundary:
 		settings.omitTimerHandler, settings.flowOutput = true, true
 	case TimerValidationMissingStartProducer:
@@ -310,7 +310,7 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 	for _, file := range []string{"policy.yaml", "agents.yaml"} {
 		writeClosedVariantFile(t, root, "flows/support/"+file, "{}\n")
 	}
-	writeClosedVariantFile(t, root, "flows/support/events.yaml", "ticket.opened:\n  swarm:\n    source: external (test)\nticket.closed:\n  entity_id: string\nadmin.done:\n  swarm:\n    source: external (test)\nadmin.review:\n  swarm:\n    source: external (test)\ntimer.reminder:\n  swarm:\n    consumer: mailbox_system\n")
+	writeClosedVariantFile(t, root, "flows/support/events.yaml", "ticket.opened:\n  swarm:\n    source: external (test)\nticket.closed:\n  entity_id: string\nadmin.done:\n  swarm:\n    source: external (test)\nadmin.review:\n  swarm:\n    source: external (test)\ntimer.reminder:\n  swarm:\n    consumer: external\n")
 	timerBlock := "    - id: reminder\n      owner: support-node\n      event: timer.reminder\n      delay: 1m\n      start_on: " + settings.startOn + "\n"
 	if settings.cancelOn != "" {
 		timerBlock += "      cancel_on: " + settings.cancelOn + "\n"

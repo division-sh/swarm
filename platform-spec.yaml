@@ -692,7 +692,7 @@ contract_formats:
         swarm:
           source: external (optional; non-derivable external/platform producer proof)
           producer: mailbox_human (optional; exceptional non-derivable producer proof)
-          consumer: external_ui (optional; non-derivable external sink proof)
+          consumer: external (optional; registered non-derivable external sink proof)
           status: planned (optional; lifecycle suppression)
           note: Human-readable metadata (optional)
         field_name: type
@@ -4349,15 +4349,11 @@ engine:
         target_unreachable_no_subscriber: Target resolution finds no recipient for the requested target.
         target_unreachable_terminated: Target or ParentRoute referred to an instance that no longer exists.
         parent_route_incomplete: Structural child-to-parent routing needs ParentRoute but instance metadata only has incomplete legacy parent data.
-        target_ambiguous: flow/match resolution finds more than one target.
         target_not_subscribed: Target instance exists but does not subscribe to the emitted event type.
         platform.reply_already_terminal: A distinct reply event attempted to consume a context already terminally claimed by
           another reply. Diagnostics name reply_context_id, request event, accepted reply event, and rejected reply event.
         platform.stale_arrival: Reply context is missing, malformed, topology-mismatched, or resolves to no live origin carrier.
           Diagnostics name the paired request/reply pins and available context identity; no fallback delivery is attempted.
-      emit_time_tool_error:
-        target_sender_no_inbound_runtime: target:sender reached a mixed path with no inbound event source.
-        target_sender_empty_source_runtime: target:sender reached an inbound event whose source is empty.
     boot_verify_scope:
       proves:
       - contract well-formedness
@@ -4371,7 +4367,6 @@ engine:
       bridge: Runtime publish-time and emit-time checks cover the cases boot verification cannot prove. No silent failure category is allowed.
       v2_non_blockers:
       - entity-field unique indexes for boot-provable match cardinality
-      - deeper trigger reachability analysis for mixed target:sender paths
       - dedicated route-inspection CLI
     select_entity_coexistence:
       canonical: External webhook ingress, events declared with swarm.source beginning with external, and mixed-provenance no-target events.
@@ -18096,6 +18091,10 @@ static_analyzer:
     accepted_target_mechanisms:
       typed_same_flow_consumer:
         rule: A scoped authored subscriber consumes the local event through typed pub/sub.
+      accepted_external_consumer:
+        rule: >-
+          Exact `swarm.consumer: external` lowers to the closed external-boundary type. Other free-form consumer
+          metadata does not authorize routing or suppress no-consumer failure.
       lowered_parent_connect:
         rule: Parent connect plus receiver-owned scalar instance/carry/resolution lowering provides concrete route-plan facts before runtime dispatch.
       structural_parent_route:
@@ -18125,7 +18124,7 @@ static_analyzer:
       reasons cover the cases boot verification cannot prove; no case may silently fall back to consumerless event-type delivery.
     implementation_slice_1444:
       status: merge_bearing_static_verify_behavior
-      canonical_code_owner: internal/runtime/bootverify.checkPinTargetResolution with pinRoutingAgentEmitSites
+      canonical_code_owner: internal/runtime/core/pinrouting.ClassifyOutputConsumer
       rule: |
         Agent emit_events declarations that name a pin-declared output event are
         static emit sites for pin_target_resolution. They consume the same
@@ -18142,6 +18141,9 @@ static_analyzer:
       - flow pins.outputs.events event identity
       - lowered parent connect proof from flow_model.flow_package.composition_routing
       - existing node/system pin_target_resolution canonical-consumer validation owner
+      runtime_consumers:
+      - internal/runtime/bootverify.checkPinTargetResolution
+      - internal/runtime/core/pinrouting.ResolveEnvelope
       produces:
       - agent emit_events pin-declared output coverage on cmd/swarm verify
       - connected agent output-pin verification success without producer routing or relay requirements

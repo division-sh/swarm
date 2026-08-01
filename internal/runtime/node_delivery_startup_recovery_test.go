@@ -794,7 +794,6 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 				GatePublisher:           bus,
 				DirectDecisionPublisher: bus,
 				DeliveryRuntime:         bus,
-				PinRoutingDescriptors:   bus,
 				FlowRoutes:              bus,
 			})
 
@@ -888,7 +887,6 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				GatePublisher:           bus,
 				DirectDecisionPublisher: bus,
 				DeliveryRuntime:         bus,
-				PinRoutingDescriptors:   bus,
 				FlowRoutes:              bus,
 			})
 
@@ -1039,7 +1037,6 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 				GatePublisher:           bus,
 				DirectDecisionPublisher: bus,
 				DeliveryRuntime:         bus,
-				PinRoutingDescriptors:   bus,
 				FlowRoutes:              bus,
 				TestWorkflowNodeHandlerStartHook: func(context.Context, string, events.Event) error {
 					select {

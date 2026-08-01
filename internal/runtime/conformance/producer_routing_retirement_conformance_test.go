@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -74,9 +75,14 @@ func TestProducerRoutingRetirementLedger(t *testing.T) {
 			if _, exists := testEntrypoints[baseProof]; !exists {
 				t.Fatalf("proof %q does not identify an actual TestXxx entrypoint", row.Proof)
 			}
+			if row.Disposition == "same_flow" || row.Disposition == "external" {
+				if _, exists := testEntrypoints[strings.TrimSpace(row.Proof)]; !exists {
+					t.Fatalf("canonical consumer proof %q does not identify an exact executable subtest", row.Proof)
+				}
+			}
 			path := filepath.Join(repoRoot, filepath.FromSlash(row.Path))
 			raw := readProducerRoutingProofYAML(t, path)
-			if hasRetiredProducerRouting(raw) {
+			if hasRetiredProducerRoutingFile(t, path) {
 				t.Fatalf("%s retains retired producer routing", row.Path)
 			}
 			emits := emittedEventsInYAML(raw)
@@ -110,6 +116,109 @@ func TestProducerRoutingRetirementLedger(t *testing.T) {
 	}
 	if fmt.Sprint(gotDispositionCounts) != fmt.Sprint(wantDispositionCounts) {
 		t.Fatalf("disposition counts = %v, want %v", gotDispositionCounts, wantDispositionCounts)
+	}
+}
+
+func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
+	cases := []struct {
+		id           string
+		fixture      string
+		flowID       string
+		flowInstance string
+		nodeID       string
+		trigger      string
+		emitted      string
+		runtimeEvent string
+		disposition  string
+		payload      map[string]any
+	}{
+		{id: "B001", fixture: "internal/runtime/testdata/generic-swarm-bundle", flowID: "delivery", flowInstance: "delivery/fixture-instance", nodeID: "delivery-node", trigger: "timer.item.timeout", emitted: "item.completed", runtimeEvent: "delivery/item.completed", disposition: "same_flow"},
+		{id: "B002", fixture: "internal/runtime/testdata/generic-swarm-bundle", flowID: "intake", flowInstance: "intake", nodeID: "intake-router", trigger: "item.created", emitted: "item.processed", runtimeEvent: "intake/item.processed", disposition: "same_flow", payload: map[string]any{"item_id": "item-1", "items": []any{map[string]any{"id": "line-1"}}}},
+		{id: "B151", fixture: "tests/tier8-boot-verification/test-boot-event-cycle", nodeID: "test-node", trigger: "cycle.ping", emitted: "cycle.pong", disposition: "same_flow"},
+		{id: "B152", fixture: "tests/tier8-boot-verification/test-boot-event-cycle", nodeID: "test-node", trigger: "cycle.pong", emitted: "cycle.ping", disposition: "same_flow"},
+		{id: "B164", fixture: "tests/tier8-boot-verification/test-boot-permission-tool-mismatch", nodeID: "test-node", trigger: "task.requested", emitted: "task.completed", disposition: "same_flow"},
+		{id: "B169", fixture: "tests/tier8-boot-verification/test-boot-prompt-ref-stub", nodeID: "prompt-ref-stub-node", trigger: "task.requested", emitted: "task.completed", disposition: "external"},
+		{id: "B170", fixture: "tests/tier8-boot-verification/test-boot-prompt-ref", nodeID: "prompt-ref-node", trigger: "task.requested", emitted: "task.completed", disposition: "external"},
+		{id: "B171", fixture: "tests/tier8-boot-verification/test-boot-prompt-stub", nodeID: "stub-agent-node", trigger: "task.requested", emitted: "task.completed", disposition: "external", payload: map[string]any{"task_type": "proof"}},
+		{id: "B173", fixture: "tests/tier8-boot-verification/test-boot-self-emit", nodeID: "test-node", trigger: "loop.event", emitted: "loop.event", disposition: "same_flow"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.id, func(t *testing.T) {
+			bundle := loadProducerRoutingFixture(t, tc.fixture)
+			if tc.id == "B171" {
+				setProducerRoutingProofEmitField(t, bundle, tc.nodeID, tc.trigger, "result", runtimecontracts.LiteralExpression("complete"))
+			}
+			source := semanticview.Wrap(bundle)
+			payload, err := json.Marshal(tc.payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			envelope := events.EnvelopeForEntityID(events.EventEnvelope{}, "fixture-entity")
+			if tc.flowID != "" {
+				envelope = events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
+					FlowID: tc.flowID, FlowInstance: tc.flowInstance, EntityID: "fixture-entity",
+				})
+			}
+			preview, err := runtimepipeline.PreviewContractHandlerExecution(
+				context.Background(), bundle, tc.nodeID,
+				eventtest.RunCreatingRootIngress(
+					"event-"+strings.ToLower(tc.id), events.EventType(tc.trigger), "fixture-proof", "", payload, 0,
+					"00000000-0000-0000-0000-000000000001", "", envelope, time.Now().UTC(),
+				),
+				runtimepipeline.WorkflowState{Stage: runtimepipeline.NormalizeWorkflowStateID(source.FlowInitialStage(tc.flowID))}, nil,
+			)
+			if err != nil {
+				t.Fatalf("execute emitting handler: %v", err)
+			}
+			wantRuntimeEvent := strings.TrimSpace(tc.runtimeEvent)
+			if wantRuntimeEvent == "" {
+				wantRuntimeEvent = tc.emitted
+			}
+			if !containsProducerRoutingValue(preview.Emits, wantRuntimeEvent) {
+				t.Fatalf("preview emits = %v, want %q", preview.Emits, wantRuntimeEvent)
+			}
+			switch tc.disposition {
+			case "same_flow":
+				consumers := semanticview.BuildAuthoredEventEndpointCensus(source).MatchingConsumers(tc.flowID, tc.emitted)
+				if len(consumers) == 0 {
+					t.Fatalf("%s has no typed same-flow consumer", tc.emitted)
+				}
+				if runtimepinrouting.PinDeclaredOutput(source, tc.flowID, tc.emitted) {
+					classification := runtimepinrouting.ClassifyOutputConsumer(source, tc.flowID, tc.emitted)
+					if !classification.Has(runtimepinrouting.OutputConsumerSameFlow) {
+						t.Fatalf("output consumer classification = %#v, want same-flow", classification)
+					}
+				}
+			case "external":
+				entry, _, ok := source.ResolveFlowEventCatalogEntry(tc.flowID, tc.emitted)
+				if !ok || entry.AcceptedConsumerBoundary() != runtimecontracts.EventConsumerBoundaryExternal {
+					t.Fatalf("%s lacks typed accepted external boundary", tc.emitted)
+				}
+			default:
+				t.Fatalf("unsupported disposition %q", tc.disposition)
+			}
+		})
+	}
+}
+
+func setProducerRoutingProofEmitField(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, nodeID, trigger, field string, value runtimecontracts.ExpressionValue) {
+	t.Helper()
+	node, ok := bundle.Nodes[nodeID]
+	if !ok {
+		t.Fatalf("node %s missing", nodeID)
+	}
+	handler, ok := node.EventHandlers[trigger]
+	if !ok {
+		t.Fatalf("handler %s/%s missing", nodeID, trigger)
+	}
+	if handler.Emit.Fields == nil {
+		handler.Emit.Fields = map[string]runtimecontracts.ExpressionValue{}
+	}
+	handler.Emit.Fields[field] = value
+	node.EventHandlers[trigger] = handler
+	bundle.Nodes[nodeID] = node
+	if handlers := bundle.Semantics.NodeHandlers[nodeID]; handlers != nil {
+		handlers[trigger] = handler
 	}
 }
 
@@ -189,22 +298,35 @@ func TestProducerRoutingRetirementExcludedDeadOutputs(t *testing.T) {
 
 func TestCheckedYAMLRejectsAllProducerRoutingAuthority(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
-	for _, root := range []string{"tests", "examples", "internal/runtime/testdata"} {
-		err := filepath.WalkDir(filepath.Join(repoRoot, root), func(path string, entry os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if entry.IsDir() || entry.Name() != "nodes.yaml" {
-				return nil
-			}
-			if hasRetiredProducerRouting(readProducerRoutingProofYAML(t, path)) {
-				t.Errorf("%s retains retired emit.target or emit.broadcast", path)
+	err := filepath.WalkDir(repoRoot, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			switch entry.Name() {
+			case ".git", "vendor", "node_modules":
+				return filepath.SkipDir
 			}
 			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
 		}
+		if entry.Name() == "nodes.yaml" && hasRetiredProducerRoutingFile(t, path) {
+			t.Errorf("%s retains retired emit.target or emit.broadcast", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProducerRoutingRetirementGuardIgnoresNestedLiteralEmitMap(t *testing.T) {
+	raw := []byte("worker:\n  id: worker\n  event_handlers:\n    request:\n      emit:\n        event: task.done\n        fields:\n          config:\n            literal:\n              emit:\n                broadcast: true\n")
+	retired, err := runtimecontracts.HasRetiredProducerRoutingYAML(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retired {
+		t.Fatal("nested literal payload was classified as retired routing")
 	}
 }
 
@@ -285,35 +407,16 @@ func outputPinSinksInYAML(document map[string]any) map[string]string {
 	return out
 }
 
-func hasRetiredProducerRouting(document map[string]any) bool {
-	retired := false
-	var walk func(any)
-	walk = func(value any) {
-		if retired {
-			return
-		}
-		switch typed := value.(type) {
-		case map[string]any:
-			for key, child := range typed {
-				if key == "emit" {
-					if emit, ok := child.(map[string]any); ok {
-						_, hasTarget := emit["target"]
-						_, hasBroadcast := emit["broadcast"]
-						if hasTarget || hasBroadcast {
-							retired = true
-							return
-						}
-					}
-				}
-				walk(child)
-			}
-		case []any:
-			for _, child := range typed {
-				walk(child)
-			}
-		}
+func hasRetiredProducerRoutingFile(t testing.TB, path string) bool {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
 	}
-	walk(document)
+	retired, err := runtimecontracts.HasRetiredProducerRoutingYAML(raw)
+	if err != nil {
+		t.Fatalf("scan %s: %v", path, err)
+	}
 	return retired
 }
 
@@ -341,6 +444,17 @@ func repositoryTestEntrypoints(t testing.TB, repoRoot string) map[string]struct{
 			function, ok := declaration.(*ast.FuncDecl)
 			if ok && strings.HasPrefix(function.Name.Name, "Test") {
 				out[function.Name.Name] = struct{}{}
+				ast.Inspect(function.Body, func(node ast.Node) bool {
+					literal, ok := node.(*ast.BasicLit)
+					if !ok || literal.Kind != token.STRING {
+						return true
+					}
+					value := strings.Trim(literal.Value, "`\"")
+					if len(value) == 4 && value[0] == 'B' {
+						out[function.Name.Name+"/"+value] = struct{}{}
+					}
+					return true
+				})
 			}
 		}
 		return nil
@@ -358,6 +472,9 @@ func loadProducerRoutingFixture(t testing.TB, relative string) *runtimecontracts
 		repoRoot, filepath.Join(repoRoot, relative), runtimecontracts.DefaultPlatformSpecFile(repoRoot),
 	)
 	if err != nil {
+		if diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
+			t.Fatalf("load %s: %v: %s", relative, err, diagnostic.RawCause)
+		}
 		t.Fatalf("load %s: %v", relative, err)
 	}
 	return bundle

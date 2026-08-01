@@ -81,6 +81,25 @@ func TestProductionValidationRejectsRootHarnessOutput(t *testing.T) {
 	}
 }
 
+func TestValidateWorkflowContractSurfaceRejectsProgrammaticUnknownOutputSink(t *testing.T) {
+	bundle := testRuntimeWorkflowValidationBundle()
+	bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{
+		Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{
+			Name: "root_completed", Event: "root.completed", Sink: runtimecontracts.FlowOutputSink(255),
+		}}}},
+	}
+	bundle.Semantics.FlowOutputEventPins = map[string][]runtimecontracts.FlowOutputEventPin{
+		"": bundle.RootSchema.Pins.Outputs.EventPins,
+	}
+	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), DefaultWorkflowContractValidationOptions(nil))
+	if err == nil || !strings.Contains(err.Error(), "output pin sink is invalid at root_completed") {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want invalid sink rejection", err)
+	}
+	if result.ProductionValid {
+		t.Fatalf("validation result = %#v, want production_valid=false", result)
+	}
+}
+
 func TestEnsureWorkflowBootWiringRejectsHarnessOutputWithoutInputHarness(t *testing.T) {
 	_, err := ensureWorkflowBootWiring(RuntimeOptions{
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: loadWorkflowValidationSourceAt(t, canonicalrouting.CopyHarnessInjectionWithoutSource(t))},

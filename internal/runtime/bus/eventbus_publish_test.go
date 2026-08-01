@@ -3219,7 +3219,6 @@ func newEventBusWorkflowCoordinator(
 		GatePublisher:           eventBus,
 		DirectDecisionPublisher: eventBus,
 		DeliveryRuntime:         eventBus,
-		PinRoutingDescriptors:   eventBus,
 		FlowRoutes:              eventBus,
 	})
 

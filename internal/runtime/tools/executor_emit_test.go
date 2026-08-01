@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -953,6 +954,32 @@ func TestHandleEmitTool_RootSchemaPinOutputStillRequiresTarget(t *testing.T) {
 	}
 	if bus.count != 0 {
 		t.Fatalf("publish count = %d, want 0", bus.count)
+	}
+}
+
+func TestHandleEmitTool_RoutesTypedSameFlowOutputToNodeConsumer(t *testing.T) {
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		filepath.Join(repoRoot, "tests/tier8-boot-verification/test-boot-event-cycle"),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load cycle fixture: %v", err)
+	}
+	source := semanticview.Wrap(bundle)
+	store := newEmitRoutePlanStore()
+	eventBus := newEmitRoutePlanEventBus(t, store, source)
+	actor := models.AgentConfig{ExecutionMode: "live", ID: "root-agent", Role: "root-agent", EmitEvents: []string{"cycle.ping"}}
+	exec := NewExecutorWithOptions(eventBus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: NewEmitRegistry(source, nil)})
+
+	out, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_cycle_ping", map[string]any{})
+	if err != nil {
+		t.Fatalf("handleEmitTool: %v", err)
+	}
+	eventID := emitToolResultString(t, out, "event_id")
+	if !emitDeliveryRoutesContain(store.routes[eventID], events.DeliveryRoute{SubscriberType: "node", SubscriberID: "test-node"}) {
+		t.Fatalf("persisted delivery routes = %#v, want typed same-flow node consumer", store.routes[eventID])
 	}
 }
 

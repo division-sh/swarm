@@ -219,7 +219,6 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 		GatePublisher:           diagnosticBus,
 		DirectDecisionPublisher: diagnosticBus,
 		DeliveryRuntime:         eventBus,
-		PinRoutingDescriptors:   eventBus,
 		FlowRoutes:              eventBus,
 		TimerScheduleStore:      backend,
 	})

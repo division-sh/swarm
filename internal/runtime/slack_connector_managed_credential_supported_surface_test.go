@@ -510,7 +510,7 @@ func startSlackManagedConnectorBusAndCoordinator(t *testing.T, backend slackMana
 		DeliveryStore:       backend.deliveryStore,
 		ManagedCredentials:  managedStore,
 		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
-		PinRoutingDescriptors: bus, FlowRoutes: bus,
+		FlowRoutes: bus,
 	})
 
 	startConfiguredChannelActivityNode(t, backend.ctx, pc, bus, backend.db)

@@ -449,7 +449,7 @@ func startTelegramConnectorSupportedSurfaceCoordinator(
 		DeliveryStore:       backend.deliveryStore,
 		Credentials:         credentialStore,
 		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
-		PinRoutingDescriptors: bus, FlowRoutes: bus,
+		FlowRoutes: bus,
 	})
 
 	startConfiguredChannelActivityNode(t, backend.ctx, pc, bus, backend.db)

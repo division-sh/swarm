@@ -10,23 +10,38 @@ import (
 )
 
 func TestPinTargetResolutionFailsClosedWithoutCanonicalConsumer(t *testing.T) {
-	report := Run(context.Background(), semanticview.Wrap(pinRoutingCheckBundle("", false, false)), Options{})
+	report := Run(context.Background(), semanticview.Wrap(pinRoutingCheckBundle(runtimecontracts.FlowOutputSinkNone, false, false)), Options{})
 	if !reportContains(report.Errors(), "pin_target_resolution", "target_required_missing") {
 		t.Fatalf("expected target_required_missing, got %#v", report.Errors())
 	}
 }
 
 func TestPinTargetResolutionAllowsTypedSameFlowConsumer(t *testing.T) {
-	report := Run(context.Background(), semanticview.Wrap(pinRoutingCheckBundle("", true, false)), Options{})
+	report := Run(context.Background(), semanticview.Wrap(pinRoutingCheckBundle(runtimecontracts.FlowOutputSinkNone, true, false)), Options{})
 	if reportContainsCheck(report.Errors(), "pin_target_resolution") {
 		t.Fatalf("same-flow consumer produced routing error: %#v", report.Errors())
 	}
 }
 
 func TestPinTargetResolutionAllowsAcceptedExternalConsumer(t *testing.T) {
-	report := Run(context.Background(), semanticview.Wrap(pinRoutingCheckBundle("", false, true)), Options{})
+	report := Run(context.Background(), semanticview.Wrap(pinRoutingCheckBundle(runtimecontracts.FlowOutputSinkNone, false, true)), Options{})
 	if reportContainsCheck(report.Errors(), "pin_target_resolution") {
 		t.Fatalf("accepted external consumer produced routing error: %#v", report.Errors())
+	}
+}
+
+func TestPinTargetResolutionRejectsUnregisteredExternalConsumerMetadata(t *testing.T) {
+	for _, consumer := range []string{"external_fixture_harness", "externl", "webhook"} {
+		t.Run(consumer, func(t *testing.T) {
+			bundle := pinRoutingCheckBundle(runtimecontracts.FlowOutputSinkNone, false, false)
+			entry := bundle.Events["result.ready"]
+			entry.Swarm.Consumer = []string{consumer}
+			bundle.Events["result.ready"] = entry
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+			if !reportContains(report.Errors(), "pin_target_resolution", "target_required_missing") {
+				t.Fatalf("metadata %q authorized routing: %#v", consumer, report.Errors())
+			}
+		})
 	}
 }
 
@@ -63,10 +78,17 @@ func TestPinTargetResolutionRejectsHarnessConflictWithoutProducer(t *testing.T) 
 	}
 }
 
+func TestPinTargetResolutionRejectsProgrammaticUnknownOutputSink(t *testing.T) {
+	report := Run(context.Background(), semanticview.Wrap(pinRoutingCheckBundle(runtimecontracts.FlowOutputSink(255), true, false)), Options{})
+	if !reportContains(report.Errors(), "pin_target_resolution", "invalid sink") {
+		t.Fatalf("expected invalid sink rejection, got %#v", report.Errors())
+	}
+}
+
 func pinRoutingCheckBundle(sink runtimecontracts.FlowOutputSink, sameFlowConsumer, externalConsumer bool) *runtimecontracts.WorkflowContractBundle {
 	ready := runtimecontracts.EventCatalogEntry{}
 	if externalConsumer {
-		ready.Swarm.Consumer = []string{"external_webhook"}
+		ready.Swarm.Consumer = []string{"external"}
 	}
 	pin := runtimecontracts.FlowOutputEventPin{Name: "result_ready", Event: "result.ready", Sink: sink}
 	bundle := &runtimecontracts.WorkflowContractBundle{

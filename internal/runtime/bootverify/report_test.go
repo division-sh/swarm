@@ -684,7 +684,7 @@ root-node:
 				name: "dead-event-schema-external-consumer",
 				flows: map[string]deadEventSchemaFlowFiles{
 					"support": {
-						events: "ticket.ready:\n  swarm:\n    consumer: mailbox_system\n",
+						events: "ticket.ready:\n  swarm:\n    consumer: external\n",
 					},
 				},
 			},
@@ -861,7 +861,7 @@ func TestRun_DoesNotUsePlatformCatalogOverlapAsProofForDeadEventSchema(t *testin
 	}
 }
 
-func TestRun_DoesNotWarnForEventConsumerExistsWhenCatalogDeclaresConsumerMetadata(t *testing.T) {
+func TestRun_DoesNotWarnForEventConsumerExistsWhenCatalogDeclaresAcceptedExternalConsumer(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Platform: runtimecontracts.PlatformSpecDocument{},
 		Semantics: runtimecontracts.WorkflowSemanticView{
@@ -883,7 +883,7 @@ func TestRun_DoesNotWarnForEventConsumerExistsWhenCatalogDeclaresConsumerMetadat
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"task.start": {Swarm: runtimecontracts.EventSwarmMetadata{Source: "external"}},
-			"task.done":  {Swarm: runtimecontracts.EventSwarmMetadata{Consumer: []string{"dashboard"}}},
+			"task.done":  {Swarm: runtimecontracts.EventSwarmMetadata{Consumer: []string{"external"}}},
 		},
 	}
 	bundle.Platform.Platform.Name = "test"
@@ -6454,7 +6454,7 @@ func TestRun_AllowsTimerFireEventWithExternalConsumer(t *testing.T) {
 		event:             "timer.reminder",
 		includeTimerEvent: true,
 		omitTimerHandler:  true,
-		timerEventSwarm:   "consumer: mailbox_system",
+		timerEventSwarm:   "consumer: external",
 	})
 	repoRoot := repoRootForBootverifyTest(t)
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)

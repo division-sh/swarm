@@ -1446,16 +1446,39 @@ type FlowOutputEventPin struct {
 	Carries []string       `yaml:"carries"`
 }
 
-type FlowOutputSink string
+type FlowOutputSink uint8
 
-const FlowOutputSinkHarness FlowOutputSink = "harness"
+const (
+	FlowOutputSinkNone FlowOutputSink = iota
+	FlowOutputSinkHarness
+)
+
+func ParseFlowOutputSink(raw string) (FlowOutputSink, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "harness":
+		return FlowOutputSinkHarness, nil
+	default:
+		return FlowOutputSinkNone, fmt.Errorf("output event pin sink must be %q", FlowOutputSinkHarness)
+	}
+}
 
 func (s FlowOutputSink) String() string {
-	return strings.TrimSpace(string(s))
+	switch s {
+	case FlowOutputSinkNone:
+		return ""
+	case FlowOutputSinkHarness:
+		return "harness"
+	default:
+		return "invalid"
+	}
 }
 
 func (s FlowOutputSink) Empty() bool {
-	return s.String() == ""
+	return s == FlowOutputSinkNone
+}
+
+func (s FlowOutputSink) Valid() bool {
+	return s == FlowOutputSinkNone || s == FlowOutputSinkHarness
 }
 
 type FlowInputPinCarries map[string]FlowInputPinCarry
@@ -1761,6 +1784,20 @@ type EventSwarmMetadata struct {
 	Status   string   `yaml:"status,omitempty"`
 }
 
+type EventConsumerBoundary uint8
+
+const (
+	EventConsumerBoundaryNone EventConsumerBoundary = iota
+	EventConsumerBoundaryExternal
+)
+
+func (b EventConsumerBoundary) String() string {
+	if b == EventConsumerBoundaryExternal {
+		return "external"
+	}
+	return ""
+}
+
 func (e EventCatalogEntry) SwarmNote() string {
 	return strings.TrimSpace(e.Swarm.Note)
 }
@@ -1775,6 +1812,14 @@ func (e EventCatalogEntry) SwarmProducer() []string {
 
 func (e EventCatalogEntry) SwarmConsumer() []string {
 	return normalizeStrings(e.Swarm.Consumer)
+}
+
+func (e EventCatalogEntry) AcceptedConsumerBoundary() EventConsumerBoundary {
+	consumers := e.SwarmConsumer()
+	if len(consumers) != 1 || !strings.EqualFold(strings.TrimSpace(consumers[0]), EventConsumerBoundaryExternal.String()) {
+		return EventConsumerBoundaryNone
+	}
+	return EventConsumerBoundaryExternal
 }
 
 func (e EventCatalogEntry) SwarmStatus() string {

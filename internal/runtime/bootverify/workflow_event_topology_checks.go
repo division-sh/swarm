@@ -272,7 +272,7 @@ func topologyRoutesConsumer(topology routingtopology.Topology, endpointID string
 }
 
 func eventHasExternalConsumerLocal(entry runtimecontracts.EventCatalogEntry) bool {
-	return len(entry.SwarmConsumer()) > 0
+	return entry.AcceptedConsumerBoundary() == runtimecontracts.EventConsumerBoundaryExternal
 }
 
 func (c *checkerContext) eventCycleDetection() []Finding {

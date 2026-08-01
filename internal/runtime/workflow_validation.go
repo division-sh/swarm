@@ -72,6 +72,10 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	if source == nil {
 		return result, fmt.Errorf("semantic source is required")
 	}
+	if invalidSinks := workflowInvalidOutputSinkDeclarations(source); len(invalidSinks) > 0 {
+		result.ProductionValid = false
+		return result, fmt.Errorf("output pin sink is invalid at %s; the only supported non-empty value is harness", strings.Join(invalidSinks, ", "))
+	}
 	harnessInputs := workflowHarnessInputDeclarations(source)
 	result.HarnessInputDeclarations = append([]string(nil), harnessInputs...)
 	result.HarnessInjectedInputCount = len(harnessInputs)
@@ -225,6 +229,33 @@ func workflowHarnessOutputDeclarations(source semanticview.Source) []string {
 	for _, flowID := range flowIDs {
 		for _, pin := range source.FlowOutputEventPins(flowID) {
 			if pin.Sink != runtimecontracts.FlowOutputSinkHarness {
+				continue
+			}
+			location := strings.TrimSpace(pin.PinName())
+			if flowID != "" {
+				location = strings.TrimSpace(flowID) + "." + location
+			}
+			declarations = append(declarations, location)
+		}
+	}
+	sort.Strings(declarations)
+	return declarations
+}
+
+func workflowInvalidOutputSinkDeclarations(source semanticview.Source) []string {
+	if source == nil {
+		return nil
+	}
+	var declarations []string
+	flowIDs := []string{""}
+	for flowID := range source.FlowSchemaEntries() {
+		if strings.TrimSpace(flowID) != "" {
+			flowIDs = append(flowIDs, flowID)
+		}
+	}
+	for _, flowID := range flowIDs {
+		for _, pin := range source.FlowOutputEventPins(flowID) {
+			if pin.Sink.Valid() {
 				continue
 			}
 			location := strings.TrimSpace(pin.PinName())

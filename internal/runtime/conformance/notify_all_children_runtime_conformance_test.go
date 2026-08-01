@@ -1510,7 +1510,6 @@ func newNotifyAllChildrenRuntime(
 		GatePublisher:           diagnosticBus,
 		DirectDecisionPublisher: diagnosticBus,
 		DeliveryRuntime:         eventBus,
-		PinRoutingDescriptors:   eventBus,
 		FlowRoutes:              eventBus,
 		TestEngineEmitNow:       engineNow,
 		WorkOwner:               workOwner,

@@ -1125,7 +1125,6 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			GatePublisher:           rt.Bus,
 			DirectDecisionPublisher: rt.Bus,
 			DeliveryRuntime:         rt.Bus,
-			PinRoutingDescriptors:   rt.Bus,
 			FlowRoutes:              rt.Bus,
 			RunLifecycle:            runtimeDeps.EventBusDurable.RunLifecycle,
 			Credentials:             rt.Credentials,

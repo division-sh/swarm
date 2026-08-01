@@ -1956,6 +1956,51 @@ func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(
 	}
 }
 
+func TestEventBusPublish_NodeProducedSameFlowOutputPersistsNodeDelivery(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		filepath.Join(repoRoot, "tests/tier8-boot-verification/test-boot-event-cycle"),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load cycle fixture: %v", err)
+	}
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	eventID := uuid.NewString()
+	evt := eventtest.PersistedChildForProducer(
+		eventID,
+		events.EventType("cycle.pong"),
+		eventtest.Producer(events.EventProducerNode, "test-node"),
+		"cycle-task",
+		[]byte(`{}`),
+		1,
+		uuid.NewString(),
+		uuid.NewString(),
+		events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString()),
+		time.Now().UTC(),
+	)
+	want := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "test-node"}
+
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if !deliveryRoutesContain(plan.DeliveryRoutes, want) {
+		t.Fatalf("delivery routes = %#v, want typed same-flow node route %#v", plan.DeliveryRoutes, want)
+	}
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if !deliveryRoutesContain(store.routes[eventID], want) {
+		t.Fatalf("persisted delivery routes = %#v, want typed same-flow node route %#v", store.routes[eventID], want)
+	}
+}
+
 func TestEventBusPublish_CanonicalParentConnectPersistsSingularStaticRoute(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(

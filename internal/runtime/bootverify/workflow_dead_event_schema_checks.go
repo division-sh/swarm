@@ -228,7 +228,7 @@ func (c *checkerContext) deadEventSourceRole(decl deadEventDeclaration) bool {
 }
 
 func deadEventExternalConsumer(entry runtimecontracts.EventCatalogEntry) bool {
-	return len(entry.SwarmConsumer()) > 0
+	return entry.AcceptedConsumerBoundary() == runtimecontracts.EventConsumerBoundaryExternal
 }
 
 func deadEventSchemaFileLabel(path, flowID string) string {
