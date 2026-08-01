@@ -11,6 +11,10 @@ import (
 )
 
 func recordActivityAttemptStory(ctx context.Context, rec ActivityAttemptRecord, transition string) error {
+	return runtimeauthoractivity.Record(ctx, ActivityAttemptStoryDraft(rec, transition))
+}
+
+func ActivityAttemptStoryDraft(rec ActivityAttemptRecord, transition string) runtimeauthoractivity.Draft {
 	retry := rec.Attempt
 	eventType := rec.ResultEventType
 	failure := rec.Failure
@@ -18,7 +22,7 @@ func recordActivityAttemptStory(ctx context.Context, rec ActivityAttemptRecord, 
 		eventType = ""
 		failure = nil
 	}
-	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+	return runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindActivityLifecycle, Transition: transition,
 		SourceOwner: "activity_attempts", SourceIdentity: rec.RequestEventID,
 		DedupKey:   "activity:" + rec.RequestEventID + ":" + transition,
@@ -28,7 +32,7 @@ func recordActivityAttemptStory(ctx context.Context, rec ActivityAttemptRecord, 
 			Tool: rec.Tool, EffectClass: rec.EffectClass, Attempt: intPointer(retry), EventType: eventType, ExecutionMode: string(rec.ExecutionMode),
 		},
 		Failure: failure,
-	})
+	}
 }
 
 func activityOccurrenceTime(rec ActivityAttemptRecord, transition string) time.Time {

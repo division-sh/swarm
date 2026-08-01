@@ -24,12 +24,12 @@ func newTestWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
 	store := NewPostgresWorkflowPersistence(db, &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectPostgres}).store
 	store.runLifecycle = &unavailablePipelineTestRunLifecycle{}
 	store.timerObligations = pipelineTestTimerObligationReader{db: db, dialect: timerobligationadapter.DialectPostgres}
-	return store
+	return installPipelineTestActivityJournal(store)
 }
 
 func newTestSQLiteWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
 	reader := &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectSQLite}
-	return &workflowInstanceStore{
+	store := &workflowInstanceStore{
 		db:               db,
 		dialect:          workflowStoreDialectSQLite,
 		entityQuery:      reader,
@@ -38,6 +38,7 @@ func newTestSQLiteWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
 		runLifecycle:     &unavailablePipelineTestRunLifecycle{},
 		timerObligations: pipelineTestTimerObligationReader{db: db, dialect: timerobligationadapter.DialectSQLite},
 	}
+	return installPipelineTestActivityJournal(store)
 }
 
 func newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db *sql.DB, runner runtimeMutationRunner) *workflowInstanceStore {
@@ -46,9 +47,9 @@ func newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db *sql.DB, run
 	if owner, ok := runner.(runtimerunlifecycle.OperationOwner); ok {
 		store.runLifecycle = owner
 	} else {
-		store.runLifecycle = &unavailablePipelineTestRunLifecycle{}
+		store.runLifecycle = &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectSQLite}
 	}
-	return store
+	return installPipelineTestActivityJournal(store)
 }
 
 type pipelineTestTimerObligationReader struct {
