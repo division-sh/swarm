@@ -813,6 +813,7 @@ seam_families:
       - internal/runtime/bus/eventbus_flow_instance_descriptors_test.go
       - internal/runtime/bus/eventbus_publish_test.go
       - internal/runtime/bus/eventbus_routing.go
+      - internal/runtime/bus/scalar_template_instance_store_parity_test.go
       - internal/runtime/engine/executor.go
       - internal/runtime/artifact_action_result_delivery_test.go
       - internal/runtime/channel_runtime_supported_surface_test.go
