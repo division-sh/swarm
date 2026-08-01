@@ -10,6 +10,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"gopkg.in/yaml.v3"
 )
 
 func TestMigrateProducerRoutingRemovesAllDeterministicBroadcasts(t *testing.T) {
@@ -202,6 +203,119 @@ func TestMigrateProducerRoutingCoversEveryStructuredNestedEmitSurface(t *testing
 	}
 	if retired, err := runtimecontracts.HasRetiredProducerRoutingYAML(raw); err != nil || retired {
 		t.Fatalf("retired routing after codemod = %v, err = %v\n%s", retired, err, raw)
+	}
+}
+
+func TestMigrateProducerRoutingCoversSchemaOwnedEmitSurfaces(t *testing.T) {
+	repo := canonicalrouting.RepoRoot(t)
+	root := writeProducerRoutingCodemodBundle(t, map[string]string{
+		"schema.yaml": `name: schema-owned-producers
+loops:
+  retry:
+    revision_field: retry_count
+    max_attempts: 3
+    escape:
+      advances_to: failed
+      emit: {event: retry.exhausted, broadcast: true}
+stages:
+  waiting:
+    initial: true
+    gate:
+      decision: review
+      outcomes:
+        approve:
+          advances_to: done
+          emit: {event: review.approved, broadcast: true}
+  failed:
+    terminal: true
+  done:
+    terminal: true
+`,
+	})
+
+	var out, errOut bytes.Buffer
+	code := executeRootCommand(context.Background(), repo, []string{"migrate-producer-routing", "--contracts", root}, &out, &errOut)
+	if code != 0 || !strings.Contains(out.String(), "removed 2 retired emit.broadcast: true declarations") {
+		t.Fatalf("migrate code/stdout/stderr = %d/%q/%q", code, out.String(), errOut.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "schema.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retired, err := runtimecontracts.HasRetiredProducerRoutingYAML(raw); err != nil || retired {
+		t.Fatalf("retired schema routing after codemod = %v, err = %v\n%s", retired, err, raw)
+	}
+	var schema runtimecontracts.FlowSchemaDocument
+	if err := yaml.Unmarshal(raw, &schema); err != nil {
+		t.Fatalf("migrated schema does not load: %v\n%s", err, raw)
+	}
+}
+
+func TestMigrateProducerRoutingPreflightsSchemaOwnedManualCasesWithoutWriting(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		schema string
+		want   string
+	}{
+		{
+			name: "loop escape target",
+			schema: `name: schema-owned-loop
+loops:
+  retry:
+    revision_field: retry_count
+    max_attempts: 3
+    escape:
+      advances_to: failed
+      emit: {event: retry.exhausted, target: sender}
+`,
+			want: "emit.target",
+		},
+		{
+			name: "stage outcome nondeterministic broadcast",
+			schema: `name: schema-owned-stage
+stages:
+  waiting:
+    initial: true
+    gate:
+      decision: review
+      outcomes:
+        approve:
+          advances_to: done
+          emit: {event: review.approved, broadcast: false}
+  done:
+    terminal: true
+`,
+			want: "not boolean true",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := canonicalrouting.RepoRoot(t)
+			root := writeProducerRoutingCodemodBundle(t, map[string]string{
+				"nodes.yaml": producerRoutingNodes(`
+    deterministic:
+      emit: {event: task.done, broadcast: true}`),
+				"schema.yaml": tc.schema,
+			})
+			before := map[string][]byte{}
+			for _, relative := range []string{"nodes.yaml", "schema.yaml"} {
+				before[relative], _ = os.ReadFile(filepath.Join(root, relative))
+			}
+
+			var out, errOut bytes.Buffer
+			code := executeRootCommand(context.Background(), repo, []string{"migrate-producer-routing", "--contracts", root}, &out, &errOut)
+			if code == 0 || !strings.Contains(errOut.String(), tc.want) {
+				t.Fatalf("migrate code/stderr = %d/%q, want %q", code, errOut.String(), tc.want)
+			}
+			for relative, want := range before {
+				got, err := os.ReadFile(filepath.Join(root, relative))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(got, want) {
+					t.Fatalf("schema preflight changed %s\nbefore:\n%s\nafter:\n%s", relative, want, got)
+				}
+			}
+		})
 	}
 }
 
