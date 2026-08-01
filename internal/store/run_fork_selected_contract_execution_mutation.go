@@ -106,7 +106,7 @@ func (s *PostgresStore) requireRunForkSelectedContractExecutionAccess() error {
 }
 
 func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionMaterializeRequest) (runfork.RunForkMaterialization, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireRunForkSelectedContractExecutionAccess(); err != nil {
@@ -149,7 +149,7 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 		}, fmt.Errorf("selected-contract fork execution materialization blocked: %s", runForkBlockerCodes(blockers))
 	}
 
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	tx, err := s.backend.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("begin selected-contract fork materialization: %w", err)
 	}
@@ -274,7 +274,7 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 }
 
 func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runfork.RunForkActivation{}, fmt.Errorf("postgres store is required")
 	}
 	forkRunID := strings.TrimSpace(req.ForkRunID)
@@ -288,7 +288,7 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 		return runfork.RunForkActivation{}, err
 	}
 
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	tx, err := s.backend.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return runfork.RunForkActivation{}, fmt.Errorf("begin selected-contract fork activation: %w", err)
 	}
@@ -462,7 +462,7 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 }
 
 func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx context.Context, forkRunID string) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required")
 	}
 	forkRunID = strings.TrimSpace(forkRunID)
@@ -475,7 +475,7 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 	if err := s.requireRunForkSelectedContractExecutionAccess(); err != nil {
 		return err
 	}
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := s.backend.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return fmt.Errorf("begin selected-contract fork discard: %w", err)
 	}
@@ -647,7 +647,7 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 }
 
 func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID, forkRunID string, sourceEventIDs []string) ([]runfork.RunForkSelectedContractSourceEvent, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
 	sourceRunID = strings.TrimSpace(sourceRunID)
@@ -662,7 +662,7 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Cont
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	tx, err := s.backend.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return nil, fmt.Errorf("begin selected-contract source event preparation: %w", err)
 	}
@@ -954,10 +954,10 @@ func runForkSelectedContractAdmissionBlockerForPendingWork(admission runfork.Run
 }
 
 func (s *PostgresStore) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, sourceRunID, forkEventID string) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required")
 	}
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	tx, err := s.backend.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return err
 	}

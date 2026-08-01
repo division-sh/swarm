@@ -18,7 +18,7 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 	}
 	opts = defaultRunDebugTraceQueryOptions(opts)
 	var exists bool
-	if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = ?)`, runID).Scan(&exists); err != nil {
+	if err := s.backend.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = ?)`, runID).Scan(&exists); err != nil {
 		return nil, "", fmt.Errorf("load sqlite run trace run existence: %w", err)
 	}
 	if !exists {
@@ -93,7 +93,7 @@ func (s *SQLiteRuntimeStore) ListOperatorEvents(ctx context.Context, opts Operat
 			pageArgs = append(pageArgs, scanCreatedAt, scanCreatedAt, scanEventID)
 		}
 		pageArgs = append(pageArgs, opts.Limit+1)
-		rows, err := s.DB.QueryContext(ctx, `
+		rows, err := s.backend.db.QueryContext(ctx, `
 			SELECT e.event_id, e.created_at
 			FROM events e
 			WHERE `+strings.Join(pageWhere, " AND ")+`
@@ -157,7 +157,7 @@ func (s *SQLiteRuntimeStore) LoadOperatorEvent(ctx context.Context, eventID stri
 	if eventID == "" {
 		return OperatorEventFull{}, ErrEventNotFound
 	}
-	row, found, err := loadSQLiteEventIdentity(ctx, s.DB, eventID)
+	row, found, err := loadSQLiteEventIdentity(ctx, s.backend.db, eventID)
 	if err != nil {
 		return OperatorEventFull{}, fmt.Errorf("load sqlite operator event: %w", err)
 	}
@@ -232,7 +232,7 @@ func (s *SQLiteRuntimeStore) ListOperatorRuntimeLogs(ctx context.Context, opts O
 		order = "ASC"
 	}
 	args = append(args, opts.Limit)
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT event_id, created_at, COALESCE(run_id, ''), COALESCE(entity_id, ''), COALESCE(produced_by, ''), payload
 		FROM events
 		WHERE `+strings.Join(where, " AND ")+`
@@ -307,7 +307,7 @@ func (s *SQLiteRuntimeStore) sqliteOperatorEventDeliveries(ctx context.Context, 
 }
 
 func (s *SQLiteRuntimeStore) sqliteOperatorEventDeadLetters(ctx context.Context, eventID string) ([]OperatorDeadLetterRecord, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT dead_letter_id, COALESCE(delivery_id, ''), COALESCE(claim_version, 0), failure,
 		       COALESCE(retry_count, 0), COALESCE(chain_depth, 0), COALESCE(handler_node, ''), created_at
 		FROM dead_letters
@@ -345,7 +345,7 @@ func (s *SQLiteRuntimeStore) sqliteOperatorEventDeadLetters(ctx context.Context,
 }
 
 func (s *SQLiteRuntimeStore) sqliteOperatorDeliveryDeadLetters(ctx context.Context, deliveryID string, claimVersion int64) ([]OperatorDeadLetterRecord, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT dead_letter_id, delivery_id, claim_version, failure,
 		       COALESCE(retry_count, 0), COALESCE(chain_depth, 0), COALESCE(handler_node, ''), created_at
 		FROM dead_letters

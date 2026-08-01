@@ -997,7 +997,7 @@ func TestPostgresPipelineClaimLeaseExcludesIndependentStoreUntilRelease(t *testi
 	if err := secondaryDB.PingContext(ctx); err != nil {
 		t.Fatalf("ping independent PostgreSQL pool: %v", err)
 	}
-	secondary := &PostgresStore{DB: secondaryDB}
+	secondary := &PostgresStore{backend: &postgresRuntimeBackend{db: secondaryDB}}
 	secondary.schemaAdmission.markCurrent()
 
 	primaryWork, err := primary.PipelineObligations().ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)

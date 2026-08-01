@@ -28,7 +28,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 	ctx := testAuthorActivityContext()
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 
@@ -121,7 +121,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunCountsWithoutMutation(
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 	ctx := testAuthorActivityContext()
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 
@@ -173,7 +173,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RejectsExecutingDirectiveAut
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 	ctx := testAuthorActivityContext()
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 	now := time.Date(2026, 7, 10, 18, 0, 0, 0, time.UTC)
@@ -217,7 +217,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RetainsTerminalDirectiveAuth
 				t.Fatalf("NewPostgresStore: %v", err)
 			}
 			bootstrapTestPostgresStore(t, pg)
-			t.Cleanup(func() { _ = pg.DB.Close() })
+			t.Cleanup(func() { _ = pg.backend.db.Close() })
 			ctx := testAuthorActivityContext()
 			seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 			now := time.Date(2026, 7, 10, 19, 0, 0, 0, time.UTC)
@@ -284,7 +284,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_IncludeBundlesDeletesBundleC
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 	ctx := testAuthorActivityContext()
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 	seedDestructiveResetBundleRows(t, ctx, pg)
@@ -327,7 +327,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_ExcludeBundlesPreservesBundl
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 	ctx := testAuthorActivityContext()
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 	seedDestructiveResetBundleRows(t, ctx, pg)
@@ -370,7 +370,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunIncludeBundlesCountsWi
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 	ctx := testAuthorActivityContext()
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 	seedDestructiveResetBundleRows(t, ctx, pg)
@@ -407,7 +407,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_IncludeBundlesRejectsOutOfPl
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 	ctx := testAuthorActivityContext()
 	seedDestructiveResetBundleRows(t, ctx, pg)
 	outOfPlanRun := uuid.NewString()
@@ -451,7 +451,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DoesNotDeleteRunsCreatedAfte
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 	ctx := testAuthorActivityContext()
 	seedDestructiveResetCleanupRows(t, ctx, pg)
 	plan, err := (destructivereset.InventoryPlanner{Reader: pg}).BuildPlan(ctx, destructivereset.Request{ActorTokenID: "operator-token", IncludeBundles: false, IncludeBundlesSet: true})
@@ -463,7 +463,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DoesNotDeleteRunsCreatedAfte
 	}
 	lateRun := uuid.NewString()
 	lateEvent := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: pg.DB}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: lateRun})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: pg.backend.db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: lateRun})
 	lateSemanticEvent := eventtest.PersistedProjectionForProducer(
 		lateEvent, events.EventType("late.event"), eventtest.Producer(events.EventProducerExternal, "cleanup-late-ingress"), "",
 		[]byte(`{}`), 0, lateRun, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
@@ -508,7 +508,7 @@ func TestPostgresStore_DestructiveResetPlanCapturesManagedContainersBeforeCleanu
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 	ctx := testAuthorActivityContext()
 	seedDestructiveResetCleanupRows(t, ctx, pg)
 	containerRefs := []destructivereset.ContainerRef{{
@@ -561,7 +561,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -580,12 +580,12 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	if err != nil {
 		t.Fatalf("agent identity fields: %v", err)
 	}
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: pg.DB}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: pg.backend.db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: preservedRunID, State: storerunlifecycle.StateCompleted,
 	})
 	registerTestAuthorActivityCatalog(t, pg)
-	seedTestAgentRow(t, ctx, pg.DB, true, agentIdentity, "active")
+	seedTestAgentRow(t, ctx, pg.backend.db, true, agentIdentity, "active")
 	cleanupSemanticEvent := eventtest.PersistedProjectionForProducer(
 		eventID, events.EventType("batch.contract"), eventtest.Producer(events.EventProducerExternal, "cleanup-reference-ingress"), "",
 		[]byte(`{}`), 0, runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
@@ -593,7 +593,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	if err := commitSemanticEventFixture(ctx, pg, cleanupSemanticEvent); err != nil {
 		t.Fatalf("seed cleanup event: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
@@ -604,7 +604,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed active session: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
@@ -617,7 +617,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed preserved predecessor session: %v", err)
 	}
-	captureRunForkTestRevision(t, pg.DB, runID)
+	captureRunForkTestRevision(t, pg.backend.db, runID)
 	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
 		SourceRunID: runID,
 		At:          eventID,
@@ -628,26 +628,26 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	if materialized.ForkRunID != lateRunID {
 		t.Fatalf("dependent fork run_id = %s, want %s", materialized.ForkRunID, lateRunID)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (mutation_id, run_id, entity_id, field, caused_by_event, writer_type, writer_id)
 		VALUES ($1::uuid, $2::uuid, $3::uuid, 'status', $4::uuid, 'platform', 'test')
 	`, lateMutationID, lateRunID, entityID, eventID); err != nil {
 		t.Fatalf("seed preserved late mutation: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO timers (timer_id, timer_name, run_id, entity_id, flow_instance, fire_event, routing_source, fire_at, owner_kind)
 		VALUES ($1::uuid, 'cleanup timer', $2::uuid, $3::uuid, 'flow/a', 'timer.fire',
 		        jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow', 'flow_instance', 'flow/a', 'entity_id', $3::text)), now(), 'system')
 	`, cleanupTimerID, runID, entityID); err != nil {
 		t.Fatalf("seed cleanup timer: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO timers (timer_id, timer_name, source_timer_id, fire_event, routing_source, fire_at, owner_kind, task_type)
 		VALUES ($1::uuid, 'preserved source timer', $2::uuid, 'timer.global', '{"kind":"platform_control","route":{}}'::jsonb, now(), 'system', 'global_recurring')
 	`, preservedTimerID, cleanupTimerID); err != nil {
 		t.Fatalf("seed preserved source timer: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO reply_contexts (
 			reply_context_id, run_id, request_event_id, requester_flow_id, request_output_pin,
 			reply_input_pin, provider_flow_id, provider_input_pin, provider_output_pin,
@@ -661,13 +661,13 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	`, replyContextID, runID, eventID); err != nil {
 		t.Fatalf("seed cleanup reply context: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO mailbox (item_id, item_type, source_event_id, from_agent, summary, reply_context_id)
 		VALUES ($1::uuid, 'review_notice', $2::uuid, 'agent-a', 'preserved reply mailbox', $3)
 	`, mailboxID, eventID, replyContextID); err != nil {
 		t.Fatalf("seed preserved reply mailbox: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO runtime_ingress_state (status, controlled_by, transition_event_id)
 		VALUES ('running', 'test', $1::uuid)
 		ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, controlled_by = EXCLUDED.controlled_by, transition_event_id = EXCLUDED.transition_event_id
@@ -705,7 +705,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		t.Fatalf("cleanup timer rows after cleanup = %d, want deleted", got)
 	}
 	var predecessorSuccessor sql.NullString
-	if err := pg.DB.QueryRowContext(ctx, `
+	if err := pg.backend.db.QueryRowContext(ctx, `
 		SELECT successor_session_id::text
 		FROM agent_sessions
 		WHERE session_id = $1::uuid
@@ -719,7 +719,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		t.Fatalf("dependent fork rows after cleanup = %d, want deleted with source", got)
 	}
 	var transitionEvent sql.NullString
-	if err := pg.DB.QueryRowContext(ctx, `SELECT transition_event_id::text FROM runtime_ingress_state WHERE id = 1`).Scan(&transitionEvent); err != nil {
+	if err := pg.backend.db.QueryRowContext(ctx, `SELECT transition_event_id::text FROM runtime_ingress_state WHERE id = 1`).Scan(&transitionEvent); err != nil {
 		t.Fatalf("read runtime ingress transition event: %v", err)
 	}
 	if transitionEvent.Valid {
@@ -729,7 +729,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		t.Fatalf("dependent fork mutation rows after cleanup = %d, want deleted with fork", got)
 	}
 	var sourceTimer sql.NullString
-	if err := pg.DB.QueryRowContext(ctx, `
+	if err := pg.backend.db.QueryRowContext(ctx, `
 		SELECT source_timer_id::text
 		FROM timers
 		WHERE timer_id = $1::uuid
@@ -743,7 +743,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		t.Fatalf("cleanup reply context rows = %d, want deleted", got)
 	}
 	var mailboxReplyContext sql.NullString
-	if err := pg.DB.QueryRowContext(ctx, `SELECT reply_context_id FROM mailbox WHERE item_id = $1::uuid`, mailboxID).Scan(&mailboxReplyContext); err != nil {
+	if err := pg.backend.db.QueryRowContext(ctx, `SELECT reply_context_id FROM mailbox WHERE item_id = $1::uuid`, mailboxID).Scan(&mailboxReplyContext); err != nil {
 		t.Fatalf("read preserved mailbox reply context: %v", err)
 	}
 	if mailboxReplyContext.Valid {
@@ -759,7 +759,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 	ctx := testAuthorActivityContext()
 	cleanupRunID := uuid.NewString()
 	preservedSourceRunID := uuid.NewString()
@@ -805,19 +805,19 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 	}); err != nil {
 		t.Fatalf("seed selected-contract event: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_bindings (fork_run_id, source_run_id, fork_event_id, mode, contracts_root, workflow_name, workflow_version)
 		VALUES ($1::uuid, $2::uuid, $3::uuid, 'selected_contracts', '/contracts', 'wf', 'v1')
 	`, cleanupRunID, preservedSourceRunID, cleanupEventID); err != nil {
 		t.Fatalf("seed selected binding: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_branch_divergences (fork_run_id, source_run_id, fork_event_id, owner, policy, source_run_status_at_activation, source_run_status_after_activation)
 		VALUES ($1::uuid, $2::uuid, $3::uuid, 'test', 'selected_contract_source_advanced_branch', 'running', 'completed')
 	`, cleanupRunID, preservedSourceRunID, cleanupEventID); err != nil {
 		t.Fatalf("seed selected branch divergence: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_route_recoveries (
 			fork_run_id, source_run_id, fork_event_id, owner, runtime_recovery_owner, mode, contracts_root, workflow_name, workflow_version,
 			route_topology_owner, recipient_planning_owner, frontier_evidence_fingerprint, route_topology_fingerprint,
@@ -884,11 +884,11 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RollsBackOnUnknownForeignKey
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: pg.DB}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
-	if _, err := pg.DB.ExecContext(ctx, `
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: pg.backend.db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		CREATE TABLE cleanup_unknown_fk_probe (
 			probe_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			run_id UUID NOT NULL REFERENCES runs(run_id)
@@ -896,7 +896,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RollsBackOnUnknownForeignKey
 	`); err != nil {
 		t.Fatalf("create unknown FK probe: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO cleanup_unknown_fk_probe (run_id) VALUES ($1::uuid)`, runID); err != nil {
+	if _, err := pg.backend.db.ExecContext(ctx, `INSERT INTO cleanup_unknown_fk_probe (run_id) VALUES ($1::uuid)`, runID); err != nil {
 		t.Fatalf("seed unknown FK probe: %v", err)
 	}
 
@@ -933,7 +933,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RequiresAppliedQuiescence(t 
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 
 	now := time.Date(2026, 5, 16, 18, 50, 0, 0, time.UTC)
 	_, err = pg.ApplyDestructiveResetCleanup(testAuthorActivityContext(), destructivereset.CleanupRequest{
@@ -958,7 +958,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RejectsStaleQuiescenceEnvelo
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 
 	now := time.Date(2026, 5, 16, 18, 55, 0, 0, time.UTC)
 	for name, quiescence := range map[string]destructivereset.QuiescenceResult{
@@ -997,7 +997,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RequiresPlannedCleanupRunSet
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 
 	now := time.Date(2026, 5, 16, 19, 0, 0, 0, time.UTC)
 	_, err = pg.ApplyDestructiveResetCleanup(testAuthorActivityContext(), destructivereset.CleanupRequest{
@@ -1141,10 +1141,10 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	if err != nil {
 		t.Fatalf("agent identity fields: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `CREATE TABLE generated_entity_fixture (entity_id UUID PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`); err != nil {
+	if _, err := pg.backend.db.ExecContext(ctx, `CREATE TABLE generated_entity_fixture (entity_id UUID PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`); err != nil {
 		t.Fatalf("create generated entity fixture: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `CREATE TABLE generated_node_state_fixture (entity_id UUID NOT NULL, node_id TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(entity_id, node_id))`); err != nil {
+	if _, err := pg.backend.db.ExecContext(ctx, `CREATE TABLE generated_node_state_fixture (entity_id UUID NOT NULL, node_id TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(entity_id, node_id))`); err != nil {
 		t.Fatalf("create generated node fixture: %v", err)
 	}
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{
@@ -1155,7 +1155,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		RunID: runB, Origin: semanticEventRunOriginForTest(t, forkEvent, "source.event"),
 		StartedAt: seededAt.Add(-time.Hour),
 	})
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO decision_cards (
 			card_id, run_id, anchor_kind, anchor, status, snapshot, card_content_hash,
 			decision_schema_hash, bundle_hash, effective_cadence, provenance, fields,
@@ -1167,7 +1167,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	`, humanTaskCardID, runA); err != nil {
 		t.Fatalf("seed human-task decision card: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO human_task_continuations (
 			card_id, run_id, deadline_at, budget_bundle_hash, budget_limit,
 			budget_window_start, budget_window_end, state, created_at, updated_at
@@ -1242,32 +1242,32 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	); err != nil {
 		t.Fatalf("terminalize seeded fork run: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, side_effects) VALUES
 			($1::uuid, 'platform', 'pipeline', 'success', '{}'::jsonb),
 			($2::uuid, 'platform', 'preserved', 'success', '{}'::jsonb)
 	`, timerForkEvent, noRunEvent); err != nil {
 		t.Fatalf("seed receipts: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO dead_letters (original_event_id, original_event, original_payload, flow_instance, failure) VALUES
 			(NULL, 'global.failure', '{}'::jsonb, 'flow/a', $1::jsonb)
 	`, mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "handler_failed", nil))); err != nil {
 		t.Fatalf("seed dead letters: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_bindings (fork_run_id, source_run_id, fork_event_id, mode, contracts_root, workflow_name, workflow_version)
 		VALUES ($1::uuid, $2::uuid, $3::uuid, 'selected_contracts', '/contracts', 'wf', 'v1')
 	`, runB, runA, forkEvent); err != nil {
 		t.Fatalf("seed selected binding: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_branch_divergences (fork_run_id, source_run_id, fork_event_id, owner, policy, source_run_status_at_activation, source_run_status_after_activation)
 		VALUES ($1::uuid, $2::uuid, $3::uuid, 'test', 'selected_contract_source_advanced_branch', 'running', 'completed')
 	`, runB, runA, forkEvent); err != nil {
 		t.Fatalf("seed selected branch divergence: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_route_recoveries (
 			fork_run_id, source_run_id, fork_event_id, owner, runtime_recovery_owner, mode, contracts_root, workflow_name, workflow_version,
 			route_topology_owner, recipient_planning_owner, frontier_evidence_fingerprint, route_topology_fingerprint,
@@ -1279,8 +1279,8 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	`, runB, runA, forkEvent); err != nil {
 		t.Fatalf("seed selected route recovery: %v", err)
 	}
-	seedTestAgentRow(t, ctx, pg.DB, true, agentIdentity, "active")
-	if _, err := pg.DB.ExecContext(ctx, `
+	seedTestAgentRow(t, ctx, pg.backend.db, true, agentIdentity, "active")
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
@@ -1291,7 +1291,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed agent session: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO conversation_forks (
 			fork_id, source_session_id, source_run_id,
 			source_agent_id, source_agent_name_owner, source_agent_name_source, source_agent_route_presence,
@@ -1310,7 +1310,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(
 		t, pg, runA, agentIdentity, sessionID, turnID, "session", "agent-a:global",
 	)
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id,
@@ -1321,7 +1321,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed agent turn: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
 			run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source, status
@@ -1331,68 +1331,67 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed agent audit: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state) VALUES ($1::uuid, $2::uuid, 'flow/a', 'active')`, runA, entityID); err != nil {
+	if _, err := pg.backend.db.ExecContext(ctx, `INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state) VALUES ($1::uuid, $2::uuid, 'flow/a', 'active')`, runA, entityID); err != nil {
 		t.Fatalf("seed entity state: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO entity_mutations (run_id, entity_id, field, writer_type, writer_id) VALUES ($1::uuid, $2::uuid, 'status', 'platform', 'test')`, runA, entityID); err != nil {
+	if _, err := pg.backend.db.ExecContext(ctx, `INSERT INTO entity_mutations (run_id, entity_id, field, writer_type, writer_id) VALUES ($1::uuid, $2::uuid, 'status', 'platform', 'test')`, runA, entityID); err != nil {
 		t.Fatalf("seed entity mutation: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO timers (timer_id, timer_name, run_id, entity_id, flow_instance, fire_event, routing_source, fire_at, owner_kind) VALUES
 			($1::uuid, 'run timer', $4::uuid, $5::uuid, 'flow/a', 'timer.fire', jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow', 'flow_instance', 'flow/a', 'entity_id', $5::text)), now(), 'system'),
 			($2::uuid, 'fork run timer', NULL, $5::uuid, 'flow/a', 'timer.fire', jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow', 'flow_instance', 'flow/a', 'entity_id', $5::text)), now(), 'system'),
 			($3::uuid, 'fork event timer', NULL, $5::uuid, 'flow/a', 'timer.fire', jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow', 'flow_instance', 'flow/a', 'entity_id', $5::text)), now(), 'system'),
-			($6::uuid, 'global timer', NULL, NULL, NULL, 'timer.global', '{"kind":"platform_control","route":{}}'::jsonb, now(), 'system')
 	`, timerRun, timerForkRun, timerForkEvent, runA, entityID, uuid.NewString()); err != nil {
 		t.Fatalf("seed timers: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `UPDATE timers SET forked_from_run_id = $1::uuid WHERE timer_id = $2::uuid`, runB, timerForkRun); err != nil {
+	if _, err := pg.backend.db.ExecContext(ctx, `UPDATE timers SET forked_from_run_id = $1::uuid WHERE timer_id = $2::uuid`, runB, timerForkRun); err != nil {
 		t.Fatalf("seed timer forked_from_run_id: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `UPDATE timers SET forked_from_event_id = $1::uuid WHERE timer_id = $2::uuid`, timerForkEvent, timerForkEvent); err != nil {
+	if _, err := pg.backend.db.ExecContext(ctx, `UPDATE timers SET forked_from_event_id = $1::uuid WHERE timer_id = $2::uuid`, timerForkEvent, timerForkEvent); err != nil {
 		t.Fatalf("seed timer forked_from_event_id: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, controlled_by) VALUES ($1::uuid, 'stopped', 'test')`, runA); err != nil {
+	if _, err := pg.backend.db.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, controlled_by) VALUES ($1::uuid, 'stopped', 'test')`, runA); err != nil {
 		t.Fatalf("seed run control: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO api_idempotency (method, actor_token_id, idempotency_key, request_hash, resource_id, response, expires_at)
 		VALUES ('runtime.nuke', 'operator', 'idem', 'hash', 'runtime', '{}'::jsonb, now() + interval '1 hour')
 	`); err != nil {
 		t.Fatalf("seed api idempotency: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO runtime_ingress_state (status, controlled_by)
 		VALUES ('running', 'test')
 		ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, controlled_by = EXCLUDED.controlled_by
 	`); err != nil {
 		t.Fatalf("seed runtime ingress: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO flow_instances (instance_id, flow_template, mode) VALUES ('flow/a', 'flow', 'static')`); err != nil {
+	if _, err := pg.backend.db.ExecContext(ctx, `INSERT INTO flow_instances (instance_id, flow_template, mode) VALUES ('flow/a', 'flow', 'static')`); err != nil {
 		t.Fatalf("seed flow instance: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO routing_rules (event_pattern, subscriber_type, subscriber_id, flow_instance)
 		VALUES ('source.event', 'agent', 'agent-a', 'flow/a')
 	`); err != nil {
 		t.Fatalf("seed routing rule: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO mailbox (entity_id, flow_instance, item_type, source_event_id, from_agent, summary)
 		VALUES ($1::uuid, 'flow/a', 'review_notice', $2::uuid, 'agent-a', 'preserve mailbox')
 	`, entityID, sourceEvent); err != nil {
 		t.Fatalf("seed mailbox: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO spend_ledger (execution_mode, entity_id, flow_instance, agent_id, model, invocation_type)
 		VALUES ('live', $1::uuid, 'flow/a', 'agent-a', 'model', 'agent_turn')
 	`, entityID); err != nil {
 		t.Fatalf("seed spend ledger: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO generated_entity_fixture (entity_id) VALUES ($1::uuid)`, entityID); err != nil {
+	if _, err := pg.backend.db.ExecContext(ctx, `INSERT INTO generated_entity_fixture (entity_id) VALUES ($1::uuid)`, entityID); err != nil {
 		t.Fatalf("seed generated entity table: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO generated_node_state_fixture (entity_id, node_id) VALUES ($1::uuid, 'node-a')`, entityID); err != nil {
+	if _, err := pg.backend.db.ExecContext(ctx, `INSERT INTO generated_node_state_fixture (entity_id, node_id) VALUES ($1::uuid, 'node-a')`, entityID); err != nil {
 		t.Fatalf("seed generated node table: %v", err)
 	}
 	return destructiveResetCleanupSeed{RunA: runA, RunB: runB}
@@ -1400,7 +1399,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 
 func seedDestructiveResetBundleRows(t *testing.T, ctx context.Context, pg *PostgresStore) {
 	t.Helper()
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json, metadata) VALUES
 			($1, 'name: bundle-a', '{}'::jsonb, '{}'::jsonb),
 			($2, 'name: bundle-b', '{}'::jsonb, '{}'::jsonb)
@@ -1438,7 +1437,7 @@ func assertCleanupTablePreserved(t *testing.T, result destructivereset.CleanupRe
 func countRows(t *testing.T, ctx context.Context, pg *PostgresStore, table string) int64 {
 	t.Helper()
 	var count int64
-	if err := pg.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+quoteIdent(table)).Scan(&count); err != nil {
+	if err := pg.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+quoteIdent(table)).Scan(&count); err != nil {
 		if err == sql.ErrNoRows {
 			return 0
 		}
@@ -1450,7 +1449,7 @@ func countRows(t *testing.T, ctx context.Context, pg *PostgresStore, table strin
 func countRowsWhere(t *testing.T, ctx context.Context, pg *PostgresStore, table, where string, args ...any) int64 {
 	t.Helper()
 	var count int64
-	if err := pg.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+quoteIdent(table)+` WHERE `+where, args...).Scan(&count); err != nil {
+	if err := pg.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+quoteIdent(table)+` WHERE `+where, args...).Scan(&count); err != nil {
 		t.Fatalf("count %s where %s: %v", table, where, err)
 	}
 	return count

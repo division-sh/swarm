@@ -15,14 +15,14 @@ import (
 const runtimeSharedStoreOwnershipLock = "swarm:runtime:shared-store-owner"
 
 func (s *PostgresStore) AcquireRuntimeStartupOwnership(ctx context.Context, req runtimestartupownership.AcquireRequest) (runtimestartupownership.Lease, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, nil
 	}
 	ownerID := strings.TrimSpace(req.OwnerID)
 	if ownerID == "" {
 		return nil, fmt.Errorf("runtime owner id is required")
 	}
-	lease, acquired, err := acquireAdvisoryLockLease(ctx, s.DB, runtimeSharedStoreOwnershipLock)
+	lease, acquired, err := acquireAdvisoryLockLease(ctx, s.backend.db, runtimeSharedStoreOwnershipLock)
 	if err != nil {
 		return nil, fmt.Errorf("acquire shared runtime store ownership for %s: %w", ownerID, err)
 	}
@@ -49,13 +49,13 @@ func (s *PostgresStore) AcquireRuntimeStartupOwnership(ctx context.Context, req 
 }
 
 func (s *PostgresStore) RecordRuntimeStartupAuthorityTransition(ctx context.Context, previous *runtimestartupownership.Authority, next ...runtimestartupownership.Authority) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required for startup authority evidence")
 	}
 	if err := runtimestartupownership.ValidateTransitionChain(previous, next...); err != nil {
 		return err
 	}
-	return runPostgresSessionTransaction(ctx, s.DB, func(txctx context.Context, tx *sql.Tx) error {
+	return runPostgresSessionTransaction(ctx, s.backend.db, func(txctx context.Context, tx *sql.Tx) error {
 		leaseID := next[0].LeaseAuthorityID
 		var persistedRaw []byte
 		headErr := tx.QueryRowContext(txctx, `

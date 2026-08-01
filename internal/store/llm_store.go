@@ -260,7 +260,7 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, identity age
 	var sessionID, status string
 	var conversation, runtimeState []byte
 	var turnCount int
-	err = s.DB.QueryRowContext(ctx, `
+	err = s.backend.db.QueryRowContext(ctx, `
 		SELECT s.session_id::text,s.status,COALESCE(s.conversation,'[]'::jsonb),COALESCE(s.runtime_state,'{}'::jsonb),s.turn_count
 		FROM agent_sessions s
 		JOIN runs run ON run.run_id = s.run_id
@@ -300,7 +300,7 @@ func (s *PostgresStore) UpdateLiveSessionWatchdog(ctx context.Context, update ru
 	if err != nil {
 		return err
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}

@@ -14,7 +14,7 @@ import (
 )
 
 type PostgresStore struct {
-	DB *sql.DB
+	backend *postgresRuntimeBackend
 
 	schemaAdmission schemaAdmission
 
@@ -23,6 +23,14 @@ type PostgresStore struct {
 	authorActivityCatalog   *runtimeauthoractivity.EventCatalogRegistry
 	sessionLockTTL          time.Duration
 	runLifecycleSinks       runLifecycleCandidateSinkRegistry
+}
+
+// postgresRuntimeBackend is the private owner of PostgreSQL runtime
+// capabilities. The selected-store facade deliberately contains no raw SQL
+// handle; runtime consumers can only reach the named operations on
+// PostgresStore.
+type postgresRuntimeBackend struct {
+	db *sql.DB
 
 	scheduleClaimMu   sync.Mutex
 	scheduleClaimConn *sql.Conn
@@ -78,19 +86,28 @@ func escapePostgresKeywordValue(value string) string {
 }
 
 func NewPostgresStore(dsn string) (*PostgresStore, error) {
+	store, _, err := OpenPostgresStore(dsn)
+	return store, err
+}
+
+// OpenPostgresStore returns the selected runtime store and the separately
+// owned process-construction database handle. Only CLI/serve construction may
+// retain the latter; runtime consumers receive the typed store facade.
+func OpenPostgresStore(dsn string) (*PostgresStore, *sql.DB, error) {
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("open postgres: %w", err)
+		return nil, nil, fmt.Errorf("open postgres: %w", err)
 	}
 	// Safe defaults; callers can still override pool settings afterward.
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(10)
 	db.SetConnMaxIdleTime(5 * time.Minute)
 	db.SetConnMaxLifetime(30 * time.Minute)
-	return &PostgresStore{
-		DB:             db,
+	store := &PostgresStore{
+		backend:        &postgresRuntimeBackend{db: db},
 		sessionLockTTL: 120 * time.Second,
-	}, nil
+	}
+	return store, db, nil
 }
 
 func (s *PostgresStore) SetSessionLockTTL(ttl time.Duration) {
@@ -104,8 +121,15 @@ func (s *PostgresStore) SetSessionLockTTL(ttl time.Duration) {
 }
 
 func (s *PostgresStore) Ping(ctx context.Context) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required")
 	}
-	return s.DB.PingContext(ctx)
+	return s.backend.db.PingContext(ctx)
+}
+
+func (s *PostgresStore) Close() error {
+	if s == nil || s.backend == nil || s.backend.db == nil {
+		return nil
+	}
+	return s.backend.db.Close()
 }

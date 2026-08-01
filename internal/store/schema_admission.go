@@ -38,14 +38,14 @@ func (a *schemaAdmission) requireCurrent() error {
 }
 
 func (s *PostgresStore) requireCurrentSchema() error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required")
 	}
 	return s.schemaAdmission.requireCurrent()
 }
 
 func (s *SQLiteSchemaStore) requireCurrentSchema() error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("sqlite schema store is required")
 	}
 	return s.schemaAdmission.requireCurrent()

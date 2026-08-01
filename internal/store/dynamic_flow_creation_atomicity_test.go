@@ -168,7 +168,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	switch backend {
 	case "sqlite":
 		sqliteStore := storetest.StartSQLiteRuntimeStore(t)
-		db = sqliteStore.DB
+		db = sqliteStore.TestDatabase()
 		selected = sqliteStore
 		sqlite = true
 	case "postgres":

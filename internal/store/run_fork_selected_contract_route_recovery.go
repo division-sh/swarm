@@ -26,7 +26,7 @@ func (s *PostgresStore) requireRunForkSelectedContractRouteRecoveryAccess() erro
 }
 
 func (s *PostgresStore) RecordRunForkSelectedContractRouteRecovery(ctx context.Context, req runfork.RunForkSelectedContractRouteRecoveryRequest) (runfork.RunForkSelectedContractRouteRecovery, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireRunForkSelectedContractRouteRecoveryAccess(); err != nil {
@@ -36,7 +36,7 @@ func (s *PostgresStore) RecordRunForkSelectedContractRouteRecovery(ctx context.C
 	if err != nil {
 		return runfork.RunForkSelectedContractRouteRecovery{}, err
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("begin selected-contract route recovery: %w", err)
 	}
@@ -150,7 +150,7 @@ func validateRunForkSelectedContractRouteRecoveryAtActivation(ctx context.Contex
 }
 
 func (s *PostgresStore) LoadRunForkSelectedContractRouteRecovery(ctx context.Context, forkRunID string) (runfork.RunForkSelectedContractRouteRecovery, bool, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runfork.RunForkSelectedContractRouteRecovery{}, false, fmt.Errorf("postgres store is required")
 	}
 	forkRunID = strings.TrimSpace(forkRunID)
@@ -163,7 +163,7 @@ func (s *PostgresStore) LoadRunForkSelectedContractRouteRecovery(ctx context.Con
 	if err := s.requireRunForkSelectedContractRouteRecoveryAccess(); err != nil {
 		return runfork.RunForkSelectedContractRouteRecovery{}, false, err
 	}
-	record, err := loadRunForkSelectedContractRouteRecovery(ctx, s.DB, `WHERE fork_run_id = $1::uuid`, forkRunID)
+	record, err := loadRunForkSelectedContractRouteRecovery(ctx, s.backend.db, `WHERE fork_run_id = $1::uuid`, forkRunID)
 	if err == sql.ErrNoRows {
 		return runfork.RunForkSelectedContractRouteRecovery{}, false, nil
 	}
@@ -174,13 +174,13 @@ func (s *PostgresStore) LoadRunForkSelectedContractRouteRecovery(ctx context.Con
 }
 
 func (s *PostgresStore) ListRunForkSelectedContractRouteRecoveries(ctx context.Context) ([]runfork.RunForkSelectedContractRouteRecovery, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireRunForkSelectedContractRouteRecoveryAccess(); err != nil {
 		return nil, err
 	}
-	rows, err := s.DB.QueryContext(ctx, runForkSelectedContractRouteRecoverySelect()+`
+	rows, err := s.backend.db.QueryContext(ctx, runForkSelectedContractRouteRecoverySelect()+`
 		ORDER BY created_at ASC, fork_run_id ASC
 	`)
 	if err != nil {

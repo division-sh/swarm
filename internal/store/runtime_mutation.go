@@ -55,7 +55,7 @@ func (s *PostgresStore) runPostgresRuntimeMutation(ctx context.Context, fn func(
 	if fn == nil {
 		return nil
 	}
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -69,7 +69,7 @@ func (s *PostgresStore) runPostgresRuntimeMutation(ctx context.Context, fn func(
 		return err
 	}
 	if !borrowed {
-		conn, connErr := s.DB.Conn(ctx)
+		conn, connErr := s.backend.db.Conn(ctx)
 		if connErr != nil {
 			return connErr
 		}
@@ -143,7 +143,7 @@ func (s *SQLiteRuntimeStore) runRuntimeMutationCommitted(
 	if fn == nil {
 		return nil, nil
 	}
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("sqlite runtime store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -230,7 +230,7 @@ func (s *SQLiteRuntimeStore) runRuntimeMutationOnceLocked(ctx context.Context, f
 	s.mutationMu.Lock()
 	defer s.mutationMu.Unlock()
 
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}

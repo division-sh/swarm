@@ -42,7 +42,7 @@ var neutralEffectPrimitiveCounts = map[string]int{
 func TestRuntimeEffectsNeutralSchemaRegisteredAdapterParity(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
 		store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-		proveRuntimeEffectsNeutralSchemaRegisteredAdapterParity(t, newNeutralEffectParityFixture(t, store, store.DB, true))
+		proveRuntimeEffectsNeutralSchemaRegisteredAdapterParity(t, newNeutralEffectParityFixture(t, store, store.backend.db, true))
 	})
 	t.Run("postgres", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
@@ -173,7 +173,7 @@ func newNeutralEffectParityFixture(t *testing.T, store neutralEffectParityStore,
 			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
 			t.Fatalf("activate neutral effect agent: %v", err)
 		}
-		requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+		requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	} else {
 		fields := testAgentIdentityStorageFields(t, identity)
 		if _, err := db.ExecContext(ctx, `
@@ -185,7 +185,7 @@ func newNeutralEffectParityFixture(t *testing.T, store neutralEffectParityStore,
 			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
 			t.Fatalf("activate neutral effect agent: %v", err)
 		}
-		requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+		requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	}
 	token := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, Identity: identity, AgentID: agentID, Generation: 3}
 	authority := runtimeeffects.NormalAgentAuthority(token, fmt.Sprintf("agent:%s:%d:%d", agentID, token.RuntimeEpoch, token.Generation), now.Add(5*time.Minute))

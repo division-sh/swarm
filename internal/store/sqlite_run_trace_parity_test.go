@@ -144,7 +144,7 @@ func TestSQLiteRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 	businessEvent := "00000000-0000-0000-0000-000000001817"
 	runtimeLogEvent := "00000000-0000-0000-0000-000000001818"
 	base := time.Unix(1700000600, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: sqliteStore.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: sqliteStore.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	if err := commitSemanticEventFixture(ctx, sqliteStore, eventtest.PersistedProjection(
 		businessEvent, events.EventType("item.received"), "runtime", "", json.RawMessage(`{}`), 0,
 		runID, "", events.EventEnvelope{}, base,
@@ -184,17 +184,17 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 	turnID := "00000000-0000-0000-0000-000000001434"
 	agentID := "agent-task"
 
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: sqliteStore.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: sqliteStore.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base.Add(-time.Minute)})
 	if err := commitSemanticEventFixture(ctx, sqliteStore, eventtest.PersistedProjection(
 		eventID, events.EventType("trace.task_audit"), "runtime", "", json.RawMessage(`{}`), 0,
 		runID, "", events.EventEnvelope{}, base,
 	)); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
-	event := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, eventID)
+	event := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.backend.db, eventID)
 	seedSQLiteTraceAgent(t, ctx, sqliteStore, agentID, base)
 	fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, agentID, "flow-a"))
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
+	if _, err := sqliteStore.backend.db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
@@ -218,7 +218,7 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 		runtimedelivery.StateDelivered,
 		nil,
 	)
-	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.DB, delivered, base.Add(time.Second), base.Add(2*time.Second))
+	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.backend.db, delivered, base.Add(time.Second), base.Add(2*time.Second))
 	insertSQLiteTraceTurnWithMemory(t, ctx, sqliteStore, turnID, runID, agentID, sessionID, eventID, "trace.task_audit", false, base.Add(2*time.Second))
 
 	rows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10})
@@ -282,7 +282,7 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 		tieTurnBID:        "00000000-0000-0000-0000-000000000203",
 		base:              base,
 	}
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: sqliteStore.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, StartedAt: base.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: sqliteStore.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, StartedAt: base.Add(-time.Minute)})
 	eventRows := []struct {
 		id   string
 		name string
@@ -313,7 +313,7 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 
 	seedDelivery := func(eventID, agentID, sessionID string, state runtimedelivery.State, createdAt, transitionAt time.Time) runtimedelivery.Snapshot {
 		t.Helper()
-		event := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, eventID)
+		event := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.backend.db, eventID)
 		route := testAgentDeliveryRoute(t, agentID, "flow-a")
 		if err := commitDeliveryObligationFixture(ctx, sqliteStore, event, route); err != nil {
 			t.Fatalf("commit trace delivery %s/%s: %v", eventID, agentID, err)
@@ -343,7 +343,7 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 		if err != nil {
 			t.Fatalf("settle trace delivery %s/%s: %v", eventID, agentID, err)
 		}
-		setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.DB, snapshot, createdAt, transitionAt)
+		setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.backend.db, snapshot, createdAt, transitionAt)
 		return snapshot
 	}
 	seedDelivery(fixture.lateDeliveredID, "agent-late", "00000000-0000-0000-0000-000000000301", runtimedelivery.StateDelivered, base.Add(time.Second), base.Add(3*time.Second))
@@ -364,13 +364,13 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 
 func seedSQLiteTraceAgent(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, agentID string, startedAt time.Time) {
 	t.Helper()
-	seedTestAgentRow(t, ctx, sqliteStore.DB, false, testAgentIdentity(t, agentID, "flow-a"), "active")
+	seedTestAgentRow(t, ctx, sqliteStore.backend.db, false, testAgentIdentity(t, agentID, "flow-a"), "active")
 }
 
 func insertSQLiteTraceSession(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, sessionID, runID, agentID string, updatedAt time.Time) {
 	t.Helper()
 	fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, agentID, "flow-a"))
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
+	if _, err := sqliteStore.backend.db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
@@ -405,7 +405,7 @@ func insertSQLiteTraceTurnWithMemory(t *testing.T, ctx context.Context, sqliteSt
 	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(
 		t, sqliteStore, runID, identity, sessionID, turnID, runtimeMode, "global",
 	)
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
+	if _, err := sqliteStore.backend.db.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id,

@@ -124,7 +124,7 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 			)
 			if backend == "sqlite" {
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-				db = store.DB
+				db = store.backend.db
 				selected = store
 				workflow = newSQLiteWorkflowTestCoordinator(t, db, store)
 			} else {

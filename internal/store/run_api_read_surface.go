@@ -60,7 +60,7 @@ func (s *PostgresStore) requireRunHeaderAccess() error {
 }
 
 func (s *PostgresStore) LoadRunHeader(ctx context.Context, runID string) (RunHeader, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return RunHeader{}, fmt.Errorf("postgres store is required")
 	}
 	runID = strings.TrimSpace(runID)
@@ -73,7 +73,7 @@ func (s *PostgresStore) LoadRunHeader(ctx context.Context, runID string) (RunHea
 	if err := s.requireRunHeaderAccess(); err != nil {
 		return RunHeader{}, err
 	}
-	row := s.DB.QueryRowContext(ctx, runHeaderSelectSQL()+`
+	row := s.backend.db.QueryRowContext(ctx, runHeaderSelectSQL()+`
 WHERE r.run_id = $1::uuid
 `, runID)
 	header, err := scanRunHeader(row)
@@ -95,7 +95,7 @@ func (s *PostgresStore) LoadRunOrigin(ctx context.Context, runID string) (runtim
 }
 
 func (s *PostgresStore) ListRunHeaders(ctx context.Context, opts RunHeaderListOptions) ([]RunHeader, string, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, "", fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireRunHeaderAccess(); err != nil {
@@ -133,7 +133,7 @@ func (s *PostgresStore) ListRunHeaders(ctx context.Context, opts RunHeaderListOp
 ORDER BY r.started_at DESC, r.run_id::text DESC
 LIMIT $%d
 `, len(args))
-	rows, err := s.DB.QueryContext(ctx, query, args...)
+	rows, err := s.backend.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, "", err
 	}

@@ -28,7 +28,7 @@ func selectedScheduleStoreCases() []selectedScheduleStoreCase {
 			runID := uuid.NewString()
 			ctx := selectedScheduleTestContext(t, runID)
 			seedSQLiteScheduleRun(t, store, ctx, runID)
-			return store, store.DB, ctx
+			return store, store.backend.db, ctx
 		}},
 		{name: "postgres", open: func(t *testing.T) (runtimepipeline.SchedulePersistence, *sql.DB, context.Context) {
 			_, db, cleanup := testutil.StartPostgres(t)

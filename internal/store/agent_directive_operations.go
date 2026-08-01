@@ -25,7 +25,7 @@ var _ runtimeagentcontrol.DirectiveOperationStore = (*PostgresStore)(nil)
 var _ runtimeagentcontrol.DirectiveOperationStore = (*SQLiteRuntimeStore)(nil)
 
 func (s *PostgresStore) ReserveDirectiveOperation(ctx context.Context, req runtimeagentcontrol.ReserveDirectiveOperationRequest) (runtimeagentcontrol.DirectiveOperationReservation, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimeagentcontrol.DirectiveOperationReservation{}, fmt.Errorf("postgres store is required")
 	}
 	req.Now = normalizeDirectiveNow(req.Now)
@@ -81,7 +81,7 @@ func (s *PostgresStore) ReserveDirectiveOperation(ctx context.Context, req runti
 }
 
 func (s *SQLiteRuntimeStore) ReserveDirectiveOperation(ctx context.Context, req runtimeagentcontrol.ReserveDirectiveOperationRequest) (runtimeagentcontrol.DirectiveOperationReservation, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimeagentcontrol.DirectiveOperationReservation{}, fmt.Errorf("sqlite runtime store is required")
 	}
 	req.Now = normalizeDirectiveNow(req.Now)
@@ -288,7 +288,7 @@ func requireDirectiveTransition(res sql.Result, err error) error {
 }
 
 func (s *PostgresStore) RenewDirectiveExecutionLease(ctx context.Context, operationID, ownerID string, now time.Time, lease time.Duration) error {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -551,19 +551,19 @@ func sameDirectiveFailure(existing *runtimefailures.Envelope, expected []byte) b
 }
 
 func (s *PostgresStore) LoadDirectiveOperation(ctx context.Context, operationID string) (runtimeagentcontrol.DirectiveOperation, bool, error) {
-	return loadPostgresDirectiveOperationByID(ctx, s.DB, operationID, false)
+	return loadPostgresDirectiveOperationByID(ctx, s.backend.db, operationID, false)
 }
 
 func (s *SQLiteRuntimeStore) LoadDirectiveOperation(ctx context.Context, operationID string) (runtimeagentcontrol.DirectiveOperation, bool, error) {
-	return loadSQLiteDirectiveOperationByID(ctx, s.DB, operationID)
+	return loadSQLiteDirectiveOperationByID(ctx, s.backend.db, operationID)
 }
 
 func (s *PostgresStore) LoadDirectiveOperationByKey(ctx context.Context, method, actorTokenID, idempotencyKey string) (runtimeagentcontrol.DirectiveOperation, bool, error) {
-	return loadPostgresDirectiveOperationByKey(ctx, s.DB, strings.TrimSpace(method), strings.TrimSpace(actorTokenID), strings.TrimSpace(idempotencyKey))
+	return loadPostgresDirectiveOperationByKey(ctx, s.backend.db, strings.TrimSpace(method), strings.TrimSpace(actorTokenID), strings.TrimSpace(idempotencyKey))
 }
 
 func (s *SQLiteRuntimeStore) LoadDirectiveOperationByKey(ctx context.Context, method, actorTokenID, idempotencyKey string) (runtimeagentcontrol.DirectiveOperation, bool, error) {
-	return loadSQLiteDirectiveOperationByKey(ctx, s.DB, strings.TrimSpace(method), strings.TrimSpace(actorTokenID), strings.TrimSpace(idempotencyKey))
+	return loadSQLiteDirectiveOperationByKey(ctx, s.backend.db, strings.TrimSpace(method), strings.TrimSpace(actorTokenID), strings.TrimSpace(idempotencyKey))
 }
 
 func (s *PostgresStore) transitionPostgresDirectiveOperation(ctx context.Context, operationID string, transition func(context.Context, *sql.Tx) error) (runtimeagentcontrol.DirectiveOperation, error) {
@@ -663,7 +663,7 @@ func recordDirectiveAuthorActivity(ctx context.Context, op runtimeagentcontrol.D
 }
 
 func (s *PostgresStore) ReconcileDirectiveOperations(ctx context.Context, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperationReconcileResult, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT o.operation_id::text
 		FROM agent_directive_operations o
 		JOIN runs run ON run.run_id = o.resolved_run_id
@@ -689,7 +689,7 @@ func (s *PostgresStore) ReconcileDirectiveOperation(ctx context.Context, operati
 }
 
 func (s *SQLiteRuntimeStore) ReconcileDirectiveOperations(ctx context.Context, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperationReconcileResult, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT o.operation_id
 		FROM agent_directive_operations o
 		JOIN runs run ON run.run_id = o.resolved_run_id
@@ -739,7 +739,7 @@ func (s *PostgresStore) reconcilePostgresDirectiveOperationIDs(ctx context.Conte
 		}
 		switch {
 		case (op.State == runtimeagentcontrol.DirectiveOperationSucceeded || op.State == runtimeagentcontrol.DirectiveOperationFailed) && !op.ExpiresAt.IsZero() && !op.ExpiresAt.After(now):
-			res, err := s.DB.ExecContext(ctx, `DELETE FROM agent_directive_operations o WHERE o.operation_id = $1::uuid AND o.state IN ('succeeded', 'failed') AND o.expires_at <= $2 AND EXISTS (SELECT 1 FROM runs run WHERE run.run_id = o.resolved_run_id AND run.status IN (`+runLifecycleActiveStateSQLValues+`))`, id, now.UTC())
+			res, err := s.backend.db.ExecContext(ctx, `DELETE FROM agent_directive_operations o WHERE o.operation_id = $1::uuid AND o.state IN ('succeeded', 'failed') AND o.expires_at <= $2 AND EXISTS (SELECT 1 FROM runs run WHERE run.run_id = o.resolved_run_id AND run.status IN (`+runLifecycleActiveStateSQLValues+`))`, id, now.UTC())
 			if err != nil {
 				return out, err
 			}

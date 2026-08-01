@@ -21,14 +21,14 @@ var _ runtimetools.EntityPersistence = (*PostgresStore)(nil)
 var _ runtimetools.EntityPersistence = (*SQLiteRuntimeStore)(nil)
 
 func (s *PostgresStore) LoadEntityState(ctx context.Context, identity runtimetools.EntityIdentity) (map[string]any, bool, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, false, fmt.Errorf("postgres entity persistence store is required")
 	}
 	runID, entityID, err := normalizeToolEntityIdentity(identity)
 	if err != nil {
 		return nil, false, err
 	}
-	rows, err := s.DB.QueryContext(ctx, toolEntitySelectSQL(`run_id = $1::uuid AND entity_id = $2::uuid`), runID, entityID)
+	rows, err := s.backend.db.QueryContext(ctx, toolEntitySelectSQL(`run_id = $1::uuid AND entity_id = $2::uuid`), runID, entityID)
 	if err != nil {
 		return nil, false, fmt.Errorf("load postgres entity state: %w", err)
 	}
@@ -44,14 +44,14 @@ func (s *PostgresStore) LoadEntityState(ctx context.Context, identity runtimetoo
 }
 
 func (s *SQLiteRuntimeStore) LoadEntityState(ctx context.Context, identity runtimetools.EntityIdentity) (map[string]any, bool, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, false, fmt.Errorf("sqlite entity persistence store is required")
 	}
 	runID, entityID, err := normalizeToolEntityIdentity(identity)
 	if err != nil {
 		return nil, false, err
 	}
-	rows, err := s.DB.QueryContext(ctx, toolEntitySelectSQL(`run_id = ? AND entity_id = ?`), runID, entityID)
+	rows, err := s.backend.db.QueryContext(ctx, toolEntitySelectSQL(`run_id = ? AND entity_id = ?`), runID, entityID)
 	if err != nil {
 		return nil, false, fmt.Errorf("load sqlite entity state: %w", err)
 	}
@@ -67,7 +67,7 @@ func (s *SQLiteRuntimeStore) LoadEntityState(ctx context.Context, identity runti
 }
 
 func (s *PostgresStore) QueryEntityStates(ctx context.Context, query runtimetools.EntityStateQuery) ([]map[string]any, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("postgres entity persistence store is required")
 	}
 	where, args, err := postgresToolEntityWhere(query)
@@ -78,7 +78,7 @@ func (s *PostgresStore) QueryEntityStates(ctx context.Context, query runtimetool
 	if query.OrderByCreatedDesc {
 		order = " ORDER BY created_at DESC"
 	}
-	rows, err := s.DB.QueryContext(ctx, toolEntitySelectSQL(where)+order, args...)
+	rows, err := s.backend.db.QueryContext(ctx, toolEntitySelectSQL(where)+order, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query postgres entity state: %w", err)
 	}
@@ -87,7 +87,7 @@ func (s *PostgresStore) QueryEntityStates(ctx context.Context, query runtimetool
 }
 
 func (s *SQLiteRuntimeStore) QueryEntityStates(ctx context.Context, query runtimetools.EntityStateQuery) ([]map[string]any, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("sqlite entity persistence store is required")
 	}
 	where, args, err := sqliteToolEntityWhere(query)
@@ -98,7 +98,7 @@ func (s *SQLiteRuntimeStore) QueryEntityStates(ctx context.Context, query runtim
 	if query.OrderByCreatedDesc {
 		order = " ORDER BY created_at DESC"
 	}
-	rows, err := s.DB.QueryContext(ctx, toolEntitySelectSQL(where)+order, args...)
+	rows, err := s.backend.db.QueryContext(ctx, toolEntitySelectSQL(where)+order, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query sqlite entity state: %w", err)
 	}
@@ -107,7 +107,7 @@ func (s *SQLiteRuntimeStore) QueryEntityStates(ctx context.Context, query runtim
 }
 
 func (s *PostgresStore) SaveEntityField(ctx context.Context, update runtimetools.EntityFieldUpdate) (int, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return 0, fmt.Errorf("postgres entity persistence store is required")
 	}
 	runID, entityID, segments, valueJSON, err := normalizeToolEntityFieldUpdate(update)
@@ -161,7 +161,7 @@ func (s *PostgresStore) SaveEntityField(ctx context.Context, update runtimetools
 }
 
 func (s *SQLiteRuntimeStore) SaveEntityField(ctx context.Context, update runtimetools.EntityFieldUpdate) (int, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return 0, fmt.Errorf("sqlite entity persistence store is required")
 	}
 	runID, entityID, segments, valueJSON, err := normalizeToolEntityFieldUpdate(update)
@@ -228,7 +228,7 @@ func (s *SQLiteRuntimeStore) SaveEntityField(ctx context.Context, update runtime
 }
 
 func (s *PostgresStore) CreateEntity(ctx context.Context, rec runtimetools.EntityCreateRecord) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres entity persistence store is required")
 	}
 	rec, fields, err := normalizeToolEntityCreateRecord(rec)
@@ -264,7 +264,7 @@ func (s *PostgresStore) CreateEntity(ctx context.Context, rec runtimetools.Entit
 }
 
 func (s *SQLiteRuntimeStore) CreateEntity(ctx context.Context, rec runtimetools.EntityCreateRecord) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("sqlite entity persistence store is required")
 	}
 	rec, fields, err := normalizeToolEntityCreateRecord(rec)

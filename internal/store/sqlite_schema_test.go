@@ -63,7 +63,7 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 	}
 
 	for _, tableName := range append(platformTableNamesForSQLiteSchemaTest(), "planner_state") {
-		if !sqliteTableExists(t, sqliteStore.DB, tableName) {
+		if !sqliteTableExists(t, sqliteStore.backend.db, tableName) {
 			t.Fatalf("sqlite table %s missing after bootstrap", tableName)
 		}
 	}
@@ -189,29 +189,29 @@ func TestSQLiteStatementsForPlanPreservesNonReusableBigserialIdentity(t *testing
 	if !strings.Contains(statements[0], `"insertion_transaction_id" INTEGER NOT NULL DEFAULT 0`) {
 		t.Fatalf("rendered statements = %#v, want inert SQLite transaction identity", statements)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, statements[0]); err != nil {
+	if _, err := sqliteStore.backend.db.ExecContext(ctx, statements[0]); err != nil {
 		t.Fatalf("create sequenced table: %v", err)
 	}
 	firstID := "00000000-0000-4000-8000-000000000001"
 	secondID := "00000000-0000-4000-8000-000000000002"
 	thirdID := "00000000-0000-4000-8000-000000000003"
 	for _, eventID := range []string{firstID, secondID} {
-		if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO sequenced (event_id) VALUES (?)`, eventID); err != nil {
+		if _, err := sqliteStore.backend.db.ExecContext(ctx, `INSERT INTO sequenced (event_id) VALUES (?)`, eventID); err != nil {
 			t.Fatalf("insert %s: %v", eventID, err)
 		}
 	}
 	var removedSequence int64
-	if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT insertion_sequence FROM sequenced WHERE event_id = ?`, secondID).Scan(&removedSequence); err != nil {
+	if err := sqliteStore.backend.db.QueryRowContext(ctx, `SELECT insertion_sequence FROM sequenced WHERE event_id = ?`, secondID).Scan(&removedSequence); err != nil {
 		t.Fatalf("read removed sequence: %v", err)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `DELETE FROM sequenced WHERE event_id = ?`, secondID); err != nil {
+	if _, err := sqliteStore.backend.db.ExecContext(ctx, `DELETE FROM sequenced WHERE event_id = ?`, secondID); err != nil {
 		t.Fatalf("delete second row: %v", err)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO sequenced (event_id) VALUES (?)`, thirdID); err != nil {
+	if _, err := sqliteStore.backend.db.ExecContext(ctx, `INSERT INTO sequenced (event_id) VALUES (?)`, thirdID); err != nil {
 		t.Fatalf("insert replacement row: %v", err)
 	}
 	var replacementSequence int64
-	if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT insertion_sequence FROM sequenced WHERE event_id = ?`, thirdID).Scan(&replacementSequence); err != nil {
+	if err := sqliteStore.backend.db.QueryRowContext(ctx, `SELECT insertion_sequence FROM sequenced WHERE event_id = ?`, thirdID).Scan(&replacementSequence); err != nil {
 		t.Fatalf("read replacement sequence: %v", err)
 	}
 	if replacementSequence <= removedSequence {
@@ -241,15 +241,15 @@ func TestSQLiteSchemaStoreRendersExplicitUUIDDefaults(t *testing.T) {
 		t.Fatalf("SQLiteStatementsForPlan: %v", err)
 	}
 	for _, statement := range statements {
-		if _, err := sqliteStore.DB.ExecContext(ctx, statement); err != nil {
+		if _, err := sqliteStore.backend.db.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("execute rendered SQLite statement: %v", err)
 		}
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO uuid_defaults DEFAULT VALUES`); err != nil {
+	if _, err := sqliteStore.backend.db.ExecContext(ctx, `INSERT INTO uuid_defaults DEFAULT VALUES`); err != nil {
 		t.Fatalf("insert default row: %v", err)
 	}
 	var id string
-	if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT id FROM uuid_defaults`).Scan(&id); err != nil {
+	if err := sqliteStore.backend.db.QueryRowContext(ctx, `SELECT id FROM uuid_defaults`).Scan(&id); err != nil {
 		t.Fatalf("select generated uuid: %v", err)
 	}
 	if !regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).MatchString(id) {
@@ -379,7 +379,7 @@ func TestSQLiteSchemaStoreAcceptsRelativePath(t *testing.T) {
 	})
 
 	var got int
-	if err := store.DB.QueryRow(`SELECT 1`).Scan(&got); err != nil {
+	if err := store.backend.db.QueryRow(`SELECT 1`).Scan(&got); err != nil {
 		t.Fatalf("SELECT 1 on relative-path store: %v", err)
 	}
 	if got != 1 {

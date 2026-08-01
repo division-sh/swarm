@@ -32,13 +32,13 @@ func (s *PostgresStore) ClaimSchedule(ctx context.Context, sc runtimepipeline.Sc
 	}
 	key := scheduleClaimLockKey(sc)
 
-	s.scheduleClaimMu.Lock()
-	defer s.scheduleClaimMu.Unlock()
+	s.backend.scheduleClaimMu.Lock()
+	defer s.backend.scheduleClaimMu.Unlock()
 
-	if _, ok := s.scheduleClaimKeys[key]; ok {
-		conn := s.scheduleClaimConn
+	if _, ok := s.backend.scheduleClaimKeys[key]; ok {
+		conn := s.backend.scheduleClaimConn
 		if conn == nil {
-			delete(s.scheduleClaimKeys, key)
+			delete(s.backend.scheduleClaimKeys, key)
 		} else if strings.TrimSpace(sc.RunID) != "" {
 			if err := requirePostgresRunActiveQuery(ctx, conn, sc.RunID); err != nil {
 				if !errors.Is(err, runtimerunlifecycle.ErrRunNotActive) {
@@ -48,8 +48,8 @@ func (s *PostgresStore) ClaimSchedule(ctx context.Context, sc runtimepipeline.Sc
 					_ = s.closeScheduleClaimConnLocked()
 					return false, fmt.Errorf("release terminal-run schedule ownership: %w", unlockErr)
 				}
-				delete(s.scheduleClaimKeys, key)
-				if len(s.scheduleClaimKeys) == 0 {
+				delete(s.backend.scheduleClaimKeys, key)
+				if len(s.backend.scheduleClaimKeys) == 0 {
 					if closeErr := s.closeScheduleClaimConnLocked(); closeErr != nil {
 						return false, closeErr
 					}
@@ -68,8 +68,8 @@ func (s *PostgresStore) ClaimSchedule(ctx context.Context, sc runtimepipeline.Sc
 			if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, key); err != nil {
 				return false, fmt.Errorf("release inactive schedule ownership: %w", err)
 			}
-			delete(s.scheduleClaimKeys, key)
-			if len(s.scheduleClaimKeys) == 0 {
+			delete(s.backend.scheduleClaimKeys, key)
+			if len(s.backend.scheduleClaimKeys) == 0 {
 				if err := s.closeScheduleClaimConnLocked(); err != nil {
 					return false, err
 				}
@@ -110,15 +110,15 @@ func (s *PostgresStore) ClaimSchedule(ctx context.Context, sc runtimepipeline.Sc
 		}
 		return false, nil
 	}
-	if s.scheduleClaimKeys == nil {
-		s.scheduleClaimKeys = map[string]struct{}{}
+	if s.backend.scheduleClaimKeys == nil {
+		s.backend.scheduleClaimKeys = map[string]struct{}{}
 	}
-	s.scheduleClaimKeys[key] = struct{}{}
+	s.backend.scheduleClaimKeys[key] = struct{}{}
 	return true, nil
 }
 
 func (s *PostgresStore) ReleaseSchedule(ctx context.Context, sc runtimepipeline.Schedule) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil
 	}
 	if ctx == nil {
@@ -138,21 +138,21 @@ func (s *PostgresStore) ReleaseSchedule(ctx context.Context, sc runtimepipeline.
 	}
 	key := scheduleClaimLockKey(sc)
 
-	s.scheduleClaimMu.Lock()
-	defer s.scheduleClaimMu.Unlock()
+	s.backend.scheduleClaimMu.Lock()
+	defer s.backend.scheduleClaimMu.Unlock()
 
-	if _, ok := s.scheduleClaimKeys[key]; !ok {
+	if _, ok := s.backend.scheduleClaimKeys[key]; !ok {
 		return nil
 	}
-	if s.scheduleClaimConn == nil {
-		delete(s.scheduleClaimKeys, key)
+	if s.backend.scheduleClaimConn == nil {
+		delete(s.backend.scheduleClaimKeys, key)
 		return nil
 	}
-	if _, err := s.scheduleClaimConn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, key); err != nil {
+	if _, err := s.backend.scheduleClaimConn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, key); err != nil {
 		return fmt.Errorf("release schedule ownership: %w", err)
 	}
-	delete(s.scheduleClaimKeys, key)
-	if len(s.scheduleClaimKeys) == 0 {
+	delete(s.backend.scheduleClaimKeys, key)
+	if len(s.backend.scheduleClaimKeys) == 0 {
 		return s.closeScheduleClaimConnLocked()
 	}
 	return nil
@@ -178,27 +178,27 @@ func (s *PostgresStore) ReleaseScheduleClaims(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	s.scheduleClaimMu.Lock()
-	defer s.scheduleClaimMu.Unlock()
+	s.backend.scheduleClaimMu.Lock()
+	defer s.backend.scheduleClaimMu.Unlock()
 	return s.closeScheduleClaimConnLocked()
 }
 
 func (s *PostgresStore) ensureScheduleClaimConnLocked(ctx context.Context) (*sql.Conn, error) {
-	if s.scheduleClaimConn != nil {
-		return s.scheduleClaimConn, nil
+	if s.backend.scheduleClaimConn != nil {
+		return s.backend.scheduleClaimConn, nil
 	}
-	conn, err := s.DB.Conn(ctx)
+	conn, err := s.backend.db.Conn(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("open schedule ownership connection: %w", err)
 	}
-	s.scheduleClaimConn = conn
+	s.backend.scheduleClaimConn = conn
 	return conn, nil
 }
 
 func (s *PostgresStore) closeScheduleClaimConnLocked() error {
-	conn := s.scheduleClaimConn
-	s.scheduleClaimConn = nil
-	s.scheduleClaimKeys = nil
+	conn := s.backend.scheduleClaimConn
+	s.backend.scheduleClaimConn = nil
+	s.backend.scheduleClaimKeys = nil
 	if conn == nil {
 		return nil
 	}
@@ -291,7 +291,7 @@ func (s *PostgresStore) persistedScheduleRecurring(ctx context.Context, sc runti
 	if err != nil {
 		return false, err
 	}
-	queryer := scheduleRecurringQueryer(s.DB)
+	queryer := scheduleRecurringQueryer(s.backend.db)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		queryer = tx
 	}

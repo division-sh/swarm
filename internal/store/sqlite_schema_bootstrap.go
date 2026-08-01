@@ -9,7 +9,7 @@ import (
 )
 
 func (s *SQLiteSchemaStore) BootstrapSchema(ctx context.Context, request SchemaBootstrapRequest) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("sqlite store is required for schema bootstrap")
 	}
 	request = request.canonical()
@@ -23,7 +23,7 @@ func (s *SQLiteSchemaStore) BootstrapSchema(ctx context.Context, request SchemaB
 	bootstrapMu := sqliteSchemaBootstrapMutex(s.path)
 	bootstrapMu.Lock()
 	defer bootstrapMu.Unlock()
-	conn, err := s.DB.Conn(ctx)
+	conn, err := s.backend.db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("open serialized sqlite schema connection: %w", err)
 	}
@@ -67,7 +67,7 @@ func (s *SQLiteSchemaStore) BootstrapSchema(ctx context.Context, request SchemaB
 		return fmt.Errorf("commit sqlite schema bootstrap: %w", err)
 	}
 	committed = true
-	if _, err := s.DB.ExecContext(ctx, `PRAGMA journal_mode = WAL`); err != nil {
+	if _, err := s.backend.db.ExecContext(ctx, `PRAGMA journal_mode = WAL`); err != nil {
 		return fmt.Errorf("enable sqlite WAL after schema acceptance: %w", err)
 	}
 	s.schemaAdmission.markCurrent()

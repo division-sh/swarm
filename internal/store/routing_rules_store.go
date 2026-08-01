@@ -33,7 +33,7 @@ func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule runtimemanag
 			  AND is_materialized = false
 			  AND status <> 'inactive'
 		`
-		res, err := s.DB.ExecContext(ctx, deactivateQ,
+		res, err := s.backend.db.ExecContext(ctx, deactivateQ,
 			eventPattern,
 			subscriberID,
 			flowInstance,
@@ -52,7 +52,7 @@ func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule runtimemanag
 				$1, 'agent', $2, $3, $4, false, 'inactive', now()
 			)
 		`
-		if _, err := s.DB.ExecContext(ctx, insertDeactivatedQ,
+		if _, err := s.backend.db.ExecContext(ctx, insertDeactivatedQ,
 			eventPattern,
 			subscriberID,
 			flowInstance,
@@ -83,7 +83,7 @@ func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule runtimemanag
 			$1, 'agent', $2, $3, $4, false, 'active', now()
 		WHERE NOT EXISTS (SELECT 1 FROM updated)
 	`
-	if _, err := s.DB.ExecContext(ctx, q,
+	if _, err := s.backend.db.ExecContext(ctx, q,
 		eventPattern,
 		subscriberID,
 		flowInstance,
@@ -111,7 +111,7 @@ func (s *PostgresStore) LoadRoutingRules(ctx context.Context) ([]runtimemanager.
 		  AND rr.is_materialized = false
 		ORDER BY rr.created_at ASC
 	`
-	rows, err := s.DB.QueryContext(ctx, q)
+	rows, err := s.backend.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("query routing rules: %w", err)
 	}
@@ -155,7 +155,7 @@ func (s *PostgresStore) DeactivateRoutingRulesByEntity(ctx context.Context, enti
 		WHERE flow_instance = $1
 		  AND status <> 'inactive'
 	`
-	_, err = s.DB.ExecContext(ctx, q, flowInstance)
+	_, err = s.backend.db.ExecContext(ctx, q, flowInstance)
 	if err != nil {
 		return fmt.Errorf("deactivate routing rules by entity: %w", err)
 	}
@@ -168,7 +168,7 @@ func routingRuleFlowInstance(ctx context.Context, s *PostgresStore, entityID str
 		return "", fmt.Errorf("lookup routing rule flow instance: %w", err)
 	}
 	var flowInstance string
-	if err := s.DB.QueryRowContext(ctx, `
+	if err := s.backend.db.QueryRowContext(ctx, `
 		SELECT flow_instance
 		FROM entity_state
 		WHERE run_id = $1::uuid

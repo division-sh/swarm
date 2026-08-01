@@ -15,7 +15,7 @@ import (
 )
 
 func (s *PostgresStore) PlanBundleDelete(ctx context.Context, req bundledelete.Request) (bundledelete.Plan, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return bundledelete.Plan{}, fmt.Errorf("postgres store is required")
 	}
 	bundleHash := strings.TrimSpace(req.BundleHash)
@@ -26,7 +26,7 @@ func (s *PostgresStore) PlanBundleDelete(ctx context.Context, req bundledelete.R
 		return bundledelete.Plan{}, err
 	}
 	var exists bool
-	if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = $1)`, bundleHash).Scan(&exists); err != nil {
+	if err := s.backend.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = $1)`, bundleHash).Scan(&exists); err != nil {
 		return bundledelete.Plan{}, fmt.Errorf("plan bundle delete bundle row: %w", err)
 	}
 	if !exists {
@@ -36,7 +36,7 @@ func (s *PostgresStore) PlanBundleDelete(ctx context.Context, req bundledelete.R
 		BundleHash: bundleHash,
 		PlannedAt:  req.RequestedAt.UTC(),
 	}
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT
 			run_id::text,
 			COALESCE(status, ''),
@@ -90,7 +90,7 @@ func (s *PostgresStore) PlanBundleDelete(ctx context.Context, req bundledelete.R
 }
 
 func (s *PostgresStore) ApplyBundleDeleteFinalMutation(ctx context.Context, req bundledelete.FinalMutationRequest) (bundledelete.FinalMutationResult, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return bundledelete.FinalMutationResult{}, fmt.Errorf("postgres store is required")
 	}
 	bundleHash := strings.TrimSpace(req.BundleHash)
@@ -108,7 +108,7 @@ func (s *PostgresStore) ApplyBundleDeleteFinalMutation(ctx context.Context, req 
 	if operationName == "" {
 		operationName = bundledelete.DefaultOperationName
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return bundledelete.FinalMutationResult{}, fmt.Errorf("begin bundle delete final mutation tx: %w", err)
 	}
@@ -183,7 +183,7 @@ func (s *PostgresStore) ApplyBundleDeleteFinalMutation(ctx context.Context, req 
 func (s *PostgresStore) planBundleDeleteDeliveries(ctx context.Context, runIDs []string) ([]bundledelete.DeliveryRef, error) {
 	out := []bundledelete.DeliveryRef{}
 	for _, runID := range runIDs {
-		snapshots, err := postgresDeliveryAdapter.NonterminalSnapshotsForRun(ctx, s.DB, runID)
+		snapshots, err := postgresDeliveryAdapter.NonterminalSnapshotsForRun(ctx, s.backend.db, runID)
 		if err != nil {
 			return nil, fmt.Errorf("plan bundle delete deliveries: %w", err)
 		}
@@ -217,7 +217,7 @@ func (s *PostgresStore) planBundleDeleteDeliveries(ctx context.Context, runIDs [
 }
 
 func (s *PostgresStore) planBundleDeleteSessions(ctx context.Context, runIDs []string) ([]bundledelete.SessionRef, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT session_id::text, run_id::text, COALESCE(agent_id, ''), COALESCE(status, '')
 		FROM agent_sessions
 		WHERE run_id = ANY($1::uuid[])
@@ -247,7 +247,7 @@ func (s *PostgresStore) planBundleDeleteSessions(ctx context.Context, runIDs []s
 }
 
 func (s *PostgresStore) planBundleDeleteTimers(ctx context.Context, runIDs []string) ([]bundledelete.TimerRef, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT timer_id::text, run_id::text, COALESCE(timer_name, ''), COALESCE(status, '')
 		FROM timers
 		WHERE run_id = ANY($1::uuid[])

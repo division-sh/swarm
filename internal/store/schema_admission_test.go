@@ -22,13 +22,13 @@ func TestUnacceptedSelectedStoreRuntimeCallsFailBeforeSQL(t *testing.T) {
 
 			var call func() error
 			if backend == "postgres" {
-				store := &PostgresStore{DB: db}
+				store := &PostgresStore{backend: &postgresRuntimeBackend{db: db}}
 				call = func() error {
 					_, err := store.ListActiveAgentDescriptors(context.Background())
 					return err
 				}
 			} else {
-				store := &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: db}}
+				store := &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: db}}}
 				call = func() error {
 					_, err := store.ListActiveAgentDescriptors(context.Background())
 					return err
@@ -61,7 +61,7 @@ func TestUnacceptedSelectedStoreEventMutationBoundariesFailBeforeSQL(t *testing.
 				call func() error
 			}
 			if backend == "postgres" {
-				store := &PostgresStore{DB: db}
+				store := &PostgresStore{backend: &postgresRuntimeBackend{db: db}}
 				calls = []struct {
 					name string
 					call func() error
@@ -82,7 +82,7 @@ func TestUnacceptedSelectedStoreEventMutationBoundariesFailBeforeSQL(t *testing.
 					}},
 				}
 			} else {
-				store := &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: db}}
+				store := &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: db}}}
 				calls = []struct {
 					name string
 					call func() error

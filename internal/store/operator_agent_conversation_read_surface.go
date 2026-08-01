@@ -371,19 +371,19 @@ type operatorRowScanner interface {
 }
 
 func (s *PostgresStore) ListOperatorAgents(ctx context.Context, opts OperatorAgentListOptions) (OperatorAgentListResult, error) {
-	return NewOperatorAgentConversationReadSurface(s.DB, s, opts.TurnLimit).ListOperatorAgents(ctx, opts)
+	return NewOperatorAgentConversationReadSurface(s.backend.db, s, opts.TurnLimit).ListOperatorAgents(ctx, opts)
 }
 
 func (s *PostgresStore) LoadOperatorAgent(ctx context.Context, identity agentidentity.Identity) (OperatorAgentDetail, error) {
-	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).LoadOperatorAgent(ctx, identity)
+	return NewOperatorAgentConversationReadSurface(s.backend.db, s, 0).LoadOperatorAgent(ctx, identity)
 }
 
 func (s *PostgresStore) LoadOperatorAgentDiagnosis(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDiagnosisOptions) (OperatorAgentDiagnosis, error) {
-	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).LoadOperatorAgentDiagnosis(ctx, identity, opts)
+	return NewOperatorAgentConversationReadSurface(s.backend.db, s, 0).LoadOperatorAgentDiagnosis(ctx, identity, opts)
 }
 
 func (s *PostgresStore) ListOperatorConversations(ctx context.Context, opts OperatorConversationListOptions) (OperatorConversationListResult, error) {
-	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).ListOperatorConversations(ctx, opts)
+	return NewOperatorAgentConversationReadSurface(s.backend.db, s, 0).ListOperatorConversations(ctx, opts)
 }
 
 func (r *OperatorAgentConversationReadSurface) ListOperatorAgents(ctx context.Context, opts OperatorAgentListOptions) (OperatorAgentListResult, error) {

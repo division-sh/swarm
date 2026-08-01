@@ -27,13 +27,13 @@ type sqliteScheduleExecutor interface {
 }
 
 func (s *SQLiteRuntimeStore) ReadTimerObligations(ctx context.Context, scope runtimetimerobligation.Scope, observedAt time.Time) (runtimetimerobligation.Snapshot, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimetimerobligation.Snapshot{}, fmt.Errorf("timer obligation reader requires SQLite store")
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		return runtimetimerobligation.Read(ctx, tx, runtimetimerobligation.DialectSQLite, scope, observedAt)
 	}
-	return runtimetimerobligation.Read(ctx, s.DB, runtimetimerobligation.DialectSQLite, scope, observedAt)
+	return runtimetimerobligation.Read(ctx, s.backend.db, runtimetimerobligation.DialectSQLite, scope, observedAt)
 }
 
 func (s *SQLiteRuntimeStore) InsertMailboxItem(ctx context.Context, item runtimetools.MailboxItem) (string, error) {
@@ -91,7 +91,7 @@ func (s *SQLiteRuntimeStore) ListMailboxItems(ctx context.Context, status string
 	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
 		return nil, err
 	}
-	rows, err := s.DB.QueryContext(ctx, sqliteMailboxSelectSQL(`status = ?`)+` ORDER BY created_at ASC LIMIT ?`, status, limit)
+	rows, err := s.backend.db.QueryContext(ctx, sqliteMailboxSelectSQL(`status = ?`)+` ORDER BY created_at ASC LIMIT ?`, status, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query sqlite mailbox items: %w", err)
 	}
@@ -107,7 +107,7 @@ func (s *SQLiteRuntimeStore) CountMailboxItems(ctx context.Context, status strin
 		return 0, err
 	}
 	var n int
-	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM mailbox WHERE status = ?`, status).Scan(&n); err != nil {
+	if err := s.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM mailbox WHERE status = ?`, status).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count sqlite mailbox items: %w", err)
 	}
 	return n, nil
@@ -121,7 +121,7 @@ func (s *SQLiteRuntimeStore) GetMailboxItem(ctx context.Context, id string) (run
 	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
 		return runtimetools.MailboxItem{}, err
 	}
-	rows, err := s.DB.QueryContext(ctx, sqliteMailboxSelectSQL(`item_id = ?`), id)
+	rows, err := s.backend.db.QueryContext(ctx, sqliteMailboxSelectSQL(`item_id = ?`), id)
 	if err != nil {
 		return runtimetools.MailboxItem{}, fmt.Errorf("get sqlite mailbox item: %w", err)
 	}
@@ -182,7 +182,7 @@ func (s *SQLiteRuntimeStore) ListUnnotifiedCriticalMailboxItems(ctx context.Cont
 	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
 		return nil, err
 	}
-	rows, err := s.DB.QueryContext(ctx, sqliteMailboxSelectSQL(`status = 'pending' AND severity = 'critical' AND COALESCE(notified, false) = false`)+` ORDER BY created_at ASC LIMIT ?`, limit)
+	rows, err := s.backend.db.QueryContext(ctx, sqliteMailboxSelectSQL(`status = 'pending' AND severity = 'critical' AND COALESCE(notified, false) = false`)+` ORDER BY created_at ASC LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query sqlite unnotified critical mailbox items: %w", err)
 	}
@@ -359,7 +359,7 @@ func (s *SQLiteRuntimeStore) CancelScheduleExactTerminal(ctx context.Context, sc
 }
 
 func (s *SQLiteRuntimeStore) LoadActiveSchedules(ctx context.Context) ([]runtimepipeline.Schedule, error) {
-	exec := sqliteScheduleDBExecutor(ctx, s.DB)
+	exec := sqliteScheduleDBExecutor(ctx, s.backend.db)
 	rows, err := exec.QueryContext(ctx, `
 		SELECT COALESCE(t.run_id, ''), COALESCE(t.owner_agent, ''), t.owner_kind,
 		       COALESCE(t.agent_name_owner, ''), COALESCE(t.agent_name_source, ''),
@@ -505,7 +505,7 @@ func (s *SQLiteRuntimeStore) ClaimSchedule(ctx context.Context, sc runtimepipeli
 		return false, err
 	}
 	var active bool
-	exec := sqliteScheduleDBExecutor(ctx, s.DB)
+	exec := sqliteScheduleDBExecutor(ctx, s.backend.db)
 	if strings.TrimSpace(sc.RunID) != "" {
 		if err := requireSQLiteRunActiveQuery(ctx, exec, sc.RunID); err != nil {
 			if errors.Is(err, runtimerunlifecycle.ErrRunNotActive) {

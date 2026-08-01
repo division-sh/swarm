@@ -41,7 +41,7 @@ func seedSQLiteNormalRunCompletionFixture(t *testing.T, store *SQLiteRuntimeStor
 	)); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
-	if _, err := store.DB.ExecContext(ctx, `
+	if _, err := store.backend.db.ExecContext(ctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
@@ -95,7 +95,7 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionMarksCompletedAndIgnoresRu
 	if err := executeRunCompletionCandidateForEvent(ctx, store, fixture.EventID, []string{"done"}, nil); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion: %v", err)
 	}
-	assertSQLiteRunCompletionStatus(t, store.DB, fixture.RunID, "completed", true)
+	assertSQLiteRunCompletionStatus(t, store.backend.db, fixture.RunID, "completed", true)
 
 	snap, err := store.LoadRunLifecycleSnapshot(ctx, fixture.RunID)
 	if err != nil {
@@ -117,7 +117,7 @@ func TestSQLiteRuntimeStoreMarkRunTerminalPreservesFailureAndRejectsConflict(t *
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC()})
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: store.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC()})
 	failure := testFailureEnvelope(runtimefailures.ClassInternalFailure, "run_quiescence_failed", nil)
 	snap, err := markRunTerminalStatusForTest(ctx, store, runID, "failed", &failure, time.Now().UTC())
 	if err != nil {
@@ -146,7 +146,7 @@ func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 	eventEntityA := uuid.NewString()
 	eventEntityB := uuid.NewString()
 	currentEntity := uuid.NewString()
-	runlifecyclefixture.RequireCorruptSQLiteSnapshot(t, ctx, store.DB, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
+	runlifecyclefixture.RequireCorruptSQLiteSnapshot(t, ctx, store.backend.db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
 		RunID: runID, State: "running",
 		BundleHash:   "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		BundleSource: "ephemeral", EventCount: 99, EntityCount: 9, StartedAt: now,
@@ -165,7 +165,7 @@ func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 			t.Fatalf("seed sqlite event %s: %v", fixture.name, err)
 		}
 	}
-	seedSQLiteEntityStateRows(t, store.DB, ctx, runID, currentEntity)
+	seedSQLiteEntityStateRows(t, store.backend.db, ctx, runID, currentEntity)
 
 	snap, err := store.LoadRunLifecycleSnapshot(ctx, runID)
 	if err != nil {
@@ -181,7 +181,7 @@ func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 		t.Fatalf("SyncCounters: %v", err)
 	}
 	var eventCount, entityCount int
-	if err := store.DB.QueryRowContext(ctx, `
+	if err := store.backend.db.QueryRowContext(ctx, `
 		SELECT event_count, entity_count
 		FROM runs
 		WHERE run_id = ?
@@ -197,7 +197,7 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionFailsClosedWhileDeliveryAc
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	fixture := seedSQLiteNormalRunCompletionFixture(t, store, "done")
-	event := loadSQLiteDeliveryFixtureEvent(t, ctx, store.DB, fixture.EventID)
+	event := loadSQLiteDeliveryFixtureEvent(t, ctx, store.backend.db, fixture.EventID)
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("terminal-node")}
 	if err := commitDeliveryObligationFixture(ctx, store, event, route); err != nil {
 		t.Fatalf("seed sqlite active delivery: %v", err)
@@ -208,7 +208,7 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionFailsClosedWhileDeliveryAc
 	if err := executeRunCompletionCandidateForEvent(ctx, store, fixture.EventID, []string{"done"}, nil); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion active: %v", err)
 	}
-	assertSQLiteRunCompletionStatus(t, store.DB, fixture.RunID, "running", false)
+	assertSQLiteRunCompletionStatus(t, store.backend.db, fixture.RunID, "running", false)
 
 	claimed, err := claimDeliveryFixture(ctx, store, event, route)
 	if err != nil {
@@ -220,5 +220,5 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionFailsClosedWhileDeliveryAc
 	if err := executeRunCompletionCandidateForEvent(ctx, store, fixture.EventID, []string{"done"}, nil); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion settled: %v", err)
 	}
-	assertSQLiteRunCompletionStatus(t, store.DB, fixture.RunID, "completed", true)
+	assertSQLiteRunCompletionStatus(t, store.backend.db, fixture.RunID, "completed", true)
 }

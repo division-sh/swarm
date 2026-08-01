@@ -253,7 +253,7 @@ func newForkChatCompletionAuthorityFixture(t *testing.T, sqlite bool) forkChatCo
 	var source conversationForkSourceFixture
 	if sqlite {
 		s := newBootstrappedSQLiteRuntimeStoreForTest(t)
-		store, db = s, s.DB
+		store, db = s, s.backend.db
 		source = seedSQLiteConversationForkSource(t, s, now)
 	} else {
 		_, pgDB, _ := testutil.StartPostgres(t)

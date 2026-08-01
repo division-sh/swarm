@@ -24,14 +24,14 @@ func (s *PostgresStore) ResolveAgentDirectiveRunTarget(ctx context.Context, iden
 		return runtimeagentcontrol.RunTargetResolution{}, err
 	}
 	explicitRunID = strings.TrimSpace(explicitRunID)
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimeagentcontrol.RunTargetResolution{}, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimeagentcontrol.RunTargetResolution{}, err
 	}
 	if explicitRunID != "" {
-		if err := validateDirectiveRunTarget(ctx, s.DB, identity, explicitRunID); err != nil {
+		if err := validateDirectiveRunTarget(ctx, s.backend.db, identity, explicitRunID); err != nil {
 			return runtimeagentcontrol.RunTargetResolution{}, err
 		}
 		return runtimeagentcontrol.RunTargetResolution{
@@ -39,7 +39,7 @@ func (s *PostgresStore) ResolveAgentDirectiveRunTarget(ctx context.Context, iden
 			Mode:  runtimeagentcontrol.RunResolutionSpecified,
 		}, nil
 	}
-	sessions, err := listActiveDirectiveSessions(ctx, s.DB, fields)
+	sessions, err := listActiveDirectiveSessions(ctx, s.backend.db, fields)
 	if err != nil {
 		return runtimeagentcontrol.RunTargetResolution{}, err
 	}
@@ -54,7 +54,7 @@ func (s *PostgresStore) ResolveAgentDirectiveRunTarget(ctx context.Context, iden
 		if strings.TrimSpace(session.RunID) == "" {
 			return runtimeagentcontrol.RunTargetResolution{}, ambiguousDirectiveRunTarget(identity, sessions)
 		}
-		if err := validateDirectiveRunTarget(ctx, s.DB, identity, session.RunID); err != nil {
+		if err := validateDirectiveRunTarget(ctx, s.backend.db, identity, session.RunID); err != nil {
 			return runtimeagentcontrol.RunTargetResolution{}, err
 		}
 		return runtimeagentcontrol.RunTargetResolution{
@@ -76,14 +76,14 @@ func (s *SQLiteRuntimeStore) ResolveAgentDirectiveRunTarget(ctx context.Context,
 		return runtimeagentcontrol.RunTargetResolution{}, err
 	}
 	explicitRunID = strings.TrimSpace(explicitRunID)
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimeagentcontrol.RunTargetResolution{}, fmt.Errorf("sqlite runtime store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimeagentcontrol.RunTargetResolution{}, err
 	}
 	if explicitRunID != "" {
-		if err := validateSQLiteDirectiveRunTarget(ctx, s.DB, identity, explicitRunID); err != nil {
+		if err := validateSQLiteDirectiveRunTarget(ctx, s.backend.db, identity, explicitRunID); err != nil {
 			return runtimeagentcontrol.RunTargetResolution{}, err
 		}
 		return runtimeagentcontrol.RunTargetResolution{
@@ -91,7 +91,7 @@ func (s *SQLiteRuntimeStore) ResolveAgentDirectiveRunTarget(ctx context.Context,
 			Mode:  runtimeagentcontrol.RunResolutionSpecified,
 		}, nil
 	}
-	sessions, err := listActiveSQLiteDirectiveSessions(ctx, s.DB, fields)
+	sessions, err := listActiveSQLiteDirectiveSessions(ctx, s.backend.db, fields)
 	if err != nil {
 		return runtimeagentcontrol.RunTargetResolution{}, err
 	}
@@ -106,7 +106,7 @@ func (s *SQLiteRuntimeStore) ResolveAgentDirectiveRunTarget(ctx context.Context,
 		if strings.TrimSpace(session.RunID) == "" {
 			return runtimeagentcontrol.RunTargetResolution{}, ambiguousDirectiveRunTarget(identity, sessions)
 		}
-		if err := validateSQLiteDirectiveRunTarget(ctx, s.DB, identity, session.RunID); err != nil {
+		if err := validateSQLiteDirectiveRunTarget(ctx, s.backend.db, identity, session.RunID); err != nil {
 			return runtimeagentcontrol.RunTargetResolution{}, err
 		}
 		return runtimeagentcontrol.RunTargetResolution{

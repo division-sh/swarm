@@ -24,7 +24,7 @@ import (
 
 func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T) {
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
-	db := sqliteStore.DB
+	db := sqliteStore.TestDatabase()
 	controller := &fakeAgentControlController{
 		directiveResponse: "accepted",
 	}
@@ -197,7 +197,7 @@ func TestOperatorAgentDirectiveFailureUsesCanonicalNestedEnvelope(t *testing.T) 
 
 func TestOperatorAgentSendDirectiveRunTargetErrors(t *testing.T) {
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
-	db := sqliteStore.DB
+	db := sqliteStore.TestDatabase()
 	missingRunID := "00000000-0000-0000-0000-000000000404"
 	terminalRunID := "00000000-0000-0000-0000-000000000405"
 	handler := testHandler(t, Options{

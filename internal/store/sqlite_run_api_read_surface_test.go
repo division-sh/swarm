@@ -48,7 +48,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 			EntityCount: 5, StartedAt: now.Add(-time.Hour),
 		},
 	} {
-		runlifecyclefixture.RequireCorruptSQLiteSnapshot(t, ctx, sqliteStore.DB, snapshot)
+		runlifecyclefixture.RequireCorruptSQLiteSnapshot(t, ctx, sqliteStore.backend.db, snapshot)
 	}
 	for _, fixture := range []struct {
 		id, runID, name, entityID string
@@ -78,21 +78,21 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 		t.Fatalf("seed sqlite runtime log: %v", err)
 	}
 	runlifecyclefixture.CorruptSQLiteState(
-		t, ctx, sqliteStore.DB, older, "completed", now.Add(-30*time.Minute),
+		t, ctx, sqliteStore.backend.db, older, "completed", now.Add(-30*time.Minute),
 	)
-	seedSQLiteEntityStateRows(t, sqliteStore.DB, ctx, newer, newerEntityA, newerEntityB)
-	seedSQLiteEntityStateRows(t, sqliteStore.DB, ctx, older, olderEntity)
-	rootEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, newerEvent)
+	seedSQLiteEntityStateRows(t, sqliteStore.backend.db, ctx, newer, newerEntityA, newerEntityB)
+	seedSQLiteEntityStateRows(t, sqliteStore.backend.db, ctx, older, olderEntity)
+	rootEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.backend.db, newerEvent)
 	pendingDelivery := seedDeliveryStateFixture(t, ctx, sqliteStore, rootEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1")}, runtimedelivery.StateQueued, nil)
-	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.DB, pendingDelivery, now.Add(3*time.Second), now.Add(3*time.Second))
+	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.backend.db, pendingDelivery, now.Add(3*time.Second), now.Add(3*time.Second))
 
-	middleEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, newerMiddleEvent)
+	middleEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.backend.db, newerMiddleEvent)
 	agentFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "agent_failure", nil)
 	agentFailedDelivery := seedDeliveryStateFixture(t, ctx, sqliteStore, middleEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-failed")}, runtimedelivery.StateRetrying, &agentFailure)
-	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.DB, agentFailedDelivery, now.Add(4*time.Second), now.Add(5*time.Second))
+	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.backend.db, agentFailedDelivery, now.Add(4*time.Second), now.Add(5*time.Second))
 	agentFailedDeliveryID := agentFailedDelivery.DeliveryID
 
-	latestEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, newerLatestEvent)
+	latestEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.backend.db, newerLatestEvent)
 	deadRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-dead")}
 	if err := commitDeliveryObligationFixture(ctx, sqliteStore, latestEvent, deadRoute); err != nil {
 		t.Fatalf("commit sqlite exhausted delivery: %v", err)
@@ -115,17 +115,17 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 		if attempt == 3 {
 			break
 		}
-		setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.DB, nodeDeadDelivery, now.Add(6*time.Second), now.Add(6*time.Second))
+		setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.backend.db, nodeDeadDelivery, now.Add(6*time.Second), now.Add(6*time.Second))
 		claimed, err = claimDeliveryFixture(ctx, sqliteStore, latestEvent, deadRoute)
 		if err != nil {
 			t.Fatalf("reclaim sqlite exhausted delivery attempt %d: %v", attempt+2, err)
 		}
 	}
-	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.DB, nodeDeadDelivery, now.Add(6*time.Second), now.Add(8*time.Second))
+	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.backend.db, nodeDeadDelivery, now.Add(6*time.Second), now.Add(8*time.Second))
 	nodeDeadDeliveryID := nodeDeadDelivery.DeliveryID
 
 	successfulDelivery := seedDeliveryStateFixture(t, ctx, sqliteStore, middleEvent, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-success")}, runtimedelivery.StateDelivered, nil)
-	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.DB, successfulDelivery, now.Add(5*time.Second), now.Add(7*time.Second))
+	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.backend.db, successfulDelivery, now.Add(5*time.Second), now.Add(7*time.Second))
 	successDeliveryID := successfulDelivery.DeliveryID
 	header, err := sqliteStore.LoadRunHeader(ctx, older)
 	if err != nil {
@@ -245,11 +245,11 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 	runtimeLogEventID := uuid.NewString()
 	readyEventID := uuid.NewString()
 
-	runlifecyclefixture.RequireSQLite(t, ctx, sqliteStore.DB, runlifecyclefixture.Fixture{
+	runlifecyclefixture.RequireSQLite(t, ctx, sqliteStore.backend.db, runlifecyclefixture.Fixture{
 		RunID: blockedRunID, Origin: runlifecyclefixture.EventOrigin(t, activeEventID, "quiescence.active_delivery"),
 		StartedAt: now.Add(-time.Minute),
 	})
-	runlifecyclefixture.RequireSQLite(t, ctx, sqliteStore.DB, runlifecyclefixture.Fixture{
+	runlifecyclefixture.RequireSQLite(t, ctx, sqliteStore.backend.db, runlifecyclefixture.Fixture{
 		RunID: readyRunID, Origin: runlifecyclefixture.EventOrigin(t, readyEventID, "quiescence.ready"),
 		StartedAt: now.Add(-time.Minute),
 	})
@@ -280,11 +280,11 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 	if err := acknowledgePipelineEventFixture(ctx, sqliteStore, readyEventID); err != nil {
 		t.Fatalf("UpsertPipelineReceipt ready event: %v", err)
 	}
-	activeEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, activeEventID)
+	activeEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.backend.db, activeEventID)
 	seedDeliveryStateFixture(t, ctx, sqliteStore, activeEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-active")}, runtimedelivery.StateQueued, nil)
-	readyEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, readyEventID)
+	readyEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.backend.db, readyEventID)
 	seedDeliveryStateFixture(t, ctx, sqliteStore, readyEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-done")}, runtimedelivery.StateDelivered, nil)
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
+	if _, err := sqliteStore.backend.db.ExecContext(ctx, `
 		INSERT INTO timers (
 			timer_id, run_id, timer_name, fire_event, fire_payload,
 			routing_source, fire_at, owner_agent, owner_kind, task_type, status, created_at
@@ -298,8 +298,8 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 	}
 	quiescenceIdentity := testAgentIdentity(t, "quiescence-agent", "quiescence")
 	quiescenceFields := testAgentIdentityStorageFields(t, quiescenceIdentity)
-	seedTestAgentRow(t, ctx, sqliteStore.DB, false, quiescenceIdentity, "active")
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
+	seedTestAgentRow(t, ctx, sqliteStore.backend.db, false, quiescenceIdentity, "active")
+	if _, err := sqliteStore.backend.db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,

@@ -40,7 +40,7 @@ func (s *PostgresStore) loadProjectedRunDebugTrace(ctx context.Context, runID st
 	if err != nil {
 		return nil, "", fmt.Errorf("load run debug trace references: %w", err)
 	}
-	inputs, err := loadPostgresRunDebugTraceInputs(ctx, s.DB, runID, page.References)
+	inputs, err := loadPostgresRunDebugTraceInputs(ctx, s.backend.db, runID, page.References)
 	if err != nil {
 		return nil, "", err
 	}
@@ -56,7 +56,7 @@ func (s *SQLiteRuntimeStore) loadProjectedRunDebugTrace(ctx context.Context, run
 	if err != nil {
 		return nil, "", fmt.Errorf("load sqlite run debug trace references: %w", err)
 	}
-	inputs, err := loadSQLiteRunDebugTraceInputs(ctx, s.DB, runID, page.References)
+	inputs, err := loadSQLiteRunDebugTraceInputs(ctx, s.backend.db, runID, page.References)
 	if err != nil {
 		return nil, "", err
 	}

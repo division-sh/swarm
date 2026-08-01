@@ -21,7 +21,7 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	now := time.Now().Add(-time.Minute).UTC()
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: store.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 
 	runtimeLogID := persistSQLiteRuntimeLogForReplayTest(t, ctx, store, runID)
 	executableID := uuid.NewString()
@@ -29,7 +29,7 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 
 		events.EventType("workflow.executable"),
 		"runtime", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, now.Add(3*time.Second)))
-	eventtestsql.CorruptEventStore(t, ctx, store.DB, runtimeauthoractivity.DialectSQLite, eventtestsql.EventCorruptionClaim{
+	eventtestsql.CorruptEventStore(t, ctx, store.backend.db, runtimeauthoractivity.DialectSQLite, eventtestsql.EventCorruptionClaim{
 		Invariant: "store.event_record.named_operation_atomicity",
 		Reason:    "prove recovery fails closed when durable replay-scope evidence is missing",
 	}, `DELETE FROM committed_replay_scopes WHERE event_id = ?`, "", executableID)
@@ -84,7 +84,7 @@ func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEv
 	pg := newTestPostgresStore(t, db)
 	runID := uuid.NewString()
 	now := time.Now().Add(-time.Minute).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 
 	runtimeLogID := persistPostgresRuntimeLogForReplayTest(t, ctx, pg, runID)
 	executableID := uuid.NewString()
@@ -92,7 +92,7 @@ func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEv
 
 		events.EventType("workflow.executable"),
 		"runtime", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, now.Add(3*time.Second)))
-	eventtestsql.CorruptEventStore(t, ctx, pg.DB, runtimeauthoractivity.DialectPostgres, eventtestsql.EventCorruptionClaim{
+	eventtestsql.CorruptEventStore(t, ctx, pg.backend.db, runtimeauthoractivity.DialectPostgres, eventtestsql.EventCorruptionClaim{
 		Invariant: "store.event_record.named_operation_atomicity",
 		Reason:    "prove recovery fails closed when durable replay-scope evidence is missing",
 	}, "", `DELETE FROM committed_replay_scopes WHERE event_id = $1::uuid`, executableID)
@@ -148,7 +148,7 @@ func persistSQLiteRuntimeLogForReplayTest(t *testing.T, ctx context.Context, sto
 		t.Fatalf("PersistRuntimeLog(sqlite): %v", err)
 	}
 	var eventID string
-	if err := store.DB.QueryRowContext(ctx, `
+	if err := store.backend.db.QueryRowContext(ctx, `
 		SELECT event_id
 		FROM events
 		WHERE run_id = ?
@@ -168,7 +168,7 @@ func persistPostgresRuntimeLogForReplayTest(t *testing.T, ctx context.Context, p
 		t.Fatalf("PersistRuntimeLog(postgres): %v", err)
 	}
 	var eventID string
-	if err := pg.DB.QueryRowContext(ctx, `
+	if err := pg.backend.db.QueryRowContext(ctx, `
 		SELECT event_id::text
 		FROM events
 		WHERE run_id = $1::uuid
@@ -218,7 +218,7 @@ func replayEventIDs(records []events.PersistedReplayEvent) []string {
 func assertNoSQLitePipelineReceipt(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, eventID string) {
 	t.Helper()
 	var count int
-	if err := store.DB.QueryRowContext(ctx, `
+	if err := store.backend.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM event_receipts
 		WHERE event_id = ?
@@ -235,7 +235,7 @@ func assertNoSQLitePipelineReceipt(t *testing.T, ctx context.Context, store *SQL
 func assertSQLitePipelineReceipt(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, eventID, outcome, reason string) {
 	t.Helper()
 	var gotOutcome, gotReason string
-	if err := store.DB.QueryRowContext(ctx, `
+	if err := store.backend.db.QueryRowContext(ctx, `
 		SELECT outcome, COALESCE(reason_code, '')
 		FROM event_receipts
 		WHERE event_id = ?
@@ -252,7 +252,7 @@ func assertSQLitePipelineReceipt(t *testing.T, ctx context.Context, store *SQLit
 func assertNoPostgresPipelineReceipt(t *testing.T, ctx context.Context, pg *PostgresStore, eventID string) {
 	t.Helper()
 	var count int
-	if err := pg.DB.QueryRowContext(ctx, `
+	if err := pg.backend.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM event_receipts
 		WHERE event_id = $1::uuid
@@ -269,7 +269,7 @@ func assertNoPostgresPipelineReceipt(t *testing.T, ctx context.Context, pg *Post
 func assertPostgresPipelineReceipt(t *testing.T, ctx context.Context, pg *PostgresStore, eventID, outcome, reason string) {
 	t.Helper()
 	var gotOutcome, gotReason string
-	if err := pg.DB.QueryRowContext(ctx, `
+	if err := pg.backend.db.QueryRowContext(ctx, `
 		SELECT outcome, COALESCE(reason_code, '')
 		FROM event_receipts
 		WHERE event_id = $1::uuid

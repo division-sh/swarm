@@ -127,7 +127,7 @@ type SQLiteRuntimeStore struct {
 }
 
 func (s *SQLiteRuntimeStore) BadBypass(ctx context.Context) error {
-	_, err := s.DB.ExecContext(ctx, "INSERT INTO events(execution_mode, event_id) VALUES ('live', ?)", "evt")
+	_, err := s.backend.db.ExecContext(ctx, "INSERT INTO events(execution_mode, event_id) VALUES ('live', ?)", "evt")
 	return err
 }
 `

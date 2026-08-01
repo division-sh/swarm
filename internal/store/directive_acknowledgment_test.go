@@ -157,7 +157,7 @@ func forEachDirectiveAmbiguityBackend(t *testing.T, run func(*testing.T, directi
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
 		store := newBootstrappedSQLiteRuntimeStoreForPath(t, filepath.Join(t.TempDir(), "directive-ambiguity.db"))
-		run(t, directiveAmbiguityBackend{name: "sqlite", store: store, db: store.DB})
+		run(t, directiveAmbiguityBackend{name: "sqlite", store: store, db: store.backend.db})
 	})
 	t.Run("postgres", func(t *testing.T) {
 		_, db, cleanup := testutil.StartPostgres(t)

@@ -68,8 +68,8 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			} else {
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 				seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "channel-runtime", "telegram", "unused", "channel-runtime-observer")
-				db, eventStore = sqliteStore.DB, sqliteStore
-				workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(sqliteStore.DB, sqliteStore)
+				db, eventStore = sqliteStore.TestDatabase(), sqliteStore
+				workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(sqliteStore.TestDatabase(), sqliteStore)
 				runLifecycle, deliveryStore = sqliteStore, sqliteStore
 			}
 			seedConfiguredChannelBundleIdentity(t, ctx, db, selected, runID, bundleHash)

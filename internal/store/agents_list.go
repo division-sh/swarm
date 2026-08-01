@@ -16,7 +16,7 @@ var _ runtimebus.ActiveAgentDescriptorLister = (*SQLiteRuntimeStore)(nil)
 // ListActiveAgentDescriptors implements runtime.ActiveAgentDescriptorLister for
 // explicit runtime delivery planning against persisted agent metadata.
 func (s *PostgresStore) ListActiveAgentDescriptors(ctx context.Context) ([]runtimebus.ActiveAgentDescriptor, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("db unavailable")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -33,7 +33,7 @@ func (s *PostgresStore) ListActiveAgentDescriptors(ctx context.Context) ([]runti
 	`
 	var queryer interface {
 		QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-	} = s.DB
+	} = s.backend.db
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		queryer = tx
 	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
@@ -70,7 +70,7 @@ func (s *SQLiteRuntimeStore) ListActiveAgentDescriptors(ctx context.Context) ([]
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
-	q := flowInstanceDescriptorQueryer(s.DB)
+	q := flowInstanceDescriptorQueryer(s.backend.db)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		q = tx
 	}

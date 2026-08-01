@@ -32,7 +32,7 @@ func seedDirectiveOperationRun(t *testing.T, db *sql.DB, postgres bool) {
 func TestSQLiteDirectiveOperationOwnsReservationExecutionAndCompletion(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	seedDirectiveOperationRun(t, store.DB, false)
+	seedDirectiveOperationRun(t, store.backend.db, false)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	req := directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001001", "00000000-0000-0000-0000-000000001002", "idem-1", "hash-1", now)
 
@@ -90,7 +90,7 @@ func TestSQLiteDirectiveOperationOwnsReservationExecutionAndCompletion(t *testin
 	if finalized.State != runtimeagentcontrol.DirectiveOperationSucceeded {
 		t.Fatalf("finalized state = %s", finalized.State)
 	}
-	assertDirectiveOperationCompletionRows(t, store.DB, reserved.Operation.OperationID, reserved.Operation.DirectiveEventID)
+	assertDirectiveOperationCompletionRows(t, store.backend.db, reserved.Operation.OperationID, reserved.Operation.DirectiveEventID)
 	if _, ok, err := store.ReconcileDirectiveOperation(ctx, reserved.Operation.OperationID, now.Add(25*time.Hour), 24*time.Hour); err != nil || ok {
 		t.Fatalf("expired terminal reconciliation ok=%v err=%v, want deleted", ok, err)
 	}
@@ -103,7 +103,7 @@ func TestSQLiteDirectiveOperationOwnsReservationExecutionAndCompletion(t *testin
 func TestSQLiteDirectiveOperationRecoveryNeverReadmitsUncertainExecution(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	seedDirectiveOperationRun(t, store.DB, false)
+	seedDirectiveOperationRun(t, store.backend.db, false)
 	now := time.Date(2026, 7, 10, 13, 0, 0, 0, time.UTC)
 
 	executingReq := directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001101", "00000000-0000-0000-0000-000000001102", "idem-recovery", "hash-recovery", now)
@@ -140,7 +140,7 @@ func TestSQLiteDirectiveOperationRecoveryNeverReadmitsUncertainExecution(t *test
 	if result.Finalized != 1 || result.Indeterminate != 1 || result.Failed != 1 {
 		t.Fatalf("reconcile result = %#v", result)
 	}
-	assertDirectiveOperationCompletionRows(t, store.DB, executedReservation.Operation.OperationID, executedReservation.Operation.DirectiveEventID)
+	assertDirectiveOperationCompletionRows(t, store.backend.db, executedReservation.Operation.OperationID, executedReservation.Operation.DirectiveEventID)
 	uncertain, _, err := store.LoadDirectiveOperation(ctx, reserved.Operation.OperationID)
 	if err != nil {
 		t.Fatalf("load uncertain: %v", err)
@@ -164,7 +164,7 @@ func TestSQLiteDirectiveOperationConcurrentSameKeyHasOneReservation(t *testing.T
 	ctx := testAuthorActivityContext()
 	path := filepath.Join(t.TempDir(), "directive.db")
 	first := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
-	seedDirectiveOperationRun(t, first.DB, false)
+	seedDirectiveOperationRun(t, first.backend.db, false)
 	second := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
 	now := time.Date(2026, 7, 10, 14, 0, 0, 0, time.UTC)
 	requests := []runtimeagentcontrol.ReserveDirectiveOperationRequest{
@@ -192,10 +192,10 @@ func TestSQLiteDirectiveOperationConcurrentSameKeyHasOneReservation(t *testing.T
 		t.Fatalf("operation ids = %s / %s", results[0].Operation.OperationID, results[1].Operation.OperationID)
 	}
 	var operationCount, eventCount int
-	if err := first.DB.QueryRow(`SELECT COUNT(*) FROM agent_directive_operations`).Scan(&operationCount); err != nil {
+	if err := first.backend.db.QueryRow(`SELECT COUNT(*) FROM agent_directive_operations`).Scan(&operationCount); err != nil {
 		t.Fatal(err)
 	}
-	if err := first.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = 'platform.agent_directive'`).Scan(&eventCount); err != nil {
+	if err := first.backend.db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = 'platform.agent_directive'`).Scan(&eventCount); err != nil {
 		t.Fatal(err)
 	}
 	if operationCount != 1 || eventCount != 1 {
@@ -223,10 +223,10 @@ func TestSQLiteDirectiveOperationFinalizationFailuresRollbackToExecuted(t *testi
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-			seedDirectiveOperationRun(t, store.DB, false)
+			seedDirectiveOperationRun(t, store.backend.db, false)
 			now := time.Date(2026, 7, 10, 14, 30, 0, 0, time.UTC)
 			reserved := reserveAndRecordExecutedDirectiveForTest(t, ctx, store, now)
-			if _, err := store.DB.Exec(tc.triggerSQL); err != nil {
+			if _, err := store.backend.db.Exec(tc.triggerSQL); err != nil {
 				t.Fatalf("create failure trigger: %v", err)
 			}
 			if _, err := store.FinalizeDirectiveSuccess(ctx, reserved.OperationID, now.Add(time.Second), 24*time.Hour); err == nil {
@@ -240,22 +240,22 @@ func TestSQLiteDirectiveOperationFinalizationFailuresRollbackToExecuted(t *testi
 				t.Fatalf("state after failed finalization = %s, want executed", persisted.State)
 			}
 			var receiptCount, projectionCount int
-			if err := store.DB.QueryRow(`SELECT COUNT(*) FROM event_receipts WHERE event_id = ?`, reserved.DirectiveEventID).Scan(&receiptCount); err != nil {
+			if err := store.backend.db.QueryRow(`SELECT COUNT(*) FROM event_receipts WHERE event_id = ?`, reserved.DirectiveEventID).Scan(&receiptCount); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.DB.QueryRow(`SELECT COUNT(*) FROM api_idempotency WHERE resource_id = ?`, reserved.OperationID).Scan(&projectionCount); err != nil {
+			if err := store.backend.db.QueryRow(`SELECT COUNT(*) FROM api_idempotency WHERE resource_id = ?`, reserved.OperationID).Scan(&projectionCount); err != nil {
 				t.Fatal(err)
 			}
 			if receiptCount != 0 || projectionCount != 0 {
 				t.Fatalf("failed finalization receipt/projection = %d/%d, want 0/0", receiptCount, projectionCount)
 			}
-			if _, err := store.DB.Exec(`DROP TRIGGER ` + tc.triggerName); err != nil {
+			if _, err := store.backend.db.Exec(`DROP TRIGGER ` + tc.triggerName); err != nil {
 				t.Fatalf("drop failure trigger: %v", err)
 			}
 			if _, err := store.FinalizeDirectiveSuccess(ctx, reserved.OperationID, now.Add(2*time.Second), 24*time.Hour); err != nil {
 				t.Fatalf("repair finalization: %v", err)
 			}
-			assertDirectiveOperationCompletionRows(t, store.DB, reserved.OperationID, reserved.DirectiveEventID)
+			assertDirectiveOperationCompletionRows(t, store.backend.db, reserved.OperationID, reserved.DirectiveEventID)
 		})
 	}
 }
@@ -263,7 +263,7 @@ func TestSQLiteDirectiveOperationFinalizationFailuresRollbackToExecuted(t *testi
 func TestSQLiteDirectiveOperationResultPersistenceFailureBecomesIndeterminate(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	seedDirectiveOperationRun(t, store.DB, false)
+	seedDirectiveOperationRun(t, store.backend.db, false)
 	now := time.Date(2026, 7, 10, 14, 45, 0, 0, time.UTC)
 	req := directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001251", "00000000-0000-0000-0000-000000001252", "result-failure", "result-hash", now)
 	reserved, err := store.ReserveDirectiveOperation(ctx, req)
@@ -274,13 +274,13 @@ func TestSQLiteDirectiveOperationResultPersistenceFailureBecomesIndeterminate(t 
 	if _, err := store.AdmitDirectiveExecution(ctx, reserved.Operation.OperationID, ownerID, now, time.Second); err != nil {
 		t.Fatalf("admit: %v", err)
 	}
-	if _, err := store.DB.Exec(`CREATE TRIGGER fail_directive_executed BEFORE UPDATE OF state ON agent_directive_operations WHEN NEW.state = 'executed' BEGIN SELECT RAISE(ABORT, 'injected result failure'); END`); err != nil {
+	if _, err := store.backend.db.Exec(`CREATE TRIGGER fail_directive_executed BEFORE UPDATE OF state ON agent_directive_operations WHEN NEW.state = 'executed' BEGIN SELECT RAISE(ABORT, 'injected result failure'); END`); err != nil {
 		t.Fatalf("create result trigger: %v", err)
 	}
 	if _, err := store.RecordDirectiveExecuted(ctx, reserved.Operation.OperationID, ownerID, directiveOperationResponseForTest(reserved.Operation), now.Add(500*time.Millisecond)); err == nil {
 		t.Fatal("RecordDirectiveExecuted error = nil")
 	}
-	if _, err := store.DB.Exec(`DROP TRIGGER fail_directive_executed`); err != nil {
+	if _, err := store.backend.db.Exec(`DROP TRIGGER fail_directive_executed`); err != nil {
 		t.Fatalf("drop result trigger: %v", err)
 	}
 	if _, err := store.ReconcileDirectiveOperations(ctx, now.Add(2*time.Second), 24*time.Hour); err != nil {
@@ -301,9 +301,9 @@ func TestSQLiteDirectiveOperationResultPersistenceFailureBecomesIndeterminate(t 
 func TestSQLiteDirectiveOperationReservationFailureRollsBackEveryFact(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	seedDirectiveOperationRun(t, store.DB, false)
+	seedDirectiveOperationRun(t, store.backend.db, false)
 	now := time.Date(2026, 7, 10, 14, 50, 0, 0, time.UTC)
-	if _, err := store.DB.Exec(`CREATE TRIGGER fail_directive_event BEFORE INSERT ON events WHEN NEW.event_name = 'platform.agent_directive' BEGIN SELECT RAISE(ABORT, 'injected event failure'); END`); err != nil {
+	if _, err := store.backend.db.Exec(`CREATE TRIGGER fail_directive_event BEFORE INSERT ON events WHEN NEW.event_name = 'platform.agent_directive' BEGIN SELECT RAISE(ABORT, 'injected event failure'); END`); err != nil {
 		t.Fatalf("create event trigger: %v", err)
 	}
 	req := directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001261", "00000000-0000-0000-0000-000000001262", "reservation-failure", "reservation-hash", now)
@@ -315,7 +315,7 @@ func TestSQLiteDirectiveOperationReservationFailureRollsBackEveryFact(t *testing
 		`SELECT COUNT(*) FROM events WHERE event_name = 'platform.agent_directive'`,
 	} {
 		var count int
-		if err := store.DB.QueryRow(query).Scan(&count); err != nil {
+		if err := store.backend.db.QueryRow(query).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		if count != 0 {

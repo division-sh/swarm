@@ -15,7 +15,7 @@ import (
 func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	s := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	if _, err := s.DB.ExecContext(ctx, `PRAGMA journal_mode = WAL`); err != nil {
+	if _, err := s.backend.db.ExecContext(ctx, `PRAGMA journal_mode = WAL`); err != nil {
 		t.Fatalf("enable production SQLite journal mode: %v", err)
 	}
 	now := activeConversationForkTestClock()
@@ -164,14 +164,14 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 		t.Fatalf("loaded turns = %d, want %d", len(loaded.Turns), chatCount)
 	}
 	var snapshots int
-	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM conversation_fork_snapshots WHERE fork_id = ?`, turnFork.ForkID).Scan(&snapshots); err != nil {
+	if err := s.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM conversation_fork_snapshots WHERE fork_id = ?`, turnFork.ForkID).Scan(&snapshots); err != nil {
 		t.Fatalf("count snapshots: %v", err)
 	}
 	if snapshots != 1 {
 		t.Fatalf("snapshot rows = %d, want 1", snapshots)
 	}
 	var normalTurns int
-	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_turns WHERE session_id = ?`, turnFork.ForkID).Scan(&normalTurns); err != nil {
+	if err := s.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_turns WHERE session_id = ?`, turnFork.ForkID).Scan(&normalTurns); err != nil {
 		t.Fatalf("count leaked normal turns: %v", err)
 	}
 	if normalTurns != 0 {
@@ -217,7 +217,7 @@ func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base 
 	if err != nil {
 		t.Fatalf("conversation fork source identity: %v", err)
 	}
-	seedTestAgentRow(t, ctx, s.DB, false, identity, "active")
+	seedTestAgentRow(t, ctx, s.backend.db, false, identity, "active")
 	statements := []struct {
 		query string
 		args  []any
@@ -226,7 +226,7 @@ func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base 
 			[]any{source.sessionID, source.runID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, base.Add(-3 * time.Minute), base.Add(-3 * time.Minute)}},
 	}
 	for _, statement := range statements {
-		if _, err := s.DB.ExecContext(ctx, statement.query, statement.args...); err != nil {
+		if _, err := s.backend.db.ExecContext(ctx, statement.query, statement.args...); err != nil {
 			t.Fatalf("seed SQLite conversation fork source: %v\nquery: %s", err, statement.query)
 		}
 	}
@@ -246,7 +246,7 @@ func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base 
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, source.sessionID, fields.FlowInstancePath,
 		source.event2ID, capability2, source.turn2At,
 	}
-	if _, err := s.DB.ExecContext(ctx, query, args...); err != nil {
+	if _, err := s.backend.db.ExecContext(ctx, query, args...); err != nil {
 		t.Fatalf("seed SQLite conversation fork source: %v\nquery: %s", err, query)
 	}
 	return source

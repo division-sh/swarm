@@ -73,7 +73,8 @@ func TestValidateSelectedStoreBundleRolesAcceptsPostgresSelectedBundle(t *testin
 	}
 	t.Cleanup(func() { closeDB(db) })
 
-	stores := selectedPostgresStoreBundle(&store.PostgresStore{DB: db}, &config.Config{})
+	selected := store.NewPostgresStoreForTest(db)
+	stores := selectedPostgresStoreBundle(selected, db, &config.Config{})
 	if err := validateSelectedStoreBundleRoles(storebackend.BackendPostgres, stores); err != nil {
 		t.Fatalf("validate selected postgres store roles: %v", err)
 	}

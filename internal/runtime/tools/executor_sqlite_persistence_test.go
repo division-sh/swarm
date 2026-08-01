@@ -130,7 +130,7 @@ accounts:
 		t.Fatalf("sqlite metric sum = %v, want 42", got)
 	}
 	var mutationCount int
-	if err := sqliteStore.DB.QueryRowContext(ctx, `
+	if err := sqliteStore.TestDatabase().QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM entity_mutations
 		WHERE run_id = ? AND entity_id = ?
@@ -341,9 +341,9 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 	now := time.Now().UTC().Truncate(time.Microsecond).Add(789 * time.Nanosecond)
 	switch typed := persistence.(type) {
 	case *store.PostgresStore:
-		runlifecyclefixture.RequirePostgres(t, unmanagedToolTestContext(), typed.DB, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource})
+		runlifecyclefixture.RequirePostgres(t, unmanagedToolTestContext(), typed.TestDatabase(), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource})
 	case *store.SQLiteRuntimeStore:
-		runlifecyclefixture.RequireSQLite(t, unmanagedToolTestContext(), typed.DB, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource})
+		runlifecyclefixture.RequireSQLite(t, unmanagedToolTestContext(), typed.TestDatabase(), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource})
 	default:
 		t.Fatalf("unsupported reply tool store %T", persistence)
 	}
@@ -429,5 +429,5 @@ func newSQLiteRuntimeToolStoreForTest(t *testing.T) *store.SQLiteRuntimeStore {
 
 func ensureSQLiteEntityToolTestRun(t *testing.T, sqliteStore *store.SQLiteRuntimeStore) {
 	t.Helper()
-	runlifecyclefixture.RequireSQLite(t, unmanagedToolTestContext(), sqliteStore.DB, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: entityToolTestRunID, StartedAt: time.Now().UTC(), BundleHash: authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource})
+	runlifecyclefixture.RequireSQLite(t, unmanagedToolTestContext(), sqliteStore.TestDatabase(), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: entityToolTestRunID, StartedAt: time.Now().UTC(), BundleHash: authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource})
 }

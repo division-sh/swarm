@@ -17,10 +17,10 @@ type sqliteOperatorAgentConversationReadSurface struct {
 }
 
 func newSQLiteOperatorAgentConversationReadSurface(s *SQLiteRuntimeStore, turnLimit int) *sqliteOperatorAgentConversationReadSurface {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil
 	}
-	return &sqliteOperatorAgentConversationReadSurface{store: s, db: s.DB, turnLimit: maxStoreInt(turnLimit, 0)}
+	return &sqliteOperatorAgentConversationReadSurface{store: s, db: s.backend.db, turnLimit: maxStoreInt(turnLimit, 0)}
 }
 
 func (s *SQLiteRuntimeStore) ListOperatorAgents(ctx context.Context, opts OperatorAgentListOptions) (OperatorAgentListResult, error) {
@@ -73,7 +73,7 @@ func (s *SQLiteRuntimeStore) ListAgentDeliveryLifecycleFacts(ctx context.Context
 }
 
 func (s *SQLiteRuntimeStore) listSQLiteAgentLifecycleRecords(ctx context.Context, identities []agentidentity.Identity) ([]agentLifecycleDeliveryRecord, error) {
-	snapshots, err := sqliteDeliveryAdapter.CurrentAgentSnapshots(ctx, s.DB, identities)
+	snapshots, err := sqliteDeliveryAdapter.CurrentAgentSnapshots(ctx, s.backend.db, identities)
 	if err != nil {
 		return nil, err
 	}

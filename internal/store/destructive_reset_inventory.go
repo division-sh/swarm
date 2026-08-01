@@ -8,7 +8,7 @@ import (
 )
 
 func (s *PostgresStore) ReadResetInventory(ctx context.Context) (destructivereset.Inventory, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return destructivereset.Inventory{}, fmt.Errorf("postgres store is required")
 	}
 	runs, err := s.readDestructiveResetInventoryRuns(ctx)
@@ -46,7 +46,7 @@ func (s *PostgresStore) ReadResetInventory(ctx context.Context) (destructiverese
 }
 
 func (s *PostgresStore) readDestructiveResetInventoryRuns(ctx context.Context) ([]destructivereset.RunRef, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT run_id::text, COALESCE(status, '')
 		FROM runs
 		ORDER BY run_id::text
@@ -70,7 +70,7 @@ func (s *PostgresStore) readDestructiveResetInventoryRuns(ctx context.Context) (
 }
 
 func (s *PostgresStore) readDestructiveResetInventoryDeliveries(ctx context.Context) ([]destructivereset.DeliveryRef, error) {
-	snapshots, err := postgresDeliveryAdapter.ActiveSnapshots(ctx, s.DB)
+	snapshots, err := postgresDeliveryAdapter.ActiveSnapshots(ctx, s.backend.db)
 	if err != nil {
 		return nil, fmt.Errorf("read destructive reset inventory deliveries: %w", err)
 	}

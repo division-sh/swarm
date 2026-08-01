@@ -18,7 +18,7 @@ import (
 )
 
 func (s *PostgresStore) ReadTimerObligations(ctx context.Context, scope runtimetimerobligation.Scope, observedAt time.Time) (runtimetimerobligation.Snapshot, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimetimerobligation.Snapshot{}, fmt.Errorf("timer obligation reader requires PostgreSQL store")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -27,7 +27,7 @@ func (s *PostgresStore) ReadTimerObligations(ctx context.Context, scope runtimet
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		return runtimetimerobligation.Read(ctx, tx, runtimetimerobligation.DialectPostgres, scope, observedAt)
 	}
-	return runtimetimerobligation.Read(ctx, s.DB, runtimetimerobligation.DialectPostgres, scope, observedAt)
+	return runtimetimerobligation.Read(ctx, s.backend.db, runtimetimerobligation.DialectPostgres, scope, observedAt)
 }
 
 func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.Schedule) error {
@@ -300,7 +300,7 @@ func (s *PostgresStore) cancelScheduleExactSpec(ctx context.Context, sc runtimep
 }
 
 func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimepipeline.Schedule, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT
 			COALESCE(t.run_id::text, ''),
 			t.owner_agent,
@@ -485,7 +485,7 @@ func (s *PostgresStore) runScheduleTransaction(ctx context.Context, label string
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		return mutate(tx)
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin %s: %w", label, err)
 	}

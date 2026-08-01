@@ -47,17 +47,17 @@ func (v *conversationForkTimeValue) Scan(src any) error {
 }
 
 func postgresConversationForkStore(s *PostgresStore) (conversationForkStore, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return conversationForkStore{}, fmt.Errorf("postgres store is required")
 	}
-	return conversationForkStore{db: s.DB, dialect: conversationForkPostgres, admission: s}, nil
+	return conversationForkStore{db: s.backend.db, dialect: conversationForkPostgres, admission: s}, nil
 }
 
 func sqliteConversationForkStore(s *SQLiteRuntimeStore) (conversationForkStore, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return conversationForkStore{}, fmt.Errorf("sqlite runtime store is required")
 	}
-	return conversationForkStore{db: s.DB, dialect: conversationForkSQLite, sqlite: s, admission: s}, nil
+	return conversationForkStore{db: s.backend.db, dialect: conversationForkSQLite, sqlite: s, admission: s}, nil
 }
 
 func (s conversationForkStore) requireCurrentSchema() error {

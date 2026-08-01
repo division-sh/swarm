@@ -88,12 +88,12 @@ func ensureBoundedStandingTarget(t *testing.T, ctx context.Context, persistence 
 
 	switch selected := persistence.(type) {
 	case *storepkg.PostgresStore:
-		if err := selected.DB.QueryRowContext(ctx, `SELECT flow_instance FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`, runID, entityID).Scan(&flowInstance); err != nil {
+		if err := selected.TestDatabase().QueryRowContext(ctx, `SELECT flow_instance FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`, runID, entityID).Scan(&flowInstance); err != nil {
 			t.Fatalf("load postgres bounded provider flow instance: %v", err)
 		}
-		insertPostgresStandingFixture(t, ctx, selected.DB, serviceID, packageKey, flowID, flowInstance, entityID, runID, bundleHash, bundleSource)
+		insertPostgresStandingFixture(t, ctx, selected.TestDatabase(), serviceID, packageKey, flowID, flowInstance, entityID, runID, bundleHash, bundleSource)
 	case *storepkg.SQLiteRuntimeStore:
-		if err := selected.DB.QueryRowContext(ctx, `SELECT flow_instance FROM entity_state WHERE run_id = ? AND entity_id = ?`, runID, entityID).Scan(&flowInstance); err != nil {
+		if err := selected.TestDatabase().QueryRowContext(ctx, `SELECT flow_instance FROM entity_state WHERE run_id = ? AND entity_id = ?`, runID, entityID).Scan(&flowInstance); err != nil {
 			t.Fatalf("load sqlite bounded provider flow instance: %v", err)
 		}
 		insertSQLiteStandingFixture(t, ctx, selected, serviceID, packageKey, flowID, flowInstance, entityID, runID, bundleHash, bundleSource)

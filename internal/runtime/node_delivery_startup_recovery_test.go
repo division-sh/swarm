@@ -173,12 +173,12 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithBundleSourceFact(ctx, persistedSource)
-				seedStartupRecoveryPersistedBundle(t, ctx, selected.DB, "sqlite", persistedSource.BundleHash())
-				storetest.RequireSQLiteRun(t, ctx, selected.DB, storetest.RunFixture{
+				seedStartupRecoveryPersistedBundle(t, ctx, selected.TestDatabase(), "sqlite", persistedSource.BundleHash())
+				storetest.RequireSQLiteRun(t, ctx, selected.TestDatabase(), storetest.RunFixture{
 					Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
 					BundleHash: persistedBundleHash, BundleSource: persistedBundleSource,
 				})
-				return ctx, nil, selected.DB, selected
+				return ctx, nil, selected.TestDatabase(), selected
 			},
 		},
 	} {
@@ -334,7 +334,7 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 						selected = storetest.AdmitPostgresRuntimeStore(t, postgresDB)
 					} else {
 						sqliteStore := storetest.StartSQLiteRuntimeStore(t)
-						db = sqliteStore.DB
+						db = sqliteStore.TestDatabase()
 						selected = sqliteStore
 					}
 
@@ -500,7 +500,7 @@ func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *t
 				selected = storetest.AdmitPostgresRuntimeStore(t, postgresDB)
 			} else {
 				sqliteStore := storetest.StartSQLiteRuntimeStore(t)
-				db = sqliteStore.DB
+				db = sqliteStore.TestDatabase()
 				selected = sqliteStore
 			}
 			runID := eventtest.UUID("pipeline-handoff-cleanup-run-" + backend)
@@ -755,8 +755,8 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
-				storetest.RequireSQLiteRun(t, ctx, selected.DB, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
-				return ctx, selected.DB, selected
+				storetest.RequireSQLiteRun(t, ctx, selected.TestDatabase(), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
+				return ctx, selected.TestDatabase(), selected
 			},
 		},
 	} {
@@ -850,8 +850,8 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
-				storetest.RequireSQLiteRun(t, ctx, selected.DB, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
-				return ctx, selected.DB, selected
+				storetest.RequireSQLiteRun(t, ctx, selected.TestDatabase(), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
+				return ctx, selected.TestDatabase(), selected
 			},
 		},
 	} {
@@ -1000,8 +1000,8 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
-				storetest.RequireSQLiteRun(t, ctx, selected.DB, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
-				return ctx, selected.DB, selected
+				storetest.RequireSQLiteRun(t, ctx, selected.TestDatabase(), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
+				return ctx, selected.TestDatabase(), selected
 			},
 		},
 	} {

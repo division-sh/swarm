@@ -243,7 +243,7 @@ func newSelectedReviewFixture(t *testing.T, sqlite bool) selectedCompletionFixtu
 	t.Helper()
 	if sqlite {
 		s := newBootstrappedSQLiteRuntimeStoreForTest(t)
-		return newSelectedCompletionFixture(t, s, s.DB, true)
+		return newSelectedCompletionFixture(t, s, s.backend.db, true)
 	}
 	_, db, _ := testutil.StartPostgres(t)
 	return newSelectedCompletionFixture(t, admitTestPostgresStore(t, db), db, false)
@@ -253,7 +253,7 @@ func newCompletionReviewFixture(t *testing.T, sqlite bool) completionSettlementF
 	t.Helper()
 	if sqlite {
 		s := newBootstrappedSQLiteRuntimeStoreForTest(t)
-		return newCompletionSettlementFixture(t, s, s.DB, true)
+		return newCompletionSettlementFixture(t, s, s.backend.db, true)
 	}
 	_, db, _ := testutil.StartPostgres(t)
 	return newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false)

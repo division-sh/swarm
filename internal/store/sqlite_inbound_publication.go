@@ -67,24 +67,24 @@ func (s *SQLiteRuntimeStore) RunInboundPublicationMutation(ctx context.Context, 
 }
 
 func (s *SQLiteRuntimeStore) LoadInboundPublicationByIdentity(ctx context.Context, provider, entityID, providerEventID string) (runtimeinbound.Record, bool, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimeinbound.Record{}, false, fmt.Errorf("sqlite runtime store is required")
 	}
-	record, found, err := loadSQLiteInboundPublicationTx(ctx, s.DB, provider, entityID, providerEventID)
+	record, found, err := loadSQLiteInboundPublicationTx(ctx, s.backend.db, provider, entityID, providerEventID)
 	if err != nil || !found {
 		return record, found, err
 	}
-	if err := validateSQLiteInboundPublicationIntegrityTx(ctx, s.DB, &record); err != nil {
+	if err := validateSQLiteInboundPublicationIntegrityTx(ctx, s.backend.db, &record); err != nil {
 		return runtimeinbound.Record{}, false, err
 	}
 	return record, true, nil
 }
 
 func (s *SQLiteRuntimeStore) ValidateInboundPublicationIntegrity(ctx context.Context) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("sqlite runtime store is required")
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT provider, entity_id, provider_event_id FROM inbound_publications ORDER BY provider, entity_id, provider_event_id`)
+	rows, err := s.backend.db.QueryContext(ctx, `SELECT provider, entity_id, provider_event_id FROM inbound_publications ORDER BY provider, entity_id, provider_event_id`)
 	if err != nil {
 		return fmt.Errorf("list sqlite inbound publications for integrity validation: %w", err)
 	}
@@ -106,14 +106,14 @@ func (s *SQLiteRuntimeStore) ValidateInboundPublicationIntegrity(ctx context.Con
 		return fmt.Errorf("close sqlite inbound publication identities: %w", err)
 	}
 	for _, item := range identities {
-		record, found, err := loadSQLiteInboundPublicationTx(ctx, s.DB, item.provider, item.entityID, item.providerEventID)
+		record, found, err := loadSQLiteInboundPublicationTx(ctx, s.backend.db, item.provider, item.entityID, item.providerEventID)
 		if err != nil {
 			return err
 		}
 		if !found {
 			return fmt.Errorf("sqlite inbound publication disappeared during integrity validation")
 		}
-		if err := validateSQLiteInboundPublicationIntegrityTx(ctx, s.DB, &record); err != nil {
+		if err := validateSQLiteInboundPublicationIntegrityTx(ctx, s.backend.db, &record); err != nil {
 			return err
 		}
 	}

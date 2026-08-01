@@ -41,7 +41,7 @@ type completionSettlementFixture struct {
 
 func TestCompletionProviderHeadSettlementSQLite(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	proveCompletionProviderHeadSettlement(t, newCompletionSettlementFixture(t, store, store.DB, true))
+	proveCompletionProviderHeadSettlement(t, newCompletionSettlementFixture(t, store, store.backend.db, true))
 }
 
 func TestCompletionProviderHeadSettlementPostgres(t *testing.T) {
@@ -64,7 +64,7 @@ func proveCompletionProviderHeadSettlement(t *testing.T, fixture completionSettl
 
 func TestCompletionProviderHeadConflictCommitsUncertaintySQLite(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	proveCompletionProviderHeadConflictCommitsUncertainty(t, newCompletionSettlementFixture(t, store, store.DB, true))
+	proveCompletionProviderHeadConflictCommitsUncertainty(t, newCompletionSettlementFixture(t, store, store.backend.db, true))
 }
 
 func TestCompletionProviderHeadConflictCommitsUncertaintyPostgres(t *testing.T) {
@@ -101,7 +101,7 @@ func proveCompletionProviderHeadConflictCommitsUncertainty(t *testing.T, fixture
 
 func TestCompletionProviderHeadStaleAuthorityCannotSettleSQLite(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	proveCompletionProviderHeadStaleAuthorityCannotSettle(t, newCompletionSettlementFixture(t, store, store.DB, true))
+	proveCompletionProviderHeadStaleAuthorityCannotSettle(t, newCompletionSettlementFixture(t, store, store.backend.db, true))
 }
 
 func TestCompletionProviderHeadStaleAuthorityCannotSettlePostgres(t *testing.T) {
@@ -111,7 +111,7 @@ func TestCompletionProviderHeadStaleAuthorityCannotSettlePostgres(t *testing.T) 
 
 func TestCompletionPrelaunchFailureDoesNotSpendSQLite(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	proveCompletionPrelaunchFailureDoesNotSpend(t, newCompletionSettlementFixture(t, store, store.DB, true))
+	proveCompletionPrelaunchFailureDoesNotSpend(t, newCompletionSettlementFixture(t, store, store.backend.db, true))
 }
 
 func TestCompletionPrelaunchFailureDoesNotSpendPostgres(t *testing.T) {
@@ -142,7 +142,7 @@ func proveCompletionPrelaunchFailureDoesNotSpend(t *testing.T, fixture completio
 
 func TestCompletionRecoveryPreservesLiveOrdinaryAuthoritySQLite(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t, newCompletionSettlementFixture(t, store, store.DB, true))
+	proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t, newCompletionSettlementFixture(t, store, store.backend.db, true))
 }
 
 func TestCompletionRecoveryPreservesLiveOrdinaryAuthorityPostgres(t *testing.T) {
@@ -152,7 +152,7 @@ func TestCompletionRecoveryPreservesLiveOrdinaryAuthorityPostgres(t *testing.T) 
 
 func TestCompletionAttemptHeartbeatFencesRecoverySQLite(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	proveCompletionAttemptHeartbeatFencesRecovery(t, newCompletionSettlementFixture(t, store, store.DB, true))
+	proveCompletionAttemptHeartbeatFencesRecovery(t, newCompletionSettlementFixture(t, store, store.backend.db, true))
 }
 
 func TestCompletionAttemptHeartbeatFencesRecoveryPostgres(t *testing.T) {
@@ -313,7 +313,7 @@ func newCompletionSettlementFixture(t *testing.T, store completionSettlementTest
 		t.Fatalf("completion agent identity: %v", err)
 	}
 	if sqlite {
-		requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
+		requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,role,model,llm_backend,memory_enabled,memory_source,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at) VALUES (?,?,?,?,?,?,?,'worker','regular','claude_cli',1,'authored','active',1,1,'running',?)`,
 			identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence,
 			identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath, now); err != nil {
@@ -326,7 +326,7 @@ func newCompletionSettlementFixture(t *testing.T, store completionSettlementTest
 			t.Fatalf("seed completion session: %v", err)
 		}
 	} else {
-		requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
+		requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,role,model,llm_backend,memory_enabled,memory_source,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,'worker','regular','claude_cli',TRUE,'authored','active',1,1,'running',$8)`,
 			identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence,
 			identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath, now); err != nil {

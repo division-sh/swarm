@@ -14,10 +14,18 @@ import (
 )
 
 type SQLiteSchemaStore struct {
-	DB   *sql.DB
-	path string
+	backend *sqliteRuntimeBackend
+	path    string
 
 	schemaAdmission schemaAdmission
+}
+
+// sqliteRuntimeBackend is the private owner of the SQLite runtime database.
+// Keeping the handle below the selected facade prevents runtime consumers
+// from assembling ad-hoc transactions while preserving the schema owner's
+// exact construction and shutdown responsibilities.
+type sqliteRuntimeBackend struct {
+	db *sql.DB
 }
 
 const sqliteDriverBusyTimeoutMillis = 50
@@ -50,7 +58,7 @@ func NewSQLiteSchemaStore(path string) (*SQLiteSchemaStore, error) {
 	}
 	db.SetMaxOpenConns(4)
 	db.SetMaxIdleConns(4)
-	store := &SQLiteSchemaStore{DB: db, path: cleanPath}
+	store := &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: db}, path: cleanPath}
 	if err := store.configure(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -80,28 +88,28 @@ func (s *SQLiteSchemaStore) Path() string {
 }
 
 func (s *SQLiteSchemaStore) Close() error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend == nil || s.backend.db == nil {
 		return nil
 	}
-	return s.DB.Close()
+	return s.backend.db.Close()
 }
 
 func (s *SQLiteSchemaStore) Ping(ctx context.Context) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend == nil || s.backend.db == nil {
 		return fmt.Errorf("sqlite schema store is required")
 	}
-	return s.DB.PingContext(ctx)
+	return s.backend.db.PingContext(ctx)
 }
 
 func (s *SQLiteSchemaStore) configure(ctx context.Context) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend == nil || s.backend.db == nil {
 		return fmt.Errorf("sqlite schema store is required")
 	}
-	if _, err := s.DB.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
+	if _, err := s.backend.db.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
 		return fmt.Errorf("enable sqlite foreign keys: %w", err)
 	}
-	if _, err := s.DB.ExecContext(ctx, fmt.Sprintf(`PRAGMA busy_timeout = %d`, sqliteDriverBusyTimeoutMillis)); err != nil {
+	if _, err := s.backend.db.ExecContext(ctx, fmt.Sprintf(`PRAGMA busy_timeout = %d`, sqliteDriverBusyTimeoutMillis)); err != nil {
 		return fmt.Errorf("configure sqlite busy timeout: %w", err)
 	}
-	return s.DB.PingContext(ctx)
+	return s.backend.db.PingContext(ctx)
 }

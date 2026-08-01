@@ -27,7 +27,7 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 	olderEventID := uuid.NewString()
 	newerEventID := uuid.NewString()
 	base := time.Unix(1700000000, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	seedOperatorObservabilityEvent(t, ctx, pg, olderEventID, runID, "task.failed", events.EventProducerExternal, "agent-a", json.RawMessage(`{"entity_id":"`+entityID+`","n":1}`), entityID, base)
 	seedOperatorObservabilityEvent(t, ctx, pg, newerEventID, runID, "task.completed", events.EventProducerExternal, "agent-b", json.RawMessage(`{"entity_id":"`+entityID+`","n":2}`), entityID, base.Add(time.Minute))
 	olderEvent := loadPostgresDeliveryFixtureEvent(t, ctx, db, olderEventID)
@@ -123,7 +123,7 @@ func TestOperatorObservabilityEventOwnerDoesNotPromotePayloadEntityIdentity(t *t
 	payloadOnlyEventID := uuid.NewString()
 	canonicalEventID := uuid.NewString()
 	base := time.Unix(1700001200, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	seedOperatorObservabilityEvent(t, ctx, pg, payloadOnlyEventID, runID, "task.payload_only", events.EventProducerExternal, "agent-a", json.RawMessage(`{"entity_id":"`+targetEntityID+`","marker":"payload-only"}`), "", base)
 	seedOperatorObservabilityEvent(t, ctx, pg, canonicalEventID, runID, "task.canonical_entity", events.EventProducerExternal, "agent-b", json.RawMessage(`{"entity_id":"payload-business-value","marker":"canonical"}`), targetEntityID, base.Add(time.Second))
 
@@ -172,7 +172,7 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 
 	runID := uuid.NewString()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	insertLog := func(code string, createdAt time.Time) string {
 		t.Helper()
 		eventID := uuid.NewString()
@@ -301,7 +301,7 @@ func TestPostgresRuntimeLogSourceFilterUsesCanonicalAgentOrRuntime(t *testing.T)
 
 	runID := uuid.NewString()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	insertLog := func(message, details string, createdAt time.Time) string {
 		t.Helper()
 		eventID := uuid.NewString()
@@ -401,7 +401,7 @@ func TestOperatorRuntimeLogsFilterBySessionAndTimeWindow(t *testing.T) {
 
 	runID := uuid.NewString()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	insertLog := func(sessionID string, createdAt time.Time) string {
 		t.Helper()
 		eventID := uuid.NewString()
@@ -523,7 +523,7 @@ func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
 
 	runID := uuid.NewString()
 	base := time.Unix(1700000300, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	firstEvent := uuid.NewString()
 	secondEvent := uuid.NewString()
 	seedOperatorObservabilityEvent(t, ctx, pg, firstEvent, runID, "first.event", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), "", base)
@@ -600,7 +600,7 @@ func TestRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 	businessEvent := uuid.NewString()
 	runtimeLogEvent := uuid.NewString()
 	base := time.Unix(1700000600, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	seedOperatorObservabilityEvent(t, ctx, pg, businessEvent, runID, "item.received", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), "", base)
 	seedOperatorRuntimeLog(t, ctx, pg, runtimeLogEvent, runID, "runtime", json.RawMessage(`{}`), base.Add(time.Millisecond))
 
@@ -632,7 +632,7 @@ func TestRunDebugTracePageTypedFilters(t *testing.T) {
 	secondEvent := uuid.NewString()
 	base := time.Unix(1700000400, 0).UTC()
 	until := base
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	seedOperatorObservabilityEvent(t, ctx, pg, firstEvent, runID, "first.event", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), entityOne, base)
 	seedOperatorObservabilityEvent(t, ctx, pg, secondEvent, runID, "second.event", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), entityTwo, base.Add(time.Second))
 	firstSnapshot := seedDeliveryStateFixture(t, ctx, pg, loadPostgresDeliveryFixtureEvent(t, ctx, db, firstEvent), events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-1")}, runtimedelivery.StateQueued, nil)

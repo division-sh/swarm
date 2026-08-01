@@ -109,7 +109,7 @@ func (s *PostgresStore) ListBundleCatalog(ctx context.Context, opts BundleCatalo
 		where = append(where, fmt.Sprintf("(ingested_at < $%d OR (ingested_at = $%d AND bundle_hash < $%d))", len(args)-1, len(args)-1, len(args)))
 	}
 	args = append(args, opts.Limit+1)
-	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
+	rows, err := s.backend.db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
 			bundle_hash,
 			content_yaml,
@@ -170,7 +170,7 @@ func (s *PostgresStore) LoadBundleCatalog(ctx context.Context, bundleHash string
 	if bundleHash == "" {
 		return BundleCatalogDetail{}, ErrBundleNotFound
 	}
-	row := s.DB.QueryRowContext(ctx, `
+	row := s.backend.db.QueryRowContext(ctx, `
 		SELECT
 			bundle_hash,
 			content_yaml,
@@ -203,7 +203,7 @@ func (s *PostgresStore) LoadBundleCatalogRuntimeRecord(ctx context.Context, bund
 	var out runtimerunbundle.BundleCatalogRuntimeRecord
 	var dataBlob []byte
 	var hasData bool
-	err := s.DB.QueryRowContext(ctx, `
+	err := s.backend.db.QueryRowContext(ctx, `
 		SELECT
 			bundle_hash,
 			content_yaml,

@@ -190,8 +190,8 @@ func newCompletionBudgetRaceFixture(t *testing.T, sqlite bool) completionBudgetR
 	if sqlite {
 		primary := newBootstrappedSQLiteRuntimeStoreForTest(t)
 		secondary := newBootstrappedSQLiteRuntimeStoreForPath(t, primary.SQLiteSchemaStore.path)
-		normal := newCompletionSettlementFixture(t, primary, primary.DB, true)
-		return completionBudgetRaceFixture{primary: primary, secondary: secondary, db: primary.DB, sqlite: true, normal: normal}
+		normal := newCompletionSettlementFixture(t, primary, primary.backend.db, true)
+		return completionBudgetRaceFixture{primary: primary, secondary: secondary, db: primary.backend.db, sqlite: true, normal: normal}
 	}
 	_, db, _ := testutil.StartPostgres(t)
 	primary := admitTestPostgresStore(t, db)
@@ -283,7 +283,7 @@ func proveCompletionBudgetSettlementAccounting(t *testing.T, sqlite bool, exactn
 	var fixture completionSettlementFixture
 	if sqlite {
 		store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-		fixture = newCompletionSettlementFixture(t, store, store.DB, true)
+		fixture = newCompletionSettlementFixture(t, store, store.backend.db, true)
 	} else {
 		_, db, _ := testutil.StartPostgres(t)
 		fixture = newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false)

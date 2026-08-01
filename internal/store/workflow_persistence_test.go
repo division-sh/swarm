@@ -173,7 +173,7 @@ func TestWorkflowStoreRolesAreImmutableConstructorInputs(t *testing.T) {
 			)
 			if backend == "sqlite" {
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-				db, selected = store.DB, store
+				db, selected = store.backend.db, store
 				persistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, store)
 				invalid = runtimepipeline.NewSQLiteWorkflowPersistence(db, nil)
 			} else {

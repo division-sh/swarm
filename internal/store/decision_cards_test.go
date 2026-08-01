@@ -1047,9 +1047,9 @@ func decisionCardStoreDB(t *testing.T, cards decisioncard.Store) (*sql.DB, bool)
 	t.Helper()
 	switch store := cards.(type) {
 	case *PostgresStore:
-		return store.DB, true
+		return store.backend.db, true
 	case *SQLiteRuntimeStore:
-		return store.DB, false
+		return store.backend.db, false
 	default:
 		t.Fatalf("unexpected decision card store %T", cards)
 		return nil, false
@@ -1195,13 +1195,13 @@ func requireDecisionCardPipelineReceipt(t *testing.T, ctx context.Context, cards
 	case *SQLiteRuntimeStore:
 		fixture = authorActivityReceiptFixture{
 			store:   selected,
-			db:      selected.DB,
+			db:      selected.backend.db,
 			dialect: runtimeauthoractivity.DialectSQLite,
 		}
 	case *PostgresStore:
 		fixture = authorActivityReceiptFixture{
 			store:   selected,
-			db:      selected.DB,
+			db:      selected.backend.db,
 			dialect: runtimeauthoractivity.DialectPostgres,
 		}
 	default:

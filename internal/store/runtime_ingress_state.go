@@ -11,13 +11,13 @@ import (
 )
 
 func (s *PostgresStore) EnsureRuntimeIngressState(ctx context.Context, now time.Time) (runtimeingress.State, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimeingress.State{}, fmt.Errorf("postgres store is required")
 	}
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	if _, err := s.DB.ExecContext(ctx, `
+	if _, err := s.backend.db.ExecContext(ctx, `
 		INSERT INTO runtime_ingress_state (id, status, controlled_by, updated_at)
 		VALUES (1, 'running', 'runtime', $1)
 		ON CONFLICT (id) DO NOTHING
@@ -28,10 +28,10 @@ func (s *PostgresStore) EnsureRuntimeIngressState(ctx context.Context, now time.
 }
 
 func (s *PostgresStore) LoadRuntimeIngressState(ctx context.Context) (runtimeingress.State, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimeingress.State{}, fmt.Errorf("postgres store is required")
 	}
-	state, err := scanRuntimeIngressState(s.DB.QueryRowContext(ctx, `
+	state, err := scanRuntimeIngressState(s.backend.db.QueryRowContext(ctx, `
 		SELECT status, COALESCE(reason, ''), controlled_by, COALESCE(transition_event_id::text, ''), updated_at
 		FROM runtime_ingress_state
 		WHERE id = 1
@@ -46,7 +46,7 @@ func (s *PostgresStore) LoadRuntimeIngressState(ctx context.Context) (runtimeing
 }
 
 func (s *PostgresStore) TransitionRuntimeIngressState(ctx context.Context, target runtimeingress.Status, reason, controlledBy string, now time.Time) (runtimeingress.State, bool, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimeingress.State{}, false, fmt.Errorf("postgres store is required")
 	}
 	if target != runtimeingress.StatusRunning && target != runtimeingress.StatusPaused {
@@ -60,7 +60,7 @@ func (s *PostgresStore) TransitionRuntimeIngressState(ctx context.Context, targe
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return runtimeingress.State{}, false, fmt.Errorf("begin runtime ingress transition: %w", err)
 	}
@@ -114,7 +114,7 @@ func (s *PostgresStore) TransitionRuntimeIngressState(ctx context.Context, targe
 }
 
 func (s *PostgresStore) SetRuntimeIngressTransitionEvent(ctx context.Context, target runtimeingress.Status, eventID string, transitionAt time.Time) (bool, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return false, fmt.Errorf("postgres store is required")
 	}
 	eventID = strings.TrimSpace(eventID)
@@ -127,7 +127,7 @@ func (s *PostgresStore) SetRuntimeIngressTransitionEvent(ctx context.Context, ta
 	if transitionAt.IsZero() {
 		return false, fmt.Errorf("runtime ingress transition timestamp is required")
 	}
-	res, err := s.DB.ExecContext(ctx, `
+	res, err := s.backend.db.ExecContext(ctx, `
 			UPDATE runtime_ingress_state
 			SET transition_event_id = $1::uuid,
 			    updated_at = $3

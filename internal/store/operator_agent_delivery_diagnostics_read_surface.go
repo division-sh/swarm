@@ -97,7 +97,7 @@ type agentDeliveryDiagnosticSnapshotReader interface {
 }
 
 func (s *PostgresStore) LoadOperatorAgentDeliveryDiagnostics(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDeliveryDiagnosticsOptions) (OperatorAgentDeliveryDiagnostics, error) {
-	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).LoadOperatorAgentDeliveryDiagnostics(ctx, identity, opts)
+	return NewOperatorAgentConversationReadSurface(s.backend.db, s, 0).LoadOperatorAgentDeliveryDiagnostics(ctx, identity, opts)
 }
 
 func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryDiagnostics(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDeliveryDiagnosticsOptions) (OperatorAgentDeliveryDiagnostics, error) {

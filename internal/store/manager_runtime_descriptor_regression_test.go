@@ -82,7 +82,7 @@ func TestFreshAgentsSchemaRejectsEnabledPlatformDefaultMemory(t *testing.T) {
 		{
 			name: "sqlite",
 			exec: func() error {
-				_, err := sqliteStore.DB.ExecContext(ctx, `
+				_, err := sqliteStore.backend.db.ExecContext(ctx, `
 					INSERT INTO agents (
 						agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 						flow_scope_key, flow_instance_id, flow_instance,

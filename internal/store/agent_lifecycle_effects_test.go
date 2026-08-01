@@ -22,7 +22,7 @@ type lifecycleEffectStore interface {
 
 func TestLifecycleAndExternalEffectAuthoritySQLite(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	proveLifecycleAndExternalEffectAuthority(t, store, store.DB, true)
+	proveLifecycleAndExternalEffectAuthority(t, store, store.backend.db, true)
 }
 
 func TestLifecycleAndExternalEffectAuthorityPostgres(t *testing.T) {
@@ -32,7 +32,7 @@ func TestLifecycleAndExternalEffectAuthorityPostgres(t *testing.T) {
 
 func TestSameSlugSiblingExternalEffectAuthoritySQLite(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	proveSameSlugSiblingExternalEffectAuthority(t, store, store.DB, true)
+	proveSameSlugSiblingExternalEffectAuthority(t, store, store.backend.db, true)
 }
 
 func TestSameSlugSiblingExternalEffectAuthorityPostgres(t *testing.T) {
@@ -100,9 +100,9 @@ func proveSameSlugSiblingExternalEffectAuthority(t *testing.T, store lifecycleEf
 
 	runID := managedNormalEffectStoreTestRunID("sibling-worker")
 	if sqlite {
-		requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+		requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	} else {
-		requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+		requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	}
 	controller := runtimeeffects.NewController(store)
 	handles := make([]*runtimeeffects.Handle, 0, len(tokens))
@@ -190,9 +190,9 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	}
 	runID := managedNormalEffectStoreTestRunID(started.AgentID)
 	if sqlite {
-		requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+		requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	} else {
-		requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+		requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	}
 
 	controller := runtimeeffects.NewController(store)

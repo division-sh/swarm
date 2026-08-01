@@ -65,7 +65,7 @@ func (s *PostgresStore) ListPendingAgentDeliveryFacts(ctx context.Context, ident
 	if err != nil {
 		return nil, err
 	}
-	aggregates, err := postgresDeliveryAdapter.AgentPendingAggregates(ctx, s.DB, normalized, since)
+	aggregates, err := postgresDeliveryAdapter.AgentPendingAggregates(ctx, s.backend.db, normalized, since)
 	if err != nil {
 		return nil, err
 	}
@@ -80,11 +80,11 @@ func (s *PostgresStore) ListPendingAgentDeliveryDetails(ctx context.Context, opt
 	if err := s.requireCurrentSchema(); err != nil {
 		return PendingAgentDeliveryPage{}, err
 	}
-	aggregates, err := postgresDeliveryAdapter.AgentPendingAggregates(ctx, s.DB, []agentidentity.Identity{opts.AgentIdentity}, opts.Since)
+	aggregates, err := postgresDeliveryAdapter.AgentPendingAggregates(ctx, s.backend.db, []agentidentity.Identity{opts.AgentIdentity}, opts.Since)
 	if err != nil {
 		return PendingAgentDeliveryPage{}, err
 	}
-	page, err := postgresDeliveryAdapter.AgentPendingReferencePage(ctx, s.DB, runtimedelivery.AgentPendingPageQuery{
+	page, err := postgresDeliveryAdapter.AgentPendingReferencePage(ctx, s.backend.db, runtimedelivery.AgentPendingPageQuery{
 		AgentIdentity: opts.AgentIdentity,
 		Since:         opts.Since,
 		Limit:         opts.Limit,
@@ -94,7 +94,7 @@ func (s *PostgresStore) ListPendingAgentDeliveryDetails(ctx context.Context, opt
 		return PendingAgentDeliveryPage{}, err
 	}
 	return pendingAgentDeliveryPageFromProjection(ctx, opts.AgentIdentity, aggregates, page, time.Now(), func(ctx context.Context, eventID string) (eventrecord.Record, bool, error) {
-		return eventrecordpostgres.Load(ctx, s.DB, eventID)
+		return eventrecordpostgres.Load(ctx, s.backend.db, eventID)
 	})
 }
 

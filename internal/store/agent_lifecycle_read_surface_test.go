@@ -43,11 +43,11 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_CoversEveryCurrentStateLa
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 
 	type lifecycleCase struct {
 		agentID       string
@@ -127,11 +127,11 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalLiveLifecycl
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 
 	activeEventID := uuid.NewString()
 	oldDeadLetterEventID := uuid.NewString()
@@ -178,12 +178,12 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalTerminalLife
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	identity := testAgentIdentity(t, "agent-1", "lifecycle/agent-1")
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: identity}
 	event := seedAgentLifecycleEvent(t, ctx, pg, eventID, runID, route, time.Now().UTC())

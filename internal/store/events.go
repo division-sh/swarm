@@ -163,7 +163,7 @@ func (s *PostgresStore) EventExists(ctx context.Context, eventID string) (bool, 
 	}
 	var exists bool
 	query := `SELECT EXISTS(SELECT 1 FROM events WHERE event_id = $1::uuid)`
-	if err := eventReadQueryerFromContext(ctx, s.DB).QueryRowContext(ctx, query, eventID).Scan(&exists); err != nil {
+	if err := eventReadQueryerFromContext(ctx, s.backend.db).QueryRowContext(ctx, query, eventID).Scan(&exists); err != nil {
 		return false, fmt.Errorf("event exists lookup: %w", err)
 	}
 	return exists, nil
@@ -178,7 +178,7 @@ func (s *SQLiteRuntimeStore) EventExists(ctx context.Context, eventID string) (b
 		return false, nil
 	}
 	var exists bool
-	if err := eventReadQueryerFromContext(ctx, s.DB).QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE event_id = ?)`, eventID).Scan(&exists); err != nil {
+	if err := eventReadQueryerFromContext(ctx, s.backend.db).QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE event_id = ?)`, eventID).Scan(&exists); err != nil {
 		return false, fmt.Errorf("event exists lookup: %w", err)
 	}
 	return exists, nil
@@ -270,7 +270,7 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, admitte
 	if err := s.validateEventPayload(ctx, wantIdentity.EventName, wantIdentity.Payload); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	queryer := chooseRowQueryer(s.DB, tx)
+	queryer := chooseRowQueryer(s.backend.db, tx)
 	existingIdentity, found, err := loadPostgresEventIdentity(ctx, queryer, wantIdentity.EventID)
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
@@ -282,7 +282,7 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, admitte
 	if duplicate {
 		return runtimebus.EventAppendExactDuplicate, nil
 	}
-	var recordExec eventrecordpostgres.Execer = s.DB
+	var recordExec eventrecordpostgres.Execer = s.backend.db
 	if tx != nil {
 		recordExec = tx
 	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
@@ -353,7 +353,7 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, admitte
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	if admitted.RunDisposition() == events.AdmittedRunCreateAuthorized {
-		rec, found, err := loadStandaloneRuntimePlatformRunRecord(ctx, chooseExecQueryer(s.DB, tx), wantIdentity.EventID)
+		rec, found, err := loadStandaloneRuntimePlatformRunRecord(ctx, chooseExecQueryer(s.backend.db, tx), wantIdentity.EventID)
 		if err != nil {
 			return runtimebus.EventAppendOutcomeUnknown, err
 		}
@@ -542,7 +542,7 @@ func (s *PostgresStore) LoadRunLifecycleSnapshot(ctx context.Context, runID stri
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimebus.RunLifecycleSnapshot{}, err
 	}
-	snap, err := loadPostgresRunLifecycleSnapshot(ctx, s.DB, runID, false)
+	snap, err := loadPostgresRunLifecycleSnapshot(ctx, s.backend.db, runID, false)
 	if err != nil {
 		return runtimebus.RunLifecycleSnapshot{}, err
 	}

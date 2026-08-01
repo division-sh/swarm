@@ -332,9 +332,9 @@ func TestRunLifecycleDirectHandoffCommitAcrossSinkRegistrationParity(t *testing.
 				var tx *sql.Tx
 				switch store := fixture.store.(type) {
 				case *PostgresStore:
-					tx, err = store.DB.BeginTx(runtimeCtx, nil)
+					tx, err = store.backend.db.BeginTx(runtimeCtx, nil)
 				case *SQLiteRuntimeStore:
-					tx, err = store.DB.BeginTx(runtimeCtx, nil)
+					tx, err = store.backend.db.BeginTx(runtimeCtx, nil)
 				default:
 					err = errors.New("unsupported direct candidate handoff store")
 				}

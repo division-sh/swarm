@@ -157,10 +157,10 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{
 		Origin: targetOrigin, RunID: targetRunID, StartedAt: now.Add(-5 * time.Minute),
 	})
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{
 		Origin: semanticScenarioSetupRunOriginForTest(), RunID: otherRunID, StartedAt: now.Add(-5 * time.Minute),
 	})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, targetEventID, targetRunID, "scan.requested", events.EventProducerAgent, "test", targetEntityID, "", now.Add(-4*time.Minute))
@@ -375,7 +375,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	projectedInstanceID := uuid.NewString()
 	now := time.Unix(1700000400, 0).UTC()
 
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now.Add(-5 * time.Minute)})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now.Add(-5 * time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", now)
 	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
 	seedRunDebugAgent(t, pg, ctx, "agent-source", entityID, agentmemory.Authored(true), "flow-a")
@@ -504,7 +504,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 	base := time.Unix(1700000450, 0).UTC()
 	since := base.Add(time.Second)
 
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", base)
 	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
 	seedRunDebugAgent(t, pg, ctx, "agent-late", entityID, agentmemory.Authored(true), "flow-a")
@@ -592,7 +592,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 	entityID := uuid.NewString()
 	now := time.Unix(1700000500, 0).UTC()
 
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now.Add(-5 * time.Minute)})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now.Add(-5 * time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "task.started", events.EventProducerPlatform, "builder", entityID, "", now)
 	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
 	seedRunDebugAgent(t, pg, ctx, "agent-task", entityID, agentmemory.PlatformDefault(), "flow-a")

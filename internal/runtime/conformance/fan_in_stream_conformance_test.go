@@ -114,8 +114,8 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 	backend := storetest.StartSQLiteRuntimeStore(t)
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-	seedFanInBarrierRun(t, ctx, backend, backend.DB, runID)
-	runtime := newFanInBarrierRuntime(t, backend, backend.DB, source)
+	seedFanInBarrierRun(t, ctx, backend, backend.TestDatabase(), runID)
+	runtime := newFanInBarrierRuntime(t, backend, backend.TestDatabase(), source)
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	if _, err := runtime.pipeline.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      templatefanin.ReceiverFlowInstance,
@@ -143,10 +143,10 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 	})
 
 	var requestPayloadRaw, reportPayloadRaw string
-	if err := backend.DB.QueryRowContext(ctx, `SELECT payload FROM events WHERE event_id = ?`, requestEventID).Scan(&requestPayloadRaw); err != nil {
+	if err := backend.TestDatabase().QueryRowContext(ctx, `SELECT payload FROM events WHERE event_id = ?`, requestEventID).Scan(&requestPayloadRaw); err != nil {
 		t.Fatalf("load producer request payload: %v", err)
 	}
-	if err := backend.DB.QueryRowContext(ctx, `SELECT payload FROM events WHERE event_name LIKE 'operating/%/operating.reported'`).Scan(&reportPayloadRaw); err != nil {
+	if err := backend.TestDatabase().QueryRowContext(ctx, `SELECT payload FROM events WHERE event_name LIKE 'operating/%/operating.reported'`).Scan(&reportPayloadRaw); err != nil {
 		t.Fatalf("load producer-driven report payload: %v", err)
 	}
 	var requestPayload, reportPayload map[string]any

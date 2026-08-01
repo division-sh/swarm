@@ -738,8 +738,8 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 				if err != nil {
 					t.Fatalf("NewPostgresStore: %v", err)
 				}
-				t.Cleanup(func() { _ = store.DB.Close() })
-				return selectedPostgresStoreBundle(store, &config.Config{})
+				t.Cleanup(func() { _ = store.TestDatabase().Close() })
+				return selectedPostgresStoreBundle(store, store.TestDatabase(), &config.Config{})
 			},
 		},
 	}
@@ -997,8 +997,8 @@ func TestStandingReplacementAdoptionRestoresWorkflowTimersOnBothStores(t *testin
 				if err != nil {
 					t.Fatalf("NewPostgresStore: %v", err)
 				}
-				t.Cleanup(func() { _ = selected.DB.Close() })
-				return selectedPostgresStoreBundle(selected, &config.Config{})
+				t.Cleanup(func() { _ = selected.TestDatabase().Close() })
+				return selectedPostgresStoreBundle(selected, selected.TestDatabase(), &config.Config{})
 			},
 		},
 	}
@@ -1148,8 +1148,8 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 			if err != nil {
 				t.Fatalf("NewPostgresStore: %v", err)
 			}
-			t.Cleanup(func() { _ = selected.DB.Close() })
-			return selectedPostgresStoreBundle(selected, &config.Config{})
+			t.Cleanup(func() { _ = selected.TestDatabase().Close() })
+			return selectedPostgresStoreBundle(selected, selected.TestDatabase(), &config.Config{})
 		}},
 	}
 	for _, backend := range backends {
@@ -1358,8 +1358,8 @@ func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *tes
 			if err != nil {
 				t.Fatalf("NewPostgresStore: %v", err)
 			}
-			t.Cleanup(func() { _ = pg.DB.Close() })
-			return selectedPostgresStoreBundle(pg, &config.Config{})
+			t.Cleanup(func() { _ = pg.TestDatabase().Close() })
+			return selectedPostgresStoreBundle(pg, pg.TestDatabase(), &config.Config{})
 		}},
 	}
 	for _, backend := range backends {
@@ -1835,8 +1835,8 @@ func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *
 			if err != nil {
 				t.Fatalf("NewPostgresStore: %v", err)
 			}
-			t.Cleanup(func() { _ = pg.DB.Close() })
-			return selectedPostgresStoreBundle(pg, &config.Config{})
+			t.Cleanup(func() { _ = pg.TestDatabase().Close() })
+			return selectedPostgresStoreBundle(pg, pg.TestDatabase(), &config.Config{})
 		}},
 	}
 	for _, backend := range backends {

@@ -42,7 +42,7 @@ type runForkSourceFacts struct {
 }
 
 func (s *PostgresStore) PlanRunFork(ctx context.Context, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runfork.RunForkPlan{}, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -57,7 +57,7 @@ func (s *PostgresStore) PlanRunFork(ctx context.Context, req runfork.RunForkPlan
 	}
 	at := strings.TrimSpace(req.At)
 
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	tx, err := s.backend.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return runfork.RunForkPlan{}, fmt.Errorf("begin run fork revision snapshot: %w", err)
 	}

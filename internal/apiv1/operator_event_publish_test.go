@@ -57,7 +57,7 @@ func TestEventPublishCanonicalClassAndProvenanceReadbackParity(t *testing.T) {
 			name: "sqlite",
 			open: func(t *testing.T, ctx context.Context) fixture {
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				return fixture{store: sqliteStore, db: sqliteStore.DB, dialect: runtimeauthoractivity.DialectSQLite}
+				return fixture{store: sqliteStore, db: sqliteStore.TestDatabase(), dialect: runtimeauthoractivity.DialectSQLite}
 			},
 		},
 		{
@@ -304,8 +304,8 @@ func TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock(t *t
 		t.Fatalf("sqlite deliveries = %#v, want one persisted delivery", deliveries)
 	}
 	assertEventPublishDeliveryIdentity(t, asMap(t, deliveries[0]), "node", "scan-orchestrator", "pending", 1)
-	assertSQLiteEventPublishRows(t, sqliteStore.DB, runID, eventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
-	if count := countSQLiteAPIIdempotencyRows(t, sqliteStore.DB); count != 1 {
+	assertSQLiteEventPublishRows(t, sqliteStore.TestDatabase(), runID, eventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
+	if count := countSQLiteAPIIdempotencyRows(t, sqliteStore.TestDatabase()); count != 1 {
 		t.Fatalf("sqlite api_idempotency rows = %d, want 1", count)
 	}
 
@@ -317,7 +317,7 @@ func TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock(t *t
 	if replayResult["event_id"] != eventID || replayResult["run_id"] != runID {
 		t.Fatalf("sqlite replay result = %#v, want original event/run", replayResult)
 	}
-	if count := countSQLiteEventsByName(t, sqliteStore.DB, "scan.requested"); count != 1 {
+	if count := countSQLiteEventsByName(t, sqliteStore.TestDatabase(), "scan.requested"); count != 1 {
 		t.Fatalf("sqlite event rows after replay = %d, want 1", count)
 	}
 
@@ -328,7 +328,7 @@ func TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock(t *t
 	if data := asMap(t, conflict.Error.Data); data["code"] != IdempotencyConflictCode {
 		t.Fatalf("sqlite idempotency conflict data = %#v", data)
 	}
-	if count := countSQLiteEventsByName(t, sqliteStore.DB, "scan.requested"); count != 1 {
+	if count := countSQLiteEventsByName(t, sqliteStore.TestDatabase(), "scan.requested"); count != 1 {
 		t.Fatalf("sqlite event rows after conflict = %d, want 1", count)
 	}
 
@@ -336,10 +336,10 @@ func TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock(t *t
 	if nonIDEM.Error != nil {
 		t.Fatalf("sqlite non-idempotent event.publish error = %#v", nonIDEM.Error)
 	}
-	if count := countSQLiteEventsByName(t, sqliteStore.DB, "scan.requested"); count != 2 {
+	if count := countSQLiteEventsByName(t, sqliteStore.TestDatabase(), "scan.requested"); count != 2 {
 		t.Fatalf("sqlite event rows after non-idempotent publish = %d, want 2", count)
 	}
-	if count := countSQLiteAPIIdempotencyRows(t, sqliteStore.DB); count != 1 {
+	if count := countSQLiteAPIIdempotencyRows(t, sqliteStore.TestDatabase()); count != 1 {
 		t.Fatalf("sqlite api_idempotency rows after non-idempotent publish = %d, want 1", count)
 	}
 }
@@ -354,13 +354,13 @@ func TestOperatorEventPublishSQLiteRejectsExistingRunSameHashDifferentSourceBefo
 	}
 	handler := eventPublishTestHandlerWithStores(t, sqliteStore, sqliteStore, sqliteStore, bus, source)
 	runID := uuid.NewString()
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
+	if _, err := sqliteStore.TestDatabase().ExecContext(ctx, `
 		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
 		VALUES (?, 'name: source-mismatch', '{}')
 	`, runStartTestBundleHash); err != nil {
 		t.Fatalf("seed SQLite bundle row: %v", err)
 	}
-	runlifecyclefixture.RequireSQLite(t, ctx, sqliteStore.DB, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: runStartTestBundleHash, BundleSource: "persisted"})
+	runlifecyclefixture.RequireSQLite(t, ctx, sqliteStore.TestDatabase(), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: runStartTestBundleHash, BundleSource: "persisted"})
 
 	body := fmt.Sprintf(
 		`{"jsonrpc":"2.0","id":"publish","method":"event.publish","params":{"run_id":%q,"event_name":"scan.requested","payload":{"topic":"source-mismatch"},"idempotency_key":"idem-sqlite-source-mismatch"}}`,
@@ -368,10 +368,10 @@ func TestOperatorEventPublishSQLiteRejectsExistingRunSameHashDifferentSourceBefo
 	)
 	resp := rpcCall(t, handler, body)
 	assertRuntimeContextBundleError(t, resp, "event.publish", BundleDataIntegrityErrorCode, "runtime_source_fact_mismatch")
-	if count := countSQLiteEventRowsByRunID(t, sqliteStore.DB, runID); count != 0 {
+	if count := countSQLiteEventRowsByRunID(t, sqliteStore.TestDatabase(), runID); count != 0 {
 		t.Fatalf("sqlite event rows for source-mismatched run = %d, want 0", count)
 	}
-	if count := countSQLiteAPIIdempotencyRows(t, sqliteStore.DB); count != 0 {
+	if count := countSQLiteAPIIdempotencyRows(t, sqliteStore.TestDatabase()); count != 0 {
 		t.Fatalf("sqlite api_idempotency rows for source-mismatched run = %d, want 0", count)
 	}
 }
@@ -402,13 +402,13 @@ func TestOperatorEventPublishSQLitePayloadFailureLeavesNoIdempotencyCompletionOr
 	if data := asMap(t, resp.Error.Data); data["code"] != PayloadValidationFailedCode {
 		t.Fatalf("sqlite payload validation data = %#v", data)
 	}
-	if count := countSQLiteEventsByName(t, sqliteStore.DB, "scan.requested"); count != 0 {
+	if count := countSQLiteEventsByName(t, sqliteStore.TestDatabase(), "scan.requested"); count != 0 {
 		t.Fatalf("sqlite event rows after failed publish = %d, want 0", count)
 	}
-	if count := countSQLiteAllRunRows(t, sqliteStore.DB); count != 0 {
+	if count := countSQLiteAllRunRows(t, sqliteStore.TestDatabase()); count != 0 {
 		t.Fatalf("sqlite run rows after failed publish = %d, want 0", count)
 	}
-	if count := countSQLiteAPIIdempotencyRows(t, sqliteStore.DB); count != 0 {
+	if count := countSQLiteAPIIdempotencyRows(t, sqliteStore.TestDatabase()); count != 0 {
 		t.Fatalf("sqlite api_idempotency rows after failed publish = %d, want 0", count)
 	}
 }
@@ -631,7 +631,7 @@ func TestOperatorEventPublishSQLiteUsesPublisherScopeWithPlainRequestContext(t *
 	result := asMap(t, published.Result)
 	eventID := stringValue(t, result["event_id"], "event_id")
 	runID := stringValue(t, result["run_id"], "run_id")
-	assertSQLiteEventPublishRows(t, sqliteStore.DB, runID, eventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
+	assertSQLiteEventPublishRows(t, sqliteStore.TestDatabase(), runID, eventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
 	got := requireAPIV1RuntimeBusEvent(t, ch, "sqlite event.publish delivery")
 	if got.ID() != eventID {
 		t.Fatalf("delivered event = %s, want %s", got.ID(), eventID)
@@ -644,7 +644,7 @@ func TestOperatorEventPublishSQLiteUsesPublisherScopeWithPlainRequestContext(t *
 	explicitResult := asMap(t, explicit.Result)
 	explicitEventID := stringValue(t, explicitResult["event_id"], "event_id")
 	explicitRunID := stringValue(t, explicitResult["run_id"], "run_id")
-	assertSQLiteEventPublishRows(t, sqliteStore.DB, explicitRunID, explicitEventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
+	assertSQLiteEventPublishRows(t, sqliteStore.TestDatabase(), explicitRunID, explicitEventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
 	explicitEvent := requireAPIV1RuntimeBusEventID(t, ch, explicitEventID, "sqlite explicit-bundle event.publish delivery")
 	if explicitEvent.ID() != explicitEventID {
 		t.Fatalf("sqlite explicit-bundle delivered event = %s, want %s", explicitEvent.ID(), explicitEventID)
@@ -1395,13 +1395,13 @@ func TestOperatorEventPublishSQLiteExplicitRunFollowUpUsesSelectedRun(t *testing
 	if result["run_id"] != runID || result["new_run_created"] != false {
 		t.Fatalf("sqlite follow-up result = %#v, want selected existing run", result)
 	}
-	if got := countSQLiteAllRunRows(t, sqliteStore.DB); got != 1 {
+	if got := countSQLiteAllRunRows(t, sqliteStore.TestDatabase()); got != 1 {
 		t.Fatalf("sqlite run rows after follow-up = %d, want 1", got)
 	}
-	if got := countSQLiteEventRowsByRunID(t, sqliteStore.DB, runID); got != 2 {
+	if got := countSQLiteEventRowsByRunID(t, sqliteStore.TestDatabase(), runID); got != 2 {
 		t.Fatalf("sqlite events for selected run = %d, want 2", got)
 	}
-	if got := countSQLiteEventsByName(t, sqliteStore.DB, "scan.followup"); got != 1 {
+	if got := countSQLiteEventsByName(t, sqliteStore.TestDatabase(), "scan.followup"); got != 1 {
 		t.Fatalf("sqlite scan.followup rows = %d, want 1", got)
 	}
 	deliveries := asSlice(t, result["deliveries"])
@@ -1478,13 +1478,13 @@ func TestOperatorEventPublishSQLiteRejectsCallerEntityIDForCreateEntityBeforePer
 	if violation := asMap(t, violations[0]); violation["field_path"] != "$.entity_id" || violation["rule"] != "create_entity_mints_entity_id" {
 		t.Fatalf("sqlite violation = %#v", violation)
 	}
-	if got := countSQLiteAllRunRows(t, sqliteStore.DB); got != 0 {
+	if got := countSQLiteAllRunRows(t, sqliteStore.TestDatabase()); got != 0 {
 		t.Fatalf("sqlite run rows after create-entity rejection = %d, want 0", got)
 	}
-	if got := countSQLiteAllEventRows(t, sqliteStore.DB); got != 0 {
+	if got := countSQLiteAllEventRows(t, sqliteStore.TestDatabase()); got != 0 {
 		t.Fatalf("sqlite event rows after create-entity rejection = %d, want 0", got)
 	}
-	if got := countSQLiteAPIIdempotencyRows(t, sqliteStore.DB); got != 0 {
+	if got := countSQLiteAPIIdempotencyRows(t, sqliteStore.TestDatabase()); got != 0 {
 		t.Fatalf("sqlite api_idempotency rows after create-entity rejection = %d, want 0", got)
 	}
 }

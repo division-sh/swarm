@@ -9,14 +9,14 @@ import (
 )
 
 func (s *PostgresStore) TryAcquire(ctx context.Context, lockKey string) (destructivereset.LockLease, bool, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, false, fmt.Errorf("postgres store is required")
 	}
 	lockKey = strings.TrimSpace(lockKey)
 	if lockKey == "" {
 		return nil, false, fmt.Errorf("destructive reset lock key is required")
 	}
-	lease, acquired, err := acquireAdvisoryLockLease(ctx, s.DB, lockKey)
+	lease, acquired, err := acquireAdvisoryLockLease(ctx, s.backend.db, lockKey)
 	if lease == nil {
 		return nil, acquired, err
 	}

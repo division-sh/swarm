@@ -52,7 +52,7 @@ func TestSQLiteScenarioSetupEntitiesIdempotentExistingRows(t *testing.T) {
 func assertSQLiteScenarioSetupCounts(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, runID, entityID string, wantEntities, wantMutations int) {
 	t.Helper()
 	var entities int
-	if err := sqliteStore.DB.QueryRowContext(ctx, `
+	if err := sqliteStore.backend.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM entity_state
 		WHERE run_id = ? AND entity_id = ?
@@ -64,7 +64,7 @@ func assertSQLiteScenarioSetupCounts(t *testing.T, ctx context.Context, sqliteSt
 	}
 
 	var mutations int
-	if err := sqliteStore.DB.QueryRowContext(ctx, `
+	if err := sqliteStore.backend.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM entity_mutations
 		WHERE run_id = ? AND entity_id = ?

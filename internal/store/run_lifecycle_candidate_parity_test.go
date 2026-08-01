@@ -664,7 +664,7 @@ func openRunLifecycleCandidateParityFixture(t *testing.T, backend string) runLif
 		store.nowFn = func() time.Time {
 			return time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
 		}
-		return runLifecycleCandidateParityFixture{store: store, db: store.DB}
+		return runLifecycleCandidateParityFixture{store: store, db: store.backend.db}
 	}
 	_, db, _ := testutil.StartPostgres(t)
 	store := admitTestPostgresStore(t, db)

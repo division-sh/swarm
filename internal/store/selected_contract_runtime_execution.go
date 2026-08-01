@@ -16,10 +16,10 @@ import (
 const selectedContractRuntimeExecutionLease = 2 * time.Minute
 
 func (s *PostgresStore) IssueRunForkSelectedContractRuntimeExecution(ctx context.Context, req runfork.SelectedContractRuntimeExecutionIssueRequest) (runfork.SelectedContractRuntimeExecution, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("postgres store is required")
 	}
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	tx, err := s.backend.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("begin selected-contract runtime issuance: %w", err)
 	}
@@ -171,10 +171,10 @@ func validateSelectedRuntimeAdmission(admission runfork.RunForkSelectedContractE
 }
 
 func (s *PostgresStore) ClaimRunForkSelectedContractRuntimeExecution(ctx context.Context, issued runfork.SelectedContractRuntimeExecution, owner string, lease time.Duration) (runtimeeffects.Authority, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimeeffects.Authority{}, fmt.Errorf("postgres store is required")
 	}
-	return claimSelectedContractRuntimeExecutionPostgres(ctx, s.DB, issued, owner, lease)
+	return claimSelectedContractRuntimeExecutionPostgres(ctx, s.backend.db, issued, owner, lease)
 }
 
 func (s *SQLiteRuntimeStore) ClaimRunForkSelectedContractRuntimeExecution(ctx context.Context, issued runfork.SelectedContractRuntimeExecution, owner string, lease time.Duration) (authority runtimeeffects.Authority, err error) {
@@ -269,13 +269,13 @@ func nonEmptyStrings(values ...string) bool {
 }
 
 func (s *PostgresStore) HeartbeatRunForkSelectedContractRuntimeExecution(ctx context.Context, authority runtimeeffects.Authority, lease time.Duration) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required")
 	}
 	if lease <= 0 {
 		lease = selectedContractRuntimeExecutionLease
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("heartbeat selected-contract runtime begin: %w", err)
 	}
@@ -314,10 +314,10 @@ func (s *SQLiteRuntimeStore) HeartbeatRunForkSelectedContractRuntimeExecution(ct
 }
 
 func (s *PostgresStore) QuiesceRunForkSelectedContractRuntimeExecution(ctx context.Context, authority runtimeeffects.Authority) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required")
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -358,10 +358,10 @@ func requireSelectedRuntimeNoLiveAttempts(ctx context.Context, tx *sql.Tx, sqlit
 }
 
 func (s *PostgresStore) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required")
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("close selected-contract runtime begin: %w", err)
 	}
@@ -389,10 +389,10 @@ func (s *SQLiteRuntimeStore) CloseRunForkSelectedContractRuntimeExecution(ctx co
 }
 
 func (s *PostgresStore) FailRunForkSelectedContractRuntimeExecution(ctx context.Context, authority runtimeeffects.Authority, failure json.RawMessage) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required")
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}

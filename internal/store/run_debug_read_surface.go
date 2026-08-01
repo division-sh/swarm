@@ -280,14 +280,14 @@ func (s *PostgresStore) requireRunDebugAccess() error {
 }
 
 func (s *PostgresStore) ResolveLatestRunDebugRunID(ctx context.Context) (string, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return "", fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireRunDebugAccess(); err != nil {
 		return "", err
 	}
 	var runID string
-	if err := s.DB.QueryRowContext(ctx, `
+	if err := s.backend.db.QueryRowContext(ctx, `
 		SELECT r.run_id::text
 		FROM runs r
 		WHERE EXISTS (
@@ -311,7 +311,7 @@ func (s *PostgresStore) ResolveLatestRunDebugRunID(ctx context.Context) (string,
 }
 
 func (s *PostgresStore) ListRunDebugRuns(ctx context.Context, limit int) ([]RunDebugRunSummary, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireRunDebugAccess(); err != nil {
@@ -320,7 +320,7 @@ func (s *PostgresStore) ListRunDebugRuns(ctx context.Context, limit int) ([]RunD
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT
 			r.run_id::text,
 			COALESCE(r.status, ''),
@@ -393,7 +393,7 @@ func (s *PostgresStore) ListRunDebugRuns(ctx context.Context, limit int) ([]RunD
 }
 
 func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, opts RunDebugQueryOptions) (RunDebugReport, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return RunDebugReport{}, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireRunDebugAccess(); err != nil {
@@ -423,7 +423,7 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 		report.RootEventType = header.Origin.EventType()
 	}
 	var lastEventAt sql.NullTime
-	if err := s.DB.QueryRowContext(ctx, `
+	if err := s.backend.db.QueryRowContext(ctx, `
 		SELECT COUNT(*), MAX(created_at)
 		FROM events
 		WHERE run_id = $1::uuid
@@ -434,7 +434,7 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 		report.LastEventAt = lastEventAt.Time.UTC()
 	}
 
-	eventCountRows, err := s.DB.QueryContext(ctx, `
+	eventCountRows, err := s.backend.db.QueryContext(ctx, `
 		SELECT event_name, COUNT(*)
 		FROM events
 		WHERE run_id = $1::uuid
@@ -472,7 +472,7 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 	}
 	report.TestQuiescence = testQuiescence
 
-	eventRows, err := s.DB.QueryContext(ctx, `
+	eventRows, err := s.backend.db.QueryContext(ctx, `
 		SELECT
 			event_id::text,
 			event_name,
@@ -503,7 +503,7 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 		return RunDebugReport{}, fmt.Errorf("read run events: %w", err)
 	}
 
-	deadRows, err := s.DB.QueryContext(ctx, `
+	deadRows, err := s.backend.db.QueryContext(ctx, `
 		SELECT
 			COALESCE(dl.original_event, ''),
 			COALESCE(dl.entity_id::text, ''),
@@ -537,7 +537,7 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 		return RunDebugReport{}, fmt.Errorf("read dead letters: %w", err)
 	}
 
-	turnRows, err := s.DB.QueryContext(ctx, `
+	turnRows, err := s.backend.db.QueryContext(ctx, `
 		SELECT agent_id, COUNT(*), COUNT(*) FILTER (WHERE failure IS NOT NULL), MAX(created_at)
 		FROM agent_turns
 		WHERE run_id = $1::uuid
@@ -559,7 +559,7 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 		return RunDebugReport{}, fmt.Errorf("read agent turns: %w", err)
 	}
 
-	mutationRows, err := s.DB.QueryContext(ctx, `
+	mutationRows, err := s.backend.db.QueryContext(ctx, `
 		SELECT
 			mutation_id::text,
 			COALESCE(entity_id::text, ''),
@@ -640,7 +640,7 @@ func (s *PostgresStore) loadRunTestQuiescence(ctx context.Context, runID string,
 		return RunTestQuiescence{}, fmt.Errorf("load run test quiescence timer obligations: snapshot omitted requested run")
 	}
 	out.DueTimers = runTimers.Totals().DueCount
-	if err := s.DB.QueryRowContext(ctx, `
+	if err := s.backend.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM agent_sessions
 		WHERE run_id = $1::uuid
@@ -672,7 +672,7 @@ func (s *PostgresStore) loadRunDebugFailureDeliveries(ctx context.Context, runID
 	}
 	return runDebugFailuresFromSnapshots(snapshots,
 		func(eventID string) (deliveryLifecycleEventMetadata, error) {
-			record, found, err := loadPostgresEventIdentity(ctx, s.DB, eventID)
+			record, found, err := loadPostgresEventIdentity(ctx, s.backend.db, eventID)
 			if err != nil {
 				return deliveryLifecycleEventMetadata{}, err
 			}
@@ -763,7 +763,7 @@ func (s *PostgresStore) LoadRunDebugTrace(ctx context.Context, runID string, opt
 }
 
 func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string, opts RunDebugTraceQueryOptions) ([]RunDebugTraceRow, string, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, "", fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireRunDebugAccess(); err != nil {
@@ -778,7 +778,7 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 	}
 	opts = defaultRunDebugTraceQueryOptions(opts)
 	var exists bool
-	if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = $1::uuid)`, runID).Scan(&exists); err != nil {
+	if err := s.backend.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = $1::uuid)`, runID).Scan(&exists); err != nil {
 		return nil, "", fmt.Errorf("check run debug trace run: %w", err)
 	}
 	if !exists {
@@ -881,7 +881,7 @@ func nullableTimePtr(value sql.NullTime) *time.Time {
 }
 
 func (s *PostgresStore) loadRunDebugRuntimeLogs(ctx context.Context, runID string, opts RunDebugQueryOptions, report *RunDebugReport) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required")
 	}
 	if report == nil {
@@ -891,7 +891,7 @@ func (s *PostgresStore) loadRunDebugRuntimeLogs(ctx context.Context, runID strin
 	if opts.LogsAllLevels {
 		logLevels = []string{"info", "warn", "error"}
 	}
-	if err := s.DB.QueryRowContext(ctx, `
+	if err := s.backend.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM events
 		WHERE event_name = 'platform.runtime_log'
@@ -901,7 +901,7 @@ func (s *PostgresStore) loadRunDebugRuntimeLogs(ctx context.Context, runID strin
 	`, runID, pq.Array(logLevels), opts.Component).Scan(&report.WarnErrorLogCount); err != nil {
 		return fmt.Errorf("load runtime log summary: %w", err)
 	}
-	logSummaryRows, err := s.DB.QueryContext(ctx, `
+	logSummaryRows, err := s.backend.db.QueryContext(ctx, `
 		SELECT
 			COALESCE(payload->>'log_level', ''),
 			COALESCE(payload->'details'->>'component', ''),
@@ -930,7 +930,7 @@ func (s *PostgresStore) loadRunDebugRuntimeLogs(ctx context.Context, runID strin
 	if err := logSummaryRows.Err(); err != nil {
 		return fmt.Errorf("read runtime log rollup: %w", err)
 	}
-	logRows, err := s.DB.QueryContext(ctx, `
+	logRows, err := s.backend.db.QueryContext(ctx, `
 		SELECT
 			event_id::text,
 			COALESCE(payload->>'log_level', ''),

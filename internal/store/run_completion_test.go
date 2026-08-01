@@ -30,7 +30,7 @@ func seedNormalRunCompletionFixture(t *testing.T, db *sql.DB, state, flowInstanc
 	if flowTemplate == "" {
 		flowTemplate = "example"
 	}
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{
 		RunID: runID, Origin: semanticEventRunOriginForTest(t, eventID, "example.started"),
 		StartedAt: time.Now().UTC(),
 	})

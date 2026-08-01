@@ -28,7 +28,7 @@ func (s *SQLiteRuntimeStore) ListBundleCatalog(ctx context.Context, opts BundleC
 		args = append(args, ingestedAt.UTC(), ingestedAt.UTC(), bundleHash)
 	}
 	args = append(args, opts.Limit+1)
-	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
+	rows, err := s.backend.db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
 			bundle_hash,
 			content_yaml,
@@ -89,7 +89,7 @@ func (s *SQLiteRuntimeStore) LoadBundleCatalog(ctx context.Context, bundleHash s
 	if bundleHash == "" {
 		return BundleCatalogDetail{}, ErrBundleNotFound
 	}
-	row := s.DB.QueryRowContext(ctx, `
+	row := s.backend.db.QueryRowContext(ctx, `
 		SELECT
 			bundle_hash,
 			content_yaml,

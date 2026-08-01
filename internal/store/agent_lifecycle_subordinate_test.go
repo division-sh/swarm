@@ -46,7 +46,7 @@ func (lifecycleOccurrenceAgent) OnEvent(context.Context, events.Event) ([]events
 
 func TestLifecycleSubordinateTransactionSQLite(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	proveLifecycleSubordinateTransaction(t, store, store.DB, true)
+	proveLifecycleSubordinateTransaction(t, store, store.backend.db, true)
 }
 
 func TestLifecycleSubordinateTransactionPostgres(t *testing.T) {
@@ -56,7 +56,7 @@ func TestLifecycleSubordinateTransactionPostgres(t *testing.T) {
 
 func TestLifecycleReconfigureOccurrenceIdentitySQLite(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	proveLifecycleReconfigureOccurrenceIdentity(t, store, store.DB, true)
+	proveLifecycleReconfigureOccurrenceIdentity(t, store, store.backend.db, true)
 }
 
 func TestLifecycleReconfigureOccurrenceIdentityPostgres(t *testing.T) {
@@ -66,7 +66,7 @@ func TestLifecycleReconfigureOccurrenceIdentityPostgres(t *testing.T) {
 
 func TestLifecycleConcurrentPartialReconfigureSQLite(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	proveLifecycleConcurrentPartialReconfigure(t, store, store.DB, true)
+	proveLifecycleConcurrentPartialReconfigure(t, store, store.backend.db, true)
 }
 
 func TestLifecycleConcurrentPartialReconfigurePostgres(t *testing.T) {

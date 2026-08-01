@@ -18,7 +18,7 @@ var _ budgetspend.Store = (*PostgresStore)(nil)
 var _ budgetspend.Store = (*SQLiteRuntimeStore)(nil)
 
 func (s *PostgresStore) RecordSpend(ctx context.Context, rec budgetspend.SpendRecord) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres budget spend store is required")
 	}
 	rec = normalizeBudgetSpendRecord(rec)
@@ -32,7 +32,7 @@ func (s *PostgresStore) RecordSpend(ctx context.Context, rec budgetspend.SpendRe
 	if err != nil {
 		return err
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -75,7 +75,7 @@ func (s *PostgresStore) RecordSpend(ctx context.Context, rec budgetspend.SpendRe
 }
 
 func (s *PostgresStore) ResolveFlowInstance(ctx context.Context, runID string, entityID string) (string, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return "", fmt.Errorf("postgres budget spend store is required")
 	}
 	runID, entityID, err := validateBudgetSpendIdentity(runID, entityID)
@@ -83,7 +83,7 @@ func (s *PostgresStore) ResolveFlowInstance(ctx context.Context, runID string, e
 		return "", err
 	}
 	var flowInstance string
-	if err := s.DB.QueryRowContext(ctx, `
+	if err := s.backend.db.QueryRowContext(ctx, `
 		SELECT COALESCE(flow_instance, '')
 		FROM entity_state
 		WHERE run_id = $1::uuid
@@ -95,10 +95,10 @@ func (s *PostgresStore) ResolveFlowInstance(ctx context.Context, runID string, e
 }
 
 func (s *PostgresStore) ListBudgetProjectionTargets(ctx context.Context, terminalStates []string) ([]budgetspend.ProjectionTarget, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("postgres budget spend store is required")
 	}
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT es.run_id::text, es.entity_id::text
 		FROM entity_state es
 		JOIN runs run ON run.run_id = es.run_id
@@ -114,7 +114,7 @@ func (s *PostgresStore) ListBudgetProjectionTargets(ctx context.Context, termina
 }
 
 func (s *PostgresStore) SumSpendUSD(ctx context.Context, query budgetspend.SpendQuery) (float64, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return 0, fmt.Errorf("postgres budget spend store is required")
 	}
 	query = normalizeBudgetSpendQuery(query)
@@ -122,14 +122,14 @@ func (s *PostgresStore) SumSpendUSD(ctx context.Context, query budgetspend.Spend
 	var err error
 	switch query.Scope {
 	case budgetspend.ScopeSystem:
-		err = s.DB.QueryRowContext(ctx, `
+		err = s.backend.db.QueryRowContext(ctx, `
 			SELECT COALESCE(SUM(cost_usd), 0)
 			FROM spend_ledger
 			WHERE created_at >= $1
 			  AND ($2::boolean = FALSE OR execution_mode = 'live')
 		`, query.Since, query.LiveOnly).Scan(&spent)
 	case budgetspend.ScopeGlobal:
-		err = s.DB.QueryRowContext(ctx, `
+		err = s.backend.db.QueryRowContext(ctx, `
 			SELECT COALESCE(SUM(cost_usd), 0)
 			FROM spend_ledger
 			WHERE entity_id IS NULL
@@ -140,7 +140,7 @@ func (s *PostgresStore) SumSpendUSD(ctx context.Context, query budgetspend.Spend
 		if err := validateBudgetSpendEntityRequired(query.EntityID); err != nil {
 			return 0, err
 		}
-		err = s.DB.QueryRowContext(ctx, `
+		err = s.backend.db.QueryRowContext(ctx, `
 			SELECT COALESCE(SUM(cost_usd), 0)
 			FROM spend_ledger
 			WHERE entity_id = $1::uuid
@@ -157,7 +157,7 @@ func (s *PostgresStore) SumSpendUSD(ctx context.Context, query budgetspend.Spend
 }
 
 func (s *SQLiteRuntimeStore) RecordSpend(ctx context.Context, rec budgetspend.SpendRecord) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("sqlite budget spend store is required")
 	}
 	rec = normalizeBudgetSpendRecord(rec)
@@ -208,7 +208,7 @@ func (s *SQLiteRuntimeStore) RecordSpend(ctx context.Context, rec budgetspend.Sp
 }
 
 func (s *SQLiteRuntimeStore) ResolveFlowInstance(ctx context.Context, runID string, entityID string) (string, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return "", fmt.Errorf("sqlite budget spend store is required")
 	}
 	runID, entityID, err := validateBudgetSpendIdentity(runID, entityID)
@@ -216,7 +216,7 @@ func (s *SQLiteRuntimeStore) ResolveFlowInstance(ctx context.Context, runID stri
 		return "", err
 	}
 	var flowInstance string
-	if err := s.DB.QueryRowContext(ctx, `
+	if err := s.backend.db.QueryRowContext(ctx, `
 		SELECT COALESCE(flow_instance, '')
 		FROM entity_state
 		WHERE run_id = ?
@@ -228,7 +228,7 @@ func (s *SQLiteRuntimeStore) ResolveFlowInstance(ctx context.Context, runID stri
 }
 
 func (s *SQLiteRuntimeStore) ListBudgetProjectionTargets(ctx context.Context, terminalStates []string) ([]budgetspend.ProjectionTarget, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("sqlite budget spend store is required")
 	}
 	args := make([]any, 0, len(terminalStates))
@@ -248,7 +248,7 @@ func (s *SQLiteRuntimeStore) ListBudgetProjectionTargets(ctx context.Context, te
 		query += " AND es.current_state NOT IN (" + strings.Join(placeholders, ", ") + ")"
 	}
 	query += " ORDER BY es.run_id ASC, es.created_at ASC, es.entity_id ASC"
-	rows, err := s.DB.QueryContext(ctx, query, args...)
+	rows, err := s.backend.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list sqlite budget projection targets: %w", err)
 	}
@@ -257,7 +257,7 @@ func (s *SQLiteRuntimeStore) ListBudgetProjectionTargets(ctx context.Context, te
 }
 
 func (s *SQLiteRuntimeStore) SumSpendUSD(ctx context.Context, query budgetspend.SpendQuery) (float64, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return 0, fmt.Errorf("sqlite budget spend store is required")
 	}
 	query = normalizeBudgetSpendQuery(query)
@@ -265,14 +265,14 @@ func (s *SQLiteRuntimeStore) SumSpendUSD(ctx context.Context, query budgetspend.
 	var err error
 	switch query.Scope {
 	case budgetspend.ScopeSystem:
-		err = s.DB.QueryRowContext(ctx, `
+		err = s.backend.db.QueryRowContext(ctx, `
 			SELECT COALESCE(SUM(cost_usd), 0)
 			FROM spend_ledger
 			WHERE created_at >= ?
 			  AND (? = 0 OR execution_mode = 'live')
 		`, query.Since.UTC(), query.LiveOnly).Scan(&spent)
 	case budgetspend.ScopeGlobal:
-		err = s.DB.QueryRowContext(ctx, `
+		err = s.backend.db.QueryRowContext(ctx, `
 			SELECT COALESCE(SUM(cost_usd), 0)
 			FROM spend_ledger
 			WHERE entity_id IS NULL
@@ -283,7 +283,7 @@ func (s *SQLiteRuntimeStore) SumSpendUSD(ctx context.Context, query budgetspend.
 		if err := validateBudgetSpendEntityRequired(query.EntityID); err != nil {
 			return 0, err
 		}
-		err = s.DB.QueryRowContext(ctx, `
+		err = s.backend.db.QueryRowContext(ctx, `
 			SELECT COALESCE(SUM(cost_usd), 0)
 			FROM spend_ledger
 			WHERE entity_id = ?

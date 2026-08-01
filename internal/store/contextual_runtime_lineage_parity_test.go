@@ -95,9 +95,9 @@ func selectedDatabase(t *testing.T, selectedStore any) *sql.DB {
 	t.Helper()
 	switch selected := selectedStore.(type) {
 	case *store.PostgresStore:
-		return selected.DB
+		return selected.TestDatabase()
 	case *store.SQLiteRuntimeStore:
-		return selected.DB
+		return selected.TestDatabase()
 	default:
 		t.Fatalf("selected store %T has no canonical database", selectedStore)
 		return nil

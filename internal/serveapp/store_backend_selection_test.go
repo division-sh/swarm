@@ -313,7 +313,7 @@ func TestSelectedOperatorReadConstructionParityClassifiesSQLitePostgresDelta(t *
 	}
 	t.Cleanup(func() { closeDB(sqliteStores.SQLDB) })
 
-	postgresStores := selectedPostgresStoreBundle(&store.PostgresStore{}, &config.Config{})
+	postgresStores := selectedPostgresStoreBundle(&store.PostgresStore{}, nil, &config.Config{})
 	postgresCaps, err := postgresStores.facade().apiCapabilities(selectedAPICapabilityRequest{})
 	if err != nil {
 		t.Fatalf("postgres apiCapabilities: %v", err)

@@ -392,7 +392,7 @@ func setupPostgresReplyContextStoreTest(t *testing.T) (replyContextStoreTestSurf
 	t.Cleanup(cleanup)
 	store := admitTestPostgresStore(t, db)
 	return store, func(ctx context.Context, runID string, eventIDs ...string) error {
-		requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, BundleHash: authorActivityTestBundleHash})
+		requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, BundleHash: authorActivityTestBundleHash})
 		for i, eventID := range eventIDs {
 			eventName := "provider.replied"
 			if i == 0 {
@@ -414,7 +414,7 @@ func setupSQLiteReplyContextStoreTest(t *testing.T) (replyContextStoreTestSurfac
 	t.Helper()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	return store, func(ctx context.Context, runID string, eventIDs ...string) error {
-		requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: authorActivityTestBundleHash})
+		requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: store.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: authorActivityTestBundleHash})
 		for i, eventID := range eventIDs {
 			eventName := "provider.replied"
 			if i == 0 {

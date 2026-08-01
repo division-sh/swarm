@@ -10,13 +10,13 @@ import (
 )
 
 func (s *PostgresStore) ActiveRunBundleAvailabilities(ctx context.Context) ([]runbundle.Availability, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
-	return storerunbundle.ListActiveAvailabilities(ctx, s.DB)
+	return storerunbundle.ListActiveAvailabilities(ctx, s.backend.db)
 }
 
 func (s *PostgresStore) ActiveRunBundleAvailabilityConflicts(ctx context.Context) ([]runbundle.Availability, error) {
@@ -37,7 +37,7 @@ func (s *PostgresStore) LoadRunBundleAvailability(ctx context.Context, runID str
 	if err := s.requireCurrentSchema(); err != nil {
 		return runbundle.Availability{}, err
 	}
-	availability, err := storerunbundle.LoadAvailability(ctx, s.DB, runID)
+	availability, err := storerunbundle.LoadAvailability(ctx, s.backend.db, runID)
 	if errors.Is(err, runbundle.ErrRunNotFound) {
 		return runbundle.Availability{}, ErrRunNotFound
 	}

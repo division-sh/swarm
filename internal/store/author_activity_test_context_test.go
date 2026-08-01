@@ -269,7 +269,7 @@ func newTestPostgresStore(t *testing.T, db *sql.DB) *PostgresStore {
 
 func admitTestPostgresStore(t testing.TB, db *sql.DB) *PostgresStore {
 	t.Helper()
-	pg := &PostgresStore{DB: db}
+	pg := &PostgresStore{backend: &postgresRuntimeBackend{db: db}}
 	bootstrapTestPostgresStore(t, pg)
 	return pg
 }

@@ -98,7 +98,7 @@ func insertProposedEffectCard(ctx context.Context, tx *sql.Tx, card decisioncard
 }
 
 func (s *PostgresStore) LoadProposedEffectContinuation(ctx context.Context, cardID string) (decisioncard.ProposedEffectContinuation, error) {
-	db := decisionCardSQL(s.DB)
+	db := decisionCardSQL(s.backend.db)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		db = tx
 	}
@@ -106,7 +106,7 @@ func (s *PostgresStore) LoadProposedEffectContinuation(ctx context.Context, card
 }
 
 func (s *SQLiteRuntimeStore) LoadProposedEffectContinuation(ctx context.Context, cardID string) (decisioncard.ProposedEffectContinuation, error) {
-	db := decisionCardSQL(s.DB)
+	db := decisionCardSQL(s.backend.db)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		db = tx
 	}
@@ -114,7 +114,7 @@ func (s *SQLiteRuntimeStore) LoadProposedEffectContinuation(ctx context.Context,
 }
 
 func (s *PostgresStore) ProposedEffectReadback(ctx context.Context, cardID string) (decisioncard.ProposedEffectReadback, error) {
-	db := decisionCardSQL(s.DB)
+	db := decisionCardSQL(s.backend.db)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		db = tx
 	}
@@ -122,7 +122,7 @@ func (s *PostgresStore) ProposedEffectReadback(ctx context.Context, cardID strin
 }
 
 func (s *SQLiteRuntimeStore) ProposedEffectReadback(ctx context.Context, cardID string) (decisioncard.ProposedEffectReadback, error) {
-	db := decisionCardSQL(s.DB)
+	db := decisionCardSQL(s.backend.db)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		db = tx
 	}

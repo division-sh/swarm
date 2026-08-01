@@ -20,7 +20,7 @@ type MailboxStore interface {
 }
 
 func (s *PostgresStore) InsertMailboxItem(ctx context.Context, item runtimetools.MailboxItem) (string, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return "", fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -62,7 +62,7 @@ func validateGenericMailboxNotice(itemType string, raw []byte) error {
 }
 
 func (s *PostgresStore) ListMailboxItems(ctx context.Context, status string, limit int) ([]runtimetools.MailboxItem, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -81,7 +81,7 @@ func (s *PostgresStore) ListMailboxItems(ctx context.Context, status string, lim
 }
 
 func (s *PostgresStore) CountMailboxItems(ctx context.Context, status string) (int, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return 0, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -101,7 +101,7 @@ func (s *PostgresStore) CountMailboxItems(ctx context.Context, status string) (i
 }
 
 func (s *PostgresStore) GetMailboxItem(ctx context.Context, id string) (runtimetools.MailboxItem, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimetools.MailboxItem{}, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -117,7 +117,7 @@ func (s *PostgresStore) GetMailboxItem(ctx context.Context, id string) (runtimet
 }
 
 func (s *PostgresStore) ExpireMailboxItems(ctx context.Context, limit int) ([]runtimetools.MailboxItem, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -130,7 +130,7 @@ func (s *PostgresStore) ExpireMailboxItems(ctx context.Context, limit int) ([]ru
 }
 
 func (s *PostgresStore) ListUnnotifiedCriticalMailboxItems(ctx context.Context, limit int) ([]runtimetools.MailboxItem, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -150,7 +150,7 @@ func coalesceMailboxEntityID(item runtimetools.MailboxItem) string {
 }
 
 func (s *PostgresStore) MarkMailboxItemNotified(ctx context.Context, id string) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -172,7 +172,7 @@ func (s *PostgresStore) insertMailboxItemSpec(ctx context.Context, item runtimet
 	if !item.TimeoutAt.IsZero() {
 		expiresAt = item.TimeoutAt
 	}
-	_, err := s.DB.ExecContext(ctx, `
+	_, err := s.backend.db.ExecContext(ctx, `
 		INSERT INTO mailbox (
 			item_id, entity_id, flow_instance, scope, item_type, source_event_id,
 			from_agent, severity, summary, payload, status, decision, decision_notes,
@@ -192,7 +192,7 @@ func (s *PostgresStore) insertMailboxItemSpec(ctx context.Context, item runtimet
 
 func (s *PostgresStore) listMailboxItemsSpec(ctx context.Context, status string, limit int) ([]runtimetools.MailboxItem, error) {
 	where, arg := mailboxListFilter(status)
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT
 			item_id::text,
 			COALESCE(source_event_id::text, ''),
@@ -223,14 +223,14 @@ func (s *PostgresStore) listMailboxItemsSpec(ctx context.Context, status string,
 
 func (s *PostgresStore) countMailboxItemsSpec(ctx context.Context, status string, out *int) error {
 	where, arg := mailboxListFilter(status)
-	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM mailbox WHERE `+where, arg).Scan(out); err != nil {
+	if err := s.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM mailbox WHERE `+where, arg).Scan(out); err != nil {
 		return fmt.Errorf("count mailbox items: %w", err)
 	}
 	return nil
 }
 
 func (s *PostgresStore) getMailboxItemSpec(ctx context.Context, id string) (runtimetools.MailboxItem, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT
 			item_id::text,
 			COALESCE(source_event_id::text, ''),
@@ -265,7 +265,7 @@ func (s *PostgresStore) getMailboxItemSpec(ctx context.Context, id string) (runt
 }
 
 func (s *PostgresStore) expireMailboxItemsSpec(ctx context.Context, limit int) ([]runtimetools.MailboxItem, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		WITH due AS (
 			SELECT item_id
 			FROM mailbox
@@ -307,7 +307,7 @@ func (s *PostgresStore) expireMailboxItemsSpec(ctx context.Context, limit int) (
 }
 
 func (s *PostgresStore) listUnnotifiedCriticalMailboxItemsSpec(ctx context.Context, limit int) ([]runtimetools.MailboxItem, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT
 			item_id::text,
 			COALESCE(source_event_id::text, ''),
@@ -341,7 +341,7 @@ func (s *PostgresStore) listUnnotifiedCriticalMailboxItemsSpec(ctx context.Conte
 func (s *PostgresStore) markMailboxItemNotifiedSpec(ctx context.Context, id string) error {
 	db := interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
-	}(s.DB)
+	}(s.backend.db)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		db = tx
 	}

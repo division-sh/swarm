@@ -185,9 +185,9 @@ func openSQLiteAuthorActivityReceiptFixture(t *testing.T) authorActivityReceiptF
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
 	store.nowFn = func() time.Time { return now }
 	return authorActivityReceiptFixture{
-		store: store, db: store.DB, dialect: runtimeauthoractivity.DialectSQLite,
+		store: store, db: store.backend.db, dialect: runtimeauthoractivity.DialectSQLite,
 		stamp: func(ctx context.Context, eventID, agentID string) [2]string {
-			return readAuthorActivityReceiptStamps(t, ctx, store.DB, `
+			return readAuthorActivityReceiptStamps(t, ctx, store.backend.db, `
 				SELECT CAST(d.settled_at AS TEXT), CAST(o.settled_at AS TEXT)
 				FROM event_deliveries d
 				JOIN event_delivery_outcomes o ON o.delivery_id = d.delivery_id

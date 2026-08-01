@@ -27,7 +27,7 @@ func (s *PostgresStore) ContinueRunControl(ctx context.Context, req runtimerunco
 }
 
 func (s *PostgresStore) RunDispatchBlocked(ctx context.Context, runID string) (bool, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return false, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -38,7 +38,7 @@ func (s *PostgresStore) RunDispatchBlocked(ctx context.Context, runID string) (b
 		return false, nil
 	}
 	var blocked bool
-	err := s.DB.QueryRowContext(ctx, `
+	err := s.backend.db.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM run_control_state
@@ -53,7 +53,7 @@ func (s *PostgresStore) RunDispatchBlocked(ctx context.Context, runID string) (b
 }
 
 func (s *PostgresStore) runControlTransition(ctx context.Context, req runtimeruncontrol.TransitionRequest, action string) (runtimeruncontrol.State, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimeruncontrol.State{}, fmt.Errorf("postgres store is required")
 	}
 	runID := nullUUIDString(req.RunID)

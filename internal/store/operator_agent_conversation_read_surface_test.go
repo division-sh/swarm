@@ -537,7 +537,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 	now := time.Now().UTC()
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	failedNewEventID := uuid.NewString()
 	failedOldEventID := uuid.NewString()
 	deadEventID := uuid.NewString()
@@ -814,7 +814,7 @@ func TestSQLiteRuntimeStoreLoadAgentUsageFailsClosedOnMalformedRows(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
+	if _, err := sqliteStore.backend.db.ExecContext(ctx, `
 		INSERT INTO spend_ledger (
 			flow_instance, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			agent_flow_scope_key, agent_flow_instance_id,
@@ -1333,7 +1333,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsUsesCanonicalLifecy
 	}
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	event := seedOperatorAgentEvent(t, ctx, pg, eventID, runID, "task.dead", "", time.Now().UTC())
 	failure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "missing_dead_letter_record", nil)
 	seedAgentDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: testOperatorAgentIdentity("agent-1")}, runtimedelivery.StateExhausted, &failure)

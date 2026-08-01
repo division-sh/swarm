@@ -10,14 +10,14 @@ import (
 )
 
 func (s *PostgresStore) LoadComputeModuleReplayEvidenceForExecution(ctx context.Context, runID, eventID, nodeID string) ([]computemodule.ReplayEnvelope, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
 	runID, eventID, nodeID, err := normalizeComputeModuleReplayEvidenceScope(runID, eventID, nodeID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT payload
 		FROM events
 		WHERE event_name = 'platform.runtime_log'
@@ -35,14 +35,14 @@ func (s *PostgresStore) LoadComputeModuleReplayEvidenceForExecution(ctx context.
 }
 
 func (s *SQLiteRuntimeStore) LoadComputeModuleReplayEvidenceForExecution(ctx context.Context, runID, eventID, nodeID string) ([]computemodule.ReplayEnvelope, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("sqlite runtime store is required")
 	}
 	runID, eventID, nodeID, err := normalizeComputeModuleReplayEvidenceScope(runID, eventID, nodeID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT payload
 		FROM events
 		WHERE event_name = 'platform.runtime_log'

@@ -23,7 +23,7 @@ func TestRunForkPlanner_ResolvesCommitOrderedEventRevisionsAndRejectsTimestampSe
 	firstEventID := "00000000-0000-0000-0000-000000000001"
 	secondEventID := "00000000-0000-0000-0000-000000000002"
 	at := time.Unix(1700000000, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, firstEventID, runID, "fork.first", events.EventProducerPlatform, "test", "", "", at)
 	firstRevision := captureRunForkTestRevision(t, db, runID)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, secondEventID, runID, "fork.second", events.EventProducerPlatform, "test", "", "", at)
@@ -66,7 +66,7 @@ func TestRunForkPlanner_FailsClosedForOpenReplyContextAtForkPoint(t *testing.T) 
 	runID := uuid.NewString()
 	requestEventID := uuid.NewString()
 	at := time.Unix(1700000050, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, requestEventID, runID, "provider.requested", events.EventProducerPlatform, "test", "", "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO reply_contexts (
@@ -106,7 +106,7 @@ func TestRunForkPlanner_ReconstructsEntityStateAtForkPointFromMutations(t *testi
 	firstEventID := uuid.NewString()
 	secondEventID := uuid.NewString()
 	at := time.Unix(1700000100, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, firstEventID, runID, "fork.before", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
@@ -166,7 +166,7 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000200, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "review/inst-1", at)
 	retryFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "retryable_error", nil)
 	deadFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "dead_letter", nil)
@@ -258,7 +258,7 @@ func TestRunForkPlanner_PendingUnstartedDeliveryIsDeliveryEventReplayReady(t *te
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000250, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.safe_pending", events.EventProducerPlatform, "test", "", "", at)
 	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("safe-agent")}, runtimedelivery.StateQueued, nil)
 
@@ -295,7 +295,7 @@ func TestRunForkPlanner_NodePendingDeliveryRemainsBlocked(t *testing.T) {
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000260, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.node_pending", events.EventProducerPlatform, "test", "", "", at)
 	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-handler")}, runtimedelivery.StateQueued, nil)
 
@@ -360,7 +360,7 @@ func TestRunForkPlanner_NonAgentDeliveryStatesRemainNamedBlockers(t *testing.T) 
 			runID := uuid.NewString()
 			eventID := uuid.NewString()
 			at := time.Unix(1700000265, 0).UTC()
-			requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+			requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 			event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.non_agent", events.EventProducerPlatform, "test", "", "", at)
 			seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-handler")}, tc.state, tc.failure)
 
@@ -396,7 +396,7 @@ func TestRunForkPlanner_CommittedReplayScopeDoesNotMasqueradeAsExecutableDeliver
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000266, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.replay_scope", events.EventProducerPlatform, "test", "", "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO committed_replay_scopes (event_id, run_id, scope, created_at, updated_at)
@@ -438,7 +438,7 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000210, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.state", events.EventProducerPlatform, "test", entityID, "flow-a/1", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
@@ -548,7 +548,7 @@ func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000220, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.timer_route", events.EventProducerPlatform, "test", entityID, "flow-a/1", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
@@ -605,7 +605,7 @@ func TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery(t *testing.T) {
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000250, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
 	retryFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "retryable_error", nil)
 	nodeDead := seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-dead")}, runtimedelivery.StateRetrying, &retryFailure)
@@ -661,7 +661,7 @@ func TestRunForkPlanner_DeadLetterClassificationUsesExactSiblingDeliveryID(t *te
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000255, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
 	deadRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-shared"), Target: events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/dead", EntityID: uuid.NewString()}}
 	deliveredRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-shared"), Target: events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/delivered", EntityID: uuid.NewString()}}
@@ -696,7 +696,7 @@ func TestRunForkPlanner_DoesNotReportPostForkCompletionAsCompletedAtFork(t *test
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000260, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
 	completedRoute := testAgentDeliveryRoute(t, "completed-after-fork", "fixture/completed-after-fork")
 	pendingRoute := testAgentDeliveryRoute(t, "started-after-fork", "fixture/started-after-fork")
@@ -760,7 +760,7 @@ func TestRunForkPlanner_SuppressesPostForkTerminalMetadata(t *testing.T) {
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000270, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
 	failedRoute := testAgentDeliveryRoute(t, "failed-after-fork", "fixture/failed-after-fork")
 	pendingRoute := testAgentDeliveryRoute(t, "pending-then-failed-after-fork", "fixture/pending-then-failed-after-fork")
@@ -820,7 +820,7 @@ func TestRunForkPlanner_AccountsForPlatformReceiptAndExactDeliveryOutcomes(t *te
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000280, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_receipts (
@@ -885,7 +885,7 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 	sessionID := uuid.NewString()
 	turnID := uuid.NewString()
 	at := time.Unix(1700000290, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.session", events.EventProducerPlatform, "test", "", "", at)
 	identity := testAgentIdentity(t, "agent-a", "fork-planner")
 	fields := testAgentIdentityStorageFields(t, identity)
@@ -950,7 +950,7 @@ func TestRunForkPlanner_ActiveConversationAuditRemainsPolicyBlocker(t *testing.T
 	eventID := uuid.NewString()
 	auditSessionID := uuid.NewString()
 	at := time.Unix(1700000295, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.task_audit", events.EventProducerPlatform, "test", "", "", at)
 	fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "agent-task", "fork-planner"))
 	if _, err := db.ExecContext(ctx, `
@@ -991,7 +991,7 @@ func TestRunForkPlanner_TerminatedSessionBeforeForkIsLineageOnly(t *testing.T) {
 	eventID := uuid.NewString()
 	sessionID := uuid.NewString()
 	at := time.Unix(1700000297, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.completed_session", events.EventProducerPlatform, "test", "", "", at)
 	identity := testAgentIdentity(t, "agent-a", "fork-planner")
 	fields := testAgentIdentityStorageFields(t, identity)
@@ -1033,7 +1033,7 @@ func TestRunForkPlanner_TerminatedAuditStillBlocksWithoutAtForkTerminationProof(
 	eventID := uuid.NewString()
 	auditSessionID := uuid.NewString()
 	at := time.Unix(1700000298, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.terminated_audit", events.EventProducerPlatform, "test", "", "", at)
 	fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "agent-task", "fork-planner"))
 	if _, err := db.ExecContext(ctx, `

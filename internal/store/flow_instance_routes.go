@@ -56,7 +56,7 @@ func runPostgresFlowInstanceRouteMutation(ctx context.Context, db *sql.DB, fn fu
 }
 
 func (s *PostgresStore) UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required for flow instance routes")
 	}
 	var err error
@@ -64,7 +64,7 @@ func (s *PostgresStore) UpsertFlowInstanceRoute(ctx context.Context, route runti
 	if err != nil {
 		return err
 	}
-	return runPostgresFlowInstanceRouteMutation(ctx, s.DB, func(exec flowInstanceRouteExecutor) error {
+	return runPostgresFlowInstanceRouteMutation(ctx, s.backend.db, func(exec flowInstanceRouteExecutor) error {
 		return upsertPostgresFlowInstanceRoute(ctx, exec, route)
 	})
 }
@@ -153,7 +153,7 @@ func upsertPostgresFlowInstanceRoute(
 }
 
 func (s *SQLiteRuntimeStore) UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("sqlite runtime store is required for flow instance routes")
 	}
 	var err error
@@ -237,7 +237,7 @@ func (s *PostgresStore) ReplaceFlowInstanceRouteRecords(
 	identity runtimeflowidentity.Route,
 	routes []runtimebus.FlowInstanceRouteRecord,
 ) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required for exact flow instance routes")
 	}
 	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
@@ -248,7 +248,7 @@ func (s *PostgresStore) ReplaceFlowInstanceRouteRecords(
 	if err != nil {
 		return err
 	}
-	return runPostgresFlowInstanceRouteMutation(ctx, s.DB, func(exec flowInstanceRouteExecutor) error {
+	return runPostgresFlowInstanceRouteMutation(ctx, s.backend.db, func(exec flowInstanceRouteExecutor) error {
 		if _, err := exec.ExecContext(ctx, `
 			UPDATE routing_rules
 			SET status = 'inactive'
@@ -272,7 +272,7 @@ func (s *SQLiteRuntimeStore) ReplaceFlowInstanceRouteRecords(
 	identity runtimeflowidentity.Route,
 	routes []runtimebus.FlowInstanceRouteRecord,
 ) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("sqlite runtime store is required for exact flow instance routes")
 	}
 	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
@@ -313,7 +313,7 @@ func (s *PostgresStore) ReplaceFlowInstanceRouteTopology(
 	ctx context.Context,
 	sets []runtimebus.FlowInstanceRouteRecordSet,
 ) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required for flow-instance route topology")
 	}
 	sets, err := normalizeFlowInstanceRouteTopology(sets)
@@ -334,7 +334,7 @@ func (s *SQLiteRuntimeStore) ReplaceFlowInstanceRouteTopology(
 	ctx context.Context,
 	sets []runtimebus.FlowInstanceRouteRecordSet,
 ) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("sqlite runtime store is required for flow-instance route topology")
 	}
 	sets, err := normalizeFlowInstanceRouteTopology(sets)
@@ -407,14 +407,14 @@ func normalizeFlowInstanceRouteSet(
 }
 
 func (s *PostgresStore) DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required for flow instance routes")
 	}
 	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
 	if !identity.Valid() {
 		return fmt.Errorf("scope_key, instance_id, and instance_path are required")
 	}
-	return runPostgresFlowInstanceRouteMutation(ctx, s.DB, func(exec flowInstanceRouteExecutor) error {
+	return runPostgresFlowInstanceRouteMutation(ctx, s.backend.db, func(exec flowInstanceRouteExecutor) error {
 		var status string
 		err := exec.QueryRowContext(ctx, `
 		SELECT status
@@ -444,7 +444,7 @@ func (s *PostgresStore) DeleteFlowInstanceRoute(ctx context.Context, identity ru
 }
 
 func (s *SQLiteRuntimeStore) DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("sqlite runtime store is required for flow instance routes")
 	}
 	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
@@ -481,14 +481,14 @@ func (s *SQLiteRuntimeStore) DeleteFlowInstanceRoute(ctx context.Context, identi
 }
 
 func (s *PostgresStore) RollbackFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required for flow instance routes")
 	}
 	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
 	if !identity.Valid() {
 		return fmt.Errorf("scope_key, instance_id, and instance_path are required")
 	}
-	return runPostgresFlowInstanceRouteMutation(ctx, s.DB, func(exec flowInstanceRouteExecutor) error {
+	return runPostgresFlowInstanceRouteMutation(ctx, s.backend.db, func(exec flowInstanceRouteExecutor) error {
 		if _, err := exec.ExecContext(ctx, `
 			UPDATE routing_rules
 			SET status = 'inactive'
@@ -503,7 +503,7 @@ func (s *PostgresStore) RollbackFlowInstanceRoute(ctx context.Context, identity 
 }
 
 func (s *SQLiteRuntimeStore) RollbackFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("sqlite runtime store is required for flow instance routes")
 	}
 	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
@@ -529,10 +529,10 @@ func (s *SQLiteRuntimeStore) RollbackFlowInstanceRoute(ctx context.Context, iden
 }
 
 func (s *PostgresStore) ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.Route, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("postgres store is required for flow instance routes")
 	}
-	q := flowInstanceDescriptorQueryer(s.DB)
+	q := flowInstanceDescriptorQueryer(s.backend.db)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		q = tx
 	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
@@ -575,10 +575,10 @@ func (s *PostgresStore) ListFlowInstanceRoutes(ctx context.Context) ([]runtimefl
 }
 
 func (s *SQLiteRuntimeStore) ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.Route, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("sqlite runtime store is required for flow instance routes")
 	}
-	q := flowInstanceDescriptorQueryer(s.DB)
+	q := flowInstanceDescriptorQueryer(s.backend.db)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		q = tx
 	}
@@ -615,14 +615,14 @@ func (s *SQLiteRuntimeStore) ListFlowInstanceRoutes(ctx context.Context) ([]runt
 }
 
 func (s *PostgresStore) ListFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.Route) ([]runtimebus.FlowInstanceRouteRecord, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("postgres store is required for flow instance routes")
 	}
 	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
 	if !identity.Valid() {
 		return nil, fmt.Errorf("flow instance route identity is required")
 	}
-	q := flowInstanceDescriptorQueryer(s.DB)
+	q := flowInstanceDescriptorQueryer(s.backend.db)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		q = tx
 	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
@@ -641,14 +641,14 @@ func (s *PostgresStore) ListFlowInstanceRouteRecords(ctx context.Context, identi
 }
 
 func (s *SQLiteRuntimeStore) ListFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.Route) ([]runtimebus.FlowInstanceRouteRecord, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("sqlite runtime store is required for flow instance routes")
 	}
 	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
 	if !identity.Valid() {
 		return nil, fmt.Errorf("flow instance route identity is required")
 	}
-	q := flowInstanceDescriptorQueryer(s.DB)
+	q := flowInstanceDescriptorQueryer(s.backend.db)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		q = tx
 	}
@@ -694,10 +694,10 @@ func listFlowInstanceRouteRecords(
 }
 
 func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("postgres store is required for active flow instance descriptors")
 	}
-	q := flowInstanceDescriptorQueryer(s.DB)
+	q := flowInstanceDescriptorQueryer(s.backend.db)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		q = tx
 	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
@@ -767,10 +767,10 @@ func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context) (
 }
 
 func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptors(ctx context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("sqlite runtime store is required for active flow instance descriptors")
 	}
-	q := flowInstanceDescriptorQueryer(s.DB)
+	q := flowInstanceDescriptorQueryer(s.backend.db)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		q = tx
 	}

@@ -169,7 +169,7 @@ func (s *PostgresStore) ensureAgentUsageAgentExists(ctx context.Context, identit
 		return ErrAgentNotFound
 	}
 	var exists bool
-	if err := s.DB.QueryRowContext(ctx, `
+	if err := s.backend.db.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM agents
@@ -198,7 +198,7 @@ func (s *SQLiteRuntimeStore) ensureAgentUsageAgentExists(ctx context.Context, id
 		return ErrAgentNotFound
 	}
 	var count int
-	if err := s.DB.QueryRowContext(ctx, `
+	if err := s.backend.db.QueryRowContext(ctx, `
 		SELECT COUNT(1)
 		FROM agents
 		WHERE agent_id = ?
@@ -234,7 +234,7 @@ func (s *PostgresStore) loadAgentUsageBreakdown(ctx context.Context, identity ag
 		args = append(args, opts.Until.UTC())
 		windowClause.WriteString(fmt.Sprintf("\n		  AND created_at < $%d", len(args)))
 	}
-	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
+	rows, err := s.backend.db.QueryContext(ctx, fmt.Sprintf(`
 		WITH usage_rows AS (
 			SELECT
 				execution_mode,
@@ -338,7 +338,7 @@ func (s *SQLiteRuntimeStore) loadAgentUsageBreakdown(ctx context.Context, identi
 		args = append(args, opts.Until.UTC())
 		windowClause.WriteString("\n		  AND created_at < ?")
 	}
-	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
+	rows, err := s.backend.db.QueryContext(ctx, fmt.Sprintf(`
 		WITH usage_rows AS (
 			SELECT
 				execution_mode,

@@ -52,7 +52,7 @@ func (s *PostgresStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, ide
 }
 
 func (s *PostgresStore) listAgentLifecycleRecordsSpec(ctx context.Context, identities []agentidentity.Identity) ([]agentLifecycleDeliveryRecord, error) {
-	snapshots, err := postgresDeliveryAdapter.CurrentAgentSnapshots(ctx, s.DB, identities)
+	snapshots, err := postgresDeliveryAdapter.CurrentAgentSnapshots(ctx, s.backend.db, identities)
 	if err != nil {
 		return nil, err
 	}

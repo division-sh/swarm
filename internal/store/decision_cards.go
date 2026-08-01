@@ -128,7 +128,7 @@ func insertDecisionCard(ctx context.Context, db decisionCardSQL, card decisionca
 }
 
 func (s *PostgresStore) GetDecisionCard(ctx context.Context, id string) (decisioncard.Card, error) {
-	db := decisionCardSQL(s.DB)
+	db := decisionCardSQL(s.backend.db)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		db = tx
 	}
@@ -136,7 +136,7 @@ func (s *PostgresStore) GetDecisionCard(ctx context.Context, id string) (decisio
 }
 
 func (s *SQLiteRuntimeStore) GetDecisionCard(ctx context.Context, id string) (decisioncard.Card, error) {
-	db := decisionCardSQL(s.DB)
+	db := decisionCardSQL(s.backend.db)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		db = tx
 	}
@@ -280,11 +280,11 @@ func scanDecisionCard(row *sql.Row) (decisioncard.Card, error) {
 }
 
 func (s *PostgresStore) ListDecisionCards(ctx context.Context, opts decisioncard.ListOptions) ([]decisioncard.ListItem, string, error) {
-	return listDecisionCards(ctx, s.DB, opts, true)
+	return listDecisionCards(ctx, s.backend.db, opts, true)
 }
 
 func (s *SQLiteRuntimeStore) ListDecisionCards(ctx context.Context, opts decisioncard.ListOptions) ([]decisioncard.ListItem, string, error) {
-	return listDecisionCards(ctx, s.DB, opts, false)
+	return listDecisionCards(ctx, s.backend.db, opts, false)
 }
 
 func listDecisionCards(ctx context.Context, db decisionCardSQL, opts decisioncard.ListOptions, postgres bool) ([]decisioncard.ListItem, string, error) {
@@ -1174,11 +1174,11 @@ func loadDecisionCardByActivation(ctx context.Context, db decisionCardSQL, runID
 }
 
 func (s *PostgresStore) ListDecisionCardChanges(ctx context.Context, opts decisioncard.SubscriptionOptions) ([]decisioncard.Change, error) {
-	return listDecisionCardChanges(ctx, s.DB, opts, true)
+	return listDecisionCardChanges(ctx, s.backend.db, opts, true)
 }
 
 func (s *SQLiteRuntimeStore) ListDecisionCardChanges(ctx context.Context, opts decisioncard.SubscriptionOptions) ([]decisioncard.Change, error) {
-	return listDecisionCardChanges(ctx, s.DB, opts, false)
+	return listDecisionCardChanges(ctx, s.backend.db, opts, false)
 }
 
 func listDecisionCardChanges(ctx context.Context, db decisionCardSQL, opts decisioncard.SubscriptionOptions, postgres bool) ([]decisioncard.Change, error) {
@@ -1331,7 +1331,7 @@ func decisionCardAuthorActivityIdentity(anchor decisioncard.Anchor) (anchorID, e
 }
 
 func runPostgresDecisionCardMutation(ctx context.Context, selected *PostgresStore, fn func(context.Context, *sql.Tx) error) error {
-	if selected == nil || selected.DB == nil {
+	if selected == nil || selected.backend == nil || selected.backend.db == nil {
 		return errors.New("PostgreSQL decision card mutation requires selected store")
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
@@ -1343,7 +1343,7 @@ func runPostgresDecisionCardMutation(ctx context.Context, selected *PostgresStor
 	conn, borrowed := runtimepipeline.PipelineSQLConnFromContext(ctx)
 	if !borrowed {
 		var err error
-		conn, err = selected.DB.Conn(ctx)
+		conn, err = selected.backend.db.Conn(ctx)
 		if err != nil {
 			return err
 		}

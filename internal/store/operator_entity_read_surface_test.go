@@ -160,7 +160,7 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	db := sqliteStore.DB
+	db := sqliteStore.backend.db
 
 	runA := uuid.NewString()
 	runB := uuid.NewString()

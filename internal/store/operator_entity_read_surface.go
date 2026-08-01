@@ -146,7 +146,7 @@ func (s *PostgresStore) ListOperatorEntities(ctx context.Context, opts OperatorE
 		)`, nTime, nTime, nEntity, nEntity, nRun))
 	}
 	limitArg := add(opts.Limit + 1)
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT
 			es.entity_id::text,
 			es.run_id::text,
@@ -272,7 +272,7 @@ func (s *SQLiteRuntimeStore) ListOperatorEntities(ctx context.Context, opts Oper
 		)`)
 	}
 	add(opts.Limit + 1)
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT
 			COALESCE(es.entity_id, ''),
 			COALESCE(es.run_id, ''),
@@ -339,7 +339,7 @@ func (s *PostgresStore) LoadOperatorEntity(ctx context.Context, entityID, runID 
 		}
 		return s.loadOperatorEntityRow(ctx, entityID, runID)
 	}
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT es.run_id::text
 		FROM entity_state es
 		WHERE es.entity_id = $1::uuid
@@ -389,7 +389,7 @@ func (s *SQLiteRuntimeStore) LoadOperatorEntity(ctx context.Context, entityID, r
 		}
 		return s.loadSQLiteOperatorEntityRow(ctx, entityID, runID)
 	}
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT COALESCE(es.run_id, '')
 		FROM entity_state es
 		WHERE es.entity_id = ?
@@ -447,7 +447,7 @@ func (s *PostgresStore) AggregateOperatorEntities(ctx context.Context, opts Oper
 	if err != nil {
 		return OperatorEntityAggregateResult{}, err
 	}
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT COALESCE(`+group.Expr+`, 'unknown') AS bucket, COUNT(*)::int
 		FROM entity_state es
 		`+group.Join+`
@@ -502,7 +502,7 @@ func (s *SQLiteRuntimeStore) AggregateOperatorEntities(ctx context.Context, opts
 		args = append(args, opts.Type)
 		where = append(where, "es.entity_type = ?")
 	}
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT COALESCE(`+group.Expr+`, 'unknown') AS bucket, COUNT(*)
 		FROM entity_state es
 		`+group.Join+`
@@ -532,7 +532,7 @@ func (s *SQLiteRuntimeStore) AggregateOperatorEntities(ctx context.Context, opts
 }
 
 func (s *PostgresStore) loadOperatorEntityRow(ctx context.Context, entityID, runID string) (OperatorEntityFull, error) {
-	row := s.DB.QueryRowContext(ctx, `
+	row := s.backend.db.QueryRowContext(ctx, `
 		SELECT
 			es.entity_id::text,
 			es.run_id::text,
@@ -601,7 +601,7 @@ func (s *PostgresStore) loadOperatorEntityRow(ctx context.Context, entityID, run
 }
 
 func (s *SQLiteRuntimeStore) loadSQLiteOperatorEntityRow(ctx context.Context, entityID, runID string) (OperatorEntityFull, error) {
-	row := s.DB.QueryRowContext(ctx, `
+	row := s.backend.db.QueryRowContext(ctx, `
 		SELECT
 			COALESCE(es.entity_id, ''),
 			COALESCE(es.run_id, ''),

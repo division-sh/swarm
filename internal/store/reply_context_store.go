@@ -26,7 +26,7 @@ func (s *PostgresStore) CreateReplyContext(ctx context.Context, record runtimere
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		return createPostgresReplyContext(ctx, tx, record)
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin reply context create: %w", err)
 	}
@@ -158,7 +158,7 @@ func (s *PostgresStore) LoadReplyContext(ctx context.Context, id string) (runtim
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		return loadPostgresReplyContext(ctx, tx, id, false)
 	}
-	return loadPostgresReplyContext(ctx, s.DB, id, false)
+	return loadPostgresReplyContext(ctx, s.backend.db, id, false)
 }
 
 func loadPostgresReplyContext(ctx context.Context, db replyContextSQL, id string, forUpdate bool) (runtimereplycontext.Record, error) {
@@ -173,7 +173,7 @@ func (s *SQLiteRuntimeStore) LoadReplyContext(ctx context.Context, id string) (r
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		return loadSQLiteReplyContext(ctx, tx, id)
 	}
-	return loadSQLiteReplyContext(ctx, s.DB, id)
+	return loadSQLiteReplyContext(ctx, s.backend.db, id)
 }
 
 func loadSQLiteReplyContext(ctx context.Context, db replyContextSQL, id string) (runtimereplycontext.Record, error) {
@@ -184,7 +184,7 @@ func (s *PostgresStore) ClaimReplyContext(ctx context.Context, id, replyEventID 
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		return claimPostgresReplyContext(ctx, tx, id, replyEventID)
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return runtimereplycontext.Record{}, "", err
 	}

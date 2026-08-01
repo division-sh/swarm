@@ -61,7 +61,7 @@ func (s *PostgresStore) WithAPIIdempotency(
 		completion, err := execute(ctx)
 		return completion, false, err
 	}
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return APIIdempotencyCompletion{}, false, fmt.Errorf("postgres store is required")
 	}
 	req.Method = strings.TrimSpace(req.Method)
@@ -82,7 +82,7 @@ func (s *PostgresStore) WithAPIIdempotency(
 		return withPostgresAPIIdempotencyTx(ctx, tx, req, execute)
 	}
 
-	conn, err := s.DB.Conn(ctx)
+	conn, err := s.backend.db.Conn(ctx)
 	if err != nil {
 		return APIIdempotencyCompletion{}, false, fmt.Errorf("acquire api idempotency connection: %w", err)
 	}

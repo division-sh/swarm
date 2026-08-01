@@ -127,7 +127,7 @@ func seedRunStatusEntityState(t *testing.T, db *sql.DB, runID, entityID string) 
 func markRunStatusCompleted(t *testing.T, pg *store.PostgresStore, eventID string) {
 	t.Helper()
 	var runID, bundleHash string
-	if err := pg.DB.QueryRowContext(context.Background(), `
+	if err := pg.TestDatabase().QueryRowContext(context.Background(), `
 		SELECT r.run_id::text, r.bundle_hash
 		FROM events e
 		JOIN runs r ON r.run_id = e.run_id

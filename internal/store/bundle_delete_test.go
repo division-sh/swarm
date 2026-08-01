@@ -30,7 +30,7 @@ func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 
 	ctx := withStoreTestPersistedBundleSource(testAuthorActivityContextForBundle(bundleDeleteTestHash), bundleDeleteTestHash)
 	now := time.Now().UTC().Add(time.Minute)
@@ -39,7 +39,7 @@ func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedTestAgentRow(t, ctx, pg.DB, true, identity, "active")
+	seedTestAgentRow(t, ctx, pg.backend.db, true, identity, "active")
 	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteTestHash)
 	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteOtherHash)
 
@@ -52,7 +52,7 @@ func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
 	seedBundleDeleteRun(t, ctx, pg, completedRunID, "completed", bundleDeleteTestHash)
 	seedBundleDeleteRun(t, ctx, pg, otherRunID, "running", bundleDeleteOtherHash)
 	eventID := seedBundleDeleteDelivery(t, ctx, pg, activeRunID, "agent-a")
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 			INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 				agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
@@ -62,7 +62,7 @@ func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
 		identityFields.RoutePresence, identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 			INSERT INTO timers (timer_id, timer_name, run_id, fire_event, routing_source, fire_at, owner_kind, status)
 			VALUES ($1::uuid, 'bundle-delete-timer', $2::uuid, 'timer.fired', '{"kind":"platform_control","route":{}}'::jsonb, now() + interval '1 hour', 'system', 'active')
 		`, timerID, activeRunID); err != nil {
@@ -132,7 +132,7 @@ func TestPostgresStore_BundleDeleteFinalMutationFailsBeforeDeletingWithActiveRun
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 
 	ctx := withStoreTestPersistedBundleSource(testAuthorActivityContextForBundle(bundleDeleteTestHash), bundleDeleteTestHash)
 	runID := uuid.NewString()
@@ -159,7 +159,7 @@ func TestPostgresStore_BundleDeleteFinalMutationMarksOnlyNonActivePersistedRunsD
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 
 	ctx := withStoreTestPersistedBundleSource(testAuthorActivityContextForBundle(bundleDeleteTestHash), bundleDeleteTestHash)
 	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteTestHash)
@@ -206,12 +206,12 @@ func TestPostgresStore_BundleDeleteFinalMutationSerializesConcurrentRunCreation(
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 
 	ctx := withStoreTestPersistedBundleSource(testAuthorActivityContextForBundle(bundleDeleteTestHash), bundleDeleteTestHash)
 	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteTestHash)
 
-	runCreationTx, err := pg.DB.BeginTx(ctx, nil)
+	runCreationTx, err := pg.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin run creation tx: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestPostgresStore_BundleDeleteFinalMutationBlocksPostDeletePersistedSourceR
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 
 	ctx := withStoreTestPersistedBundleSource(testAuthorActivityContextForBundle(bundleDeleteTestHash), bundleDeleteTestHash)
 	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteTestHash)
@@ -304,7 +304,7 @@ func TestPostgresStore_BundleDeleteFinalMutationBlocksPostDeletePersistedSourceR
 
 func seedBundleDeleteBundle(t *testing.T, ctx context.Context, pg *PostgresStore, bundleHash string) {
 	t.Helper()
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json, metadata, ingested_at)
 		VALUES ($1, 'version: 1', '{}'::jsonb, '{}'::jsonb, now())
 		ON CONFLICT (bundle_hash) DO NOTHING
@@ -338,7 +338,7 @@ func seedBundleDeleteRunWithSource(t *testing.T, ctx context.Context, pg *Postgr
 		t.Fatalf("parse bundle delete run state %q: %v", status, err)
 	}
 	if bundleSource == storerunlifecycle.BundleSourceDeleted {
-		runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, pg.DB, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
+		runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, pg.backend.db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
 			RunID: runID, State: status, BundleHash: bundleHash, BundleSource: bundleSource,
 		})
 		return
@@ -374,7 +374,7 @@ func seedBundleDeleteRunWithSource(t *testing.T, ctx context.Context, pg *Postgr
 func assertBundleDeleteRunBundle(t *testing.T, ctx context.Context, pg *PostgresStore, runID, wantStatus, wantSource, wantHash string) {
 	t.Helper()
 	var status, source, bundleHash string
-	if err := pg.DB.QueryRowContext(ctx, `
+	if err := pg.backend.db.QueryRowContext(ctx, `
 		SELECT status, bundle_source, COALESCE(bundle_hash, '')
 		FROM runs
 		WHERE run_id = $1::uuid
@@ -391,7 +391,7 @@ func assertBundleDeleteRun(t *testing.T, ctx context.Context, pg *PostgresStore,
 	var status, source string
 	var failure []byte
 	var endedAt sql.NullTime
-	if err := pg.DB.QueryRowContext(ctx, `
+	if err := pg.backend.db.QueryRowContext(ctx, `
 		SELECT status, bundle_source, failure, ended_at
 		FROM runs
 		WHERE run_id = $1::uuid
@@ -406,7 +406,7 @@ func assertBundleDeleteRun(t *testing.T, ctx context.Context, pg *PostgresStore,
 	}
 	if wantStatus == "cancelled" {
 		var controlStatus, reason, controlledBy string
-		if err := pg.DB.QueryRowContext(ctx, `
+		if err := pg.backend.db.QueryRowContext(ctx, `
 			SELECT control_status, COALESCE(reason, ''), COALESCE(controlled_by, '')
 			FROM run_control_state
 			WHERE run_id = $1::uuid
@@ -422,7 +422,7 @@ func assertBundleDeleteRun(t *testing.T, ctx context.Context, pg *PostgresStore,
 func assertBundleDeleteRunAbsent(t *testing.T, ctx context.Context, pg *PostgresStore, runID string) {
 	t.Helper()
 	var count int
-	if err := pg.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE run_id = $1::uuid`, runID).Scan(&count); err != nil {
+	if err := pg.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE run_id = $1::uuid`, runID).Scan(&count); err != nil {
 		t.Fatalf("count run %s: %v", runID, err)
 	}
 	if count != 0 {
@@ -433,7 +433,7 @@ func assertBundleDeleteRunAbsent(t *testing.T, ctx context.Context, pg *Postgres
 func assertBundleDeleteEventAbsent(t *testing.T, ctx context.Context, pg *PostgresStore, eventID string) {
 	t.Helper()
 	var count int
-	if err := pg.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`, eventID).Scan(&count); err != nil {
+	if err := pg.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`, eventID).Scan(&count); err != nil {
 		t.Fatalf("count event %s: %v", eventID, err)
 	}
 	if count != 0 {
@@ -444,7 +444,7 @@ func assertBundleDeleteEventAbsent(t *testing.T, ctx context.Context, pg *Postgr
 func assertBundleRowPresent(t *testing.T, ctx context.Context, pg *PostgresStore, bundleHash string) {
 	t.Helper()
 	var exists bool
-	if err := pg.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = $1)`, bundleHash).Scan(&exists); err != nil {
+	if err := pg.backend.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = $1)`, bundleHash).Scan(&exists); err != nil {
 		t.Fatalf("check bundle row %s: %v", bundleHash, err)
 	}
 	if !exists {
@@ -455,7 +455,7 @@ func assertBundleRowPresent(t *testing.T, ctx context.Context, pg *PostgresStore
 func assertBundleRowAbsent(t *testing.T, ctx context.Context, pg *PostgresStore, bundleHash string) {
 	t.Helper()
 	var exists bool
-	if err := pg.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = $1)`, bundleHash).Scan(&exists); err != nil {
+	if err := pg.backend.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = $1)`, bundleHash).Scan(&exists); err != nil {
 		t.Fatalf("check bundle row %s: %v", bundleHash, err)
 	}
 	if exists {

@@ -308,7 +308,7 @@ func TestDynamicFlowSourceRevisionConvergesExactAgentSetAndFencesPredecessorsOnB
 			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB, func(), func() int32) {
 				base := storetest.StartSQLiteRuntimeStore(t)
 				selected := &failingNotifyAllChildrenSQLiteStore{SQLiteRuntimeStore: base}
-				return selected, base.DB,
+				return selected, base.TestDatabase(),
 					func() { selected.failNextRouteReplacement.Store(true) },
 					selected.transientRouteFailures.Load
 			},
@@ -920,7 +920,7 @@ func TestDynamicFlowTerminalizationAndRouteReplacementRollbackTogetherOnBothBack
 			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB, func()) {
 				base := storetest.StartSQLiteRuntimeStore(t)
 				selected := &failingNotifyAllChildrenSQLiteStore{SQLiteRuntimeStore: base}
-				return selected, base.DB, func() { selected.failExactRouteReplacement.Store(true) }
+				return selected, base.TestDatabase(), func() { selected.failExactRouteReplacement.Store(true) }
 			},
 		},
 	} {
@@ -1005,7 +1005,7 @@ func TestNotifyAllChildrenFixedSlugAgentsCompleteIndependentlyOnBothBackends(t *
 			name: "sqlite",
 			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
 				backend := storetest.StartSQLiteRuntimeStore(t)
-				return backend, backend.DB
+				return backend, backend.TestDatabase()
 			},
 		},
 	} {
@@ -1107,7 +1107,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			name: "sqlite",
 			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
 				backend := storetest.StartSQLiteRuntimeStore(t)
-				return backend, backend.DB
+				return backend, backend.TestDatabase()
 			},
 		},
 	} {

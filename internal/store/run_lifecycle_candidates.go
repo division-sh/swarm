@@ -607,7 +607,7 @@ func (s *PostgresStore) ListCompletionCandidates(
 	cursor runtimerunlifecycle.CandidateCursor,
 	limit int,
 ) (runtimerunlifecycle.CandidatePage, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimerunlifecycle.CandidatePage{}, errors.New("postgres store is required")
 	}
 	if err := scope.Validate(); err != nil {
@@ -616,7 +616,7 @@ func (s *PostgresStore) ListCompletionCandidates(
 	if limit <= 0 {
 		return runtimerunlifecycle.CandidatePage{}, errors.New("completion candidate page limit must be positive")
 	}
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT run_id::text, bundle_hash, completion_revision, completion_due_at
 		FROM runs
 		WHERE bundle_hash = $1
@@ -656,7 +656,7 @@ func (s *SQLiteRuntimeStore) ListCompletionCandidates(
 	cursor runtimerunlifecycle.CandidateCursor,
 	limit int,
 ) (runtimerunlifecycle.CandidatePage, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimerunlifecycle.CandidatePage{}, errors.New("sqlite runtime store is required")
 	}
 	if err := scope.Validate(); err != nil {
@@ -665,7 +665,7 @@ func (s *SQLiteRuntimeStore) ListCompletionCandidates(
 	if limit <= 0 {
 		return runtimerunlifecycle.CandidatePage{}, errors.New("completion candidate page limit must be positive")
 	}
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT run_id, bundle_hash, completion_revision, completion_due_at
 		FROM runs
 		WHERE bundle_hash = ?

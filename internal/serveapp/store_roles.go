@@ -122,6 +122,7 @@ func selectedStoreBundleRoleLedger() []selectedStoreBundleRoleEntry {
 	return []selectedStoreBundleRoleEntry{
 		{Name: "Postgres", Classification: selectedStoreRoleConstructionOwner, RequiredOn: selectedStoreRolePostgres, ForbiddenOn: selectedStoreRoleSQLite, SpecRef: selectedFacadeSpec, Reason: "concrete Postgres owner is construction-only and must not represent selected capability authority"},
 		{Name: "SQLDB", Classification: selectedStoreRoleWorkspaceProcessDB, RequiredOn: selectedStoreRoleBoth, SpecRef: rawSQLSpec, Reason: "raw process/workspace DB handle is allowed only for close/health/workspace lifecycle capability"},
+		{Name: "WorkspaceLookup", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "workspace runtime lookup is an exact typed selected-store read capability"},
 		{Name: "Database", Classification: selectedStoreRolePublicAPIReadControl, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "health/readiness pinger is a selected public control capability"},
 		{Name: "RuntimeLogStore", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "runtime diagnostics/log persistence is required for selected runtime construction"},
 		{Name: "SchemaBootstrapper", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "schema/bootstrap capability is required before selected runtime persistence executes"},

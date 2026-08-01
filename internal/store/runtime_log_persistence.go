@@ -41,7 +41,7 @@ func (s *PostgresStore) RuntimeLogLineageParentEventID(ctx context.Context, runI
 	}
 	runID = strings.TrimSpace(runID)
 	subjectEventID = strings.TrimSpace(subjectEventID)
-	if s == nil || s.DB == nil || runID == "" || subjectEventID == "" {
+	if s == nil || s.backend.db == nil || runID == "" || subjectEventID == "" {
 		return "", nil
 	}
 	if _, err := uuid.Parse(runID); err != nil {
@@ -50,7 +50,7 @@ func (s *PostgresStore) RuntimeLogLineageParentEventID(ctx context.Context, runI
 	if _, err := uuid.Parse(subjectEventID); err != nil {
 		return "", nil
 	}
-	queryer := rowQueryer(s.DB)
+	queryer := rowQueryer(s.backend.db)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		queryer = tx
 	}
@@ -72,7 +72,7 @@ func (s *PostgresStore) RuntimeLogLineageParentEventID(ctx context.Context, runI
 }
 
 func (s *PostgresStore) PersistRuntimeLog(ctx context.Context, record runtimepkg.RuntimeLogPersistenceRecord) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -104,7 +104,7 @@ func (s *SQLiteRuntimeStore) RuntimeLogLineageParentEventID(ctx context.Context,
 	}
 	runID = strings.TrimSpace(runID)
 	subjectEventID = strings.TrimSpace(subjectEventID)
-	if s == nil || s.DB == nil || runID == "" || subjectEventID == "" {
+	if s == nil || s.backend.db == nil || runID == "" || subjectEventID == "" {
 		return "", nil
 	}
 	if _, err := uuid.Parse(runID); err != nil {
@@ -113,7 +113,7 @@ func (s *SQLiteRuntimeStore) RuntimeLogLineageParentEventID(ctx context.Context,
 	if _, err := uuid.Parse(subjectEventID); err != nil {
 		return "", nil
 	}
-	queryer := rowQueryer(s.DB)
+	queryer := rowQueryer(s.backend.db)
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		queryer = tx
 	}
@@ -135,7 +135,7 @@ func (s *SQLiteRuntimeStore) RuntimeLogLineageParentEventID(ctx context.Context,
 }
 
 func (s *SQLiteRuntimeStore) PersistRuntimeLog(ctx context.Context, record runtimepkg.RuntimeLogPersistenceRecord) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("sqlite runtime store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {

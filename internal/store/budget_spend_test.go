@@ -102,10 +102,10 @@ func TestSQLiteRuntimeStoreBudgetSpendPersistence(t *testing.T) {
 	}
 
 	var exactRows, estimatedRows int
-	if err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM spend_ledger WHERE usage_accounting = 'exact'`).Scan(&exactRows); err != nil {
+	if err := store.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM spend_ledger WHERE usage_accounting = 'exact'`).Scan(&exactRows); err != nil {
 		t.Fatalf("count exact rows: %v", err)
 	}
-	if err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM spend_ledger WHERE usage_accounting = 'estimated'`).Scan(&estimatedRows); err != nil {
+	if err := store.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM spend_ledger WHERE usage_accounting = 'estimated'`).Scan(&estimatedRows); err != nil {
 		t.Fatalf("count estimated rows: %v", err)
 	}
 	if exactRows != 1 || estimatedRows != 1 {
@@ -119,7 +119,7 @@ func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
 		t.Fatalf("sqlmock: %v", err)
 	}
 	defer db.Close()
-	pg := &PostgresStore{DB: db}
+	pg := &PostgresStore{backend: &postgresRuntimeBackend{db: db}}
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	entityID := uuid.NewString()
@@ -205,7 +205,7 @@ func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
 
 func seedSQLiteBudgetEntity(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, runID, entityID, flowInstance, state string, at time.Time) {
 	t.Helper()
-	if _, err := store.DB.ExecContext(ctx, `
+	if _, err := store.backend.db.ExecContext(ctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
@@ -217,5 +217,5 @@ func seedSQLiteBudgetEntity(t *testing.T, ctx context.Context, store *SQLiteRunt
 
 func seedSQLiteBudgetRun(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, runID string, at time.Time) {
 	t.Helper()
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at})
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: store.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at})
 }

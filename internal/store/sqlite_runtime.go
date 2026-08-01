@@ -69,11 +69,19 @@ var sqliteAPIIdempotencyLocks = struct {
 }{byPath: map[string]*sync.Mutex{}}
 
 func NewSQLiteRuntimeStore(path string) (*SQLiteRuntimeStore, error) {
+	store, _, err := OpenSQLiteRuntimeStore(path)
+	return store, err
+}
+
+// OpenSQLiteRuntimeStore returns the selected runtime store and the separately
+// owned process-construction database handle. Only CLI/serve construction may
+// retain the latter; runtime consumers receive the typed store facade.
+func OpenSQLiteRuntimeStore(path string) (*SQLiteRuntimeStore, *sql.DB, error) {
 	schemaStore, err := NewSQLiteSchemaStore(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return &SQLiteRuntimeStore{
+	store := &SQLiteRuntimeStore{
 		SQLiteSchemaStore:   schemaStore,
 		pipelineClaimIssuer: runtimepipelineobligation.NewClaimIssuer(),
 		pipelineClaims:      map[string]*pipelineClaimState{},
@@ -81,7 +89,8 @@ func NewSQLiteRuntimeStore(path string) (*SQLiteRuntimeStore, error) {
 		pipelineScans:       map[string]*pipelineScanState{},
 		sessionLockTTL:      120 * time.Second,
 		nowFn:               time.Now,
-	}, nil
+	}
+	return store, schemaStore.backend.db, nil
 }
 
 func (s *SQLiteRuntimeStore) SetSessionLockTTL(ttl time.Duration) {
@@ -303,7 +312,7 @@ func (s *SQLiteRuntimeStore) UpsertAgent(ctx context.Context, rec runtimemanager
 }
 
 func (s *SQLiteRuntimeStore) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 		       flow_scope_key, flow_instance_id, flow_instance,
 		       role, model, llm_backend, memory_enabled, memory_source,
@@ -368,7 +377,7 @@ func (s *SQLiteRuntimeStore) EnsureRuntimeIngressState(ctx context.Context, now 
 }
 
 func (s *SQLiteRuntimeStore) LoadRuntimeIngressState(ctx context.Context) (runtimeingress.State, error) {
-	state, err := scanRuntimeIngressState(s.DB.QueryRowContext(ctx, `
+	state, err := scanRuntimeIngressState(s.backend.db.QueryRowContext(ctx, `
 		SELECT status, COALESCE(reason, ''), controlled_by, COALESCE(transition_event_id, ''), updated_at
 		FROM runtime_ingress_state
 		WHERE id = 1
@@ -484,7 +493,7 @@ func (s *SQLiteRuntimeStore) RunDispatchBlocked(ctx context.Context, runID strin
 		return false, nil
 	}
 	var blocked bool
-	if err := s.DB.QueryRowContext(ctx, `
+	if err := s.backend.db.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM run_control_state
 			WHERE run_id = ? AND control_status IN ('paused', 'stopped')
@@ -581,7 +590,7 @@ func (s *SQLiteRuntimeStore) WithAPIIdempotency(ctx context.Context, req APIIdem
 		completion, err := execute(ctx)
 		return completion, false, err
 	}
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return APIIdempotencyCompletion{}, false, fmt.Errorf("sqlite runtime store is required")
 	}
 	req.Method = strings.TrimSpace(req.Method)

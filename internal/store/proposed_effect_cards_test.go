@@ -387,9 +387,9 @@ func overwriteProposedEffectAttemptMode(t *testing.T, ctx context.Context, cards
 	var err error
 	switch selected := cards.(type) {
 	case *SQLiteRuntimeStore:
-		_, err = selected.DB.ExecContext(ctx, `UPDATE activity_attempts SET execution_mode = ? WHERE request_event_id = ?`, mode, requestEventID)
+		_, err = selected.backend.db.ExecContext(ctx, `UPDATE activity_attempts SET execution_mode = ? WHERE request_event_id = ?`, mode, requestEventID)
 	case *PostgresStore:
-		_, err = selected.DB.ExecContext(ctx, `UPDATE activity_attempts SET execution_mode = $2 WHERE request_event_id = $1::uuid`, requestEventID, mode)
+		_, err = selected.backend.db.ExecContext(ctx, `UPDATE activity_attempts SET execution_mode = $2 WHERE request_event_id = $1::uuid`, requestEventID, mode)
 	default:
 		t.Fatalf("unsupported proposed-effect test store %T", cards)
 	}
@@ -402,9 +402,9 @@ func proposedEffectTestJournal(t *testing.T, cards decisioncard.Store) *runtimep
 	t.Helper()
 	switch selected := cards.(type) {
 	case *SQLiteRuntimeStore:
-		return newSQLiteWorkflowTestCoordinator(t, selected.DB, selected)
+		return newSQLiteWorkflowTestCoordinator(t, selected.backend.db, selected)
 	case *PostgresStore:
-		return newPostgresWorkflowTestCoordinator(t, selected.DB, selected)
+		return newPostgresWorkflowTestCoordinator(t, selected.backend.db, selected)
 	default:
 		panic("unsupported proposed-effect test store")
 	}

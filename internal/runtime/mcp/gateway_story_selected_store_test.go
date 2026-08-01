@@ -59,7 +59,7 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 			name: "sqlite",
 			start: func(t *testing.T) gatewayStorySelectedStore {
 				backend := storetest.StartSQLiteRuntimeStore(t)
-				return gatewayStorySelectedStore{backend: backend, db: backend.DB}
+				return gatewayStorySelectedStore{backend: backend, db: backend.TestDatabase()}
 			},
 		},
 		{

@@ -447,7 +447,7 @@ func requireRunningSQLiteRunForTest(
 	startedAt time.Time,
 ) {
 	t.Helper()
-	selected := &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: db}}
+	selected := &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: db}}}
 	if err := selected.BootstrapSchema(context.Background(), canonicalSchemaBootstrapTestRequest(t)); err != nil {
 		t.Fatalf("BootstrapSchema: %v", err)
 	}
@@ -604,7 +604,7 @@ func executeRunCompletionCandidateForEvent(
 	case *PostgresStore:
 		store = owner
 		var runID string
-		if err := owner.DB.QueryRowContext(ctx, `
+		if err := owner.backend.db.QueryRowContext(ctx, `
 			SELECT run_id::text FROM events WHERE event_id = $1::uuid
 		`, eventID).Scan(&runID); err != nil {
 			return fmt.Errorf("load PostgreSQL completion candidate run: %w", err)
@@ -619,7 +619,7 @@ func executeRunCompletionCandidateForEvent(
 	case *SQLiteRuntimeStore:
 		store = owner
 		var runID string
-		if err := owner.DB.QueryRowContext(ctx, `
+		if err := owner.backend.db.QueryRowContext(ctx, `
 			SELECT run_id FROM events WHERE event_id = ?
 		`, eventID).Scan(&runID); err != nil {
 			return fmt.Errorf("load SQLite completion candidate run: %w", err)

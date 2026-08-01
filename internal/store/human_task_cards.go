@@ -108,11 +108,11 @@ func sameHumanTaskCreationIdentity(existing, requested decisioncard.HumanTaskCon
 }
 
 func (s *PostgresStore) LoadHumanTaskContinuation(ctx context.Context, cardID string) (decisioncard.HumanTaskContinuation, error) {
-	return loadHumanTaskContinuation(ctx, s.DB, cardID, true, false)
+	return loadHumanTaskContinuation(ctx, s.backend.db, cardID, true, false)
 }
 
 func (s *SQLiteRuntimeStore) LoadHumanTaskContinuation(ctx context.Context, cardID string) (decisioncard.HumanTaskContinuation, error) {
-	return loadHumanTaskContinuation(ctx, s.DB, cardID, false, false)
+	return loadHumanTaskContinuation(ctx, s.backend.db, cardID, false, false)
 }
 
 func (s *PostgresStore) CompleteHumanTaskOutcome(ctx context.Context, cardID, eventID string, at time.Time) (decisioncard.HumanTaskContinuation, error) {

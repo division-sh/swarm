@@ -152,7 +152,7 @@ func (s *PostgresStore) loadAgentsSpec(ctx context.Context) ([]runtimemanager.Pe
 		WHERE status NOT IN ('terminated', 'ephemeral')
 		ORDER BY created_at ASC, agent_id ASC
 	`
-	rows, err := s.DB.QueryContext(ctx, q)
+	rows, err := s.backend.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("query agents: %w", err)
 	}

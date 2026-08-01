@@ -45,7 +45,7 @@ func (s *SQLiteRuntimeStore) ApplyServeAbandonActiveRunQuiescence(ctx context.Co
 }
 
 func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtimerunquiescence.Request) (runtimerunquiescence.Result, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimerunquiescence.Result{}, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -81,7 +81,7 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 		return out, nil
 	}
 
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return runtimerunquiescence.Result{}, fmt.Errorf("begin active run quiescence tx: %w", err)
 	}
@@ -207,7 +207,7 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 }
 
 func (s *SQLiteRuntimeStore) ApplyActiveRunQuiescence(ctx context.Context, req runtimerunquiescence.Request) (runtimerunquiescence.Result, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimerunquiescence.Result{}, fmt.Errorf("sqlite runtime store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -589,7 +589,7 @@ func sqliteUpsertActiveRunQuiescenceRunControlTx(ctx context.Context, tx *sql.Tx
 }
 
 func (s *PostgresStore) ActiveRunDeliveryQuiesced(ctx context.Context, eventID string, route events.DeliveryRoute) (string, bool, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return "", false, fmt.Errorf("postgres store is required")
 	}
 	eventID = strings.TrimSpace(eventID)
@@ -609,7 +609,7 @@ func (s *PostgresStore) ActiveRunDeliveryQuiesced(ctx context.Context, eventID s
 }
 
 func (s *SQLiteRuntimeStore) ActiveRunDeliveryQuiesced(ctx context.Context, eventID string, route events.DeliveryRoute) (string, bool, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return "", false, fmt.Errorf("sqlite runtime store is required")
 	}
 	eventID = strings.TrimSpace(eventID)
@@ -650,14 +650,14 @@ func activeRunDeliveryQuiescenceReason(snapshots []runtimedelivery.Snapshot, rou
 }
 
 func (s *SQLiteRuntimeStore) DestructiveResetDeliveryQuiesced(ctx context.Context, eventID, subscriberType, subscriberID string) (bool, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return false, fmt.Errorf("sqlite runtime store is required")
 	}
 	return s.deliveryQuiescedForReason(ctx, eventID, subscriberType, subscriberID, runtimedestructivereset.QuiescenceReasonCode)
 }
 
 func (s *SQLiteRuntimeStore) ServeAbandonDeliveryQuiesced(ctx context.Context, eventID, subscriberType, subscriberID string) (bool, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return false, fmt.Errorf("sqlite runtime store is required")
 	}
 	return s.deliveryQuiescedForReason(ctx, eventID, subscriberType, subscriberID, runtimerunquiescence.ServeAbandonReasonCode)

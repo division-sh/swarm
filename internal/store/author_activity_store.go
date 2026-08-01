@@ -71,29 +71,29 @@ func (s *SQLiteRuntimeStore) runAuthorActivityMutation(ctx context.Context, labe
 }
 
 func (s *PostgresStore) ListAuthorActivity(ctx context.Context, opts runtimeauthoractivity.ListOptions) (runtimeauthoractivity.ListResult, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimeauthoractivity.ListResult{}, fmt.Errorf("postgres store is required")
 	}
-	return runtimeauthoractivity.List(ctx, s.DB, runtimeauthoractivity.DialectPostgres, opts)
+	return runtimeauthoractivity.List(ctx, s.backend.db, runtimeauthoractivity.DialectPostgres, opts)
 }
 
 func (s *SQLiteRuntimeStore) ListAuthorActivity(ctx context.Context, opts runtimeauthoractivity.ListOptions) (runtimeauthoractivity.ListResult, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimeauthoractivity.ListResult{}, fmt.Errorf("sqlite runtime store is required")
 	}
-	return runtimeauthoractivity.List(ctx, s.DB, runtimeauthoractivity.DialectSQLite, opts)
+	return runtimeauthoractivity.List(ctx, s.backend.db, runtimeauthoractivity.DialectSQLite, opts)
 }
 
 func (s *PostgresStore) HeadAuthorActivity(ctx context.Context) (int64, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return 0, fmt.Errorf("postgres store is required")
 	}
-	return runtimeauthoractivity.Head(ctx, s.DB)
+	return runtimeauthoractivity.Head(ctx, s.backend.db)
 }
 
 func (s *SQLiteRuntimeStore) HeadAuthorActivity(ctx context.Context) (int64, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return 0, fmt.Errorf("sqlite runtime store is required")
 	}
-	return runtimeauthoractivity.Head(ctx, s.DB)
+	return runtimeauthoractivity.Head(ctx, s.backend.db)
 }

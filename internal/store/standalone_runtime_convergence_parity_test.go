@@ -260,7 +260,7 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 		claims = append(claims, claimed.Claim)
 	}
 
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		CREATE OR REPLACE FUNCTION slow_receipt_delivery_sync()
 		RETURNS trigger
 		LANGUAGE plpgsql
@@ -273,7 +273,7 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 	`); err != nil {
 		t.Fatalf("create slow trigger function: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		CREATE TRIGGER event_deliveries_slow_terminal_sync
 		BEFORE UPDATE ON event_deliveries
 		FOR EACH ROW
@@ -306,7 +306,7 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 		t.Fatalf("run status = %q, want completed", status)
 	}
 	var pending, delivered int
-	if err := pg.DB.QueryRowContext(ctx, `
+	if err := pg.backend.db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FILTER (WHERE status IN ('pending', 'in_progress')),
 		       COUNT(*) FILTER (WHERE status = 'delivered')
 		FROM event_deliveries

@@ -68,10 +68,10 @@ func resetAgentSessionsSpecTable(t *testing.T, ctx context.Context, pg *Postgres
 	if err := pg.requireCurrentSchema(); err != nil {
 		t.Fatalf("canonical agent session schema: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `DELETE FROM agent_turns`); err != nil {
+	if _, err := pg.backend.db.ExecContext(ctx, `DELETE FROM agent_turns`); err != nil {
 		t.Fatalf("clear agent turns: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `DELETE FROM agent_sessions`); err != nil {
+	if _, err := pg.backend.db.ExecContext(ctx, `DELETE FROM agent_sessions`); err != nil {
 		t.Fatalf("clear agent sessions: %v", err)
 	}
 }
@@ -100,7 +100,7 @@ func seedSpecMemoryRun(t *testing.T, ctx context.Context, db *sql.DB) {
 
 func seedManagerRun(t *testing.T, ctx context.Context, db *sql.DB, runID string) {
 	t.Helper()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 }
 
 func specMemoryIdentity(agentID, flowInstance string) agentmemory.Identity {
@@ -116,7 +116,7 @@ func terminateSpecAgentViaLifecycle(t *testing.T, ctx context.Context, pg *Postg
 	var epoch int64
 	var generation uint64
 	var phase runtimemanager.AgentLifecyclePhase
-	if err := pg.DB.QueryRowContext(ctx, `
+	if err := pg.backend.db.QueryRowContext(ctx, `
 		SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase
 		FROM agents
 		WHERE agent_id = $1
@@ -158,7 +158,7 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	seedPostgresStoreEvent(t, ctx, pg, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", time.Now().UTC())
 	seedPostgresEntityStateRows(t, db, ctx, runID, entityID)
 	route := testAgentDeliveryRoute(t, "agent-1", "fixture/agent-1")
@@ -614,7 +614,7 @@ func TestPostgresStore_AgentSessionSuccessorInvariantsRejectInvalidCanonicalWrit
 
 func seedSpecEntityState(t *testing.T, ctx context.Context, db *sql.DB, entityID, flowInstance, slug, name, state string) {
 	t.Helper()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: specEntityStateRunID})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: specEntityStateRunID})
 	if strings.TrimSpace(flowInstance) == "" {
 		flowInstance = strings.TrimSpace(slug)
 	}
@@ -931,7 +931,7 @@ func TestPostgresStore_RunTerminalOwnersPersistCanonicalLifecycle(t *testing.T) 
 
 	failedRunID := uuid.NewString()
 	failedAt := time.Now().UTC().Round(time.Second)
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: failedRunID, StartedAt: failedAt.Add(-time.Minute),
 	})
 	failure := testFailureEnvelope(runtimefailures.ClassInternalFailure, "run_quiescence_failed", nil)
@@ -989,7 +989,7 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 		"human", "", []byte(`{"directive":"x"}`), 0, runID,
 		parentID, events.EventEnvelope{}, time.Now().Add(-1*time.Minute))
 
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	if err := commitSemanticEventFixture(ctx, pg, eventtest.ExistingRunRootIngress(parentID,
 		events.EventType("system.parent"),
 		"runtime", "", []byte(`{"ok":true}`), 0, runID, events.EventEnvelope{}, time.Now().Add(-3*time.Minute))); err != nil {
@@ -1631,7 +1631,7 @@ func TestSchedules_LoadActiveSchedulesIgnoresWorkflowSidecarRows(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
 			run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,

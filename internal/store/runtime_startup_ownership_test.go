@@ -38,7 +38,7 @@ func TestRuntimeStartupAuthorityTransitionsPersistWithBackendParity(t *testing.T
 			name: "sqlite",
 			store: func(t *testing.T) (startupAuthorityParityStore, *sql.DB) {
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-				return store, store.DB
+				return store, store.backend.db
 			},
 		},
 	}

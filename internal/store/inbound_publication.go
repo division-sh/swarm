@@ -187,24 +187,24 @@ func (s *PostgresStore) RunInboundPublicationMutation(ctx context.Context, reque
 }
 
 func (s *PostgresStore) LoadInboundPublicationByIdentity(ctx context.Context, provider, entityID, providerEventID string) (runtimeinbound.Record, bool, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimeinbound.Record{}, false, fmt.Errorf("postgres store is required")
 	}
-	record, found, err := loadPostgresInboundPublicationTx(ctx, s.DB, provider, entityID, providerEventID, false)
+	record, found, err := loadPostgresInboundPublicationTx(ctx, s.backend.db, provider, entityID, providerEventID, false)
 	if err != nil || !found {
 		return record, found, err
 	}
-	if err := validatePostgresInboundPublicationIntegrityTx(ctx, s.DB, &record); err != nil {
+	if err := validatePostgresInboundPublicationIntegrityTx(ctx, s.backend.db, &record); err != nil {
 		return runtimeinbound.Record{}, false, err
 	}
 	return record, true, nil
 }
 
 func (s *PostgresStore) ValidateInboundPublicationIntegrity(ctx context.Context) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required")
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT provider, entity_id::text, provider_event_id FROM inbound_publications ORDER BY provider, entity_id::text, provider_event_id`)
+	rows, err := s.backend.db.QueryContext(ctx, `SELECT provider, entity_id::text, provider_event_id FROM inbound_publications ORDER BY provider, entity_id::text, provider_event_id`)
 	if err != nil {
 		return fmt.Errorf("list inbound publications for integrity validation: %w", err)
 	}
@@ -225,14 +225,14 @@ func (s *PostgresStore) ValidateInboundPublicationIntegrity(ctx context.Context)
 		return fmt.Errorf("close inbound publication identities: %w", err)
 	}
 	for _, item := range identities {
-		record, found, err := loadPostgresInboundPublicationTx(ctx, s.DB, item.provider, item.entityID, item.providerEventID, false)
+		record, found, err := loadPostgresInboundPublicationTx(ctx, s.backend.db, item.provider, item.entityID, item.providerEventID, false)
 		if err != nil {
 			return err
 		}
 		if !found {
 			return fmt.Errorf("inbound publication disappeared during integrity validation")
 		}
-		if err := validatePostgresInboundPublicationIntegrityTx(ctx, s.DB, &record); err != nil {
+		if err := validatePostgresInboundPublicationIntegrityTx(ctx, s.backend.db, &record); err != nil {
 			return err
 		}
 	}

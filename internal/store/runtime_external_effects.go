@@ -77,11 +77,11 @@ func (s *SQLiteRuntimeStore) ReconcileExternalEffectAttempts(ctx context.Context
 }
 
 func (s *PostgresStore) IsExternalEffectAuthorityCurrent(ctx context.Context, authority runtimeeffects.Authority) (bool, error) {
-	return externalEffectAuthorityCurrentPostgres(ctx, s.DB, authority)
+	return externalEffectAuthorityCurrentPostgres(ctx, s.backend.db, authority)
 }
 
 func (s *SQLiteRuntimeStore) IsExternalEffectAuthorityCurrent(ctx context.Context, authority runtimeeffects.Authority) (bool, error) {
-	return externalEffectAuthorityCurrentSQLite(ctx, s.DB, authority)
+	return externalEffectAuthorityCurrentSQLite(ctx, s.backend.db, authority)
 }
 
 func (s *PostgresStore) AuthorizeExternalAttempt(ctx context.Context, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
@@ -90,7 +90,7 @@ func (s *PostgresStore) AuthorizeExternalAttempt(ctx context.Context, authority 
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return runtimeeffects.Attempt{}, fmt.Errorf("authorize external attempt begin: %w", err)
 	}
@@ -975,7 +975,7 @@ func (s *PostgresStore) HeartbeatCompletionAttempt(ctx context.Context, attempt 
 	if lease <= 0 {
 		return runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_heartbeat_lease_invalid", "external-effects", "heartbeat_attempt", map[string]any{"attempt_id": attempt.AttemptID})
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("heartbeat completion attempt begin: %w", err)
 	}
@@ -1024,7 +1024,7 @@ func (s *SQLiteRuntimeStore) HeartbeatCompletionAttempt(ctx context.Context, att
 }
 
 func (s *PostgresStore) MarkExternalAttemptResponseObserved(ctx context.Context, attempt runtimeeffects.Attempt, evidence map[string]any, now time.Time) error {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}

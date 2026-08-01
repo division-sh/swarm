@@ -85,7 +85,7 @@ func (s *SQLiteRuntimeStore) PipelineObligations() runtimepipelineobligation.Sto
 }
 
 func (s *PostgresStore) postgresPipelineClaims() *postgresPipelineClaimRegistry {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil
 	}
 	created := &postgresPipelineClaimRegistry{
@@ -95,7 +95,7 @@ func (s *PostgresStore) postgresPipelineClaims() *postgresPipelineClaimRegistry 
 		scans:      map[string]*pipelineScanState{},
 		acquiring:  map[string]struct{}{},
 	}
-	actual, _ := postgresPipelineClaimRegistries.LoadOrStore(s.DB, created)
+	actual, _ := postgresPipelineClaimRegistries.LoadOrStore(s.backend.db, created)
 	return actual.(*postgresPipelineClaimRegistry)
 }
 
@@ -768,7 +768,7 @@ func (s *PostgresStore) claimPostgresPipelineEvent(ctx context.Context, eventID 
 			err = errors.Join(err, releaseReservation())
 		}
 	}()
-	lease, acquired, err := acquireAdvisoryLockLease(claimCtx, s.DB, replayClaimLockKey(eventID))
+	lease, acquired, err := acquireAdvisoryLockLease(claimCtx, s.backend.db, replayClaimLockKey(eventID))
 	if err != nil {
 		return runtimepipelineobligation.Claim{}, err
 	}
@@ -793,7 +793,7 @@ func (s *PostgresStore) claimPostgresPipelineEvent(ctx context.Context, eventID 
 		)
 	}
 	state := &pipelineClaimState{claim: claim, postgresLease: lease}
-	releaseCapacity := registry.retainPostgresPipelineClaimCapacity(s.DB)
+	releaseCapacity := registry.retainPostgresPipelineClaimCapacity(s.backend.db)
 	registry.mu.Lock()
 	installed := lease.installTerminalOwner(
 		releaseCapacity,
@@ -880,7 +880,7 @@ func (s *PostgresStore) reservePostgresPipelineClaimConnection(ctx context.Conte
 		}
 		return bound, func() error { return nil }, nil
 	}
-	conn, err := s.DB.Conn(ctx)
+	conn, err := s.backend.db.Conn(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reserve PostgreSQL pipeline claim connection: %w", err)
 	}
@@ -913,7 +913,7 @@ func (s *SQLiteRuntimeStore) claimSQLitePipelineEvent(ctx context.Context, event
 		}
 	}
 	if purpose != runtimepipelineobligation.PurposePublication {
-		eligible, err := sqlitePipelineEligible(ctx, s.DB, eventID, purpose)
+		eligible, err := sqlitePipelineEligible(ctx, s.backend.db, eventID, purpose)
 		if err != nil {
 			s.pipelineClaimMu.Unlock()
 			return runtimepipelineobligation.Claim{}, err
@@ -958,7 +958,7 @@ func (s *SQLiteRuntimeStore) loadSQLiteClaimedPipelineWork(ctx context.Context, 
 	if _, err := s.sqlitePipelineClaimState(claim); err != nil {
 		return runtimepipelineobligation.ClaimedWork{}, err
 	}
-	return loadClaimedPipelineWork(ctx, s.DB, claim, false)
+	return loadClaimedPipelineWork(ctx, s.backend.db, claim, false)
 }
 
 func (s *PostgresStore) commitInitialPipelineScopeTx(ctx context.Context, tx *sql.Tx, eventID string, scope runtimepipelineobligation.CommittedScope) error {
@@ -1251,7 +1251,7 @@ func sqlitePipelineEligible(ctx context.Context, q pipelineQueryer, eventID stri
 
 func (s *PostgresStore) postgresPipelineBoundary(ctx context.Context, query runtimepipelineobligation.ClaimQuery) (*pipelineCandidate, error) {
 	var visibilitySnapshot string
-	if err := s.DB.QueryRowContext(ctx, `SELECT pg_current_snapshot()::text`).Scan(&visibilitySnapshot); err != nil {
+	if err := s.backend.db.QueryRowContext(ctx, `SELECT pg_current_snapshot()::text`).Scan(&visibilitySnapshot); err != nil {
 		return nil, fmt.Errorf("capture postgres pipeline visibility snapshot: %w", err)
 	}
 	visibilitySnapshot = strings.TrimSpace(visibilitySnapshot)
@@ -1317,7 +1317,7 @@ func (s *PostgresStore) postgresPipelineCandidatePage(
 			orderBy = "route.insertion_sequence DESC"
 		}
 		args = append(args, limit)
-		rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
+		rows, err := s.backend.db.QueryContext(ctx, fmt.Sprintf(`
 				SELECT route.event_id::text
 				     , route.insertion_sequence
 				     , route.attempt_count
@@ -1365,7 +1365,7 @@ func (s *PostgresStore) postgresPipelineCandidatePage(
 		orderBy = "e.insertion_sequence DESC"
 	}
 	args = append(args, limit)
-	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
+	rows, err := s.backend.db.QueryContext(ctx, fmt.Sprintf(`
 			SELECT e.event_id::text, e.insertion_sequence, 0, e.created_at, e.created_at
 			FROM events e
 			LEFT JOIN runs run ON run.run_id = e.run_id
@@ -1443,7 +1443,7 @@ func (s *SQLiteRuntimeStore) sqlitePipelineCandidatePage(
 			orderBy = "route.insertion_sequence DESC"
 		}
 		args = append(args, limit)
-		rows, err := s.DB.QueryContext(ctx, `
+		rows, err := s.backend.db.QueryContext(ctx, `
 				SELECT route.event_id
 				     , route.insertion_sequence
 				     , route.attempt_count
@@ -1486,7 +1486,7 @@ func (s *SQLiteRuntimeStore) sqlitePipelineCandidatePage(
 	}
 	args = append(args, diagnosticDirectReplayEventArgs()...)
 	args = append(args, limit)
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 			SELECT e.event_id, e.insertion_sequence, 0, e.created_at, e.created_at
 			FROM events e
 			LEFT JOIN runs run ON run.run_id = e.run_id
@@ -2222,7 +2222,7 @@ func (s *SQLiteRuntimeStore) releaseSQLitePipelineClaimLocked(claim runtimepipel
 func (s *postgresPipelineObligationStore) GlobalWorkPresence(ctx context.Context) (runtimepipelineobligation.GlobalWorkPresence, error) {
 	var out runtimepipelineobligation.GlobalWorkPresence
 	args := diagnosticDirectReplayEventArgs()
-	err := s.DB.QueryRowContext(ctx, fmt.Sprintf(`
+	err := s.backend.db.QueryRowContext(ctx, fmt.Sprintf(`
 		SELECT EXISTS (
 			SELECT 1 FROM events e
 			LEFT JOIN runs run ON run.run_id = e.run_id
@@ -2258,7 +2258,7 @@ func (s *sqlitePipelineObligationStore) GlobalWorkPresence(ctx context.Context) 
 	args = append(args, diagnostics...)
 	args = append(args, time.Now().UTC())
 	args = append(args, diagnostics...)
-	err := s.DB.QueryRowContext(ctx, `
+	err := s.backend.db.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM events e
 			LEFT JOIN runs run ON run.run_id = e.run_id
@@ -2292,7 +2292,7 @@ func (s *sqlitePipelineObligationStore) GlobalWorkPresence(ctx context.Context) 
 }
 
 func (s *postgresPipelineObligationStore) SummarizeRun(ctx context.Context, runID string) (runtimepipelineobligation.RunSummary, error) {
-	var queryer pipelineQueryer = s.DB
+	var queryer pipelineQueryer = s.backend.db
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		queryer = tx
 	}
@@ -2300,7 +2300,7 @@ func (s *postgresPipelineObligationStore) SummarizeRun(ctx context.Context, runI
 }
 
 func (s *sqlitePipelineObligationStore) SummarizeRun(ctx context.Context, runID string) (runtimepipelineobligation.RunSummary, error) {
-	var queryer pipelineQueryer = s.DB
+	var queryer pipelineQueryer = s.backend.db
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		queryer = tx
 	}

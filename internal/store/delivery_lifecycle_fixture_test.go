@@ -17,7 +17,7 @@ import (
 )
 
 func postgresDeliveryFixtureStore(db *sql.DB) *PostgresStore {
-	store := &PostgresStore{DB: db}
+	store := &PostgresStore{backend: &postgresRuntimeBackend{db: db}}
 	store.schemaAdmission.markCurrent()
 	return store
 }

@@ -104,14 +104,14 @@ func TestPostgresStore_HelpersAndDescriptors(t *testing.T) {
 	}
 
 	entityID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: pg.DB}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
-	if _, err := pg.DB.ExecContext(ctx, `
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: pg.backend.db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 		VALUES ('testco', 'test', 'static', '{"instance_kind":"entity","workflow_version":"v1"}'::jsonb, 'active', now())
 	`); err != nil {
 		t.Fatalf("seed flow instance: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at

@@ -19,7 +19,7 @@ type schemaQueryer interface {
 }
 
 func (s *PostgresStore) BootstrapSchema(ctx context.Context, request SchemaBootstrapRequest) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required for schema bootstrap")
 	}
 	request = request.canonical()
@@ -30,7 +30,7 @@ func (s *PostgresStore) BootstrapSchema(ctx context.Context, request SchemaBoots
 	if err != nil {
 		return err
 	}
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := s.backend.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin postgres schema bootstrap: %w", err)
 	}

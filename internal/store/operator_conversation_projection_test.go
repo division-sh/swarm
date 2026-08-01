@@ -92,7 +92,7 @@ func newOperatorConversationProjectionTestBackend(t *testing.T, name string) ope
 		if err != nil {
 			t.Fatalf("sqlite conversation owner: %v", err)
 		}
-		return operatorConversationProjectionTestBackend{store: store, owner: owner, db: store.DB, sqlite: true}
+		return operatorConversationProjectionTestBackend{store: store, owner: owner, db: store.backend.db, sqlite: true}
 	case "postgres":
 		_, db, _ := testutil.StartPostgres(t)
 		store := admitTestPostgresStore(t, db)

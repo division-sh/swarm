@@ -225,7 +225,7 @@ func (s *PostgresStore) operatorObservabilityReadSurface() *OperatorObservabilit
 	if s == nil {
 		return nil
 	}
-	return NewOperatorObservabilityReadSurface(s.DB, s)
+	return NewOperatorObservabilityReadSurface(s.backend.db, s)
 }
 
 func (s *PostgresStore) ListOperatorEvents(ctx context.Context, opts OperatorEventListOptions) (OperatorEventListResult, error) {

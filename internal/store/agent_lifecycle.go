@@ -33,7 +33,7 @@ func (s *PostgresStore) LoadAgentLifecycleState(
 	}
 	var state runtimemanager.AgentLifecycleState
 	var generation int64
-	err = s.DB.QueryRowContext(ctx, `
+	err = s.backend.db.QueryRowContext(ctx, `
 		SELECT agent_id, lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase,
 		       lifecycle_config_revision, lifecycle_run_mode
 		FROM agents
@@ -70,7 +70,7 @@ func (s *SQLiteRuntimeStore) LoadAgentLifecycleState(
 	}
 	var state runtimemanager.AgentLifecycleState
 	var generation int64
-	err = s.DB.QueryRowContext(ctx, `
+	err = s.backend.db.QueryRowContext(ctx, `
 		SELECT agent_id, lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase,
 		       lifecycle_config_revision, lifecycle_run_mode
 		FROM agents
@@ -101,7 +101,7 @@ func (s *PostgresStore) ListPendingAgentLifecycleDiagnostics(ctx context.Context
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT outbox_id::text, operation_id::text,
 		       agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 		       flow_scope_key, flow_instance_id, flow_instance,
@@ -122,7 +122,7 @@ func (s *SQLiteRuntimeStore) ListPendingAgentLifecycleDiagnostics(ctx context.Co
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT outbox_id, operation_id,
 		       agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 		       flow_scope_key, flow_instance_id, flow_instance,
@@ -189,7 +189,7 @@ func scanAgentLifecycleDiagnostics(rows *sql.Rows) ([]runtimemanager.AgentLifecy
 }
 
 func (s *PostgresStore) MarkAgentLifecycleDiagnosticProjected(ctx context.Context, outboxID string, at time.Time) error {
-	res, err := s.DB.ExecContext(ctx, `UPDATE agent_lifecycle_diagnostic_outbox SET projected_at = $2 WHERE outbox_id = $1::uuid AND projected_at IS NULL`, outboxID, at.UTC())
+	res, err := s.backend.db.ExecContext(ctx, `UPDATE agent_lifecycle_diagnostic_outbox SET projected_at = $2 WHERE outbox_id = $1::uuid AND projected_at IS NULL`, outboxID, at.UTC())
 	return requireSingleLifecycleDiagnosticProjection(res, err)
 }
 

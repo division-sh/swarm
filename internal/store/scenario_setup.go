@@ -44,7 +44,7 @@ type ScenarioSetupEntityResult struct {
 }
 
 func (s *PostgresStore) SetupScenarioEntities(ctx context.Context, req ScenarioSetupRequest) (ScenarioSetupResult, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return ScenarioSetupResult{}, fmt.Errorf("postgres scenario setup store is required")
 	}
 	req, err := normalizeScenarioSetupRequest(req)
@@ -110,7 +110,7 @@ func (s *PostgresStore) SetupScenarioEntities(ctx context.Context, req ScenarioS
 }
 
 func (s *SQLiteRuntimeStore) SetupScenarioEntities(ctx context.Context, req ScenarioSetupRequest) (ScenarioSetupResult, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return ScenarioSetupResult{}, fmt.Errorf("sqlite scenario setup store is required")
 	}
 	req, err := normalizeScenarioSetupRequest(req)

@@ -103,10 +103,10 @@ func CommitDeliveryObligationsForPersistedEvent(
 	)
 	switch selected := selectedStore.(type) {
 	case *store.PostgresStore:
-		db = selected.DB
+		db = selected.TestDatabase()
 		adapter, err = runtimedelivery.NewAdapter(runtimedelivery.DialectPostgres)
 	case *store.SQLiteRuntimeStore:
-		db = selected.DB
+		db = selected.TestDatabase()
 		adapter, err = runtimedelivery.NewAdapter(runtimedelivery.DialectSQLite)
 	default:
 		t.Fatalf("persisted event delivery fixture store %T is unsupported", selectedStore)
@@ -171,9 +171,9 @@ func LoadCanonicalEventRecord(t testing.TB, ctx context.Context, selectedStore a
 	)
 	switch selected := selectedStore.(type) {
 	case *store.PostgresStore:
-		record, found, err = eventrecordpostgres.Load(ctx, selected.DB, eventID)
+		record, found, err = eventrecordpostgres.Load(ctx, selected.TestDatabase(), eventID)
 	case *store.SQLiteRuntimeStore:
-		record, found, err = eventrecordsqlite.Load(ctx, selected.DB, eventID)
+		record, found, err = eventrecordsqlite.Load(ctx, selected.TestDatabase(), eventID)
 	default:
 		t.Fatalf("canonical event readback store %T is unsupported", selectedStore)
 	}
@@ -350,7 +350,7 @@ func commitSemanticEventWithInitialFacts(
 	)
 	switch selected := selectedStore.(type) {
 	case *store.PostgresStore:
-		db = selected.DB
+		db = selected.TestDatabase()
 		postgres = true
 		deliveryAdapter, err = runtimedelivery.NewAdapter(runtimedelivery.DialectPostgres)
 		insert = func(ctx context.Context, tx *sql.Tx, record eventrecord.Record) (bool, error) {
@@ -360,7 +360,7 @@ func commitSemanticEventWithInitialFacts(
 			return eventrecordpostgres.Load(ctx, tx, eventID)
 		}
 	case *store.SQLiteRuntimeStore:
-		db = selected.DB
+		db = selected.TestDatabase()
 		deliveryAdapter, err = runtimedelivery.NewAdapter(runtimedelivery.DialectSQLite)
 		insert = func(ctx context.Context, tx *sql.Tx, record eventrecord.Record) (bool, error) {
 			return eventrecordsqlite.Insert(ctx, tx, record)

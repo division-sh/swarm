@@ -589,7 +589,7 @@ func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conver
 		turn2At:    base.Add(-1 * time.Minute),
 	}
 	ctx := testAuthorActivityContext()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: source.runID, StartedAt: base.Add(-3 * time.Minute), BundleHash: source.bundleHash})
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: source.runID, StartedAt: base.Add(-3 * time.Minute), BundleHash: source.bundleHash})
 	identity := testAgentIdentity(t, source.agentID, conversationForkSourceFlowInstance)
 	fields, err := identity.StorageFields()
 	if err != nil {

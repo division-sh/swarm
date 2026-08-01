@@ -55,7 +55,7 @@ func (s *SQLiteRuntimeStore) ListPendingAgentDeliveryFacts(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	aggregates, err := sqliteDeliveryAdapter.AgentPendingAggregates(ctx, s.DB, normalized, since)
+	aggregates, err := sqliteDeliveryAdapter.AgentPendingAggregates(ctx, s.backend.db, normalized, since)
 	if err != nil {
 		return nil, err
 	}
@@ -67,11 +67,11 @@ func (s *SQLiteRuntimeStore) ListPendingAgentDeliveryDetails(ctx context.Context
 	if err != nil || empty {
 		return PendingAgentDeliveryPage{PendingDeliveries: []PendingAgentDeliveryDetail{}}, err
 	}
-	aggregates, err := sqliteDeliveryAdapter.AgentPendingAggregates(ctx, s.DB, []agentidentity.Identity{opts.AgentIdentity}, opts.Since)
+	aggregates, err := sqliteDeliveryAdapter.AgentPendingAggregates(ctx, s.backend.db, []agentidentity.Identity{opts.AgentIdentity}, opts.Since)
 	if err != nil {
 		return PendingAgentDeliveryPage{}, err
 	}
-	page, err := sqliteDeliveryAdapter.AgentPendingReferencePage(ctx, s.DB, runtimedelivery.AgentPendingPageQuery{
+	page, err := sqliteDeliveryAdapter.AgentPendingReferencePage(ctx, s.backend.db, runtimedelivery.AgentPendingPageQuery{
 		AgentIdentity: opts.AgentIdentity,
 		Since:         opts.Since,
 		Limit:         opts.Limit,
@@ -81,7 +81,7 @@ func (s *SQLiteRuntimeStore) ListPendingAgentDeliveryDetails(ctx context.Context
 		return PendingAgentDeliveryPage{}, err
 	}
 	return pendingAgentDeliveryPageFromProjection(ctx, opts.AgentIdentity, aggregates, page, s.now(), func(ctx context.Context, eventID string) (eventrecord.Record, bool, error) {
-		return eventrecordsqlite.Load(ctx, s.DB, eventID)
+		return eventrecordsqlite.Load(ctx, s.backend.db, eventID)
 	})
 }
 

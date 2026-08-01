@@ -74,9 +74,9 @@ func markSelectedTestRunForked(t *testing.T, fixture selectedCompletionFixture, 
 	ctx := testAuthorActivityBundleSourceContext()
 	var selected any
 	if fixture.sqlite {
-		selected = &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: fixture.db}}
+		selected = &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: fixture.db}}}
 	} else {
-		selected = &PostgresStore{DB: fixture.db}
+		selected = &PostgresStore{backend: &postgresRuntimeBackend{db: fixture.db}}
 	}
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: continuedRunID, StartedAt: now, BundleHash: authorActivityTestBundleHash,

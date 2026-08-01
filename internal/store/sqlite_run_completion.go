@@ -10,10 +10,10 @@ import (
 )
 
 func (s *SQLiteRuntimeStore) LoadRunLifecycleSnapshot(ctx context.Context, runID string) (runtimebus.RunLifecycleSnapshot, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("sqlite runtime store is required")
 	}
-	snap, err := loadSQLiteRunLifecycleSnapshot(ctx, s.DB, runID)
+	snap, err := loadSQLiteRunLifecycleSnapshot(ctx, s.backend.db, runID)
 	if err != nil {
 		return runtimebus.RunLifecycleSnapshot{}, err
 	}

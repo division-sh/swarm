@@ -25,7 +25,7 @@ func (s *SQLiteRuntimeStore) LoadRunBundleAvailability(ctx context.Context, runI
 	}
 	var availability runbundle.Availability
 	var rawSource string
-	err := s.DB.QueryRowContext(ctx, `
+	err := s.backend.db.QueryRowContext(ctx, `
 		SELECT
 			run_id,
 			COALESCE(status, ''),
@@ -87,7 +87,7 @@ func (s *SQLiteRuntimeStore) sqliteBundleRowExists(ctx context.Context, bundleHa
 		return false, nil
 	}
 	var exists bool
-	if err := s.DB.QueryRowContext(ctx, `
+	if err := s.backend.db.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM bundles

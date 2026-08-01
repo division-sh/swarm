@@ -70,7 +70,7 @@ func (s *PostgresStore) InspectDeliveryRecovery(
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimedelivery.RecoveryInventory{}, err
 	}
-	return postgresDeliveryAdapter.InspectRecovery(ctx, s.DB, source)
+	return postgresDeliveryAdapter.InspectRecovery(ctx, s.backend.db, source)
 }
 
 func (s *SQLiteRuntimeStore) InspectDeliveryRecovery(
@@ -80,7 +80,7 @@ func (s *SQLiteRuntimeStore) InspectDeliveryRecovery(
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimedelivery.RecoveryInventory{}, err
 	}
-	return sqliteDeliveryAdapter.InspectRecovery(ctx, s.DB, source)
+	return sqliteDeliveryAdapter.InspectRecovery(ctx, s.backend.db, source)
 }
 
 func (s *PostgresStore) ClaimDelivery(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimResult, error) {
@@ -397,56 +397,56 @@ func (s *PostgresStore) Snapshot(ctx context.Context, deliveryID string) (runtim
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimedelivery.Snapshot{}, err
 	}
-	return postgresDeliveryAdapter.Snapshot(ctx, eventReadQueryerFromContext(ctx, s.DB), deliveryID)
+	return postgresDeliveryAdapter.Snapshot(ctx, eventReadQueryerFromContext(ctx, s.backend.db), deliveryID)
 }
 
 func (s *SQLiteRuntimeStore) Snapshot(ctx context.Context, deliveryID string) (runtimedelivery.Snapshot, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimedelivery.Snapshot{}, err
 	}
-	return sqliteDeliveryAdapter.Snapshot(ctx, eventReadQueryerFromContext(ctx, s.DB), deliveryID)
+	return sqliteDeliveryAdapter.Snapshot(ctx, eventReadQueryerFromContext(ctx, s.backend.db), deliveryID)
 }
 
 func (s *PostgresStore) Outcomes(ctx context.Context, deliveryID string) ([]runtimedelivery.Outcome, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
-	return postgresDeliveryAdapter.Outcomes(ctx, eventReadQueryerFromContext(ctx, s.DB), deliveryID)
+	return postgresDeliveryAdapter.Outcomes(ctx, eventReadQueryerFromContext(ctx, s.backend.db), deliveryID)
 }
 
 func (s *SQLiteRuntimeStore) Outcomes(ctx context.Context, deliveryID string) ([]runtimedelivery.Outcome, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
-	return sqliteDeliveryAdapter.Outcomes(ctx, eventReadQueryerFromContext(ctx, s.DB), deliveryID)
+	return sqliteDeliveryAdapter.Outcomes(ctx, eventReadQueryerFromContext(ctx, s.backend.db), deliveryID)
 }
 
 func (s *PostgresStore) ProveHandoff(ctx context.Context, eventID string, route events.DeliveryRoute) (runtimedelivery.DurableHandoffProof, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimedelivery.DurableHandoffProof{}, err
 	}
-	return postgresDeliveryAdapter.ProveHandoff(ctx, eventReadQueryerFromContext(ctx, s.DB), eventID, route)
+	return postgresDeliveryAdapter.ProveHandoff(ctx, eventReadQueryerFromContext(ctx, s.backend.db), eventID, route)
 }
 
 func (s *SQLiteRuntimeStore) ProveHandoff(ctx context.Context, eventID string, route events.DeliveryRoute) (runtimedelivery.DurableHandoffProof, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimedelivery.DurableHandoffProof{}, err
 	}
-	return sqliteDeliveryAdapter.ProveHandoff(ctx, eventReadQueryerFromContext(ctx, s.DB), eventID, route)
+	return sqliteDeliveryAdapter.ProveHandoff(ctx, eventReadQueryerFromContext(ctx, s.backend.db), eventID, route)
 }
 
 func (s *PostgresStore) SummarizeRun(ctx context.Context, runID string) (runtimedelivery.RunSummary, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimedelivery.RunSummary{}, err
 	}
-	return postgresDeliveryAdapter.SummarizeRun(ctx, eventReadQueryerFromContext(ctx, s.DB), runID)
+	return postgresDeliveryAdapter.SummarizeRun(ctx, eventReadQueryerFromContext(ctx, s.backend.db), runID)
 }
 
 func (s *SQLiteRuntimeStore) SummarizeRun(ctx context.Context, runID string) (runtimedelivery.RunSummary, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimedelivery.RunSummary{}, err
 	}
-	return sqliteDeliveryAdapter.SummarizeRun(ctx, eventReadQueryerFromContext(ctx, s.DB), runID)
+	return sqliteDeliveryAdapter.SummarizeRun(ctx, eventReadQueryerFromContext(ctx, s.backend.db), runID)
 }
 
 func (s *PostgresStore) TerminalizeRun(ctx context.Context, runID, reason string) ([]runtimedelivery.Terminalization, error) {
@@ -482,59 +482,59 @@ func (s *SQLiteRuntimeStore) TerminalizeRun(ctx context.Context, runID, reason s
 }
 
 func (s *PostgresStore) deliverySnapshotsForEvent(ctx context.Context, eventID string) ([]runtimedelivery.Snapshot, error) {
-	return postgresDeliveryAdapter.SnapshotsForEvent(ctx, eventReadQueryerFromContext(ctx, s.DB), eventID)
+	return postgresDeliveryAdapter.SnapshotsForEvent(ctx, eventReadQueryerFromContext(ctx, s.backend.db), eventID)
 }
 
 func (s *SQLiteRuntimeStore) deliverySnapshotsForEvent(ctx context.Context, eventID string) ([]runtimedelivery.Snapshot, error) {
-	return sqliteDeliveryAdapter.SnapshotsForEvent(ctx, eventReadQueryerFromContext(ctx, s.DB), eventID)
+	return sqliteDeliveryAdapter.SnapshotsForEvent(ctx, eventReadQueryerFromContext(ctx, s.backend.db), eventID)
 }
 
 func (s *PostgresStore) deliveryRunDiagnosticCounts(ctx context.Context, runID string) ([]runtimedelivery.RunDiagnosticCount, error) {
-	return postgresDeliveryAdapter.RunDiagnosticCounts(ctx, eventReadQueryerFromContext(ctx, s.DB), runID)
+	return postgresDeliveryAdapter.RunDiagnosticCounts(ctx, eventReadQueryerFromContext(ctx, s.backend.db), runID)
 }
 
 func (s *SQLiteRuntimeStore) deliveryRunDiagnosticCounts(ctx context.Context, runID string) ([]runtimedelivery.RunDiagnosticCount, error) {
-	return sqliteDeliveryAdapter.RunDiagnosticCounts(ctx, eventReadQueryerFromContext(ctx, s.DB), runID)
+	return sqliteDeliveryAdapter.RunDiagnosticCounts(ctx, eventReadQueryerFromContext(ctx, s.backend.db), runID)
 }
 
 func (s *PostgresStore) deliveryRunDiagnosticFailures(ctx context.Context, runID string, limit int) ([]runtimedelivery.Snapshot, error) {
-	return postgresDeliveryAdapter.RunDiagnosticFailures(ctx, eventReadQueryerFromContext(ctx, s.DB), runID, limit)
+	return postgresDeliveryAdapter.RunDiagnosticFailures(ctx, eventReadQueryerFromContext(ctx, s.backend.db), runID, limit)
 }
 
 func (s *SQLiteRuntimeStore) deliveryRunDiagnosticFailures(ctx context.Context, runID string, limit int) ([]runtimedelivery.Snapshot, error) {
-	return sqliteDeliveryAdapter.RunDiagnosticFailures(ctx, eventReadQueryerFromContext(ctx, s.DB), runID, limit)
+	return sqliteDeliveryAdapter.RunDiagnosticFailures(ctx, eventReadQueryerFromContext(ctx, s.backend.db), runID, limit)
 }
 
 func (s *PostgresStore) deliveryRunTraceReferencePage(ctx context.Context, query runtimedelivery.RunTracePageQuery) (runtimedelivery.RunTraceReferencePage, error) {
-	return postgresDeliveryAdapter.RunTraceReferencePage(ctx, eventReadQueryerFromContext(ctx, s.DB), query)
+	return postgresDeliveryAdapter.RunTraceReferencePage(ctx, eventReadQueryerFromContext(ctx, s.backend.db), query)
 }
 
 func (s *SQLiteRuntimeStore) deliveryRunTraceReferencePage(ctx context.Context, query runtimedelivery.RunTracePageQuery) (runtimedelivery.RunTraceReferencePage, error) {
-	return sqliteDeliveryAdapter.RunTraceReferencePage(ctx, eventReadQueryerFromContext(ctx, s.DB), query)
+	return sqliteDeliveryAdapter.RunTraceReferencePage(ctx, eventReadQueryerFromContext(ctx, s.backend.db), query)
 }
 
 func (s *PostgresStore) deliveryLifecycleSnapshotPageForAgent(ctx context.Context, query runtimedelivery.AgentLifecyclePageQuery) (runtimedelivery.SnapshotPage, error) {
-	return postgresDeliveryAdapter.LifecycleSnapshotPageForAgent(ctx, eventReadQueryerFromContext(ctx, s.DB), query)
+	return postgresDeliveryAdapter.LifecycleSnapshotPageForAgent(ctx, eventReadQueryerFromContext(ctx, s.backend.db), query)
 }
 
 func (s *SQLiteRuntimeStore) deliveryLifecycleSnapshotPageForAgent(ctx context.Context, query runtimedelivery.AgentLifecyclePageQuery) (runtimedelivery.SnapshotPage, error) {
-	return sqliteDeliveryAdapter.LifecycleSnapshotPageForAgent(ctx, eventReadQueryerFromContext(ctx, s.DB), query)
+	return sqliteDeliveryAdapter.LifecycleSnapshotPageForAgent(ctx, eventReadQueryerFromContext(ctx, s.backend.db), query)
 }
 
 func (s *PostgresStore) deliveryDiagnosticSnapshotPageForAgent(ctx context.Context, query runtimedelivery.AgentDiagnosticPageQuery) (runtimedelivery.SnapshotPage, error) {
-	return postgresDeliveryAdapter.DiagnosticSnapshotPageForAgent(ctx, eventReadQueryerFromContext(ctx, s.DB), query)
+	return postgresDeliveryAdapter.DiagnosticSnapshotPageForAgent(ctx, eventReadQueryerFromContext(ctx, s.backend.db), query)
 }
 
 func (s *SQLiteRuntimeStore) deliveryDiagnosticSnapshotPageForAgent(ctx context.Context, query runtimedelivery.AgentDiagnosticPageQuery) (runtimedelivery.SnapshotPage, error) {
-	return sqliteDeliveryAdapter.DiagnosticSnapshotPageForAgent(ctx, eventReadQueryerFromContext(ctx, s.DB), query)
+	return sqliteDeliveryAdapter.DiagnosticSnapshotPageForAgent(ctx, eventReadQueryerFromContext(ctx, s.backend.db), query)
 }
 
 func (s *PostgresStore) deliveryDiagnosticCountsForAgentSince(ctx context.Context, identity agentidentity.Identity, since time.Time) (runtimedelivery.AgentDiagnosticCounts, error) {
-	return postgresDeliveryAdapter.DiagnosticCountsForAgentSince(ctx, eventReadQueryerFromContext(ctx, s.DB), identity, since)
+	return postgresDeliveryAdapter.DiagnosticCountsForAgentSince(ctx, eventReadQueryerFromContext(ctx, s.backend.db), identity, since)
 }
 
 func (s *SQLiteRuntimeStore) deliveryDiagnosticCountsForAgentSince(ctx context.Context, identity agentidentity.Identity, since time.Time) (runtimedelivery.AgentDiagnosticCounts, error) {
-	return sqliteDeliveryAdapter.DiagnosticCountsForAgentSince(ctx, eventReadQueryerFromContext(ctx, s.DB), identity, since)
+	return sqliteDeliveryAdapter.DiagnosticCountsForAgentSince(ctx, eventReadQueryerFromContext(ctx, s.backend.db), identity, since)
 }
 
 func (s *PostgresStore) terminalizeRunDeliveriesTx(ctx context.Context, tx *sql.Tx, runID, reason string) ([]runtimedelivery.Terminalization, error) {

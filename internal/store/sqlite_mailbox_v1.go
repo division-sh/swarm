@@ -9,7 +9,7 @@ import (
 )
 
 func (s *SQLiteRuntimeStore) ListV1MailboxItems(ctx context.Context, opts MailboxV1ListOptions) ([]MailboxV1Item, string, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, "", fmt.Errorf("sqlite runtime store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -30,7 +30,7 @@ func (s *SQLiteRuntimeStore) ListV1MailboxItems(ctx context.Context, opts Mailbo
 	}
 	where, args := sqliteMailboxV1ListWhere(opts, cursor)
 	args = append(args, opts.Limit+1)
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT
 			m.item_id,
 			m.item_type,
@@ -79,7 +79,7 @@ func (s *SQLiteRuntimeStore) ListV1MailboxItems(ctx context.Context, opts Mailbo
 }
 
 func (s *SQLiteRuntimeStore) GetV1MailboxItem(ctx context.Context, id string) (MailboxV1ItemDetail, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return MailboxV1ItemDetail{}, fmt.Errorf("sqlite runtime store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -142,7 +142,7 @@ func (s *SQLiteRuntimeStore) loadSQLiteMailboxV1Row(ctx context.Context, id stri
 }
 
 func (s *SQLiteRuntimeStore) loadSQLiteMailboxV1RowTx(ctx context.Context, tx *sql.Tx, id string) (mailboxV1Row, error) {
-	var q mailboxV1RowQueryer = s.DB
+	var q mailboxV1RowQueryer = s.backend.db
 	if tx != nil {
 		q = tx
 	}

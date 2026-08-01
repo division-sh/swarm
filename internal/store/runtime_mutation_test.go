@@ -20,7 +20,7 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationRetriesBusyAndFlushesPostCommitOnc
 	ctx, cancel := context.WithTimeout(storeTestWorkContext(t, testAuthorActivityContext()), 2*time.Second)
 	defer cancel()
 
-	lockTx, err := lockStore.DB.BeginTx(ctx, nil)
+	lockTx, err := lockStore.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin locking tx: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationStopsRetryOnContextDeadline(t *tes
 	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, time.Millisecond)
 	baseCtx := testAuthorActivityContext()
 
-	lockTx, err := lockStore.DB.BeginTx(baseCtx, nil)
+	lockTx, err := lockStore.backend.db.BeginTx(baseCtx, nil)
 	if err != nil {
 		t.Fatalf("begin locking tx: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationContextDeadlineCapsDriverBusyTimeo
 	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, 50*time.Millisecond)
 	baseCtx := testAuthorActivityContext()
 
-	lockTx, err := lockStore.DB.BeginTx(baseCtx, nil)
+	lockTx, err := lockStore.backend.db.BeginTx(baseCtx, nil)
 	if err != nil {
 		t.Fatalf("begin locking tx: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationContextDeadlineCapsDriverBusyTimeo
 func TestSQLiteRuntimeStore_RunRuntimeMutationDoesNotRetryActiveTransaction(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx := testAuthorActivityContext()
-	tx, err := store.DB.BeginTx(ctx, nil)
+	tx, err := store.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin active tx: %v", err)
 	}
@@ -274,7 +274,7 @@ func newSQLiteRuntimeMutationBusyStores(t *testing.T, busyTimeout time.Duration)
 	path := filepath.Join(t.TempDir(), "runtime.db")
 	store := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
 	lockStore := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
-	for _, db := range []*sql.DB{store.DB, lockStore.DB} {
+	for _, db := range []*sql.DB{store.backend.db, lockStore.backend.db} {
 		if _, err := db.ExecContext(testAuthorActivityContext(), fmt.Sprintf("PRAGMA busy_timeout = %d", int(busyTimeout/time.Millisecond))); err != nil {
 			t.Fatalf("set sqlite busy_timeout: %v", err)
 		}

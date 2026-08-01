@@ -49,7 +49,7 @@ func newForkedConsumerTestBackend(t *testing.T, backend string) *forkedConsumerT
 		})
 	case "sqlite":
 		out.sqlite = newBootstrappedSQLiteRuntimeStoreForTest(t)
-		out.db = out.sqlite.DB
+		out.db = out.sqlite.backend.db
 		requireRunFixtureForTest(t, testAuthorActivityBundleSourceContext(), out.sqlite, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 			RunID: out.sourceRun, BundleHash: authorActivityTestBundleHash, StartedAt: now.Add(-time.Hour),
 		})

@@ -30,7 +30,7 @@ func (s *SQLiteRuntimeStore) LoadRunHeader(ctx context.Context, runID string) (R
 	if _, err := uuid.Parse(runID); err != nil {
 		return RunHeader{}, ErrRunNotFound
 	}
-	row := s.DB.QueryRowContext(ctx, sqliteRunHeaderSelectSQL()+`
+	row := s.backend.db.QueryRowContext(ctx, sqliteRunHeaderSelectSQL()+`
 WHERE r.run_id = ?
 `, runID)
 	header, err := scanSQLiteRunHeader(row)
@@ -83,7 +83,7 @@ func (s *SQLiteRuntimeStore) ListRunHeaders(ctx context.Context, opts RunHeaderL
 		where = append(where, "(r.started_at < ? OR (r.started_at = ? AND r.run_id < ?))")
 	}
 	args = append(args, opts.Limit+1)
-	rows, err := s.DB.QueryContext(ctx, sqliteRunHeaderSelectSQL()+`
+	rows, err := s.backend.db.QueryContext(ctx, sqliteRunHeaderSelectSQL()+`
 WHERE `+strings.Join(where, " AND ")+`
 ORDER BY r.started_at DESC, r.run_id DESC
 LIMIT ?
@@ -210,7 +210,7 @@ func (s *SQLiteRuntimeStore) sqliteRunTestQuiescence(ctx context.Context, runID 
 }
 
 func (s *SQLiteRuntimeStore) sqliteRunActiveSessionLeaseCount(ctx context.Context, runID string) (int, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT lease_expires_at
 		FROM agent_sessions
 		WHERE run_id = ?
@@ -348,14 +348,14 @@ func scanSQLiteRunHeader(row runHeaderScanner) (RunHeader, error) {
 
 func (s *SQLiteRuntimeStore) sqliteRunLastEventAt(ctx context.Context, runID string) (time.Time, bool, error) {
 	var raw any
-	if err := s.DB.QueryRowContext(ctx, `SELECT MAX(created_at) FROM events WHERE run_id = ?`, runID).Scan(&raw); err != nil {
+	if err := s.backend.db.QueryRowContext(ctx, `SELECT MAX(created_at) FROM events WHERE run_id = ?`, runID).Scan(&raw); err != nil {
 		return time.Time{}, false, fmt.Errorf("load sqlite run last event timestamp: %w", err)
 	}
 	return sqliteTimeValue(raw)
 }
 
 func (s *SQLiteRuntimeStore) sqliteRunDebugEventCounts(ctx context.Context, runID string) ([]RunDebugEventCount, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT event_name, COUNT(*)
 		FROM events
 		WHERE run_id = ?
@@ -398,7 +398,7 @@ func (s *SQLiteRuntimeStore) sqliteRunDebugFailureDeliveries(ctx context.Context
 	}
 	return runDebugFailuresFromSnapshots(snapshots,
 		func(eventID string) (deliveryLifecycleEventMetadata, error) {
-			record, found, err := loadSQLiteEventIdentity(ctx, s.DB, eventID)
+			record, found, err := loadSQLiteEventIdentity(ctx, s.backend.db, eventID)
 			if err != nil {
 				return deliveryLifecycleEventMetadata{}, err
 			}
@@ -417,7 +417,7 @@ func (s *SQLiteRuntimeStore) sqliteRunDebugFailureDeliveries(ctx context.Context
 }
 
 func (s *SQLiteRuntimeStore) sqliteRunDebugEvents(ctx context.Context, runID string, limit int) ([]RunDebugEvent, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT event_id, event_name, COALESCE(entity_id, ''), created_at,
 		       COALESCE(produced_by, ''), COALESCE(produced_by_type, ''), payload
 		FROM events
@@ -461,7 +461,7 @@ func (s *SQLiteRuntimeStore) sqliteRunDebugRuntimeLogs(ctx context.Context, runI
 		args = append(args, opts.Component)
 	}
 	args = append(args, opts.RuntimeLogLimit)
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT event_id, created_at, COALESCE(entity_id, ''), payload
 		FROM events
 		WHERE `+strings.Join(where, " AND ")+`
@@ -518,7 +518,7 @@ func (s *SQLiteRuntimeStore) sqliteRunDebugRuntimeLogSummary(ctx context.Context
 		args = append(args, component)
 	}
 	logLevels := "COALESCE(json_extract(payload, '$.log_level'), '') IN ('warn', 'error')"
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT COALESCE(json_extract(payload, '$.log_level'), 'info'),
 		       COALESCE(json_extract(payload, '$.details.component'), ''),
 		       COALESCE(json_extract(payload, '$.details.action'), ''),

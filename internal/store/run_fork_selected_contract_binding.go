@@ -20,7 +20,7 @@ func (s *PostgresStore) requireRunForkSelectedContractBindingAccess() error {
 }
 
 func (s *PostgresStore) LoadRunForkSelectedContractBinding(ctx context.Context, forkRunID string) (runfork.RunForkSelectedContractBinding, bool, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runfork.RunForkSelectedContractBinding{}, false, fmt.Errorf("postgres store is required")
 	}
 	forkRunID = strings.TrimSpace(forkRunID)
@@ -33,7 +33,7 @@ func (s *PostgresStore) LoadRunForkSelectedContractBinding(ctx context.Context, 
 	if err := s.requireCurrentSchema(); err != nil {
 		return runfork.RunForkSelectedContractBinding{}, false, err
 	}
-	binding, err := loadRunForkSelectedContractBinding(ctx, s.DB, forkRunID)
+	binding, err := loadRunForkSelectedContractBinding(ctx, s.backend.db, forkRunID)
 	if err == sql.ErrNoRows {
 		return runfork.RunForkSelectedContractBinding{}, false, nil
 	}

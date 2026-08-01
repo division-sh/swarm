@@ -14,7 +14,7 @@ func TestPostgresStore_TryAcquireSerializesDestructiveResetLock(t *testing.T) {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 
 	ctx := testAuthorActivityContext()
 	first, acquired, err := pg.TryAcquire(ctx, "test:destructive-reset")

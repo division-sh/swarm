@@ -10,7 +10,7 @@ import (
 )
 
 func (s *PostgresStore) LoadLatestRunFlowInstance(ctx context.Context, runID string) (string, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return "", fmt.Errorf("postgres store is required")
 	}
 	runID = strings.TrimSpace(runID)
@@ -18,7 +18,7 @@ func (s *PostgresStore) LoadLatestRunFlowInstance(ctx context.Context, runID str
 		return "", nil
 	}
 	var flowInstance string
-	err := s.DB.QueryRowContext(ctx, `
+	err := s.backend.db.QueryRowContext(ctx, `
 		SELECT COALESCE(flow_instance, '')
 		FROM events
 		WHERE run_id = $1::uuid
@@ -36,7 +36,7 @@ func (s *PostgresStore) LoadLatestRunFlowInstance(ctx context.Context, runID str
 }
 
 func (s *PostgresStore) LoadLatestRunNonEscalationProgressAt(ctx context.Context, runID, escalationEventName string) (time.Time, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return time.Time{}, fmt.Errorf("postgres store is required")
 	}
 	runID = strings.TrimSpace(runID)
@@ -44,7 +44,7 @@ func (s *PostgresStore) LoadLatestRunNonEscalationProgressAt(ctx context.Context
 		return time.Time{}, nil
 	}
 	var raw any
-	if err := s.DB.QueryRowContext(ctx, `
+	if err := s.backend.db.QueryRowContext(ctx, `
 		SELECT MAX(created_at)
 		FROM events
 		WHERE run_id = $1::uuid
@@ -60,7 +60,7 @@ func (s *PostgresStore) LoadLatestRunNonEscalationProgressAt(ctx context.Context
 }
 
 func (s *SQLiteRuntimeStore) LoadLatestRunFlowInstance(ctx context.Context, runID string) (string, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return "", fmt.Errorf("sqlite runtime store is required")
 	}
 	runID = strings.TrimSpace(runID)
@@ -68,7 +68,7 @@ func (s *SQLiteRuntimeStore) LoadLatestRunFlowInstance(ctx context.Context, runI
 		return "", nil
 	}
 	var flowInstance string
-	err := s.DB.QueryRowContext(ctx, `
+	err := s.backend.db.QueryRowContext(ctx, `
 		SELECT COALESCE(flow_instance, '')
 		FROM events
 		WHERE run_id = ?
@@ -86,7 +86,7 @@ func (s *SQLiteRuntimeStore) LoadLatestRunFlowInstance(ctx context.Context, runI
 }
 
 func (s *SQLiteRuntimeStore) LoadLatestRunNonEscalationProgressAt(ctx context.Context, runID, escalationEventName string) (time.Time, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return time.Time{}, fmt.Errorf("sqlite runtime store is required")
 	}
 	runID = strings.TrimSpace(runID)
@@ -94,7 +94,7 @@ func (s *SQLiteRuntimeStore) LoadLatestRunNonEscalationProgressAt(ctx context.Co
 		return time.Time{}, nil
 	}
 	var raw any
-	if err := s.DB.QueryRowContext(ctx, `
+	if err := s.backend.db.QueryRowContext(ctx, `
 		SELECT MAX(created_at)
 		FROM events
 		WHERE run_id = ?

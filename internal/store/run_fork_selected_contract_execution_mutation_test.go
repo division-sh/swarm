@@ -1997,8 +1997,8 @@ func seedSelectedContractExecutionStoreSourceWithoutDelivery(t *testing.T, db *s
 func seedSelectedContractExecutionStoreSourceRaw(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time, routes []events.DeliveryRoute) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
-	selected := &PostgresStore{DB: db}
+	requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
+	selected := &PostgresStore{backend: &postgresRuntimeBackend{db: db}}
 	selected.schemaAdmission.markCurrent()
 	event := semanticEventRecordFixture(
 		eventID, sourceRunID, "item.received", eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`),

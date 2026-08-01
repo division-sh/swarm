@@ -268,7 +268,7 @@ func TestPostgresHumanTaskWeeklyBudgetSerializesConcurrentApprovals(t *testing.T
 		cards = append(cards, card)
 	}
 
-	if _, err := postgres.DB.ExecContext(ctx, `
+	if _, err := postgres.backend.db.ExecContext(ctx, `
 		CREATE FUNCTION test_delay_human_task_budget_commit() RETURNS trigger AS $$
 		BEGIN
 			PERFORM pg_sleep(0.5);
@@ -327,7 +327,7 @@ func TestPostgresHumanTaskWeeklyBudgetSerializesConcurrentApprovals(t *testing.T
 	}
 
 	var committed int
-	if err := postgres.DB.QueryRowContext(ctx, `
+	if err := postgres.backend.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM human_task_continuations h
 		JOIN decision_cards c ON c.card_id = h.card_id

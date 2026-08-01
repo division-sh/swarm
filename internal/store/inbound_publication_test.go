@@ -63,8 +63,8 @@ func commitInboundPublicationTestEvent(t *testing.T, store storeTestDurableEvent
 func TestSQLiteInboundPublicationOperationCommitsRetriesAndRollsBackAtomically(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	store.SetEventPayloadValidator(currentPlatformPayloadValidatorForStoreTest(t))
-	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.DB, store)
-	runInboundPublicationOperationProof(t, store.DB, true, store, workflowStore)
+	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.db, store)
+	runInboundPublicationOperationProof(t, store.backend.db, true, store, workflowStore)
 }
 
 func TestPostgresInboundPublicationOperationCommitsRetriesAndRollsBackAtomically(t *testing.T) {

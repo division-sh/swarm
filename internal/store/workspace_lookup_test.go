@@ -30,7 +30,7 @@ func TestWorkspaceLookupPrivateAdapterParity(t *testing.T) {
 			case "sqlite":
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 				lookup = store
-				db = store.DB
+				db = store.backend.db
 				requireRunFixtureForTest(t, ctx, store, semanticRunFixture{
 					Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID,
 					State: runtimerunlifecycle.StateRunning, StartedAt: time.Now().UTC(),
@@ -38,7 +38,7 @@ func TestWorkspaceLookupPrivateAdapterParity(t *testing.T) {
 			case "postgres":
 				_, postgresDB, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				store := &PostgresStore{DB: postgresDB}
+				store := &PostgresStore{backend: &postgresRuntimeBackend{db: postgresDB}}
 				lookup = store
 				db = postgresDB
 				requireRunFixtureForTest(t, ctx, store, semanticRunFixture{

@@ -23,7 +23,7 @@ type sqliteRuntimeStartupLease struct {
 }
 
 func (s *SQLiteRuntimeStore) AcquireRuntimeStartupOwnership(ctx context.Context, req runtimestartupownership.AcquireRequest) (runtimestartupownership.Lease, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, nil
 	}
 	ownerID := strings.TrimSpace(req.OwnerID)
@@ -50,7 +50,7 @@ func (s *SQLiteRuntimeStore) AcquireRuntimeStartupOwnership(ctx context.Context,
 }
 
 func (s *SQLiteRuntimeStore) RecordRuntimeStartupAuthorityTransition(ctx context.Context, previous *runtimestartupownership.Authority, next ...runtimestartupownership.Authority) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("sqlite store is required for startup authority evidence")
 	}
 	if err := runtimestartupownership.ValidateTransitionChain(previous, next...); err != nil {
@@ -407,7 +407,7 @@ func (s *SQLiteRuntimeStore) AdoptSessionID(ctx context.Context, identity agentm
 }
 
 func (s *SQLiteRuntimeStore) ResetAll(metadata runtimesessions.ResetMetadata) (runtimesessions.ResetSummary, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimesessions.ResetSummary{}, nil
 	}
 	source := strings.TrimSpace(metadata.Source)

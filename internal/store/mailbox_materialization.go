@@ -18,7 +18,7 @@ type mailboxMaterializationExecutor interface {
 }
 
 func (s *PostgresStore) MaterializeMailboxWrite(ctx context.Context, item runtimepipeline.MailboxWriteMaterialization) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -28,7 +28,7 @@ func (s *PostgresStore) MaterializeMailboxWrite(ctx context.Context, item runtim
 	if err != nil {
 		return err
 	}
-	exec := mailboxMaterializationDBExecutor(ctx, s.DB)
+	exec := mailboxMaterializationDBExecutor(ctx, s.backend.db)
 	_, err = exec.ExecContext(ctx, `
 		INSERT INTO mailbox (
 			item_id, entity_id, flow_instance, scope, item_type, source_event_id,
@@ -47,7 +47,7 @@ func (s *PostgresStore) MaterializeMailboxWrite(ctx context.Context, item runtim
 }
 
 func (s *SQLiteRuntimeStore) MaterializeMailboxWrite(ctx context.Context, item runtimepipeline.MailboxWriteMaterialization) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("sqlite runtime store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {

@@ -35,15 +35,15 @@ func TestRunForkSourceFreezeIsTheOnlyForkedStatusWriter(t *testing.T) {
 			if backend == "postgres" {
 				_, db, _ = testutil.StartPostgres(t)
 				pg := admitTestPostgresStore(t, db)
-				requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
+				requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 				mark = func(ctx context.Context, runID, status string, at time.Time) error {
 					_, err := markRunTerminalStatusForTest(ctx, pg, runID, status, nil, at)
 					return err
 				}
 			} else {
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-				db = store.DB
-				requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
+				db = store.backend.db
+				requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 				mark = func(ctx context.Context, runID, status string, at time.Time) error {
 					_, err := markRunTerminalStatusForTest(ctx, store, runID, status, nil, at)
 					return err
@@ -473,7 +473,7 @@ func seedRunForkSourceFreezePair(t *testing.T, db *sql.DB, sourceStatus, forkSta
 	if err != nil {
 		t.Fatalf("parse fork run state %q: %v", forkStatus, err)
 	}
-	selected := &PostgresStore{DB: db}
+	selected := &PostgresStore{backend: &postgresRuntimeBackend{db: db}}
 	ctx := testAuthorActivityBundleSourceContext()
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: lineage.SourceRunID, State: sourceState,
@@ -487,7 +487,7 @@ func seedRunForkSourceFreezePair(t *testing.T, db *sql.DB, sourceStatus, forkSta
 }
 
 func commitRunForkSourceFreezeForTest(ctx context.Context, store *PostgresStore, lineage runForkActivationLineage, now time.Time, confirmed bool) error {
-	db := store.DB
+	db := store.backend.db
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err

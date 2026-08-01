@@ -33,7 +33,7 @@ type runForkActivationLineage struct {
 }
 
 func (s *PostgresStore) ActivateRunFork(ctx context.Context, req runfork.RunForkActivateRequest) (runfork.RunForkActivation, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runfork.RunForkActivation{}, fmt.Errorf("postgres store is required")
 	}
 	forkRunID := strings.TrimSpace(req.ForkRunID)
@@ -47,7 +47,7 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req runfork.RunFork
 		return runfork.RunForkActivation{}, err
 	}
 
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	tx, err := s.backend.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return runfork.RunForkActivation{}, fmt.Errorf("begin fork activation: %w", err)
 	}

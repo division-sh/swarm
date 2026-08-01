@@ -20,7 +20,7 @@ type destructiveResetCleanupExecutor interface {
 }
 
 func (s *PostgresStore) ApplyDestructiveResetCleanup(ctx context.Context, req destructivereset.CleanupRequest) (destructivereset.CleanupResult, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return destructivereset.CleanupResult{}, fmt.Errorf("postgres store is required")
 	}
 	now := req.RequestedAt.UTC()
@@ -45,7 +45,7 @@ func (s *PostgresStore) ApplyDestructiveResetCleanup(ctx context.Context, req de
 	}
 	if req.Result.DryRun {
 		out.RunIDs = runIDs
-		rows, err := destructiveResetCleanupTableResults(ctx, s.DB, runIDs, req.Result.IncludeBundles)
+		rows, err := destructiveResetCleanupTableResults(ctx, s.backend.db, runIDs, req.Result.IncludeBundles)
 		if err != nil {
 			return destructivereset.CleanupResult{}, err
 		}
@@ -53,7 +53,7 @@ func (s *PostgresStore) ApplyDestructiveResetCleanup(ctx context.Context, req de
 		return out, nil
 	}
 
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return destructivereset.CleanupResult{}, fmt.Errorf("begin destructive reset cleanup tx: %w", err)
 	}

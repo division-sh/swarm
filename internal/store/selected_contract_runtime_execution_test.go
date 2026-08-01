@@ -47,7 +47,7 @@ type selectedCompletionFixture struct {
 
 func TestSelectedForkCompletionAuthorityIssuanceConsumesExactAdmissionSQLite(t *testing.T) {
 	s := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	proveSelectedForkCompletionAuthorityIssuance(t, newSelectedCompletionFixture(t, s, s.DB, true))
+	proveSelectedForkCompletionAuthorityIssuance(t, newSelectedCompletionFixture(t, s, s.backend.db, true))
 }
 
 func TestSelectedForkCompletionAuthorityIssuanceConsumesExactAdmissionPostgres(t *testing.T) {
@@ -225,7 +225,7 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 
 func TestSelectedForkCompletionAuthoritySingleCurrentGenerationSQLite(t *testing.T) {
 	s := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	proveSelectedForkCompletionAuthoritySingleCurrentGeneration(t, newSelectedCompletionFixture(t, s, s.DB, true))
+	proveSelectedForkCompletionAuthoritySingleCurrentGeneration(t, newSelectedCompletionFixture(t, s, s.backend.db, true))
 }
 
 func TestSelectedForkCompletionAuthoritySingleCurrentGenerationPostgres(t *testing.T) {
@@ -274,7 +274,7 @@ func proveSelectedForkCompletionAuthoritySingleCurrentGeneration(t *testing.T, f
 
 func TestSelectedForkCompletionAuthorityRecoveryNoRedispatchSQLite(t *testing.T) {
 	s := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t, newSelectedCompletionFixture(t, s, s.DB, true))
+	proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t, newSelectedCompletionFixture(t, s, s.backend.db, true))
 }
 
 func TestSelectedForkCompletionAuthorityRecoveryNoRedispatchPostgres(t *testing.T) {

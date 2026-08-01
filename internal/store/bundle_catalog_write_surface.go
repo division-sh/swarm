@@ -57,7 +57,7 @@ func (s *PostgresStore) UpsertBundleCatalog(ctx context.Context, req BundleCatal
 		return BundleCatalogUpsertResult{}, fmt.Errorf("bundle catalog metadata: %w", err)
 	}
 
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return BundleCatalogUpsertResult{}, err
 	}

@@ -230,13 +230,13 @@ func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerSQLite(t *testi
 	assertEventBusTerminalRunRefusal(t, sqliteStore, runID, "cancelled", func(eventID string) (string, int, int, error) {
 		var status string
 		var eventCount, deliveryCount int
-		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = ?`, runID).Scan(&status); err != nil {
+		if err := sqliteStore.TestDatabase().QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = ?`, runID).Scan(&status); err != nil {
 			return "", 0, 0, err
 		}
-		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = ?`, eventID).Scan(&eventCount); err != nil {
+		if err := sqliteStore.TestDatabase().QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = ?`, eventID).Scan(&eventCount); err != nil {
 			return "", 0, 0, err
 		}
-		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, eventID).Scan(&deliveryCount); err != nil {
+		if err := sqliteStore.TestDatabase().QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, eventID).Scan(&deliveryCount); err != nil {
 			return "", 0, 0, err
 		}
 		return status, eventCount, deliveryCount, nil
@@ -315,16 +315,16 @@ func TestEventBusExactDuplicateIsOperationNoOpSQLite(t *testing.T) {
 	storetest.CommitSemanticEventWithRoutes(t, ctx, sqliteStore, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeDirect)
 	assertEventBusExactDuplicateIsOperationNoOp(t, sqliteStore, evt, func() (eventBusExactDuplicateState, error) {
 		var state eventBusExactDuplicateState
-		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COALESCE(status, ''), COALESCE(event_count, 0) FROM runs WHERE run_id = ?`, runID).Scan(&state.Status, &state.RunEventCount); err != nil {
+		if err := sqliteStore.TestDatabase().QueryRowContext(ctx, `SELECT COALESCE(status, ''), COALESCE(event_count, 0) FROM runs WHERE run_id = ?`, runID).Scan(&state.Status, &state.RunEventCount); err != nil {
 			return state, err
 		}
-		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = ?`, evt.ID()).Scan(&state.EventRows); err != nil {
+		if err := sqliteStore.TestDatabase().QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = ?`, evt.ID()).Scan(&state.EventRows); err != nil {
 			return state, err
 		}
-		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, evt.ID()).Scan(&state.DeliveryRows); err != nil {
+		if err := sqliteStore.TestDatabase().QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, evt.ID()).Scan(&state.DeliveryRows); err != nil {
 			return state, err
 		}
-		if err := sqliteStore.DB.QueryRowContext(ctx, `
+		if err := sqliteStore.TestDatabase().QueryRowContext(ctx, `
 			SELECT COUNT(*)
 			FROM event_delivery_outcomes o
 			JOIN event_deliveries d ON d.delivery_id = o.delivery_id
@@ -421,7 +421,7 @@ func TestEventBusRejectsDiagnosticDirectEventsThroughEveryPublishOwnerSQLite(t *
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	assertEventBusDiagnosticDirectRefusal(t, sqliteStore, func(eventID string) (int, error) {
 		var count int
-		err := sqliteStore.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE event_id = ?`, eventID).Scan(&count)
+		err := sqliteStore.TestDatabase().QueryRow(`SELECT COUNT(*) FROM events WHERE event_id = ?`, eventID).Scan(&count)
 		return count, err
 	})
 }
@@ -847,7 +847,7 @@ func (i postCommitTxAbsentInterceptor) Intercept(ctx context.Context, _ events.E
 		assertSortedStringsEqual(i.t, got, i.wantRecipients)
 	}
 	if i.wantScope != "" {
-		got := loadCommittedPipelineScopePostgres(i.t, ctx, i.store.DB, i.eventID)
+		got := loadCommittedPipelineScopePostgres(i.t, ctx, i.store.TestDatabase(), i.eventID)
 		if got != i.wantScope {
 			i.t.Fatalf("committed replay scope = %q, want %q", got, i.wantScope)
 		}
@@ -2014,7 +2014,7 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 			name: "sqlite",
 			open: func(t *testing.T) (runtimebus.EventStore, runtimebus.EventStore, *sql.DB, string) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected, selected, selected.DB, "?"
+				return selected, selected, selected.TestDatabase(), "?"
 			},
 		},
 		{
@@ -2604,7 +2604,7 @@ func TestEventBusPublishInMutationSQLiteRecordsTargetFailureDeadLetter(t *testin
 	}
 
 	var reason, targetContext string
-	if err := sqliteStore.DB.QueryRowContext(ctx, `
+	if err := sqliteStore.TestDatabase().QueryRowContext(ctx, `
 		SELECT COALESCE(json_extract(failure, '$.detail.code'), ''), COALESCE(json_extract(failure, '$.detail.attributes.target'), '')
 		FROM dead_letters
 		WHERE original_event_id = ?
@@ -2620,7 +2620,7 @@ func TestEventBusPublishInMutationSQLiteRecordsTargetFailureDeadLetter(t *testin
 		t.Fatalf("target context = %s, want missing-flow", targetContext)
 	}
 	var pipelineReceipts int
-	if err := sqliteStore.DB.QueryRowContext(ctx, `
+	if err := sqliteStore.TestDatabase().QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM event_receipts
 		WHERE event_id = ?

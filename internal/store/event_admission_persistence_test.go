@@ -267,7 +267,7 @@ func TestSQLiteTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 				return seedCanonicalForkedRunForAdmissionTest(ctx, sqliteStore, runID)
 			}
 			if status == "completed" {
-				return convergeTerminalAdmissionRun(ctx, sqliteStore.DB, false, sqliteStore, runID, eventID)
+				return convergeTerminalAdmissionRun(ctx, sqliteStore.backend.db, false, sqliteStore, runID, eventID)
 			}
 			failure := terminalEventAdmissionFailure(status)
 			_, err := markRunTerminalStatusForTest(ctx, sqliteStore, runID, status, failure, time.Now().UTC())
@@ -275,16 +275,16 @@ func TestSQLiteTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 		},
 		loadState: func(ctx context.Context, runID, eventID string) (terminalEventAdmissionState, error) {
 			var state terminalEventAdmissionState
-			if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = ?`, runID).Scan(&state.Status); err != nil {
+			if err := sqliteStore.backend.db.QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = ?`, runID).Scan(&state.Status); err != nil {
 				return state, err
 			}
-			if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id = ?`, runID).Scan(&state.RunEventCount); err != nil {
+			if err := sqliteStore.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id = ?`, runID).Scan(&state.RunEventCount); err != nil {
 				return state, err
 			}
-			if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = ?`, eventID).Scan(&state.EventExists); err != nil {
+			if err := sqliteStore.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = ?`, eventID).Scan(&state.EventExists); err != nil {
 				return state, err
 			}
-			if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, eventID).Scan(&state.DeliveryCount); err != nil {
+			if err := sqliteStore.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, eventID).Scan(&state.DeliveryCount); err != nil {
 				return state, err
 			}
 			return state, nil
@@ -406,7 +406,7 @@ func TestSQLiteRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 				})
 				return err
 			case "completed":
-				return convergeTerminalAdmissionRun(ctx, store.DB, false, store, runID, eventID)
+				return convergeTerminalAdmissionRun(ctx, store.backend.db, false, store, runID, eventID)
 			case "forked":
 				return seedCanonicalForkedRunForAdmissionTest(ctx, store, runID)
 			default:
@@ -418,7 +418,7 @@ func TestSQLiteRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 		persistLog: store.PersistRuntimeLog,
 		loadState: func(ctx context.Context, runID string) (runtimeLogStatusState, error) {
 			var state runtimeLogStatusState
-			if err := store.DB.QueryRowContext(ctx, `
+			if err := store.backend.db.QueryRowContext(ctx, `
 				SELECT
 					COALESCE(status, ''),
 					COALESCE(CAST(ended_at AS TEXT), ''),
@@ -436,20 +436,20 @@ func TestSQLiteRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 			); err != nil {
 				return state, err
 			}
-			if err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id = ?`, runID).Scan(&state.EventRows); err != nil {
+			if err := store.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id = ?`, runID).Scan(&state.EventRows); err != nil {
 				return state, err
 			}
-			if err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_state WHERE run_id = ?`, runID).Scan(&state.EntityRows); err != nil {
+			if err := store.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_state WHERE run_id = ?`, runID).Scan(&state.EntityRows); err != nil {
 				return state, err
 			}
-			if err := store.DB.QueryRowContext(ctx, `
+			if err := store.backend.db.QueryRowContext(ctx, `
 				SELECT COUNT(*), COALESCE(MAX(produced_by_type), '')
 				FROM events
 				WHERE run_id = ? AND event_name = 'platform.runtime_log'
 			`, runID).Scan(&state.RuntimeLogRows, &state.ProducedByType); err != nil {
 				return state, err
 			}
-			if err := store.DB.QueryRowContext(ctx, `
+			if err := store.backend.db.QueryRowContext(ctx, `
 				SELECT COUNT(*)
 				FROM event_deliveries d
 				JOIN events e ON e.event_id = d.event_id
@@ -457,7 +457,7 @@ func TestSQLiteRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 			`, runID).Scan(&state.DeliveryRows); err != nil {
 				return state, err
 			}
-			if err := store.DB.QueryRowContext(ctx, `
+			if err := store.backend.db.QueryRowContext(ctx, `
 				SELECT COUNT(*)
 				FROM event_receipts r
 				JOIN events e ON e.event_id = r.event_id
@@ -875,20 +875,20 @@ func TestSQLiteGlobalRuntimeLogIdentityIsIdempotentAndNonRouted(t *testing.T) {
 		},
 		loadState: func(ctx context.Context, eventID string) (globalRuntimeLogIdentityState, error) {
 			var state globalRuntimeLogIdentityState
-			if err := store.DB.QueryRowContext(ctx, `
+			if err := store.backend.db.QueryRowContext(ctx, `
 				SELECT COUNT(*), COALESCE(MAX(run_id), ''), COALESCE(MAX(produced_by), ''), COALESCE(MAX(produced_by_type), '')
 				FROM events
 				WHERE event_id = ?
 			`, eventID).Scan(&state.EventCount, &state.RunID, &state.ProducedBy, &state.ProducedByType); err != nil {
 				return state, err
 			}
-			if err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs`).Scan(&state.RunCount); err != nil {
+			if err := store.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs`).Scan(&state.RunCount); err != nil {
 				return state, err
 			}
-			if err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, eventID).Scan(&state.DeliveryCount); err != nil {
+			if err := store.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, eventID).Scan(&state.DeliveryCount); err != nil {
 				return state, err
 			}
-			if err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = ?`, eventID).Scan(&state.ReceiptCount); err != nil {
+			if err := store.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = ?`, eventID).Scan(&state.ReceiptCount); err != nil {
 				return state, err
 			}
 			return state, nil
@@ -954,10 +954,10 @@ func TestSQLiteRunScopedRuntimeLogRequiresExistingRun(t *testing.T) {
 		return commitDiagnosticRuntimeLogFixture(ctx, store, evt)
 	}, func(ctx context.Context, runID, eventID string) (int, int, error) {
 		var runCount, eventCount int
-		if err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE run_id = ?`, runID).Scan(&runCount); err != nil {
+		if err := store.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE run_id = ?`, runID).Scan(&runCount); err != nil {
 			return 0, 0, err
 		}
-		if err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = ?`, eventID).Scan(&eventCount); err != nil {
+		if err := store.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = ?`, eventID).Scan(&eventCount); err != nil {
 			return 0, 0, err
 		}
 		return runCount, eventCount, nil
@@ -1032,7 +1032,7 @@ func TestSQLiteRuntimeLogDiagnosticDirectUsesAdmissionFacts(t *testing.T) {
 	}
 
 	var eventID, runID, createdAt string
-	if err := sqliteStore.DB.QueryRowContext(ctx, `
+	if err := sqliteStore.backend.db.QueryRowContext(ctx, `
 		SELECT event_id, COALESCE(run_id, ''), created_at
 		FROM events
 		WHERE event_name = 'platform.runtime_log'
@@ -1045,7 +1045,7 @@ func TestSQLiteRuntimeLogDiagnosticDirectUsesAdmissionFacts(t *testing.T) {
 	}
 
 	var deliveries int
-	if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, eventID).Scan(&deliveries); err != nil {
+	if err := sqliteStore.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, eventID).Scan(&deliveries); err != nil {
 		t.Fatalf("count sqlite runtime_log deliveries: %v", err)
 	}
 	if deliveries != 0 {

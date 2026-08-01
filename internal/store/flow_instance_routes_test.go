@@ -282,7 +282,7 @@ func TestSQLiteRuntimeStoreUpsertFlowInstanceRouteUsesPipelineTransaction(t *tes
 		SubscriberID:   "reviewer-inst-1",
 		SourceFlow:     "review",
 	}
-	tx, err := store.DB.BeginTx(ctx, nil)
+	tx, err := store.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestSQLiteRuntimeStoreUpsertFlowInstanceRouteUsesPipelineTransaction(t *tes
 		t.Fatalf("Rollback: %v", err)
 	}
 	var leaked int
-	if err := store.DB.QueryRowContext(ctx, `
+	if err := store.backend.db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM routing_rules
 		WHERE flow_instance = ? AND is_materialized = TRUE
 	`, route.Identity.InstancePath).Scan(&leaked); err != nil {
@@ -327,13 +327,13 @@ func TestSQLiteRuntimeStoreReplaceFlowInstanceRouteRecordsIsExactAndTransactiona
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	identity := runtimeflowidentity.DeriveRoute("review", "inst-exact")
-	if _, err := store.DB.ExecContext(ctx, `
+	if _, err := store.backend.db.ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 		VALUES (?, 'review', 'template', '{}', 'active', ?)
 	`, identity.InstancePath, time.Now().UTC()); err != nil {
 		t.Fatalf("seed flow instance: %v", err)
 	}
-	ctx = seedFlowRouteTestAuthority(t, ctx, store.DB, false, identity.InstancePath)
+	ctx = seedFlowRouteTestAuthority(t, ctx, store.backend.db, false, identity.InstancePath)
 	first := []runtimebus.FlowInstanceRouteRecord{
 		{
 			Identity: identity, EventPattern: "review/inst-exact/task.started",
@@ -358,7 +358,7 @@ func TestSQLiteRuntimeStoreReplaceFlowInstanceRouteRecordsIsExactAndTransactiona
 		t.Fatalf("second exact route set: routes=%#v err=%v", got, err)
 	}
 
-	tx, err := store.DB.BeginTx(ctx, nil)
+	tx, err := store.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestPostgresStoreReplaceFlowInstanceRouteTopologyIsAtomic(t *testing.T) {
 func TestSQLiteRuntimeStoreReplaceFlowInstanceRouteTopologyIsAtomic(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	testFlowInstanceRouteTopologyAtomicity(t, ctx, selected.DB, selected, false)
+	testFlowInstanceRouteTopologyAtomicity(t, ctx, selected.backend.db, selected, false)
 }
 
 func testFlowInstanceRouteTopologyAtomicity(

@@ -53,7 +53,7 @@ func TestPostgresStoreResolveAgentDirectiveRunTarget(t *testing.T) {
 	}
 
 	agentOne := testAgentIdentity(t, "agent-one", "directive/one")
-	seedTestAgentRow(t, ctx, pg.DB, true, agentOne, "active")
+	seedTestAgentRow(t, ctx, pg.backend.db, true, agentOne, "active")
 	insertDirectiveSession(t, ctx, pg, "00000000-0000-0000-0000-000000000101", agentOne, runB)
 	active, err := pg.ResolveAgentDirectiveRunTarget(ctx, agentOne, "")
 	if err != nil {
@@ -64,7 +64,7 @@ func TestPostgresStoreResolveAgentDirectiveRunTarget(t *testing.T) {
 	}
 
 	agentMany := testAgentIdentity(t, "agent-many", "directive/many")
-	seedTestAgentRow(t, ctx, pg.DB, true, agentMany, "active")
+	seedTestAgentRow(t, ctx, pg.backend.db, true, agentMany, "active")
 	insertDirectiveSession(t, ctx, pg, "00000000-0000-0000-0000-000000000201", agentMany, runA)
 	insertDirectiveSession(t, ctx, pg, "00000000-0000-0000-0000-000000000202", agentMany, runB)
 	_, err = pg.ResolveAgentDirectiveRunTarget(ctx, agentMany, "")
@@ -89,7 +89,7 @@ func insertDirectiveSession(t *testing.T, ctx context.Context, pg *PostgresStore
 	if err != nil {
 		t.Fatalf("directive session identity: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `
+	if _, err := pg.backend.db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,

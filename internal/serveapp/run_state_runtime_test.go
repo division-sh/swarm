@@ -113,7 +113,7 @@ func publishRunStatusRootEvent(t *testing.T, bus *runtimebus.EventBus, runID, en
 func seedRunStatusEntityState(t *testing.T, pg *store.PostgresStore, runID, entityID string) {
 	t.Helper()
 	now := time.Now().UTC()
-	if _, err := pg.DB.ExecContext(context.Background(), `
+	if _, err := pg.TestDatabase().ExecContext(context.Background(), `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
@@ -132,7 +132,7 @@ func seedRunStatusEntityState(t *testing.T, pg *store.PostgresStore, runID, enti
 func markRunStatusCompleted(t *testing.T, pg *store.PostgresStore, eventID string) {
 	t.Helper()
 	var runID, bundleHash string
-	if err := pg.DB.QueryRowContext(runStatusAuthorActivityContext(), `
+	if err := pg.TestDatabase().QueryRowContext(runStatusAuthorActivityContext(), `
 		SELECT r.run_id::text, r.bundle_hash
 		FROM events e
 		JOIN runs r ON r.run_id = e.run_id

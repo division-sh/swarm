@@ -455,9 +455,9 @@ func insertCanonicalEventRecordFixture(ctx context.Context, selectedStore any, e
 	var inserted bool
 	switch selected := selectedStore.(type) {
 	case *PostgresStore:
-		inserted, err = eventrecordpostgres.Insert(ctx, selected.DB, record)
+		inserted, err = eventrecordpostgres.Insert(ctx, selected.backend.db, record)
 	case *SQLiteRuntimeStore:
-		inserted, err = eventrecordsqlite.Insert(ctx, selected.DB, record)
+		inserted, err = eventrecordsqlite.Insert(ctx, selected.backend.db, record)
 	default:
 		return fmt.Errorf("canonical event record fixture store %T is unsupported", selectedStore)
 	}
@@ -474,7 +474,7 @@ func insertPostgresCanonicalEventRecordFixture(ctx context.Context, db *sql.DB, 
 	if db == nil {
 		return fmt.Errorf("postgres canonical event record fixture requires a database")
 	}
-	return insertCanonicalEventRecordFixture(ctx, &PostgresStore{DB: db}, event)
+	return insertCanonicalEventRecordFixture(ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: db}}, event)
 }
 
 func insertPostgresCanonicalEventRecordFixtureTx(ctx context.Context, tx *sql.Tx, event events.Event) error {

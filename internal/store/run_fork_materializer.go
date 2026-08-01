@@ -28,7 +28,7 @@ func (s *PostgresStore) requireRunForkMaterializerAccess() error {
 }
 
 func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireRunForkMaterializerAccess(); err != nil {
@@ -64,7 +64,7 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req runfork.RunF
 	}
 
 	forkRunID := deterministicRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint.EventID)
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	tx, err := s.backend.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("begin fork materialization: %w", err)
 	}

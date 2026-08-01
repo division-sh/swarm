@@ -93,7 +93,7 @@ var agentDeliveryLifecycleStatuses = map[string]struct{}{
 }
 
 func (s *PostgresStore) LoadOperatorAgentDeliveryLifecycle(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDeliveryLifecycleOptions) (OperatorAgentDeliveryLifecycleList, error) {
-	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).LoadOperatorAgentDeliveryLifecycle(ctx, identity, opts)
+	return NewOperatorAgentConversationReadSurface(s.backend.db, s, 0).LoadOperatorAgentDeliveryLifecycle(ctx, identity, opts)
 }
 
 func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryLifecycle(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDeliveryLifecycleOptions) (OperatorAgentDeliveryLifecycleList, error) {
@@ -191,7 +191,7 @@ func (r *OperatorAgentConversationReadSurface) requireAgentDeliveryLifecycleAcce
 }
 
 func (s *SQLiteRuntimeStore) requireSQLiteAgentDeliveryLifecycleAccess() error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("sqlite runtime store is required")
 	}
 	return s.requireCurrentSchema()
@@ -232,7 +232,7 @@ func (s *SQLiteRuntimeStore) ensureSQLiteAgentDeliveryLifecycleAgentExists(ctx c
 		return ErrAgentNotFound
 	}
 	var exists bool
-	if err := s.DB.QueryRowContext(ctx, `
+	if err := s.backend.db.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM agents
@@ -298,7 +298,7 @@ func (s *SQLiteRuntimeStore) listSQLiteAgentDeliveryLifecycleRows(ctx context.Co
 		return nil, "", fmt.Errorf("list sqlite agent delivery lifecycle rows: %w", err)
 	}
 	rows, err := deliveryLifecycleRowsFromSnapshots(page.Snapshots, func(eventID string) (deliveryLifecycleEventMetadata, error) {
-		record, found, err := loadSQLiteEventIdentity(ctx, s.DB, eventID)
+		record, found, err := loadSQLiteEventIdentity(ctx, s.backend.db, eventID)
 		if err != nil {
 			return deliveryLifecycleEventMetadata{}, err
 		}

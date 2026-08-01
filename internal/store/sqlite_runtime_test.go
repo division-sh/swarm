@@ -87,7 +87,7 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	}
 
 	entityID := uuid.NewString()
-	if _, err := store.DB.ExecContext(ctx, `
+	if _, err := store.backend.db.ExecContext(ctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
@@ -241,7 +241,7 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	now := time.Now().UTC()
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: store.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 	event := eventtest.PersistedProjection(
 		eventID, events.EventType("custom.stop"), "test", "", json.RawMessage(`{}`), 0,
 		runID, "", events.EventEnvelope{}, now,
@@ -269,7 +269,7 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 
 	var deliveryStatus, reasonCode, activeSession string
 	var stoppedFailure []byte
-	if err := store.DB.QueryRowContext(ctx, `
+	if err := store.backend.db.QueryRowContext(ctx, `
 		SELECT status, COALESCE(reason_code, ''), failure, COALESCE(CAST(current_attempt_version AS TEXT), '')
 		FROM event_deliveries
 		WHERE event_id = ?
@@ -281,7 +281,7 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 		t.Fatalf("stopped sqlite delivery = %s/%s failure=%s active=%q, want dead_letter/run_stopped/typed failure/no active session", deliveryStatus, reasonCode, stoppedFailure, activeSession)
 	}
 	assertParentTerminalizationFailure(t, stoppedFailure, "run_stopped")
-	if err := store.DB.QueryRowContext(ctx, `
+	if err := store.backend.db.QueryRowContext(ctx, `
 		SELECT status, COALESCE(reason_code, ''), failure, COALESCE(CAST(current_attempt_version AS TEXT), '')
 		FROM event_deliveries
 		WHERE event_id = ?
@@ -296,7 +296,7 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 	assertParentTerminalizationFailure(t, stoppedFailure, "run_stopped")
 
 	var agentOutcome, agentReason string
-	if err := store.DB.QueryRowContext(ctx, `
+	if err := store.backend.db.QueryRowContext(ctx, `
 		SELECT o.outcome, COALESCE(o.reason_code, '')
 		FROM event_delivery_outcomes o
 		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
@@ -310,7 +310,7 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 		t.Fatalf("stopped sqlite agent outcome = %s/%s, want terminalized/run_stopped", agentOutcome, agentReason)
 	}
 	var nodeOutcome, nodeReason string
-	if err := store.DB.QueryRowContext(ctx, `
+	if err := store.backend.db.QueryRowContext(ctx, `
 		SELECT o.outcome, COALESCE(o.reason_code, '')
 		FROM event_delivery_outcomes o
 		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
@@ -325,7 +325,7 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 	}
 
 	var pipelineOutcome string
-	if err := store.DB.QueryRowContext(ctx, `
+	if err := store.backend.db.QueryRowContext(ctx, `
 		SELECT outcome
 		FROM event_receipts
 		WHERE event_id = ?
@@ -354,7 +354,7 @@ func TestSQLiteRuntimeStoreUpsertAgentConsumesActivePipelineTransaction(t *testi
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), uuid.NewString())
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 
-	tx, err := store.DB.BeginTx(ctx, nil)
+	tx, err := store.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin sqlite tx: %v", err)
 	}
@@ -411,7 +411,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContext()), runID)
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: sqliteStore.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: sqliteStore.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	bus := &sqliteFlowActivationBus{}
 	bundle := sqliteFlowActivationBundle()
 	workflowStore := configureSQLiteFlowActivationLifecycle(t, sqliteStore, bus, bundle)
@@ -464,7 +464,7 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContext()), runID)
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: sqliteStore.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: sqliteStore.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	bus := &sqliteFlowActivationBus{}
 	bundle := sqliteFlowActivationBundle()
 	workflowStore := configureSQLiteFlowActivationLifecycle(t, sqliteStore, bus, bundle)
@@ -592,7 +592,7 @@ func configureSQLiteFlowActivationLifecycle(
 	}
 	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, runtimepipeline.PipelineCoordinatorOptions{
 		Module:                  module,
-		Persistence:             runtimepipeline.NewSQLiteWorkflowPersistence(selected.DB, selected),
+		Persistence:             runtimepipeline.NewSQLiteWorkflowPersistence(selected.backend.db, selected),
 		RunLifecycle:            selected,
 		PipelineObligations:     selected.PipelineObligations(),
 		DeliveryStore:           selected,
@@ -1117,7 +1117,7 @@ func TestSQLiteRuntimeStoreRuntimeIngressReadDuringPublishDoesNotReenterWrite(t 
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: store.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	bus, err := newStoreTestEventBus(t, store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -1144,7 +1144,7 @@ func TestSQLiteRuntimeStoreRuntimeIngressReadDuringPublishDoesNotReenterWrite(t 
 		t.Fatalf("Publish with runtime ingress gate: %v", err)
 	}
 	var count int
-	if err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = ?`, eventID).Scan(&count); err != nil {
+	if err := store.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = ?`, eventID).Scan(&count); err != nil {
 		t.Fatalf("count event: %v", err)
 	}
 	if count != 1 {
@@ -1155,7 +1155,7 @@ func TestSQLiteRuntimeStoreRuntimeIngressReadDuringPublishDoesNotReenterWrite(t 
 func assertSQLiteRuntimeCount(t *testing.T, store *SQLiteRuntimeStore, query string, want int, args ...any) {
 	t.Helper()
 	var count int
-	if err := store.DB.QueryRowContext(testAuthorActivityContext(), query, args...).Scan(&count); err != nil {
+	if err := store.backend.db.QueryRowContext(testAuthorActivityContext(), query, args...).Scan(&count); err != nil {
 		t.Fatalf("count sqlite runtime rows: %v", err)
 	}
 	if count != want {
@@ -1168,8 +1168,8 @@ func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
-	owner := newSQLiteWorkflowTestCoordinator(t, store.DB, store)
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: store.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	owner := newSQLiteWorkflowTestCoordinator(t, store.backend.db, store)
 	entityID := runtimepipeline.FlowInstanceEntityID("root/acme")
 	createdAt := time.Now().UTC()
 	if _, err := owner.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
@@ -1198,7 +1198,7 @@ func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 		t.Fatalf("loaded workflow instance = %#v, want qualified acme", loaded)
 	}
 	var mutationCount int
-	if err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_mutations WHERE run_id = ? AND entity_id = ?`, runID, entityID).Scan(&mutationCount); err != nil {
+	if err := store.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_mutations WHERE run_id = ? AND entity_id = ?`, runID, entityID).Scan(&mutationCount); err != nil {
 		t.Fatalf("count sqlite entity mutations: %v", err)
 	}
 	if mutationCount == 0 {
@@ -1213,7 +1213,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	store.SetNowFnForTest(func() time.Time { return now })
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: store.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
@@ -1359,7 +1359,7 @@ func TestSQLiteRuntimeStore_StatelessAuditUsesExplicitMemoryPlan(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	sessionID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: store.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 
 	if err := store.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
 		AgentID:        "task-agent",
@@ -1377,7 +1377,7 @@ func TestSQLiteRuntimeStore_StatelessAuditUsesExplicitMemoryPlan(t *testing.T) {
 	var count int
 	var entityID, flowInstance, conversation, persistedRunID, status, memorySource string
 	var memoryEnabled bool
-	if err := store.DB.QueryRowContext(ctx, `
+	if err := store.backend.db.QueryRowContext(ctx, `
 		SELECT COUNT(*), COALESCE(MAX(entity_id), ''), COALESCE(MAX(flow_instance), ''),
 		       COALESCE(MAX(conversation), ''), COALESCE(MAX(run_id), ''), COALESCE(MAX(status), ''),
 		       MAX(memory_enabled), COALESCE(MAX(memory_source), '')
@@ -1400,7 +1400,7 @@ func TestSQLiteRuntimeStore_StatelessAuditUsesExplicitMemoryPlan(t *testing.T) {
 	}
 
 	var turns int
-	if err := store.DB.QueryRowContext(ctx, `
+	if err := store.backend.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM agent_turns
 		WHERE session_id = ? AND memory_enabled = 0
@@ -1418,7 +1418,7 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsEntityMetadata(t *testing.T) {
 	runID := uuid.NewString()
 	sessionID := uuid.NewString()
 	entityID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: store.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 
 	if err := store.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
 		AgentID:        "task-agent",
@@ -1437,7 +1437,7 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsEntityMetadata(t *testing.T) {
 	var count int
 	var gotEntityID, flowInstance, conversation, memorySource string
 	var memoryEnabled bool
-	if err := store.DB.QueryRowContext(ctx, `
+	if err := store.backend.db.QueryRowContext(ctx, `
 		SELECT COUNT(*), COALESCE(MAX(entity_id), ''), COALESCE(MAX(flow_instance), ''),
 		       COALESCE(MAX(conversation), ''), MAX(memory_enabled), COALESCE(MAX(memory_source), '')
 		FROM agent_conversation_audits
@@ -1456,7 +1456,7 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsEntityMetadata(t *testing.T) {
 	}
 
 	var linkedTurns int
-	if err := store.DB.QueryRowContext(ctx, `
+	if err := store.backend.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM agent_turns
 		WHERE session_id = ? AND memory_enabled = 0 AND entity_id = ?
@@ -1474,7 +1474,7 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsFlowInstanceMetadata(t *testin
 	runID := uuid.NewString()
 	sessionID := uuid.NewString()
 	flowInstance := "review/inst-1"
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: store.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 
 	if err := store.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
 		AgentID:        "task-agent",
@@ -1493,7 +1493,7 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsFlowInstanceMetadata(t *testin
 	var count int
 	var entityID, gotFlowInstance, conversation, memorySource string
 	var memoryEnabled bool
-	if err := store.DB.QueryRowContext(ctx, `
+	if err := store.backend.db.QueryRowContext(ctx, `
 		SELECT COUNT(*), COALESCE(MAX(entity_id), ''), COALESCE(MAX(flow_instance), ''),
 		       COALESCE(MAX(conversation), ''), MAX(memory_enabled), COALESCE(MAX(memory_source), '')
 		FROM agent_conversation_audits
@@ -1512,7 +1512,7 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsFlowInstanceMetadata(t *testin
 	}
 
 	var linkedTurns int
-	if err := store.DB.QueryRowContext(ctx, `
+	if err := store.backend.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM agent_turns
 		WHERE session_id = ? AND memory_enabled = 0
@@ -1530,7 +1530,7 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
 	store.SetNowFnForTest(func() time.Time { return now })
 	runID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: store.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
@@ -1602,17 +1602,17 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 		auditStatus      string
 		activeAuditCount int
 	)
-	if err := store.DB.QueryRowContext(ctx, `SELECT status FROM agents WHERE agent_id = ?`, "agent-cleanup-1").Scan(&agentStatus); err != nil {
+	if err := store.backend.db.QueryRowContext(ctx, `SELECT status FROM agents WHERE agent_id = ?`, "agent-cleanup-1").Scan(&agentStatus); err != nil {
 		t.Fatalf("read agent status: %v", err)
 	}
-	if err := store.DB.QueryRowContext(ctx, `
+	if err := store.backend.db.QueryRowContext(ctx, `
 		SELECT status, COALESCE(termination_reason, ''), terminated_at
 		FROM agent_sessions
 		WHERE agent_id = ?
 	`, "agent-cleanup-1").Scan(&sessionStatus, &sessionReason, &terminatedRaw); err != nil {
 		t.Fatalf("read session status: %v", err)
 	}
-	if err := store.DB.QueryRowContext(ctx, `
+	if err := store.backend.db.QueryRowContext(ctx, `
 		SELECT status
 		FROM agent_conversation_audits
 		WHERE agent_id = ?
@@ -1621,7 +1621,7 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 	`, "agent-cleanup-1").Scan(&auditStatus); err != nil {
 		t.Fatalf("read audit status: %v", err)
 	}
-	if err := store.DB.QueryRowContext(ctx, `
+	if err := store.backend.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM agent_conversation_audits
 		WHERE agent_id = ?
@@ -1717,7 +1717,7 @@ func TestSQLiteRuntimeStoreScheduleUsesPipelineTransactionForCommitVisibility(t 
 	seedSQLiteScheduleRun(t, store, ctx, runID)
 	schedule := sqliteScheduleTransactionTestSchedule(t, runID, "task-commit")
 
-	tx, err := store.DB.BeginTx(ctx, nil)
+	tx, err := store.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx(upsert): %v", err)
 	}
@@ -1733,7 +1733,7 @@ func TestSQLiteRuntimeStoreScheduleUsesPipelineTransactionForCommitVisibility(t 
 	}
 	assertSQLiteScheduleClaimed(t, store, ctx, schedule, true)
 
-	tx, err = store.DB.BeginTx(ctx, nil)
+	tx, err = store.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx(cancel): %v", err)
 	}
@@ -1751,7 +1751,7 @@ func TestSQLiteRuntimeStoreScheduleUsesPipelineTransactionForCommitVisibility(t 
 	if err := store.UpsertSchedule(ctx, schedule); err != nil {
 		t.Fatalf("UpsertSchedule(before complete): %v", err)
 	}
-	tx, err = store.DB.BeginTx(ctx, nil)
+	tx, err = store.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx(complete): %v", err)
 	}
@@ -1774,7 +1774,7 @@ func TestSQLiteRuntimeStoreScheduleUsesPipelineTransactionForRollbackVisibility(
 	seedSQLiteScheduleRun(t, store, ctx, runID)
 	schedule := sqliteScheduleTransactionTestSchedule(t, runID, "task-rollback")
 
-	tx, err := store.DB.BeginTx(ctx, nil)
+	tx, err := store.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx(upsert rollback): %v", err)
 	}
@@ -1791,7 +1791,7 @@ func TestSQLiteRuntimeStoreScheduleUsesPipelineTransactionForRollbackVisibility(
 	if err := store.UpsertSchedule(ctx, schedule); err != nil {
 		t.Fatalf("UpsertSchedule(seed active): %v", err)
 	}
-	tx, err = store.DB.BeginTx(ctx, nil)
+	tx, err = store.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx(cancel rollback): %v", err)
 	}
@@ -1809,7 +1809,7 @@ func TestSQLiteRuntimeStoreScheduleUsesPipelineTransactionForRollbackVisibility(
 
 func seedSQLiteScheduleRun(t *testing.T, store *SQLiteRuntimeStore, ctx context.Context, runID string) {
 	t.Helper()
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC()})
+	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: store.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC()})
 }
 
 func sqliteScheduleTransactionTestSchedule(t *testing.T, runID, taskID string) runtimepipeline.Schedule {

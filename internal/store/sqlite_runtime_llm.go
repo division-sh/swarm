@@ -183,7 +183,7 @@ func (s *SQLiteRuntimeStore) LoadActiveConversation(ctx context.Context, identit
 	var sessionID, status string
 	var conversation, runtimeState any
 	var turnCount int
-	err = s.DB.QueryRowContext(ctx, `
+	err = s.backend.db.QueryRowContext(ctx, `
 		SELECT s.session_id,s.status,COALESCE(s.conversation,'[]'),COALESCE(s.runtime_state,'{}'),s.turn_count
 		FROM agent_sessions s
 		JOIN runs run ON run.run_id = s.run_id

@@ -49,7 +49,7 @@ func (s *PostgresStore) acquirePostgresLiveSession(ctx context.Context, identity
 		return nil, runtimellm.ConversationRecord{}, err
 	}
 	defer handoff.rollback()
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, runtimellm.ConversationRecord{}, fmt.Errorf("begin live session acquire: %w", err)
 	}
@@ -177,7 +177,7 @@ func (s *PostgresStore) Release(ctx context.Context, lease *runtimesessions.Leas
 		return err
 	}
 	defer handoff.rollback()
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin live session release: %w", err)
 	}
@@ -230,7 +230,7 @@ func (s *PostgresStore) Rotate(ctx context.Context, identity agentmemory.Identit
 		return nil, err
 	}
 	defer handoff.rollback()
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -341,7 +341,7 @@ func (s *PostgresStore) IncrementTurn(ctx context.Context, identity agentmemory.
 	if err != nil {
 		return err
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -390,7 +390,7 @@ func (s *PostgresStore) AdoptSessionID(ctx context.Context, identity agentmemory
 		return err
 	}
 	defer handoff.rollback()
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -447,7 +447,7 @@ func (s *PostgresStore) AdoptSessionID(ctx context.Context, identity agentmemory
 }
 
 func (s *PostgresStore) ResetAll(metadata runtimesessions.ResetMetadata) (runtimesessions.ResetSummary, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return runtimesessions.ResetSummary{}, nil
 	}
 	source := strings.TrimSpace(metadata.Source)
@@ -457,7 +457,7 @@ func (s *PostgresStore) ResetAll(metadata runtimesessions.ResetMetadata) (runtim
 		return runtimesessions.ResetSummary{}, err
 	}
 	defer handoff.rollback()
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return runtimesessions.ResetSummary{}, fmt.Errorf("begin reset postgres live sessions: %w", err)
 	}

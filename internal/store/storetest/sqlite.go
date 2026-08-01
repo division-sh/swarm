@@ -94,7 +94,7 @@ func StartSQLiteRuntimeStoreWithContext(t testing.TB, ctx context.Context) *stor
 // PostgreSQL test database and returns the admitted store object.
 func AdmitPostgresRuntimeStore(t testing.TB, db *sql.DB) *store.PostgresStore {
 	t.Helper()
-	postgresStore := &store.PostgresStore{DB: db}
+	postgresStore := store.NewPostgresStoreForTest(db)
 	BootstrapPostgresRuntimeStore(t, postgresStore)
 	return postgresStore
 }
@@ -103,9 +103,7 @@ func AdmitPostgresRuntimeStore(t testing.TB, db *sql.DB) *store.PostgresStore {
 // SQLite test database and returns the admitted store object.
 func AdmitSQLiteRuntimeStore(t testing.TB, db *sql.DB) *store.SQLiteRuntimeStore {
 	t.Helper()
-	sqliteStore := &store.SQLiteRuntimeStore{
-		SQLiteSchemaStore: &store.SQLiteSchemaStore{DB: db},
-	}
+	sqliteStore := store.NewSQLiteRuntimeStoreForTest(db)
 	platformSpec, plans := canonicalPlatformPlans(t)
 	if err := sqliteStore.BootstrapSchema(context.Background(), store.SchemaBootstrapRequest{
 		PlatformPlans: plans,

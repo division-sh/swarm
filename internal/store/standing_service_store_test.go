@@ -88,7 +88,7 @@ func TestStandingServiceTerminalizationSignalUsesCallbackTimeRegistrationParity(
 				)
 				if backend == "sqlite" {
 					sqliteSelected := newBootstrappedSQLiteRuntimeStoreForTest(t)
-					db, base, deliveryStore = sqliteSelected.DB, sqliteSelected, sqliteSelected
+					db, base, deliveryStore = sqliteSelected.backend.db, sqliteSelected, sqliteSelected
 					selected = sqliteSelected
 					dialect, adapter = runtimeauthoractivity.DialectSQLite, sqliteDeliveryAdapter
 				} else {
@@ -281,7 +281,7 @@ func TestStandingServiceTerminalizationBeforeRegistrationIsRecoveredByStartupSca
 			)
 			if backend == "sqlite" {
 				sqliteSelected := newBootstrappedSQLiteRuntimeStoreForTest(t)
-				db, deliveryStore = sqliteSelected.DB, sqliteSelected
+				db, deliveryStore = sqliteSelected.backend.db, sqliteSelected
 				selected = sqliteSelected
 				dialect, adapter = runtimeauthoractivity.DialectSQLite, sqliteDeliveryAdapter
 			} else {
@@ -400,7 +400,7 @@ func TestStandingServiceTerminalizationSignalFollowsTransactionOutcomeParity(t *
 					)
 					if backend == "sqlite" {
 						sqliteSelected := newBootstrappedSQLiteRuntimeStoreForTest(t)
-						db = sqliteSelected.DB
+						db = sqliteSelected.backend.db
 						base = sqliteSelected
 						selected = sqliteSelected
 						deliveryStore = sqliteSelected
@@ -628,7 +628,7 @@ func awaitStandingTerminalResolution(
 func TestSQLiteStandingServiceReconcileCreatesPublishesAndRepairsRestartAbandon(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.DB, store)
+	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.db, store)
 	packageKey := "project"
 	flowID := "ingress"
 	serviceID := runtimeflowidentity.StandingServiceID(packageKey, flowID)
@@ -641,7 +641,7 @@ func TestSQLiteStandingServiceReconcileCreatesPublishesAndRepairsRestartAbandon(
 		InstanceID: instanceID, EntityID: entityID,
 		Source: mustStoreTestPersistedBundleSourceFact(firstHash),
 	}
-	seedStoreTestPersistedBundle(t, store.DB, firstHash)
+	seedStoreTestPersistedBundle(t, store.backend.db, firstHash)
 
 	created, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
@@ -654,7 +654,7 @@ func TestSQLiteStandingServiceReconcileCreatesPublishesAndRepairsRestartAbandon(
 	if err != nil || sequence != 1 {
 		t.Fatalf("PublishStandingService = %d, %v", sequence, err)
 	}
-	if _, err := store.DB.ExecContext(ctx, `
+	if _, err := store.backend.db.ExecContext(ctx, `
 		INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, fields, gates, accumulator, entered_state_at, created_at, updated_at)
 		VALUES (?, ?, ?, 'default', 'ready', '{"name":"preserved"}', '{}', '{}', ?, ?, ?)
 	`, created.RunID, entityID, "ingress/"+instanceID, time.Now().UTC(), time.Now().UTC(), time.Now().UTC()); err != nil {
@@ -665,11 +665,11 @@ func TestSQLiteStandingServiceReconcileCreatesPublishesAndRepairsRestartAbandon(
 	); err != nil {
 		t.Fatalf("cancel standing run: %v", err)
 	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, stopped_at, updated_at) VALUES (?, 'stopped', 'server_restart_abandon', 'swarm.serve.abandon_active_runs', ?, ?)`, created.RunID, time.Now().UTC(), time.Now().UTC()); err != nil {
+	if _, err := store.backend.db.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, stopped_at, updated_at) VALUES (?, 'stopped', 'server_restart_abandon', 'swarm.serve.abandon_active_runs', ?, ?)`, created.RunID, time.Now().UTC(), time.Now().UTC()); err != nil {
 		t.Fatalf("seed restart-abandon provenance: %v", err)
 	}
 	candidate.Source = mustStoreTestPersistedBundleSourceFact(secondHash)
-	seedStoreTestPersistedBundle(t, store.DB, secondHash)
+	seedStoreTestPersistedBundle(t, store.backend.db, secondHash)
 	repaired, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
 		t.Fatalf("ReconcileStandingService(repair): %v", err)
@@ -678,14 +678,14 @@ func TestSQLiteStandingServiceReconcileCreatesPublishesAndRepairsRestartAbandon(
 		t.Fatalf("repaired reconciliation = %#v", repaired)
 	}
 	var state, name string
-	if err := store.DB.QueryRowContext(ctx, `SELECT current_state, json_extract(fields, '$.name') FROM entity_state WHERE run_id = ? AND entity_id = ?`, repaired.RunID, entityID).Scan(&state, &name); err != nil {
+	if err := store.backend.db.QueryRowContext(ctx, `SELECT current_state, json_extract(fields, '$.name') FROM entity_state WHERE run_id = ? AND entity_id = ?`, repaired.RunID, entityID).Scan(&state, &name); err != nil {
 		t.Fatalf("load repaired entity state: %v", err)
 	}
 	if state != "ready" || name != "preserved" {
 		t.Fatalf("repaired entity state = %s/%s", state, name)
 	}
 	var oldStatus, retiredReason string
-	if err := store.DB.QueryRowContext(ctx, `
+	if err := store.backend.db.QueryRowContext(ctx, `
 		SELECT r.status, COALESCE(g.retired_reason, '')
 		FROM runs r JOIN standing_service_generations g ON g.run_id = r.run_id
 		WHERE r.run_id = ?
@@ -700,14 +700,14 @@ func TestSQLiteStandingServiceReconcileCreatesPublishesAndRepairsRestartAbandon(
 func TestSQLiteStandingServiceReconcileRejectsUnknownTerminalityWithCommand(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.DB, store)
+	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.db, store)
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
 		InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
 		Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("3", 64)),
 	}
-	seedStoreTestPersistedBundle(t, store.DB, candidate.Source.BundleHash())
+	seedStoreTestPersistedBundle(t, store.backend.db, candidate.Source.BundleHash())
 	created, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
 		t.Fatal(err)
@@ -726,14 +726,14 @@ func TestSQLiteStandingServiceReconcileRejectsUnknownTerminalityWithCommand(t *t
 func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.DB, store)
+	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.db, store)
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
 		InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
 		Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("4", 64)),
 	}
-	seedStoreTestPersistedBundle(t, store.DB, candidate.Source.BundleHash())
+	seedStoreTestPersistedBundle(t, store.backend.db, candidate.Source.BundleHash())
 	created, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
 		t.Fatal(err)
@@ -763,8 +763,8 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	)); err != nil {
 		t.Fatal(err)
 	}
-	seedTestAgentRow(t, ctx, store.DB, false, identity, "active")
-	if _, err := store.DB.ExecContext(ctx, `
+	seedTestAgentRow(t, ctx, store.backend.db, false, identity, "active")
+	if _, err := store.backend.db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
@@ -781,7 +781,7 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	if _, err := store.BindAgentSession(fixtureCtx, claimed.Claim, sessionID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.DB.ExecContext(ctx, `INSERT INTO timers (timer_id, timer_name, run_id, fire_event, routing_source, fire_at, owner_kind, status) VALUES (?, ?, ?, 'timer.fire', '{"kind":"platform_control","route":{}}', ?, 'system', 'active')`, timerID, aggregateWorkflowTimerTaskID(timerID), created.RunID, time.Now().UTC().Add(time.Hour)); err != nil {
+	if _, err := store.backend.db.ExecContext(ctx, `INSERT INTO timers (timer_id, timer_name, run_id, fire_event, routing_source, fire_at, owner_kind, status) VALUES (?, ?, ?, 'timer.fire', '{"kind":"platform_control","route":{}}', ?, 'system', 'active')`, timerID, aggregateWorkflowTimerTaskID(timerID), created.RunID, time.Now().UTC().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -793,24 +793,24 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 		t.Fatalf("suspended = %#v", suspended)
 	}
 	var runStatus, deliveryStatus, deliveryReason, sessionStatus, sessionReason, timerStatus string
-	if err := store.DB.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = ?`, created.RunID).Scan(&runStatus); err != nil {
+	if err := store.backend.db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = ?`, created.RunID).Scan(&runStatus); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.DB.QueryRowContext(ctx, `
+	if err := store.backend.db.QueryRowContext(ctx, `
 		SELECT status, reason_code
 		FROM event_deliveries
 		WHERE event_id = ? AND subscriber_type = 'agent' AND subscriber_id = ?
 	`, eventID, agentID).Scan(&deliveryStatus, &deliveryReason); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.DB.QueryRowContext(ctx, `SELECT status, termination_reason FROM agent_sessions WHERE session_id = ?`, sessionID).Scan(&sessionStatus, &sessionReason); err != nil {
+	if err := store.backend.db.QueryRowContext(ctx, `SELECT status, termination_reason FROM agent_sessions WHERE session_id = ?`, sessionID).Scan(&sessionStatus, &sessionReason); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.DB.QueryRowContext(ctx, `SELECT status FROM timers WHERE timer_id = ?`, timerID).Scan(&timerStatus); err != nil {
+	if err := store.backend.db.QueryRowContext(ctx, `SELECT status FROM timers WHERE timer_id = ?`, timerID).Scan(&timerStatus); err != nil {
 		t.Fatal(err)
 	}
 	var pipelineOutcome, pipelineReason string
-	if err := store.DB.QueryRowContext(ctx, `SELECT outcome, reason_code FROM event_receipts WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, unsettledEventID).Scan(&pipelineOutcome, &pipelineReason); err != nil {
+	if err := store.backend.db.QueryRowContext(ctx, `SELECT outcome, reason_code FROM event_receipts WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, unsettledEventID).Scan(&pipelineOutcome, &pipelineReason); err != nil {
 		t.Fatal(err)
 	}
 	if runStatus != "paused" || deliveryStatus != "dead_letter" || deliveryReason != "standing_suspended" || sessionStatus != "terminated" || sessionReason != "cancelled" || timerStatus != "cancelled" {
@@ -842,7 +842,7 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	if reset.Transition != "reset" || reset.Generation != 2 || reset.RunID != runtimeflowidentity.StandingGenerationRunID(serviceID, 2) {
 		t.Fatalf("reset = %#v", reset)
 	}
-	if err := store.DB.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = ?`, created.RunID).Scan(&runStatus); err != nil {
+	if err := store.backend.db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = ?`, created.RunID).Scan(&runStatus); err != nil {
 		t.Fatal(err)
 	}
 	if runStatus != "cancelled" {
@@ -853,14 +853,14 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 func TestSQLiteStandingServiceSetOrphansRemovedDeclaration(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.DB, store)
+	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.db, store)
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
 		InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
 		Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("5", 64)),
 	}
-	seedStoreTestPersistedBundle(t, store.DB, candidate.Source.BundleHash())
+	seedStoreTestPersistedBundle(t, store.backend.db, candidate.Source.BundleHash())
 	created, err := workflowStore.ReconcileStandingServiceSet(ctx, []runtimepipeline.StandingServiceCandidate{candidate})
 	if err != nil || len(created) != 1 {
 		t.Fatalf("create set = %#v, %v", created, err)
@@ -874,10 +874,10 @@ func TestSQLiteStandingServiceSetOrphansRemovedDeclaration(t *testing.T) {
 	}
 	var declarationPresent bool
 	var effectiveState, runStatus string
-	if err := store.DB.QueryRowContext(ctx, `SELECT declaration_present, effective_state FROM standing_services WHERE service_id = ?`, serviceID).Scan(&declarationPresent, &effectiveState); err != nil {
+	if err := store.backend.db.QueryRowContext(ctx, `SELECT declaration_present, effective_state FROM standing_services WHERE service_id = ?`, serviceID).Scan(&declarationPresent, &effectiveState); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.DB.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = ?`, created[0].RunID).Scan(&runStatus); err != nil {
+	if err := store.backend.db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = ?`, created[0].RunID).Scan(&runStatus); err != nil {
 		t.Fatal(err)
 	}
 	if declarationPresent || effectiveState != "orphaned" || runStatus != "paused" {
@@ -887,8 +887,8 @@ func TestSQLiteStandingServiceSetOrphansRemovedDeclaration(t *testing.T) {
 
 func TestSQLiteStandingServiceReplacementIsScopedAndAtomic(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.DB, store)
-	testStandingServiceReplacementIsScopedAndAtomic(t, store.DB, workflowStore)
+	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.db, store)
+	testStandingServiceReplacementIsScopedAndAtomic(t, store.backend.db, workflowStore)
 }
 
 func TestPostgresStandingServiceReplacementIsScopedAndAtomic(t *testing.T) {
@@ -1082,13 +1082,13 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 func TestSQLiteRunStopRefusesCurrentStandingGenerationWithTeachingCommand(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.DB, store)
+	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.db, store)
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress", InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
 		Source: mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("7", 64)),
 	}
-	seedStoreTestPersistedBundle(t, store.DB, candidate.Source.BundleHash())
+	seedStoreTestPersistedBundle(t, store.backend.db, candidate.Source.BundleHash())
 	created, err := workflowStore.ReconcileStandingService(ctx, candidate)
 	if err != nil {
 		t.Fatal(err)
@@ -1098,7 +1098,7 @@ func TestSQLiteRunStopRefusesCurrentStandingGenerationWithTeachingCommand(t *tes
 		t.Fatalf("StopRunControl error = %v", err)
 	}
 	var status string
-	if err := store.DB.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = ?`, created.RunID).Scan(&status); err != nil {
+	if err := store.backend.db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = ?`, created.RunID).Scan(&status); err != nil {
 		t.Fatal(err)
 	}
 	if status != "running" {

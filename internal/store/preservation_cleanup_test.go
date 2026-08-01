@@ -25,7 +25,7 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.DB.Close() })
+	t.Cleanup(func() { _ = pg.backend.db.Close() })
 
 	ctx := testAuthorActivityContextForBundle(testCanonicalBundleHash)
 	now := time.Now().UTC().Add(time.Minute)
@@ -34,7 +34,7 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 	if err != nil {
 		t.Fatalf("agent identity fields: %v", err)
 	}
-	seedTestAgentRow(t, ctx, pg.DB, true, agentIdentity, "active")
+	seedTestAgentRow(t, ctx, pg.backend.db, true, agentIdentity, "active")
 
 	targets := []preservationcleanup.RunTarget{}
 	byRun := map[string]preservationcleanup.RunTarget{}
@@ -53,8 +53,8 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 		runID := uuid.NewString()
 		sessionID := uuid.NewString()
 		timerID := uuid.NewString()
-		requireRunFixtureForTest(t, ctx, &PostgresStore{DB: pg.DB}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, BundleHash: testCanonicalBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
-		if _, err := pg.DB.ExecContext(ctx, `
+		requireRunFixtureForTest(t, ctx, &PostgresStore{backend: &postgresRuntimeBackend{db: pg.backend.db}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, BundleHash: testCanonicalBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
+		if _, err := pg.backend.db.ExecContext(ctx, `
 			INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 				agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
@@ -77,7 +77,7 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 		}); err != nil || snapshot.Status != runtimedelivery.StatusFailed {
 			t.Fatalf("seed retryable delivery %s: snapshot=%#v err=%v", source, snapshot, err)
 		}
-		if _, err := pg.DB.ExecContext(ctx, `
+		if _, err := pg.backend.db.ExecContext(ctx, `
 			INSERT INTO timers (timer_id, timer_name, run_id, fire_event, routing_source, fire_at, owner_kind, status)
 			VALUES ($1::uuid, $2, $3::uuid, 'timer.fired', '{"kind":"platform_control","route":{}}'::jsonb, now() + interval '1 hour', 'system', 'active')
 		`, timerID, aggregateWorkflowTimerTaskID(timerID), runID); err != nil {
@@ -85,7 +85,7 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 		}
 		if source.IsDeleted() {
 			runlifecyclefixture.CorruptPostgresSource(
-				t, ctx, pg.DB, runID, testCanonicalBundleHash, source.String(),
+				t, ctx, pg.backend.db, runID, testCanonicalBundleHash, source.String(),
 			)
 		}
 		cause, ok := preservationcleanup.CauseForBundleSource(source)
@@ -124,7 +124,7 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 		assertUnavailableBundlePreservationTimer(t, ctx, pg, item.timerID)
 	}
 	var eventCount int
-	if err := pg.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&eventCount); err != nil {
+	if err := pg.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&eventCount); err != nil {
 		t.Fatalf("count events: %v", err)
 	}
 	if eventCount != 4 {
@@ -137,7 +137,7 @@ func assertUnavailableBundlePreservationRun(t *testing.T, ctx context.Context, p
 	var status, source, controlStatus, controlReason, controlledBy string
 	var failure []byte
 	var endedAt sql.NullTime
-	if err := pg.DB.QueryRowContext(ctx, `
+	if err := pg.backend.db.QueryRowContext(ctx, `
 		SELECT
 			r.status,
 			r.bundle_source,
@@ -164,7 +164,7 @@ func assertUnavailableBundlePreservationDelivery(t *testing.T, ctx context.Conte
 	t.Helper()
 	var status, reason string
 	var activeSession sql.NullString
-	if err := pg.DB.QueryRowContext(ctx, `
+	if err := pg.backend.db.QueryRowContext(ctx, `
 		SELECT status, COALESCE(reason_code, ''), current_attempt_version::text
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
@@ -194,7 +194,7 @@ func assertUnavailableBundlePreservationReceipt(t *testing.T, ctx context.Contex
 		query = `SELECT outcome, COALESCE(reason_code, '') FROM event_receipts WHERE event_id = $1::uuid AND subscriber_id = $2`
 		wantOutcome = "dead_letter"
 	}
-	if err := pg.DB.QueryRowContext(ctx, query, eventID, subscriberID).Scan(&outcome, &reason); err != nil {
+	if err := pg.backend.db.QueryRowContext(ctx, query, eventID, subscriberID).Scan(&outcome, &reason); err != nil {
 		t.Fatalf("load receipt %s/%s: %v", eventID, subscriberID, err)
 	}
 	if outcome != wantOutcome || reason != wantReason {
@@ -206,7 +206,7 @@ func assertUnavailableBundlePreservationSession(t *testing.T, ctx context.Contex
 	t.Helper()
 	var status, reason, detail string
 	var terminatedAt sql.NullTime
-	if err := pg.DB.QueryRowContext(ctx, `
+	if err := pg.backend.db.QueryRowContext(ctx, `
 		SELECT status, COALESCE(termination_reason, ''), COALESCE(termination_detail, ''), terminated_at
 		FROM agent_sessions
 		WHERE session_id = $1::uuid
@@ -221,7 +221,7 @@ func assertUnavailableBundlePreservationSession(t *testing.T, ctx context.Contex
 func assertUnavailableBundlePreservationTimer(t *testing.T, ctx context.Context, pg *PostgresStore, timerID string) {
 	t.Helper()
 	var status string
-	if err := pg.DB.QueryRowContext(ctx, `SELECT status FROM timers WHERE timer_id = $1::uuid`, timerID).Scan(&status); err != nil {
+	if err := pg.backend.db.QueryRowContext(ctx, `SELECT status FROM timers WHERE timer_id = $1::uuid`, timerID).Scan(&status); err != nil {
 		t.Fatalf("load timer %s: %v", timerID, err)
 	}
 	if status != "cancelled" {

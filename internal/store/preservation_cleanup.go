@@ -45,7 +45,7 @@ func (s *PostgresStore) ApplyBundleForceDeletePreservationCleanup(ctx context.Co
 }
 
 func (s *PostgresStore) applyPreservationCleanup(ctx context.Context, req preservationcleanup.Request, defaultOperationName, defaultControlledBy string) (preservationcleanup.Result, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return preservationcleanup.Result{}, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -85,7 +85,7 @@ func (s *PostgresStore) applyPreservationCleanup(ctx context.Context, req preser
 		runIDs = append(runIDs, target.RunID)
 	}
 
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return preservationcleanup.Result{}, fmt.Errorf("begin preservation cleanup tx: %w", err)
 	}

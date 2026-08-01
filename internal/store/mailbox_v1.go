@@ -81,7 +81,7 @@ type MailboxV1DownstreamPreview struct {
 }
 
 func (s *PostgresStore) ListV1MailboxItems(ctx context.Context, opts MailboxV1ListOptions) ([]MailboxV1Item, string, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return nil, "", fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -102,7 +102,7 @@ func (s *PostgresStore) ListV1MailboxItems(ctx context.Context, opts MailboxV1Li
 	}
 	where, args := mailboxV1ListWhere(opts, cursor)
 	args = append(args, opts.Limit+1)
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT
 			m.item_id::text,
 			m.item_type,
@@ -151,7 +151,7 @@ func (s *PostgresStore) ListV1MailboxItems(ctx context.Context, opts MailboxV1Li
 }
 
 func (s *PostgresStore) GetV1MailboxItem(ctx context.Context, id string) (MailboxV1ItemDetail, error) {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return MailboxV1ItemDetail{}, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -285,7 +285,7 @@ func (s *PostgresStore) loadMailboxV1Row(ctx context.Context, id string) (mailbo
 }
 
 func (s *PostgresStore) loadMailboxV1RowTx(ctx context.Context, tx *sql.Tx, id string, forUpdate bool) (mailboxV1Row, error) {
-	var q mailboxV1RowQueryer = s.DB
+	var q mailboxV1RowQueryer = s.backend.db
 	if tx != nil {
 		q = tx
 	}

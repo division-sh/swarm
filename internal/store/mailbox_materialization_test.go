@@ -125,7 +125,7 @@ func TestSQLiteRuntimeStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner
 		Payload:       json.RawMessage(`{"review_kind":"validation"}`),
 	}
 
-	rollbackTx, err := store.DB.BeginTx(ctx, nil)
+	rollbackTx, err := store.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx rollback: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestSQLiteRuntimeStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner
 	}
 	assertSQLiteMailboxMaterializationCount(t, ctx, store, item.ItemID, 0)
 
-	commitTx, err := store.DB.BeginTx(ctx, nil)
+	commitTx, err := store.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx commit: %v", err)
 	}
@@ -210,7 +210,7 @@ func assertPostgresMailboxMaterializationCount(t *testing.T, ctx context.Context
 func assertSQLiteMailboxMaterializationCount(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, itemID string, want int) {
 	t.Helper()
 	var count int
-	if err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM mailbox WHERE item_id = ?`, itemID).Scan(&count); err != nil {
+	if err := store.backend.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM mailbox WHERE item_id = ?`, itemID).Scan(&count); err != nil {
 		t.Fatalf("count sqlite mailbox materializations: %v", err)
 	}
 	if count != want {

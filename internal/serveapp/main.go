@@ -328,7 +328,7 @@ func selectedPostgresContractExecutionOwner(pg *store.PostgresStore, persistence
 	)
 }
 
-func selectedPostgresStoreBundle(pg *store.PostgresStore, cfg *config.Config) storeBundle {
+func selectedPostgresStoreBundle(pg *store.PostgresStore, constructionDB *sql.DB, cfg *config.Config) storeBundle {
 	if pg == nil {
 		return storeBundle{}
 	}
@@ -336,10 +336,10 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, cfg *config.Config) st
 		cfg = &config.Config{}
 	}
 	pg.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
-	workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(pg.DB, pg)
+	workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(constructionDB, pg)
 	bundle := storeBundle{
 		Postgres:           pg,
-		SQLDB:              pg.DB,
+		SQLDB:              constructionDB,
 		WorkspaceLookup:    pg,
 		Database:           pg,
 		RuntimeLogStore:    pg,
@@ -2191,21 +2191,21 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 		if err != nil {
 			return storeBundle{}, err
 		}
-		pg, err := store.NewPostgresStore(dsn)
+		pg, constructionDB, err := store.OpenPostgresStore(dsn)
 		if err != nil {
 			return storeBundle{}, err
 		}
 		if err := pg.Ping(ctx); err != nil {
 			return storeBundle{}, err
 		}
-		bundle := selectedPostgresStoreBundle(pg, cfg)
+		bundle := selectedPostgresStoreBundle(pg, constructionDB, cfg)
 		if err := validateSelectedStoreBundleRoles(selection.Backend, bundle); err != nil {
-			closeDB(pg.DB)
+			closeDB(constructionDB)
 			return storeBundle{}, err
 		}
 		return bundle, nil
 	case storebackend.BackendSQLite:
-		sqliteStore, err := store.NewSQLiteRuntimeStore(selection.SQLitePath)
+		sqliteStore, constructionDB, err := store.OpenSQLiteRuntimeStore(selection.SQLitePath)
 		if err != nil {
 			return storeBundle{}, err
 		}
@@ -2214,11 +2214,11 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			return storeBundle{}, err
 		}
 		sqliteStore.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
-		workflowPersistence := runtimepipeline.NewSQLiteWorkflowPersistence(sqliteStore.DB, sqliteStore)
+		workflowPersistence := runtimepipeline.NewSQLiteWorkflowPersistence(constructionDB, sqliteStore)
 		bundle := storeBundle{
-			SQLDB:              sqliteStore.DB,
+			SQLDB:              constructionDB,
 			WorkspaceLookup:    sqliteStore,
-			Database:           sqlDBPinger{db: sqliteStore.DB},
+			Database:           sqlDBPinger{db: constructionDB},
 			RuntimeLogStore:    sqliteStore,
 			SchemaBootstrapper: sqliteStore,
 			EventStore:         sqliteStore,

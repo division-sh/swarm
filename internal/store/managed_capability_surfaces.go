@@ -26,10 +26,10 @@ func decodeManagedCapabilitySurface(raw []byte) (managedcapabilities.Surface, er
 }
 
 func (s *PostgresStore) SaveManagedCapabilitySurface(ctx context.Context, surface managedcapabilities.Surface) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required for managed capability persistence")
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -45,7 +45,7 @@ func (s *PostgresStore) SaveManagedCapabilitySurface(ctx context.Context, surfac
 }
 
 func (s *SQLiteRuntimeStore) SaveManagedCapabilitySurface(ctx context.Context, surface managedcapabilities.Surface) error {
-	if s == nil || s.DB == nil {
+	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("sqlite store is required for managed capability persistence")
 	}
 	return s.runRuntimeMutation(ctx, "sqlite save managed capability surface", func(txctx context.Context, tx *sql.Tx) error {
