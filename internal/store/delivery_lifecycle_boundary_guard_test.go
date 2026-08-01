@@ -15,8 +15,8 @@ import (
 var executableDeliverySQL = regexp.MustCompile(`(?is)\b(?:from|join|into|update|delete\s+from|on)\s+(?:event_deliveries|event_delivery_attempts|event_delivery_outcomes)\b`)
 
 var executableDeliverySQLOwners = map[string]string{
-	"internal/runtime/deliverylifecycle/adapter.go":                   "canonical executable-delivery lifecycle adapter",
-	"internal/runtime/deliverylifecycle/read_projections.go":          "canonical bounded executable-delivery read projections",
+	"internal/store/internal/delivery/adapter.go":                     "private canonical executable-delivery lifecycle adapter",
+	"internal/store/internal/delivery/read_projections.go":            "private canonical bounded executable-delivery read projections",
 	"internal/runtime/runforkrevision/revision.go":                    "immutable fork-revision fact capture",
 	"internal/store/destructive_reset_cleanup.go":                     "named destructive-reset physical cleanup",
 	"internal/store/run_fork_selected_contract_execution_mutation.go": "selected-fork physical cleanup after typed terminalization",
@@ -106,7 +106,7 @@ func TestExecutableDeliverySQLHasClosedOwners(t *testing.T) {
 
 func TestReplayScopesAreNotExecutableDeliveries(t *testing.T) {
 	for _, source := range []string{
-		"internal/runtime/deliverylifecycle/adapter.go",
+		"internal/store/internal/delivery/adapter.go",
 		"internal/store/delivery_lifecycle.go",
 	} {
 		contents, err := os.ReadFile(filepath.Join(eventBoundaryRepositoryRoot(t), source))

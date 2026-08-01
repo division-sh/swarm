@@ -21,6 +21,7 @@ import (
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/delivery"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -84,7 +85,7 @@ func TestStandingServiceTerminalizationSignalUsesCallbackTimeRegistrationParity(
 					deliveryStore runtimedelivery.Store
 					workflowStore *runtimepipeline.PipelineCoordinator
 					dialect       runtimeauthoractivity.Dialect
-					adapter       *runtimedelivery.Adapter
+					adapter       *deliveryadapter.Adapter
 				)
 				if backend == "sqlite" {
 					sqliteSelected := newBootstrappedSQLiteRuntimeStoreForTest(t)
@@ -277,7 +278,7 @@ func TestStandingServiceTerminalizationBeforeRegistrationIsRecoveredByStartupSca
 				deliveryStore runtimedelivery.Store
 				workflowStore *runtimepipeline.PipelineCoordinator
 				dialect       runtimeauthoractivity.Dialect
-				adapter       *runtimedelivery.Adapter
+				adapter       *deliveryadapter.Adapter
 			)
 			if backend == "sqlite" {
 				sqliteSelected := newBootstrappedSQLiteRuntimeStoreForTest(t)

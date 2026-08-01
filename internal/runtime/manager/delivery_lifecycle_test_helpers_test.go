@@ -16,13 +16,14 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	deliveryfixture "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
 
 type managerDeliveryTestStore struct {
 	db        *sql.DB
-	adapter   *runtimedelivery.Adapter
+	adapter   *deliveryfixture.Adapter
 	authority runtimedelivery.ExecutionAuthority
 	seedMu    sync.Mutex
 	mu        sync.RWMutex
@@ -174,7 +175,7 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 			t.Fatalf("create manager delivery test schema: %v", err)
 		}
 	}
-	adapter, err := runtimedelivery.NewAdapter(runtimedelivery.DialectSQLite)
+	adapter, err := deliveryfixture.NewAdapter(deliveryfixture.DialectSQLite)
 	if err != nil {
 		t.Fatalf("create manager delivery adapter: %v", err)
 	}

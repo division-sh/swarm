@@ -19,6 +19,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	deliveryfixture "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -27,7 +28,7 @@ type exactHandoffProofStore struct {
 	InMemoryEventStore
 	runtimedelivery.Store
 	db          *sql.DB
-	adapter     *runtimedelivery.Adapter
+	adapter     *deliveryfixture.Adapter
 	authority   runtimedelivery.ExecutionAuthority
 	mu          sync.Mutex
 	attempts    int
@@ -224,7 +225,7 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 			t.Fatalf("create exact handoff proof schema: %v", err)
 		}
 	}
-	adapter, err := runtimedelivery.NewAdapter(runtimedelivery.DialectSQLite)
+	adapter, err := deliveryfixture.NewAdapter(deliveryfixture.DialectSQLite)
 	if err != nil {
 		t.Fatalf("create exact handoff adapter: %v", err)
 	}

@@ -1,4 +1,4 @@
-package deliverylifecycle
+package delivery
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	. "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )

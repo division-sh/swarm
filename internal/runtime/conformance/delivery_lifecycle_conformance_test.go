@@ -20,6 +20,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	deliveryfixture "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -409,7 +410,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					if err != nil {
 						t.Fatalf("claim long-transaction lease route: %v", err)
 					}
-					adapter, err := runtimedelivery.NewAdapter(runtimedelivery.DialectPostgres)
+					adapter, err := deliveryfixture.NewAdapter(deliveryfixture.DialectPostgres)
 					if err != nil {
 						t.Fatal(err)
 					}

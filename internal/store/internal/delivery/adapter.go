@@ -1,4 +1,8 @@
-package deliverylifecycle
+// Package delivery owns the private SQL adapter for executable delivery
+// lifecycle persistence. Runtime packages define the typed lifecycle facts;
+// only selected-store operations can construct this adapter or provide it a
+// transaction.
+package delivery
 
 import (
 	"context"
@@ -14,6 +18,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	. "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -240,10 +245,7 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 	if inserted == 0 && (record.Status != StatusPending || record.RetryCount != 0 || record.ClaimVersion != 0) {
 		return DurableHandoffProof{}, fmt.Errorf("%w: delivery obligation replay conflicts with existing lifecycle", ErrConflict)
 	}
-	return DurableHandoffProof{
-		deliveryID: obligation.DeliveryID(), eventID: obligation.EventID(),
-		routeIdentity: events.EncodeDeliveryRouteIdentity(obligation.RouteIdentity()), authority: obligation.Authority(),
-	}, nil
+	return AdmitDurableHandoffProof(obligation.DeliveryID(), obligation.EventID(), obligation.RouteIdentity().String(), obligation.Authority())
 }
 
 func (a *Adapter) ClaimExactResult(ctx context.Context, tx *sql.Tx, authority ExecutionAuthority, event events.Event, route events.DeliveryRoute, leaseTTL time.Duration) (ClaimResult, error) {
@@ -339,7 +341,8 @@ func (a *Adapter) ScanContinuations(ctx context.Context, tx *sql.Tx, authority E
 		return ContinuationPage{}, fmt.Errorf("delivery continuation scan limit must be between 1 and 500")
 	}
 	cursorID := executionAuthorityCursorID(authority)
-	if cursor.started && cursor.authorityID != cursorID {
+	cursorAuthorityID, cursorCreatedAt, cursorDeliveryID, cursorStarted := cursor.Position()
+	if cursorStarted && cursorAuthorityID != cursorID {
 		return ContinuationPage{}, fmt.Errorf("delivery continuation cursor authority mismatch")
 	}
 	bundleHash, bundleSource := authority.BundleSource().StorageValues()
@@ -360,9 +363,9 @@ func (a *Adapter) ScanContinuations(ctx context.Context, tx *sql.Tx, authority E
 		string(authority.Kind()), bundleHash, bundleSource, authority.ExecutionID(), authority.Generation(),
 		nil, nil, limit + 1,
 	}
-	if cursor.started {
-		args[5] = cursor.createdAt
-		args[6] = cursor.deliveryID
+	if cursorStarted {
+		args[5] = cursorCreatedAt
+		args[6] = cursorDeliveryID
 	}
 	if a.dialect == DialectSQLite {
 		query = `
@@ -380,9 +383,9 @@ func (a *Adapter) ScanContinuations(ctx context.Context, tx *sql.Tx, authority E
 			LIMIT ?`
 		var cursorTime, cursorTime2, cursorTime3 any
 		var cursorDelivery any
-		if cursor.started {
-			cursorTime, cursorTime2, cursorTime3 = cursor.createdAt, cursor.createdAt, cursor.createdAt
-			cursorDelivery = cursor.deliveryID
+		if cursorStarted {
+			cursorTime, cursorTime2, cursorTime3 = cursorCreatedAt, cursorCreatedAt, cursorCreatedAt
+			cursorDelivery = cursorDeliveryID
 		}
 		args = []any{
 			string(authority.Kind()), bundleHash, bundleSource, authority.ExecutionID(), authority.Generation(),
@@ -456,9 +459,9 @@ func (a *Adapter) ScanContinuations(ctx context.Context, tx *sql.Tx, authority E
 	}
 	if len(refs) > 0 {
 		last := refs[len(refs)-1]
-		page.Next = ContinuationCursor{
-			authorityID: cursorID, createdAt: last.createdAt,
-			deliveryID: last.id, started: true,
+		page.Next, err = AdmitContinuationCursor(cursorID, last.createdAt, last.id)
+		if err != nil {
+			return ContinuationPage{}, err
 		}
 	} else {
 		page.Next = cursor
@@ -606,9 +609,9 @@ func continuationDisposition(record deliveryRecord, now time.Time) ClaimDisposit
 func continuationWake(record deliveryRecord, disposition ClaimDisposition, now time.Time) ContinuationWake {
 	switch disposition {
 	case ClaimDeferred:
-		return newContinuationWake(record.NextEligibleAt.Sub(now))
+		return AdmitContinuationWake(record.NextEligibleAt.Sub(now))
 	case ClaimBusy:
-		return newContinuationWake(record.ClaimExpiresAt.Sub(now))
+		return AdmitContinuationWake(record.ClaimExpiresAt.Sub(now))
 	default:
 		return ContinuationWake{}
 	}
@@ -680,7 +683,10 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, record deliveryRe
 			return ClaimedObligation{}, err
 		}
 	}
-	claim := Claim{deliveryID: record.DeliveryID, runID: record.RunID, routeIdentity: events.EncodeDeliveryRouteIdentity(record.RouteIdentity), token: token, version: version, class: record.SubscriberClass, subscriberID: record.SubscriberID}
+	claim, err := AdmitPersistedClaim(record.DeliveryID, record.RunID, record.RouteIdentity.String(), token, version, record.SubscriberClass, record.SubscriberID)
+	if err != nil {
+		return ClaimedObligation{}, err
+	}
 	claimed, err := a.loadByID(ctx, tx, record.DeliveryID, false)
 	if err != nil {
 		return ClaimedObligation{}, err
@@ -692,7 +698,7 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, record deliveryRe
 }
 
 func (a *Adapter) BindAgentSession(ctx context.Context, tx *sql.Tx, claim Claim, sessionID string) (Snapshot, error) {
-	if tx == nil || !claim.valid() {
+	if tx == nil || claim.Validate() != nil {
 		return Snapshot{}, fmt.Errorf("delivery session binding requires a current claim")
 	}
 	sessionID = strings.TrimSpace(sessionID)
@@ -728,7 +734,7 @@ func (a *Adapter) BindAgentSession(ctx context.Context, tx *sql.Tx, claim Claim,
 			  AND session.status = 'active'
 		  )`
 	args := []any{
-		sessionID, record.RunID, record.SubscriberID, claim.deliveryID, claim.version, claim.token,
+		sessionID, record.RunID, record.SubscriberID, claim.DeliveryID(), claim.Version(), claim.PersistenceToken(),
 		fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
 	}
@@ -758,12 +764,12 @@ func (a *Adapter) BindAgentSession(ctx context.Context, tx *sql.Tx, claim Claim,
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return Snapshot{}, fmt.Errorf("%w: delivery session binding lost claim", ErrConflict)
 	}
-	updated, err := a.loadByID(ctx, tx, claim.deliveryID, false)
+	updated, err := a.loadByID(ctx, tx, claim.DeliveryID(), false)
 	return updated.Snapshot, err
 }
 
 func (a *Adapter) RenewClaim(ctx context.Context, tx *sql.Tx, claim Claim, leaseTTL time.Duration) (Snapshot, error) {
-	if tx == nil || !claim.valid() {
+	if tx == nil || claim.Validate() != nil {
 		return Snapshot{}, fmt.Errorf("delivery claim renewal requires a current claim")
 	}
 	if leaseTTL <= 0 {
@@ -779,7 +785,7 @@ func (a *Adapter) RenewClaim(ctx context.Context, tx *sql.Tx, claim Claim, lease
 		SET lease_expires_at = $1
 		WHERE delivery_id = $2::uuid AND claim_version = $3 AND claim_token = $4::uuid
 		  AND open_marker = TRUE AND lease_expires_at > $5`
-	args := []any{expiresAt, claim.deliveryID, claim.version, claim.token, now}
+	args := []any{expiresAt, claim.DeliveryID(), claim.Version(), claim.PersistenceToken(), now}
 	if a.dialect == DialectSQLite {
 		query = `
 			UPDATE event_delivery_attempts
@@ -799,14 +805,14 @@ func (a *Adapter) RenewClaim(ctx context.Context, tx *sql.Tx, claim Claim, lease
 		SET updated_at = $1
 		WHERE delivery_id = $2::uuid AND status = 'in_progress' AND claim_version = $3
 		  AND current_attempt_version = $3 AND current_attempt_open = TRUE`
-	deliveryArgs := []any{now, claim.deliveryID, claim.version}
+	deliveryArgs := []any{now, claim.DeliveryID(), claim.Version()}
 	if a.dialect == DialectSQLite {
 		deliveryQuery = `
 			UPDATE event_deliveries
 			SET updated_at = ?
 			WHERE delivery_id = ? AND status = 'in_progress' AND claim_version = ?
 			  AND current_attempt_version = ? AND current_attempt_open = TRUE`
-		deliveryArgs = []any{now, claim.deliveryID, claim.version, claim.version}
+		deliveryArgs = []any{now, claim.DeliveryID(), claim.Version(), claim.Version()}
 	}
 	deliveryResult, err := tx.ExecContext(ctx, deliveryQuery, deliveryArgs...)
 	if err != nil {
@@ -815,7 +821,7 @@ func (a *Adapter) RenewClaim(ctx context.Context, tx *sql.Tx, claim Claim, lease
 	if rows, _ := deliveryResult.RowsAffected(); rows != 1 {
 		return Snapshot{}, fmt.Errorf("%w: delivery claim renewal lost lifecycle owner", ErrConflict)
 	}
-	updated, err := a.loadByID(ctx, tx, claim.deliveryID, false)
+	updated, err := a.loadByID(ctx, tx, claim.DeliveryID(), false)
 	return updated.Snapshot, err
 }
 
@@ -840,8 +846,8 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, claim Claim, settlemen
 	if tx == nil {
 		return Snapshot{}, fmt.Errorf("delivery settlement transaction is required")
 	}
-	if !claim.valid() {
-		return Snapshot{}, fmt.Errorf("delivery settlement requires a current claim (delivery=%q run=%q route=%t token=%t version=%d class=%q subscriber=%q)", claim.deliveryID, claim.runID, claim.routeIdentity != "", claim.token != "", claim.version, claim.class, claim.subscriberID)
+	if claim.Validate() != nil {
+		return Snapshot{}, fmt.Errorf("delivery settlement requires a current claim (delivery=%q run=%q route=%t token=%t version=%d class=%q subscriber=%q)", claim.DeliveryID(), claim.RunID(), claim.RouteIdentity() != "", claim.PersistenceToken() != "", claim.Version(), claim.SubscriberClass(), claim.SubscriberID())
 	}
 	if settlement.Duration < 0 {
 		return Snapshot{}, fmt.Errorf("delivery settlement duration cannot be negative")
@@ -897,7 +903,7 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, claim Claim, settlemen
 			updated_at = $6::timestamptz
 		WHERE delivery_id = $7::uuid AND claim_version = $8 AND current_attempt_version = $8
 		  AND current_attempt_open = TRUE AND status = 'in_progress'`
-	args := []any{string(status), retryCount, nextEligible, reason, failureRaw, now, claim.deliveryID, claim.version}
+	args := []any{string(status), retryCount, nextEligible, reason, failureRaw, now, claim.DeliveryID(), claim.Version()}
 	if a.dialect == DialectSQLite {
 		query = `
 			UPDATE event_deliveries
@@ -908,7 +914,7 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, claim Claim, settlemen
 				updated_at = ?
 			WHERE delivery_id = ? AND claim_version = ? AND current_attempt_version = ?
 			  AND current_attempt_open = TRUE AND status = 'in_progress'`
-		args = []any{string(status), retryCount, nextEligible, reason, failureRaw, string(status), now, now, claim.deliveryID, claim.version, claim.version}
+		args = []any{string(status), retryCount, nextEligible, reason, failureRaw, string(status), now, now, claim.DeliveryID(), claim.Version(), claim.Version()}
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -920,7 +926,7 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, claim Claim, settlemen
 	if err := a.completeAttempt(ctx, tx, claim, outcome, reason, effectiveFailure, settlement.SideEffects, settlement.Duration, now); err != nil {
 		return Snapshot{}, err
 	}
-	updated, err := a.loadByID(ctx, tx, claim.deliveryID, false)
+	updated, err := a.loadByID(ctx, tx, claim.DeliveryID(), false)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -931,7 +937,7 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, claim Claim, settlemen
 }
 
 func (a *Adapter) retryExhaustedFailure(ctx context.Context, tx *sql.Tx, record deliveryRecord, claim Claim, current *runtimefailures.Envelope) (*runtimefailures.Envelope, error) {
-	outcomes, err := a.Outcomes(ctx, tx, claim.deliveryID)
+	outcomes, err := a.Outcomes(ctx, tx, claim.DeliveryID())
 	if err != nil {
 		return nil, fmt.Errorf("load delivery retry history: %w", err)
 	}
@@ -958,7 +964,7 @@ func (a *Adapter) retryExhaustedFailure(ctx context.Context, tx *sql.Tx, record 
 			return nil, err
 		}
 	}
-	if err := appendFailure(claim.version, current); err != nil {
+	if err := appendFailure(claim.Version(), current); err != nil {
 		return nil, err
 	}
 	failure, ok := runtimefailures.EnvelopeFromError(runtimefailures.New(
@@ -1064,10 +1070,7 @@ func (a *Adapter) ProveHandoff(ctx context.Context, q queryer, eventID string, r
 	if !events.SameDeliveryRouteIdentity(record.Route, route) {
 		return DurableHandoffProof{}, fmt.Errorf("%w: durable handoff route mismatch", ErrConflict)
 	}
-	return DurableHandoffProof{
-		deliveryID: record.DeliveryID, eventID: record.EventID,
-		routeIdentity: events.EncodeDeliveryRouteIdentity(record.RouteIdentity), authority: record.Authority,
-	}, nil
+	return AdmitDurableHandoffProof(record.DeliveryID, record.EventID, record.RouteIdentity.String(), record.Authority)
 }
 
 func (a *Adapter) SummarizeRun(ctx context.Context, q queryer, runID string) (RunSummary, error) {
@@ -1909,7 +1912,10 @@ func (a *Adapter) TerminalizeRun(ctx context.Context, tx *sql.Tx, runID, reason 
 			return nil, fmt.Errorf("%w: run terminalization lost delivery claim fence", ErrConflict)
 		}
 		if record.claimToken != "" && record.ClaimVersion > 0 {
-			claim := Claim{deliveryID: id, routeIdentity: events.EncodeDeliveryRouteIdentity(record.RouteIdentity), token: record.claimToken, version: record.ClaimVersion, class: record.SubscriberClass, subscriberID: record.SubscriberID}
+			claim, err := AdmitPersistedClaim(id, record.RunID, record.RouteIdentity.String(), record.claimToken, record.ClaimVersion, record.SubscriberClass, record.SubscriberID)
+			if err != nil {
+				return nil, err
+			}
 			if err := a.closeAttemptForTerminalization(ctx, tx, claim, reason, &failure, now); err != nil {
 				return nil, err
 			}
@@ -1955,7 +1961,7 @@ func (a *Adapter) closeAttemptForTerminalization(ctx context.Context, tx *sql.Tx
 			side_effects = '[]'::jsonb, duration_ms = 0, completed_at = $3,
 			current_delivery_id = NULL, open_marker = FALSE
 		WHERE delivery_id = $4::uuid AND claim_version = $5 AND claim_token = $6::uuid AND open_marker = TRUE`
-	args := []any{reason, failureRaw, now, claim.deliveryID, claim.version, claim.token}
+	args := []any{reason, failureRaw, now, claim.DeliveryID(), claim.Version(), claim.PersistenceToken()}
 	if a.dialect == DialectSQLite {
 		query = `
 			UPDATE event_delivery_attempts
@@ -2001,7 +2007,7 @@ func (a *Adapter) insertTerminalizedAttempt(ctx context.Context, tx *sql.Tx, del
 }
 
 func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Claim) (deliveryRecord, time.Time, error) {
-	record, err := a.loadByID(ctx, tx, claim.deliveryID, true)
+	record, err := a.loadByID(ctx, tx, claim.DeliveryID(), true)
 	if err != nil {
 		return deliveryRecord{}, time.Time{}, err
 	}
@@ -2009,8 +2015,8 @@ func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Cla
 	if err != nil {
 		return deliveryRecord{}, time.Time{}, err
 	}
-	if record.Status != StatusInProgress || record.claimToken != claim.token || record.ClaimVersion != claim.version ||
-		events.EncodeDeliveryRouteIdentity(record.RouteIdentity) != claim.routeIdentity || record.ClaimExpiresAt.IsZero() || !record.ClaimExpiresAt.After(now) {
+	if record.Status != StatusInProgress || record.claimToken != claim.PersistenceToken() || record.ClaimVersion != claim.Version() ||
+		record.RouteIdentity.String() != claim.RouteIdentity() || record.ClaimExpiresAt.IsZero() || !record.ClaimExpiresAt.After(now) {
 		return deliveryRecord{}, time.Time{}, fmt.Errorf("%w: delivery claim is stale", ErrConflict)
 	}
 	return record, now, nil
@@ -2063,7 +2069,7 @@ func (a *Adapter) completeAttempt(ctx context.Context, tx *sql.Tx, claim Claim, 
 			side_effects = $4::jsonb, duration_ms = $5, completed_at = $6,
 			current_delivery_id = NULL, open_marker = FALSE
 		WHERE delivery_id = $7::uuid AND claim_version = $8 AND claim_token = $9::uuid AND open_marker = TRUE`
-	args := []any{outcome, reason, failureRaw, string(sideEffectsRaw), durationMS, now, claim.deliveryID, claim.version, claim.token}
+	args := []any{outcome, reason, failureRaw, string(sideEffectsRaw), durationMS, now, claim.DeliveryID(), claim.Version(), claim.PersistenceToken()}
 	if a.dialect == DialectSQLite {
 		query = `
 			UPDATE event_delivery_attempts
@@ -2079,7 +2085,7 @@ func (a *Adapter) completeAttempt(ctx context.Context, tx *sql.Tx, claim Claim, 
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return fmt.Errorf("%w: delivery attempt is stale", ErrConflict)
 	}
-	return a.insertOutcome(ctx, tx, claim.deliveryID, claim.version, outcome, reason, failure, sideEffects, duration, now)
+	return a.insertOutcome(ctx, tx, claim.DeliveryID(), claim.Version(), outcome, reason, failure, sideEffects, duration, now)
 }
 
 func (a *Adapter) insertOutcome(ctx context.Context, tx *sql.Tx, deliveryID string, version int64, outcome, reason string, failure *runtimefailures.Envelope, sideEffects []string, duration time.Duration, now time.Time) error {

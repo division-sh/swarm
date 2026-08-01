@@ -11,10 +11,10 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/delivery"
 	"github.com/google/uuid"
 )
 
@@ -362,7 +362,7 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 		t.Fatalf("append replay event outcome = %d, want inserted", outcome)
 	}
 	route := testAgentDeliveryRoute(t, "replay-agent", "fixture/replay-agent")
-	sourceAuthority, err := deliveryFixtureAuthorityForRun(txctx, tx, runtimedelivery.DialectPostgres, sourceRunID)
+	sourceAuthority, err := deliveryFixtureAuthorityForRun(txctx, tx, deliveryadapter.DialectPostgres, sourceRunID)
 	if err != nil {
 		t.Fatalf("construct source replay delivery authority: %v", err)
 	}
@@ -370,7 +370,7 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 	if err != nil || len(sourceProofs) != 1 {
 		t.Fatalf("commit source replay delivery fixture: proofs=%d err=%v", len(sourceProofs), err)
 	}
-	forkAuthority, err := deliveryFixtureAuthorityForRun(txctx, tx, runtimedelivery.DialectPostgres, forkRunID)
+	forkAuthority, err := deliveryFixtureAuthorityForRun(txctx, tx, deliveryadapter.DialectPostgres, forkRunID)
 	if err != nil {
 		t.Fatalf("construct fork replay delivery authority: %v", err)
 	}

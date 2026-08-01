@@ -14,6 +14,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	deliveryfixture "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
 )
 
 type pipelineTestContinuationOwner struct {
@@ -95,8 +96,8 @@ func (c *pipelineTestContinuation) Resolve(_ context.Context, intent worklifetim
 
 type pipelineTestDeliveryOwner struct {
 	db      *sql.DB
-	dialect runtimedelivery.Dialect
-	adapter *runtimedelivery.Adapter
+	dialect deliveryfixture.Dialect
+	adapter *deliveryfixture.Adapter
 }
 
 func newPipelineTestDeliveryOwnerForDB(t interface {
@@ -113,11 +114,11 @@ func newPipelineTestDeliveryOwner(t interface {
 	Fatalf(string, ...any)
 }, db *sql.DB, sqlite bool) *pipelineTestDeliveryOwner {
 	t.Helper()
-	dialect := runtimedelivery.DialectPostgres
+	dialect := deliveryfixture.DialectPostgres
 	if sqlite {
-		dialect = runtimedelivery.DialectSQLite
+		dialect = deliveryfixture.DialectSQLite
 	}
-	adapter, err := runtimedelivery.NewAdapter(dialect)
+	adapter, err := deliveryfixture.NewAdapter(dialect)
 	if err != nil {
 		t.Fatalf("create pipeline test delivery owner: %v", err)
 	}
@@ -131,7 +132,7 @@ func (s *pipelineTestDeliveryOwner) mutate(ctx context.Context, fn func(context.
 	}
 	defer func() { _ = tx.Rollback() }()
 	storyDialect := runtimeauthoractivity.DialectPostgres
-	if s.dialect == runtimedelivery.DialectSQLite {
+	if s.dialect == deliveryfixture.DialectSQLite {
 		storyDialect = runtimeauthoractivity.DialectSQLite
 	}
 	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, storyDialect)
@@ -160,7 +161,7 @@ func (s *pipelineTestDeliveryOwner) commitInitial(ctx context.Context, event eve
 
 func (s *pipelineTestDeliveryOwner) authorityForRun(ctx context.Context, tx *sql.Tx, runID string) (runtimedelivery.ExecutionAuthority, error) {
 	query := `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=$1::uuid`
-	if s.dialect == runtimedelivery.DialectSQLite {
+	if s.dialect == deliveryfixture.DialectSQLite {
 		query = `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=?`
 	}
 	var bundleHash, bundleSource string
@@ -180,7 +181,7 @@ func (s *pipelineTestDeliveryOwner) commitNode(ctx context.Context, event events
 
 func (s *pipelineTestDeliveryOwner) loadEvent(ctx context.Context, eventID string) (events.Event, error) {
 	dialect := runtimeauthoractivity.DialectPostgres
-	if s.dialect == runtimedelivery.DialectSQLite {
+	if s.dialect == deliveryfixture.DialectSQLite {
 		dialect = runtimeauthoractivity.DialectSQLite
 	}
 	return eventfixture.Load(ctx, s.db, dialect, eventID)
@@ -267,7 +268,7 @@ func (s *pipelineTestDeliveryOwner) makeRetryEligible(ctx context.Context, deliv
 		UPDATE event_deliveries
 		SET next_eligible_at=CURRENT_TIMESTAMP
 		WHERE delivery_id=$1::uuid AND status='failed'`
-	if s.dialect == runtimedelivery.DialectSQLite {
+	if s.dialect == deliveryfixture.DialectSQLite {
 		query = `
 			UPDATE event_deliveries
 			SET next_eligible_at=CURRENT_TIMESTAMP

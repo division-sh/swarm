@@ -13,18 +13,19 @@ import (
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/eventrecord/sqlite"
 )
 
 var (
-	postgresDeliveryAdapter = mustDeliveryAdapter(runtimedelivery.DialectPostgres)
-	sqliteDeliveryAdapter   = mustDeliveryAdapter(runtimedelivery.DialectSQLite)
+	postgresDeliveryAdapter = mustDeliveryAdapter(deliveryadapter.DialectPostgres)
+	sqliteDeliveryAdapter   = mustDeliveryAdapter(deliveryadapter.DialectSQLite)
 )
 
-func mustDeliveryAdapter(dialect runtimedelivery.Dialect) *runtimedelivery.Adapter {
-	adapter, err := runtimedelivery.NewAdapter(dialect)
+func mustDeliveryAdapter(dialect deliveryadapter.Dialect) *deliveryadapter.Adapter {
+	adapter, err := deliveryadapter.NewAdapter(dialect)
 	if err != nil {
 		panic(err)
 	}

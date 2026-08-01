@@ -25,6 +25,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	deliveryfixture "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -49,7 +50,7 @@ type runtimeShutdownManagerStore struct{}
 type runtimeShutdownDeliveryStore struct {
 	runtimedelivery.Store
 	db        *sql.DB
-	adapter   *runtimedelivery.Adapter
+	adapter   *deliveryfixture.Adapter
 	authority runtimedelivery.ExecutionAuthority
 	mu        sync.Mutex
 	events    map[string]events.Event
@@ -125,7 +126,7 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 			t.Fatalf("create runtime shutdown delivery schema: %v", err)
 		}
 	}
-	adapter, err := runtimedelivery.NewAdapter(runtimedelivery.DialectSQLite)
+	adapter, err := deliveryfixture.NewAdapter(deliveryfixture.DialectSQLite)
 	if err != nil {
 		t.Fatalf("create runtime shutdown delivery adapter: %v", err)
 	}

@@ -488,6 +488,36 @@ func (c Claim) Version() int64                   { return c.version }
 func (c Claim) SubscriberClass() SubscriberClass { return c.class }
 func (c Claim) SubscriberID() string             { return c.subscriberID }
 
+// AdmitPersistedClaim reconstructs the opaque claim capability from one exact
+// selected-store compare-and-set result. Production use is confined by the
+// persistence boundary guard to the private delivery adapter.
+func AdmitPersistedClaim(deliveryID, runID, routeIdentity, token string, version int64, class SubscriberClass, subscriberID string) (Claim, error) {
+	claim := Claim{
+		deliveryID:    strings.TrimSpace(deliveryID),
+		runID:         strings.TrimSpace(runID),
+		routeIdentity: strings.TrimSpace(routeIdentity),
+		token:         strings.TrimSpace(token),
+		version:       version,
+		class:         class,
+		subscriberID:  strings.TrimSpace(subscriberID),
+	}
+	if !claim.valid() {
+		return Claim{}, fmt.Errorf("persisted delivery claim is incomplete")
+	}
+	return claim, nil
+}
+
+// PersistenceToken returns the fencing token required by the private adapter.
+// Runtime consumers deliberately receive no interface that exposes it.
+func (c Claim) PersistenceToken() string { return c.token }
+
+func (c Claim) Validate() error {
+	if !c.valid() {
+		return fmt.Errorf("delivery claim is incomplete")
+	}
+	return nil
+}
+
 func (c Claim) valid() bool {
 	return strings.TrimSpace(c.deliveryID) != "" && strings.TrimSpace(c.runID) != "" && strings.TrimSpace(c.routeIdentity) != "" &&
 		strings.TrimSpace(c.token) != "" && c.version > 0 && c.class.MaxRetries() >= 0 && strings.TrimSpace(c.subscriberID) != ""
@@ -578,6 +608,23 @@ type ContinuationCursor struct {
 	started     bool
 }
 
+// AdmitContinuationCursor records the exact monotonic selected-store position.
+func AdmitContinuationCursor(authorityID string, createdAt time.Time, deliveryID string) (ContinuationCursor, error) {
+	authorityID = strings.TrimSpace(authorityID)
+	deliveryID = strings.TrimSpace(deliveryID)
+	createdAt = createdAt.UTC()
+	if authorityID == "" || deliveryID == "" || createdAt.IsZero() {
+		return ContinuationCursor{}, fmt.Errorf("delivery continuation cursor is incomplete")
+	}
+	return ContinuationCursor{authorityID: authorityID, createdAt: createdAt, deliveryID: deliveryID, started: true}, nil
+}
+
+// Position exposes the immutable cursor facts to the private selected-store
+// adapter without making them independently mutable.
+func (c ContinuationCursor) Position() (authorityID string, createdAt time.Time, deliveryID string, started bool) {
+	return c.authorityID, c.createdAt, c.deliveryID, c.started
+}
+
 type ContinuationItem struct {
 	DeliveryID  string
 	Event       events.Event
@@ -606,6 +653,12 @@ func newContinuationWake(after time.Duration) ContinuationWake {
 		after = 0
 	}
 	return ContinuationWake{after: after, present: true}
+}
+
+// AdmitContinuationWake converts one selected-store eligibility observation
+// into the opaque relative wake consumed by runtime scheduling.
+func AdmitContinuationWake(after time.Duration) ContinuationWake {
+	return newContinuationWake(after)
 }
 
 func (w ContinuationWake) After() (time.Duration, bool) {
@@ -642,6 +695,22 @@ type DurableHandoffProof struct {
 	eventID       string
 	routeIdentity string
 	authority     ExecutionAuthority
+}
+
+// AdmitDurableHandoffProof constructs proof only from exact committed storage
+// facts. The architecture guard confines production calls to the private
+// delivery adapter.
+func AdmitDurableHandoffProof(deliveryID, eventID, routeIdentity string, authority ExecutionAuthority) (DurableHandoffProof, error) {
+	proof := DurableHandoffProof{
+		deliveryID:    strings.TrimSpace(deliveryID),
+		eventID:       strings.TrimSpace(eventID),
+		routeIdentity: strings.TrimSpace(routeIdentity),
+		authority:     authority,
+	}
+	if err := proof.Validate(); err != nil {
+		return DurableHandoffProof{}, err
+	}
+	return proof, nil
 }
 
 func (p DurableHandoffProof) DeliveryID() string            { return p.deliveryID }

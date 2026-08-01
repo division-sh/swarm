@@ -15,6 +15,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/eventrecord/sqlite"
@@ -250,7 +251,7 @@ func commitDeliveryReplayEventFixture(
 			return err
 		}
 		route := canonicalDeliveryFixtureRouteValue(events.DeliveryRoute{Recipient: recipient})
-		authority, err := deliveryFixtureAuthorityForRun(txctx, tx, runtimedelivery.DialectPostgres, forkRunID)
+		authority, err := deliveryFixtureAuthorityForRun(txctx, tx, deliveryadapter.DialectPostgres, forkRunID)
 		if err != nil {
 			return err
 		}
@@ -415,9 +416,9 @@ func semanticEventFixtureDeliveryAuthority(
 ) (runtimedelivery.ExecutionAuthority, error) {
 	switch selected.(type) {
 	case *PostgresStore:
-		return deliveryFixtureAuthorityForRun(ctx, tx, runtimedelivery.DialectPostgres, runID)
+		return deliveryFixtureAuthorityForRun(ctx, tx, deliveryadapter.DialectPostgres, runID)
 	case *SQLiteRuntimeStore:
-		return deliveryFixtureAuthorityForRun(ctx, tx, runtimedelivery.DialectSQLite, runID)
+		return deliveryFixtureAuthorityForRun(ctx, tx, deliveryadapter.DialectSQLite, runID)
 	default:
 		return runtimedelivery.ExecutionAuthority{}, fmt.Errorf(
 			"semantic event fixture store %T has no delivery authority",

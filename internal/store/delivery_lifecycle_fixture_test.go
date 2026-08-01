@@ -12,6 +12,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/delivery"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/eventrecord/sqlite"
 )
@@ -60,7 +61,7 @@ func commitPostgresDeliveryFixture(t testing.TB, ctx context.Context, db *sql.DB
 	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
 	store := postgresDeliveryFixtureStore(db)
 	if err := store.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		authority, err := deliveryFixtureAuthorityForRun(txctx, tx, runtimedelivery.DialectPostgres, event.RunID())
+		authority, err := deliveryFixtureAuthorityForRun(txctx, tx, deliveryadapter.DialectPostgres, event.RunID())
 		if err != nil {
 			return err
 		}
@@ -181,7 +182,7 @@ func commitDeliveryObligationFixture(ctx context.Context, store deliveryFixtureS
 	switch selected := store.(type) {
 	case *PostgresStore:
 		return selected.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			authority, err := deliveryFixtureAuthorityForRun(txctx, tx, runtimedelivery.DialectPostgres, event.RunID())
+			authority, err := deliveryFixtureAuthorityForRun(txctx, tx, deliveryadapter.DialectPostgres, event.RunID())
 			if err != nil {
 				return err
 			}
@@ -190,7 +191,7 @@ func commitDeliveryObligationFixture(ctx context.Context, store deliveryFixtureS
 		})
 	case *SQLiteRuntimeStore:
 		return selected.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			authority, err := deliveryFixtureAuthorityForRun(txctx, tx, runtimedelivery.DialectSQLite, event.RunID())
+			authority, err := deliveryFixtureAuthorityForRun(txctx, tx, deliveryadapter.DialectSQLite, event.RunID())
 			if err != nil {
 				return err
 			}
@@ -204,9 +205,9 @@ func commitDeliveryObligationFixture(ctx context.Context, store deliveryFixtureS
 
 func deliveryFixtureAuthorityForRun(ctx context.Context, queryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, dialect runtimedelivery.Dialect, runID string) (runtimedelivery.ExecutionAuthority, error) {
+}, dialect deliveryadapter.Dialect, runID string) (runtimedelivery.ExecutionAuthority, error) {
 	query := `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=$1::uuid`
-	if dialect == runtimedelivery.DialectSQLite {
+	if dialect == deliveryadapter.DialectSQLite {
 		query = `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=?`
 	}
 	var bundleHash, bundleSource string
