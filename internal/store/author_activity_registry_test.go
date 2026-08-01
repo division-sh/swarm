@@ -18,6 +18,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	authoractivityadapter "github.com/division-sh/swarm/internal/store/authoractivityadapter"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
@@ -184,7 +185,7 @@ func TestDynamicAuthorActivityEventDescriptorRequiresLiveExactScopeLease(t *test
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	page, err := runtimeauthoractivity.List(base, db, runtimeauthoractivity.DialectSQLite, runtimeauthoractivity.ListOptions{Limit: 10})
+	page, err := authoractivityadapter.List(base, db, authoractivityadapter.DialectSQLite, runtimeauthoractivity.ListOptions{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +276,7 @@ func TestAuthorActivityEventAndEffectAdaptersRenderExactSubjects(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page, err := runtimeauthoractivity.List(ctx, db, runtimeauthoractivity.DialectSQLite, runtimeauthoractivity.ListOptions{Limit: 10})
+	page, err := authoractivityadapter.List(ctx, db, authoractivityadapter.DialectSQLite, runtimeauthoractivity.ListOptions{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}

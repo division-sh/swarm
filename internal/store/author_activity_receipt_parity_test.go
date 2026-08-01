@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	authoractivityadapter "github.com/division-sh/swarm/internal/store/authoractivityadapter"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -172,7 +173,11 @@ func readEventProducerIdentity(t *testing.T, fixture authorActivityReceiptFixtur
 
 func listAuthorActivityForReceiptParity(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context) []runtimeauthoractivity.Occurrence {
 	t.Helper()
-	page, err := runtimeauthoractivity.List(ctx, fixture.db, fixture.dialect, runtimeauthoractivity.ListOptions{Limit: 10})
+	readDialect := authoractivityadapter.DialectSQLite
+	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+		readDialect = authoractivityadapter.DialectPostgres
+	}
+	page, err := authoractivityadapter.List(ctx, fixture.db, readDialect, runtimeauthoractivity.ListOptions{Limit: 10})
 	if err != nil {
 		t.Fatalf("List author activity: %v", err)
 	}

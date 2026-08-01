@@ -7,6 +7,7 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	authoractivityadapter "github.com/division-sh/swarm/internal/store/authoractivityadapter"
 )
 
 func (s *PostgresStore) runAuthorActivityMutation(ctx context.Context, label string, fn func(context.Context, *sql.Tx) error) error {
@@ -74,26 +75,26 @@ func (s *PostgresStore) ListAuthorActivity(ctx context.Context, opts runtimeauth
 	if s == nil || s.backend.db == nil {
 		return runtimeauthoractivity.ListResult{}, fmt.Errorf("postgres store is required")
 	}
-	return runtimeauthoractivity.List(ctx, s.backend.db, runtimeauthoractivity.DialectPostgres, opts)
+	return authoractivityadapter.List(ctx, s.backend.db, authoractivityadapter.DialectPostgres, opts)
 }
 
 func (s *SQLiteRuntimeStore) ListAuthorActivity(ctx context.Context, opts runtimeauthoractivity.ListOptions) (runtimeauthoractivity.ListResult, error) {
 	if s == nil || s.backend.db == nil {
 		return runtimeauthoractivity.ListResult{}, fmt.Errorf("sqlite runtime store is required")
 	}
-	return runtimeauthoractivity.List(ctx, s.backend.db, runtimeauthoractivity.DialectSQLite, opts)
+	return authoractivityadapter.List(ctx, s.backend.db, authoractivityadapter.DialectSQLite, opts)
 }
 
 func (s *PostgresStore) HeadAuthorActivity(ctx context.Context) (int64, error) {
 	if s == nil || s.backend.db == nil {
 		return 0, fmt.Errorf("postgres store is required")
 	}
-	return runtimeauthoractivity.Head(ctx, s.backend.db)
+	return authoractivityadapter.Head(ctx, s.backend.db)
 }
 
 func (s *SQLiteRuntimeStore) HeadAuthorActivity(ctx context.Context) (int64, error) {
 	if s == nil || s.backend.db == nil {
 		return 0, fmt.Errorf("sqlite runtime store is required")
 	}
-	return runtimeauthoractivity.Head(ctx, s.backend.db)
+	return authoractivityadapter.Head(ctx, s.backend.db)
 }

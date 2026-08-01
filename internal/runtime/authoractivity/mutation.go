@@ -253,7 +253,7 @@ func (s *mutationState) loadByDedup(ctx context.Context, key string) (Occurrence
 	if s.dialect == DialectSQLite {
 		query = occurrenceSelect + ` WHERE dedup_key = ?`
 	}
-	occurrence, err := scanOccurrence(s.tx.QueryRowContext(ctx, query, key))
+	occurrence, err := ScanOccurrence(s.tx.QueryRowContext(ctx, query, key))
 	if err == sql.ErrNoRows {
 		return Occurrence{}, false, nil
 	}
@@ -318,9 +318,9 @@ func nullableSQLite(value string) any {
 
 const occurrenceSelect = `SELECT CAST(occurrence_id AS TEXT), sequence, kind, version, transition, source_owner, source_identity, dedup_key, COALESCE(CAST(run_id AS TEXT), ''), COALESCE(CAST(entity_id AS TEXT), ''), COALESCE(agent_id, ''), COALESCE(flow_id, ''), scope_kind, COALESCE(CAST(runtime_instance_id AS TEXT), ''), COALESCE(bundle_hash, ''), COALESCE(author_safe_summary, ''), projection, failure, occurred_at FROM author_activity_occurrences`
 
-type rowScanner interface{ Scan(...any) error }
+type RowScanner interface{ Scan(...any) error }
 
-func scanOccurrence(row rowScanner) (Occurrence, error) {
+func ScanOccurrence(row RowScanner) (Occurrence, error) {
 	var occurrence Occurrence
 	var projectionRaw []byte
 	var failureRaw []byte
