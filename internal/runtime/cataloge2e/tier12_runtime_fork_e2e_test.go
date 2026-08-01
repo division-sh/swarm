@@ -168,7 +168,7 @@ func selectedContractExecutionOwnerForCatalogTest(t testing.TB, db *sql.DB, sele
 		FlowRoutes: selected,
 	}
 	owner, err := runtimerunforkexecution.NewSelectedContractExecutionOwner(
-		db, runtimepipeline.NewPostgresWorkflowPersistence(db, selected), selected, selected, selected,
+		runtimepipeline.NewPostgresWorkflowPersistence(db, selected), selected, selected, selected,
 		selected, durable, selected.PipelineObligations(), selected, managerRoles,
 		selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
 	)

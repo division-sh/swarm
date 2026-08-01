@@ -324,7 +324,7 @@ func selectedPostgresContractExecutionOwner(pg *store.PostgresStore, persistence
 		FlowRoutes: pg,
 	}
 	return runtimerunforkexecution.NewSelectedContractExecutionOwner(
-		pg.DB, persistence, pg, pg, pg, pg, durable, pg.PipelineObligations(), pg, managerRoles,
+		persistence, pg, pg, pg, pg, durable, pg.PipelineObligations(), pg, managerRoles,
 		pg, pg, pg, pg, pg, pg, pg, pg, pg, pg, pg, pg, pg,
 	)
 }
