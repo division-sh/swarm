@@ -10867,6 +10867,17 @@ flow_model:
                       validation_case_id:
                         from: generated.uuid
                         type: uuid
+          source_type_authority: >
+            The canonical instance-source type resolver owns compatibility for
+            every runnable create, select, and select-or-create path before
+            route-plan lowering. For `payload.<field>`, the actual source type
+            comes from that field in the receiver input event schema. For
+            `generated.uuid` and `event.id`, the actual source type is the
+            intrinsic UUID-compatible platform type. Optional `carry.type` is
+            only an assertion and MUST agree with the actual source type; it
+            MUST NOT replace missing or contradictory source evidence. The
+            actual source type MUST also be scalar-compatible with the receiver
+            entity instance field after named catalog aliases are resolved.
           modes:
             create:
               status: runnable_in_1835_pr1
@@ -10931,8 +10942,11 @@ flow_model:
                 instance field. `instance` owns partition identity,
                 `carries.<instance>.from` owns sourcing, and `resolution.mode`
                 owns unmatched behavior; no pin-level identity field is authored.
-                The carry MUST use one top-level `payload.<field>` and may declare a type compatible with the
-                receiver `entity.<field>`. The lowered route plan records
+                The carry MUST use one top-level `payload.<field>`. Its actual
+                type is resolved from the input event schema and must be
+                compatible with the receiver `entity.<field>`; an optional
+                authored carry type is validated as an assertion against that
+                actual type. The lowered route plan records
                 `Mode: select`, the scalar instance field and typed payload
                 `Source` derived from the same-named carry, runtime descriptor
                 resolution, and no policy facts. Missing or ambiguous target is
@@ -18341,7 +18355,12 @@ static_analyzer:
         adapts names only and does not own topology.
       output_interface_evidence_valid: Producer output key/carries declarations, when present, must agree with event schema and emitted payload; they never own receiver identity.
       receiver_instance_resolution_present: Template receivers must declare one scalar instance field, a same-named typed carry source, and an explicit supported resolution mode.
-      key_types_compatible: The typed carry source and receiver scalar instance field types must be compatible before lowering.
+      key_types_compatible: >
+        Before lowering, the canonical instance-source type resolver must use
+        the actual receiver input event-schema type for payload sources or the
+        intrinsic UUID-compatible type for generated.uuid/event.id, validate
+        any optional carry type as an assertion against that evidence, and
+        require compatibility with the receiver scalar instance field.
       receiver_resolution_valid: Receiver typed mode, lifecycle action, fan-in, and typed reply lineage must be valid and unambiguous.
       event_topology_roles_consume_connect: Verify-time producer/consumer and dead-event schema checks must treat valid
         connect output/input facts as authored event roles so parent topology does not require runtime reconstruction to

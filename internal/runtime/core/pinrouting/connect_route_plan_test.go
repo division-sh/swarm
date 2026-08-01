@@ -246,21 +246,13 @@ func TestLowerTargetFreeInputRoutePlans_RejectsHarnessSource(t *testing.T) {
 
 func TestLowerTargetFreeInputRoutePlansUsesCanonicalRenamedIdentitySource(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
-	root := canonicalrouting.CopyProviderRollback(t, true)
+	root := canonicalrouting.CopyProviderRollbackRenamedSource(t, true)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot),
 	)
 	if err != nil {
 		t.Fatalf("load provider rollback artifact: %v", err)
 	}
-	pins := bundle.Semantics.FlowInputEventPins["consumer"]
-	if len(pins) != 1 {
-		t.Fatalf("consumer input pins = %#v, want one", pins)
-	}
-	carry := pins[0].Carries["chat_id"]
-	carry.From = "payload.external_chat_id"
-	pins[0].Carries["chat_id"] = carry
-	bundle.Semantics.FlowInputEventPins["consumer"] = pins
 	authorization := runtimeprovideroutput.MustAuthorization(
 		"telegram", "inbound.telegram.text_message", "provider.telegram", "1.0.0",
 		"sha256:"+strings.Repeat("a", 64),
@@ -591,19 +583,15 @@ func TestInputPinResolutionMultiPinSatisfactionDerivesOneFlowIdentity(t *testing
 
 func TestLowerCompositionConnectRoutePlanDerivesRenamedPayloadSourceFromCarry(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
-	root := canonicalrouting.CopyTemplateSelectResolution(t, canonicalrouting.TemplateSelectResolutionOptions{})
+	root := canonicalrouting.CopyTemplateSelectResolutionRenamedSource(t, canonicalrouting.TemplateSelectResolutionOptions{})
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	pins := bundle.Semantics.FlowInputEventPins["account"]
-	if len(pins) != 2 {
-		t.Fatalf("account input pins = %#v, want two", pins)
+	if len(pins) != 2 || pins[1].Carries["account_id"].From != "payload.external_account_id" {
+		t.Fatalf("renamed source fixture pins = %#v, want account_ready from payload.external_account_id", pins)
 	}
-	carry := pins[1].Carries["account_id"]
-	carry.From = "payload.external_account_id"
-	pins[1].Carries["account_id"] = carry
-	bundle.Semantics.FlowInputEventPins["account"] = pins
 	plans, issues := LowerCompositionConnectRoutePlans(semanticview.Wrap(bundle))
 	if len(issues) != 0 || len(plans) != 1 || plans[0].InstanceKey == nil {
 		t.Fatalf("plans/issues = %#v/%#v, want one derived plan", plans, issues)
@@ -633,6 +621,112 @@ func TestLowerCompositionConnectRoutePlanDerivesRenamedPayloadSourceFromCarry(t 
 				t.Fatalf("materialized target/failure = %#v/%q, want renamed-source account/authoritative", materialized.Target, materialized.Failure)
 			}
 		})
+	}
+}
+
+func TestLowerCompositionConnectRoutePlansValidatesAuthoritativeInstanceSourceTypeMatrix(t *testing.T) {
+	tests := []struct {
+		name      string
+		root      func(*testing.T) string
+		wantError bool
+	}{
+		{
+			name: "select accepts compatible aliases",
+			root: func(t *testing.T) string {
+				return canonicalrouting.CopyTemplateSelectResolution(t, canonicalrouting.TemplateSelectResolutionOptions{})
+			},
+		},
+		{
+			name: "select rejects omitted annotation mismatch",
+			root: func(t *testing.T) string {
+				return canonicalrouting.CopyTemplateSelectResolution(t, canonicalrouting.TemplateSelectResolutionOptions{Invalidity: canonicalrouting.SelectResolutionSourceTypeMismatchWithoutCarryType})
+			},
+			wantError: true,
+		},
+		{
+			name: "select-or-create rejects dishonest annotation",
+			root: func(t *testing.T) string {
+				return canonicalrouting.CopyTemplateSelectResolution(t, canonicalrouting.TemplateSelectResolutionOptions{Mode: canonicalrouting.SelectResolutionSelectOrCreate, Invalidity: canonicalrouting.SelectResolutionDishonestCarryType})
+			},
+			wantError: true,
+		},
+		{
+			name: "create accepts payload alias",
+			root: func(t *testing.T) string {
+				return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintPayload})
+			},
+		},
+		{
+			name: "create accepts intrinsic generated uuid",
+			root: func(t *testing.T) string {
+				return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintUUID})
+			},
+		},
+		{
+			name: "create accepts intrinsic event id",
+			root: func(t *testing.T) string {
+				return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintEventID})
+			},
+		},
+		{
+			name: "create payload rejects omitted annotation mismatch",
+			root: func(t *testing.T) string {
+				return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintPayload, Invalidity: canonicalrouting.CreateResolutionSourceTypeMismatchWithoutCarryType})
+			},
+			wantError: true,
+		},
+		{
+			name: "create generated uuid rejects incompatible receiver",
+			root: func(t *testing.T) string {
+				return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintUUID, Invalidity: canonicalrouting.CreateResolutionSourceTypeMismatchWithoutCarryType})
+			},
+			wantError: true,
+		},
+		{
+			name: "create event id rejects dishonest annotation",
+			root: func(t *testing.T) string {
+				return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintEventID, Invalidity: canonicalrouting.CreateResolutionDishonestCarryType})
+			},
+			wantError: true,
+		},
+	}
+	repoRoot := canonicalrouting.RepoRoot(t)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, tc.root(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+			if err != nil {
+				t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+			}
+			_, issues := LowerCompositionConnectRoutePlans(semanticview.Wrap(bundle))
+			gotError := false
+			for _, issue := range issues {
+				if strings.Contains(issue.Detail, "key_types_incompatible") {
+					gotError = true
+				}
+			}
+			if gotError != tc.wantError {
+				t.Fatalf("key type issue = %v, want %v; issues = %#v", gotError, tc.wantError, issues)
+			}
+		})
+	}
+}
+
+func TestLowerTargetFreeInputRoutePlansRejectsAuthoritativeSourceTypeMismatch(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	root := canonicalrouting.CopyProviderRollbackInvalidSourceType(t, canonicalrouting.ProviderRollbackSourceTypeOmittedMismatch)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("load provider rollback artifact: %v", err)
+	}
+	authorization := runtimeprovideroutput.MustAuthorization(
+		"telegram", "inbound.telegram.text_message", "provider.telegram", "1.0.0",
+		"sha256:"+strings.Repeat("a", 64),
+		triggergeneration.FromCanonicalBytes([]byte("target-free-source-type")),
+	)
+
+	plans, issues := LowerTargetFreeInputRoutePlans(semanticview.Wrap(bundle), []runtimeprovideroutput.Authorization{authorization})
+	if len(plans) != 0 || len(issues) != 1 || !strings.Contains(issues[0].Detail, "key_types_incompatible") {
+		t.Fatalf("plans/issues = %#v/%#v, want target-free source type blocker", plans, issues)
 	}
 }
 

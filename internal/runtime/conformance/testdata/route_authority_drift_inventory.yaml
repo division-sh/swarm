@@ -430,19 +430,21 @@ seam_families:
       - internal/runtime/bus/route_plan.go
       - internal/cliapp/connect_delivery_one_codemod_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
+      - internal/runtime/conformance/template_instance_semantic_ownership_test.go
     search_dimensions: [connect_route_plan, route_plan, route_plan_source_reason]
     notes: >
       Lowered ConnectRoutePlan is the typed route-intent artifact consumed by
       EventBus planning. #1494 classifies it as route authority input and guard
       surface; #1495 owns broader producer migration. #1545 adds an explicit
-      ResolutionKind discriminant so addressed-input, instance-key, broadcast,
-      and static route authority are not selected by nil-field ordering, and
-      keyed instance evidence cannot shadow explicit parent broadcast fan-out.
-      #1546 adds ConnectRoutePlan.InstanceKey.Mappings as the only runtime
-      adapter authority for renamed addressless template instance-key routes;
-      connect.map remains non-authoritative for that class. #1577 adds the
-      connect-time template lifecycle owner that consumes the lowered instance
-      key plan and creates, reuses, or fails closed before delivery rows commit.
+      ResolutionKind discriminant so static, scalar instance-key, reply, and
+      separately owned fan-in route authority are not selected by nil-field
+      ordering. Dynamic instance intent consists only of opaque
+      TemplateInstanceField, typed FlowInputInstanceSource, and exhaustive
+      FlowInputResolutionMode. The source-type owner resolves actual payload
+      event-schema or intrinsic UUID evidence and validates any optional carry
+      assertion plus the receiver field before lowering. #1577 adds the
+      connect-time template lifecycle owner that consumes this scalar typed plan
+      and creates, reuses, or fails closed before delivery rows commit.
   - id: connect_source_endpoint_mode_authority
     layer: route_plan_authority
     classification: canonical_owner

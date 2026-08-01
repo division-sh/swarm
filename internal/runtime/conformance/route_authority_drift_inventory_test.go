@@ -180,6 +180,32 @@ func TestRouteAuthorityDriftInventoryRejectsNarrowOrStaleAudit(t *testing.T) {
 	}
 }
 
+func TestRouteAuthorityDriftInventoryRejectsRetiredLoweredConnectAuthority(t *testing.T) {
+	root := conformanceRepoRoot(t)
+	base := loadRouteAuthorityDriftInventory(t, root)
+	corpus := routeAuthorityDriftNewValidationCorpus(t, root)
+
+	for _, retired := range []string{"addressed-input", "InstanceKey.Mappings", "connect.map remains"} {
+		t.Run(retired, func(t *testing.T) {
+			inventory := cloneRouteAuthorityDriftInventory(base)
+			family := routeAuthorityDriftSeamFamilyByID(t, &inventory, "lowered_connect_route_intent_authority")
+			family.Notes += " " + retired
+			problems := validateRouteAuthorityDriftInventoryWithCorpus(root, corpus, inventory)
+			if !routeAuthorityProblemsContain(problems, "retain retired authority") {
+				t.Fatalf("validation problems did not reject %q:\n- %s", retired, strings.Join(problems, "\n- "))
+			}
+		})
+	}
+
+	inventory := cloneRouteAuthorityDriftInventory(base)
+	family := routeAuthorityDriftSeamFamilyByID(t, &inventory, "lowered_connect_route_intent_authority")
+	family.Notes = strings.ReplaceAll(family.Notes, "FlowInputInstanceSource", "source")
+	problems := validateRouteAuthorityDriftInventoryWithCorpus(root, corpus, inventory)
+	if !routeAuthorityProblemsContain(problems, "missing current semantic owner \"flowinputinstancesource\"") {
+		t.Fatalf("validation problems did not reject missing typed source owner:\n- %s", strings.Join(problems, "\n- "))
+	}
+}
+
 func TestRouteAuthorityDriftInventoryRejectsUnclassifiedRouteLikeProducer(t *testing.T) {
 	root := conformanceRepoRoot(t)
 	inventory := loadRouteAuthorityDriftInventory(t, root)
@@ -332,6 +358,9 @@ func validateRouteAuthorityDriftInventoryWithCorpus(root string, corpus *routeAu
 			problems = append(problems, fmt.Sprintf("missing required seam_family %s", id))
 		}
 	}
+	if family, ok := familiesByID["lowered_connect_route_intent_authority"]; ok {
+		problems = append(problems, validateLoweredConnectRouteIntentAuthority(family)...)
+	}
 	problems = append(problems, validateRouteAuthorityDriftClassifiedMatches(root, corpus, dimensionsByID, familiesByID)...)
 	problems = append(problems, validateRouteAuthorityDriftGuardrails(root, inventory.GuardrailProposals)...)
 	if inventory.FollowUpDecision.NewChildRequiredBeforeCoding {
@@ -347,6 +376,32 @@ func validateRouteAuthorityDriftInventoryWithCorpus(root string, corpus *routeAu
 		problems = append(problems, "follow_up_decision notes missing")
 	}
 	sort.Strings(problems)
+	return problems
+}
+
+func validateLoweredConnectRouteIntentAuthority(family routeAuthorityDriftSeamFamily) []string {
+	var problems []string
+	notes := strings.ToLower(strings.TrimSpace(family.Notes))
+	for _, required := range []string{
+		"templateinstancefield",
+		"flowinputinstancesource",
+		"flowinputresolutionmode",
+		"actual payload",
+		"intrinsic uuid",
+	} {
+		if !strings.Contains(notes, required) {
+			problems = append(problems, fmt.Sprintf("seam_family lowered_connect_route_intent_authority notes missing current semantic owner %q", required))
+		}
+	}
+	for _, retired := range []string{
+		"addressed-input",
+		"instancekey.mappings",
+		"connect.map remains",
+	} {
+		if strings.Contains(notes, retired) {
+			problems = append(problems, fmt.Sprintf("seam_family lowered_connect_route_intent_authority notes retain retired authority %q", retired))
+		}
+	}
 	return problems
 }
 

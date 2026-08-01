@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
-	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -822,61 +821,15 @@ func connectCanonicalResolutionInstanceKey(source semanticview.Source, connect r
 	if instance.Field.Empty() {
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode %s requires receiver `instance: <field>`", modeText)}
 	}
-	key := instance.Field.String()
-	carry, ok := inputPin.Carries[key]
-	if !ok {
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("flow %s is one instance per %s; input pin %s must declare a carry named %s (add carries: %s: {from: payload.<field>})", receiverFlowID, key, inputPin.PinName(), key, key)}
-	}
-	keySource, sourceErr := runtimecontracts.ResolveFlowInputInstanceSource(mode, carry.From)
-	if sourceErr != nil {
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("carry %s source %q is invalid for resolution mode %s: %v", key, strings.TrimSpace(carry.From), modeText, sourceErr)}
-	}
-	if strings.TrimSpace(carry.Type) != "" {
-		targetType, err := connectResolutionReceiverEntityFieldType(source, receiverFlowID, key)
-		if err != nil {
-			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: err.Error()}
-		}
-		if !connectResolutionTypesCompatible(carry.Type, targetType) {
-			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("key_types_incompatible: carry %s type %s is incompatible with receiver entity.%s type %s", key, carry.Type, key, targetType)}
-		}
+	evidence, err := bundle.ResolveFlowInputInstanceSourceType(source, receiverFlowID, inputPin, instance)
+	if err != nil {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: err.Error()}
 	}
 	return &ConnectRoutePlanInstanceKey{
 		Mode:   mode,
 		Field:  instance.Field,
-		Source: keySource,
+		Source: evidence.Source,
 	}, ConnectRoutePlanIssue{}
-}
-
-func connectResolutionReceiverEntityFieldType(source semanticview.Source, receiverFlowID, field string) (string, error) {
-	contract, ok := entityruntime.ResolveForFlow(source, receiverFlowID)
-	if !ok {
-		return "", fmt.Errorf("receiver flow %s has no entity contract for entity.%s", receiverFlowID, field)
-	}
-	resolved, err := entityruntime.ResolveLeafField(contract, field)
-	if err != nil {
-		return "", fmt.Errorf("receiver entity.%s is invalid: %v", field, err)
-	}
-	return resolved.Type, nil
-}
-
-func connectResolutionTypesCompatible(sourceType, targetType string) bool {
-	sourceType = connectResolutionTypeFamily(sourceType)
-	targetType = connectResolutionTypeFamily(targetType)
-	return sourceType != "" && targetType != "" && sourceType == targetType
-}
-
-func connectResolutionTypeFamily(raw string) string {
-	raw = strings.ToLower(strings.TrimSpace(raw))
-	switch raw {
-	case "string", "text", "uuid", "timestamp":
-		return "string"
-	case "integer", "number", "numeric", "float", "double", "real":
-		return "number"
-	case "boolean", "bool":
-		return "boolean"
-	default:
-		return raw
-	}
 }
 
 func connectResolutionKind(scope semanticview.FlowScope, instanceKey *ConnectRoutePlanInstanceKey) ConnectRoutePlanResolutionKind {
