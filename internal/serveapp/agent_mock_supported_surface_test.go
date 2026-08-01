@@ -112,7 +112,7 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 		oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
 			storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
-			return selectedPostgresStoreBundle(runtimePG, runtimePG.TestDatabase(), cfg), nil
+			return selectedPostgresStoreBundle(runtimePG, store.DatabaseForTest(runtimePG), cfg), nil
 		}
 		cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 			return serveRuntimeWorkspaceStub{}, nil

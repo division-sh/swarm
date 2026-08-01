@@ -97,7 +97,7 @@ func newHumanTaskAckLossOwners(
 	}
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	return sqliteStore, sqliteStore, sqliteStore, sqliteStore,
-		newHumanTaskAckLossDecisionAuthority(t, sqliteStore.TestDatabase(), sqliteStore, runtimepipeline.NewSQLiteWorkflowPersistence(sqliteStore.TestDatabase(), sqliteStore), sqliteStore, sqliteStore, publisher), publisher, sqliteStore.TestDatabase()
+		newHumanTaskAckLossDecisionAuthority(t, storetest.Database(sqliteStore), sqliteStore, runtimepipeline.NewSQLiteWorkflowPersistence(storetest.Database(sqliteStore), sqliteStore), sqliteStore, sqliteStore, publisher), publisher, storetest.Database(sqliteStore)
 }
 
 type humanTaskAckLossPersistence interface {

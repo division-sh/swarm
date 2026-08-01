@@ -42,8 +42,8 @@ func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *
 				t.Helper()
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 				probe := runtimelifecycleprobe.New()
-				handler, bus := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.TestDatabase(), source, fact, sqliteStore, probe)
-				return handler, sqliteStore.TestDatabase(), bus, probe
+				handler, bus := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, store.DatabaseForTest(sqliteStore), source, fact, sqliteStore, probe)
+				return handler, store.DatabaseForTest(sqliteStore), bus, probe
 			},
 		},
 		{
@@ -115,8 +115,8 @@ func TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends(t 
 				t.Helper()
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 				probe := runtimelifecycleprobe.New()
-				handler, bus := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.TestDatabase(), source, fact, sqliteStore, probe)
-				return handler, sqliteStore.TestDatabase(), bus, probe
+				handler, bus := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, store.DatabaseForTest(sqliteStore), source, fact, sqliteStore, probe)
+				return handler, store.DatabaseForTest(sqliteStore), bus, probe
 			},
 		},
 		{
@@ -170,7 +170,7 @@ func TestOperatorMailboxWriteSupportedSurfaceMissingMaterializerIsLoud(t *testin
 	fact := bundleSourceFactForTestBundle(t, bundle)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	probe := runtimelifecycleprobe.New()
-	handler, _ := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.TestDatabase(), source, fact, nil, probe)
+	handler, _ := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, store.DatabaseForTest(sqliteStore), source, fact, nil, probe)
 
 	published := rpcCall(t, handler, eventPublishBodyWithoutBundle("", "thing.created", `{"amount":250,"who":"alice"}`, "", "idem-mailbox-write-missing-materializer"))
 	if published.Error != nil {
@@ -178,7 +178,7 @@ func TestOperatorMailboxWriteSupportedSurfaceMissingMaterializerIsLoud(t *testin
 	}
 	result := asMap(t, published.Result)
 	eventID := stringValue(t, result["event_id"], "event_id")
-	waitForSQLiteNodeMaterializerFailure(t, sqliteStore.TestDatabase(), probe, eventID, "reviewer")
+	waitForSQLiteNodeMaterializerFailure(t, store.DatabaseForTest(sqliteStore), probe, eventID, "reviewer")
 }
 
 func newMailboxWriteSupportedSurfaceHandler(

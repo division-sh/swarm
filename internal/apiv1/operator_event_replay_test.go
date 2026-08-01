@@ -202,7 +202,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 			name: "sqlite",
 			open: func(t *testing.T, ctx context.Context) fixture {
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				return fixture{store: sqliteStore, db: sqliteStore.TestDatabase(), sqlite: true}
+				return fixture{store: sqliteStore, db: store.DatabaseForTest(sqliteStore), sqlite: true}
 			},
 		},
 		{
@@ -347,7 +347,7 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 			name: "sqlite",
 			open: func(t *testing.T, ctx context.Context) fixture {
 				s := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				return fixture{store: s, db: s.TestDatabase()}
+				return fixture{store: s, db: store.DatabaseForTest(s)}
 			},
 		},
 		{
@@ -554,7 +554,7 @@ func TestOpaqueMissingEventIDReturnsNotFoundAcrossOperatorConsumersParity(t *tes
 			name: "sqlite",
 			open: func(t *testing.T, ctx context.Context) fixture {
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				return fixture{store: sqliteStore, db: sqliteStore.TestDatabase()}
+				return fixture{store: sqliteStore, db: store.DatabaseForTest(sqliteStore)}
 			},
 		},
 		{
@@ -1360,7 +1360,7 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 	t.Helper()
 	eventID := uuid.NewString()
 	runID := uuid.NewString()
-	storetest.RequirePostgresRun(t, ctx, pg.TestDatabase(), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+	storetest.RequirePostgresRun(t, ctx, store.DatabaseForTest(pg), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	semanticEvent := eventtest.PersistedProjection(
 		eventID,
 		events.EventType(eventName),
@@ -1392,7 +1392,7 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 			if err != nil {
 				t.Fatalf("claim original delivery %s %s: %v", eventID, subscriber, err)
 			}
-			sessionID := seedOperatorReplayDeliverySession(t, ctx, pg.TestDatabase(), false, runID, route.AgentIdentity)
+			sessionID := seedOperatorReplayDeliverySession(t, ctx, store.DatabaseForTest(pg), false, runID, route.AgentIdentity)
 			if _, err := pg.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 				t.Fatalf("bind original delivery %s %s: %v", eventID, subscriber, err)
 			}

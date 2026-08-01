@@ -30,8 +30,8 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	}
 
 	seedSQLiteAgentUsageAgent(t, ctx, sqliteStore, agentID)
-	storetest.RequireSQLiteRun(t, ctx, sqliteStore.TestDatabase(), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base.Add(-time.Hour)})
-	if _, err := sqliteStore.TestDatabase().ExecContext(ctx, `
+	storetest.RequireSQLiteRun(t, ctx, storepkg.DatabaseForTest(sqliteStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base.Add(-time.Hour)})
+	if _, err := storepkg.DatabaseForTest(sqliteStore).ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
@@ -46,12 +46,12 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 		t.Fatalf("seed sqlite session: %v", err)
 	}
 	storetest.InsertExistingRunRootEventRecord(
-		t, ctx, sqliteStore.TestDatabase(), "sqlite", eventID, runID, events.EventType("operator.read"),
+		t, ctx, storepkg.DatabaseForTest(sqliteStore), "sqlite", eventID, runID, events.EventType("operator.read"),
 		eventtest.Producer(events.EventProducerExternal, "operator-read-fixture"), []byte(`{}`),
 		events.EventEnvelope{Scope: events.EventScopeGlobal}, base.Add(-4*time.Minute),
 	)
 	capabilitySurfaceID := seedSQLiteOperatorReadCapabilitySurface(t, ctx, sqliteStore, runID, turnID, sessionID, agentID, "session")
-	if _, err := sqliteStore.TestDatabase().ExecContext(ctx, `
+	if _, err := storepkg.DatabaseForTest(sqliteStore).ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
@@ -123,7 +123,7 @@ func TestSQLiteBundleCatalogOwnerBacksSupportedAPISurface(t *testing.T) {
 	ctx := context.Background()
 	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx)
 	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	if _, err := sqliteStore.TestDatabase().ExecContext(ctx, `
+	if _, err := storepkg.DatabaseForTest(sqliteStore).ExecContext(ctx, `
 		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json, data_blob, metadata, ingested_at)
 		VALUES (?, ?, '{}', NULL, '{"source":"sqlite-test"}', ?)
 	`, bundleHash, `agents:

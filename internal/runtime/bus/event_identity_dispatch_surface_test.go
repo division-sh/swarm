@@ -246,7 +246,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	switch backend {
 	case "sqlite":
 		sqlite := storetest.StartSQLiteRuntimeStore(t)
-		selected, db = sqlite, sqlite.TestDatabase()
+		selected, db = sqlite, store.DatabaseForTest(sqlite)
 	case "postgres":
 		_, postgresDB, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)

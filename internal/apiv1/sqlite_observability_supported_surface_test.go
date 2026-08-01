@@ -171,7 +171,7 @@ func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testin
 	eventOnlyID := "00000000-0000-0000-0000-000000001401"
 	lateDeliveryID := "00000000-0000-0000-0000-000000001402"
 	secondDeliveryID := "00000000-0000-0000-0000-000000001403"
-	storetest.RequireSQLiteRun(t, ctx, sqliteStore.TestDatabase(), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base.Add(-time.Minute)})
+	storetest.RequireSQLiteRun(t, ctx, storepkg.DatabaseForTest(sqliteStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base.Add(-time.Minute)})
 	for _, fixture := range []struct {
 		id        string
 		eventType events.EventType
@@ -270,7 +270,7 @@ type observabilitySurfaceFixture struct {
 func newSQLiteObservabilitySurfaceFixture(t *testing.T, ctx context.Context) observabilitySurfaceFixture {
 	t.Helper()
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-	return newObservabilitySurfaceFixture(t, ctx, sqliteStore, sqliteStore.TestDatabase(), true)
+	return newObservabilitySurfaceFixture(t, ctx, sqliteStore, storepkg.DatabaseForTest(sqliteStore), true)
 }
 
 func newPostgresObservabilitySurfaceFixture(t *testing.T, ctx context.Context) observabilitySurfaceFixture {

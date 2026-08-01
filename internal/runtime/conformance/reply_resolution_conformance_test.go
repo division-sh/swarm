@@ -849,9 +849,9 @@ func replyConformanceDB(t *testing.T, backend durableReplyConformanceStore) *sql
 	t.Helper()
 	switch typed := backend.(type) {
 	case *store.PostgresStore:
-		return typed.TestDatabase()
+		return store.DatabaseForTest(typed)
 	case *store.SQLiteRuntimeStore:
-		return typed.TestDatabase()
+		return store.DatabaseForTest(typed)
 	default:
 		t.Fatalf("unsupported reply conformance backend %T", backend)
 		return nil
@@ -998,9 +998,9 @@ func seedDurableReplyConformanceRun(t *testing.T, ctx context.Context, backend d
 	t.Helper()
 	switch typed := backend.(type) {
 	case *store.PostgresStore:
-		storetest.RequirePostgresRun(t, ctx, typed.TestDatabase(), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+		storetest.RequirePostgresRun(t, ctx, store.DatabaseForTest(typed), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	case *store.SQLiteRuntimeStore:
-		storetest.RequireSQLiteRun(t, ctx, typed.TestDatabase(), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+		storetest.RequireSQLiteRun(t, ctx, store.DatabaseForTest(typed), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	default:
 		t.Fatalf("unsupported reply conformance backend %T", backend)
 	}

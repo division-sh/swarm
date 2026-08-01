@@ -50,7 +50,7 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 				oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 				buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
 					storetest.BootstrapPostgresRuntimeStore(t, postgresStore)
-					return selectedPostgresStoreBundle(postgresStore, postgresStore.TestDatabase(), cfg), nil
+					return selectedPostgresStoreBundle(postgresStore, store.DatabaseForTest(postgresStore), cfg), nil
 				}
 				cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 					return serveRuntimeWorkspaceStub{}, nil
@@ -169,7 +169,7 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
 			storetest.BootstrapPostgresRuntimeStore(t, postgresStore)
-			return selectedPostgresStoreBundle(postgresStore, postgresStore.TestDatabase(), cfg), nil
+			return selectedPostgresStoreBundle(postgresStore, store.DatabaseForTest(postgresStore), cfg), nil
 		}
 		cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 			return serveRuntimeWorkspaceStub{}, nil
@@ -287,9 +287,9 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		for _, eventName := range test.eventNames {
 			var count int
 			if backend == "sqlite" {
-				err = sqliteStore.TestDatabase().QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = ?`, eventName).Scan(&count)
+				err = store.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = ?`, eventName).Scan(&count)
 			} else {
-				err = postgresStore.TestDatabase().QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = $1`, eventName).Scan(&count)
+				err = store.DatabaseForTest(postgresStore).QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = $1`, eventName).Scan(&count)
 			}
 			if err != nil || count != 1 {
 				t.Fatalf("%s persisted count=%d err=%v, want 1", eventName, count, err)

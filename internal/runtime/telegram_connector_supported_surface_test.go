@@ -77,16 +77,16 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 		seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")
-		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, sqliteStore.TestDatabase(), flowInstance, true)
+		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, storetest.Database(sqliteStore), flowInstance, true)
 
 		runTelegramConnectorSupportedSurfaceRoundTrip(t, telegramConnectorSupportedSurfaceBackend{
 			name:          "sqlite",
 			ctx:           ctx,
-			db:            sqliteStore.TestDatabase(),
+			db:            storetest.Database(sqliteStore),
 			eventStore:    sqliteStore,
 			deliveryStore: sqliteStore,
 			inboundStore:  sqliteStore,
-			persistence:   runtimepipeline.NewSQLiteWorkflowPersistence(sqliteStore.TestDatabase(), sqliteStore),
+			persistence:   runtimepipeline.NewSQLiteWorkflowPersistence(storetest.Database(sqliteStore), sqliteStore),
 			runLifecycle:  sqliteStore,
 			obligations:   sqliteStore.PipelineObligations(),
 			runID:         runID,

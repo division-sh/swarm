@@ -71,7 +71,7 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 			name: "sqlite",
 			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected.TestDatabase(), selected, false
+				return storetest.Database(selected), selected, false
 			},
 		},
 		{
@@ -216,7 +216,7 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 			name: "sqlite",
 			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected.TestDatabase(), selected, false
+				return storetest.Database(selected), selected, false
 			},
 		},
 		{
@@ -343,7 +343,7 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 			name: "sqlite",
 			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected.TestDatabase(), selected, false
+				return storetest.Database(selected), selected, false
 			},
 		},
 		{

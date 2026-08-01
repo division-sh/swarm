@@ -118,6 +118,12 @@ func AdmitSQLiteRuntimeStore(t testing.TB, db *sql.DB) *store.SQLiteRuntimeStore
 	return sqliteStore
 }
 
+// Database exposes the exact test-owned SQL handle for hostile fixture setup
+// and persistence readback. Runtime code must use typed selected-store ports.
+func Database(selected any) *sql.DB {
+	return store.DatabaseForTest(selected)
+}
+
 // BootstrapPostgresRuntimeStore admits an existing PostgreSQL store through
 // the same production bootstrap used at serve startup.
 func BootstrapPostgresRuntimeStore(t testing.TB, postgresStore *store.PostgresStore) {

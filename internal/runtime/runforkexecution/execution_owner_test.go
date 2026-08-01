@@ -26,7 +26,7 @@ func selectedContractExecutionOwnerForTest(t testing.TB, selected *store.Postgre
 		FlowRoutes: selected,
 	}
 	owner, err := NewSelectedContractExecutionOwner(
-		runtimepipeline.NewPostgresWorkflowPersistence(selected.TestDatabase(), selected), selected, selected, selected,
+		runtimepipeline.NewPostgresWorkflowPersistence(store.DatabaseForTest(selected), selected), selected, selected, selected,
 		selected, durable, selected.PipelineObligations(), selected, roles,
 		selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
 	)

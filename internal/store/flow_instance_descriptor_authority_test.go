@@ -46,7 +46,7 @@ func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenance
 			name: "sqlite",
 			setup: func(t *testing.T) (flowInstanceDescriptorAuthorityStore, *sql.DB, bool) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected, selected.TestDatabase(), true
+				return selected, storetest.Database(selected), true
 			},
 		},
 	}

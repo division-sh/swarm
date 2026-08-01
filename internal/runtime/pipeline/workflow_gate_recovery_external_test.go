@@ -1401,9 +1401,9 @@ func makeGateRecoveryRouteDue(t *testing.T, tc gateRecoveryStoreCase, eventID st
 
 func openSQLiteGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 	selected := storetest.StartSQLiteRuntimeStore(t)
-	persistence := runtimepipeline.NewSQLiteWorkflowPersistence(selected.TestDatabase(), selected)
+	persistence := runtimepipeline.NewSQLiteWorkflowPersistence(storetest.Database(selected), selected)
 	result := gateRecoveryStoreCase{
-		name: "sqlite", db: selected.TestDatabase(), events: selected, cards: selected,
+		name: "sqlite", db: storetest.Database(selected), events: selected, cards: selected,
 		lifecycle: selected, persistence: persistence,
 	}
 	return result

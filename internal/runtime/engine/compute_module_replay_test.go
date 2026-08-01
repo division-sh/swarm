@@ -34,7 +34,7 @@ func TestExecuteWithPersistedComputeModuleReplayEvidenceLoadsAndFailsClosedOnSto
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
-	runlifecyclefixture.RequireSQLite(t, ctx, sqliteStore.TestDatabase(), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: bundleHash, BundleSource: bundleSource})
+	runlifecyclefixture.RequireSQLite(t, ctx, store.DatabaseForTest(sqliteStore), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: bundleHash, BundleSource: bundleSource})
 
 	source := computeModuleReplaySource(t)
 	exec := newComputeModuleReplayExecutor(t, source)

@@ -19,7 +19,7 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTempl
 	}
 	_, bundleSource := source.StorageValues()
 
-	if _, err := sqliteStore.TestDatabase().ExecContext(ctx, `
+	if _, err := storetest.Database(sqliteStore).ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 		VALUES
 			('component-scaffold/active', 'component-scaffold', 'template', '{}', 'active', CURRENT_TIMESTAMP),
@@ -32,13 +32,13 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTempl
 	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: "44444444-4444-4444-8444-444444444444",
 	})
-	if _, err := sqliteStore.TestDatabase().ExecContext(ctx, `
+	if _, err := storetest.Database(sqliteStore).ExecContext(ctx, `
 		INSERT INTO flow_instance_runtime_readiness (run_id, instance_id, plan, created_at, updated_at)
 		VALUES (?, 'component-scaffold/active', '{"workflow_version":"1.0.0"}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	`, runID); err != nil {
 		t.Fatalf("seed flow-instance readiness: %v", err)
 	}
-	if _, err := sqliteStore.TestDatabase().ExecContext(ctx, `
+	if _, err := storetest.Database(sqliteStore).ExecContext(ctx, `
 		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
 		VALUES
 			('22222222-2222-4222-8222-222222222222', ?, 'component-scaffold/active', 'component', 'ready', '{"vertical_id":"v-active","weight":1.1234567}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
@@ -96,7 +96,7 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsReadsPipelineTransac
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 
-	tx, err := sqliteStore.TestDatabase().BeginTx(ctx, nil)
+	tx, err := storetest.Database(sqliteStore).BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}

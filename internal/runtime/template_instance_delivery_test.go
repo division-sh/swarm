@@ -927,8 +927,8 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 				sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithBundleSourceFact(ctx, providerRollbackBundleSourceFact())
-				storetest.RequireSQLiteRun(t, ctx, sqliteStore.TestDatabase(), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
-				return ctx, sqliteStore.TestDatabase(), &providerRollbackSQLiteStore{
+				storetest.RequireSQLiteRun(t, ctx, store.DatabaseForTest(sqliteStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
+				return ctx, store.DatabaseForTest(sqliteStore), &providerRollbackSQLiteStore{
 					SQLiteRuntimeStore: sqliteStore,
 					proof:              &providerRollbackProof{checkpoint: checkpoint},
 				}

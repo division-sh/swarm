@@ -44,7 +44,7 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 			name: "sqlite",
 			start: func(t *testing.T) (budgetRecoveryParityStore, *sql.DB, bool) {
 				s := storetest.StartSQLiteRuntimeStore(t)
-				return s, s.TestDatabase(), false
+				return s, storetest.Database(s), false
 			},
 		},
 		{

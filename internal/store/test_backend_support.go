@@ -17,20 +17,18 @@ func NewSQLiteRuntimeStoreForTest(db *sql.DB) *SQLiteRuntimeStore {
 	}
 }
 
-// TestDatabase exposes the fixture-owned database for exact persistence
-// readback. It is not a runtime capability surface.
-func (s *PostgresStore) TestDatabase() *sql.DB {
-	if s == nil || s.backend == nil {
-		return nil
+// DatabaseForTest exposes a fixture-owned database for exact persistence
+// readback without adding a raw capability to either selected-store facade.
+func DatabaseForTest(selected any) *sql.DB {
+	switch store := selected.(type) {
+	case *PostgresStore:
+		if store != nil && store.backend != nil {
+			return store.backend.db
+		}
+	case *SQLiteRuntimeStore:
+		if store != nil && store.backend != nil {
+			return store.backend.db
+		}
 	}
-	return s.backend.db
-}
-
-// TestDatabase exposes the fixture-owned database for exact persistence
-// readback. It is not a runtime capability surface.
-func (s *SQLiteRuntimeStore) TestDatabase() *sql.DB {
-	if s == nil || s.backend == nil {
-		return nil
-	}
-	return s.backend.db
+	return nil
 }
