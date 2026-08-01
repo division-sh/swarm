@@ -119,7 +119,6 @@ func (noWorkspaceStartupRecoveryContainers) StopManagedContainer(context.Context
 type storeBundle struct {
 	Postgres                       *store.PostgresStore
 	SQLDB                          *sql.DB
-	RuntimeSQLDB                   *sql.DB
 	WorkspaceLookup                workspace.Lookup
 	Database                       apiv1.Pinger
 	RuntimeLogStore                runtime.RuntimeLogPersistence
@@ -341,7 +340,6 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, cfg *config.Config) st
 	bundle := storeBundle{
 		Postgres:           pg,
 		SQLDB:              pg.DB,
-		RuntimeSQLDB:       pg.DB,
 		WorkspaceLookup:    pg,
 		Database:           pg,
 		RuntimeLogStore:    pg,

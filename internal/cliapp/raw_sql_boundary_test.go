@@ -99,7 +99,7 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 		"internal/serveapp/store_facade.go": {
 			Classification: rawSQLConstructionBoundary,
 			Issue:          1783,
-			Reason:         "selected facade may expose named construction-time SQL exceptions such as workspace DB and Postgres-only RuntimeSQLDB",
+			Reason:         "selected facade owns only the exact construction-time process database close capability",
 		},
 		"internal/serveapp/store_roles.go": {
 			Classification: rawSQLConstructionBoundary,
@@ -351,11 +351,6 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,
 			Reason:         "workflow transition receipts are an explicit pipeline SQL read/write owner",
-		},
-		"internal/runtime/runtime.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1783,
-			Reason:         "runtime dependency struct carries the named Postgres-only RuntimeSQLDB exception and must not be used as SQLite capability authority",
 		},
 		"internal/runtime/workspace/host_manager.go": {
 			Classification: rawSQLWorkspaceProcessBoundary,

@@ -258,9 +258,8 @@ func TestSelectedRuntimeConstructionUsesOpaqueWorkflowPersistence(t *testing.T) 
 			t.Fatalf("serve runtime construction retains concrete workflow-store constructor %s", forbidden)
 		}
 	}
-	sqliteBlock := runtimeWriterSnippetAfter(mainText, "case storebackend.BackendSQLite:", "default:")
-	if strings.Contains(sqliteBlock, "RuntimeSQLDB:") {
-		t.Fatal("SQLite runtime construction must not expose the PostgreSQL-only RuntimeSQLDB exception")
+	if strings.Contains(mainText, "RuntimeSQLDB") {
+		t.Fatal("serve runtime construction must not expose raw runtime SQL authority")
 	}
 
 	facadeData, err := os.ReadFile(filepath.Join(root, "internal", "serveapp", "store_facade.go"))

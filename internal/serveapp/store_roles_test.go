@@ -64,9 +64,6 @@ func TestValidateSelectedStoreBundleRolesAcceptsSQLiteBuildStores(t *testing.T) 
 	if err := validateSelectedStoreBundleRoles(storebackend.BackendSQLite, stores); err != nil {
 		t.Fatalf("validate selected sqlite store roles: %v", err)
 	}
-	if stores.RuntimeSQLDB != nil {
-		t.Fatalf("sqlite RuntimeSQLDB = %#v, want nil raw runtime SQL handle", stores.RuntimeSQLDB)
-	}
 }
 
 func TestValidateSelectedStoreBundleRolesAcceptsPostgresSelectedBundle(t *testing.T) {
@@ -92,19 +89,6 @@ func TestValidateSelectedStoreBundleRolesFailsClosedForMissingRequiredCoreRole(t
 	}
 	if !strings.Contains(err.Error(), "RuntimeLogStore") {
 		t.Fatalf("selected role validation error = %v, want RuntimeLogStore named", err)
-	}
-}
-
-func TestValidateSelectedStoreBundleRolesFailsClosedForSQLiteRawRuntimeSQL(t *testing.T) {
-	stores := buildSQLiteSelectedStoreBundleForRoleTest(t)
-	stores.RuntimeSQLDB = stores.SQLDB
-
-	err := validateSelectedStoreBundleRoles(storebackend.BackendSQLite, stores)
-	if err == nil {
-		t.Fatal("expected selected role validation to reject SQLite raw runtime SQL handle")
-	}
-	if !strings.Contains(err.Error(), "RuntimeSQLDB") {
-		t.Fatalf("selected role validation error = %v, want RuntimeSQLDB named", err)
 	}
 }
 

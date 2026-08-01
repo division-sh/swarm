@@ -96,7 +96,6 @@ type selectedStoreRoleClassification string
 const (
 	selectedStoreRoleConstructionOwner         selectedStoreRoleClassification = "construction_only_backend_owner"
 	selectedStoreRoleWorkspaceProcessDB        selectedStoreRoleClassification = "workspace_and_process_db_capability"
-	selectedStoreRoleRawRuntimeSQLException    selectedStoreRoleClassification = "raw_runtime_sql_exception"
 	selectedStoreRoleLegacyConstructionBlocker selectedStoreRoleClassification = "legacy_construction_blocker"
 	selectedStoreRoleCoreRuntime               selectedStoreRoleClassification = "core_runtime_store"
 	selectedStoreRolePublicAPIReadControl      selectedStoreRoleClassification = "public_api_read_and_control_capability"
@@ -123,7 +122,6 @@ func selectedStoreBundleRoleLedger() []selectedStoreBundleRoleEntry {
 	return []selectedStoreBundleRoleEntry{
 		{Name: "Postgres", Classification: selectedStoreRoleConstructionOwner, RequiredOn: selectedStoreRolePostgres, ForbiddenOn: selectedStoreRoleSQLite, SpecRef: selectedFacadeSpec, Reason: "concrete Postgres owner is construction-only and must not represent selected capability authority"},
 		{Name: "SQLDB", Classification: selectedStoreRoleWorkspaceProcessDB, RequiredOn: selectedStoreRoleBoth, SpecRef: rawSQLSpec, Reason: "raw process/workspace DB handle is allowed only for close/health/workspace lifecycle capability"},
-		{Name: "RuntimeSQLDB", Classification: selectedStoreRoleRawRuntimeSQLException, RequiredOn: selectedStoreRolePostgres, ForbiddenOn: selectedStoreRoleSQLite, Issue: 1783, SpecRef: rawSQLSpec, Reason: "raw runtime SQL remains a tracked Postgres-only exception and must stay omitted for SQLite"},
 		{Name: "Database", Classification: selectedStoreRolePublicAPIReadControl, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "health/readiness pinger is a selected public control capability"},
 		{Name: "RuntimeLogStore", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "runtime diagnostics/log persistence is required for selected runtime construction"},
 		{Name: "SchemaBootstrapper", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "schema/bootstrap capability is required before selected runtime persistence executes"},
