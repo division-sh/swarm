@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [item.reviewed]
   outputs:
-    events: [item.approved]
+    events:
+      - name: item.approved
+        event: item.approved
+        sink: harness

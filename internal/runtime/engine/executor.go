@@ -3159,7 +3159,7 @@ func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.Em
 		EntityID:     entityID,
 		FlowInstance: flowInstance,
 	}
-	resolution, err := e.resolveEmitRoute(frame, spec, eventType, sourceRoute, envelope)
+	resolution, err := e.resolveEmitRoute(frame, eventType, sourceRoute, envelope)
 	if err != nil {
 		return EmitIntent{}, err
 	}
@@ -3215,64 +3215,20 @@ func nextPersistenceSafeEmitTime(now, previous time.Time) time.Time {
 	return now
 }
 
-func (e *Executor) resolveEmitRoute(frame *executionFrame, spec runtimecontracts.EmitSpec, eventType string, sourceRoute events.RouteIdentity, envelope events.EventEnvelope) (runtimepinrouting.Resolution, error) {
-	if spec.EventType() == "" {
-		spec.Event = strings.TrimSpace(eventType)
-	}
+func (e *Executor) resolveEmitRoute(frame *executionFrame, eventType string, sourceRoute events.RouteIdentity, envelope events.EventEnvelope) (runtimepinrouting.Resolution, error) {
 	input := runtimepinrouting.ResolutionInput{
 		Source:      e.deps.Source,
 		FlowID:      strings.TrimSpace(frame.req.FlowID.String()),
 		EventType:   strings.TrimSpace(eventType),
-		Emit:        spec,
 		SourceRoute: sourceRoute,
 		Inbound:     frame.req.Event,
 		ParentRoute: parentRouteFromState(frame.state.State.StateCarrier.Metadata),
-	}
-	if spec.Target.Kind == runtimecontracts.EmitTargetKindFlowMatch && len(spec.Target.Match) > 0 {
-		values, err := e.resolveEmitTargetMatchValues(frame, spec.Target.Match)
-		if err != nil {
-			return runtimepinrouting.Resolution{}, err
-		}
-		input.MatchValues = values
-	}
-	if e.deps.TargetDescriptors != nil {
-		descriptors, err := e.deps.TargetDescriptors(frame.tx.Context())
-		if err != nil {
-			return runtimepinrouting.Resolution{}, err
-		}
-		input.Descriptors = descriptors
 	}
 	resolution := runtimepinrouting.ResolveEnvelope(input, envelope)
 	if err := runtimepinrouting.FailureError(resolution.Failure); err != nil {
 		return runtimepinrouting.Resolution{}, err
 	}
 	return resolution, nil
-}
-
-func (e *Executor) resolveEmitTargetMatchValues(frame *executionFrame, match map[string]runtimecontracts.ExpressionValue) (map[string]string, error) {
-	if len(match) == 0 {
-		return nil, nil
-	}
-	values := make(map[string]string, len(match))
-	base := e.currentContext(frame)
-	for key, expr := range match {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		value, ok, err := evalExpressionValue(base, frame.state, expr, workflowexpr.ValueExpressionOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("emit target.match.%s: %w", key, err)
-		}
-		if !ok {
-			continue
-		}
-		values[key] = strings.TrimSpace(asString(value))
-		if values[key] == "" {
-			values[key] = strings.TrimSpace(fmt.Sprint(value))
-		}
-	}
-	return values, nil
 }
 
 func parentRouteFromState(metadata map[string]any) events.RouteIdentity {

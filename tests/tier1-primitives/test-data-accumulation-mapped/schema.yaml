@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [item.received]
   outputs:
-    events: [item.stored]
+    events:
+      - name: item.stored
+        event: item.stored
+        sink: harness

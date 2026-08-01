@@ -9,4 +9,3 @@ score-handler:
       advances_to: scored
       emit:
         event: score.done
-        broadcast: true

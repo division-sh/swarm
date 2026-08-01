@@ -9,4 +9,3 @@ test-node:
       evidence_target: evidence.items
       emit:
         event: evidence.recorded
-        broadcast: true

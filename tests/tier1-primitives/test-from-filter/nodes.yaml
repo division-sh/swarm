@@ -9,4 +9,3 @@ test-node:
       advances_to: done
       emit:
         event: task.acknowledged
-        broadcast: true

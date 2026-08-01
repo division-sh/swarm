@@ -14,4 +14,3 @@ test-node:
       advances_to: done
       emit:
         event: check.passed
-        broadcast: true

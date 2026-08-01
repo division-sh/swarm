@@ -332,7 +332,6 @@ func assertMutationParentRoutePinOutputFailure(t *testing.T, metadata map[string
 		Source:    mutationParentRoutePinOutputSource(),
 		FlowID:    "child",
 		EventType: "child.done",
-		Emit:      runtimecontracts.EmitSpec{Event: "child.done"},
 		ParentRoute: events.RouteIdentity{
 			FlowID:       route.FlowID,
 			FlowInstance: route.FlowInstance,

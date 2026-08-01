@@ -57,9 +57,6 @@ node-7:
   id: node-7
   execution_type: system_node
   subscribes_to: [chain.e6]
-  produces: [chain.e7]
+  produces: []
   event_handlers:
     chain.e6:
-      emit:
-        event: chain.e7
-        broadcast: true

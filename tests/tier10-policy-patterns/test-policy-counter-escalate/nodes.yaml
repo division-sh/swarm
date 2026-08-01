@@ -2,7 +2,7 @@ processor:
   id: processor
   execution_type: system_node
   subscribes_to: [attempt.requested]
-  produces: [attempt.processed, attempt.limit_hit]
+  produces: [attempt.limit_hit]
   event_handlers:
     attempt.requested:
       guard:
@@ -13,6 +13,3 @@ processor:
         writes:
           - target_field: attempt_count
             expression: entity.attempt_count + 1
-      emit:
-        event: attempt.processed
-        broadcast: true

@@ -13,5 +13,4 @@ test-node:
         timeout_ms: payload.config.timeout_ms
       emit:
         event: flow.spawned
-        broadcast: true
       advances_to: spawned

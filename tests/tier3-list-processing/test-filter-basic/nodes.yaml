@@ -11,5 +11,4 @@ filter-node:
         store_as: entity.filtered
       emit:
         event: items.filtered
-        broadcast: true
       advances_to: done

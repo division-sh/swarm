@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [export.requested]
   outputs:
-    events: [item.exported]
+    events:
+      - name: item.exported
+        event: item.exported
+        sink: harness

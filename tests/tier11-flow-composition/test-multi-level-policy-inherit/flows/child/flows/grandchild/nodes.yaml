@@ -12,4 +12,3 @@ grandchild-node:
       advances_to: approved
       emit:
         event: grandchild.passed
-        broadcast: true

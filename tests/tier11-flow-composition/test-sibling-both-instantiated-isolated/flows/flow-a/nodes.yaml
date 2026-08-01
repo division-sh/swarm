@@ -13,10 +13,7 @@ alpha-processor:
   id: alpha-processor
   execution_type: system_node
   subscribes_to: [internal.step2]
-  produces: [alpha.done]
+  produces: []
   event_handlers:
     internal.step2:
       advances_to: processed
-      emit:
-        event: alpha.done
-        broadcast: true

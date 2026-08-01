@@ -6,4 +6,4 @@ pins:
   inputs:
     events: [start]
   outputs:
-    events: [complete]
+    events: []

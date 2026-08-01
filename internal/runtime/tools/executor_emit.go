@@ -136,13 +136,11 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		return nil, err
 	}
 	if runtimepinrouting.PinDeclaredOutput(e.workflowSource, flowID, eventType) {
-		spec := runtimecontracts.EmitSpec{Event: eventType}
 		resolvedBeforePreflight := false
 		rootResolution := runtimepinrouting.ResolveEnvelope(runtimepinrouting.ResolutionInput{
 			Source:      e.workflowSource,
 			FlowID:      flowID,
 			EventType:   eventType,
-			Emit:        spec,
 			SourceRoute: sourceRoute,
 			Inbound:     inbound,
 		}, envelope)
@@ -163,7 +161,6 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 				Source:                     e.workflowSource,
 				FlowID:                     flowID,
 				EventType:                  eventType,
-				Emit:                       spec,
 				SourceRoute:                sourceRoute,
 				Inbound:                    inbound,
 				ParentRoute:                parentRoute,
@@ -231,7 +228,6 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 				Source:                     e.workflowSource,
 				FlowID:                     flowID,
 				EventType:                  eventType,
-				Emit:                       spec,
 				SourceRoute:                sourceRoute,
 				Inbound:                    inbound,
 				ParentRoute:                parentRoute,

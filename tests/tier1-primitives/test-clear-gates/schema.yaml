@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [gates.clear_requested]
   outputs:
-    events: [gates.cleared]
+    events:
+      - name: gates.cleared
+        event: gates.cleared
+        sink: harness

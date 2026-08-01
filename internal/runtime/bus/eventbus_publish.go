@@ -556,6 +556,7 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 	planRoutes func(context.Context, events.Event) (RoutePlan, error),
 ) (PreparedPublish, error) {
 	evt := admitted.Event()
+	planningEvent := evt
 	transaction, ok := CommitPublishTransactionFromContext(ctx)
 	if !ok || transaction == nil {
 		return PreparedPublish{}, errors.New("typed CommitPublish transaction context is required")
@@ -579,6 +580,14 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 		dispatchContext:  txctx,
 		deliveryReceipt:  newDeliveryCommitReceipt(),
 	}
+	if replayScope == runtimepipelineobligation.ScopeSubscribed {
+		admitted, evt, err = eb.resolveCanonicalSubscribedEventBeforePersistence(txctx, admitted)
+		if err != nil {
+			return PreparedPublish{}, err
+		}
+		prepared.Event = evt
+		prepared.admitted = admitted
+	}
 	appendOutcome, err := beginPreparedPublish(txctx, transaction, admitted)
 	if err != nil {
 		return PreparedPublish{}, fmt.Errorf("persist event: %w", err)
@@ -587,9 +596,14 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 		prepared.exactDuplicate = true
 		return prepared, nil
 	}
-	inboundPlan, err := planRoutes(txctx, evt)
+	inboundPlan, err := planRoutes(txctx, planningEvent)
 	if err != nil {
 		return PreparedPublish{}, err
+	}
+	if replayScope == runtimepipelineobligation.ScopeSubscribed {
+		if err := validateCanonicalConnectRouteEvent(evt, inboundPlan); err != nil {
+			return PreparedPublish{}, err
+		}
 	}
 	if err := inboundPlan.ValidatePersistentDeliveries(); err != nil {
 		return PreparedPublish{}, fmt.Errorf("validate durable route plan: %w", err)
@@ -635,6 +649,90 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 		prepared.queueReason = reason
 	}
 	return prepared, nil
+}
+
+func (eb *EventBus) resolveCanonicalSubscribedEventBeforePersistence(ctx context.Context, admitted events.AdmittedEvent) (events.AdmittedEvent, events.Event, error) {
+	evt := admitted.Event()
+	if eb == nil || len(eb.connectRoutePlanner.matchedPlans(ctx, evt)) == 0 {
+		return admitted, evt, nil
+	}
+	previewPlan, err := eb.planSubscribedRoutePlan(withTemplateInstanceLifecyclePreview(ctx), evt, false)
+	if err != nil {
+		return admitted, evt, fmt.Errorf("preview event route facts: %w", err)
+	}
+	resolved, changed, err := resolveCanonicalConnectRouteEvent(evt, previewPlan)
+	if err != nil {
+		return admitted, evt, err
+	}
+	if !changed {
+		return admitted, evt, nil
+	}
+	resolvedAdmission, err := events.AdmitForPersistence(resolved, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		return admitted, evt, fmt.Errorf("admit resolved event route facts: %w", err)
+	}
+	return resolvedAdmission, resolvedAdmission.Event(), nil
+}
+
+func validateCanonicalConnectRouteEvent(evt events.Event, plan RoutePlan) error {
+	resolved, _, err := resolveCanonicalConnectRouteEvent(evt, plan)
+	if err != nil {
+		return err
+	}
+	if !sameEventTargetFacts(evt, resolved) {
+		return errors.New("connect route facts changed after event admission")
+	}
+	return nil
+}
+
+func resolveCanonicalConnectRouteEvent(evt events.Event, plan RoutePlan) (events.Event, bool, error) {
+	plan = plan.Normalized()
+	if plan.AuthorityState != RoutePlanAuthorityCanonicalMatched || plan.AuthorityOwner != routePlanSourceConnectRoutePlan {
+		return evt, false, nil
+	}
+	targets := make([]events.RouteIdentity, 0, len(plan.DeliveryIntents))
+	for _, route := range plan.DeliveryRoutes() {
+		if target := route.Target.Normalized(); !target.Empty() {
+			targets = append(targets, target)
+		}
+	}
+	targets = uniqueRouteIdentities(targets)
+	if len(targets) == 0 {
+		return evt, false, nil
+	}
+	existing := uniqueRouteIdentities(eventDeliveryTargetRoutes(evt))
+	if len(existing) > 0 && !sameRouteIdentities(existing, targets) {
+		return evt, false, errors.New("connect route facts conflict with the admitted event target")
+	}
+	envelope := evt.NormalizedEnvelope()
+	if len(targets) == 1 {
+		envelope = events.EnvelopeForTargetRoute(envelope, targets[0])
+	} else {
+		envelope = events.EnvelopeForTargetSet(envelope, targets)
+	}
+	resolved, err := events.ResolveEnvelope(evt, envelope)
+	if err != nil {
+		return evt, false, fmt.Errorf("resolve canonical connect route facts: %w", err)
+	}
+	return resolved, !sameEventTargetFacts(evt, resolved), nil
+}
+
+func sameEventTargetFacts(left, right events.Event) bool {
+	return sameRouteIdentities(eventDeliveryTargetRoutes(left), eventDeliveryTargetRoutes(right))
+}
+
+func sameRouteIdentities(left, right []events.RouteIdentity) bool {
+	left = uniqueRouteIdentities(left)
+	right = uniqueRouteIdentities(right)
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index].Normalized() != right[index].Normalized() {
+			return false
+		}
+	}
+	return true
 }
 
 // PublishInMutation preserves the general producer surface by preparing inside

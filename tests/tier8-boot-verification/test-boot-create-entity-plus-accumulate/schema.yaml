@@ -5,4 +5,4 @@ pins:
   inputs:
     events: [task.started]
   outputs:
-    events: [task.done]
+    events: []

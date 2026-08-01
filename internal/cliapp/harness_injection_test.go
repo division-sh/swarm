@@ -22,7 +22,7 @@ func TestVerifyHarnessInjectionLabelsNonProductionBundle(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("verify exit = %d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	want := " -- 1 harness-injected input; not production-valid"
+	want := " -- 1 harness-injected input at [worker.work_requested], 1 harness-observed output at [worker.work_completed]; not production-valid"
 	if !strings.Contains(stdout.String(), want) {
 		t.Fatalf("verify stdout missing %q:\n%s", want, stdout.String())
 	}
@@ -49,8 +49,11 @@ func TestVerifyHarnessInjectionJSONMarksNonProductionBundle(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
 		t.Fatalf("decode verify JSON: %v\n%s", err, stdout.String())
 	}
-	if !output.OK || output.HarnessInjectedInputs != 1 || output.ProductionValid {
+	if !output.OK || output.HarnessInjectedInputs != 1 || output.HarnessObservedOutputs != 1 || output.ProductionValid {
 		t.Fatalf("verify JSON = %#v, want ok validation-only result", output)
+	}
+	if strings.Join(output.HarnessInputProvenance, ",") != "worker.work_requested" || strings.Join(output.HarnessOutputProvenance, ",") != "worker.work_completed" {
+		t.Fatalf("verify JSON harness provenance = inputs %v outputs %v", output.HarnessInputProvenance, output.HarnessOutputProvenance)
 	}
 }
 
@@ -78,10 +81,11 @@ func TestVerifyValidationPolicyIsTheOnlyHarnessOptIn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verifyWorkflowContractValidationOptions: %v", err)
 	}
-	if !opts.AllowHarnessInputs {
+	if !opts.AllowHarnessInputs || !opts.AllowHarnessOutputs {
 		t.Fatal("verify policy did not opt into validation-only harness acceptance")
 	}
-	if runtimepkg.DefaultWorkflowContractValidationOptions(nil).AllowHarnessInputs {
+	production := runtimepkg.DefaultWorkflowContractValidationOptions(nil)
+	if production.AllowHarnessInputs || production.AllowHarnessOutputs {
 		t.Fatal("default production policy inherited verify-only harness acceptance")
 	}
 }

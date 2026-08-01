@@ -2,19 +2,13 @@ test-node:
   id: test-node
   execution_type: system_node
   subscribes_to: [task.submitted]
-  produces: [task.completed, task.routed]
+  produces: []
   event_handlers:
     task.submitted:
       on_complete:
         - condition: "payload.score >= 70"
           advances_to: done
-          emit:
-            event: task.completed
-            broadcast: true
       rules:
         route_a:
           condition: "payload.type == \"a\""
-          emit:
-            event: task.routed
-            broadcast: true
           advances_to: routed

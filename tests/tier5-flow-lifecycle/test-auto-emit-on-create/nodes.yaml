@@ -8,4 +8,3 @@ test-node:
       advances_to: started
       emit:
         event: auto.processed
-        broadcast: true

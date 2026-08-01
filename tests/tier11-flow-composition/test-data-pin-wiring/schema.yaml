@@ -9,5 +9,5 @@ pins:
       - name: process_done
         event: process.done
   outputs:
-    events: [job.complete]
+    events: []
     writes: [task_config]

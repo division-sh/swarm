@@ -562,6 +562,10 @@ func runtimeThrottleSuppressPrefixes(source semanticview.Source) []string {
 }
 
 func ensureWorkflowBootWiring(opts RuntimeOptions, executionMode runtimeeffects.ExecutionMode) (*providerconnectors.MockResponsePlan, error) {
+	return ensureWorkflowBootWiringWithHarnessPolicy(opts, executionMode, false)
+}
+
+func ensureWorkflowBootWiringWithHarnessPolicy(opts RuntimeOptions, executionMode runtimeeffects.ExecutionMode, allowValidationHarness bool) (*providerconnectors.MockResponsePlan, error) {
 	if opts.WorkflowModule == nil {
 		return nil, fmt.Errorf("workflow module is required: configure RuntimeOptions.WorkflowModule")
 	}
@@ -577,6 +581,8 @@ func ensureWorkflowBootWiring(opts RuntimeOptions, executionMode runtimeeffects.
 	validationOpts.ExecutionMode = executionMode
 	validationOpts.ChannelPlans = opts.ChannelPlans
 	validationOpts.ChannelOutboundBindings = opts.ChannelOutboundBindings
+	validationOpts.AllowHarnessInputs = allowValidationHarness
+	validationOpts.AllowHarnessOutputs = allowValidationHarness
 	result, err := ValidateWorkflowContractSurface(context.Background(), source, validationOpts)
 	if err != nil {
 		return nil, err
@@ -683,6 +689,10 @@ func (deps RuntimeDeps) Validate() error {
 }
 
 func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
+	return deps.validatedWithHarnessPolicy(false)
+}
+
+func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) (validatedRuntimeDeps, error) {
 	cfg := deps.Config
 	opts := deps.Options
 	if cfg == nil {
@@ -737,7 +747,7 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 		opts.WorkflowModule = workflowModule
 		source = wrappedSource
 	}
-	mockConnectorResponses, err := ensureWorkflowBootWiring(opts, executionMode)
+	mockConnectorResponses, err := ensureWorkflowBootWiringWithHarnessPolicy(opts, executionMode, allowValidationHarness)
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
@@ -927,7 +937,18 @@ func (rt *Runtime) authorActivityContext(ctx context.Context) context.Context {
 }
 
 func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
-	boot, err := deps.validated()
+	return newRuntime(ctx, deps, false)
+}
+
+// NewValidationHarnessRuntime is the explicit non-production catalog execution
+// surface for contracts that declare source/sink harness pins. It changes only
+// admission; harness pins still create no runtime route or delivery authority.
+func NewValidationHarnessRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
+	return newRuntime(ctx, deps, true)
+}
+
+func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bool) (*Runtime, error) {
+	boot, err := deps.validatedWithHarnessPolicy(allowValidationHarness)
 	if err != nil {
 		return nil, err
 	}

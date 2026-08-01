@@ -12,10 +12,7 @@ listener:
   id: listener
   execution_type: system_node
   subscribes_to: [task.done]
-  produces: [work.finished]
+  produces: []
   event_handlers:
     task.done:
       advances_to: completed
-      emit:
-        event: work.finished
-        broadcast: true

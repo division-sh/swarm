@@ -2,7 +2,7 @@ orchestrator:
   id: orchestrator
   execution_type: system_node
   subscribes_to: [spawn.requested]
-  produces: [spawn.confirmed]
+  produces: []
   event_handlers:
     spawn.requested:
       action: create_flow_instance
@@ -11,11 +11,6 @@ orchestrator:
       config_from:
         worker_id: payload.worker_id
         task_label: payload.task_label
-      emit:
-        event: spawn.confirmed
-        broadcast: true
-        fields:
-          worker_id: payload.worker_id
       advances_to: spawned
 
 assigner:
@@ -28,9 +23,6 @@ assigner:
       emit:
         event: worker/work.assign
         fields:
+          worker_id: payload.worker_id
           task_label: payload.task_label
-        target:
-          flow: worker
-          match:
-            instance_id: payload.worker_id
       advances_to: done

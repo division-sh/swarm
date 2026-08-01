@@ -208,6 +208,7 @@ var inputEventPinFieldOptions = map[string]struct{}{
 var outputEventPinFieldOptions = map[string]struct{}{
 	"name":    {},
 	"event":   {},
+	"sink":    {},
 	"key":     {},
 	"carries": {},
 }
@@ -323,6 +324,14 @@ func decodeFlowOutputPinEventNode(node *yaml.Node) (FlowOutputEventPin, error) {
 		case "event":
 			if err := value.Decode(&out.Event); err != nil {
 				return FlowOutputEventPin{}, fmt.Errorf("output event pin event: %w", err)
+			}
+		case "sink":
+			if value.Kind != yaml.ScalarNode || strings.EqualFold(strings.TrimSpace(value.Tag), "!!null") {
+				return FlowOutputEventPin{}, fmt.Errorf("output event pin sink must be %q", FlowOutputSinkHarness)
+			}
+			out.Sink = FlowOutputSink(strings.ToLower(strings.TrimSpace(value.Value)))
+			if out.Sink != FlowOutputSinkHarness {
+				return FlowOutputEventPin{}, fmt.Errorf("output event pin sink must be %q", FlowOutputSinkHarness)
 			}
 		case "key":
 			if err := value.Decode(&out.Key); err != nil {

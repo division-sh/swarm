@@ -987,6 +987,45 @@ pins:
 	}
 }
 
+func TestFlowSchemaDocumentDecode_NormalizesClosedOutputPinSinkEnum(t *testing.T) {
+	var doc FlowSchemaDocument
+	err := yaml.Unmarshal([]byte(`
+name: harness-output
+pins:
+  outputs:
+    events:
+      - name: work_completed
+        event: work.completed
+        sink: "  HARNESS  "
+`), &doc)
+	if err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := doc.Pins.Outputs.EventPins[0].Sink; got != FlowOutputSinkHarness {
+		t.Fatalf("Sink = %q, want %q", got, FlowOutputSinkHarness)
+	}
+
+	for _, tc := range []struct {
+		name string
+		sink string
+	}{
+		{name: "unknown", sink: "external"},
+		{name: "empty", sink: `""`},
+		{name: "null", sink: "null"},
+		{name: "mapping", sink: "{kind: harness}"},
+		{name: "sequence", sink: "[harness]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var invalid FlowSchemaDocument
+			raw := "name: harness-output\npins:\n  outputs:\n    events:\n      - name: work_completed\n        event: work.completed\n        sink: " + tc.sink + "\n"
+			err := yaml.Unmarshal([]byte(raw), &invalid)
+			if err == nil || !strings.Contains(err.Error(), `output event pin sink must be "harness"`) {
+				t.Fatalf("yaml.Unmarshal error = %v, want closed sink-enum rejection", err)
+			}
+		})
+	}
+}
+
 func TestFlowPackageConnectDecodeRejectsRetiredDeliveryAndReplyOnPresence(t *testing.T) {
 	if _, ok := flowPackageConnectFieldOptions["delivery"]; ok {
 		t.Fatal("connect valid options retain retired delivery field")
@@ -3261,7 +3300,7 @@ rules:
       fields:
         bucket: '"low"'
 `,
-			contains: "may only contribute fields",
+			contains: "RETIRED-EMIT-ROUTING: emit.target",
 		},
 		{
 			name: "on_success_split",
@@ -3826,7 +3865,7 @@ func TestAccumulateSpecDecodeRejectsRetiredFiniteBarrierFields(t *testing.T) {
 	}
 }
 
-func TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence(t *testing.T) {
+func TestEmitTargetDecode_RejectsEveryRetiredShapeOnPresence(t *testing.T) {
 	tests := []struct {
 		name string
 		yaml string
@@ -3842,10 +3881,33 @@ func TestEmitTargetDecode_RejectsRetiredAllowFanoutOnPresence(t *testing.T) {
 			if err == nil {
 				t.Fatal("yaml.Unmarshal succeeded, want retired allow_fanout rejection")
 			}
-			for _, want := range []string{"RETIRED-EMIT-TARGET", "examples/routing/notify-all-children", "issues/1934"} {
-				if !strings.Contains(err.Error(), want) {
-					t.Fatalf("yaml.Unmarshal error = %v, want %q", err, want)
-				}
+			if want := "RETIRED-EMIT-ROUTING: emit.target"; !strings.Contains(err.Error(), want) {
+				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, want)
+			}
+		})
+	}
+}
+
+func TestEmitSpecDecode_RejectsEveryRetiredProducerRoutingFieldOnPresence(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{name: "target scalar", yaml: "event: task.done\ntarget: sender\n", want: "emit.target"},
+		{name: "target empty", yaml: "event: task.done\ntarget: {}\n", want: "emit.target"},
+		{name: "target null", yaml: "event: task.done\ntarget: null\n", want: "emit.target"},
+		{name: "broadcast true", yaml: "event: task.done\nbroadcast: true\n", want: "emit.broadcast"},
+		{name: "broadcast false", yaml: "event: task.done\nbroadcast: false\n", want: "emit.broadcast"},
+		{name: "broadcast null", yaml: "event: task.done\nbroadcast: null\n", want: "emit.broadcast"},
+		{name: "broadcast malformed", yaml: "event: task.done\nbroadcast: [true]\n", want: "emit.broadcast"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var emit EmitSpec
+			err := canonicalrouting.NewParserSnippet(t, tc.yaml).Decode(&emit)
+			if err == nil || !strings.Contains(err.Error(), "RETIRED-EMIT-ROUTING: "+tc.want) {
+				t.Fatalf("yaml.Unmarshal error = %v, want retired %s rejection", err, tc.want)
 			}
 		})
 	}
@@ -3864,7 +3926,7 @@ emit:
       account_id: account_id
     allow_fanout: false
 `).Decode(&spec)
-	if err == nil || !strings.Contains(err.Error(), "examples/routing/notify-all-children") {
-		t.Fatalf("yaml.Unmarshal error = %v, want nested retired allow_fanout diagnostic", err)
+	if err == nil || !strings.Contains(err.Error(), "RETIRED-EMIT-ROUTING: emit.target") {
+		t.Fatalf("yaml.Unmarshal error = %v, want nested retired target diagnostic", err)
 	}
 }

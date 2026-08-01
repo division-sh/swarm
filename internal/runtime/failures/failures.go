@@ -189,8 +189,6 @@ var targetDetailClasses = map[string]Class{
 	"target_unknown_flow":                      ClassTargetUnreachable,
 	"target_sender_no_inbound_runtime":         ClassTargetUnreachable,
 	"target_sender_empty_source_runtime":       ClassTargetUnreachable,
-	"producer_target_common_path_forbidden":    ClassTargetUnreachable,
-	"producer_broadcast_common_path_forbidden": ClassTargetUnreachable,
 	"route_plan_instance_source_value_missing": ClassTargetUnreachable,
 	"route_plan_target_unresolved":             ClassTargetUnreachable,
 	"route_plan_target_ambiguous":              ClassTargetAmbiguous,

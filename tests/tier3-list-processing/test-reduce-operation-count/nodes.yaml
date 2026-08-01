@@ -12,4 +12,3 @@ counter-node:
       advances_to: done
       emit:
         event: batch.counted
-        broadcast: true

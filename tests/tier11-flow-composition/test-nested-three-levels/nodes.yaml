@@ -11,10 +11,7 @@ root-collector:
   id: root-collector
   execution_type: system_node
   subscribes_to: [micro.done]
-  produces: [pipeline.complete]
+  produces: []
   event_handlers:
     micro.done:
       advances_to: done
-      emit:
-        event: pipeline.complete
-        broadcast: true

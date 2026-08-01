@@ -15,15 +15,18 @@ import (
 )
 
 type verifyCommandResult struct {
-	OK                    bool                  `json:"ok"`
-	Contracts             string                `json:"contracts"`
-	WorkspaceBackend      string                `json:"workspace_backend"`
-	HarnessInjectedInputs int                   `json:"harness_injected_inputs"`
-	ProductionValid       bool                  `json:"production_valid"`
-	Errors                []verifyFindingOutput `json:"errors"`
-	Warnings              []verifyFindingOutput `json:"warnings"`
-	LintEvidence          []verifyFindingOutput `json:"lint_evidence"`
-	CapabilitySubjects    []packs.Subject       `json:"capability_subjects"`
+	OK                      bool                  `json:"ok"`
+	Contracts               string                `json:"contracts"`
+	WorkspaceBackend        string                `json:"workspace_backend"`
+	HarnessInjectedInputs   int                   `json:"harness_injected_inputs"`
+	HarnessObservedOutputs  int                   `json:"harness_observed_outputs"`
+	HarnessInputProvenance  []string              `json:"harness_input_provenance,omitempty"`
+	HarnessOutputProvenance []string              `json:"harness_output_provenance,omitempty"`
+	ProductionValid         bool                  `json:"production_valid"`
+	Errors                  []verifyFindingOutput `json:"errors"`
+	Warnings                []verifyFindingOutput `json:"warnings"`
+	LintEvidence            []verifyFindingOutput `json:"lint_evidence"`
+	CapabilitySubjects      []packs.Subject       `json:"capability_subjects"`
 }
 
 type verifyFindingOutput struct {
@@ -123,8 +126,8 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 			writeVerifyFindings(errOut, result.BootReport.Warnings(), false)
 			writeVerifyFindings(errOut, result.BootReport.LintEvidence(), false)
 			if out != nil {
-				if result.HarnessInjectedInputCount > 0 {
-					fmt.Fprintf(out, "verify ok: contracts=%s -- %d harness-injected input%s; not production-valid\n", contractsRoot, result.HarnessInjectedInputCount, pluralSuffix(result.HarnessInjectedInputCount))
+				if result.HarnessInjectedInputCount > 0 || result.HarnessObservedOutputCount > 0 {
+					fmt.Fprintf(out, "verify ok: contracts=%s -- %s; not production-valid\n", contractsRoot, harnessValidationSummary(result))
 				} else {
 					fmt.Fprintf(out, "verify ok: contracts=%s\n", contractsRoot)
 				}
@@ -142,17 +145,31 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 	return 0
 }
 
+func harnessValidationSummary(result runtime.WorkflowContractValidationResult) string {
+	parts := make([]string, 0, 2)
+	if result.HarnessInjectedInputCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d harness-injected input%s at [%s]", result.HarnessInjectedInputCount, pluralSuffix(result.HarnessInjectedInputCount), strings.Join(result.HarnessInputDeclarations, ", ")))
+	}
+	if result.HarnessObservedOutputCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d harness-observed output%s at [%s]", result.HarnessObservedOutputCount, pluralSuffix(result.HarnessObservedOutputCount), strings.Join(result.HarnessOutputDeclarations, ", ")))
+	}
+	return strings.Join(parts, ", ")
+}
+
 func verifyCommandOutput(ok bool, contractsRoot string, workspaceBackend string, result runtime.WorkflowContractValidationResult) verifyCommandResult {
 	return verifyCommandResult{
-		OK:                    ok,
-		Contracts:             contractsRoot,
-		WorkspaceBackend:      workspaceBackend,
-		HarnessInjectedInputs: result.HarnessInjectedInputCount,
-		ProductionValid:       result.ProductionValid,
-		Errors:                verifyFindingOutputs(result.BootReport.Errors()),
-		Warnings:              verifyFindingOutputs(result.BootReport.Warnings()),
-		LintEvidence:          verifyFindingOutputs(result.BootReport.LintEvidence()),
-		CapabilitySubjects:    append([]packs.Subject(nil), result.CapabilitySubjects...),
+		OK:                      ok,
+		Contracts:               contractsRoot,
+		WorkspaceBackend:        workspaceBackend,
+		HarnessInjectedInputs:   result.HarnessInjectedInputCount,
+		HarnessObservedOutputs:  result.HarnessObservedOutputCount,
+		HarnessInputProvenance:  append([]string(nil), result.HarnessInputDeclarations...),
+		HarnessOutputProvenance: append([]string(nil), result.HarnessOutputDeclarations...),
+		ProductionValid:         result.ProductionValid,
+		Errors:                  verifyFindingOutputs(result.BootReport.Errors()),
+		Warnings:                verifyFindingOutputs(result.BootReport.Warnings()),
+		LintEvidence:            verifyFindingOutputs(result.BootReport.LintEvidence()),
+		CapabilitySubjects:      append([]packs.Subject(nil), result.CapabilitySubjects...),
 	}
 }
 
@@ -251,6 +268,7 @@ func verifyWorkflowContractValidationOptions(repo, configPath string, source sem
 	}
 	opts.ManagedCredentials = managedCredentialStore
 	opts.AllowHarnessInputs = true
+	opts.AllowHarnessOutputs = true
 	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
 	if err != nil {
 		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("load runtime config: %w", err)

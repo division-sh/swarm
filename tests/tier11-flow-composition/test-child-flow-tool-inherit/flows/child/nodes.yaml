@@ -2,11 +2,8 @@ child-node:
   id: child-node
   execution_type: system_node
   subscribes_to: [child.task]
-  produces: [child.result]
+  produces: []
   event_handlers:
     child.task:
       create_entity: true
       advances_to: done
-      emit:
-        event: child.result
-        broadcast: true

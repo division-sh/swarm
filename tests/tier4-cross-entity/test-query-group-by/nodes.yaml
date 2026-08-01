@@ -11,5 +11,4 @@ test-node:
         count: true
       emit:
         event: digest.compiled
-        broadcast: true
       advances_to: compiled

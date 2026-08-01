@@ -6,6 +6,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -105,6 +106,9 @@ func (c *checkerContext) eventWarnings() []Finding {
 			continue
 		}
 		if _, rejected := rejectedProducers[strings.TrimSpace(entry.ID)]; rejected {
+			continue
+		}
+		if runtimepinrouting.OutputHarnessSink(c.source, ref.FlowID, ref.Authored) {
 			continue
 		}
 		if topologyRoutesProducer(topology, entry.ID) || eventHasExternalConsumerLocal(ref.Entry) {

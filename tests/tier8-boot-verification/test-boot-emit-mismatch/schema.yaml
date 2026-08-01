@@ -5,7 +5,7 @@ pins:
   inputs:
     events: [task.requested]
   outputs:
-    events: [task.completed]
+    events: []
 required_agents:
   - role: worker
     subscribes_to: [task.requested]

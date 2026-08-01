@@ -8,9 +8,7 @@ test-node:
       advances_to: processing
       emit:
         event: cycle.pong
-        broadcast: true
     cycle.pong:
       advances_to: done
       emit:
         event: cycle.ping
-        broadcast: true

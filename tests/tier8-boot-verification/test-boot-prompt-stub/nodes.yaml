@@ -8,4 +8,3 @@ stub-agent-node:
       advances_to: done
       emit:
         event: task.completed
-        broadcast: true

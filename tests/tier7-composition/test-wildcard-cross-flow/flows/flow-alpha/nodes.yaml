@@ -9,4 +9,3 @@ alpha-node:
       advances_to: done
       emit:
         event: job.alpha_done
-        broadcast: true

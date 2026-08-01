@@ -6,4 +6,4 @@ pins:
   inputs:
     events: [child.start]
   outputs:
-    events: [child.done]
+    events: []

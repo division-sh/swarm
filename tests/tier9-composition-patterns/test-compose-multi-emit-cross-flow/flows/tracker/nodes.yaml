@@ -2,11 +2,8 @@ recorder:
   id: recorder
   execution_type: system_node
   subscribes_to: [task.record]
-  produces: [task.recorded]
+  produces: []
   event_handlers:
     task.record:
       create_entity: true
-      emit:
-        event: task.recorded
-        broadcast: true
       advances_to: recorded

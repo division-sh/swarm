@@ -11,5 +11,4 @@ count-node:
         store_as: entity.active_count
       emit:
         event: items.counted
-        broadcast: true
       advances_to: done

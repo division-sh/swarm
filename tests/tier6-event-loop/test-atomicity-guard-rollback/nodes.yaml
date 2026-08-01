@@ -2,7 +2,7 @@ processor:
   id: processor
   execution_type: system_node
   subscribes_to: [process.requested]
-  produces: [process.done]
+  produces: []
   gate_state:
     g_processed: gate set when processing succeeds
   event_handlers:
@@ -16,6 +16,3 @@ processor:
             expression: entity.counter + 1
       sets_gate: g_processed
       advances_to: processed
-      emit:
-        event: process.done
-        broadcast: true

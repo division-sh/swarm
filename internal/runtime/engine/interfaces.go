@@ -7,7 +7,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
@@ -116,8 +115,6 @@ type PayloadShaper interface {
 	ShapeEmitPayload(ctx context.Context, req ExecutionRequest, eventType string, payload map[string]any) (map[string]any, error)
 }
 
-type TargetDescriptorLoader func(context.Context) ([]runtimepinrouting.Descriptor, error)
-
 type TransitionValidator interface {
 	ValidateTransition(currentState, nextState string) error
 }
@@ -138,7 +135,6 @@ type RuntimeDependencies struct {
 	ActionRegistry      ActionRegistry
 	ActionRunner        ActionRunner
 	PayloadShaper       PayloadShaper
-	TargetDescriptors   TargetDescriptorLoader
 	TransitionValidator TransitionValidator
 	EmitNow             func() time.Time
 	MaxChainDepth       int

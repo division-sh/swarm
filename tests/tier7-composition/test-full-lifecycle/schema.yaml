@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [order.submitted]
   outputs:
-    events: [order.finalized]
+    events:
+      - name: order.finalized
+        event: order.finalized
+        sink: harness

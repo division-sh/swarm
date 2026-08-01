@@ -8,4 +8,4 @@ pins:
       - name: work_completed
         event: work.completed
   outputs:
-    events: [job.done]
+    events: []

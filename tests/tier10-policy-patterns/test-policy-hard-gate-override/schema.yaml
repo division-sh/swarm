@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [score.final]
   outputs:
-    events: [result.promoted, result.demoted, result.rejected]
+    events:
+      - name: result.demoted
+        event: result.demoted
+        sink: harness

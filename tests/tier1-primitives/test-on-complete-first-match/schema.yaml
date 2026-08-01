@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [item.evaluated]
   outputs:
-    events: [item.passed, item.failed]
+    events:
+      - name: item.passed
+        event: item.passed
+        sink: harness

@@ -2,13 +2,10 @@ monitor:
   id: monitor
   execution_type: system_node
   subscribes_to: [task.done, timer.check]
-  produces: [task.completed, task.timed_out]
+  produces: [task.timed_out]
   event_handlers:
     task.done:
       advances_to: done
-      emit:
-        event: task.completed
-        broadcast: true
     timer.check:
       guard:
         id: past_deadline
@@ -16,4 +13,3 @@ monitor:
       advances_to: timed_out
       emit:
         event: task.timed_out
-        broadcast: true

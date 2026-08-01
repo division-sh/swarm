@@ -11,5 +11,4 @@ reduce-node:
         store_as: entity.maximum
       emit:
         event: values.reduced
-        broadcast: true
       advances_to: done

@@ -21,4 +21,3 @@ gatekeeper:
       advances_to: accepted
       emit:
         event: candidate.accepted
-        broadcast: true

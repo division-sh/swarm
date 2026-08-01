@@ -7,8 +7,6 @@ type RootConnectEmit uint8
 const (
 	RootConnectNoEmitter RootConnectEmit = iota
 	RootConnectCanonicalEmit
-	RootConnectBroadcastEmit
-	RootConnectTargetEmit
 )
 
 // CopyRootOutputConnect derives the closed root-output-to-child route matrix
@@ -32,13 +30,7 @@ connect:
 	if emit != RootConnectNoEmitter {
 		rootInput = "  inputs:\n    events: [root.start]\n"
 		emitBody := "      emit:\n        event: root.ready\n        fields:\n          entity_id: payload.entity_id\n"
-		switch emit {
-		case RootConnectCanonicalEmit:
-		case RootConnectBroadcastEmit:
-			emitBody += "        broadcast: true\n"
-		case RootConnectTargetEmit:
-			emitBody += "        target:\n          flow: consumer\n          match:\n            entity_id: payload.entity_id\n"
-		default:
+		if emit != RootConnectCanonicalEmit {
 			t.Fatalf("unsupported root connect emitter %d", emit)
 		}
 		rootNodes = "root-node:\n  id: root-node\n  execution_type: system_node\n  event_handlers:\n    root.start:\n" + emitBody

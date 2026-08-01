@@ -9,6 +9,5 @@ pins:
         event: micro.done
   outputs:
     events:
-      - pipeline.complete
       - name: step_begin
         event: step.begin

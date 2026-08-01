@@ -15,4 +15,3 @@ spawner:
       advances_to: spawned
       emit:
         event: spawn.done
-        broadcast: true

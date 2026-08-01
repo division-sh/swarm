@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [batch.received]
   outputs:
-    events: [task.dispatched]
+    events:
+      - name: task.dispatched
+        event: task.dispatched
+        sink: harness

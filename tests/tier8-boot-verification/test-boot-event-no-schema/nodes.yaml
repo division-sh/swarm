@@ -8,4 +8,3 @@ test-node:
       advances_to: done
       emit:
         event: orphan.event
-        broadcast: true

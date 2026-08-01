@@ -2,11 +2,8 @@ sub-node:
   id: sub-node
   execution_type: system_node
   subscribes_to: [sub.requested]
-  produces: [sub.completed]
+  produces: []
   event_handlers:
     sub.requested:
       create_entity: true
       advances_to: done
-      emit:
-        event: sub.completed
-        broadcast: true

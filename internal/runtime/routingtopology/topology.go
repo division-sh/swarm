@@ -54,6 +54,7 @@ type Endpoint struct {
 	SourceLine     int                                 `json:"source_line,omitempty"`
 	SourceLocation string                              `json:"source_location,omitempty"`
 	ResolutionMode string                              `json:"resolution_mode,omitempty"`
+	Sink           string                              `json:"sink,omitempty"`
 }
 
 type BoundaryExposure struct {
@@ -570,6 +571,7 @@ func endpointView(endpoint semanticview.AuthoredEventEndpoint) Endpoint {
 		SourceLine:     endpoint.SourceLine,
 		SourceLocation: strings.TrimSpace(endpoint.SourceLocation),
 		ResolutionMode: strings.TrimSpace(endpoint.ResolutionMode),
+		Sink:           strings.TrimSpace(endpoint.Sink),
 	}
 }
 

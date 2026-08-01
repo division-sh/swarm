@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [values.submitted]
   outputs:
-    events: [values.reduced]
+    events:
+      - name: values.reduced
+        event: values.reduced
+        sink: harness

@@ -10,5 +10,4 @@ test-node:
         filter: "entity.status == 'active'"
       emit:
         event: filter.completed
-        broadcast: true
       advances_to: filtered

@@ -6,4 +6,6 @@ pins:
   inputs:
     events: [spawn.requested, assign.requested]
   outputs:
-    events: [spawn.confirmed, worker/work.assign]
+    events:
+      - name: work_assign
+        event: worker/work.assign

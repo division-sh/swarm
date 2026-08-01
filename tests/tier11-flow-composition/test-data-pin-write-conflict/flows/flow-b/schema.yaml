@@ -6,5 +6,5 @@ pins:
   inputs:
     events: [b.start]
   outputs:
-    events: [b.done]
+    events: []
     writes: [shared_field]

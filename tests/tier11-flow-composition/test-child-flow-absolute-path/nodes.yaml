@@ -17,4 +17,3 @@ listener:
       advances_to: done
       emit:
         event: work.finished
-        broadcast: true

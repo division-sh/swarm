@@ -2,19 +2,13 @@ dual-dialect-node:
   id: dual-dialect-node
   execution_type: system_node
   subscribes_to: [check.requested]
-  produces: [check.passed]
+  produces: []
   event_handlers:
     check.requested:
       on_complete:
         - condition: "payload.score >= 70"
           advances_to: done
-          emit:
-            event: check.passed
-            broadcast: true
       rules:
         - id: high_score
           condition: "payload.score >= 70"
-          emit:
-            event: check.passed
-            broadcast: true
       advances_to: done

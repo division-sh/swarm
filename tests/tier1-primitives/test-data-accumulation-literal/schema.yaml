@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [item.received]
   outputs:
-    events: [item.categorized]
+    events:
+      - name: item.categorized
+        event: item.categorized
+        sink: harness

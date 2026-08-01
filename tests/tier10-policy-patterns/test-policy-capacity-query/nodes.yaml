@@ -13,4 +13,3 @@ admitter:
       advances_to: active
       emit:
         event: slot.granted
-        broadcast: true

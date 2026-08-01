@@ -43,7 +43,7 @@ func TestBuildShowsReplyPairedTopology(t *testing.T) {
 	}
 }
 
-func TestBuildIncludesHarnessInputSource(t *testing.T) {
+func TestBuildIncludesHarnessInputSourceAndOutputSink(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot,
@@ -60,6 +60,9 @@ func TestBuildIncludesHarnessInputSource(t *testing.T) {
 	worker := flowByID(t, view, "worker")
 	if len(worker.InputPins) != 1 || worker.InputPins[0].Source != "harness" {
 		t.Fatalf("worker input pins = %#v, want effective source harness", worker.InputPins)
+	}
+	if got := outputPinByName(t, worker, "work_completed").Sink; got != "harness" {
+		t.Fatalf("worker output sink = %q, want harness", got)
 	}
 }
 

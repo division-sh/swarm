@@ -12,6 +12,5 @@ pins:
         event: validation.done
     reads: []
   outputs:
-    events:
-      - name: validate.passed
+    events: []
     writes: []

@@ -1,13 +1,20 @@
 task-handler:
   id: task-handler
   execution_type: system_node
-  subscribes_to: [work.assign]
-  produces: [work.done]
+  subscribes_to: [work.setup, work.assign]
+  produces: []
   event_handlers:
+    work.setup:
+      data_accumulation:
+        writes:
+          - source_field: worker_id
+            target_field: worker_id
+          - source_field: task_label
+            target_field: task_label
+        source_event: work.setup
     work.assign:
-      advances_to: working
-      emit:
-        event: work.done
-        broadcast: true
-        fields:
-          task_label: payload.task_label
+      advances_to: complete
+  state_schema:
+    fields:
+      worker_id: string
+      task_label: string

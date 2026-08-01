@@ -18,4 +18,3 @@ complete-node:
       advances_to: done
       emit:
         event: task.finalized
-        broadcast: true

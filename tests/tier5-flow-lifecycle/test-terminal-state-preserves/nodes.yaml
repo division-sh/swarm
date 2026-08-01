@@ -8,16 +8,12 @@ complete-node:
       advances_to: done
       emit:
         event: task.finished
-        broadcast: true
 
 update-node:
   id: update-node
   execution_type: system_node
   subscribes_to: [task.updated]
-  produces: [state.updated]
+  produces: []
   event_handlers:
     task.updated:
       advances_to: pending
-      emit:
-        event: state.updated
-        broadcast: true

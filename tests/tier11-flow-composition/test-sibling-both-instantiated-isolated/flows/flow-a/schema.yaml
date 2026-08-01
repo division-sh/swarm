@@ -6,4 +6,4 @@ pins:
   inputs:
     events: [work.begin]
   outputs:
-    events: [alpha.done]
+    events: []

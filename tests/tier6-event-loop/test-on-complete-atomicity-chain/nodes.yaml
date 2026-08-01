@@ -27,4 +27,3 @@ phase-two:
       advances_to: done
       emit:
         event: task.done
-        broadcast: true

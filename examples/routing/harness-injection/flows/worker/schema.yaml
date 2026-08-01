@@ -6,3 +6,8 @@ pins:
       - name: work_requested
         event: work.requested
         source: harness
+  outputs:
+    events:
+      - name: work_completed
+        event: work.completed
+        sink: harness

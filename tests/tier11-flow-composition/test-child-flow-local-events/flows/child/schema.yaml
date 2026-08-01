@@ -6,4 +6,7 @@ pins:
   inputs:
     events: [child.start]
   outputs:
-    events: [child.done]
+    events:
+      - name: child.done
+        event: child.done
+        sink: harness

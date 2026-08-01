@@ -337,71 +337,6 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 	return root
 }
 
-type PinRoutingProducerRouteVariant uint8
-
-const (
-	PinRoutingTargetAdapted PinRoutingProducerRouteVariant = iota + 1
-	PinRoutingBroadcastAdapted
-	PinRoutingTargetDirect
-	PinRoutingUnknownTargetDirect
-	PinRoutingAgentDirect
-	PinRoutingAgentDirectWithRootOutput
-)
-
-func CopyPinRoutingProducerRoute(t testing.TB, variant PinRoutingProducerRouteVariant) string {
-	t.Helper()
-	root := CopyExample(t, ParentConnect)
-	removeInheritedScenarios(t, root)
-	adapted := variant == PinRoutingTargetAdapted || variant == PinRoutingBroadcastAdapted
-	agent := variant == PinRoutingAgentDirect || variant == PinRoutingAgentDirectWithRootOutput
-	consumerEvent := "shared.ready"
-	connect := "connect:\n  - from: producer.shared.ready\n    to: consumer.shared.ready\n"
-	if adapted {
-		consumerEvent = "consumer.ready"
-		connect = "connect:\n  - from: producer.shared.ready\n    to: consumer.consumer.ready\n    adapter: producer-shared-to-consumer-ready\n"
-	}
-	rootSchema := "name: pin-routing-producer-route\n"
-	if variant == PinRoutingAgentDirectWithRootOutput {
-		rootSchema += "pins:\n  outputs:\n    events: [shared.ready]\n"
-	}
-	writeClosedVariantFile(t, root, "package.yaml", "name: pin-routing-producer-route\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n  - id: producer\n    flow: producer\n    mode: static\n  - id: consumer\n    flow: consumer\n    mode: static\n"+connect)
-	writeClosedVariantFile(t, root, "schema.yaml", rootSchema)
-	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "events.yaml", "entities.yaml", "nodes.yaml"} {
-		writeClosedVariantFile(t, root, file, "{}\n")
-	}
-	writeClosedVariantFile(t, root, "flows/producer/schema.yaml", "name: producer\ninitial_state: pending\nstates: [pending, done]\nterminal_states: [done]\npins:\n  inputs:\n    events: [producer.start]\n  outputs:\n    events: [shared.ready]\n")
-	writeClosedVariantFile(t, root, "flows/producer/events.yaml", "producer.start:\n  entity_id: text\nshared.ready:\n  entity_id: text\n")
-	writeClosedVariantFile(t, root, "flows/producer/entities.yaml", "producer:\n  entity_id: text\n")
-	if agent {
-		writeClosedVariantFile(t, root, "flows/producer/agents.yaml", "producer-agent:\n  id: producer-agent\n  role: producer\n  memory: false\n  emit_events:\n    - shared.ready\n")
-		writeClosedVariantFile(t, root, "flows/producer/nodes.yaml", "{}\n")
-	} else {
-		handler := "      emit:\n        event: shared.ready\n        fields:\n          entity_id: payload.entity_id\n"
-		switch variant {
-		case PinRoutingTargetAdapted, PinRoutingTargetDirect:
-			handler += "        target:\n          flow: consumer\n          match:\n            entity_id: payload.entity_id\n"
-		case PinRoutingUnknownTargetDirect:
-			handler += "        target:\n          flow: missing-consumer\n          match:\n            entity_id: payload.entity_id\n"
-		case PinRoutingBroadcastAdapted:
-			handler += "        broadcast: true\n"
-		default:
-			t.Fatalf("unsupported system-node pin-routing variant %d", variant)
-		}
-		writeClosedVariantFile(t, root, "flows/producer/agents.yaml", "{}\n")
-		writeClosedVariantFile(t, root, "flows/producer/nodes.yaml", "producer-node:\n  id: producer-node\n  execution_type: system_node\n  event_handlers:\n    producer.start:\n"+handler)
-	}
-	writeClosedVariantFile(t, root, "flows/consumer/schema.yaml", "name: consumer\ninitial_state: pending\nstates: [pending, done]\nterminal_states: [done]\npins:\n  inputs:\n    events: ["+consumerEvent+"]\n  outputs:\n    events: [consumer.done]\n")
-	consumerEvents := "consumer.start:\n  entity_id: text\n"
-	if consumerEvent != "consumer.start" {
-		consumerEvents += consumerEvent + ":\n  entity_id: text\n"
-	}
-	consumerEvents += "consumer.done:\n  entity_id: text\n"
-	writeClosedVariantFile(t, root, "flows/consumer/events.yaml", consumerEvents)
-	writeClosedVariantFile(t, root, "flows/consumer/entities.yaml", "consumer:\n  entity_id: text\n")
-	writeClosedVariantFile(t, root, "flows/consumer/nodes.yaml", "{}\n")
-	return root
-}
-
 func CopyVerifyStateSchemaFloat(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
@@ -426,14 +361,14 @@ func CopyVerifyAccumulatorEntityProjection(t testing.TB) string {
 	root := CopyExample(t, RootIngress)
 	removeInheritedScenarios(t, root)
 	writeClosedVariantFile(t, root, "package.yaml", "name: verify-accumulator-entity-projection\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n")
-	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-accumulator-entity-projection\ninitial_state: collecting\nterminal_states: [complete]\nstates: [collecting, complete]\npins:\n  inputs:\n    events: [score.dimension_complete]\n  outputs:\n    events: [score.completed]\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-accumulator-entity-projection\ninitial_state: collecting\nterminal_states: [complete]\nstates: [collecting, complete]\npins:\n  inputs:\n    events: [score.dimension_complete]\n  outputs:\n    events:\n      - name: score_completed\n        event: score.completed\n        sink: harness\n")
 	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml"} {
 		writeClosedVariantFile(t, root, file, "{}\n")
 	}
 	writeClosedVariantFile(t, root, "types.yaml", "types:\n  DimensionScore:\n    dimension: text\n    tier: integer\n    score: integer\n    evidence: text\n    confidence: text\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "vertical:\n  scores:\n    type: list<DimensionScore>\n    materialize_from: scorer.dimensions_received\n")
 	writeClosedVariantFile(t, root, "events.yaml", "score.dimension_complete:\n  swarm:\n    source: external (verify accumulator projection fixture)\n  expected_dimensions: integer\n  vertical_id: string\n  dimension: text\n  tier: integer\n  score: integer\n  evidence: text\n  confidence: text\nscore.completed: {}\n")
-	writeClosedVariantFile(t, root, "nodes.yaml", "scorer:\n  id: scorer\n  execution_type: system_node\n  subscribes_to: [score.dimension_complete]\n  produces: [score.completed]\n  event_handlers:\n    score.dimension_complete:\n      accumulate:\n        into: dimensions_received\n        from: payload\n      emit:\n        event: score.completed\n        broadcast: true\n      advances_to: complete\n  state_schema:\n    fields:\n      dimensions_received: list<DimensionScore>\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", "scorer:\n  id: scorer\n  execution_type: system_node\n  subscribes_to: [score.dimension_complete]\n  produces: [score.completed]\n  event_handlers:\n    score.dimension_complete:\n      accumulate:\n        into: dimensions_received\n        from: payload\n      emit:\n        event: score.completed\n      advances_to: complete\n  state_schema:\n    fields:\n      dimensions_received: list<DimensionScore>\n")
 	return root
 }
 

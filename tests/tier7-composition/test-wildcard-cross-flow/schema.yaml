@@ -6,4 +6,4 @@ pins:
   inputs:
     events: [flow-alpha/trigger.alpha, "*/job.*"]
   outputs:
-    events: [audit.logged]
+    events: []

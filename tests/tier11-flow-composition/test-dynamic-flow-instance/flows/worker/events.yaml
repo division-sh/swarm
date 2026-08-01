@@ -1,4 +1,6 @@
-work.assign:
+work.setup:
+  worker_id: string
   task_label: string
-work.done:
+work.assign:
+  worker_id: string
   task_label: string

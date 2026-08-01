@@ -134,13 +134,12 @@ func TestAuthoredEmitSites_LowersEmitFromToCanonicalFields(t *testing.T) {
 
 func TestAuthoredEmitSites_DeduplicatesPackageProjectionWithoutCollapsingDistinctSources(t *testing.T) {
 	source := loadAuthoredEmitSiteFixture(t, authoredEmitSiteFixture{
-		rootNodeID:      "root-node",
-		rootEmit:        "root.ready",
-		flowNodeID:      "support-node",
-		flowEmit:        "support.ready",
-		extrasNodeID:    "support-node",
-		extrasEmit:      "support.ready",
-		extrasBroadcast: true,
+		rootNodeID:   "root-node",
+		rootEmit:     "root.ready",
+		flowNodeID:   "support-node",
+		flowEmit:     "support.ready",
+		extrasNodeID: "support-node",
+		extrasEmit:   "support.ready",
 	})
 
 	sites := AuthoredEmitSites(source)
@@ -198,13 +197,10 @@ type authoredEmitSiteFixture struct {
 	rootOnSuccess       string
 	rootTemplateEmit    bool
 	rootGuardEmit       string
-	rootBroadcast       bool
 	flowNodeID          string
 	flowEmit            string
-	flowBroadcast       bool
 	extrasNodeID        string
 	extrasEmit          string
-	extrasBroadcast     bool
 	omitFlowPackage     bool
 	nestedPackageNodeID string
 	nestedPackageEmit   string
@@ -252,7 +248,7 @@ root.audit: {}
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "entities.yaml"), "{}\n")
-	rootNodeYAML := authoredEmitSiteNodeYAML(opts.rootNodeID, "root.start", opts.rootEmit, opts.rootGuardEmit, opts.rootBroadcast)
+	rootNodeYAML := authoredEmitSiteNodeYAML(opts.rootNodeID, "root.start", opts.rootEmit, opts.rootGuardEmit)
 	if strings.TrimSpace(opts.rootRuleEmit) != "" || strings.TrimSpace(opts.rootOnSuccess) != "" {
 		rootNodeYAML = authoredEmitSiteRulesSuccessNodeYAML(opts.rootNodeID, "root.start", opts.rootRuleEmit, opts.rootOnSuccess)
 	}
@@ -260,7 +256,7 @@ root.audit: {}
 		rootNodeYAML = authoredEmitSiteTemplateNodeYAML(opts.rootNodeID, "root.start", "root.ready")
 	}
 	if opts.rootGuardObject {
-		rootNodeYAML = authoredEmitSiteNodeYAMLWithGuardObject(opts.rootNodeID, "root.start", opts.rootEmit, opts.rootGuardEmit, opts.rootBroadcast)
+		rootNodeYAML = authoredEmitSiteNodeYAMLWithGuardObject(opts.rootNodeID, "root.start", opts.rootEmit, opts.rootGuardEmit)
 	}
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "nodes.yaml"), rootNodeYAML)
 	if !opts.omitFlowPackage {
@@ -287,20 +283,20 @@ support.ready: {}
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), authoredEmitSiteNodeYAML(opts.flowNodeID, "support.start", opts.flowEmit, "", opts.flowBroadcast))
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), authoredEmitSiteNodeYAML(opts.flowNodeID, "support.start", opts.flowEmit, ""))
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "package.yaml"), `
 name: extras
 version: "1.0.0"
 flows: []
 `)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "nodes.yaml"), authoredEmitSiteNodeYAML(opts.extrasNodeID, "support.start", opts.extrasEmit, "", opts.extrasBroadcast))
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "nodes.yaml"), authoredEmitSiteNodeYAML(opts.extrasNodeID, "support.start", opts.extrasEmit, ""))
 	if strings.TrimSpace(opts.nestedPackageNodeID) != "" {
 		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "addon", "package.yaml"), `
 name: support-addon
 version: "1.0.0"
 flows: []
 `)
-		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "addon", "nodes.yaml"), authoredEmitSiteNodeYAML(opts.nestedPackageNodeID, "support.start", opts.nestedPackageEmit, "", false))
+		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "addon", "nodes.yaml"), authoredEmitSiteNodeYAML(opts.nestedPackageNodeID, "support.start", opts.nestedPackageEmit, ""))
 	}
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
@@ -373,13 +369,9 @@ dispatcher:
 	return Wrap(bundle)
 }
 
-func authoredEmitSiteNodeYAML(nodeID, trigger, eventType, guardEventType string, broadcast bool) string {
+func authoredEmitSiteNodeYAML(nodeID, trigger, eventType, guardEventType string) string {
 	if strings.TrimSpace(nodeID) == "" || strings.TrimSpace(eventType) == "" {
 		return "{}\n"
-	}
-	broadcastLine := ""
-	if broadcast {
-		broadcastLine = "        broadcast: true\n"
 	}
 	guardYAML := ""
 	if strings.TrimSpace(guardEventType) != "" {
@@ -397,16 +389,12 @@ func authoredEmitSiteNodeYAML(nodeID, trigger, eventType, guardEventType string,
 ` + guardYAML + `
       emit:
         event: ` + eventType + `
-` + broadcastLine
+`
 }
 
-func authoredEmitSiteNodeYAMLWithGuardObject(nodeID, trigger, eventType, guardEventType string, broadcast bool) string {
+func authoredEmitSiteNodeYAMLWithGuardObject(nodeID, trigger, eventType, guardEventType string) string {
 	if strings.TrimSpace(nodeID) == "" || strings.TrimSpace(eventType) == "" {
 		return "{}\n"
-	}
-	broadcastLine := ""
-	if broadcast {
-		broadcastLine = "        broadcast: true\n"
 	}
 	return nodeID + `:
   id: ` + nodeID + `
@@ -426,7 +414,7 @@ func authoredEmitSiteNodeYAMLWithGuardObject(nodeID, trigger, eventType, guardEv
 
       emit:
         event: ` + eventType + `
-` + broadcastLine
+`
 }
 
 func authoredEmitSiteRulesSuccessNodeYAML(nodeID, trigger, ruleEventType, successEventType string) string {

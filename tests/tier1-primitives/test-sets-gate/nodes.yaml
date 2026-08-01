@@ -10,4 +10,3 @@ test-node:
       sets_gate: g1_check
       emit:
         event: gate.set
-        broadcast: true

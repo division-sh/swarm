@@ -6,4 +6,8 @@ pins:
   inputs:
     events: [timer.scheduled, timer.cancel_requested, timer.check]
   outputs:
-    events: [timer.check, timer.cancelled]
+    events:
+      - timer.check
+      - name: timer.cancelled
+        event: timer.cancelled
+        sink: harness

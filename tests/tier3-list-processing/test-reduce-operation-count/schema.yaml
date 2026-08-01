@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [batch.submitted]
   outputs:
-    events: [batch.counted]
+    events:
+      - name: batch.counted
+        event: batch.counted
+        sink: harness

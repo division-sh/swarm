@@ -2,10 +2,7 @@ complete-node:
   id: complete-node
   execution_type: system_node
   subscribes_to: [task.assigned]
-  produces: [task.done]
+  produces: []
   event_handlers:
     task.assigned:
       advances_to: done
-      emit:
-        event: task.done
-        broadcast: true

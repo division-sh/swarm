@@ -9,4 +9,4 @@ pins:
       - name: task_done
         event: task.done
   outputs:
-    events: [work.finished]
+    events: []

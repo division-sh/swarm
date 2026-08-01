@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
@@ -14,45 +13,65 @@ import (
 
 func checkPinTargetResolution(c *checkerContext) []Finding {
 	findings := []Finding{}
+	census := semanticview.BuildAuthoredEventEndpointCensus(c.source)
+	flowIDs := []string{""}
+	for flowID := range c.source.FlowSchemaEntries() {
+		if strings.TrimSpace(flowID) != "" {
+			flowIDs = append(flowIDs, flowID)
+		}
+	}
+	for _, flowID := range flowIDs {
+		for _, pin := range c.source.FlowOutputEventPins(flowID) {
+			if pin.Sink != "harness" || !pinRoutingOutputHasCanonicalConsumer(c.source, census, flowID, pin.EventType()) {
+				continue
+			}
+			location := strings.TrimSpace(flowID)
+			if location == "" {
+				location = "root"
+			}
+			findings = append(findings, Finding{
+				CheckID:  "pin_target_resolution",
+				Severity: SeverityHardInvalidity,
+				Message:  fmt.Sprintf("output pin %s in %s declares validation-only sink: harness and a canonical runtime consumer; remove sink: harness or remove the runtime consumer", pin.PinName(), location),
+				Location: location,
+			})
+		}
+	}
 	for _, site := range pinRoutingEmitSites(c.source) {
 		if !runtimepinrouting.PinDeclaredOutput(c.source, site.FlowID, site.Spec.EventType()) {
 			continue
 		}
-		if failure := runtimepinrouting.ProducerRouteCommonPathFailure(c.source, site.FlowID, site.Spec.EventType(), site.Spec); failure != "" {
-			findings = append(findings, pinTargetFinding(site, string(failure)))
+		eventType := site.Spec.EventType()
+		if runtimepinrouting.OutputHarnessSink(c.source, site.FlowID, eventType) {
 			continue
 		}
-		connectedOutput := compositionConnectsFromOutputEvent(c.source, site.FlowID, site.Spec.EventType())
-		structuralParent := pinRoutingStructuralParentRouteEligible(c.source, site.FlowID)
-		if connectedOutput {
-			structuralParent = true
-		}
-		if failure := runtimepinrouting.ValidateTargetSpec(c.source, site.FlowID, site.Spec, structuralParent); failure != "" {
-			findings = append(findings, pinTargetFinding(site, string(failure)))
-			continue
-		}
-		if connectedOutput {
-			continue
-		}
-		if site.Spec.Target.Normalized().Kind == runtimecontracts.EmitTargetKindSender && c.pinRoutingEventExternalSource(site.FlowID, site.HandlerEvent) {
-			findings = append(findings, pinTargetFinding(site, "target_sender_empty_source"))
+		hasCanonicalConsumer := pinRoutingOutputHasCanonicalConsumer(c.source, census, site.FlowID, eventType)
+		if !hasCanonicalConsumer {
+			findings = append(findings, pinTargetFinding(site, string(runtimepinrouting.FailureTargetRequiredMissing)))
 		}
 	}
 	for _, site := range pinRoutingAgentEmitSites(c.source) {
 		if !runtimepinrouting.PinDeclaredOutput(c.source, site.FlowID, site.EventType) {
 			continue
 		}
-		spec := runtimecontracts.EmitSpec{Event: site.EventType}
-		connectedOutput := compositionConnectsFromOutputEvent(c.source, site.FlowID, spec.EventType())
-		structuralParent := pinRoutingStructuralParentRouteEligible(c.source, site.FlowID)
-		if connectedOutput {
-			structuralParent = true
+		if runtimepinrouting.OutputHarnessSink(c.source, site.FlowID, site.EventType) {
+			continue
 		}
-		if failure := runtimepinrouting.ValidateTargetSpec(c.source, site.FlowID, spec, structuralParent); failure != "" {
-			findings = append(findings, pinTargetAgentFinding(site, string(failure)))
+		hasCanonicalConsumer := pinRoutingOutputHasCanonicalConsumer(c.source, census, site.FlowID, site.EventType)
+		if !hasCanonicalConsumer {
+			findings = append(findings, pinTargetAgentFinding(site, string(runtimepinrouting.FailureTargetRequiredMissing)))
 		}
 	}
 	return findings
+}
+
+func pinRoutingOutputHasCanonicalConsumer(source semanticview.Source, census semanticview.AuthoredEventEndpointCensus, flowID, eventType string) bool {
+	if runtimepinrouting.OutputHasExternalConsumer(source, flowID, eventType) ||
+		compositionConnectsFromOutputEvent(source, flowID, eventType) ||
+		pinRoutingStructuralParentRouteEligible(source, flowID) {
+		return true
+	}
+	return len(census.MatchingConsumers(flowID, eventType)) > 0
 }
 
 func checkRedundantInTopologySelectEntity(c *checkerContext) []Finding {
@@ -242,12 +261,7 @@ func pinRoutingAllKnownProducersTargeted(source semanticview.Source, flowID, eve
 		}
 		producers++
 		connectedToReceiver := topologyConnectsProducerToReceiver(topology, endpoint.ID, flowID)
-		structuralParent := pinRoutingStructuralParentRouteEligible(source, site.FlowID)
-		if connectedToReceiver {
-			structuralParent = true
-		}
-		if (site.Spec.HasTarget() && runtimepinrouting.ProducerRouteCommonPathFailure(source, site.FlowID, site.Spec.EventType(), site.Spec) == "") ||
-			(structuralParent && !site.Spec.Broadcast) {
+		if connectedToReceiver || pinRoutingStructuralParentRouteEligible(source, site.FlowID) {
 			targeted++
 		}
 	}

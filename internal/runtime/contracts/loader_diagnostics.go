@@ -401,8 +401,6 @@ func loaderFieldOptionsForContext(context string) map[string]struct{} {
 		return activityFieldOptions
 	case "activity.approval":
 		return activityApprovalFieldOptions
-	case "emit.target":
-		return emitTargetFieldOptions
 	case "mailbox":
 		return mailboxFieldOptions
 	case "artifact_repo":

@@ -16,7 +16,6 @@ pipeline:
       advances_to: stage_two
       emit:
         event: stage.two_start
-        broadcast: true
     stage.two_done:
       sets_gate: g_stage_two
       data_accumulation:
@@ -26,4 +25,3 @@ pipeline:
       advances_to: complete
       emit:
         event: stage.complete
-        broadcast: true

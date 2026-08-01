@@ -13,7 +13,6 @@ test-node:
       advances_to: done
       emit:
         event: item.categorized
-        broadcast: true
   state_schema:
     fields:
       category: string

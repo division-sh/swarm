@@ -2,14 +2,10 @@ test-node:
   id: test-node
   execution_type: system_node
   subscribes_to: [task.requested]
-  produces: [task.completed]
+  produces: []
   event_handlers:
     task.requested:
       advances_to: done
-      emit:
-        event: task.completed
-        broadcast: true
-
 ghost-listener:
   id: ghost-listener
   execution_type: system_node

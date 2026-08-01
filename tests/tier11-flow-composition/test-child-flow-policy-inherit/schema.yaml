@@ -5,4 +5,4 @@ pins:
   inputs:
     events: [review.requested]
   outputs:
-    events: [review.done]
+    events: []

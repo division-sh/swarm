@@ -2,7 +2,7 @@ reviewer:
   id: reviewer
   execution_type: system_node
   subscribes_to: [review.done, review.insufficient]
-  produces: [review.approved, review.restarted]
+  produces: [review.approved]
   gate_state:
     g_reviewed: gate set when review is approved
   event_handlers:
@@ -11,10 +11,6 @@ reviewer:
       advances_to: approved
       emit:
         event: review.approved
-        broadcast: true
     review.insufficient:
       clear_gates: true
       advances_to: reviewing
-      emit:
-        event: review.restarted
-        broadcast: true

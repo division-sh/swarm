@@ -3,9 +3,8 @@ router:
   subscribes_to:
     - validate.requested
     - validation.done
-  produces:
-    - validate.passed
-    - child/validate.start
+  produces: []
+
   event_handlers:
     validate.requested:
       emit: child/validate.start
@@ -14,6 +13,3 @@ router:
         id: check_child_gate
         check: _entity.gates['child/g_validated'] == true
       advances_to: done
-      emit:
-        event: validate.passed
-        broadcast: true

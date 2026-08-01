@@ -998,9 +998,6 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 	if got, want := string(persisted.Type()), "producer/deploy.done"; got != want {
 		t.Fatalf("persisted event type = %q, want %q", got, want)
 	}
-	if persisted.HasTargetRoute() {
-		t.Fatalf("persisted event target route = %#v, want no producer-authored target", persisted.TargetRoute())
-	}
 	wantRoute := events.DeliveryRoute{
 		SubscriberType: "node",
 		SubscriberID:   "consumer-node",
@@ -1009,6 +1006,9 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 			FlowInstance: "consumer",
 			EntityID:     runtimeflowidentity.EntityID("consumer"),
 		},
+	}
+	if got := persisted.TargetRoute().Normalized(); got != wantRoute.Target.Normalized() {
+		t.Fatalf("persisted event target route = %#v, want canonical connect target %#v", got, wantRoute.Target)
 	}
 	if !emitDeliveryRoutesContain(store.routes[eventID], wantRoute) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", store.routes[eventID], wantRoute)

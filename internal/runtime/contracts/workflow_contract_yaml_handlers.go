@@ -165,8 +165,6 @@ func (e *EmitSpec) UnmarshalYAML(node *yaml.Node) error {
 		var event string
 		var from string
 		fields := map[string]ExpressionValue{}
-		var target EmitTargetSpec
-		var broadcast bool
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			key := strings.TrimSpace(node.Content[i].Value)
 			value := node.Content[i+1]
@@ -189,26 +187,15 @@ func (e *EmitSpec) UnmarshalYAML(node *yaml.Node) error {
 				}
 				fields = decoded
 			case "target":
-				decoded, err := decodeEmitTargetNode(value)
-				if err != nil {
-					return err
-				}
-				target = decoded
+				return fmt.Errorf("RETIRED-EMIT-ROUTING: emit.target is not accepted; use same-flow subscriptions, package connect with receiver select/reply, or an accepted external consumer")
 			case "broadcast":
-				if err := value.Decode(&broadcast); err != nil {
-					return err
-				}
+				return fmt.Errorf("RETIRED-EMIT-ROUTING: emit.broadcast is not accepted; use same-flow subscriptions, package connect with receiver select/reply, or a structured output pin with sink: harness for validation-only observation")
 			}
 		}
 		*e = EmitSpec{
-			Event:     strings.TrimSpace(event),
-			From:      strings.TrimSpace(from),
-			Fields:    fields,
-			Target:    target.Normalized(),
-			Broadcast: broadcast,
-		}
-		if e.Broadcast && e.HasTarget() {
-			return fmt.Errorf("INVALID-EMIT: emit.target and emit.broadcast:true are mutually exclusive")
+			Event:  strings.TrimSpace(event),
+			From:   strings.TrimSpace(from),
+			Fields: fields,
 		}
 		return nil
 	default:
@@ -238,14 +225,6 @@ var activityFieldOptions = map[string]struct{}{
 var activityApprovalFieldOptions = map[string]struct{}{
 	"decision": {},
 }
-
-var emitTargetFieldOptions = map[string]struct{}{
-	"instance_id": {},
-	"flow":        {},
-	"match":       {},
-}
-
-const retiredAllowFanoutDiagnostic = "RETIRED-EMIT-TARGET: emit.target.allow_fanout is deferred and not runnable; use collection fan_out over the owner's child-key list, then an ordinary output pin/connect and receiver resolution.mode: select. See examples/routing/notify-all-children. True one-event multi-instance delivery is evidence-gated at https://github.com/division-sh/swarm/issues/1934"
 
 var mailboxFieldOptions = map[string]struct{}{
 	"item_type":     {},
@@ -447,71 +426,6 @@ func decodeActivityInputNode(node *yaml.Node) (map[string]ExpressionValue, error
 		fields[target] = value
 	}
 	return fields, nil
-}
-
-func decodeEmitTargetNode(node *yaml.Node) (EmitTargetSpec, error) {
-	if node == nil || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
-		return EmitTargetSpec{}, nil
-	}
-	switch node.Kind {
-	case yaml.ScalarNode:
-		value := strings.TrimSpace(node.Value)
-		if value == "" {
-			return EmitTargetSpec{}, nil
-		}
-		if value != string(EmitTargetKindSender) {
-			return EmitTargetSpec{}, fmt.Errorf("INVALID-EMIT: emit.target scalar must be %q", EmitTargetKindSender)
-		}
-		return EmitTargetSpec{Kind: EmitTargetKindSender}, nil
-	case yaml.MappingNode:
-		for i := 0; i+1 < len(node.Content); i += 2 {
-			key := strings.TrimSpace(node.Content[i].Value)
-			if key == "" {
-				continue
-			}
-			if key == "allow_fanout" {
-				return EmitTargetSpec{}, fmt.Errorf("%s", retiredAllowFanoutDiagnostic)
-			}
-			if _, ok := emitTargetFieldOptions[key]; !ok {
-				return EmitTargetSpec{}, NewUndefinedFieldDiagnostic("emit.target", key, emitTargetFieldOptions)
-			}
-		}
-		var out EmitTargetSpec
-		for i := 0; i+1 < len(node.Content); i += 2 {
-			key := strings.TrimSpace(node.Content[i].Value)
-			value := node.Content[i+1]
-			switch key {
-			case "instance_id":
-				if err := value.Decode(&out.InstanceID); err != nil {
-					return EmitTargetSpec{}, err
-				}
-			case "flow":
-				if err := value.Decode(&out.Flow); err != nil {
-					return EmitTargetSpec{}, err
-				}
-			case "match":
-				match, err := decodeExpressionValueMapNode(value, "emit.target.match")
-				if err != nil {
-					return EmitTargetSpec{}, fmt.Errorf("INVALID-EMIT: emit.target.match must be a mapping: %w", err)
-				}
-				out.Match = match
-			}
-		}
-		out = out.Normalized()
-		switch {
-		case out.InstanceID != "" && (out.Flow != "" || len(out.Match) > 0):
-			return EmitTargetSpec{}, fmt.Errorf("INVALID-EMIT: emit.target.instance_id cannot be combined with flow/match")
-		case out.InstanceID != "":
-			out.Kind = EmitTargetKindInstanceID
-		case out.Flow != "" && len(out.Match) > 0:
-			out.Kind = EmitTargetKindFlowMatch
-		default:
-			return EmitTargetSpec{}, fmt.Errorf("INVALID-EMIT: emit.target requires sender, instance_id, or flow+match")
-		}
-		return out, nil
-	default:
-		return EmitTargetSpec{}, fmt.Errorf("unsupported emit.target yaml node kind %d", node.Kind)
-	}
 }
 
 func decodeEmitFieldsNode(node *yaml.Node) (map[string]ExpressionValue, error) {

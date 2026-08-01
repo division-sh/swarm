@@ -111,7 +111,7 @@ func TestLowerEmitSpecFieldsFailsClosed(t *testing.T) {
 	}
 }
 
-func TestEmitFromSugarDoesNotBleedIntoTargetMatch(t *testing.T) {
+func TestEmitTargetIsStrictlyRetiredBeforeFieldLowering(t *testing.T) {
 	var spec EmitSpec
 	err := yaml.Unmarshal([]byte(`
 event: account.bucketed
@@ -123,21 +123,9 @@ target:
 fields:
   interest_score: payload
 `), &spec)
-	if err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "RETIRED-EMIT-ROUTING: emit.target") {
+		t.Fatalf("yaml.Unmarshal error = %v, want hard retirement", err)
 	}
-
-	lowered, err := emitFieldLoweringTestBundle().LowerEmitSpecFields(EmitFieldLoweringContext{
-		NodeID:           "bucket-node",
-		TriggerEventType: "account.scored",
-		Site:             "handler.emit",
-	}, spec)
-	if err != nil {
-		t.Fatalf("LowerEmitSpecFields error: %v", err)
-	}
-
-	assertEmitCEL(t, lowered.Fields, "interest_score", "payload.interest_score")
-	assertEmitCEL(t, lowered.Target.Match, "account_id", "payload")
 }
 
 func TestMailboxPayloadDoesNotAcceptEmitFromSugar(t *testing.T) {

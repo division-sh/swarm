@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [task.started]
   outputs:
-    events: [task.done]
+    events:
+      - name: task.done
+        event: task.done
+        sink: harness

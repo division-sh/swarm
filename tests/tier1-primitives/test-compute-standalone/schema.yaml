@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [scores.ready]
   outputs:
-    events: [scores.computed]
+    events:
+      - name: scores.computed
+        event: scores.computed
+        sink: harness

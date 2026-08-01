@@ -12,4 +12,5 @@ pins:
   outputs:
     events:
       - name: check.passed
+        sink: harness
     writes: []

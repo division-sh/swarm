@@ -2,7 +2,7 @@ scorer:
   id: scorer
   execution_type: system_node
   subscribes_to: [score.submitted]
-  produces: [result.high, result.mid, result.low]
+  produces: [result.high]
   event_handlers:
     score.submitted:
       data_accumulation:
@@ -14,14 +14,7 @@ scorer:
           advances_to: high
           emit:
             event: result.high
-            broadcast: true
         - condition: "payload.value >= 50"
           advances_to: mid
-          emit:
-            event: result.mid
-            broadcast: true
         - condition: "else"
           advances_to: low
-          emit:
-            event: result.low
-            broadcast: true

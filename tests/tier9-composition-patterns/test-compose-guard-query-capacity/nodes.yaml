@@ -13,4 +13,3 @@ gatekeeper:
       advances_to: admitted
       emit:
         event: admission.granted
-        broadcast: true

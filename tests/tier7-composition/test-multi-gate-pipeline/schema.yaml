@@ -6,4 +6,10 @@ pins:
   inputs:
     events: [gate.g1_set, gate.g2_set, gate.g3_set, approval.requested]
   outputs:
-    events: [approval.granted, gate.set]
+    events:
+      - name: approval.granted
+        event: approval.granted
+        sink: harness
+      - name: gate.set
+        event: gate.set
+        sink: harness

@@ -2,7 +2,7 @@ test-node:
   id: test-node
   execution_type: system_node
   subscribes_to: [task.submitted]
-  produces: [task.accepted]
+  produces: []
   gate_state:
     approval_gate: gate set when task is accepted
   event_handlers:
@@ -13,6 +13,3 @@ test-node:
         on_fail: reject
       advances_to: done
       sets_gate: approval_gate
-      emit:
-        event: task.accepted
-        broadcast: true

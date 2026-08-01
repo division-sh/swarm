@@ -353,8 +353,8 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
-	if result.Outcome == nil || len(result.Outcome.Emits) != 1 || result.Outcome.Emits[0] != "job.done" {
-		t.Fatalf("handler emits = %#v, want [job.done]", result.Outcome)
+	if result.Outcome == nil || len(result.Outcome.Emits) != 0 {
+		t.Fatalf("handler emits = %#v, want no retired dead output", result.Outcome)
 	}
 
 	if handled := pc.executeNodeHandlerPlan(withWorkflowNodeDeliveryRoute(listenerCtx, completionRoute), "parent-listener", completion); !handled {
@@ -426,8 +426,8 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 	if !passThrough {
 		t.Fatal("expected root-local work.completed to remain visible downstream")
 	}
-	if len(emitted) != 1 || string(emitted[0].Type()) != "job.done" {
-		t.Fatalf("emitted = %#v, want [job.done]", emitted)
+	if len(emitted) != 0 {
+		t.Fatalf("emitted = %#v, want no retired dead output", emitted)
 	}
 }
 

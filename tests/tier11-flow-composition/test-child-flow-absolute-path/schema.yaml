@@ -8,4 +8,7 @@ pins:
       - name: task_done
         event: task.done
   outputs:
-    events: [work.finished]
+    events:
+      - name: work.finished
+        event: work.finished
+        sink: harness

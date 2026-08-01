@@ -6,4 +6,7 @@ pins:
   inputs:
     events: [spawn.requested]
   outputs:
-    events: [spawn.done]
+    events:
+      - name: spawn.done
+        event: spawn.done
+        sink: harness

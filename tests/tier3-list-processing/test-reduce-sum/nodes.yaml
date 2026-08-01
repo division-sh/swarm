@@ -11,5 +11,4 @@ reduce-node:
         store_as: entity.total
       emit:
         event: values.totaled
-        broadcast: true
       advances_to: done

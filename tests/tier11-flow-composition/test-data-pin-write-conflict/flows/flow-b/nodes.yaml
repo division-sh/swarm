@@ -2,7 +2,7 @@ b-node:
   id: b-node
   execution_type: system_node
   subscribes_to: [b.start]
-  produces: [b.done]
+  produces: []
   event_handlers:
     b.start:
       create_entity: true
@@ -12,6 +12,3 @@ b-node:
             value:
               source: flow-b
       advances_to: done
-      emit:
-        event: b.done
-        broadcast: true

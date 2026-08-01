@@ -17,7 +17,6 @@ resolver:
           advances_to: resolved
           emit:
             event: conflict.resolved
-            broadcast: true
         - id: keep_best
           condition: "payload.strategy == 'keep_best'"
           data_accumulation:
@@ -29,7 +28,6 @@ resolver:
           advances_to: resolved
           emit:
             event: conflict.resolved
-            broadcast: true
         - id: merge
           condition: "payload.strategy == 'merge'"
           data_accumulation:
@@ -43,4 +41,3 @@ resolver:
           advances_to: resolved
           emit:
             event: conflict.resolved
-            broadcast: true

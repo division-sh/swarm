@@ -3353,8 +3353,8 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 	if contains(emitted, "child/step.result") {
 		t.Fatalf("events = %v, do not want child/step.result", emitted)
 	}
-	if !contains(emitted, "pipeline.complete") {
-		t.Fatalf("events = %v, want pipeline.complete through declared ancestor connects", emitted)
+	if contains(emitted, "pipeline.complete") {
+		t.Fatalf("events = %v, do not want retired dead output pipeline.complete", emitted)
 	}
 }
 
@@ -3873,8 +3873,8 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	if contains(emitted, "child/step.result") {
 		t.Fatalf("events = %v, do not want child/step.result", emitted)
 	}
-	if !contains(emitted, "pipeline.complete") {
-		t.Fatalf("events = %v, want pipeline.complete through declared ancestor connects", emitted)
+	if contains(emitted, "pipeline.complete") {
+		t.Fatalf("events = %v, do not want retired dead output pipeline.complete", emitted)
 	}
 }
 

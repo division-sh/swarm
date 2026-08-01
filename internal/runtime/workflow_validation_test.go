@@ -23,8 +23,8 @@ func TestDefaultWorkflowContractValidationRejectsHarnessInput(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only input source: harness at worker.work_requested") {
 		t.Fatalf("ValidateWorkflowContractSurface error = %v, want harness production rejection", err)
 	}
-	if result.HarnessInjectedInputCount != 1 || result.ProductionValid {
-		t.Fatalf("validation result = %#v, want one harness input and production_valid=false", result)
+	if result.HarnessInjectedInputCount != 1 || result.HarnessObservedOutputCount != 1 || result.ProductionValid {
+		t.Fatalf("validation result = %#v, want one harness input, one harness output, and production_valid=false", result)
 	}
 }
 
@@ -32,14 +32,61 @@ func TestValidateWorkflowContractSurfaceAllowsHarnessOnlyForExplicitVerifyPolicy
 	source := loadHarnessInjectionValidationSource(t)
 	opts := DefaultWorkflowContractValidationOptions(nil)
 	opts.AllowHarnessInputs = true
+	opts.AllowHarnessOutputs = true
 	opts.CheckMCPReachable = false
 	opts.FatalBootWarnings = false
 	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, opts)
 	if err != nil {
 		t.Fatalf("ValidateWorkflowContractSurface: %v", err)
 	}
-	if result.HarnessInjectedInputCount != 1 || result.ProductionValid {
-		t.Fatalf("validation result = %#v, want one harness input and production_valid=false", result)
+	if result.HarnessInjectedInputCount != 1 || result.HarnessObservedOutputCount != 1 || result.ProductionValid {
+		t.Fatalf("validation result = %#v, want one harness input, one harness output, and production_valid=false", result)
+	}
+}
+
+func TestProductionValidationRejectsHarnessOutputIndependently(t *testing.T) {
+	source := loadWorkflowValidationSourceAt(t, canonicalrouting.CopyHarnessInjectionWithoutSource(t))
+	opts := DefaultWorkflowContractValidationOptions(nil)
+	opts.AllowHarnessInputs = true
+	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, opts)
+	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only output sink: harness at worker.work_completed") {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want harness output production rejection", err)
+	}
+	if result.HarnessInjectedInputCount != 0 || result.HarnessObservedOutputCount != 1 || result.ProductionValid {
+		t.Fatalf("validation result = %#v, want one harness output and production_valid=false", result)
+	}
+}
+
+func TestProductionValidationRejectsRootHarnessOutput(t *testing.T) {
+	bundle := testRuntimeWorkflowValidationBundle()
+	bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{
+		Pins: runtimecontracts.FlowPins{
+			Outputs: runtimecontracts.FlowOutputPins{
+				EventPins: []runtimecontracts.FlowOutputEventPin{{
+					Name:  "root_completed",
+					Event: "root.completed",
+					Sink:  runtimecontracts.FlowOutputSinkHarness,
+				}},
+			},
+		},
+	}
+	source := semanticview.Wrap(bundle)
+	opts := DefaultWorkflowContractValidationOptions(nil)
+	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, opts)
+	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only output sink: harness at root_completed") {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want root harness output production rejection", err)
+	}
+	if result.HarnessObservedOutputCount != 1 || result.ProductionValid {
+		t.Fatalf("validation result = %#v, want one root harness output and production_valid=false", result)
+	}
+}
+
+func TestEnsureWorkflowBootWiringRejectsHarnessOutputWithoutInputHarness(t *testing.T) {
+	_, err := ensureWorkflowBootWiring(RuntimeOptions{
+		WorkflowModule: semanticOnlyWorkflowRuntime{source: loadWorkflowValidationSourceAt(t, canonicalrouting.CopyHarnessInjectionWithoutSource(t))},
+	}, runtimeeffects.ExecutionModeLive)
+	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only output sink: harness") {
+		t.Fatalf("ensureWorkflowBootWiring error = %v, want harness output production rejection", err)
 	}
 }
 
@@ -943,6 +990,20 @@ func loadHarnessInjectionValidationSource(t *testing.T) semanticview.Source {
 	)
 	if err != nil {
 		t.Fatalf("load harness injection artifact: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func loadWorkflowValidationSourceAt(t *testing.T, root string) semanticview.Source {
+	t.Helper()
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		root,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load workflow validation source: %v", err)
 	}
 	return semanticview.Wrap(bundle)
 }

@@ -2,7 +2,7 @@ test-node:
   id: test-node
   execution_type: system_node
   subscribes_to: [task.started]
-  produces: [task.done]
+  produces: []
   event_handlers:
     task.started:
       create_entity: true
@@ -10,6 +10,3 @@ test-node:
         into: items
         from: payload
       advances_to: done
-      emit:
-        event: task.done
-        broadcast: true

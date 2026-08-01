@@ -11,5 +11,4 @@ reduce-node:
         store_as: entity.result
       emit:
         event: scores.resolved
-        broadcast: true
       advances_to: done

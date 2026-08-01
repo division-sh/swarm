@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [batch.submitted]
   outputs:
-    events: [item.assigned]
+    events:
+      - name: item.assigned
+        event: item.assigned
+        sink: harness

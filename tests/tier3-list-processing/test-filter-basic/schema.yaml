@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [items.submitted]
   outputs:
-    events: [items.filtered]
+    events:
+      - name: items.filtered
+        event: items.filtered
+        sink: harness
