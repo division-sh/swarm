@@ -146,26 +146,31 @@ import (
 
 type modeAlias = runtimecontracts.FlowInputResolutionMode
 
+type embeddedMode struct {
+	runtimecontracts.FlowInputResolutionMode
+}
+
 func fieldResult() runtimecontracts.TemplateInstanceField {
 	var value runtimecontracts.TemplateInstanceField
 	return value
 }
 
-func arbitraryReceiverNames(identity runtimecontracts.TemplateInstanceField, resolution modeAlias, outcome *runtimebus.TemplateInstanceLifecycleAction) {
+func arbitraryReceiverNames(identity runtimecontracts.TemplateInstanceField, resolution modeAlias, outcome *runtimebus.TemplateInstanceLifecycleAction, promoted embeddedMode) {
 	_ = identity.String()
 	_ = resolution.String()
 	_ = outcome.String()
 	_ = fieldResult().String()
 	render := resolution.String
 	_ = render()
+	_ = promoted.String()
 }
 `},
 	)
 	if err != nil {
 		t.Fatalf("scan hostile semantic receivers: %v", err)
 	}
-	if len(findings) != 5 {
-		t.Fatalf("compiler-resolved hostile findings = %#v, want five arbitrary-name/alias/pointer/call-result/method-value conversions", findings)
+	if len(findings) != 6 {
+		t.Fatalf("compiler-resolved hostile findings = %#v, want six arbitrary-name/alias/pointer/call-result/method-value/promoted-method conversions", findings)
 	}
 	owners := map[string]int{}
 	for _, finding := range findings {
@@ -173,7 +178,7 @@ func arbitraryReceiverNames(identity runtimecontracts.TemplateInstanceField, res
 	}
 	for owner, want := range map[string]int{
 		"contracts.TemplateInstanceField":     2,
-		"contracts.FlowInputResolutionMode":   2,
+		"contracts.FlowInputResolutionMode":   3,
 		"bus.TemplateInstanceLifecycleAction": 1,
 	} {
 		if owners[owner] != want {
@@ -415,7 +420,15 @@ func templateInstanceSemanticReceiverOwner(selection *types.Selection) string {
 	if selection == nil || selection.Obj() == nil || selection.Obj().Name() != "String" {
 		return ""
 	}
-	receiver := types.Unalias(selection.Recv())
+	method, ok := selection.Obj().(*types.Func)
+	if !ok {
+		return ""
+	}
+	signature, ok := method.Type().(*types.Signature)
+	if !ok || signature.Recv() == nil {
+		return ""
+	}
+	receiver := types.Unalias(signature.Recv().Type())
 	for {
 		pointer, ok := receiver.(*types.Pointer)
 		if !ok {
