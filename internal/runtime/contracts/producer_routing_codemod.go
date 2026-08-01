@@ -31,7 +31,7 @@ func RewriteRetiredProducerBroadcasts(contractsRoot string) (int, error) {
 		if walkErr != nil {
 			return walkErr
 		}
-		if !entry.IsDir() && entry.Name() == "nodes.yaml" {
+		if !entry.IsDir() && (entry.Name() == "nodes.yaml" || entry.Name() == "schema.yaml") {
 			files = append(files, path)
 		}
 		return nil
@@ -166,6 +166,21 @@ func producerRoutingEmitNodes(document *yaml.Node) []*yaml.Node {
 			emits = appendMappingEmit(emits, producerRoutingMappingValue(join, "timeout"))
 		}
 	}
+	emits = append(emits, producerRoutingSchemaEmitNodes(root)...)
+	return emits
+}
+
+func producerRoutingSchemaEmitNodes(root *yaml.Node) []*yaml.Node {
+	var emits []*yaml.Node
+	for _, loop := range producerRoutingMappingValues(producerRoutingMappingValue(root, "loops")) {
+		emits = appendMappingEmit(emits, producerRoutingMappingValue(loop, "escape"))
+	}
+	for _, stage := range producerRoutingMappingValues(producerRoutingMappingValue(root, "stages")) {
+		gate := producerRoutingMappingValue(stage, "gate")
+		for _, outcome := range producerRoutingMappingValues(producerRoutingMappingValue(gate, "outcomes")) {
+			emits = appendMappingEmit(emits, outcome)
+		}
+	}
 	return emits
 }
 
@@ -212,6 +227,17 @@ func producerRoutingMappingValue(node *yaml.Node, key string) *yaml.Node {
 		}
 	}
 	return nil
+}
+
+func producerRoutingMappingValues(node *yaml.Node) []*yaml.Node {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	values := make([]*yaml.Node, 0, len(node.Content)/2)
+	for i := 1; i < len(node.Content); i += 2 {
+		values = append(values, node.Content[i])
+	}
+	return values
 }
 
 func writeProducerRoutingRewrite(path string, mode fs.FileMode, raw []byte) error {

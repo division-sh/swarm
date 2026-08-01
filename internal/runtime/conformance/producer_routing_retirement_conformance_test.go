@@ -309,7 +309,7 @@ func TestCheckedYAMLRejectsAllProducerRoutingAuthority(t *testing.T) {
 			}
 			return nil
 		}
-		if entry.Name() == "nodes.yaml" && hasRetiredProducerRoutingFile(t, path) {
+		if (entry.Name() == "nodes.yaml" || entry.Name() == "schema.yaml") && hasRetiredProducerRoutingFile(t, path) {
 			t.Errorf("%s retains retired emit.target or emit.broadcast", path)
 		}
 		return nil
@@ -327,6 +327,32 @@ func TestProducerRoutingRetirementGuardIgnoresNestedLiteralEmitMap(t *testing.T)
 	}
 	if retired {
 		t.Fatal("nested literal payload was classified as retired routing")
+	}
+}
+
+func TestProducerRoutingRetirementGuardCoversSchemaOwnedEmitSites(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{
+			name: "loop escape",
+			raw:  "name: loop\nloops:\n  retry:\n    escape:\n      emit: {event: retry.exhausted, broadcast: true}\n",
+		},
+		{
+			name: "stage gate outcome",
+			raw:  "name: gate\nstages:\n  waiting:\n    gate:\n      outcomes:\n        approve:\n          emit: {event: review.approved, target: sender}\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			retired, err := runtimecontracts.HasRetiredProducerRoutingYAML([]byte(tc.raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !retired {
+				t.Fatal("schema-owned retired routing was not classified")
+			}
+		})
 	}
 }
 
