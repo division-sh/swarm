@@ -146,24 +146,20 @@ func requireInstanceSourceTypesCompatible(source, target CatalogTypeReference) e
 	if err != nil {
 		return fmt.Errorf("target type %q does not resolve: %w", target.Type, err)
 	}
-	sourceFamily := instanceSourceScalarFamily(sourceType.Kind)
-	targetFamily := instanceSourceScalarFamily(targetType.Kind)
-	if sourceFamily == "" || targetFamily == "" || sourceFamily != targetFamily {
-		return fmt.Errorf("resolved scalar families are %s and %s", sourceType.Kind, targetType.Kind)
+	if !instanceSourceScalarAssignable(sourceType.Kind, targetType.Kind) {
+		return fmt.Errorf("resolved scalar types are %s and %s", sourceType.Kind, targetType.Kind)
 	}
 	return nil
 }
 
-func instanceSourceScalarFamily(kind CatalogTypeKind) CatalogTypeKind {
-	switch kind {
-	case CatalogTypeText:
-		return CatalogTypeText
-	case CatalogTypeInteger, CatalogTypeNumber:
-		return CatalogTypeNumber
-	case CatalogTypeBoolean:
-		return CatalogTypeBoolean
+func instanceSourceScalarAssignable(source, target CatalogTypeKind) bool {
+	switch source {
+	case CatalogTypeText, CatalogTypeBoolean, CatalogTypeNumber:
+		return source == target
+	case CatalogTypeInteger:
+		return target == CatalogTypeInteger || target == CatalogTypeNumber
 	default:
-		return ""
+		return false
 	}
 }
 

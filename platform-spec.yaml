@@ -18360,7 +18360,10 @@ static_analyzer:
         the actual receiver input event-schema type for payload sources or the
         intrinsic UUID-compatible type for generated.uuid/event.id, validate
         any optional carry type as an assertion against that evidence, and
-        require compatibility with the receiver scalar instance field.
+        require directional compatibility with the receiver scalar instance
+        field. Integer sources may widen to numeric receiver fields; numeric
+        sources MUST NOT narrow to integer receiver fields because their event
+        schema admits fractional values.
       receiver_resolution_valid: Receiver typed mode, lifecycle action, fan-in, and typed reply lineage must be valid and unambiguous.
       event_topology_roles_consume_connect: Verify-time producer/consumer and dead-event schema checks must treat valid
         connect output/input facts as authored event roles so parent topology does not require runtime reconstruction to

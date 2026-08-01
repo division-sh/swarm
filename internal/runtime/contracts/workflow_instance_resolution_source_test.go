@@ -164,3 +164,29 @@ func TestResolveFlowInputInstanceSourceTypeAcceptsScalarAliasesAndIntrinsicUUID(
 		})
 	}
 }
+
+func TestRequireInstanceSourceTypesCompatiblePreservesIntegerConstraints(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		target  string
+		wantErr bool
+	}{
+		{name: "integer identity", source: "integer", target: "integer"},
+		{name: "integer widens to number", source: "integer", target: "number"},
+		{name: "number identity", source: "number", target: "number"},
+		{name: "number cannot narrow to integer", source: "number", target: "integer", wantErr: true},
+		{name: "numeric alias cannot narrow to bigint", source: "numeric", target: "bigint", wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := requireInstanceSourceTypesCompatible(
+				CatalogTypeReference{Type: tc.source},
+				CatalogTypeReference{Type: tc.target},
+			)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("requireInstanceSourceTypesCompatible(%q, %q) error = %v, wantErr %v", tc.source, tc.target, err, tc.wantErr)
+			}
+		})
+	}
+}
