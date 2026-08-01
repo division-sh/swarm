@@ -156,14 +156,16 @@ func arbitraryReceiverNames(identity runtimecontracts.TemplateInstanceField, res
 	_ = resolution.String()
 	_ = outcome.String()
 	_ = fieldResult().String()
+	render := resolution.String
+	_ = render()
 }
 `},
 	)
 	if err != nil {
 		t.Fatalf("scan hostile semantic receivers: %v", err)
 	}
-	if len(findings) != 4 {
-		t.Fatalf("compiler-resolved hostile findings = %#v, want four arbitrary-name/alias/pointer/call-result conversions", findings)
+	if len(findings) != 5 {
+		t.Fatalf("compiler-resolved hostile findings = %#v, want five arbitrary-name/alias/pointer/call-result/method-value conversions", findings)
 	}
 	owners := map[string]int{}
 	for _, finding := range findings {
@@ -171,13 +173,27 @@ func arbitraryReceiverNames(identity runtimecontracts.TemplateInstanceField, res
 	}
 	for owner, want := range map[string]int{
 		"contracts.TemplateInstanceField":     2,
-		"contracts.FlowInputResolutionMode":   1,
+		"contracts.FlowInputResolutionMode":   2,
 		"bus.TemplateInstanceLifecycleAction": 1,
 	} {
 		if owners[owner] != want {
 			t.Fatalf("hostile findings for %s = %d, want %d (%#v)", owner, owners[owner], want, findings)
 		}
 	}
+}
+
+func TestTemplateInstanceSemanticStringConversionGuardIncludesRootRuntimePackage(t *testing.T) {
+	root := conformanceRepoRoot(t)
+	_, packages, err := newTemplateInstanceSemanticScanner(root)
+	if err != nil {
+		t.Fatalf("prepare compiler-resolved semantic scanner: %v", err)
+	}
+	for _, candidate := range packages {
+		if candidate.ImportPath == "github.com/division-sh/swarm/internal/runtime" {
+			return
+		}
+	}
+	t.Fatal("compiler-resolved semantic scan omitted the root internal/runtime production package")
 }
 
 func TestTemplateInstanceSemanticStringConversionGuardAllowsOnlyExactFunctions(t *testing.T) {
@@ -273,7 +289,7 @@ func newTemplateInstanceSemanticScanner(root string) (*templateInstanceSemanticS
 		if strings.TrimSpace(candidate.Export) != "" {
 			exports[candidate.ImportPath] = candidate.Export
 		}
-		if strings.HasPrefix(candidate.ImportPath, "github.com/division-sh/swarm/internal/runtime/") && len(candidate.GoFiles) != 0 {
+		if (candidate.ImportPath == "github.com/division-sh/swarm/internal/runtime" || strings.HasPrefix(candidate.ImportPath, "github.com/division-sh/swarm/internal/runtime/")) && len(candidate.GoFiles) != 0 {
 			runtimePackages = append(runtimePackages, candidate)
 		}
 	}
@@ -332,11 +348,7 @@ func (s *templateInstanceSemanticScanner) scanSourcePackage(importPath string, s
 	for _, file := range files {
 		functions := templateInstanceFunctions(file, importPath, info)
 		ast.Inspect(file, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			selector, ok := call.Fun.(*ast.SelectorExpr)
+			selector, ok := node.(*ast.SelectorExpr)
 			if !ok || selector.Sel.Name != "String" {
 				return true
 			}
@@ -344,9 +356,9 @@ func (s *templateInstanceSemanticScanner) scanSourcePackage(importPath string, s
 			if owner == "" {
 				return true
 			}
-			position := s.fileSet.Position(call.Pos())
+			position := s.fileSet.Position(selector.Pos())
 			findings = append(findings, templateInstanceStringConversion{
-				Owner: owner, Function: templateInstanceFunctionAt(functions, call.Pos()), File: filepath.ToSlash(position.Filename),
+				Owner: owner, Function: templateInstanceFunctionAt(functions, selector.Pos()), File: filepath.ToSlash(position.Filename),
 				Line: position.Line, Receiver: renderASTNode(selector.X),
 			})
 			return true
