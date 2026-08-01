@@ -10591,7 +10591,10 @@ flow_model:
         receiver_route_key_present: Template receivers must resolve one valid scalar instance field, same-named typed carry source,
           and explicit resolution mode. Stateful/static receivers that
           need no runtime selection may lower to a statically unique receiver.
-        key_types_compatible: Source and target key types must be compatible before route-plan lowering.
+        key_types_compatible: >
+          Source and target key types must be directionally compatible before
+          route-plan lowering. Integer sources may widen to numeric receiver fields;
+          numeric sources MUST NOT narrow to integer receiver fields.
         receiver_resolution_valid: Receiver-owned typed resolution mode, scalar instance source, fan-in, and reply facts must be internally valid and unambiguous.
         inference_unambiguous: Analyzer inference is allowed only when exactly one producer, receiver, key, adapter, and topology match is possible.
         lowered_route_plan_concrete: Accepted connections must lower to concrete route-plan inputs; no runtime path may recover by broadcasting or reinterpreting raw pin names.
