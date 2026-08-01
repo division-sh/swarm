@@ -1,4 +1,4 @@
-package sessions
+package sessionstore
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 type SummaryDialect string
@@ -19,53 +21,17 @@ type SummaryQueryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
-// RunSummary is the session owner's selected-store-time view of execution
-// leases that can still perform work for one run.
-type RunSummary struct {
-	RunID          string
-	ActiveLeases   int
-	MalformedLease int
-	NextExpiry     time.Time
-	ObservedAt     time.Time
-}
-
-func (s RunSummary) Validate() error {
-	if strings.TrimSpace(s.RunID) == "" {
-		return fmt.Errorf("session run summary requires run_id")
-	}
-	if s.ActiveLeases < 0 {
-		return fmt.Errorf("session run summary active lease count cannot be negative")
-	}
-	if s.MalformedLease < 0 {
-		return fmt.Errorf("session run summary malformed lease count cannot be negative")
-	}
-	if s.ObservedAt.IsZero() {
-		return fmt.Errorf("session run summary requires selected-store observation time")
-	}
-	if s.ActiveLeases == 0 && !s.NextExpiry.IsZero() {
-		return fmt.Errorf("settled session run summary forbids next expiry")
-	}
-	if s.ActiveLeases > 0 && s.NextExpiry.IsZero() {
-		return fmt.Errorf("active session run summary requires next expiry")
-	}
-	return nil
-}
-
-func (s RunSummary) BlocksCompletion() bool {
-	return s.ActiveLeases > 0 || s.MalformedLease > 0
-}
-
 func ReadRunSummary(
 	ctx context.Context,
 	queryer SummaryQueryer,
 	dialect SummaryDialect,
 	runID string,
 	observedAt time.Time,
-) (RunSummary, error) {
+) (runtimesessions.RunSummary, error) {
 	runID = strings.TrimSpace(runID)
 	observedAt = canonicalSummaryTime(observedAt)
 	if queryer == nil || runID == "" || observedAt.IsZero() {
-		return RunSummary{}, fmt.Errorf("session run summary requires selected store, run_id, and observation time")
+		return runtimesessions.RunSummary{}, fmt.Errorf("session run summary requires selected store, run_id, and observation time")
 	}
 	query := `
 		SELECT status, lease_holder, lease_expires_at
@@ -85,15 +51,15 @@ func ReadRunSummary(
 			FOR SHARE
 		`
 	default:
-		return RunSummary{}, fmt.Errorf("session run summary requires selected store dialect")
+		return runtimesessions.RunSummary{}, fmt.Errorf("session run summary requires selected store dialect")
 	}
 	rows, err := queryer.QueryContext(ctx, query, args...)
 	if err != nil {
-		return RunSummary{}, fmt.Errorf("read session run summary: %w", err)
+		return runtimesessions.RunSummary{}, fmt.Errorf("read session run summary: %w", err)
 	}
 	defer rows.Close()
 
-	summary := RunSummary{RunID: runID, ObservedAt: observedAt}
+	summary := runtimesessions.RunSummary{RunID: runID, ObservedAt: observedAt}
 	for rows.Next() {
 		var (
 			status string
@@ -101,7 +67,7 @@ func ReadRunSummary(
 			raw    any
 		)
 		if err := rows.Scan(&status, &holder, &raw); err != nil {
-			return RunSummary{}, fmt.Errorf("scan session run summary: %w", err)
+			return runtimesessions.RunSummary{}, fmt.Errorf("scan session run summary: %w", err)
 		}
 		status = strings.TrimSpace(status)
 		holderPresent := holder.Valid && strings.TrimSpace(holder.String) != ""
@@ -136,7 +102,7 @@ func ReadRunSummary(
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return RunSummary{}, fmt.Errorf("iterate session run summary: %w", err)
+		return runtimesessions.RunSummary{}, fmt.Errorf("iterate session run summary: %w", err)
 	}
 	return summary, summary.Validate()
 }

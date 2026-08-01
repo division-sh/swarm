@@ -15,6 +15,10 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetimers "github.com/division-sh/swarm/internal/runtime/timerobligation"
+	decisionstore "github.com/division-sh/swarm/internal/store/internal/decisioncard"
+	effectstore "github.com/division-sh/swarm/internal/store/internal/effects"
+	entitystore "github.com/division-sh/swarm/internal/store/internal/entityruntime"
+	sessionstore "github.com/division-sh/swarm/internal/store/internal/sessions"
 )
 
 type runCompletionOwnerSummaries struct {
@@ -94,19 +98,19 @@ func loadPostgresRunCompletionOwnerSummaries(
 	if err != nil {
 		return runCompletionOwnerSummaries{}, err
 	}
-	sessions, err := runtimesessions.ReadRunSummary(ctx, tx, runtimesessions.SummaryDialectPostgres, runID, selectedNow)
+	sessions, err := sessionstore.ReadRunSummary(ctx, tx, sessionstore.SummaryDialectPostgres, runID, selectedNow)
 	if err != nil {
 		return runCompletionOwnerSummaries{}, err
 	}
-	decisions, err := runtimedecision.ReadRunSummary(ctx, tx, runtimedecision.SummaryDialectPostgres, runID)
+	decisions, err := decisionstore.ReadRunSummary(ctx, tx, decisionstore.SummaryDialectPostgres, runID)
 	if err != nil {
 		return runCompletionOwnerSummaries{}, err
 	}
-	effects, err := runtimeeffects.ReadRunSummary(ctx, tx, runtimeeffects.SummaryDialectPostgres, runID)
+	effects, err := effectstore.ReadRunSummary(ctx, tx, effectstore.SummaryDialectPostgres, runID)
 	if err != nil {
 		return runCompletionOwnerSummaries{}, err
 	}
-	entities, err := runtimeentity.ReadRunSummary(ctx, tx, runtimeentity.SummaryDialectPostgres, runID, catalog)
+	entities, err := entitystore.ReadRunSummary(ctx, tx, entitystore.SummaryDialectPostgres, runID, catalog)
 	if err != nil {
 		return runCompletionOwnerSummaries{}, err
 	}
@@ -136,19 +140,19 @@ func loadSQLiteRunCompletionOwnerSummaries(
 	if err != nil {
 		return runCompletionOwnerSummaries{}, err
 	}
-	sessions, err := runtimesessions.ReadRunSummary(ctx, tx, runtimesessions.SummaryDialectSQLite, runID, selectedNow)
+	sessions, err := sessionstore.ReadRunSummary(ctx, tx, sessionstore.SummaryDialectSQLite, runID, selectedNow)
 	if err != nil {
 		return runCompletionOwnerSummaries{}, err
 	}
-	decisions, err := runtimedecision.ReadRunSummary(ctx, tx, runtimedecision.SummaryDialectSQLite, runID)
+	decisions, err := decisionstore.ReadRunSummary(ctx, tx, decisionstore.SummaryDialectSQLite, runID)
 	if err != nil {
 		return runCompletionOwnerSummaries{}, err
 	}
-	effects, err := runtimeeffects.ReadRunSummary(ctx, tx, runtimeeffects.SummaryDialectSQLite, runID)
+	effects, err := effectstore.ReadRunSummary(ctx, tx, effectstore.SummaryDialectSQLite, runID)
 	if err != nil {
 		return runCompletionOwnerSummaries{}, err
 	}
-	entities, err := runtimeentity.ReadRunSummary(ctx, tx, runtimeentity.SummaryDialectSQLite, runID, catalog)
+	entities, err := entitystore.ReadRunSummary(ctx, tx, entitystore.SummaryDialectSQLite, runID, catalog)
 	if err != nil {
 		return runCompletionOwnerSummaries{}, err
 	}
@@ -181,7 +185,7 @@ func summarizeTimerRun(ctx context.Context, tx *sql.Tx, runID string, selectedNo
 }
 
 func postgresRunSessionNextWakeTx(ctx context.Context, tx *sql.Tx, runID string, selectedNow time.Time) (*time.Time, error) {
-	summary, err := runtimesessions.ReadRunSummary(ctx, tx, runtimesessions.SummaryDialectPostgres, runID, selectedNow)
+	summary, err := sessionstore.ReadRunSummary(ctx, tx, sessionstore.SummaryDialectPostgres, runID, selectedNow)
 	if err != nil {
 		return nil, err
 	}

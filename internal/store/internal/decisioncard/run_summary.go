@@ -1,4 +1,4 @@
-package decisioncard
+package decisionstore
 
 import (
 	"bytes"
@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 
+	runtimedecision "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 )
 
@@ -26,24 +27,24 @@ type SummaryQueryer interface {
 
 // ReadRunSummary is the decision owner's selected-store projection of every
 // decision-card continuation and gate activation that can block run completion.
-func ReadRunSummary(ctx context.Context, queryer SummaryQueryer, dialect SummaryDialect, runID string) (RunSummary, error) {
+func ReadRunSummary(ctx context.Context, queryer SummaryQueryer, dialect SummaryDialect, runID string) (runtimedecision.RunSummary, error) {
 	runID = strings.TrimSpace(runID)
 	if queryer == nil || runID == "" {
-		return RunSummary{}, fmt.Errorf("decision run summary requires selected store and run_id")
+		return runtimedecision.RunSummary{}, fmt.Errorf("decision run summary requires selected store and run_id")
 	}
-	summary := RunSummary{RunID: runID}
+	summary := runtimedecision.RunSummary{RunID: runID}
 	var err error
 	summary.UnresolvedHumanTasks, err = unresolvedHumanTasks(ctx, queryer, dialect, runID)
 	if err != nil {
-		return RunSummary{}, err
+		return runtimedecision.RunSummary{}, err
 	}
 	summary.UnresolvedEffects, err = unresolvedProposedEffects(ctx, queryer, dialect, runID)
 	if err != nil {
-		return RunSummary{}, err
+		return runtimedecision.RunSummary{}, err
 	}
 	open, malformed, err := summarizeGates(ctx, queryer, dialect, runID)
 	if err != nil {
-		return RunSummary{}, err
+		return runtimedecision.RunSummary{}, err
 	}
 	summary.OpenGateObligations = open
 	summary.MalformedObligations = malformed
@@ -229,18 +230,18 @@ func humanOutcomeEvents(ctx context.Context, q SummaryQueryer, dialect SummaryDi
 		}
 		eventName := ""
 		switch {
-		case status == string(StatusExpired):
+		case status == string(runtimedecision.StatusExpired):
 			eventName = "human_task.expired"
-		case status == string(StatusDecided) && verdict == "approve":
+		case status == string(runtimedecision.StatusDecided) && verdict == "approve":
 			eventName = "human_task.approved"
-		case status == string(StatusDecided) && verdict == "reject":
+		case status == string(runtimedecision.StatusDecided) && verdict == "reject":
 			eventName = "human_task.rejected"
 		default:
 			_ = rows.Close()
 			return 0, fmt.Errorf("human-task outcome identity is inconsistent")
 		}
 		expected = append(expected, expectedOutcomeEvent{
-			id: HumanTaskOutcomeEventID(cardID, sourceID), runID: eventRunID,
+			id: runtimedecision.HumanTaskOutcomeEventID(cardID, sourceID), runID: eventRunID,
 			name: eventName, sourceID: sourceID,
 		})
 	}
@@ -298,7 +299,7 @@ func proposedEffectOutcomeEvents(ctx context.Context, q SummaryQueryer, dialect 
 			eventName = revisionEvent
 		}
 		expected = append(expected, expectedOutcomeEvent{
-			id: ProposedEffectOutcomeEventID(cardID, sourceID, verdict), runID: eventRunID,
+			id: runtimedecision.ProposedEffectOutcomeEventID(cardID, sourceID, verdict), runID: eventRunID,
 			name: eventName, sourceID: sourceID,
 		})
 	}
