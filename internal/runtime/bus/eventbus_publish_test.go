@@ -52,6 +52,10 @@ type testCommitPublishTransaction struct {
 	finalize func(context.Context, runtimebus.CommitPublishRequest) error
 }
 
+func (*testCommitPublishTransaction) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
+	return events.AdmittedEvent{}, false, nil
+}
+
 func (t *testCommitPublishTransaction) BeginPreparedPublish(ctx context.Context, prepared runtimebus.PreparedPublishEvent) (runtimebus.EventAppendOutcome, error) {
 	outcome := runtimebus.EventAppendInserted
 	var err error

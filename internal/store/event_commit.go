@@ -30,6 +30,21 @@ type sqlPublishCommitter struct {
 	activeEventIDs []string
 }
 
+type preparedPublishEventTxReader interface {
+	loadPreparedPublishEventTx(context.Context, *sql.Tx, string) (events.AdmittedEvent, bool, error)
+}
+
+func (c *sqlPublishCommitter) LoadPreparedPublishEvent(ctx context.Context, eventID string) (events.AdmittedEvent, bool, error) {
+	if c == nil || c.tx == nil || c.store == nil {
+		return events.AdmittedEvent{}, false, fmt.Errorf("event commit transaction is required")
+	}
+	reader, ok := c.store.(preparedPublishEventTxReader)
+	if !ok {
+		return events.AdmittedEvent{}, false, fmt.Errorf("selected store does not expose durable event identity lookup")
+	}
+	return reader.loadPreparedPublishEventTx(ctx, c.tx, eventID)
+}
+
 func (c *sqlPublishCommitter) BeginPreparedPublish(ctx context.Context, event runtimebus.PreparedPublishEvent) (runtimebus.EventAppendOutcome, error) {
 	if c == nil || c.tx == nil || c.store == nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("event commit transaction is required")

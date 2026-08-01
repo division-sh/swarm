@@ -302,6 +302,10 @@ func (s *sourceBoundaryProbeStore) BindAgentSession(ctx context.Context, _ runti
 	return runtimedelivery.Snapshot{}, nil
 }
 
+func (*sourceMutationProbeTransaction) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
+	return events.AdmittedEvent{}, false, nil
+}
+
 func (t *sourceMutationProbeTransaction) BeginPreparedPublish(context.Context, PreparedPublishEvent) (EventAppendOutcome, error) {
 	t.begin++
 	return EventAppendInserted, nil

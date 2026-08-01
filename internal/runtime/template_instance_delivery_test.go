@@ -1274,6 +1274,13 @@ func (m *providerRollbackMutation) Context() context.Context {
 	return runtimebus.WithCommitPublishTransaction(m.Mutation.Context(), m)
 }
 
+func (m *providerRollbackMutation) LoadPreparedPublishEvent(ctx context.Context, eventID string) (events.AdmittedEvent, bool, error) {
+	if m.transaction == nil {
+		return events.AdmittedEvent{}, false, errors.New("provider rollback proof requires commit transaction")
+	}
+	return m.transaction.LoadPreparedPublishEvent(ctx, eventID)
+}
+
 func (m *providerRollbackMutation) BeginPreparedPublish(ctx context.Context, prepared runtimebus.PreparedPublishEvent) (runtimebus.EventAppendOutcome, error) {
 	if m.transaction == nil {
 		return runtimebus.EventAppendOutcomeUnknown, errors.New("provider rollback proof requires commit transaction")

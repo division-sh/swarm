@@ -20,6 +20,10 @@ type routeValidationPublishTransaction struct {
 	finalized bool
 }
 
+func (*routeValidationPublishTransaction) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
+	return events.AdmittedEvent{}, false, nil
+}
+
 func (t *routeValidationPublishTransaction) BeginPreparedPublish(context.Context, PreparedPublishEvent) (EventAppendOutcome, error) {
 	t.begun = true
 	return EventAppendInserted, nil

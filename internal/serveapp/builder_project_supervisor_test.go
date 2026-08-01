@@ -1758,6 +1758,10 @@ func (s *processIngressEventStore) finalizePublish(_ context.Context, req runtim
 	return nil
 }
 
+func (s *processIngressEventStore) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
+	return events.AdmittedEvent{}, false, nil
+}
+
 func (s *processIngressEventStore) BeginPreparedPublish(ctx context.Context, prepared runtimebus.PreparedPublishEvent) (runtimebus.EventAppendOutcome, error) {
 	return s.beginPublish(ctx, prepared.AdmittedEvent())
 }

@@ -45,6 +45,10 @@ type Transaction struct {
 	active   []string
 }
 
+func (*Transaction) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
+	return events.AdmittedEvent{}, false, nil
+}
+
 func (t *Transaction) BeginPreparedPublish(ctx context.Context, prepared runtimebus.PreparedPublishEvent) (runtimebus.EventAppendOutcome, error) {
 	outcome := runtimebus.EventAppendInserted
 	var err error

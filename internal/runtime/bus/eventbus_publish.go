@@ -581,7 +581,7 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 		deliveryReceipt:  newDeliveryCommitReceipt(),
 	}
 	if replayScope == runtimepipelineobligation.ScopeSubscribed {
-		admitted, evt, err = eb.resolveCanonicalSubscribedEventBeforePersistence(txctx, admitted)
+		admitted, evt, err = eb.resolveCanonicalSubscribedEventBeforePersistence(txctx, transaction, admitted)
 		if err != nil {
 			return PreparedPublish{}, err
 		}
@@ -651,10 +651,23 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 	return prepared, nil
 }
 
-func (eb *EventBus) resolveCanonicalSubscribedEventBeforePersistence(ctx context.Context, admitted events.AdmittedEvent) (events.AdmittedEvent, events.Event, error) {
+func (eb *EventBus) resolveCanonicalSubscribedEventBeforePersistence(
+	ctx context.Context,
+	transaction CommitPublishTransaction,
+	admitted events.AdmittedEvent,
+) (events.AdmittedEvent, events.Event, error) {
 	evt := admitted.Event()
 	if eb == nil || len(eb.connectRoutePlanner.matchedPlans(ctx, evt)) == 0 {
 		return admitted, evt, nil
+	}
+	// A committed route is a stamped event fact; duplicate admission must not
+	// consult topology that may have changed since the original publication.
+	durable, found, err := transaction.LoadPreparedPublishEvent(ctx, admitted.ID())
+	if err != nil {
+		return admitted, evt, fmt.Errorf("load durable event route facts: %w", err)
+	}
+	if found {
+		return reuseDurableSubscribedEventRouteFacts(admitted, durable)
 	}
 	previewPlan, err := eb.planSubscribedRoutePlan(withTemplateInstanceLifecyclePreview(ctx), evt, false)
 	if err != nil {
@@ -670,6 +683,37 @@ func (eb *EventBus) resolveCanonicalSubscribedEventBeforePersistence(ctx context
 	resolvedAdmission, err := events.AdmitForPersistence(resolved, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return admitted, evt, fmt.Errorf("admit resolved event route facts: %w", err)
+	}
+	return resolvedAdmission, resolvedAdmission.Event(), nil
+}
+
+func reuseDurableSubscribedEventRouteFacts(admitted, durable events.AdmittedEvent) (events.AdmittedEvent, events.Event, error) {
+	evt := admitted.Event()
+	durableEvent := durable.Event()
+	if evt.ID() == "" || durableEvent.ID() != evt.ID() {
+		return admitted, evt, errors.New("durable event route facts do not match the admitted event identity")
+	}
+	durableTargets := eventDeliveryTargetRoutes(durableEvent)
+	existingTargets := eventDeliveryTargetRoutes(evt)
+	if len(existingTargets) > 0 && !sameRouteIdentities(existingTargets, durableTargets) {
+		return admitted, evt, errors.New("durable event route facts conflict with the admitted event target")
+	}
+	if len(durableTargets) == 0 || sameRouteIdentities(existingTargets, durableTargets) {
+		return admitted, evt, nil
+	}
+	envelope := evt.NormalizedEnvelope()
+	if len(durableTargets) == 1 {
+		envelope = events.EnvelopeForTargetRoute(envelope, durableTargets[0])
+	} else {
+		envelope = events.EnvelopeForTargetSet(envelope, durableTargets)
+	}
+	resolved, err := events.ResolveEnvelope(evt, envelope)
+	if err != nil {
+		return admitted, evt, fmt.Errorf("reuse durable event route facts: %w", err)
+	}
+	resolvedAdmission, err := events.AdmitForPersistence(resolved, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		return admitted, evt, fmt.Errorf("admit durable event route facts: %w", err)
 	}
 	return resolvedAdmission, resolvedAdmission.Event(), nil
 }

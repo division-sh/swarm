@@ -79,7 +79,7 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 			return err
 		}
 		if len(intent.Recipients) == 0 {
-			admitted, intent.Event, err = o.bus.resolveCanonicalSubscribedEventBeforePersistence(intentCtx, admitted)
+			admitted, intent.Event, err = o.bus.resolveCanonicalSubscribedEventBeforePersistence(intentCtx, transaction, admitted)
 			if err != nil {
 				return err
 			}

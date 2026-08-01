@@ -24,6 +24,10 @@ func (m *inboundBatchPreflightMutation) Context() context.Context {
 	return WithCommitPublishTransaction(context.Background(), m)
 }
 
+func (*inboundBatchPreflightMutation) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
+	return events.AdmittedEvent{}, false, nil
+}
+
 func (m *inboundBatchPreflightMutation) BeginPreparedPublish(context.Context, PreparedPublishEvent) (EventAppendOutcome, error) {
 	m.appendCalls++
 	return EventAppendOutcomeUnknown, errors.New("mutation append sentinel")
@@ -218,6 +222,10 @@ type inboundBatchOverlayMutation struct {
 
 func (m *inboundBatchOverlayMutation) Context() context.Context {
 	return WithCommitPublishTransaction(m.ctx, m)
+}
+
+func (*inboundBatchOverlayMutation) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
+	return events.AdmittedEvent{}, false, nil
 }
 
 func (m *inboundBatchOverlayMutation) BeginPreparedPublish(ctx context.Context, prepared PreparedPublishEvent) (EventAppendOutcome, error) {

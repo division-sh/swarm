@@ -233,6 +233,10 @@ func (s *directRecipientTransactionalStore) CommitPublish(ctx context.Context, p
 	})
 }
 
+func (s *directRecipientTransactionalStore) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
+	return events.AdmittedEvent{}, false, nil
+}
+
 func (s *directRecipientTransactionalStore) BeginPreparedPublish(ctx context.Context, prepared runtimebus.PreparedPublishEvent) (runtimebus.EventAppendOutcome, error) {
 	return s.beginPreparedPublish(ctx, prepared.AdmittedEvent())
 }

@@ -118,6 +118,7 @@ func (r *DeliveryCommitReceipt) Handoffs() ([]runtimedelivery.DurableHandoffProo
 // reference it while finalization still commits every declared initial fact in
 // the same selected-store transaction.
 type CommitPublishTransaction interface {
+	LoadPreparedPublishEvent(ctx context.Context, eventID string) (events.AdmittedEvent, bool, error)
 	BeginPreparedPublish(ctx context.Context, event PreparedPublishEvent) (EventAppendOutcome, error)
 	FinalizePreparedPublish(ctx context.Context, finalization PreparedPublishFinalization) error
 }
@@ -378,6 +379,10 @@ func commitPublishInMemory(ctx context.Context, plan CommitPublishPlan, transact
 
 type inMemoryCommitPublishTransaction struct {
 	activeEventIDs []string
+}
+
+func (*inMemoryCommitPublishTransaction) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
+	return events.AdmittedEvent{}, false, nil
 }
 
 func (t *inMemoryCommitPublishTransaction) BeginPreparedPublish(_ context.Context, event PreparedPublishEvent) (EventAppendOutcome, error) {
