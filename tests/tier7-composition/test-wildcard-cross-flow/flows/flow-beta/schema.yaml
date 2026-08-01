@@ -6,4 +6,4 @@ pins:
   inputs:
     events: [trigger.beta]
   outputs:
-    events: [job.beta_done]
+    events: []

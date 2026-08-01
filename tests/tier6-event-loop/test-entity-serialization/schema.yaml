@@ -5,4 +5,10 @@ pins:
   inputs:
     events: [step.first, step.second]
   outputs:
-    events: [step.first_done, step.second_done]
+    events:
+      - name: step.first_done
+        event: step.first_done
+        sink: harness
+      - name: step.second_done
+        event: step.second_done
+        sink: harness

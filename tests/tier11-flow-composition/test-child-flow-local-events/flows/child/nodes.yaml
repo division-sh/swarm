@@ -19,4 +19,3 @@ child-processor:
       advances_to: processed
       emit:
         event: child.done
-        broadcast: true

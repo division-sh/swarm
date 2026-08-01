@@ -6,4 +6,7 @@ pins:
   inputs:
     events: [grandchild.check]
   outputs:
-    events: [grandchild.passed]
+    events:
+      - name: grandchild.passed
+        event: grandchild.passed
+        sink: harness

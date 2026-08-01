@@ -254,7 +254,7 @@ func validateFanOutFieldNodes(node *yaml.Node) error {
 		}
 		switch key {
 		case "target":
-			return fmt.Errorf("RETIRED: fan_out field %q is retired; route fan_out.emit through output pins and parent connect, or use emit.target only as an explicit producer escape hatch", key)
+			return fmt.Errorf("RETIRED: fan_out field %q is retired; route fan_out.emit through typed consumers, output pins, and parent connect", key)
 		case "emit_per_item":
 			return fmt.Errorf("RETIRED: fan_out field %q is retired; use emit: <event> or emit: {event, fields}", key)
 		case "emit_mapping":

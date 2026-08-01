@@ -11,5 +11,4 @@ test-node:
           - pending_dedup
       emit:
         event: state.reset_completed
-        broadcast: true
       advances_to: cleared

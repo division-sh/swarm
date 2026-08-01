@@ -2,7 +2,7 @@ validator:
   id: validator
   execution_type: system_node
   subscribes_to: [check.requested]
-  produces: [check.passed]
+  produces: []
   event_handlers:
     check.requested:
       guard:
@@ -19,6 +19,3 @@ validator:
             check: "entity.item_count < policy.max_items"
         on_fail: discard
       advances_to: accepted
-      emit:
-        event: check.passed
-        broadcast: true

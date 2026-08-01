@@ -8,7 +8,6 @@ test-node:
       advances_to: done
       emit:
         event: item.exported
-        broadcast: true
         fields:
           id: _entity.id
           name: entity.name

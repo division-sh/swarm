@@ -2,17 +2,13 @@ test-node:
   id: test-node
   execution_type: system_node
   subscribes_to: [item.received]
-  produces: [routed.a, routed.unknown]
+  produces: [routed.unknown]
   event_handlers:
     item.received:
       rules:
         type_a:
           condition: "payload.kind == 'a'"
-          emit:
-            event: routed.a
-            broadcast: true
         unknown:
           condition: "else"
           emit:
             event: routed.unknown
-            broadcast: true

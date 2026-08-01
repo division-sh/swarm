@@ -9,4 +9,4 @@ pins:
       - name: task_result
         event: task.result
   outputs:
-    events: [task.completed]
+    events: []

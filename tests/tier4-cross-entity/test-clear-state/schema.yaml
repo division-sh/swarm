@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [state.clear_requested]
   outputs:
-    events: [state.cleared]
+    events:
+      - name: state.cleared
+        event: state.cleared
+        sink: harness

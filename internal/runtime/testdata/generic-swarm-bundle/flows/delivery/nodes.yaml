@@ -26,7 +26,6 @@ delivery-node:
       advances_to: completed
       emit:
         event: item.completed
-        broadcast: true
       data_accumulation:
         source_event: timer.item.timeout
         writes:

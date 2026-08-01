@@ -5,4 +5,4 @@ pins:
   inputs:
     events: [item.received]
   outputs:
-    events: [routed.a, routed.b]
+    events: []

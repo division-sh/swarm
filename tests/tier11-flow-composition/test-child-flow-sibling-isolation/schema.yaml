@@ -5,4 +5,4 @@ pins:
   inputs:
     events: [run.start]
   outputs:
-    events: [run.complete]
+    events: []

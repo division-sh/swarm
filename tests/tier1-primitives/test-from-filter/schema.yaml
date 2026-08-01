@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [task.completed]
   outputs:
-    events: [task.acknowledged]
+    events:
+      - name: task.acknowledged
+        event: task.acknowledged
+        sink: harness

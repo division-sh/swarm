@@ -104,14 +104,14 @@ func TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix(t *testing.T) {
 		{
 			name:        "producer target cannot rescue common composition",
 			opts:        finalflowinstanceauthoring.Options{ProducerTarget: true},
-			checkID:     "pin_target_resolution",
-			wantMessage: "producer_target_common_path_forbidden",
+			wantMessage: "RETIRED-EMIT-ROUTING: emit.target",
+			loadError:   true,
 		},
 		{
 			name:        "producer broadcast cannot replace parent connect authority",
 			opts:        finalflowinstanceauthoring.Options{ProducerBroadcast: true},
-			checkID:     "pin_target_resolution",
-			wantMessage: "producer_broadcast_common_path_forbidden",
+			wantMessage: "RETIRED-EMIT-ROUTING: emit.broadcast",
+			loadError:   true,
 		},
 		{
 			name:        "retired static create_entity",

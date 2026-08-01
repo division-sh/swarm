@@ -231,8 +231,7 @@ func exactOnceCreateEntityHandler() runtimecontracts.SystemNodeEventHandler {
 		SetsGate:   &runtimecontracts.GateSpec{Name: "ready"},
 		AdvancesTo: "done",
 		Emit: runtimecontracts.EmitSpec{
-			Event:     "thing.emitted",
-			Broadcast: true,
+			Event: "thing.emitted",
 			Fields: map[string]runtimecontracts.ExpressionValue{
 				"amount": runtimecontracts.CELExpression("entity.amount"),
 				"who":    runtimecontracts.CELExpression("entity.who"),

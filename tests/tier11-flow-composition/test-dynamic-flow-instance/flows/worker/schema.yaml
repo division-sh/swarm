@@ -3,12 +3,24 @@ mode: template
 instance: worker_id
 initial_state: idle
 terminal_states: [complete]
-states: [idle, working, complete]
+states: [idle, complete]
 instance_variables:
   worker_id: string
   task_label: string
+auto_emit_on_create:
+  event: work.setup
 pins:
   inputs:
-    events: [work.assign]
+    events:
+      - name: work_setup
+        event: work.setup
+      - name: work_assign
+        event: work.assign
+        resolution:
+          mode: select
+        carries:
+          worker_id:
+            from: payload.worker_id
+            type: string
   outputs:
-    events: [work.done]
+    events: []

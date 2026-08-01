@@ -414,7 +414,6 @@ opco.spinup_requested:
     approval.completed:
       emit:
         event: opco.spinup_requested
-        broadcast: true
         fields:
           instance_id: payload.instance_id
           product_id: payload.product_id

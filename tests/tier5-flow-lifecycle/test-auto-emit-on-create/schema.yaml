@@ -7,4 +7,8 @@ pins:
   inputs:
     events: [flow.created]
   outputs:
-    events: [auto.started, auto.processed]
+    events:
+      - auto.started
+      - name: auto.processed
+        event: auto.processed
+        sink: harness

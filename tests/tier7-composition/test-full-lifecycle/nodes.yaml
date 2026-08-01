@@ -27,4 +27,3 @@ completion-node:
       advances_to: complete
       emit:
         event: order.finalized
-        broadcast: true

@@ -12,5 +12,4 @@ test-node:
         worker_id: payload.worker_id
       emit:
         event: flow.spawned
-        broadcast: true
       advances_to: spawned

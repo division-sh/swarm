@@ -5,4 +5,8 @@ pins:
   inputs:
     events: [batch.submitted]
   outputs:
-    events: [routed.a, routed.b]
+    events:
+      - name: routed.a
+        event: routed.a
+        sink: harness
+      - routed.b

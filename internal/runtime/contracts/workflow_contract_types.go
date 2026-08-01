@@ -1439,11 +1439,25 @@ type FlowInputEventPin struct {
 	Carries    FlowInputPinCarries    `yaml:"carries"`
 }
 type FlowOutputEventPin struct {
-	Name    string   `yaml:"name"`
-	Event   string   `yaml:"event"`
-	Key     string   `yaml:"key"`
-	Carries []string `yaml:"carries"`
+	Name    string         `yaml:"name"`
+	Event   string         `yaml:"event"`
+	Sink    FlowOutputSink `yaml:"sink,omitempty"`
+	Key     string         `yaml:"key"`
+	Carries []string       `yaml:"carries"`
 }
+
+type FlowOutputSink string
+
+const FlowOutputSinkHarness FlowOutputSink = "harness"
+
+func (s FlowOutputSink) String() string {
+	return strings.TrimSpace(string(s))
+}
+
+func (s FlowOutputSink) Empty() bool {
+	return s.String() == ""
+}
+
 type FlowInputPinCarries map[string]FlowInputPinCarry
 type FlowInputPinCarry struct {
 	From     string `yaml:"from"`
@@ -1624,11 +1638,9 @@ func (e EventEmission) Empty() bool {
 }
 
 type EmitSpec struct {
-	Event     string                     `yaml:"event"`
-	From      string                     `yaml:"from,omitempty"`
-	Fields    map[string]ExpressionValue `yaml:"fields"`
-	Target    EmitTargetSpec             `yaml:"target"`
-	Broadcast bool                       `yaml:"broadcast"`
+	Event  string                     `yaml:"event"`
+	From   string                     `yaml:"from,omitempty"`
+	Fields map[string]ExpressionValue `yaml:"fields"`
 }
 
 func (e EmitSpec) EventType() string {
@@ -1636,60 +1648,11 @@ func (e EmitSpec) EventType() string {
 }
 
 func (e EmitSpec) Empty() bool {
-	return strings.TrimSpace(e.Event) == "" && strings.TrimSpace(e.From) == "" && len(e.Fields) == 0 && e.Target.Empty() && !e.Broadcast
+	return strings.TrimSpace(e.Event) == "" && strings.TrimSpace(e.From) == "" && len(e.Fields) == 0
 }
 
 func (e EmitSpec) HasFields() bool {
 	return len(e.Fields) > 0
-}
-
-func (e EmitSpec) HasTarget() bool {
-	return !e.Target.Empty()
-}
-
-type EmitTargetKind string
-
-const (
-	EmitTargetKindSender     EmitTargetKind = "sender"
-	EmitTargetKindInstanceID EmitTargetKind = "instance_id"
-	EmitTargetKindFlowMatch  EmitTargetKind = "flow_match"
-)
-
-type EmitTargetSpec struct {
-	Kind       EmitTargetKind             `yaml:"-"`
-	InstanceID string                     `yaml:"instance_id,omitempty"`
-	Flow       string                     `yaml:"flow,omitempty"`
-	Match      map[string]ExpressionValue `yaml:"match,omitempty"`
-}
-
-func (t EmitTargetSpec) Empty() bool {
-	t = t.Normalized()
-	return t.Kind == "" && t.InstanceID == "" && t.Flow == "" && len(t.Match) == 0
-}
-
-func (t EmitTargetSpec) Normalized() EmitTargetSpec {
-	t.Kind = EmitTargetKind(strings.TrimSpace(string(t.Kind)))
-	t.InstanceID = strings.TrimSpace(t.InstanceID)
-	t.Flow = strings.TrimSpace(t.Flow)
-	if len(t.Match) > 0 {
-		out := make(map[string]ExpressionValue, len(t.Match))
-		for key, value := range t.Match {
-			key = strings.TrimSpace(key)
-			if key == "" {
-				continue
-			}
-			value.hydrate()
-			out[key] = value
-		}
-		t.Match = out
-	}
-	switch {
-	case t.Kind == "" && t.InstanceID != "":
-		t.Kind = EmitTargetKindInstanceID
-	case t.Kind == "" && (t.Flow != "" || len(t.Match) > 0):
-		t.Kind = EmitTargetKindFlowMatch
-	}
-	return t
 }
 
 func cloneExpressionValueMap(in map[string]ExpressionValue) map[string]ExpressionValue {
@@ -1705,23 +1668,10 @@ func cloneExpressionValueMap(in map[string]ExpressionValue) map[string]Expressio
 }
 
 func cloneEmitSpec(spec EmitSpec) EmitSpec {
-	target := spec.Target.Normalized()
 	return EmitSpec{
-		Event:     strings.TrimSpace(spec.Event),
-		From:      strings.TrimSpace(spec.From),
-		Fields:    cloneExpressionValueMap(spec.Fields),
-		Target:    cloneEmitTargetSpec(target),
-		Broadcast: spec.Broadcast,
-	}
-}
-
-func cloneEmitTargetSpec(spec EmitTargetSpec) EmitTargetSpec {
-	spec = spec.Normalized()
-	return EmitTargetSpec{
-		Kind:       spec.Kind,
-		InstanceID: strings.TrimSpace(spec.InstanceID),
-		Flow:       strings.TrimSpace(spec.Flow),
-		Match:      cloneExpressionValueMap(spec.Match),
+		Event:  strings.TrimSpace(spec.Event),
+		From:   strings.TrimSpace(spec.From),
+		Fields: cloneExpressionValueMap(spec.Fields),
 	}
 }
 

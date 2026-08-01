@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [conflict.submitted]
   outputs:
-    events: [conflict.resolved]
+    events:
+      - name: conflict.resolved
+        event: conflict.resolved
+        sink: harness

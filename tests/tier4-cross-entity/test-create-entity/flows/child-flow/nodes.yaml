@@ -2,10 +2,7 @@ child-node:
   id: child-node
   execution_type: system_node
   subscribes_to: [child.start]
-  produces: [child.done]
+  produces: []
   event_handlers:
     child.start:
       advances_to: completed
-      emit:
-        event: child.done
-        broadcast: true

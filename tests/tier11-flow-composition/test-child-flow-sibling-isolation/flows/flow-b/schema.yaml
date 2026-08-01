@@ -6,4 +6,4 @@ pins:
   inputs:
     events: [beta.start]
   outputs:
-    events: [beta.complete]
+    events: []

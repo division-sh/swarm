@@ -2,7 +2,7 @@ processor:
   id: processor
   execution_type: system_node
   subscribes_to: [process.requested]
-  produces: [process.done]
+  produces: []
   event_handlers:
     process.requested:
       guard:
@@ -13,6 +13,3 @@ processor:
           - target_field: counter
             expression: entity.counter + 1
       advances_to: processing
-      emit:
-        event: process.done
-        broadcast: true

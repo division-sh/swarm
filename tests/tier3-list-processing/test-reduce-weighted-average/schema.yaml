@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [scores.submitted]
   outputs:
-    events: [scores.aggregated]
+    events:
+      - name: scores.aggregated
+        event: scores.aggregated
+        sink: harness

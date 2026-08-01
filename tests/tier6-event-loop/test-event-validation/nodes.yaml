@@ -2,10 +2,7 @@ test-node:
   id: test-node
   execution_type: system_node
   subscribes_to: [task.submitted]
-  produces: [task.accepted]
+  produces: []
   event_handlers:
     task.submitted:
       advances_to: done
-      emit:
-        event: task.accepted
-        broadcast: true

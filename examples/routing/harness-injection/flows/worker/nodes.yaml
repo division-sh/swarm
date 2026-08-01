@@ -2,5 +2,10 @@ worker-node:
   id: worker-node
   execution_type: system_node
   subscribes_to: [work.requested]
+  produces: [work.completed]
   event_handlers:
-    work.requested: {}
+    work.requested:
+      emit:
+        event: work.completed
+        fields:
+          work_id: payload.work_id

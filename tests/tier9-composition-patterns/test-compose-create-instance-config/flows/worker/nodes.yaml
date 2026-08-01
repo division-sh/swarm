@@ -2,10 +2,7 @@ task-runner:
   id: task-runner
   execution_type: system_node
   subscribes_to: [task.assign]
-  produces: [task.done]
+  produces: []
   event_handlers:
     task.assign:
       advances_to: done
-      emit:
-        event: task.done
-        broadcast: true

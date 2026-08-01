@@ -6,4 +6,4 @@ pins:
   inputs:
     events: [task.submitted]
   outputs:
-    events: [task.accepted]
+    events: []

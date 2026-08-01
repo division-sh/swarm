@@ -10,5 +10,4 @@ test-node:
           - accumulator_state
       emit:
         event: state.cleared
-        broadcast: true
       advances_to: cleared

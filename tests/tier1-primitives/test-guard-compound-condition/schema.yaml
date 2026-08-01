@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [check.requested]
   outputs:
-    events: [check.passed]
+    events:
+      - name: check.passed
+        event: check.passed
+        sink: harness

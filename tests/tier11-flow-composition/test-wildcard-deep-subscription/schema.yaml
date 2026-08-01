@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [pipeline.start]
   outputs:
-    events: [pipeline.complete]
+    events:
+      - name: pipeline.complete
+        event: pipeline.complete
+        sink: harness

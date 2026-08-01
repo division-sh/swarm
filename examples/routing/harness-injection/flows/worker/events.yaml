@@ -1,2 +1,4 @@
 work.requested:
   work_id: text
+work.completed:
+  work_id: text

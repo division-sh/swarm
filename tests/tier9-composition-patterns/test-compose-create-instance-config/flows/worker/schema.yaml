@@ -15,4 +15,4 @@ pins:
         event: task.assign
         source: external
   outputs:
-    events: [task.done]
+    events: []

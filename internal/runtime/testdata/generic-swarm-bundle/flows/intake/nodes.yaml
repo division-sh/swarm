@@ -21,7 +21,6 @@ intake-router:
         identity: intake_item.id
         emit:
           event: item.processed
-          broadcast: true
           fields:
             item_id: intake_item.id
     item.processed:

@@ -73,9 +73,16 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 			return err
 		}
 		intent.Event = admitted.Event()
+		planningEvent := intent.Event
 		intentCtx, err = o.bus.withAuthorActivityEventDescriptor(intentCtx, intent.Event)
 		if err != nil {
 			return err
+		}
+		if len(intent.Recipients) == 0 {
+			admitted, intent.Event, err = o.bus.resolveCanonicalSubscribedEventBeforePersistence(intentCtx, admitted)
+			if err != nil {
+				return err
+			}
 		}
 		publicationClaim, err := o.bus.claimPipelinePublication(intentCtx, intent.Event.ID())
 		if err != nil {
@@ -95,9 +102,16 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 			o.bus.stagePendingOutboxOperation(ctx, *intent, appendOutcome, publicationClaim, nil)
 			continue
 		}
-		plan, err := o.deliveryPlanForIntent(intentCtx, *intent)
+		planningIntent := *intent
+		planningIntent.Event = planningEvent
+		plan, err := o.deliveryPlanForIntent(intentCtx, planningIntent)
 		if err != nil {
 			return err
+		}
+		if len(intent.Recipients) == 0 {
+			if err := validateCanonicalConnectRouteEvent(intent.Event, plan); err != nil {
+				return err
+			}
 		}
 		var disposition *runtimepipelineobligation.Disposition
 		var deadLetter *runtimedeadletters.Record

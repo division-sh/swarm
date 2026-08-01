@@ -2,12 +2,9 @@ test-node:
   id: test-node
   execution_type: system_node
   subscribes_to: [task.requested]
-  produces: [task.completed]
+  produces: []
   event_handlers:
     task.requested:
       on_complete:
         - condition: "payload.score >= 70"
           advances_to: nonexistent
-          emit:
-            event: task.completed
-            broadcast: true

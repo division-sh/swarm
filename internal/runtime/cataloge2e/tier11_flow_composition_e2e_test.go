@@ -140,7 +140,7 @@ func TestTier11FlowCompositionCatalogFixtures_AreExplicitlyClassified(t *testing
 	}
 }
 
-func TestTier11DynamicFlowInstanceFlowMatchTarget_RealRuntime(t *testing.T) {
+func TestTier11DynamicFlowInstanceReceiverSelect_RealRuntime(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-dynamic-flow-instance"))
 	repoRoot := repoRootFromCatalogE2E(t)
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-dynamic-flow-instance")
@@ -153,10 +153,10 @@ func TestTier11DynamicFlowInstanceFlowMatchTarget_RealRuntime(t *testing.T) {
 		h.publishAndWait(step, catalogRuntimePublishTimeout)
 	}
 	assertCatalogRuntimeOutcome(t, h, expected)
-	assertDynamicFlowInstanceFlowMatchTargetedNodeDelivery(t, h, "worker/work.assign", "worker/w-001", "task-handler")
+	assertDynamicFlowInstanceReceiverSelectedNodeDelivery(t, h, "worker/work.assign", "worker/w-001", "task-handler")
 }
 
-func assertDynamicFlowInstanceFlowMatchTargetedNodeDelivery(t testing.TB, h *runtimeHarness, eventName, flowInstance, nodeID string) {
+func assertDynamicFlowInstanceReceiverSelectedNodeDelivery(t testing.TB, h *runtimeHarness, eventName, flowInstance, nodeID string) {
 	t.Helper()
 	if h == nil || h.db == nil {
 		t.Fatal("runtime harness database is required")

@@ -19,7 +19,6 @@ test-node:
       advances_to: done
       emit:
         event: scores.computed
-        broadcast: true
   state_schema:
     fields:
       composite: float

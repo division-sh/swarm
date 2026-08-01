@@ -11,7 +11,6 @@ routing-node:
         identity: routed_item.id
         emit:
           event: routed.a
-          broadcast: true
           fields:
             item: routed_item
             item_id: routed_item.id

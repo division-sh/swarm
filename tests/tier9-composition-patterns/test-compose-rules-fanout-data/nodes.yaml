@@ -14,7 +14,6 @@ dispatcher:
           advances_to: dispatched
           emit:
             event: batch.dispatched
-            broadcast: true
         - id: sequential
           condition: "payload.mode == 'sequential'"
           data_accumulation:
@@ -24,7 +23,6 @@ dispatcher:
           advances_to: dispatched
           emit:
             event: batch.dispatched
-            broadcast: true
         - id: fallback
           condition: "else"
           data_accumulation:
@@ -34,4 +32,3 @@ dispatcher:
           advances_to: dispatched
           emit:
             event: batch.dispatched
-            broadcast: true

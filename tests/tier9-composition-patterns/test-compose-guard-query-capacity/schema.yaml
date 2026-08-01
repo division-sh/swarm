@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [admission.requested]
   outputs:
-    events: [admission.granted]
+    events:
+      - name: admission.granted
+        event: admission.granted
+        sink: harness

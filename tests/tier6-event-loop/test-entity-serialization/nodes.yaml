@@ -8,7 +8,6 @@ test-node:
       advances_to: processing
       emit:
         event: step.first_done
-        broadcast: true
     step.second:
       guard:
         id: state_check
@@ -16,4 +15,3 @@ test-node:
       advances_to: complete
       emit:
         event: step.second_done
-        broadcast: true

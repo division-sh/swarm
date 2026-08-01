@@ -18,16 +18,21 @@ type Options struct {
 
 func LoadBundle(t testing.TB, opts Options) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	root := Write(t, opts)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
-		canonicalrouting.RepoRoot(t),
-		root,
-		runtimecontracts.DefaultPlatformSpecFile(canonicalrouting.RepoRoot(t)),
-	)
+	bundle, err := LoadBundleResult(t, opts)
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	return bundle
+}
+
+func LoadBundleResult(t testing.TB, opts Options) (*runtimecontracts.WorkflowContractBundle, error) {
+	t.Helper()
+	root := Write(t, opts)
+	return runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		canonicalrouting.RepoRoot(t),
+		root,
+		runtimecontracts.DefaultPlatformSpecFile(canonicalrouting.RepoRoot(t)),
+	)
 }
 
 func LoadSource(t testing.TB, opts Options) semanticview.Source {

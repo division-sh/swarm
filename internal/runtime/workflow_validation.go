@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -32,6 +33,7 @@ type WorkflowContractValidationOptions struct {
 	LLMProfile                     llmselection.Profile
 	ModelAliases                   llmselection.ModelAliases
 	AllowHarnessInputs             bool
+	AllowHarnessOutputs            bool
 	ProviderTriggerCatalog         *providertriggers.CatalogSnapshot
 	ChannelPlans                   []packs.SatisfactionPlan
 	ChannelOutboundBindings        []packs.OutboundBindingPlan
@@ -45,6 +47,9 @@ type WorkflowContractValidationResult struct {
 	GeneratedToolSchemaClosureErrors []error
 	CapabilitySubjects               []packs.Subject
 	HarnessInjectedInputCount        int
+	HarnessObservedOutputCount       int
+	HarnessInputDeclarations         []string
+	HarnessOutputDeclarations        []string
 	ProductionValid                  bool
 	mockConnectorResponses           *providerconnectors.MockResponsePlan
 }
@@ -68,12 +73,19 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 		return result, fmt.Errorf("semantic source is required")
 	}
 	harnessInputs := workflowHarnessInputDeclarations(source)
+	result.HarnessInputDeclarations = append([]string(nil), harnessInputs...)
 	result.HarnessInjectedInputCount = len(harnessInputs)
-	if len(harnessInputs) > 0 {
+	harnessOutputs := workflowHarnessOutputDeclarations(source)
+	result.HarnessOutputDeclarations = append([]string(nil), harnessOutputs...)
+	result.HarnessObservedOutputCount = len(harnessOutputs)
+	if len(harnessInputs) > 0 || len(harnessOutputs) > 0 {
 		result.ProductionValid = false
-		if !opts.AllowHarnessInputs {
-			return result, fmt.Errorf("production validation rejects test-only input source: harness at %s; replace it with a real producer before booting", strings.Join(harnessInputs, ", "))
-		}
+	}
+	if len(harnessInputs) > 0 && !opts.AllowHarnessInputs {
+		return result, fmt.Errorf("production validation rejects test-only input source: harness at %s; replace it with a real producer before booting", strings.Join(harnessInputs, ", "))
+	}
+	if len(harnessOutputs) > 0 && !opts.AllowHarnessOutputs {
+		return result, fmt.Errorf("production validation rejects test-only output sink: harness at %s; replace it with a real consumer before booting", strings.Join(harnessOutputs, ", "))
 	}
 	var err error
 	source, err = providerconnectors.SourceWithConnectorPackImports(source)
@@ -186,6 +198,33 @@ func workflowHarnessInputDeclarations(source semanticview.Source) []string {
 	for flowID := range source.FlowSchemaEntries() {
 		for _, pin := range source.FlowInputEventPins(flowID) {
 			if strings.TrimSpace(pin.Source) != "harness" {
+				continue
+			}
+			location := strings.TrimSpace(pin.PinName())
+			if flowID != "" {
+				location = strings.TrimSpace(flowID) + "." + location
+			}
+			declarations = append(declarations, location)
+		}
+	}
+	sort.Strings(declarations)
+	return declarations
+}
+
+func workflowHarnessOutputDeclarations(source semanticview.Source) []string {
+	if source == nil {
+		return nil
+	}
+	var declarations []string
+	flowIDs := []string{""}
+	for flowID := range source.FlowSchemaEntries() {
+		if strings.TrimSpace(flowID) != "" {
+			flowIDs = append(flowIDs, flowID)
+		}
+	}
+	for _, flowID := range flowIDs {
+		for _, pin := range source.FlowOutputEventPins(flowID) {
+			if pin.Sink != runtimecontracts.FlowOutputSinkHarness {
 				continue
 			}
 			location := strings.TrimSpace(pin.PinName())

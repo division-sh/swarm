@@ -91,6 +91,7 @@ func TestTemplateFlowPilotConformance_FailClosedMatrix(t *testing.T) {
 		opts        templateflowpilot.Options
 		checkID     string
 		wantMessage string
+		loadError   bool
 	}{
 		{
 			name:        "unsupported receiver select_entity on connected normal path",
@@ -101,19 +102,29 @@ func TestTemplateFlowPilotConformance_FailClosedMatrix(t *testing.T) {
 		{
 			name:        "producer target cannot rescue common composition",
 			opts:        templateflowpilot.Options{ProducerTarget: true},
-			checkID:     "pin_target_resolution",
-			wantMessage: "producer_target_common_path_forbidden",
+			wantMessage: "RETIRED-EMIT-ROUTING: emit.target",
+			loadError:   true,
 		},
 		{
 			name:        "producer broadcast cannot replace parent connect authority",
 			opts:        templateflowpilot.Options{ProducerBroadcast: true},
-			checkID:     "pin_target_resolution",
-			wantMessage: "producer_broadcast_common_path_forbidden",
+			wantMessage: "RETIRED-EMIT-ROUTING: emit.broadcast",
+			loadError:   true,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			source := templateflowpilot.LoadSource(t, tc.opts)
+			bundle, err := templateflowpilot.LoadBundleResult(t, tc.opts)
+			if tc.loadError {
+				if err == nil || !strings.Contains(err.Error(), tc.wantMessage) {
+					t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want containing %q", err, tc.wantMessage)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+			}
+			source := semanticview.Wrap(bundle)
 			report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 			if !templateFlowPilotConformanceFindingContains(report.HardInvalidities(), tc.checkID, tc.wantMessage) {
 				t.Fatalf("expected hard invalidity %s containing %q, got %#v", tc.checkID, tc.wantMessage, report.HardInvalidities())
@@ -303,14 +314,16 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		t.Fatalf("fan_out result = status:%s count:%d intents:%d", result.Status, result.FanOutCount, len(result.EmitIntents))
 	}
 
+	accountAEntityID := runtimeflowidentity.EntityID("account/acct-a")
+	accountBEntityID := runtimeflowidentity.EntityID("account/acct-b")
 	store := &fanOutPinRouteMemoryStore{
 		flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
-			{InstanceID: "acct-a", EntityID: "ent-a", FlowInstance: "account/acct-a", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
-			{InstanceID: "acct-b", EntityID: "ent-b", FlowInstance: "account/acct-b", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-b"}},
+			{InstanceID: "acct-a", EntityID: accountAEntityID, FlowInstance: "account/acct-a", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
+			{InstanceID: "acct-b", EntityID: accountBEntityID, FlowInstance: "account/acct-b", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-b"}},
 		},
 		activeAgents: []runtimebus.ActiveAgentDescriptor{
-			{Identity: agentidentitytest.Declared(t, "account-worker", "notify-all-children/account", "account", "acct-a", "account/acct-a"), EntityID: "ent-a"},
-			{Identity: agentidentitytest.Declared(t, "account-worker", "notify-all-children/account", "account", "acct-b", "account/acct-b"), EntityID: "ent-b"},
+			{Identity: agentidentitytest.Declared(t, "account-worker", "notify-all-children/account", "account", "acct-a", "account/acct-a"), EntityID: accountAEntityID},
+			{Identity: agentidentitytest.Declared(t, "account-worker", "notify-all-children/account", "account", "acct-b", "account/acct-b"), EntityID: accountBEntityID},
 		},
 	}
 	eb, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
@@ -349,8 +362,8 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 	}
 
 	want := map[string]events.RouteIdentity{
-		"acct-a": {FlowID: "account", FlowInstance: "account/acct-a", EntityID: "ent-a"},
-		"acct-b": {FlowID: "account", FlowInstance: "account/acct-b", EntityID: "ent-b"},
+		"acct-a": {FlowID: "account", FlowInstance: "account/acct-a", EntityID: accountAEntityID},
+		"acct-b": {FlowID: "account", FlowInstance: "account/acct-b", EntityID: accountBEntityID},
 	}
 	for idx, intent := range result.EmitIntents {
 		evt := eventtest.Child(

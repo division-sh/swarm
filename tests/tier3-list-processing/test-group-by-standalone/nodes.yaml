@@ -11,5 +11,4 @@ group-node:
         store_as: entity.grouped
       emit:
         event: items.grouped
-        broadcast: true
       advances_to: done

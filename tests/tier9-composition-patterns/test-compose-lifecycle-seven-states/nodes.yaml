@@ -24,4 +24,3 @@ lifecycle:
       advances_to: closed
       emit:
         event: lifecycle.complete
-        broadcast: true

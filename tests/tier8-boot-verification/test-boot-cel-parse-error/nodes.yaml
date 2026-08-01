@@ -2,13 +2,10 @@ test-node:
   id: test-node
   execution_type: system_node
   subscribes_to: [check.requested]
-  produces: [check.passed]
+  produces: []
   event_handlers:
     check.requested:
       guard:
         id: bad_cel_guard
         check: "payload.((invalid"
       advances_to: done
-      emit:
-        event: check.passed
-        broadcast: true

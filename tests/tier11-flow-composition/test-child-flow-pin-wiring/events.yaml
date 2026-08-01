@@ -1,6 +1,5 @@
 job.submit:
 work.requested:
   task_type: string
-job.done:
 child/work.completed:
 work.completed:

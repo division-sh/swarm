@@ -443,7 +443,6 @@ rows:
       - {kind: artifact, path: internal/runtime/engine/executor_test.go}
     proof_refs:
       - {kind: go_test, name: TestExecutor_DeclarativeEmitSurfacesUseProducerSourceRouteNamespace}
-      - {kind: go_test, name: TestExecutor_StaticProducerTargetRouteDoesNotOwnEventNamespace}
 
   - id: empire_event_publish_flow_scope
     category: api

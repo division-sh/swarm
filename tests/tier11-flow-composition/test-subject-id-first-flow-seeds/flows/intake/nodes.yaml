@@ -9,4 +9,3 @@ intake-handler:
       advances_to: processed
       emit:
         event: item.processed
-        broadcast: true

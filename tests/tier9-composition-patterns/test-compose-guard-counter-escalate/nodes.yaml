@@ -2,7 +2,7 @@ retrier:
   id: retrier
   execution_type: system_node
   subscribes_to: [retry.requested]
-  produces: [retry.dispatched, limit.reached]
+  produces: [limit.reached]
   event_handlers:
     retry.requested:
       guard:
@@ -13,6 +13,3 @@ retrier:
         writes:
           - target_field: retry_count
             expression: entity.retry_count + 1
-      emit:
-        event: retry.dispatched
-        broadcast: true

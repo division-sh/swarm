@@ -4847,59 +4847,6 @@ func TestExecutor_FanOutEmitUsesProducerSourceRouteNamespace(t *testing.T) {
 	}
 }
 
-func TestExecutor_StaticProducerTargetRouteDoesNotOwnEventNamespace(t *testing.T) {
-	source := sourceWithDeclarativeEmitExternalizationFlows()
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     source,
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
-	}, nil)
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "repo-entity",
-		NodeID:   "repo-node",
-		FlowID:   "repo-scaffold",
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "repo.commit_ready", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			Emit: runtimecontracts.EmitSpec{
-				Event: "repo-scaffold/repo_scaffold.repo_scaffolded",
-				Target: runtimecontracts.EmitTargetSpec{
-					Kind:       runtimecontracts.EmitTargetKindInstanceID,
-					Flow:       "component-scaffold",
-					InstanceID: "component-1",
-				},
-			},
-		},
-		State: testStateSnapshot("ready", map[string]any{
-			"flow_path": "repo-scaffold",
-		}, nil, map[string]map[string]any{}),
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-	if got := len(result.EmitIntents); got != 1 {
-		t.Fatalf("EmitIntents count = %d, want 1", got)
-	}
-	emitted := result.EmitIntents[0].Event
-	if got, want := string(emitted.Type()), "repo-scaffold/repo_scaffold.repo_scaffolded"; got != want {
-		t.Fatalf("emitted type = %q, want %q", got, want)
-	}
-	if got := emitted.SourceRoute().FlowInstance; got != "repo-scaffold" {
-		t.Fatalf("source flow_instance = %q, want repo-scaffold", got)
-	}
-	if got := emitted.TargetRoute().FlowInstance; got != "component-scaffold/component-1" {
-		t.Fatalf("target flow_instance = %q, want component-scaffold/component-1", got)
-	}
-	if got := emitted.FlowInstance(); got != "component-scaffold/component-1" {
-		t.Fatalf("legacy flow_instance projection = %q, want target component-scaffold/component-1", got)
-	}
-}
-
 func TestExecutor_ChildPinOutputTargetsStoredParentRoute(t *testing.T) {
 	source := sourceWithChildOutputPin()
 	exec, err := NewExecutor(RuntimeDependencies{
@@ -6283,7 +6230,9 @@ pins:
       - score.dimension_complete
   outputs:
     events:
-      - vertical.scored
+      - name: vertical_scored
+        event: vertical.scored
+        sink: harness
 `)
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "scoring", "types.yaml"), `
 types:
@@ -6316,7 +6265,6 @@ scoring-node:
         dedup_by: payload.dimension
       emit:
         event: vertical.scored
-        broadcast: true
         fields:
           scores: entity.scores
   state_schema:

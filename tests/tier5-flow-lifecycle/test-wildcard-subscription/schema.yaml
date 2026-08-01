@@ -5,4 +5,7 @@ pins:
   inputs:
     events: ["*.completed"]
   outputs:
-    events: [match.found]
+    events:
+      - name: match.found
+        event: match.found
+        sink: harness

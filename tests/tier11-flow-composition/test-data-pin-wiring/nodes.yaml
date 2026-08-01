@@ -18,10 +18,7 @@ result-listener:
   id: result-listener
   execution_type: system_node
   subscribes_to: [process.done]
-  produces: [job.complete]
+  produces: []
   event_handlers:
     process.done:
       advances_to: done
-      emit:
-        event: job.complete
-        broadcast: true

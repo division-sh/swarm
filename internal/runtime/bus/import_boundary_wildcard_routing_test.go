@@ -900,7 +900,6 @@ producer-source:
     task.start:
       emit:
         event: task.done
-        broadcast: true
 `
 	}
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), producerEvents)

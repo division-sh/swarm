@@ -10,7 +10,6 @@ gate-setter-1:
       sets_gate: g1
       emit:
         event: gate.set
-        broadcast: true
 
 gate-setter-2:
   id: gate-setter-2
@@ -24,7 +23,6 @@ gate-setter-2:
       sets_gate: g2
       emit:
         event: gate.set
-        broadcast: true
 
 gate-setter-3:
   id: gate-setter-3
@@ -38,7 +36,6 @@ gate-setter-3:
       sets_gate: g3
       emit:
         event: gate.set
-        broadcast: true
 
 approval-node:
   id: approval-node
@@ -53,4 +50,3 @@ approval-node:
       advances_to: approved
       emit:
         event: approval.granted
-        broadcast: true

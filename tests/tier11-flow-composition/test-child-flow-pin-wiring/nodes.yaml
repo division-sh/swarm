@@ -11,10 +11,7 @@ parent-listener:
   id: parent-listener
   execution_type: system_node
   subscribes_to: [work.completed]
-  produces: [job.done]
+  produces: []
   event_handlers:
     work.completed:
       advances_to: done
-      emit:
-        event: job.done
-        broadcast: true

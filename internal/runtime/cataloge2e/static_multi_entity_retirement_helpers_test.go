@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -25,7 +26,26 @@ func assertCatalogStaticMultiEntityRetirement(t testing.TB, fixtureRoot string) 
 	}
 	if _, err := newTier8Runtime(t, bundle); err == nil {
 		t.Fatal("expected runtime startup to fail for retired static multi-entity fixture")
+	} else if workflowBundleHasHarnessOutput(bundle) {
+		if !strings.Contains(err.Error(), "production validation rejects test-only output sink: harness") {
+			t.Fatalf("runtime startup error = %q, want production harness rejection", err.Error())
+		}
 	} else if !strings.Contains(err.Error(), staticMultiEntityRetirementDiagnostic) {
 		t.Fatalf("runtime startup error = %q, want %q", err.Error(), staticMultiEntityRetirementDiagnostic)
 	}
+}
+
+func workflowBundleHasHarnessOutput(bundle *runtimecontracts.WorkflowContractBundle) bool {
+	if bundle == nil {
+		return false
+	}
+	source := semanticview.Wrap(bundle)
+	for flowID := range source.FlowSchemaEntries() {
+		for _, pin := range source.FlowOutputEventPins(flowID) {
+			if pin.Sink == runtimecontracts.FlowOutputSinkHarness {
+				return true
+			}
+		}
+	}
+	return false
 }

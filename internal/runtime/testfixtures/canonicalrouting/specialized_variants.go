@@ -374,7 +374,6 @@ ticket.assigned:
         check: "entity.category != '' && entity.priority != ''"
       emit:
         event: ticket.assigned
-        broadcast: true
         fields:
           category: entity.category
           priority: entity.priority
@@ -471,7 +470,7 @@ flows:
   - id: child
     flow: child
 `)
-	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-missing-pin-warning\ninitial_state: pending\nterminal_states: [done]\nstates: [pending, done]\npins:\n  inputs:\n    events: [task.requested]\n  outputs:\n    events: [task.completed]\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-missing-pin-warning\ninitial_state: pending\nterminal_states: [done]\nstates: [pending, done]\npins:\n  inputs:\n    events: [task.requested]\n")
 	writeClosedVariantFile(t, root, "events.yaml", "task.requested:\n  swarm:\n    source: external\ntask.completed: {}\nchild/task.assigned: {}\nchild/task.result: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `dispatcher:
   id: dispatcher
@@ -485,12 +484,11 @@ flows:
       advances_to: done
       emit:
         event: task.completed
-        broadcast: true
 `)
 	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "entities.yaml"} {
 		writeClosedVariantFile(t, root, file, "{}\n")
 	}
-	writeLegacyInstanceFlow(t, root, "child", "name: child\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, working, done]\npins:\n  inputs:\n    events: [task.assigned, task.feedback]\n  outputs:\n    events: [task.result]\n", "task.assigned: {}\ntask.feedback:\n  comment: string\ntask.result: {}\n", "work_item: {}\n", `worker:
+	writeLegacyInstanceFlow(t, root, "child", "name: child\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, working, done]\npins:\n  inputs:\n    events: [task.assigned, task.feedback]\n", "task.assigned: {}\ntask.feedback:\n  comment: string\ntask.result: {}\n", "work_item: {}\n", `worker:
   id: worker
   execution_type: system_node
   subscribes_to: [task.assigned, task.feedback]
@@ -502,7 +500,6 @@ flows:
       advances_to: done
       emit:
         event: task.result
-        broadcast: true
 `)
 	return root
 }
@@ -511,9 +508,9 @@ func CopyRunForkTarget(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 	writeClosedVariantFile(t, root, "package.yaml", "name: cross-bundle-target\nversion: 1.0.0\ndescription: Cross-bundle target fixture for run.fork.\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n")
-	writeClosedVariantFile(t, root, "schema.yaml", "initial_state: pending\nterminal_states: [done]\nstates: [pending, done]\npins:\n  inputs:\n    events: [task.requested]\n  outputs:\n    events: [task.completed]\n")
-	writeClosedVariantFile(t, root, "nodes.yaml", "test-node:\n  id: test-node\n  execution_type: system_node\n  subscribes_to: [task.requested]\n  produces: [task.completed]\n  event_handlers:\n    task.requested:\n      advances_to: done\n      emit:\n        event: task.completed\n        broadcast: true\n")
-	writeClosedVariantFile(t, root, "events.yaml", "task.requested:\n  swarm:\n    source: external\ntask.completed:\n  swarm:\n    source: external\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "initial_state: pending\nterminal_states: [done]\nstates: [pending, done]\npins:\n  inputs:\n    events: [task.requested]\n  outputs:\n    events: []\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", "test-node:\n  id: test-node\n  execution_type: system_node\n  subscribes_to: [task.requested]\n  produces: []\n  event_handlers:\n    task.requested:\n      advances_to: done\n")
+	writeClosedVariantFile(t, root, "events.yaml", "task.requested:\n  swarm:\n    source: external\n")
 	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "entities.yaml"} {
 		writeClosedVariantFile(t, root, file, "{}\n")
 	}

@@ -681,6 +681,9 @@ func TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscr
 	if routes := store.routes[eventID]; !deliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
 	}
+	if got := store.events[eventID].TargetRoute().Normalized(); got != want.Target.Normalized() {
+		t.Fatalf("persisted event target = %#v, want %#v", got, want.Target)
+	}
 	if got := store.scopes[eventID]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
@@ -696,6 +699,46 @@ func TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscr
 	}
 	if !deliveryRoutesContain(replayRoutes, want) {
 		t.Fatalf("replay delivery routes = %#v, want %#v", replayRoutes, want)
+	}
+}
+
+func TestEventBusPublish_ConnectRoutePlanRejectsConflictingAdmittedTargetBeforePersistence(t *testing.T) {
+	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
+		From: "producer.deploy_done",
+		To:   "consumer.deploy_completed",
+	})
+	store := newTargetRouteMemoryStore()
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	eventID := uuid.NewString()
+	evt := eventtest.RunCreatingRootIngress(
+		eventID,
+		events.EventType("producer/deploy.done"),
+		"",
+		"",
+		json.RawMessage(`{"ignored":"yes"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{
+			FlowID:       "unrelated",
+			FlowInstance: "unrelated/one",
+			EntityID:     eventtest.UUID("unrelated-one"),
+		}),
+		time.Now().UTC(),
+	)
+
+	err = eb.Publish(context.Background(), evt)
+	if err == nil || !strings.Contains(err.Error(), "connect route facts conflict with the admitted event target") {
+		t.Fatalf("Publish error = %v, want connect route fact conflict", err)
+	}
+	if _, persisted := store.events[eventID]; persisted {
+		t.Fatal("conflicting event was persisted")
+	}
+	if len(store.routes[eventID]) != 0 {
+		t.Fatalf("conflicting event delivery routes = %#v, want none", store.routes[eventID])
 	}
 }
 
@@ -869,6 +912,9 @@ func TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget(t *testing.T
 	}
 	if routes := store.routes[eventID]; !deliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
+	}
+	if got := store.events[eventID].TargetRoute().Normalized(); got != want.Target.Normalized() {
+		t.Fatalf("persisted event target = %#v, want %#v", got, want.Target)
 	}
 	if got := store.scopes[eventID]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
@@ -1059,6 +1105,9 @@ func TestEventBusPublishInMutation_ConnectRoutePlanPersistsSharedRoutePlan(t *te
 	if routes := store.routes[eventID]; !deliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
 	}
+	if got := store.events[eventID].TargetRoute().Normalized(); got != want.Target.Normalized() {
+		t.Fatalf("persisted mutation event target = %#v, want %#v", got, want.Target)
+	}
 	if got := store.scopes[eventID]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
@@ -1103,6 +1152,9 @@ func TestEngineOutbox_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 	if routes := store.routes[eventID]; !deliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
 	}
+	if got := store.events[eventID].TargetRoute().Normalized(); got != want.Target.Normalized() {
+		t.Fatalf("persisted outbox event target = %#v, want %#v", got, want.Target)
+	}
 	if got := store.scopes[eventID]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
@@ -1110,10 +1162,12 @@ func TestEngineOutbox_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 
 func TestEventBusResetInMemoryStateRefreshesConnectRoutePlanner(t *testing.T) {
 	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, false)
+	alphaEntityID := eventtest.UUID("ent-alpha")
+	betaEntityID := eventtest.UUID("ent-beta")
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		flowInstances: []ActiveFlowInstanceDescriptor{{
-			InstanceID: "alpha", EntityID: "ent-alpha", FlowInstance: "consumer/alpha",
+			InstanceID: "alpha", EntityID: alphaEntityID, FlowInstance: "consumer/alpha",
 			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 		}},
 	}
@@ -1131,7 +1185,7 @@ func TestEventBusResetInMemoryStateRefreshesConnectRoutePlanner(t *testing.T) {
 		t.Fatalf("ResetInMemoryState: %v", err)
 	}
 	store.flowInstances = []ActiveFlowInstanceDescriptor{{
-		InstanceID: "beta", EntityID: "ent-beta", FlowInstance: "consumer/beta",
+		InstanceID: "beta", EntityID: betaEntityID, FlowInstance: "consumer/beta",
 		AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 	}}
 	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
@@ -1144,7 +1198,7 @@ func TestEventBusResetInMemoryStateRefreshesConnectRoutePlanner(t *testing.T) {
 	evt := eventtest.RunCreatingRootIngress(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	wantBeta := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-beta", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/beta", EntityID: "ent-beta"}}
+	wantBeta := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-beta", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/beta", EntityID: betaEntityID}}
 
 	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
 	if err != nil {
@@ -1229,6 +1283,9 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *te
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
+	if got := store.events[eventID].TargetRoute().Normalized(); got != want.Target.Normalized() {
+		t.Fatalf("persisted event target = %#v, want %#v", got, want.Target)
+	}
 	if !deliveryRoutesContain(store.routes[eventID], want) || len(store.routes[eventID]) != 1 {
 		t.Fatalf("persisted delivery routes = %#v, want instance-key route %#v", store.routes[eventID], want)
 	}
@@ -1302,6 +1359,9 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 			FlowInstance: activation.Instance.InstancePath,
 			EntityID:     activation.Instance.EntityID,
 		},
+	}
+	if got := store.events[evt.ID()].TargetRoute().Normalized(); got != want.Target.Normalized() {
+		t.Fatalf("persisted event target = %#v, want %#v", got, want.Target)
 	}
 	if !deliveryRoutesContain(store.routes[evt.ID()], want) || len(store.routes[evt.ID()]) != 1 {
 		t.Fatalf("persisted delivery routes = %#v, want created instance route %#v", store.routes[evt.ID()], want)

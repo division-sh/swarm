@@ -9,7 +9,6 @@ test-node:
         - condition: "entity.priority == 'high'"
           emit:
             event: item.expedited
-            broadcast: true
           advances_to: done
   state_schema:
     fields:

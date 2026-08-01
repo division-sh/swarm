@@ -22,8 +22,11 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 
 	authored := mustMappingValue(t, composition, "authored_shapes")
 	outputPin := mustMappingValue(t, authored, "output_event_pin")
-	assertScalarContains(t, mustMappingValue(t, outputPin, "canonical_form"), "{name, event, key, carries}")
+	assertScalarContains(t, mustMappingValue(t, outputPin, "canonical_form"), "{name, event, sink, key, carries}")
 	assertScalarContains(t, mustMappingValue(t, outputPin, "canonical_form"), "MUST include `key`")
+	assertScalarContains(t, mustMappingValue(t, outputPin, "canonical_form"), "production_valid:false")
+	assertScalarContains(t, mustMappingValue(t, outputPin, "harness_sink"), "mutually exclusive")
+	assertScalarContains(t, mustMappingValue(t, outputPin, "harness_sink"), "creates no semantic")
 	assertScalarContains(t, mustMappingValue(t, outputPin, "scalar_form"), "never inferred")
 	resolved := mustMappingValue(t, authored, "resolved_input_pin")
 	assertScalarContains(t, mustMappingValue(t, resolved, "canonical_form"), "{name, event, source, resolution, carries}")
@@ -49,7 +52,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, ownership, "receiver_input_resolution"), "cardinality")
 	assertScalarContains(t, mustMappingValue(t, ownership, "output_pins"), "never receiver identity")
 	assertScalarContains(t, mustMappingValue(t, ownership, "input_pins"), "typed identity source")
-	assertScalarContains(t, mustMappingValue(t, ownership, "producer_emit_target"), "exceptional dynamic routing")
+	assertScalarContains(t, mustMappingValue(t, ownership, "producer_emit"), "retired on presence")
 
 	verify := mustMappingValue(t, composition, "analyzer_verify_requirements")
 	for _, key := range []string{
@@ -93,7 +96,8 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	}
 
 	assertScalarContains(t, mustYAMLPath(t, composition, "pin_alias_interface_adaptation", "owner_consumed"), "pin_alias_interface_adaptation")
-	assertScalarContains(t, mustYAMLPath(t, composition, "emit_target_escape_hatch", "role"), "not a compatibility path")
+	assertScalarContains(t, mustYAMLPath(t, composition, "producer_routing_retirement", "role"), "retired on presence")
+	assertScalarContains(t, mustYAMLPath(t, composition, "producer_routing_retirement", "migration"), "bundle-wide preflight")
 	assertScalarContains(t, mustYAMLPath(t, composition, "split_boundaries", "runtime_route_consumption"), "#1473 closes supported EventBus publish/preflight/outbox")
 	assertScalarContains(t, mustYAMLPath(t, composition, "split_boundaries", "runtime_route_consumption"), "selected-contract runfork readiness")
 	slice1473 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1473")
@@ -125,19 +129,11 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, slice1546, "rule"), "ConnectRoutePlan.InstanceKey.Mappings are removed")
 
 	slice1475 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1475")
-	assertScalarValue(t, mustMappingValue(t, slice1475, "status"), "merge_bearing_runtime_behavior")
-	assertScalarContains(t, mustMappingValue(t, slice1475, "canonical_code_owner"), "ProducerRouteCommonPathFailure")
-	assertScalarContains(t, mustMappingValue(t, slice1475, "rule"), "not valid common-path")
-	assertScalarContains(t, mustMappingValue(t, slice1475, "rule"), "does not grandfather")
-	assertScalarContains(t, mustMappingValue(t, slice1475, "rule"), "alias/adapter connect")
-	if !sequenceContainsScalar(mustMappingValue(t, slice1475, "consumes"), "loaded package receiver input pins and parent connect graph edges, including alias/adapter connects") {
-		t.Fatal("implementation_slice_1475 missing connected adapter proof surface")
-	}
-	if !sequenceContainsScalar(mustMappingValue(t, slice1475, "produces"), "producer_target_common_path_forbidden for loaded flow-scope target.flow/match common-path composition") {
-		t.Fatal("implementation_slice_1475 missing producer_target_common_path_forbidden proof surface")
-	}
-	if !sequenceContainsScalar(mustMappingValue(t, slice1475, "produces"), "producer_broadcast_common_path_forbidden for loaded flow-scope broadcast:true common-path composition") {
-		t.Fatal("implementation_slice_1475 missing producer_broadcast_common_path_forbidden proof surface")
+	assertScalarValue(t, mustMappingValue(t, slice1475, "status"), "superseded_by_complete_retirement")
+	assertScalarContains(t, mustMappingValue(t, slice1475, "canonical_code_owner"), "strict emit decoding")
+	assertScalarContains(t, mustMappingValue(t, slice1475, "rule"), "fails strict load")
+	if !sequenceContainsScalar(mustMappingValue(t, slice1475, "produces"), "RETIRED-EMIT-ROUTING before normalization, verification, or runtime") {
+		t.Fatal("implementation_slice_1475 missing complete retirement proof surface")
 	}
 	slice1508 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1508")
 	if !sequenceContainsScalar(mustMappingValue(t, slice1508, "proof_obligations"), "semanticview exposes package-aware root connect facts through ResolvedCompositionConnectsFrom, and runtime delivery consumes the same endpoints through lowered ConnectRoutePlan authority") {
@@ -235,7 +231,7 @@ func TestPlatformSpecInstanceIdentityAuthoringSourceAuthority(t *testing.T) {
 	}
 }
 
-func TestPlatformSpecCompositionRoutingDemotesProducerTargetAuthority(t *testing.T) {
+func TestPlatformSpecCompositionRoutingRetiresProducerTargetAuthority(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
 
 	crossFlow := mustYAMLPath(t, root, "engine", "cross_flow_routing")
@@ -244,18 +240,14 @@ func TestPlatformSpecCompositionRoutingDemotesProducerTargetAuthority(t *testing
 	if !sequenceContainsScalar(mustYAMLPath(t, crossFlow, "target_resolution", "precedence"), "lowered parent connect route plan") {
 		t.Fatal("cross_flow_routing target precedence must start from lowered parent connect route plan")
 	}
-	assertScalarContains(t, mustYAMLPath(t, crossFlow, "target_resolution", "explicit_target_escape_hatch"), "exceptional dynamic-routing escape hatch")
-	assertScalarContains(t, mustYAMLPath(t, crossFlow, "target_resolution", "explicit_target_escape_hatch"), "must not replace lowered parent connect")
-	assertScalarContains(t, mustYAMLPath(t, crossFlow, "target_resolution", "explicit_target_escape_hatch"), "illegal common-path composition routing")
-	assertScalarContains(t, mustYAMLPath(t, crossFlow, "target_resolution", "fail_closed"), "no lowered parent connect route")
+	assertScalarContains(t, mustYAMLPath(t, crossFlow, "retired_producer_forms", "target"), "rejected on presence")
+	assertScalarContains(t, mustYAMLPath(t, crossFlow, "retired_producer_forms", "target"), "receiver-owned")
+	assertScalarContains(t, mustYAMLPath(t, crossFlow, "retired_producer_forms", "broadcast"), "rejected on presence")
+	assertScalarContains(t, mustYAMLPath(t, crossFlow, "target_resolution", "fail_closed"), "canonical typed consumer")
 	assertScalarContains(t, mustYAMLPath(t, crossFlow, "auto_wiring", "description"), "only as an inference candidate")
-	assertScalarContains(t, mustYAMLPath(t, crossFlow, "activation", "rule"), "valid lowered parent connect route")
+	assertScalarContains(t, mustYAMLPath(t, crossFlow, "activation", "rule"), "lowered parent connect route")
 	assertScalarContains(t, mustYAMLPath(t, crossFlow, "auto_wiring", "template_pairs"), "lowered parent connect route facts")
 
-	assertScalarContains(t, mustYAMLPath(t, crossFlow, "target_forms", "flow_match"), "more than one match fail closed")
-	assertScalarContains(t, mustYAMLPath(t, crossFlow, "target_forms", "flow_match"), "as package-internal composition")
-	assertScalarContains(t, mustYAMLPath(t, crossFlow, "target_forms", "broadcast"), "producer-authored explicit opt-out escape hatch")
-	assertScalarContains(t, mustYAMLPath(t, crossFlow, "target_forms", "broadcast"), "forbidden when it functions as")
 	assertScalarContains(t, mustYAMLPath(t, crossFlow, "structural_binding", "precedence_guard"), "lower precedence than lowered parent connect")
 	assertScalarContains(t, mustYAMLPath(t, crossFlow, "structural_binding", "child_to_parent"), "no lowered parent connect route")
 	assertScalarContains(t, mustYAMLPath(t, crossFlow, "structural_binding", "static_child_no_instance"), "without a lowered parent connect route")
@@ -269,20 +261,18 @@ func TestPlatformSpecCompositionRoutingDemotesProducerTargetAuthority(t *testing
 	pinTargetResolution := mustYAMLPath(t, root, "static_analyzer", "slice_3a_pin_target_resolution")
 	assertScalarValue(t, mustMappingValue(t, pinTargetResolution, "canonical_replacement"), "flow_model.flow_package.composition_routing.analyzer_verify_requirements")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "lowered_parent_connect", "rule"), "Parent connect")
-	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "explicit_target", "rule"), "genuine dynamic escape hatch")
-	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "explicit_target", "rule"), "more than one is ambiguous")
-	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "retired_producer_fanout", "rule"), "examples/routing/notify-all-children")
-	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "retired_producer_fanout", "rule"), "issues/1934")
-	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "explicit_broadcast", "rule"), "no loaded package receiver input")
+	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "typed_same_flow_consumer", "rule"), "typed pub/sub")
+	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "harness_sink", "rule"), "Production admission rejects")
+	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "harness_sink", "rule"), "no runtime recipient")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "structural_parent_route", "rule"), "no lowered parent connect route applies")
-	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "scope", "description"), "no lowered connect route applies")
+	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "scope", "description"), "typed same-flow consumer")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "scope", "description"), "eligible static child delivery-entity")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "scope", "description"), "agent emit_events")
-	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "scope", "description"), "do not require producer")
-	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "static_failure_reasons", "producer_target_common_path_forbidden"), "parent connect is the required route owner")
-	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "static_failure_reasons", "producer_broadcast_common_path_forbidden"), "parent connect broadcast/fan-out")
+	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "scope", "description"), "never author recipient identity")
+	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "static_failure_reasons", "retired_emit_routing"), "present in any shape")
+	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "static_failure_reasons", "harness_consumer_conflict"), "combined with a real")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "implementation_slice_1444", "rule"), "Agent emit_events declarations")
-	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "implementation_slice_1444", "rule"), "MUST NOT require producer target")
+	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "implementation_slice_1444", "rule"), "MUST NOT require producer routing fields")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "implementation_slice_1444", "canonical_code_owner"), "pinRoutingAgentEmitSites")
 
 	fanOut := mustYAMLPath(t, root, "handler_specification", "handler_fields", "fan_out")
@@ -295,6 +285,7 @@ func TestPlatformSpecCompositionRoutingDemotesProducerTargetAuthority(t *testing
 	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "never sorts or deduplicates")
 	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "exact microsecond precision")
 	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "event_id is never an order owner")
+	assertScalarContains(t, mustYAMLPath(t, fanOut, "retired_target_field"), "retired on presence")
 	if !sequenceContainsScalar(mustYAMLPath(t, fanOut, "effective_semantics", "consumers"), "engine") ||
 		!sequenceContainsScalar(mustYAMLPath(t, fanOut, "effective_semantics", "consumers"), "authoring_view") {
 		t.Fatal("fan_out effective semantics must name runtime and authoring consumers")
@@ -310,10 +301,12 @@ func TestPlatformSpecCompositionRoutingCatalogSurfacesConsumeConnectAuthority(t 
 		t.Fatal("expected at least one target_required_missing spec surface")
 	}
 	for _, node := range targetRequiredMissing {
-		assertScalarContains(t, node, "lowered parent connect")
-		assertScalarContains(t, node, "explicit target")
-		assertScalarContains(t, node, "broadcast:true")
-		assertScalarContains(t, node, "eligible static child delivery-entity route")
+		if !strings.Contains(node.Value, "consumer") {
+			t.Fatalf("target_required_missing does not name canonical consumer evidence: %q", node.Value)
+		}
+		if strings.Contains(node.Value, "explicit target") || strings.Contains(node.Value, "broadcast:true") {
+			t.Fatalf("target_required_missing retains retired producer routing: %q", node.Value)
+		}
 	}
 
 	checks := mustYAMLPath(t, root, "engine", "boot_verification", "checks")
@@ -325,9 +318,9 @@ func TestPlatformSpecCompositionRoutingCatalogSurfacesConsumeConnectAuthority(t 
 	pinTargetResolution := mustSequenceMappingByScalarField(t, checks, "id", "pin_target_resolution")
 	assertScalarContains(t, mustMappingValue(t, pinTargetResolution, "trigger"), "agent emit_events")
 	assertScalarContains(t, mustMappingValue(t, pinTargetResolution, "trigger"), "lowered parent connect route")
-	assertScalarContains(t, mustMappingValue(t, pinTargetResolution, "trigger"), "explicit target escape hatch")
+	assertScalarContains(t, mustMappingValue(t, pinTargetResolution, "trigger"), "typed same-flow consumer")
 	assertScalarContains(t, mustMappingValue(t, pinTargetResolution, "trigger"), "eligible static child delivery-entity route")
-	assertScalarContains(t, mustMappingValue(t, pinTargetResolution, "trigger"), "producer target/broadcast")
+	assertScalarContains(t, mustMappingValue(t, pinTargetResolution, "trigger"), "fail strict loading on presence")
 
 	outputPinKeyCarries := mustSequenceMappingByScalarField(t, checks, "id", "output_pin_key_carries_validation")
 	assertScalarContains(t, mustMappingValue(t, outputPinKeyCarries, "trigger"), "missing key/carries evidence")
@@ -337,11 +330,11 @@ func TestPlatformSpecCompositionRoutingCatalogSurfacesConsumeConnectAuthority(t 
 
 	bootSteps := mustYAMLPath(t, root, "engine", "boot_sequence", "steps")
 	validatePins := mustSequenceMappingByScalarField(t, bootSteps, "name", "validate_pins")
-	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "flow_model.flow_package.composition_routing")
-	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "lowered parent connect supplies singular event.target")
-	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "event.target_set route facts")
-	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "when no lowered connect route applies")
-	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "broadcast:true is the explicit no-target opt-out")
+	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "canonical input-source resolver")
+	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "typed same-flow consumer")
+	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "sink:harness")
+	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "production admission rejects")
+	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "emit.target and emit.broadcast are rejected on presence")
 }
 
 func TestPlatformSpecCompositionRoutingRejectsStaleParentRouteAuthorityPhrases(t *testing.T) {

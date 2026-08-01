@@ -6,4 +6,4 @@ pins:
   inputs:
     events: [task.assigned]
   outputs:
-    events: [task.done]
+    events: []

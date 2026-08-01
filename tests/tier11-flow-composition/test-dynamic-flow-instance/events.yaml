@@ -1,12 +1,9 @@
 spawn.requested:
   worker_id: string
   task_label: string
-spawn.confirmed:
-  worker_id: string
 assign.requested:
   worker_id: string
   task_label: string
 worker/work.assign:
-  task_label: string
-worker/work.done:
+  worker_id: string
   task_label: string

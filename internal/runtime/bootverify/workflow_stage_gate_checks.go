@@ -98,8 +98,8 @@ func validateStageGateEmit(c *checkerContext, plan runtimecontracts.WorkflowGate
 	if outcome.Emit.Empty() {
 		return nil
 	}
-	if strings.TrimSpace(outcome.Emit.From) != "" || outcome.Emit.HasTarget() || outcome.Emit.Broadcast {
-		return []Finding{stageGateFinding(location, fmt.Sprintf("outcome %s uses emit.from, emit.target, or emit.broadcast; stage gates support only one frozen event emitted to the current entity", verdict))}
+	if strings.TrimSpace(outcome.Emit.From) != "" {
+		return []Finding{stageGateFinding(location, fmt.Sprintf("outcome %s uses emit.from; stage gates support only one frozen event emitted to the current entity", verdict))}
 	}
 	eventType := strings.TrimSpace(outcome.Emit.EventType())
 	entry, _, ok := c.source.ResolveFlowEventCatalogEntry(plan.FlowID, eventType)

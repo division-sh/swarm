@@ -9,4 +9,7 @@ pins:
       - name: child_done
         event: child.done
   outputs:
-    events: [task.done]
+    events:
+      - name: task.done
+        event: task.done
+        sink: harness

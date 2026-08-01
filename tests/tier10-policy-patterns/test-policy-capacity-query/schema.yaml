@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [slot.requested]
   outputs:
-    events: [slot.granted]
+    events:
+      - name: slot.granted
+        event: slot.granted
+        sink: harness

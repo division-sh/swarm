@@ -13,7 +13,6 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
-	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -544,26 +543,10 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 		ActionRegistry:      pipelineEngineActionRegistry{registry: pc.ActionRegistry()},
 		ActionRunner:        pipelineEngineActionRunner{coordinator: pc},
 		PayloadShaper:       pipelineEnginePayloadShaper{coordinator: pc},
-		TargetDescriptors:   pipelineEngineTargetDescriptorLoader(pc),
 		TransitionValidator: pipelineEngineTransitionValidator{coordinator: pc},
 		EmitNow:             pc.testEngineEmitNow,
 		MaxChainDepth:       workflowMaxChainDepthPolicy(source),
 	}
-}
-
-type PinRoutingDescriptorSource interface {
-	PinRoutingDescriptors(context.Context) ([]runtimepinrouting.Descriptor, error)
-}
-
-func pipelineEngineTargetDescriptorLoader(pc *PipelineCoordinator) runtimeengine.TargetDescriptorLoader {
-	if pc == nil || pc.bus == nil {
-		return nil
-	}
-	source := pc.pinRoutingDescriptors
-	if source == nil {
-		return nil
-	}
-	return source.PinRoutingDescriptors
 }
 
 func workflowMetadataValue(metadata map[string]any, target string) (any, bool) {

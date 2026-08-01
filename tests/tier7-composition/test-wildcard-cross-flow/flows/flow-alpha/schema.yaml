@@ -6,4 +6,7 @@ pins:
   inputs:
     events: [trigger.alpha]
   outputs:
-    events: [job.alpha_done]
+    events:
+      - name: job.alpha_done
+        event: job.alpha_done
+        sink: harness

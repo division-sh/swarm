@@ -6,4 +6,4 @@ pins:
   inputs:
     events: [chain.start]
   outputs:
-    events: [chain.e7]
+    events: []

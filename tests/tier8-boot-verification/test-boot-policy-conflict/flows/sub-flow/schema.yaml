@@ -6,4 +6,4 @@ pins:
   inputs:
     events: [sub.requested]
   outputs:
-    events: [sub.completed]
+    events: []

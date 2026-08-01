@@ -17,4 +17,3 @@ collector:
       advances_to: done
       emit:
         event: pipeline.complete
-        broadcast: true

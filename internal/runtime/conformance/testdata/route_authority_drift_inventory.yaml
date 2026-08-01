@@ -65,7 +65,6 @@ search_dimensions:
       - internal/runtime/core/pinrouting/connect_route_plan.go
       - internal/runtime/core/pinrouting/connect_route_plan_test.go
       - internal/runtime/core/pinrouting/pinrouting.go
-      - internal/runtime/core/pinrouting/pinrouting_test.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/bus/routing_derivation_test.go
@@ -153,8 +152,6 @@ search_dimensions:
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/delivery_planner.go
       - internal/runtime/bus/eventbus.go
-      - internal/runtime/engine/interfaces.go
-      - internal/runtime/pipeline/engine_adapter.go
     canonical_layer: descriptor_evidence_non_authority
     classified_paths_required: true
   - id: event_delivery_plan_compatibility
@@ -420,7 +417,6 @@ seam_families:
       - internal/runtime/core/pinrouting/connect_route_plan.go
       - internal/runtime/core/pinrouting/connect_route_plan_test.go
       - internal/runtime/core/pinrouting/pinrouting.go
-      - internal/runtime/core/pinrouting/pinrouting_test.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
@@ -818,12 +814,10 @@ seam_families:
       - internal/runtime/bus/eventbus_publish_test.go
       - internal/runtime/bus/eventbus_routing.go
       - internal/runtime/engine/executor.go
-      - internal/runtime/engine/interfaces.go
       - internal/runtime/artifact_action_result_delivery_test.go
       - internal/runtime/channel_runtime_supported_surface_test.go
       - internal/runtime/final_flow_instance_authoring_runtime_test.go
       - internal/runtime/node_delivery_startup_recovery_test.go
-      - internal/runtime/pipeline/engine_adapter.go
       - internal/runtime/pipeline/coordinator.go
       - internal/runtime/runforkexecution/execution.go
       - internal/runtime/runtime.go

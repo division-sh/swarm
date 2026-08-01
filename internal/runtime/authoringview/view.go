@@ -263,6 +263,7 @@ type OutputPinView struct {
 	Name          string   `json:"name"`
 	Event         string   `json:"event"`
 	ResolvedEvent string   `json:"resolved_event"`
+	Sink          string   `json:"sink,omitempty"`
 	Key           string   `json:"key,omitempty"`
 	Carries       []string `json:"carries,omitempty"`
 }
@@ -1052,6 +1053,7 @@ func outputPinViews(source semanticview.Source, flowID string, pins []runtimecon
 			Name:          strings.TrimSpace(pin.PinName()),
 			Event:         strings.TrimSpace(pin.EventType()),
 			ResolvedEvent: strings.TrimSpace(source.ResolveFlowEventReference(flowID, pin.EventType())),
+			Sink:          pin.Sink.String(),
 			Key:           strings.TrimSpace(pin.Key),
 			Carries:       normalizedStrings(pin.Carries),
 		})

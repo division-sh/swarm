@@ -46,6 +46,25 @@ func TestAuthoredEventEndpointCensusEnumeratesExecutableFactsAndAssertions(t *te
 	}
 }
 
+func TestAuthoredEventEndpointCensusReportsHarnessSinkWithoutConsumer(t *testing.T) {
+	bundle := endpointCensusBundle(nil)
+	schema := bundle.FlowSchemas["worker"]
+	schema.Pins.Outputs.EventPins = []runtimecontracts.FlowOutputEventPin{{
+		Name: "work_completed", Event: "work.completed", Sink: runtimecontracts.FlowOutputSinkHarness,
+	}}
+	bundle.FlowSchemas["worker"] = schema
+	bundle.FlowTree.ByID["worker"].Schema = schema
+
+	census := BuildAuthoredEventEndpointCensus(Wrap(bundle))
+	outputs := census.OutputPins()
+	if len(outputs) != 1 || outputs[0].Sink != "harness" {
+		t.Fatalf("output endpoints = %#v, want harness sink readback", outputs)
+	}
+	if got := census.MatchingConsumers("worker", "work.completed"); len(got) != 0 {
+		t.Fatalf("matching consumers = %#v, want harness to create none", got)
+	}
+}
+
 func TestAuthoredEventEndpointCensusIncludesCompiledHandlersOutsideEffectiveSubscriptions(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
@@ -506,6 +525,10 @@ func TestLegacyQualifiedSubscriptionsExcludeConnectedInputDelivery(t *testing.T)
 }
 
 func endpointCensusFixture(inputPins []runtimecontracts.FlowInputEventPin) Source {
+	return Wrap(endpointCensusBundle(inputPins))
+}
+
+func endpointCensusBundle(inputPins []runtimecontracts.FlowInputEventPin) *runtimecontracts.WorkflowContractBundle {
 	node := runtimecontracts.SystemNodeContract{
 		ID:               "worker-node",
 		ProducesDeclared: true,
@@ -532,14 +555,13 @@ func endpointCensusFixture(inputPins []runtimecontracts.FlowInputEventPin) Sourc
 		Path:  "worker",
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{worker}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
+	return &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{"worker": &root.Children[0]},
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"worker": worker.Schema},
 	}
-	return Wrap(bundle)
 }
 
 func endpointCount(endpoints []AuthoredEventEndpoint, kind EventEndpointKind, flowID, eventType string) int {

@@ -5,4 +5,7 @@ pins:
   inputs:
     events: [flow.spawn_with_config]
   outputs:
-    events: [flow.spawned]
+    events:
+      - name: flow.spawned
+        event: flow.spawned
+        sink: harness

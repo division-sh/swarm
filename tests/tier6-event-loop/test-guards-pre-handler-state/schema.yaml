@@ -6,4 +6,4 @@ pins:
   inputs:
     events: [process.requested]
   outputs:
-    events: [process.done]
+    events: []

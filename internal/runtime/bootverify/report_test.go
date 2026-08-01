@@ -2107,7 +2107,7 @@ func TestRun_MapsEmptyEventPayloadSchemaConditionRefsToNamedError(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			handler := tc.handler
 			handler.AdvancesTo = "done"
-			handler.Emit = runtimecontracts.EmitSpec{Event: "task.completed", Broadcast: true}
+			handler.Emit = runtimecontracts.EmitSpec{Event: "task.completed"}
 			bundle := &runtimecontracts.WorkflowContractBundle{
 				Events: map[string]runtimecontracts.EventCatalogEntry{
 					"task.requested": {},
@@ -2170,7 +2170,7 @@ func TestRun_DoesNotMapMissingEventSchemaToConditionPayloadAlignment(t *testing.
 					"task.requested": {
 						Guard:      &runtimecontracts.GuardSpec{Check: `payload.missing == "x"`},
 						AdvancesTo: "done",
-						Emit:       runtimecontracts.EmitSpec{Event: "task.completed", Broadcast: true},
+						Emit:       runtimecontracts.EmitSpec{Event: "task.completed"},
 					},
 				},
 			},

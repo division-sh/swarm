@@ -27,11 +27,34 @@ func TestHarnessInputCreatesEndpointWithoutRouteOrTopologyEdge(t *testing.T) {
 	if len(harnessTopology.InputPins) != 1 || harnessTopology.InputPins[0].FlowID != "worker" {
 		t.Fatalf("input endpoints = %#v, want worker harness endpoint", harnessTopology.InputPins)
 	}
+	if len(harnessTopology.OutputPins) != 1 || harnessTopology.OutputPins[0].Sink != "harness" {
+		t.Fatalf("output endpoints = %#v, want worker harness sink", harnessTopology.OutputPins)
+	}
+	outputID := harnessTopology.OutputPins[0].ID
+	for _, edge := range harnessTopology.Edges {
+		if edge.Producer.ID == outputID || edge.Consumer.ID == outputID {
+			t.Fatalf("harness output acquired delivery edge %#v", edge)
+		}
+	}
 	if !sameTopologyEdgeIdentities(harnessTopology.Edges, plainTopology.Edges) ||
-		!reflect.DeepEqual(harnessTopology.BoundaryExposures, plainTopology.BoundaryExposures) ||
+		!sameBoundaryExposureIdentities(harnessTopology.BoundaryExposures, plainTopology.BoundaryExposures) ||
 		!reflect.DeepEqual(harnessTopology.RootInputSources, plainTopology.RootInputSources) {
 		t.Fatalf("harness declaration changed delivery topology\nharness=%#v\nplain=%#v", harnessTopology, plainTopology)
 	}
+}
+
+func sameBoundaryExposureIdentities(left, right []BoundaryExposure) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for idx := range left {
+		if left[idx].ID != right[idx].ID || left[idx].Event.Canonical != right[idx].Event.Canonical ||
+			left[idx].Producer.ID != right[idx].Producer.ID || left[idx].Output.ID != right[idx].Output.ID ||
+			left[idx].Output.Sink != right[idx].Output.Sink {
+			return false
+		}
+	}
+	return true
 }
 
 func sameTopologyEdgeIdentities(left, right []Edge) bool {

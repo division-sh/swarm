@@ -11,4 +11,3 @@ test-node:
       sets_gate: approval_gate
       emit:
         event: task.accepted
-        broadcast: true

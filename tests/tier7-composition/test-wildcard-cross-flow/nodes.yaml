@@ -2,10 +2,7 @@ audit-node:
   id: audit-node
   execution_type: system_node
   subscribes_to: ["*/job.*"]
-  produces: [audit.logged]
+  produces: []
   event_handlers:
     "*/job.*":
       advances_to: done
-      emit:
-        event: audit.logged
-        broadcast: true
