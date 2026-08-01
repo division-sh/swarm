@@ -204,6 +204,10 @@ func (failingInboundEventStore) beginPublish(context.Context, events.AdmittedEve
 	return runtimebus.EventAppendOutcomeUnknown, errors.New("append failed")
 }
 
+func (failingInboundEventStore) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
+	return events.AdmittedEvent{}, false, nil
+}
+
 func (s failingInboundEventStore) BeginPreparedPublish(ctx context.Context, prepared runtimebus.PreparedPublishEvent) (runtimebus.EventAppendOutcome, error) {
 	return s.beginPublish(ctx, prepared.AdmittedEvent())
 }
@@ -255,6 +259,10 @@ func (s *capturingInboundEventStore) finalizePublish(_ context.Context, req runt
 	}
 	s.active = s.active[:len(s.active)-1]
 	return nil
+}
+
+func (s *capturingInboundEventStore) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
+	return events.AdmittedEvent{}, false, nil
 }
 
 func (s *capturingInboundEventStore) BeginPreparedPublish(ctx context.Context, prepared runtimebus.PreparedPublishEvent) (runtimebus.EventAppendOutcome, error) {

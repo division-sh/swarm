@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -27,10 +28,14 @@ type postgresScalarTemplateInstanceStore struct {
 	*store.PostgresStore
 	descriptors     []runtimebus.ActiveFlowInstanceDescriptor
 	descriptorCalls int
+	descriptorErr   error
 }
 
 func (s *postgresScalarTemplateInstanceStore) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
 	s.descriptorCalls++
+	if s.descriptorErr != nil {
+		return nil, s.descriptorErr
+	}
 	return slices.Clone(s.descriptors), nil
 }
 
@@ -38,10 +43,14 @@ type sqliteScalarTemplateInstanceStore struct {
 	*store.SQLiteRuntimeStore
 	descriptors     []runtimebus.ActiveFlowInstanceDescriptor
 	descriptorCalls int
+	descriptorErr   error
 }
 
 func (s *sqliteScalarTemplateInstanceStore) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
 	s.descriptorCalls++
+	if s.descriptorErr != nil {
+		return nil, s.descriptorErr
+	}
 	return slices.Clone(s.descriptors), nil
 }
 
@@ -51,12 +60,17 @@ type scalarTemplateInstanceParityStore interface {
 	runtimebus.ActiveFlowInstanceDescriptorLister
 	runtimebus.EventDeliveryRouteSetReader
 	setScalarTemplateInstanceDescriptors([]runtimebus.ActiveFlowInstanceDescriptor)
+	setScalarTemplateInstanceDescriptorError(error)
 	resetScalarTemplateInstanceDescriptorCalls()
 	scalarTemplateInstanceDescriptorCalls() int
 }
 
 func (s *postgresScalarTemplateInstanceStore) setScalarTemplateInstanceDescriptors(descriptors []runtimebus.ActiveFlowInstanceDescriptor) {
 	s.descriptors = slices.Clone(descriptors)
+}
+
+func (s *postgresScalarTemplateInstanceStore) setScalarTemplateInstanceDescriptorError(err error) {
+	s.descriptorErr = err
 }
 
 func (s *postgresScalarTemplateInstanceStore) resetScalarTemplateInstanceDescriptorCalls() {
@@ -69,6 +83,10 @@ func (s *postgresScalarTemplateInstanceStore) scalarTemplateInstanceDescriptorCa
 
 func (s *sqliteScalarTemplateInstanceStore) setScalarTemplateInstanceDescriptors(descriptors []runtimebus.ActiveFlowInstanceDescriptor) {
 	s.descriptors = slices.Clone(descriptors)
+}
+
+func (s *sqliteScalarTemplateInstanceStore) setScalarTemplateInstanceDescriptorError(err error) {
+	s.descriptorErr = err
 }
 
 func (s *sqliteScalarTemplateInstanceStore) resetScalarTemplateInstanceDescriptorCalls() {
@@ -115,6 +133,8 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 			}
 
 			eventID := uuid.NewString()
+			eventTime := time.Now().UTC()
+			producerEntityID := uuid.NewString()
 			evt := eventtest.ExistingRunRootIngress(
 				eventID,
 				events.EventType("producer/account.ready"),
@@ -123,8 +143,8 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 				json.RawMessage(`{"account_id":"acct-1"}`),
 				0,
 				runID,
-				events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: uuid.NewString()}),
-				time.Now().UTC(),
+				events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: producerEntityID}),
+				eventTime,
 			)
 			plan, err := eventBus.CheckPublishRecipientPlan(ctx, evt)
 			if err != nil {
@@ -144,6 +164,33 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 			if len(persistedRoutes) != 1 || persistedRoutes[0].SubscriberID != "account-node" || persistedRoutes[0].Target.Normalized() != wantTarget.Normalized() {
 				t.Fatalf("persisted routes = %#v, want account-node at %#v", persistedRoutes, wantTarget)
 			}
+
+			selected.setScalarTemplateInstanceDescriptorError(errors.New("descriptor lookup must not run for a durable duplicate"))
+			selected.resetScalarTemplateInstanceDescriptorCalls()
+			if err := eventBus.Publish(ctx, evt); err != nil {
+				t.Fatalf("Publish exact duplicate after descriptor failure: %v", err)
+			}
+			if calls := selected.scalarTemplateInstanceDescriptorCalls(); calls != 0 {
+				t.Fatalf("duplicate descriptor calls = %d, want durable identity short-circuit", calls)
+			}
+			conflicting := eventtest.ExistingRunRootIngress(
+				eventID,
+				events.EventType("producer/account.ready"),
+				"producer",
+				"",
+				json.RawMessage(`{"account_id":"acct-2"}`),
+				0,
+				runID,
+				events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: producerEntityID}),
+				eventTime,
+			)
+			if err := eventBus.Publish(ctx, conflicting); !errors.Is(err, store.ErrEventIdentityConflict) {
+				t.Fatalf("Publish conflicting duplicate error = %v, want event identity conflict", err)
+			}
+			if calls := selected.scalarTemplateInstanceDescriptorCalls(); calls != 0 {
+				t.Fatalf("conflicting duplicate descriptor calls = %d, want durable identity short-circuit", calls)
+			}
+			selected.setScalarTemplateInstanceDescriptorError(nil)
 
 			replayed := subscribeInternalDeliveriesForTest(t, eventBus, "account-node")
 			selected.setScalarTemplateInstanceDescriptors([]runtimebus.ActiveFlowInstanceDescriptor{{

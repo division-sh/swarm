@@ -53,6 +53,24 @@ func loadSQLiteEventIdentity(ctx context.Context, q rowQueryer, eventID string) 
 	return eventrecordsqlite.Load(ctx, q, eventID)
 }
 
+func (s *PostgresStore) loadPreparedPublishEventTx(ctx context.Context, tx *sql.Tx, eventID string) (events.AdmittedEvent, bool, error) {
+	row, found, err := loadPostgresEventIdentity(ctx, tx, eventID)
+	if err != nil || !found {
+		return events.AdmittedEvent{}, found, err
+	}
+	admitted, err := decodeEventRecord(row)
+	return admitted, err == nil, err
+}
+
+func (s *SQLiteRuntimeStore) loadPreparedPublishEventTx(ctx context.Context, tx *sql.Tx, eventID string) (events.AdmittedEvent, bool, error) {
+	row, found, err := loadSQLiteEventIdentity(ctx, tx, eventID)
+	if err != nil || !found {
+		return events.AdmittedEvent{}, found, err
+	}
+	admitted, err := decodeEventRecord(row)
+	return admitted, err == nil, err
+}
+
 func loadPostgresEventIdentities(ctx context.Context, q eventReadQueryer, eventIDs []string) ([]persistedEventIdentity, error) {
 	return eventrecordpostgres.LoadMany(ctx, q, eventIDs)
 }

@@ -55,6 +55,7 @@ type connectRoutePlanDescriptorStore struct {
 	*targetRouteMemoryStore
 	flowInstances               []ActiveFlowInstanceDescriptor
 	flowInstanceDescriptorCalls int
+	flowInstanceDescriptorErr   error
 }
 
 type connectRoutePlanFailingAgentDescriptorStore struct {
@@ -508,6 +509,9 @@ func runConnectRoutePlanCommitScope(ctx context.Context, transaction CommitPubli
 
 func (s *connectRoutePlanDescriptorStore) ListActiveFlowInstanceDescriptors(context.Context) ([]ActiveFlowInstanceDescriptor, error) {
 	s.flowInstanceDescriptorCalls++
+	if s.flowInstanceDescriptorErr != nil {
+		return nil, s.flowInstanceDescriptorErr
+	}
 	return exactAuthorActivityFlowInstanceDescriptors(s.flowInstances, "1.0.0"), nil
 }
 
@@ -1157,6 +1161,60 @@ func TestEngineOutbox_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 	}
 	if got := store.scopes[eventID]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
+	}
+}
+
+func TestEngineOutbox_ExactDuplicateReusesDurableConnectRouteBeforeDescriptorLookup(t *testing.T) {
+	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, false)
+	store := &connectRoutePlanDescriptorStore{
+		targetRouteMemoryStore: newTargetRouteMemoryStore(),
+		flowInstances: []ActiveFlowInstanceDescriptor{{
+			InstanceID:    "one",
+			EntityID:      eventtest.UUID("ent-1"),
+			FlowInstance:  "consumer/one",
+			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
+		}},
+	}
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", "one")}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	}
+	eventID := uuid.NewString()
+	evt := eventtest.RunCreatingRootIngress(eventID,
+		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	write := func() error {
+		return runConnectRoutePlanCommitScope(context.Background(), store, func(commitCtx context.Context) error {
+			return eb.EngineOutbox().WriteOutbox(commitCtx, []runtimeengine.EmitIntent{{Event: evt}})
+		})
+	}
+	if err := write(); err != nil {
+		t.Fatalf("initial WriteOutbox: %v", err)
+	}
+	wantTarget := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: eventtest.UUID("ent-1")}
+	if got := store.events[eventID].TargetRoute().Normalized(); got != wantTarget.Normalized() {
+		t.Fatalf("initial persisted target = %#v, want %#v", got, wantTarget)
+	}
+	if err := eb.clearPendingOutboxOperation(context.Background(), eventID); err != nil {
+		t.Fatalf("clear initial pending outbox operation: %v", err)
+	}
+
+	store.flowInstances = nil
+	store.flowInstanceDescriptorErr = errors.New("descriptor lookup must not run for a durable duplicate")
+	store.flowInstanceDescriptorCalls = 0
+	if err := write(); err != nil {
+		t.Fatalf("duplicate WriteOutbox after descriptor failure: %v", err)
+	}
+	if got := store.flowInstanceDescriptorCalls; got != 0 {
+		t.Fatalf("duplicate descriptor calls = %d, want durable identity short-circuit", got)
+	}
+	if got := store.events[eventID].TargetRoute().Normalized(); got != wantTarget.Normalized() {
+		t.Fatalf("duplicate persisted target = %#v, want unchanged %#v", got, wantTarget)
+	}
+	if err := eb.clearPendingOutboxOperation(context.Background(), eventID); err != nil {
+		t.Fatalf("clear duplicate pending outbox operation: %v", err)
 	}
 }
 

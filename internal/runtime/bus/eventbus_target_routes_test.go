@@ -158,6 +158,21 @@ func (t *targetRouteMemoryPublishTransaction) BeginPreparedPublish(ctx context.C
 	return t.store.BeginPreparedPublish(ctx, prepared)
 }
 
+func (t *targetRouteMemoryPublishTransaction) LoadPreparedPublishEvent(_ context.Context, eventID string) (events.AdmittedEvent, bool, error) {
+	return t.store.LoadPreparedPublishEvent(context.Background(), eventID)
+}
+
+func (s *targetRouteMemoryStore) LoadPreparedPublishEvent(_ context.Context, eventID string) (events.AdmittedEvent, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	evt, found := s.events[eventID]
+	if !found {
+		return events.AdmittedEvent{}, false, nil
+	}
+	admitted, err := events.AdmitForPersistence(evt, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	return admitted, err == nil, err
+}
+
 func (s *targetRouteMemoryStore) BeginPreparedPublish(ctx context.Context, prepared PreparedPublishEvent) (EventAppendOutcome, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2261,6 +2276,10 @@ type rejectingDeliveryRouteStore struct{}
 
 func (s rejectingDeliveryRouteStore) CommitPublish(ctx context.Context, plan CommitPublishPlan) (PreparedPublish, error) {
 	return commitPublishInMemory(ctx, plan, s)
+}
+
+func (rejectingDeliveryRouteStore) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
+	return events.AdmittedEvent{}, false, nil
 }
 
 func (rejectingDeliveryRouteStore) BeginPreparedPublish(context.Context, PreparedPublishEvent) (EventAppendOutcome, error) {
