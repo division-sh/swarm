@@ -64,6 +64,7 @@ type SelectedContractForkLocalRuntimeContainer struct {
 type selectedContractForkLocalRuntimeContainer struct {
 	proof     SelectedContractForkLocalRuntimeContainer
 	req       publishSelectedContractForkEventsRequest
+	ports     *selectedContractExecutionPorts
 	authority runtimeeffects.Authority
 	admission managedexecution.Admission
 }
@@ -72,8 +73,9 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	if err := ctx.Err(); err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
-	if req.Store == nil {
-		return selectedContractForkLocalRuntimeContainer{}, fmt.Errorf("%s requires postgres store", runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner)
+	ports, err := req.Owner.require()
+	if err != nil {
+		return selectedContractForkLocalRuntimeContainer{}, fmt.Errorf("%s: %w", runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, err)
 	}
 	sourceRunID, err := requireSelectedContractRuntimeContainerUUID("source run_id", req.SourceRunID)
 	if err != nil {
@@ -183,7 +185,7 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 			return selectedContractForkLocalRuntimeContainer{}, fmt.Errorf("selected-contract agent %s execution mode %s conflicts with selected backend mode %s", record.Config.ID, record.Config.ExecutionMode, mode)
 		}
 	}
-	issued, err := req.Store.IssueRunForkSelectedContractRuntimeExecution(ctx, runfork.SelectedContractRuntimeExecutionIssueRequest{
+	issued, err := ports.runtimeExecution.IssueRunForkSelectedContractRuntimeExecution(ctx, runfork.SelectedContractRuntimeExecutionIssueRequest{
 		Admission: req.Admission, ContainerPlanFingerprint: containerFingerprint,
 		ActorCensusFingerprint: actorFingerprint, EffectiveConfigFingerprint: configFingerprint,
 	})
@@ -191,7 +193,7 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
 	authorityOwner := executionOwner + ":" + uuid.NewString()
-	authority, err := req.Store.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, authorityOwner, 2*time.Minute)
+	authority, err := ports.runtimeExecution.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, authorityOwner, 2*time.Minute)
 	if err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
@@ -210,7 +212,7 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	if err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
-	return selectedContractForkLocalRuntimeContainer{proof: proof, req: req, authority: authority, admission: admission}, nil
+	return selectedContractForkLocalRuntimeContainer{proof: proof, req: req, ports: ports, authority: authority, admission: admission}, nil
 }
 
 func (c selectedContractForkLocalRuntimeContainer) Proof() SelectedContractForkLocalRuntimeContainer {
@@ -234,10 +236,10 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	defer func() { _ = forkOwner.RetireAndWait(context.Background()) }()
 	ctx = worklifetime.WithOccurrence(ctx, forkOwner)
 	req.AgentRuntime.Options.AgentManagerOptions.WorkOwner = forkOwner
-	if err := req.Store.EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, req.SourceRunID, req.ForkEventID); err != nil {
+	if err := c.ports.replay.EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, req.SourceRunID, req.ForkEventID); err != nil {
 		return nil, err
 	}
-	sourceEvents, err := req.Store.LoadRunForkSelectedContractSourceEvents(ctx, req.SourceRunID, req.ForkRunID, req.SourceEvents)
+	sourceEvents, err := c.ports.replay.LoadRunForkSelectedContractSourceEvents(ctx, req.SourceRunID, req.ForkRunID, req.SourceEvents)
 	if err != nil {
 		return nil, err
 	}
@@ -255,19 +257,14 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	if err != nil {
 		return nil, fmt.Errorf("create selected-contract delivery authority: %w", err)
 	}
-	bus, err := runtimebus.NewEventBusWithOptions(req.Store, runtimebus.EventBusOptions{
-		WorkOwner: forkOwner,
-		Durable: runtimebus.DurableDependencies{
-			ReplyContext: req.Store, RunLifecycle: req.Store, DeliveryLifecycle: req.Store,
-			FlowRoutes: req.Store, FlowRouteRecords: req.Store, FlowRouteSets: req.Store, FlowRouteTopology: req.Store, FlowRouteRollback: req.Store,
-			ActiveAgents: req.Store, ActiveFlows: req.Store, DeliveryTargets: req.Store, DeliveryRouteSets: req.Store,
-			TargetFailureRecorder: req.Store, RunOrigins: req.Store,
-		},
-		PipelineObligations:         req.Store.PipelineObligations(),
+	bus, err := runtimebus.NewEventBusWithOptions(c.ports.events, runtimebus.EventBusOptions{
+		WorkOwner:                   forkOwner,
+		Durable:                     c.ports.busDurable,
+		PipelineObligations:         c.ports.pipelineObligations,
 		BundleSourceFact:            req.LoadedSource.BundleSourceFact,
 		DeliveryAuthority:           deliveryAuthority,
 		ContractBundle:              req.LoadedSource.Source,
-		Logger:                      selectedContractRuntimeContainerLogger(req.Store),
+		Logger:                      selectedContractRuntimeContainerLogger(c.ports.logs),
 		RecipientPlanAdmissionGuard: guard.AuthorizeEvent,
 		RecipientPlanMaterializer:   guard.MaterializeNodeDeliveryRoutes,
 		RecipientPlanGuard:          guard.Authorize,
@@ -281,7 +278,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	if err != nil {
 		return nil, fmt.Errorf("create selected-contract fork-local runtime container bus: %w", err)
 	}
-	pipeline := newSelectedContractPipeline(bus, req.Store, req.WorkflowPersistence, req.LoadedSource, req.AgentRuntime.Options, func(ctx context.Context, activation runtimepipeline.FlowInstanceActivationRequest) error {
+	pipeline := newSelectedContractPipeline(bus, c.ports, req.LoadedSource, req.AgentRuntime.Options, func(ctx context.Context, activation runtimepipeline.FlowInstanceActivationRequest) error {
 		if lifecycleManager == nil {
 			return fmt.Errorf("selected-contract fork-local lifecycle manager is not initialized")
 		}
@@ -291,7 +288,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 
 	runCtx := selectedContractRuntimeContainerLineageContext(ctx, c.proof)
 	runCtx = runtimeeffects.WithAuthority(runCtx, c.authority)
-	runCtx = runtimeeffects.WithController(runCtx, runtimeeffects.NewController(req.Store))
+	runCtx = runtimeeffects.WithController(runCtx, runtimeeffects.NewController(c.ports.effects))
 	runCtx = managedexecution.WithAdmission(runCtx, c.admission)
 	runCtx, cancelRuntime := context.WithCancel(runCtx)
 	defer cancelRuntime()
@@ -315,7 +312,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 			case <-heartbeatLease.Context().Done():
 				return
 			case <-ticker.C:
-				if err := req.Store.HeartbeatRunForkSelectedContractRuntimeExecution(context.WithoutCancel(heartbeatLease.Context()), c.authority, 2*time.Minute); err != nil {
+				if err := c.ports.runtimeExecution.HeartbeatRunForkSelectedContractRuntimeExecution(context.WithoutCancel(heartbeatLease.Context()), c.authority, 2*time.Minute); err != nil {
 					heartbeatErr <- err
 					cancelRuntime()
 					return
@@ -367,7 +364,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 			SelectionAuthority: c.proof.ExecutionOwner,
 			CreatedAt:          prepared.Event.CreatedAt(),
 		}
-		outcome, err := req.Store.CommitSelectedForkEvent(eventCtx, runtimebus.CommitSelectedForkEventRequest{
+		outcome, err := c.ports.replay.CommitSelectedForkEvent(eventCtx, runtimebus.CommitSelectedForkEventRequest{
 			Commit: prepared.CommitRequest(), Lineage: lineage,
 		})
 		if err != nil {
@@ -417,11 +414,11 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 }
 
 func (c selectedContractForkLocalRuntimeContainer) Quiesce(ctx context.Context) error {
-	return c.req.Store.QuiesceRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority)
+	return c.ports.runtimeExecution.QuiesceRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority)
 }
 
 func (c selectedContractForkLocalRuntimeContainer) Close(ctx context.Context) error {
-	return c.req.Store.CloseRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority.ID)
+	return c.ports.runtimeExecution.CloseRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority.ID)
 }
 
 func (c selectedContractForkLocalRuntimeContainer) Fail(ctx context.Context, cause error) error {
@@ -430,7 +427,7 @@ func (c selectedContractForkLocalRuntimeContainer) Fail(ctx context.Context, cau
 	if err != nil {
 		return err
 	}
-	if err := c.req.Store.FailRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority, raw); err != nil {
+	if err := c.ports.runtimeExecution.FailRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority, raw); err != nil {
 		return err
 	}
 	return c.Close(ctx)

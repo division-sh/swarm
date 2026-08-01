@@ -702,8 +702,28 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime execution mode validation failed: %w", err)
 	}
-	if deps.SQLDB != nil && deps.PipelineObligations == nil {
-		return validatedRuntimeDeps{}, fmt.Errorf("selected runtime store pipeline obligation owner is required")
+	if deps.WorkflowPersistence.Configured() && !deps.WorkflowPersistence.Valid() {
+		return validatedRuntimeDeps{}, fmt.Errorf("selected runtime workflow persistence mutation owner is required")
+	}
+	if deps.WorkflowPersistence.Valid() {
+		requiredWorkflowRoles := []struct {
+			name  string
+			value any
+		}{
+			{"delivery lifecycle", deps.DeliveryStore},
+			{"pipeline obligation", deps.PipelineObligations},
+			{"decision cards", deps.DecisionCards},
+			{"proposed effects", deps.ProposedEffects},
+			{"human tasks", deps.DecisionCardHumanTasks},
+			{"decision-card draft expiry", deps.DecisionCardDraftExpiry},
+			{"human-task expiry", deps.HumanTaskExpiry},
+			{"run lifecycle", deps.EventBusDurable.RunLifecycle},
+		}
+		for _, role := range requiredWorkflowRoles {
+			if role.value == nil {
+				return validatedRuntimeDeps{}, fmt.Errorf("selected runtime workflow %s owner is required", role.name)
+			}
+		}
 	}
 	if deps.InboundStore != nil && opts.ProviderTriggerCatalog == nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("provider trigger catalog snapshot is required when inbound store is configured")
@@ -1104,6 +1124,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			TestLifecycleProbe:               opts.TestLifecycleProbe,
 			WorkOwner:                        workOccurrence,
 		})
+
 		if rt.Pipeline == nil {
 			return nil, fmt.Errorf("runtime workflow persistence construction is required")
 		}

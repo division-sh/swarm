@@ -113,7 +113,7 @@ func newSQLiteDynamicActivationCoordinator(t *testing.T, db *sql.DB, workflowSto
 	bundle := sqliteDynamicActivationBundle()
 	deliveryStore := newPipelineTestDeliveryOwnerForDB(t, db)
 	bus.configurePipelineTestDeliveryOwner(deliveryStore)
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Persistence:         workflowPersistenceForTest(workflowStore),
 		DeliveryStore:       deliveryStore,
 		DeliveryRuntime:     bus,

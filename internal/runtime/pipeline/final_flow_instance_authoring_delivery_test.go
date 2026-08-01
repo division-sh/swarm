@@ -100,7 +100,7 @@ func newFinalFlowInstanceAuthoringPipelineCoordinator(t *testing.T, db *sql.DB, 
 	deliveryStore := newPipelineTestDeliveryOwnerForDB(t, db)
 	bus := &recordingPipelineBus{}
 	bus.configurePipelineTestDeliveryOwner(deliveryStore)
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{
 			bundle:         bundle,
 			workflow:       workflow,

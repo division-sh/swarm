@@ -224,7 +224,7 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	builder, err := buildSelectedContractAgentRuntimeFactory(publishSelectedContractForkEventsRequest{
-		Store:        selected,
+		Owner:        selectedContractExecutionOwnerForTest(t, selected),
 		LoadedSource: LoadedSelectedContractSource{},
 		AgentRuntime: selectedContractAgentRuntimePlan{
 			Proof: SelectedContractAgentRuntimeMaterialization{AgentRecipients: []agentidentity.Identity{mockIdentity}},
@@ -310,7 +310,7 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 	probe := &selectedContractSelfReleaseScopeProbe{want: wantScope, seen: make(chan runtimeauthoractivity.Scope, 1)}
 
 	runtime, _, err := startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
-		Store: selected,
+		Owner: selectedContractExecutionOwnerForTest(t, selected),
 		AgentRuntime: selectedContractAgentRuntimePlan{
 			Records: []runtimemanager.PersistedAgent{{Config: runtimeactors.AgentConfig{
 				ID: "fork-agent", Identity: selectedContractTestRootAgentIdentity(t, "fork-agent"),

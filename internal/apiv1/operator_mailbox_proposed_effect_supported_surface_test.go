@@ -193,13 +193,14 @@ func newProposedEffectMailboxHandler(
 	if !ok {
 		t.Fatal("persistence store does not implement decisioncard.Store")
 	}
-	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, completeAPITestDurableWorkflowOptions(t, persistence, bus, runtimepipeline.PipelineCoordinatorOptions{
 		Module: newRunCompletionSystemNodeModule(t, source), Persistence: workflowPersistence,
 		DecisionCards: cards, ProposedEffects: persistence.(decisioncard.ProposedEffectStore),
 		DeliveryStore: deliveryOwner, DeliveryRuntime: bus, PipelineObligations: obligationOwner,
 		GatePublisher: bus, DirectDecisionPublisher: bus,
 		RunLifecycle: runLifecycle, BundleSourceFact: fact,
-	})
+	}))
+
 	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{
 		Identity: runtimebustest.Identity(t, "workflow-runtime", ""),
 	})

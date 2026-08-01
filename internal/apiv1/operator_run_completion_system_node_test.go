@@ -45,7 +45,7 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	module := newRunCompletionSystemNodeModule(t, source)
-	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, completeAPITestDurableWorkflowOptions(t, pg, bus, runtimepipeline.PipelineCoordinatorOptions{
 		Module:              module,
 		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
 		DeliveryStore:       pg,
@@ -53,7 +53,7 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 		PipelineObligations: pg.PipelineObligations(),
 		RunLifecycle:        pg,
 		BundleSourceFact:    runStartTestBundleSourceFact(),
-	})
+	}))
 
 	runID := "11111111-1111-4111-8111-111111111111"
 	started := rpcCall(t, handler, runStartBody(runID, runStartTestBundleHash, "flow.started", `{"topic":"supported-surfaces"}`, "idem-system-node-run"))

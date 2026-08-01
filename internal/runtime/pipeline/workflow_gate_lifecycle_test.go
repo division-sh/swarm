@@ -39,7 +39,7 @@ func newGateLifecyclePipelineCoordinator(bus *recordingPipelineBus, db *sql.DB, 
 	opts.PipelineObligations = unavailablePipelineTestObligationOwner{}
 	opts.GatePublisher = bus
 	opts.DirectDecisionPublisher = bus
-	return NewPipelineCoordinatorWithOptions(bus, db, opts)
+	return newDurablePipelineCoordinatorForTest(bus, db, opts)
 }
 
 func (s *gateLifecycleCardStore) CreateDecisionCard(ctx context.Context, card decisioncard.Card) error {

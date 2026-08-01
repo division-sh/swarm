@@ -19,6 +19,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -42,6 +43,11 @@ type completeEventDispatchStore interface {
 		RunRuntimeMutationContext(context.Context, func(context.Context) error) error
 	}
 	runtimerunlifecycle.OperationOwner
+	decisioncard.Store
+	decisioncard.ProposedEffectStore
+	decisioncard.HumanTaskStore
+	runtimepipeline.DecisionCardDraftExpiry
+	runtimepipeline.HumanTaskExpiry
 	PipelineObligations() runtimepipelineobligation.Store
 }
 
@@ -266,12 +272,21 @@ func newCompleteEventDispatchFixtureWithOrigin(
 			workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected.(*store.SQLiteRuntimeStore))
 		}
 		workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-			Module:              standingDispatchWorkflowModule{},
-			Persistence:         workflowPersistence,
-			RunLifecycle:        selected,
-			DeliveryStore:       selected,
-			PipelineObligations: selected.PipelineObligations(),
+			Module:                  standingDispatchWorkflowModule{},
+			Persistence:             workflowPersistence,
+			RunLifecycle:            selected,
+			DeliveryStore:           selected,
+			PipelineObligations:     selected.PipelineObligations(),
+			DecisionCards:           selected,
+			ProposedEffects:         selected,
+			HumanTasks:              selected,
+			DecisionCardDraftExpiry: selected,
+			HumanTaskExpiry:         selected,
+			GatePublisher:           bus,
+			DirectDecisionPublisher: bus,
+			DeliveryRuntime:         bus,
 		})
+
 		reconciled, err := workflow.ReconcileStandingService(ctx, runtimepipeline.StandingServiceCandidate{
 			ServiceID:  origin.ServiceID(),
 			PackageKey: "standing-recovery-proof",

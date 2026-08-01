@@ -453,7 +453,7 @@ func newActivityBoringFixture(t *testing.T, kind activityBoringStoreKind, server
 		bus := &persistingActivityBoringBus{appendEvent: func(ctx context.Context, evt events.Event) error {
 			return appendActivityBoringEvent(ctx, db, kind, evt)
 		}}
-		pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+		pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 			Module:              staticSemanticWorkflowModule{source: activityBoringSource(serverURL)},
 			Persistence:         workflowPersistenceForTest(newSQLiteWorkflowInstanceStoreForTest(t, db)),
 			PipelineObligations: unavailablePipelineTestObligationOwner{},
@@ -479,7 +479,7 @@ func newActivityBoringCoordinator(t *testing.T, db *sql.DB, kind activityBoringS
 		store = newSQLiteWorkflowInstanceStoreForTest(t, db)
 	}
 	deliveryStore := newPipelineTestDeliveryOwnerForDB(t, db)
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Module:              staticSemanticWorkflowModule{source: activityBoringSource(serverURL)},
 		Persistence:         workflowPersistenceForTest(store),
 		DeliveryStore:       deliveryStore,
@@ -519,7 +519,7 @@ func newActivityBoringFullFlowCoordinator(t *testing.T, db *sql.DB, kind activit
 	}
 	bundle := activityBoringFullFlowBundle(serverURL)
 	deliveryStore := newPipelineTestDeliveryOwnerForDB(t, db)
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{
 			bundle:   bundle,
 			workflow: NewWorkflowDefinition("research", []WorkflowStage{{Name: "pending"}}, nil),

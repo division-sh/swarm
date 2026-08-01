@@ -195,7 +195,7 @@ func newExactOnceCoordinator(t *testing.T, db *sql.DB, store *workflowInstanceSt
 	}
 	bus := &recordingPipelineBus{}
 	deliveryStore := newPipelineTestDeliveryOwner(t, db, store.isSQLite())
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Persistence:         workflowPersistenceForTest(store),
 		DeliveryStore:       deliveryStore,
 		DeliveryRuntime:     bus,

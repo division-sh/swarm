@@ -2,6 +2,7 @@ package runtime_test
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sort"
 	"strings"
@@ -9,15 +10,18 @@ import (
 	"testing"
 	"time"
 
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -36,6 +40,81 @@ type testAuthorActivityCatalogRegistrar interface {
 
 type externalRuntimeTestMutationOwner interface {
 	RunRuntimeMutationContext(context.Context, func(context.Context) error) error
+}
+
+type externalRuntimeTestWorkflowOwner interface {
+	decisioncard.Store
+	decisioncard.ProposedEffectStore
+	decisioncard.HumanTaskStore
+	runtimepipeline.DecisionCardDraftExpiry
+	runtimepipeline.HumanTaskExpiry
+}
+
+func newExternalRuntimeTestPipelineCoordinator(
+	t testing.TB,
+	bus *runtimebus.EventBus,
+	db *sql.DB,
+	selected any,
+	opts runtimepipeline.PipelineCoordinatorOptions,
+) *runtimepipeline.PipelineCoordinator {
+	t.Helper()
+	owner, ok := selected.(externalRuntimeTestWorkflowOwner)
+	if !ok {
+		t.Fatalf("selected workflow test owner %T lacks exact decision and expiry roles", selected)
+	}
+	if opts.DecisionCards == nil {
+		opts.DecisionCards = owner
+	}
+	if opts.ProposedEffects == nil {
+		opts.ProposedEffects = owner
+	}
+	if opts.HumanTasks == nil {
+		opts.HumanTasks = owner
+	}
+	if opts.DecisionCardDraftExpiry == nil {
+		opts.DecisionCardDraftExpiry = owner
+	}
+	if opts.HumanTaskExpiry == nil {
+		opts.HumanTaskExpiry = owner
+	}
+	if opts.GatePublisher == nil {
+		opts.GatePublisher = bus
+	}
+	if opts.DirectDecisionPublisher == nil {
+		opts.DirectDecisionPublisher = bus
+	}
+	if opts.DeliveryRuntime == nil {
+		opts.DeliveryRuntime = bus
+	}
+	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, opts)
+	if coordinator == nil {
+		t.Fatal("construct durable pipeline coordinator with complete workflow owners")
+	}
+	return coordinator
+}
+
+func completeExternalRuntimeTestWorkflowDeps(t testing.TB, selected any, deps runtimepkg.RuntimeDeps) runtimepkg.RuntimeDeps {
+	t.Helper()
+	owner, ok := selected.(externalRuntimeTestWorkflowOwner)
+	if !ok {
+		t.Fatalf("selected workflow test owner %T lacks exact decision and expiry roles", selected)
+	}
+	if deps.DecisionCards == nil {
+		deps.DecisionCards = owner
+	}
+	if deps.ProposedEffects == nil {
+		deps.ProposedEffects = owner
+	}
+	if deps.DecisionCardHumanTasks == nil {
+		deps.DecisionCardHumanTasks = owner
+	}
+	if deps.DecisionCardDraftExpiry == nil {
+		deps.DecisionCardDraftExpiry = owner
+	}
+	if deps.HumanTaskExpiry == nil {
+		deps.HumanTaskExpiry = owner
+	}
+	return deps
 }
 
 type externalRuntimeTestDurableEventStore interface {

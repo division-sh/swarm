@@ -9,13 +9,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -43,6 +46,60 @@ type runtimeTestRejectedMutationOwner struct{}
 
 func (runtimeTestRejectedMutationOwner) RunRuntimeMutationContext(context.Context, func(context.Context) error) error {
 	return errors.New("unexpected runtime test workflow mutation")
+}
+
+type runtimeTestUnavailableDecisionCards struct{ decisioncard.Store }
+type runtimeTestUnavailableProposedEffects struct {
+	decisioncard.ProposedEffectStore
+}
+type runtimeTestUnavailableHumanTasks struct{ decisioncard.HumanTaskStore }
+type runtimeTestUnavailableDecisionCardDraftExpiry struct{}
+type runtimeTestUnavailableHumanTaskExpiry struct{}
+type runtimeTestUnavailableDeliveryStore struct{ runtimedelivery.Store }
+type runtimeTestUnavailableRunLifecycle struct {
+	runtimerunlifecycle.OperationOwner
+}
+
+func (*runtimeTestUnavailableDecisionCardDraftExpiry) ExpireDecisionCardInputDrafts(context.Context, time.Time) (int, error) {
+	return 0, nil
+}
+
+func (*runtimeTestUnavailableHumanTaskExpiry) ExpireHumanTaskCardsInMutation(context.Context, time.Time, int) ([]events.Event, error) {
+	return nil, nil
+}
+
+func completeRuntimeTestPipelineOptions(bus *runtimebus.EventBus, opts runtimepipeline.PipelineCoordinatorOptions) runtimepipeline.PipelineCoordinatorOptions {
+	if opts.DeliveryStore == nil {
+		opts.DeliveryStore = &runtimeTestUnavailableDeliveryStore{}
+	}
+	if opts.DecisionCards == nil {
+		opts.DecisionCards = &runtimeTestUnavailableDecisionCards{}
+	}
+	if opts.ProposedEffects == nil {
+		opts.ProposedEffects = &runtimeTestUnavailableProposedEffects{}
+	}
+	if opts.HumanTasks == nil {
+		opts.HumanTasks = &runtimeTestUnavailableHumanTasks{}
+	}
+	if opts.DecisionCardDraftExpiry == nil {
+		opts.DecisionCardDraftExpiry = &runtimeTestUnavailableDecisionCardDraftExpiry{}
+	}
+	if opts.HumanTaskExpiry == nil {
+		opts.HumanTaskExpiry = &runtimeTestUnavailableHumanTaskExpiry{}
+	}
+	if opts.GatePublisher == nil {
+		opts.GatePublisher = bus
+	}
+	if opts.DirectDecisionPublisher == nil {
+		opts.DirectDecisionPublisher = bus
+	}
+	if opts.DeliveryRuntime == nil {
+		opts.DeliveryRuntime = bus
+	}
+	if opts.RunLifecycle == nil {
+		opts.RunLifecycle = &runtimeTestUnavailableRunLifecycle{}
+	}
+	return opts
 }
 
 type runtimeTestDurableEventStore interface {
@@ -258,6 +315,23 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps) (
 	}
 	if deps.Options.ProcessWorkOwner == nil {
 		deps.Options.ProcessWorkOwner = runtimeTestProcessWorkOwner(t)
+	}
+	if deps.WorkflowPersistence.Valid() {
+		if deps.DecisionCards == nil {
+			deps.DecisionCards = &runtimeTestUnavailableDecisionCards{}
+		}
+		if deps.ProposedEffects == nil {
+			deps.ProposedEffects = &runtimeTestUnavailableProposedEffects{}
+		}
+		if deps.DecisionCardHumanTasks == nil {
+			deps.DecisionCardHumanTasks = &runtimeTestUnavailableHumanTasks{}
+		}
+		if deps.DecisionCardDraftExpiry == nil {
+			deps.DecisionCardDraftExpiry = &runtimeTestUnavailableDecisionCardDraftExpiry{}
+		}
+		if deps.HumanTaskExpiry == nil {
+			deps.HumanTaskExpiry = &runtimeTestUnavailableHumanTaskExpiry{}
+		}
 	}
 	if deps.SQLDB != nil && deps.RunLifecycleCandidates == nil {
 		if candidates, ok := deps.EventStore.(runtimerunlifecycle.CandidateOwner); ok {

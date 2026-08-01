@@ -3211,12 +3211,18 @@ func newEventBusWorkflowCoordinator(
 		RunLifecycle:            selected,
 		PipelineObligations:     selected.PipelineObligations(),
 		DeliveryStore:           selected,
+		DecisionCards:           selected,
+		ProposedEffects:         selected,
+		HumanTasks:              selected,
+		DecisionCardDraftExpiry: selected,
+		HumanTaskExpiry:         selected,
 		GatePublisher:           eventBus,
 		DirectDecisionPublisher: eventBus,
 		DeliveryRuntime:         eventBus,
 		PinRoutingDescriptors:   eventBus,
 		FlowRoutes:              eventBus,
 	})
+
 }
 
 func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnects(t *testing.T) {

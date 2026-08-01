@@ -219,10 +219,17 @@ func (p WorkflowPersistence) empty() bool {
 	return p.store == nil || p.store.db == nil
 }
 
-// Valid reports whether the selected backend supplied workflow persistence.
-// It does not expose the concrete persistence implementation.
+// Configured reports whether a selected backend attempted to provide durable
+// workflow persistence. It lets construction reject an incomplete owner rather
+// than silently treating it as preview mode.
+func (p WorkflowPersistence) Configured() bool {
+	return p.store != nil
+}
+
+// Valid reports whether the selected backend supplied complete workflow
+// persistence, including its private mutation executor.
 func (p WorkflowPersistence) Valid() bool {
-	return !p.empty()
+	return !p.empty() && p.store.runtimeMutation != nil
 }
 
 var errSQLiteWorkflowMutationOwnerRequired = errors.New("sqlite workflow persistence requires its selected mutation owner")
@@ -293,7 +300,7 @@ func (s *workflowInstanceStore) queueDeliveryContinuationSignal(ctx context.Cont
 
 func (s *workflowInstanceStore) requestRunCompletionCandidate(ctx context.Context, runID string) error {
 	if s == nil || s.runLifecycle == nil {
-		return nil
+		return errors.New("workflow run lifecycle owner is required")
 	}
 	_, err := s.runLifecycle.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID))
 	return err

@@ -1498,16 +1498,24 @@ func newNotifyAllChildrenRuntime(
 			}
 			return manager.DeactivateFlowInstanceModel(ctx, req)
 		},
-		Persistence:           workflowPersistence,
-		RunLifecycle:          backend,
-		PipelineObligations:   backend.PipelineObligations(),
-		DeliveryStore:         backend,
-		DeliveryRuntime:       eventBus,
-		PinRoutingDescriptors: eventBus,
-		FlowRoutes:            eventBus,
-		TestEngineEmitNow:     engineNow,
-		WorkOwner:             workOwner,
+		Persistence:             workflowPersistence,
+		RunLifecycle:            backend,
+		PipelineObligations:     backend.PipelineObligations(),
+		DeliveryStore:           backend,
+		DecisionCards:           backend,
+		ProposedEffects:         backend,
+		HumanTasks:              backend,
+		DecisionCardDraftExpiry: backend,
+		HumanTaskExpiry:         backend,
+		GatePublisher:           diagnosticBus,
+		DirectDecisionPublisher: diagnosticBus,
+		DeliveryRuntime:         eventBus,
+		PinRoutingDescriptors:   eventBus,
+		FlowRoutes:              eventBus,
+		TestEngineEmitNow:       engineNow,
+		WorkOwner:               workOwner,
 	})
+
 	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, agentFactory, runtimemanager.AgentManagerOptions{
 		BaseContext:       testAuthorActivityContext(context.Background()),
 		BundleSourceFact:  authorActivityTestBundleSourceFact,

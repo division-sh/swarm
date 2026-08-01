@@ -225,7 +225,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				}
 			})
 			hydrated := atomic.Bool{}
-			runtime, err := swarmruntime.NewRuntime(ctx, swarmruntime.RuntimeDeps{
+			runtime, err := swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
 				Config: &config.Config{Runtime: config.RuntimeConfig{RecoveryOnStartup: true}, LLM: config.LLMConfig{Backend: "anthropic"}},
 
 				SQLDB: runtimeSQLDB, EventStore: selected, EventBusDurable: externalRuntimeTestDurableDependencies(selected),
@@ -246,7 +246,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 						return nil
 					},
 				},
-			})
+			}))
 			if err != nil {
 				t.Fatalf("NewRuntime: %v", err)
 			}
@@ -414,7 +414,7 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 					processOwner := worklifetime.NewProcess()
 					activationProbe := &startupRecoveryActivationProbe{Store: selected}
 					handlerStarts := atomic.Int64{}
-					runtime, runtimeErr := swarmruntime.NewRuntime(currentCtx, swarmruntime.RuntimeDeps{
+					runtime, runtimeErr := swarmruntime.NewRuntime(currentCtx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
 						Config: &config.Config{
 							Runtime: config.RuntimeConfig{RecoveryOnStartup: mode.recoveryOnStartup},
 							LLM:     config.LLMConfig{Backend: "anthropic"},
@@ -437,7 +437,7 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 								return nil
 							},
 						},
-					})
+					}))
 					if runtimeErr != nil {
 						t.Fatalf("NewRuntime: %v", runtimeErr)
 					}
@@ -784,7 +784,7 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 			}
 			deliveryOwner := &renewalTrackingDeliveryStore{Store: selected}
 			workOwner := runtimeTestEventBusWorkOwner(t, bus)
-			pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, selected, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:               workOwner,
 				Module:                  newRuntimeTestWorkflowModule(t, source),
 				Persistence:             workflowPersistence,
@@ -797,6 +797,7 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 				PinRoutingDescriptors:   bus,
 				FlowRoutes:              bus,
 			})
+
 			if _, err := pc.MaterializeInitialEntry(ctx, artifactActionResultWorkflowInstance(), time.Now().UTC()); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
@@ -877,7 +878,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected)
 			}
 			workOwner := runtimeTestEventBusWorkOwner(t, bus)
-			pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, selected, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:               workOwner,
 				Module:                  newRuntimeTestWorkflowModule(t, source),
 				Persistence:             workflowPersistence,
@@ -890,6 +891,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				PinRoutingDescriptors:   bus,
 				FlowRoutes:              bus,
 			})
+
 			if _, err := pc.MaterializeInitialEntry(ctx, artifactActionResultWorkflowInstance(), time.Now().UTC()); err != nil {
 				t.Fatalf("seed healthy workflow instance: %v", err)
 			}
@@ -1027,7 +1029,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 			handlerStarted := make(chan struct{}, 4)
 			deliveryOwner := &renewalTrackingDeliveryStore{Store: selected}
 			workOwner := runtimeTestEventBusWorkOwner(t, bus)
-			pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, selected, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:               workOwner,
 				Module:                  newRuntimeTestWorkflowModule(t, source),
 				Persistence:             workflowPersistence,
@@ -1047,6 +1049,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 					return nil
 				},
 			})
+
 			if _, err := pc.MaterializeInitialEntry(ctx, artifactActionResultWorkflowInstance(), time.Now().UTC()); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}

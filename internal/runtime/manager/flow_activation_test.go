@@ -27,6 +27,8 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -43,6 +45,45 @@ import (
 
 type flowActivationTestRunLifecycleOwner struct {
 	db *sql.DB
+}
+
+type unavailableFlowActivationDeliveryStore struct{ runtimedelivery.Store }
+type unavailableFlowActivationDecisionCards struct{ decisioncard.Store }
+type unavailableFlowActivationProposedEffects struct {
+	decisioncard.ProposedEffectStore
+}
+type unavailableFlowActivationHumanTasks struct{ decisioncard.HumanTaskStore }
+type unavailableFlowActivationGatePublisher struct {
+	runtimepipeline.WorkflowGateMutationPublisher
+}
+type unavailableFlowActivationDirectDecisionPublisher struct {
+	runtimepipeline.DecisionCardDirectMutationPublisher
+}
+type unavailableFlowActivationDeliveryRuntime struct {
+	runtimepipeline.WorkflowDeliveryRuntime
+}
+type unavailableFlowActivationDecisionCardDraftExpiry struct{}
+type unavailableFlowActivationHumanTaskExpiry struct{}
+
+func (*unavailableFlowActivationDecisionCardDraftExpiry) ExpireDecisionCardInputDrafts(context.Context, time.Time) (int, error) {
+	return 0, nil
+}
+
+func (*unavailableFlowActivationHumanTaskExpiry) ExpireHumanTaskCardsInMutation(context.Context, time.Time, int) ([]events.Event, error) {
+	return nil, nil
+}
+
+func completeFlowActivationWorkflowOptions(opts runtimepipeline.PipelineCoordinatorOptions) runtimepipeline.PipelineCoordinatorOptions {
+	opts.DeliveryStore = &unavailableFlowActivationDeliveryStore{}
+	opts.DecisionCards = &unavailableFlowActivationDecisionCards{}
+	opts.ProposedEffects = &unavailableFlowActivationProposedEffects{}
+	opts.HumanTasks = &unavailableFlowActivationHumanTasks{}
+	opts.DecisionCardDraftExpiry = &unavailableFlowActivationDecisionCardDraftExpiry{}
+	opts.HumanTaskExpiry = &unavailableFlowActivationHumanTaskExpiry{}
+	opts.GatePublisher = &unavailableFlowActivationGatePublisher{}
+	opts.DirectDecisionPublisher = &unavailableFlowActivationDirectDecisionPublisher{}
+	opts.DeliveryRuntime = &unavailableFlowActivationDeliveryRuntime{}
+	return opts
 }
 
 func (o flowActivationTestRunLifecycleOwner) RunRuntimeMutationContext(
@@ -3178,14 +3219,15 @@ func TestActivateFlowInstanceCanonicalStoreFinalizesIdenticalReplayWithoutDuplic
 	agentStore := &flowActivationTestStore{}
 	workflowOwner := flowActivationTestRunLifecycleOwner{db: db}
 	bundle := testFlowBundle("task.started")
-	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, completeFlowActivationWorkflowOptions(runtimepipeline.PipelineCoordinatorOptions{
 		Module:              newFlowActivationWorkflowModule(t, bundle),
 		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, workflowOwner),
 		RunLifecycle:        workflowOwner,
 		PipelineObligations: bus.PipelineObligationOwner(),
 		FlowRoutes:          bus,
 		WorkOwner:           newTestManagerWorkOwner(t),
-	})
+	}))
+
 	am := newFlowActivationManager(t, bus, workflowStore, agentStore)
 	req := testActivationRequest(bundle, "review", "inst-1", "11111111-1111-1111-1111-111111111111", "review/inst-1")
 	req.TriggerEvent = testFlowActivationTriggerEvent(req.TriggerEvent.ID(), runID)
@@ -3716,14 +3758,15 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 	bus := &flowActivationTestBus{routeStore: routeStore}
 	workflowOwner := flowActivationTestRunLifecycleOwner{db: db}
 	bundle := testFlowBundle("")
-	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, completeFlowActivationWorkflowOptions(runtimepipeline.PipelineCoordinatorOptions{
 		Module:              newFlowActivationWorkflowModule(t, bundle),
 		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, workflowOwner),
 		RunLifecycle:        workflowOwner,
 		PipelineObligations: bus.PipelineObligationOwner(),
 		FlowRoutes:          bus,
 		WorkOwner:           newTestManagerWorkOwner(t),
-	})
+	}))
+
 	am := newFlowActivationManager(t, bus, workflowStore)
 	ctx = worklifetime.WithOccurrence(ctx, am.workOwner)
 	const subjectID = "11111111-1111-1111-1111-111111111111"
@@ -3817,14 +3860,15 @@ func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t
 	managerStore := &flowActivationTestStore{}
 	workflowOwner := flowActivationTestRunLifecycleOwner{db: db}
 	bundle := testFlowBundle("")
-	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, completeFlowActivationWorkflowOptions(runtimepipeline.PipelineCoordinatorOptions{
 		Module:              newFlowActivationWorkflowModule(t, bundle),
 		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, workflowOwner),
 		RunLifecycle:        workflowOwner,
 		PipelineObligations: bus.PipelineObligationOwner(),
 		FlowRoutes:          bus,
 		WorkOwner:           newTestManagerWorkOwner(t),
-	})
+	}))
+
 	am := newFlowActivationManager(t, bus, workflowStore, managerStore)
 	ctx = worklifetime.WithOccurrence(ctx, am.workOwner)
 	const subjectID = "22222222-2222-2222-2222-222222222222"

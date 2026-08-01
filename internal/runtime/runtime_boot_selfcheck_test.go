@@ -47,10 +47,11 @@ func TestRuntimeStart_PipelineMaintenanceFailureUsesCanonicalBootStepIdentity(t 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, db, runtimepipeline.PipelineCoordinatorOptions{
+	rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, db, completeRuntimeTestPipelineOptions(rt.Bus, runtimepipeline.PipelineCoordinatorOptions{
 		Module: module, Persistence: runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}), WorkOwner: rt.WorkOccurrence(),
 		PipelineObligations: newStartupRecoveryPipelineOwner(nil, nil),
-	})
+	}))
+
 	if err := rt.Start(testAuthorActivityContext(context.Background())); err == nil {
 		t.Fatal("Start error = nil, want pipeline maintenance failure")
 	}

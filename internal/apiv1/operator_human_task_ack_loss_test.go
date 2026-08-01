@@ -121,7 +121,7 @@ func newHumanTaskAckLossDecisionAuthority(
 	if err != nil {
 		t.Fatalf("construct human-task acknowledgment-loss event bus: %v", err)
 	}
-	return runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, db, runtimepipeline.PipelineCoordinatorOptions{
+	return runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, db, completeAPITestDurableWorkflowOptions(t, selected, eventBus, runtimepipeline.PipelineCoordinatorOptions{
 		Module:              newRunCompletionSystemNodeModule(t, source),
 		Persistence:         persistence,
 		DecisionCards:       cards,
@@ -129,7 +129,8 @@ func newHumanTaskAckLossDecisionAuthority(
 		GatePublisher:       publisher,
 		RunLifecycle:        selected,
 		PipelineObligations: selected.PipelineObligations(),
-	})
+	}))
+
 }
 
 func newAPIHumanTaskAckLossCard(t *testing.T, runID string, now time.Time) (decisioncard.Card, decisioncard.HumanTaskContinuation) {

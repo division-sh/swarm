@@ -451,6 +451,7 @@ func newPostgresWorkflowInstanceStoreForTest(db *sql.DB) *workflowInstanceStore 
 		dialect: workflowStoreDialectPostgres,
 	}
 	store.runtimeMutation = runner
+	store.runLifecycle = &unavailablePipelineTestRunLifecycle{}
 	return store
 }
 
@@ -465,5 +466,5 @@ func newPostgresPipelineCoordinatorForTest(
 	if opts.PipelineObligations == nil {
 		opts.PipelineObligations = unavailablePipelineTestObligationOwner{}
 	}
-	return NewPipelineCoordinatorWithOptions(bus, db, opts)
+	return newDurablePipelineCoordinatorForTest(bus, db, opts)
 }

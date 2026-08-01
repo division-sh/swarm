@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -16,9 +17,11 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -334,6 +337,118 @@ func TestOperatorRuntimeContextManagerRoutesAgentDirectiveByStoredBundle(t *test
 	}
 	if baseAgent.calls != 0 {
 		t.Fatalf("base agent calls = %d, want 0", baseAgent.calls)
+	}
+}
+
+type rejectingPrimaryDecisionCards struct {
+	decisioncard.Store
+	calls int
+}
+
+func (s *rejectingPrimaryDecisionCards) reject() error {
+	s.calls++
+	return errors.New("primary decision-card owner must not be used")
+}
+
+func (s *rejectingPrimaryDecisionCards) GetDecisionCard(context.Context, string) (decisioncard.Card, error) {
+	return decisioncard.Card{}, s.reject()
+}
+
+func (s *rejectingPrimaryDecisionCards) DeferDecisionCard(context.Context, decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error) {
+	return decisioncard.DecisionOutcome{}, s.reject()
+}
+
+func (s *rejectingPrimaryDecisionCards) CancelDecisionCardInput(context.Context, decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
+	return decisioncard.InputDraft{}, s.reject()
+}
+
+type recordingBundleGatePublisher struct {
+	delegate runtimepipeline.WorkflowGateMutationPublisher
+	facts    []runtimecorrelation.BundleSourceFact
+}
+
+func (p *recordingBundleGatePublisher) PublishInMutation(ctx context.Context, event events.Event) error {
+	fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	if !ok {
+		return errors.New("decision publication bundle source fact is required")
+	}
+	p.facts = append(p.facts, fact)
+	return p.delegate.PublishInMutation(ctx, event)
+}
+
+func TestOperatorRuntimeContextManagerRoutesEveryDecisionMutationThroughSelectedPipeline(t *testing.T) {
+	fixture := newOperatorRuntimeContextFixture(t)
+	now := time.Date(2026, 7, 14, 14, 0, 0, 0, time.UTC)
+	runID := uuid.NewString()
+	storetest.RequirePostgresRun(t, testAuthorActivityContext(context.Background()), fixture.db, storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
+		BundleHash: runtimeContextTestBundleHashB, BundleSource: storerunlifecycle.BundleSourcePersisted,
+	})
+	card, continuation := newAPIHumanTaskAckLossCard(t, runID, now)
+	card.BundleHash = runtimeContextTestBundleHashB
+	continuation.BudgetBundleHash = runtimeContextTestBundleHashB
+	if err := fixture.pg.CreateHumanTaskCard(testAuthorActivityContextForSource(context.Background(), runtimeContextTestSourceFact(runtimeContextTestBundleHashB)), card, continuation); err != nil {
+		t.Fatalf("create selected-bundle human-task card: %v", err)
+	}
+
+	moduleA := newRunCompletionSystemNodeModule(t, fixture.sourceA)
+	moduleB := newRunCompletionSystemNodeModule(t, fixture.sourceB)
+	primaryCards := &rejectingPrimaryDecisionCards{Store: fixture.pg}
+	primaryPublisher := &recordingBundleGatePublisher{delegate: fixture.busA}
+	selectedPublisher := &recordingBundleGatePublisher{delegate: fixture.busB}
+	primaryPipeline := runtimepipeline.NewPipelineCoordinatorWithOptions(fixture.busA, fixture.db, completeAPITestDurableWorkflowOptions(t, fixture.pg, fixture.busA, runtimepipeline.PipelineCoordinatorOptions{
+		Module: moduleA, Persistence: runtimepipeline.NewPostgresWorkflowPersistence(fixture.db, fixture.pg),
+		DecisionCards: primaryCards, GatePublisher: primaryPublisher,
+		BundleSourceFact: runtimeContextTestSourceFact(runStartTestBundleHash),
+	}))
+
+	selectedPipeline := runtimepipeline.NewPipelineCoordinatorWithOptions(fixture.busB, fixture.db, completeAPITestDurableWorkflowOptions(t, fixture.pg, fixture.busB, runtimepipeline.PipelineCoordinatorOptions{
+		Module: moduleB, Persistence: runtimepipeline.NewPostgresWorkflowPersistence(fixture.db, fixture.pg),
+		GatePublisher: selectedPublisher, BundleSourceFact: runtimeContextTestSourceFact(runtimeContextTestBundleHashB),
+	}))
+
+	manager := runtimeContextManagerWithRuntimes(t, fixture,
+		&swruntime.Runtime{Bus: fixture.busA, Pipeline: primaryPipeline},
+		&swruntime.Runtime{Bus: fixture.busB, Pipeline: selectedPipeline},
+	)
+	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Now: func() time.Time { return now.Add(time.Minute) }, Idempotency: fixture.pg,
+		Mailbox: fixture.pg, DecisionCards: fixture.pg, DecisionAuthority: primaryPipeline, Events: fixture.busA,
+		RunBundleContext: fixture.pg, RuntimeContexts: manager, Source: fixture.sourceA,
+		Bundle: runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0", BundleHash: runStartTestBundleHash},
+	})})
+
+	begin := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"begin","method":"mailbox.begin_input","params":{"card_id":%q,"verdict":"reject","observed_content_hash":%q,"idempotency_key":"selected-begin"}}`, card.CardID, card.CardContentHash))
+	if begin.Error != nil {
+		t.Fatalf("selected mailbox.begin_input error = %#v", begin.Error)
+	}
+	draftID := stringValue(t, asMap(t, begin.Result)["input_draft_id"], "input_draft_id")
+	cancel := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"cancel","method":"mailbox.cancel_input","params":{"card_id":%q,"input_draft_id":%q,"idempotency_key":"selected-cancel"}}`, card.CardID, draftID))
+	if cancel.Error != nil {
+		t.Fatalf("selected mailbox.cancel_input error = %#v", cancel.Error)
+	}
+	deferBody := fmt.Sprintf(`{"jsonrpc":"2.0","id":"defer","method":"mailbox.defer","params":{"card_id":%q,"until":"2026-07-15T14:00:00Z","idempotency_key":"selected-defer"}}`, card.CardID)
+	if deferred := rpcCall(t, handler, deferBody); deferred.Error != nil {
+		t.Fatalf("selected mailbox.defer error = %#v", deferred.Error)
+	}
+	decideBody := fmt.Sprintf(`{"jsonrpc":"2.0","id":"decide","method":"mailbox.decide","params":{"card_id":%q,"verdict":"approve","fields":{},"observed_content_hash":%q,"idempotency_key":"selected-decide"}}`, card.CardID, card.CardContentHash)
+	if decided := rpcCall(t, handler, decideBody); decided.Error != nil {
+		t.Fatalf("selected mailbox.decide error = %#v", decided.Error)
+	}
+	replay := rpcCall(t, handler, decideBody)
+	if replay.Error != nil || asMap(t, replay.Result)["idempotency_replayed"] != true {
+		t.Fatalf("selected mailbox.decide replay = result %#v error %#v", replay.Result, replay.Error)
+	}
+	if primaryCards.calls != 0 || len(primaryPublisher.facts) != 0 {
+		t.Fatalf("primary decision path calls/publications = %d/%d, want 0/0", primaryCards.calls, len(primaryPublisher.facts))
+	}
+	if len(selectedPublisher.facts) != 2 {
+		t.Fatalf("selected decision publications = %d, want defer and decide", len(selectedPublisher.facts))
+	}
+	for _, fact := range selectedPublisher.facts {
+		if fact.BundleHash() != runtimeContextTestBundleHashB {
+			t.Fatalf("selected decision publication bundle = %q, want %q", fact.BundleHash(), runtimeContextTestBundleHashB)
+		}
 	}
 }
 

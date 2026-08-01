@@ -8,6 +8,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -20,7 +22,13 @@ import (
 type catalogPersistenceBus struct{}
 
 func (catalogPersistenceBus) Publish(context.Context, events.Event) error { return nil }
+func (catalogPersistenceBus) PublishInMutation(context.Context, events.Event) error {
+	return nil
+}
 func (catalogPersistenceBus) PublishDirect(context.Context, events.Event, []string) error {
+	return nil
+}
+func (catalogPersistenceBus) PublishDirectInMutation(context.Context, events.Event, []string) error {
 	return nil
 }
 func (catalogPersistenceBus) ResolveSubscribedRecipients(string) []string { return nil }
@@ -29,6 +37,16 @@ func (catalogPersistenceBus) LogRuntime(context.Context, runtimepipeline.Runtime
 }
 func (catalogPersistenceBus) EngineOutbox() runtimeengine.OutboxWriter             { return nil }
 func (catalogPersistenceBus) EngineDispatcher() runtimeengine.PostCommitDispatcher { return nil }
+func (catalogPersistenceBus) DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error) {
+	return runtimedelivery.ExecutionAuthority{}, nil
+}
+func (catalogPersistenceBus) AcquireDeliveryContinuation(string) (worklifetime.DeliveryContinuation, error) {
+	return nil, nil
+}
+func (catalogPersistenceBus) ReleaseDeliveryContinuation(string) error { return nil }
+func (catalogPersistenceBus) RetainDeliveryContinuation(runtimedelivery.Snapshot) error {
+	return nil
+}
 
 func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
@@ -238,12 +256,23 @@ func newCatalogAssertionHarness(t *testing.T) *runtimeHarness {
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID})
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	registerTestAuthorActivityCatalog(t, pg, "score.requested")
-	workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(catalogPersistenceBus{}, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:              &fixtureWorkflowModule{},
-		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
-		RunLifecycle:        pg,
-		PipelineObligations: pg.PipelineObligations(),
+	bus := catalogPersistenceBus{}
+	workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module:                  &fixtureWorkflowModule{},
+		Persistence:             runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		RunLifecycle:            pg,
+		PipelineObligations:     pg.PipelineObligations(),
+		DeliveryStore:           pg,
+		DecisionCards:           pg,
+		ProposedEffects:         pg,
+		HumanTasks:              pg,
+		DecisionCardDraftExpiry: pg,
+		HumanTaskExpiry:         pg,
+		GatePublisher:           bus,
+		DirectDecisionPublisher: bus,
+		DeliveryRuntime:         bus,
 	})
+
 	return &runtimeHarness{
 		t:              t,
 		ctx:            ctx,
