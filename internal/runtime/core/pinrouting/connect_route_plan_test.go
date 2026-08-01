@@ -651,6 +651,20 @@ func TestLowerCompositionConnectRoutePlansValidatesAuthoritativeInstanceSourceTy
 			wantError: true,
 		},
 		{
+			name: "select rejects number source for integer receiver",
+			root: func(t *testing.T) string {
+				return canonicalrouting.CopyTemplateSelectResolution(t, canonicalrouting.TemplateSelectResolutionOptions{Invalidity: canonicalrouting.SelectResolutionNumberSourceToIntegerReceiver})
+			},
+			wantError: true,
+		},
+		{
+			name: "select-or-create rejects number source for integer receiver",
+			root: func(t *testing.T) string {
+				return canonicalrouting.CopyTemplateSelectResolution(t, canonicalrouting.TemplateSelectResolutionOptions{Mode: canonicalrouting.SelectResolutionSelectOrCreate, Invalidity: canonicalrouting.SelectResolutionNumberSourceToIntegerReceiver})
+			},
+			wantError: true,
+		},
+		{
 			name: "create accepts payload alias",
 			root: func(t *testing.T) string {
 				return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintPayload})
@@ -672,6 +686,13 @@ func TestLowerCompositionConnectRoutePlansValidatesAuthoritativeInstanceSourceTy
 			name: "create payload rejects omitted annotation mismatch",
 			root: func(t *testing.T) string {
 				return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintPayload, Invalidity: canonicalrouting.CreateResolutionSourceTypeMismatchWithoutCarryType})
+			},
+			wantError: true,
+		},
+		{
+			name: "create rejects number source for integer receiver",
+			root: func(t *testing.T) string {
+				return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintPayload, Invalidity: canonicalrouting.CreateResolutionNumberSourceToIntegerReceiver})
 			},
 			wantError: true,
 		},

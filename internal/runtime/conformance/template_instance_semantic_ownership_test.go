@@ -140,6 +140,8 @@ func TestTemplateInstanceSemanticStringConversionGuardUsesCompilerReceiverTypes(
 		map[string]string{"hostile.go": `package semanticguardhostile
 
 import (
+	"fmt"
+
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
@@ -155,6 +157,14 @@ func fieldResult() runtimecontracts.TemplateInstanceField {
 	return value
 }
 
+func renderStringer(value fmt.Stringer) string {
+	return value.String()
+}
+
+func returnedStringer(value modeAlias) fmt.Stringer {
+	return value
+}
+
 func arbitraryReceiverNames(identity runtimecontracts.TemplateInstanceField, resolution modeAlias, outcome *runtimebus.TemplateInstanceLifecycleAction, promoted embeddedMode) {
 	_ = identity.String()
 	_ = resolution.String()
@@ -163,23 +173,35 @@ func arbitraryReceiverNames(identity runtimecontracts.TemplateInstanceField, res
 	render := resolution.String
 	_ = render()
 	_ = promoted.String()
+	_ = fmt.Sprint(identity)
+	_ = fmt.Sprintf("%v", resolution)
+	_ = renderStringer(outcome)
+	var assigned fmt.Stringer = identity
+	assigned = resolution
+	_ = assigned.String()
+	_ = []fmt.Stringer{promoted}
+	_ = fmt.Sprint(any(*outcome))
+	_ = returnedStringer(resolution)
+	_ = func() fmt.Stringer { return resolution }()
+	stringers := make(chan fmt.Stringer, 1)
+	stringers <- identity
 }
 `},
 	)
 	if err != nil {
 		t.Fatalf("scan hostile semantic receivers: %v", err)
 	}
-	if len(findings) != 6 {
-		t.Fatalf("compiler-resolved hostile findings = %#v, want six arbitrary-name/alias/pointer/call-result/method-value/promoted-method conversions", findings)
+	if len(findings) != 16 {
+		t.Fatalf("compiler-resolved hostile findings = %#v, want sixteen direct/method-value/promoted/fmt/Stringer conversions", findings)
 	}
 	owners := map[string]int{}
 	for _, finding := range findings {
 		owners[finding.Owner]++
 	}
 	for owner, want := range map[string]int{
-		"contracts.TemplateInstanceField":     2,
-		"contracts.FlowInputResolutionMode":   3,
-		"bus.TemplateInstanceLifecycleAction": 1,
+		"contracts.TemplateInstanceField":     5,
+		"contracts.FlowInputResolutionMode":   8,
+		"bus.TemplateInstanceLifecycleAction": 3,
 	} {
 		if owners[owner] != want {
 			t.Fatalf("hostile findings for %s = %d, want %d (%#v)", owner, owners[owner], want, findings)
@@ -353,29 +375,312 @@ func (s *templateInstanceSemanticScanner) scanSourcePackage(importPath string, s
 	for _, file := range files {
 		functions := templateInstanceFunctions(file, importPath, info)
 		ast.Inspect(file, func(node ast.Node) bool {
-			selector, ok := node.(*ast.SelectorExpr)
-			if !ok || selector.Sel.Name != "String" {
-				return true
+			switch typed := node.(type) {
+			case *ast.SelectorExpr:
+				if typed.Sel.Name != "String" {
+					return true
+				}
+				owner := templateInstanceSemanticReceiverOwner(info.Selections[typed])
+				if owner != "" {
+					findings = append(findings, s.templateInstanceStringConversion(functions, typed.Pos(), owner, typed.X))
+				}
+			case *ast.CallExpr:
+				for _, conversion := range templateInstanceSemanticIndirectStringConversions(info, typed) {
+					findings = append(findings, s.templateInstanceStringConversion(functions, conversion.expression.Pos(), conversion.owner, conversion.expression))
+				}
+			case *ast.ValueSpec:
+				for _, conversion := range templateInstanceSemanticValueSpecConversions(info, typed) {
+					findings = append(findings, s.templateInstanceStringConversion(functions, conversion.expression.Pos(), conversion.owner, conversion.expression))
+				}
+			case *ast.AssignStmt:
+				for _, conversion := range templateInstanceSemanticAssignmentConversions(info, typed) {
+					findings = append(findings, s.templateInstanceStringConversion(functions, conversion.expression.Pos(), conversion.owner, conversion.expression))
+				}
+			case *ast.ReturnStmt:
+				for _, conversion := range templateInstanceSemanticReturnConversions(info, templateInstanceFunctionContaining(functions, typed.Pos()), typed) {
+					findings = append(findings, s.templateInstanceStringConversion(functions, conversion.expression.Pos(), conversion.owner, conversion.expression))
+				}
+			case *ast.CompositeLit:
+				for _, conversion := range templateInstanceSemanticCompositeConversions(info, typed) {
+					findings = append(findings, s.templateInstanceStringConversion(functions, conversion.expression.Pos(), conversion.owner, conversion.expression))
+				}
+			case *ast.SendStmt:
+				for _, conversion := range templateInstanceSemanticSendConversions(info, typed) {
+					findings = append(findings, s.templateInstanceStringConversion(functions, conversion.expression.Pos(), conversion.owner, conversion.expression))
+				}
 			}
-			owner := templateInstanceSemanticReceiverOwner(info.Selections[selector])
-			if owner == "" {
-				return true
-			}
-			position := s.fileSet.Position(selector.Pos())
-			findings = append(findings, templateInstanceStringConversion{
-				Owner: owner, Function: templateInstanceFunctionAt(functions, selector.Pos()), File: filepath.ToSlash(position.Filename),
-				Line: position.Line, Receiver: renderASTNode(selector.X),
-			})
 			return true
 		})
 	}
 	return findings, nil
 }
 
+func (s *templateInstanceSemanticScanner) templateInstanceStringConversion(functions []templateInstanceFunction, position token.Pos, owner string, receiver ast.Expr) templateInstanceStringConversion {
+	location := s.fileSet.Position(position)
+	return templateInstanceStringConversion{
+		Owner: owner, Function: templateInstanceFunctionAt(functions, position), File: filepath.ToSlash(location.Filename),
+		Line: location.Line, Receiver: renderASTNode(receiver),
+	}
+}
+
+type templateInstanceSemanticExpression struct {
+	owner      string
+	expression ast.Expr
+}
+
+func templateInstanceSemanticIndirectStringConversions(info *types.Info, call *ast.CallExpr) []templateInstanceSemanticExpression {
+	var conversions []templateInstanceSemanticExpression
+	if function := templateInstanceCalledFunction(info, call.Fun); templateInstanceFmtStringifies(function) {
+		for _, argument := range call.Args {
+			conversions = append(conversions, templateInstanceSemanticFormattingInputs(info, argument)...)
+		}
+	}
+
+	if typeAndValue, ok := info.Types[call.Fun]; ok && typeAndValue.IsType() {
+		if len(call.Args) == 1 && templateInstanceStringerInterface(typeAndValue.Type) {
+			if owner := templateInstanceSemanticTypeOwner(info.TypeOf(call.Args[0])); owner != "" {
+				conversions = append(conversions, templateInstanceSemanticExpression{owner: owner, expression: call.Args[0]})
+			}
+		}
+		return conversions
+	}
+
+	signature, ok := info.TypeOf(call.Fun).(*types.Signature)
+	if !ok {
+		return conversions
+	}
+	for index, argument := range call.Args {
+		target := templateInstanceCallArgumentTarget(signature, index, call.Ellipsis.IsValid())
+		if !templateInstanceStringerInterface(target) {
+			continue
+		}
+		if owner := templateInstanceSemanticTypeOwner(info.TypeOf(argument)); owner != "" {
+			conversions = append(conversions, templateInstanceSemanticExpression{owner: owner, expression: argument})
+		}
+	}
+	return conversions
+}
+
+func templateInstanceSemanticFormattingInputs(info *types.Info, expression ast.Expr) []templateInstanceSemanticExpression {
+	if owner := templateInstanceSemanticTypeOwner(info.TypeOf(expression)); owner != "" {
+		return []templateInstanceSemanticExpression{{owner: owner, expression: expression}}
+	}
+	switch typed := expression.(type) {
+	case *ast.CallExpr:
+		if typeAndValue, ok := info.Types[typed.Fun]; ok && typeAndValue.IsType() {
+			var conversions []templateInstanceSemanticExpression
+			for _, argument := range typed.Args {
+				conversions = append(conversions, templateInstanceSemanticFormattingInputs(info, argument)...)
+			}
+			return conversions
+		}
+	case *ast.CompositeLit:
+		var conversions []templateInstanceSemanticExpression
+		for _, element := range typed.Elts {
+			if keyValue, ok := element.(*ast.KeyValueExpr); ok {
+				conversions = append(conversions, templateInstanceSemanticFormattingInputs(info, keyValue.Value)...)
+				continue
+			}
+			conversions = append(conversions, templateInstanceSemanticFormattingInputs(info, element.(ast.Expr))...)
+		}
+		return conversions
+	case *ast.ParenExpr:
+		return templateInstanceSemanticFormattingInputs(info, typed.X)
+	}
+	return nil
+}
+
+func templateInstanceSemanticValueSpecConversions(info *types.Info, declaration *ast.ValueSpec) []templateInstanceSemanticExpression {
+	if len(declaration.Names) != len(declaration.Values) {
+		return nil
+	}
+	var conversions []templateInstanceSemanticExpression
+	for index, value := range declaration.Values {
+		object := info.Defs[declaration.Names[index]]
+		if object != nil {
+			conversions = append(conversions, templateInstanceSemanticStringerConversion(info, value, object.Type())...)
+		}
+	}
+	return conversions
+}
+
+func templateInstanceSemanticAssignmentConversions(info *types.Info, assignment *ast.AssignStmt) []templateInstanceSemanticExpression {
+	if len(assignment.Lhs) != len(assignment.Rhs) {
+		return nil
+	}
+	var conversions []templateInstanceSemanticExpression
+	for index, value := range assignment.Rhs {
+		conversions = append(conversions, templateInstanceSemanticStringerConversion(info, value, info.TypeOf(assignment.Lhs[index]))...)
+	}
+	return conversions
+}
+
+func templateInstanceSemanticReturnConversions(info *types.Info, function *templateInstanceFunction, statement *ast.ReturnStmt) []templateInstanceSemanticExpression {
+	if function == nil || function.results == nil || function.results.Len() != len(statement.Results) {
+		return nil
+	}
+	var conversions []templateInstanceSemanticExpression
+	for index, value := range statement.Results {
+		conversions = append(conversions, templateInstanceSemanticStringerConversion(info, value, function.results.At(index).Type())...)
+	}
+	return conversions
+}
+
+func templateInstanceSemanticCompositeConversions(info *types.Info, literal *ast.CompositeLit) []templateInstanceSemanticExpression {
+	candidate := types.Unalias(info.TypeOf(literal))
+	if candidate == nil {
+		return nil
+	}
+	var conversions []templateInstanceSemanticExpression
+	switch underlying := candidate.Underlying().(type) {
+	case *types.Array:
+		for _, element := range literal.Elts {
+			if expression, ok := element.(ast.Expr); ok {
+				conversions = append(conversions, templateInstanceSemanticStringerConversion(info, expression, underlying.Elem())...)
+			}
+		}
+	case *types.Slice:
+		for _, element := range literal.Elts {
+			if expression, ok := element.(ast.Expr); ok {
+				conversions = append(conversions, templateInstanceSemanticStringerConversion(info, expression, underlying.Elem())...)
+			}
+		}
+	case *types.Map:
+		for _, element := range literal.Elts {
+			keyValue, ok := element.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			conversions = append(conversions, templateInstanceSemanticStringerConversion(info, keyValue.Key, underlying.Key())...)
+			conversions = append(conversions, templateInstanceSemanticStringerConversion(info, keyValue.Value, underlying.Elem())...)
+		}
+	case *types.Struct:
+		for index, element := range literal.Elts {
+			value, target := element.(ast.Expr), types.Type(nil)
+			if keyValue, ok := element.(*ast.KeyValueExpr); ok {
+				value = keyValue.Value
+				if name, ok := keyValue.Key.(*ast.Ident); ok {
+					for fieldIndex := 0; fieldIndex < underlying.NumFields(); fieldIndex++ {
+						if underlying.Field(fieldIndex).Name() == name.Name {
+							target = underlying.Field(fieldIndex).Type()
+							break
+						}
+					}
+				}
+			} else if index < underlying.NumFields() {
+				target = underlying.Field(index).Type()
+			}
+			if value != nil {
+				conversions = append(conversions, templateInstanceSemanticStringerConversion(info, value, target)...)
+			}
+		}
+	}
+	return conversions
+}
+
+func templateInstanceSemanticStringerConversion(info *types.Info, expression ast.Expr, target types.Type) []templateInstanceSemanticExpression {
+	if !templateInstanceStringerInterface(target) {
+		return nil
+	}
+	owner := templateInstanceSemanticTypeOwner(info.TypeOf(expression))
+	if owner == "" {
+		return nil
+	}
+	return []templateInstanceSemanticExpression{{owner: owner, expression: expression}}
+}
+
+func templateInstanceSemanticSendConversions(info *types.Info, statement *ast.SendStmt) []templateInstanceSemanticExpression {
+	candidate := types.Unalias(info.TypeOf(statement.Chan))
+	if candidate == nil {
+		return nil
+	}
+	channel, ok := candidate.Underlying().(*types.Chan)
+	if !ok {
+		return nil
+	}
+	return templateInstanceSemanticStringerConversion(info, statement.Value, channel.Elem())
+}
+
+func templateInstanceCalledFunction(info *types.Info, expression ast.Expr) *types.Func {
+	switch typed := expression.(type) {
+	case *ast.Ident:
+		function, _ := info.Uses[typed].(*types.Func)
+		return function
+	case *ast.SelectorExpr:
+		function, _ := info.Uses[typed.Sel].(*types.Func)
+		return function
+	case *ast.IndexExpr:
+		return templateInstanceCalledFunction(info, typed.X)
+	case *ast.IndexListExpr:
+		return templateInstanceCalledFunction(info, typed.X)
+	case *ast.ParenExpr:
+		return templateInstanceCalledFunction(info, typed.X)
+	default:
+		return nil
+	}
+}
+
+func templateInstanceFmtStringifies(function *types.Func) bool {
+	if function == nil || function.Pkg() == nil || function.Pkg().Path() != "fmt" {
+		return false
+	}
+	switch function.Name() {
+	case "Append", "Appendf", "Appendln", "Errorf", "Fprint", "Fprintf", "Fprintln", "Print", "Printf", "Println", "Sprint", "Sprintf", "Sprintln":
+		return true
+	default:
+		return false
+	}
+}
+
+func templateInstanceCallArgumentTarget(signature *types.Signature, index int, ellipsis bool) types.Type {
+	parameters := signature.Params()
+	if parameters == nil || parameters.Len() == 0 {
+		return nil
+	}
+	last := parameters.Len() - 1
+	if index < last || !signature.Variadic() {
+		if index >= parameters.Len() {
+			return nil
+		}
+		return parameters.At(index).Type()
+	}
+	variadic := parameters.At(last).Type()
+	if ellipsis && index == last {
+		return variadic
+	}
+	slice, ok := types.Unalias(variadic).(*types.Slice)
+	if !ok {
+		return nil
+	}
+	return slice.Elem()
+}
+
+func templateInstanceStringerInterface(candidate types.Type) bool {
+	if candidate == nil {
+		return false
+	}
+	underlying := types.Unalias(candidate).Underlying()
+	if _, ok := underlying.(*types.Interface); !ok {
+		return false
+	}
+	method, _, _ := types.LookupFieldOrMethod(candidate, true, nil, "String")
+	function, ok := method.(*types.Func)
+	if !ok {
+		return false
+	}
+	signature, ok := function.Type().(*types.Signature)
+	if !ok || signature.Params().Len() != 0 || signature.Results().Len() != 1 {
+		return false
+	}
+	result, ok := signature.Results().At(0).Type().Underlying().(*types.Basic)
+	return ok && result.Kind() == types.String
+}
+
 type templateInstanceFunction struct {
-	start token.Pos
-	end   token.Pos
-	id    string
+	start   token.Pos
+	end     token.Pos
+	id      string
+	results *types.Tuple
 }
 
 func templateInstanceFunctions(file *ast.File, importPath string, info *types.Info) []templateInstanceFunction {
@@ -386,23 +691,53 @@ func templateInstanceFunctions(file *ast.File, importPath string, info *types.In
 			continue
 		}
 		id := importPath + "." + function.Name.Name
+		var results *types.Tuple
 		if object, ok := info.Defs[function.Name].(*types.Func); ok {
 			if signature, ok := object.Type().(*types.Signature); ok && signature.Recv() != nil {
 				id = importPath + "." + templateInstanceReceiverName(signature.Recv().Type()) + "." + function.Name.Name
 			}
+			if signature, ok := object.Type().(*types.Signature); ok {
+				results = signature.Results()
+			}
 		}
-		functions = append(functions, templateInstanceFunction{start: function.Body.Pos(), end: function.Body.End(), id: id})
+		functions = append(functions, templateInstanceFunction{start: function.Body.Pos(), end: function.Body.End(), id: id, results: results})
 	}
+	ast.Inspect(file, func(node ast.Node) bool {
+		literal, ok := node.(*ast.FuncLit)
+		if !ok || literal.Body == nil {
+			return true
+		}
+		id := importPath + ".<func literal>"
+		if parent := templateInstanceFunctionContaining(functions, literal.Pos()); parent != nil {
+			id = parent.id
+		}
+		var results *types.Tuple
+		if signature, ok := info.TypeOf(literal.Type).(*types.Signature); ok {
+			results = signature.Results()
+		}
+		functions = append(functions, templateInstanceFunction{start: literal.Body.Pos(), end: literal.Body.End(), id: id, results: results})
+		return true
+	})
 	return functions
 }
 
 func templateInstanceFunctionAt(functions []templateInstanceFunction, position token.Pos) string {
-	for _, function := range functions {
-		if function.start <= position && position <= function.end {
-			return function.id
-		}
+	if function := templateInstanceFunctionContaining(functions, position); function != nil {
+		return function.id
 	}
 	return "<package-scope>"
+}
+
+func templateInstanceFunctionContaining(functions []templateInstanceFunction, position token.Pos) *templateInstanceFunction {
+	var match *templateInstanceFunction
+	for index := range functions {
+		if functions[index].start <= position && position <= functions[index].end {
+			if match == nil || functions[index].end-functions[index].start < match.end-match.start {
+				match = &functions[index]
+			}
+		}
+	}
+	return match
 }
 
 func templateInstanceReceiverName(receiver types.Type) string {
@@ -424,6 +759,22 @@ func templateInstanceSemanticReceiverOwner(selection *types.Selection) string {
 	if !ok {
 		return ""
 	}
+	return templateInstanceSemanticStringMethodOwner(method)
+}
+
+func templateInstanceSemanticTypeOwner(candidate types.Type) string {
+	if candidate == nil {
+		return ""
+	}
+	method, _, _ := types.LookupFieldOrMethod(candidate, true, nil, "String")
+	function, ok := method.(*types.Func)
+	if !ok {
+		return ""
+	}
+	return templateInstanceSemanticStringMethodOwner(function)
+}
+
+func templateInstanceSemanticStringMethodOwner(method *types.Func) string {
 	signature, ok := method.Type().(*types.Signature)
 	if !ok || signature.Recv() == nil {
 		return ""
